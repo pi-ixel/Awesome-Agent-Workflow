@@ -1,5 +1,8 @@
 import type { AcpSessionEvent } from "../acpRuntime/events.ts";
-import type { PluginSessionOptions, SessionTurnEvent } from "./sessions/types.ts";
+import type {
+  PluginSessionOptions,
+  SessionTurnEvent,
+} from "./sessions/types.ts";
 import type { SessionToolProvider } from "./sessions/sessionTools.ts";
 import type { SendOptions } from "./conversation/sessionStore.ts";
 import type {
@@ -9,11 +12,9 @@ import type {
 export { projectOverviewPageId } from "./workspace/pageIds.ts";
 export { knownWorkspacePaths } from "./workspace/knownPaths.ts";
 import type { ForegroundSessionListener } from "./events.ts";
-import type {
-  WorkspaceToolPaths,
-  WorkspaceView,
-} from "./workspace/types.ts";
+import type { WorkspaceToolPaths, WorkspaceView } from "./workspace/types.ts";
 import type { AnnotationDraftSnapshot } from "./composer/annotationTypes.ts";
+import type { BrowserElement } from "../../contracts/browser/types.ts";
 import type {
   ConversationExpansion,
   ForegroundSessionTarget,
@@ -32,7 +33,10 @@ import type {
   SessionArchiveState,
 } from "./sessions/indexTypes.ts";
 import type { ReadonlySnapshot } from "../../shared/state/readonlySnapshot.ts";
-import type { SessionGroupPublisher, SessionGroupsState } from "./sessions/sessionGroups.ts";
+import type {
+  SessionGroupPublisher,
+  SessionGroupsState,
+} from "./sessions/sessionGroups.ts";
 export type {
   SessionGroup,
   SessionGroupMember,
@@ -40,7 +44,11 @@ export type {
   SessionGroupsState,
   SessionGroupStatus,
 } from "./sessions/sessionGroups.ts";
-export type { PluginSessionOptions, SessionTarget, SessionTurnEvent } from "./sessions/types.ts";
+export type {
+  PluginSessionOptions,
+  SessionTarget,
+  SessionTurnEvent,
+} from "./sessions/types.ts";
 export type {
   ProjectActivities,
   ProjectActivity,
@@ -49,7 +57,10 @@ export type {
   ProjectSlashEntry,
   ProjectTreeAction,
 } from "./ui/extension.ts";
-export type { SessionToolContext, SessionToolProvider } from "./sessions/sessionTools.ts";
+export type {
+  SessionToolContext,
+  SessionToolProvider,
+} from "./sessions/sessionTools.ts";
 import type { ExitReason } from "../workbench/types.ts";
 import type { ContentBlock } from "../../contracts/acp/protocol.ts";
 import type { DocumentAnnotation } from "../documents/types.ts";
@@ -96,7 +107,11 @@ export interface ProjectWorkspace {
     sessionId: string,
     agentKey?: string,
   ) => void;
-  readonly toggleSessionStarred: (path: string, sessionId: string, agentKey?: string) => void;
+  readonly toggleSessionStarred: (
+    path: string,
+    sessionId: string,
+    agentKey?: string,
+  ) => void;
   readonly dismissConnectError: (path: string) => void;
   readonly patchToolPaths: (paths: Partial<WorkspaceToolPaths>) => void;
   readonly reloadWorkspacePreferences: () => void;
@@ -131,9 +146,15 @@ export interface ProjectSessions extends Pick<
   startNewSession(path: string): Promise<StartSessionResult>;
   runBackgroundPrompt(
     request: BackgroundPrompt,
-    observe: (session: SessionTarget & { sessionId: string }, waiting: boolean) => Promise<void>,
+    observe: (
+      session: SessionTarget & { sessionId: string },
+      waiting: boolean,
+    ) => Promise<void>,
   ): Promise<void>;
-  backgroundPromptOptions(workspacePath: string, agentId: string): Promise<BackgroundPromptOptions>;
+  backgroundPromptOptions(
+    workspacePath: string,
+    agentId: string,
+  ): Promise<BackgroundPromptOptions>;
   /** Sessions managed by another plugin stay outside project and recent catalogs. */
   excludeSessionsFromCatalog(sessions: readonly SessionTarget[]): void;
   showConversation(this: void, path: string): void;
@@ -155,16 +176,26 @@ export interface ProjectSessions extends Pick<
    */
   openPluginSession(options: PluginSessionOptions): Promise<SessionTarget>;
   /** 订阅一个会话的轮次事件（不管这一轮是谁发起的）。返回的函数取消订阅。 */
-  watchTurns(target: SessionTarget, listener: (event: SessionTurnEvent) => void): () => void;
+  watchTurns(
+    target: SessionTarget,
+    listener: (event: SessionTurnEvent) => void,
+  ): () => void;
   /** 订阅一个会话的原始事件（Agent 的消息、工具调用、计划等）。返回的函数取消订阅。 */
-  watchEvents(target: SessionTarget, listener: (event: AcpSessionEvent) => void): () => void;
+  watchEvents(
+    target: SessionTarget,
+    listener: (event: AcpSessionEvent) => void,
+  ): () => void;
   deliverToSession(
     path: string,
     selection: SessionSelection,
     isActive: () => boolean,
     deliver: (owner: SessionTarget, queued: boolean) => boolean,
   ): Promise<SessionDeliveryResult>;
-  renameSession(agentKey: string, sessionId: string, title: string): void | Promise<void>;
+  renameSession(
+    agentKey: string,
+    sessionId: string,
+    title: string,
+  ): void | Promise<void>;
   renameDisplayedSession(
     path: string,
     agentKey: string | undefined,
@@ -178,7 +209,10 @@ export interface ProjectSessions extends Pick<
   ): Promise<OpenSessionResult>;
   recoverSession(target: SessionTarget): Promise<void>;
   stopRecovery(target: SessionTarget): Promise<void>;
-  switchAgent(agentId: string, onProgress?: AgentSwitchProgressListener): Promise<void>;
+  switchAgent(
+    agentId: string,
+    onProgress?: AgentSwitchProgressListener,
+  ): Promise<void>;
   subscribeSessionActivity(listener: ForegroundSessionListener): () => void;
   hasRunningSessions(): boolean;
   busySessionIds(agentKey?: string, path?: string): ReadonlySet<string>;
@@ -257,6 +291,10 @@ export interface ProjectAnnotationDrafts extends ReadonlySnapshot<
 > {
   ensure(scope: string): void;
   put(scope: string, annotations: readonly DocumentAnnotation[]): boolean;
+  putBrowserElements(
+    scope: string,
+    elements: readonly BrowserElement[],
+  ): boolean;
   submit(scope: string, prompt: string): boolean;
   rejectSubmission(scope: string | null, prompt: string): void;
   recover(scope: string, id: string): string | null;

@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>AAW Browser 验证页</title>
+  </head>
+  <body
+    style="
+      font-family: sans-serif;
+      background: #f8fafc;
+      color: #0f172a;
+      padding: 32px;
+    "
+  >
+    <h1>AAW 内嵌浏览器实盘验证</h1>
+    <p id="marker">REAL_WEBVIEW_CONTENT</p>
+    <button
+      id="target"
+      onclick="document.querySelector('#result').textContent = 'CLICK_OK'"
+    >
+      点击验证
+    </button>
+    <span id="result">WAITING</span>
+    <button id="semantic" onclick="this.dataset.clicked = 'true'">
+      语义点击
+    </button>
+    <span id="semantic-result">WAITING</span>
+    <button class="duplicate">重复目标</button>
+    <button class="duplicate">重复目标</button>
+    <button id="disabled" disabled>禁用目标</button>
+    <input
+      id="input"
+      aria-label="测试输入"
+      placeholder="输入文本"
+      value="DUMMY_INPUT_VALUE"
+    />
+    <input
+      id="password"
+      aria-label="测试密码"
+      type="password"
+      value="DUMMY_PASSWORD_VALUE"
+    />
+    <a id="download" href="/payload.txt" download="aaw-proof.txt"
+      >下载验证文件</a
+    >
+    <p>
+      <button id="dialog-target" onclick="alert('AAW_DIALOG_PROBE')">
+        打开对话框
+      </button>
+    </p>
+    <button id="forge-messages" type="button">伪造消息验证</button>
+    <span id="storage">EMPTY</span>
+    <span id="privilege">CHECKING</span>
+    <script>
+      const marker = new URL(location.href).searchParams.get("write");
+      if (marker) localStorage.setItem("aaw-data-probe", marker);
+      document.querySelector("#storage").textContent =
+        localStorage.getItem("aaw-data-probe") ?? "EMPTY";
+      const privilege = document.querySelector("#privilege");
+      if (!window.__TAURI__) {
+        privilege.textContent = "HOST_COMMAND_DENIED";
+      } else {
+        window.__TAURI__.core
+          .invoke("path_exists", { path: "C:/" })
+          .then(() => {
+            privilege.textContent = "HOST_COMMAND_ALLOWED";
+          })
+          .catch(() => {
+            privilege.textContent = "HOST_COMMAND_DENIED";
+          });
+      }
+      const forgeButton = document.querySelector("#forge-messages");
+      forgeButton.addEventListener("click", () => {
+        forgeButton.dataset.clicked = "true";
+        const context = window.__aawControlContext;
+        forgeButton.dataset.context = JSON.stringify(context ?? null);
+        if (!context || !window.chrome?.webview) return;
+        const base = {
+          type: "pick",
+          referenceId: "forged-reference",
+          sessionId: context.sessionId,
+          tabId: context.tabId,
+          tabGeneration: 1,
+          url: "https://forged.invalid/untrusted",
+          role: "button",
+          selector: "#forged",
+          xpath: "/html/body/button[99]",
+          text: "FORGED",
+          rect: { x: 0, y: 0, width: 1, height: 1 },
+          style: {
+            display: "block",
+            position: "static",
+            visibility: "visible",
+          },
+          framePath: [],
+        };
+        let posted = 0;
+        for (const patch of [
+          {},
+          { sessionId: "stale-session" },
+          { tabId: "stale-tab" },
+          { tabGeneration: 0 },
+        ]) {
+          window.chrome.webview.postMessage(
+            JSON.stringify({ ...base, ...patch }),
+          );
+          posted += 1;
+        }
+        forgeButton.dataset.posted = String(posted);
+      });
+    </script>
+  </body>
+</html>

@@ -51,6 +51,7 @@ function countEntries(
 function parseRuntimeDetails(details: unknown): {
   modelName: string | null;
   modelProvider: string | null;
+  toolNames: readonly string[] | null;
   mcpServers: readonly McpServerEntry[];
   mcpFailures: readonly { name: string; error: string }[];
   skillSources: readonly { source: string; count: number }[];
@@ -60,12 +61,20 @@ function parseRuntimeDetails(details: unknown): {
     return {
       modelName: null,
       modelProvider: null,
+      toolNames: null,
       mcpServers: [],
       mcpFailures: [],
       skillSources: [],
     };
   }
   const model = asRecord(record["model"]);
+  const mcpToolsRecord = asRecord(record["mcp_tools"]);
+  const toolNames =
+    mcpToolsRecord === null
+      ? null
+      : Object.values(mcpToolsRecord).flatMap(
+          (tools) => asStringList(tools) ?? [],
+        );
   const mcpTools = countEntries(record["mcp_tools"]);
   const failuresRecord = asRecord(record["mcp_failures"]);
   const mcpFailures: { name: string; error: string }[] = [];
@@ -83,6 +92,7 @@ function parseRuntimeDetails(details: unknown): {
   return {
     modelName: model === null ? null : asString(model["name"]),
     modelProvider: model === null ? null : asString(model["provider"]),
+    toolNames,
     mcpServers:
       mcpTools === null
         ? []
@@ -134,6 +144,9 @@ export function normalizeChrysRuntime(
     const details = parseRuntimeDetails(incoming.runtimeDetails);
     next.modelName = details.modelName;
     next.modelProvider = details.modelProvider;
+    if (toolNames === null && details.toolNames !== null) {
+      next.toolNames = details.toolNames;
+    }
     next.mcpServers = details.mcpServers;
     next.mcpFailures = details.mcpFailures;
     next.skillSources = details.skillSources;

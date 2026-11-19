@@ -12,17 +12,17 @@ AAW Desktop 是 AI Agent Workspace：通过 ACP（Agent Client Protocol）承载
 
 ## 2. 目录地图
 
-| 目录 | 是什么 | 技术栈 |
-|---|---|---|
-| `src/plugins/` | Cordis 插件（15 个），全部业务能力所在 | TypeScript |
-| `src/contracts/` | 协议契约与报文校验（含标准 ACP 协议 `acp/`） | TypeScript |
-| `src/shared/` | 跨插件共享代码与主题样式（token 源在 `styles/index.css`） | TypeScript + CSS |
-| `src/bootstrap/` | 启动装配层 | TypeScript |
-| `src-tauri/` | Rust 桌面壳：Agent 子进程、自动更新、通知、面板原生运行时 | Rust |
-| `workflow-engine-rs/` | 通用工作流引擎服务（独立进程） | Rust |
-| `tests/` | 分层测试：`architecture/`、`plugins/`、`integration/`、`visual/` | Vitest + Playwright |
-| `scripts/` | 开发与构建脚本（dev-web、build-workflow-service 等） | Node |
-| `docs/` | 文档：architecture / engineering / features / workflow / history | — |
+| 目录                  | 是什么                                                           | 技术栈              |
+| --------------------- | ---------------------------------------------------------------- | ------------------- |
+| `src/plugins/`        | Cordis 插件（17 个），全部业务能力所在                           | TypeScript          |
+| `src/contracts/`      | 协议契约与报文校验（含标准 ACP 协议 `acp/`）                     | TypeScript          |
+| `src/shared/`         | 跨插件共享代码与主题样式（token 源在 `styles/index.css`）        | TypeScript + CSS    |
+| `src/bootstrap/`      | 启动装配层                                                       | TypeScript          |
+| `src-tauri/`          | Rust 桌面壳：Agent 子进程、自动更新、通知、面板原生运行时        | Rust                |
+| `workflow-engine-rs/` | 通用工作流引擎服务（独立进程）                                   | Rust                |
+| `tests/`              | 分层测试：`architecture/`、`plugins/`、`integration/`、`visual/` | Vitest + Playwright |
+| `scripts/`            | 开发与构建脚本（dev-web、build-workflow-service 等）             | Node                |
+| `docs/`               | 文档：architecture / engineering / features / workflow / history | —                   |
 
 Rust 测试分别位于 `src-tauri/` 与 `workflow-engine-rs/` 各自 crate 内。
 
@@ -30,7 +30,7 @@ Rust 测试分别位于 `src-tauri/` 与 `workflow-engine-rs/` 各自 crate 内�
 
 ### Cordis 插件
 
-前端能力全部以插件组织在 `src/plugins/`（15 个）：account、acpConnection、acpRuntime、agents、configuration、diagnostics、documents、git、host、project、skills、terminal、updates、workbench、workflow。每个插件声明服务、依赖与资源所有权；`workbench` 提供根界面、布局与导航，`host` 承载进程、文件等原生能力入口。
+前端能力全部以插件组织在 `src/plugins/`（17 个）：account、acpConnection、acpRuntime、agents、browser、configuration、diagnostics、documents、git、host、project、scheduledTasks、skills、terminal、updates、workbench、workflow。每个插件声明服务、依赖与资源所有权；`workbench` 提供根界面、布局与导航，`host` 承载进程、文件等原生能力入口。
 
 装配主链：`project → acpRuntime → acpConnection → host`。依赖图以 `docs/architecture/cordis-plugin-dependencies.mmd` 为源，`tests/architecture/cordisArchitecture.test.ts` 核对图源、文档表格与实际装配三者一致——改插件依赖必须同步 `.mmd` 与依赖文档，否则测试失败。
 
@@ -46,15 +46,15 @@ Rust 测试分别位于 `src-tauri/` 与 `workflow-engine-rs/` 各自 crate 内�
 
 ## 4. 验证与门禁
 
-| 命令 | 作用 |
-|---|---|
-| `npm run typecheck` | TypeScript 类型检查（主项目 + node 配置） |
-| `npm run lint` | ESLint（含禁 `any` 的类型感知规则） |
-| `npm run format:check` | Prettier 校验 |
-| `npm run test` | Vitest 全量（含架构测试） |
-| `npm run test:visual` | Playwright 视觉测试（`tests/visual/`） |
-| `npm run workflow:build` | 构建工作流引擎服务二进制 |
-| `cargo test` | Rust 测试（`src-tauri/`、`workflow-engine-rs/` 内执行） |
+| 命令                     | 作用                                                    |
+| ------------------------ | ------------------------------------------------------- |
+| `npm run typecheck`      | TypeScript 类型检查（主项目 + node 配置）               |
+| `npm run lint`           | ESLint（含禁 `any` 的类型感知规则）                     |
+| `npm run format:check`   | Prettier 校验                                           |
+| `npm run test`           | Vitest 全量（含架构测试）                               |
+| `npm run test:visual`    | Playwright 视觉测试（`tests/visual/`）                  |
+| `npm run workflow:build` | 构建工作流引擎服务二进制                                |
+| `cargo test`             | Rust 测试（`src-tauri/`、`workflow-engine-rs/` 内执行） |
 
 改什么必须跑什么：
 
@@ -70,14 +70,14 @@ CI（`.github/workflows/desktop.yml`）对涉及 `desktop/**` 的 PR 依次执�
 
 ## 5. 文档阅读优先级
 
-| 主题 | 权威文档 |
-|---|---|
-| 插件架构与依赖 | `docs/architecture/cordis-plugin-architecture.md`、`cordis-plugin-dependencies.md` |
-| ACP 与方言 | `docs/architecture/acp-architecture.md` |
-| 工程与风格 | `docs/engineering/conventions.md`、`frontend-style.md`、`development.md`（开发入口与 ACP 宿主） |
-| 工作流引擎 | `workflow-engine-rs/README.md`、`workflow-engine-rs/docs/workflow-format.md` |
-| 功能现状 | `docs/features/` |
-| 发布 | `docs/engineering/CI-CD.md` |
+| 主题           | 权威文档                                                                                        |
+| -------------- | ----------------------------------------------------------------------------------------------- |
+| 插件架构与依赖 | `docs/architecture/cordis-plugin-architecture.md`、`cordis-plugin-dependencies.md`              |
+| ACP 与方言     | `docs/architecture/acp-architecture.md`                                                         |
+| 工程与风格     | `docs/engineering/conventions.md`、`frontend-style.md`、`development.md`（开发入口与 ACP 宿主） |
+| 工作流引擎     | `workflow-engine-rs/README.md`、`workflow-engine-rs/docs/workflow-format.md`                    |
+| 功能现状       | `docs/features/`                                                                                |
+| 发布           | `docs/engineering/CI-CD.md`                                                                     |
 
 `docs/history/` 与 `docs/` 下的阶段性设计、验收记录是过程记录，查找现状以上表为准。
 

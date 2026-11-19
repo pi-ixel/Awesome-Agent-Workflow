@@ -1,9 +1,14 @@
-import type { AcpRawDirection, AcpRawWriter, DiagnosticsStatus } from "../types.ts";
+import type {
+  AcpRawDirection,
+  AcpRawWriter,
+  DiagnosticsStatus,
+} from "../types.ts";
 import type { DiagnosticsHost } from "../../host/types.ts";
 import { withDeadline } from "../../../shared/asyncDeadline.ts";
 import type { LogSink } from "./logSink.ts";
 import type { LogEntry } from "../../../shared/logging/types.ts";
 import type { DiagnosticsCapture } from "../config.ts";
+import { redactAcpRaw } from "../../../shared/logging/logPrivacy.ts";
 
 interface AcpRawRecord {
   readonly line: string;
@@ -35,6 +40,7 @@ export function startDiagnosticsCollector(
   let rawSending = false;
   const recordRaw: AcpRawWriter = (line, connectionId, direction) => {
     if (stopped) return;
+    line = redactAcpRaw(line);
     const bytes = new TextEncoder().encode(line).length;
     if (
       bytes > 32 * 1024 * 1024 ||

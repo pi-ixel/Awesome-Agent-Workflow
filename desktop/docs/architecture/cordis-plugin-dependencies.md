@@ -1,10 +1,10 @@
 # Desktop 完整插件依赖图
 
-这是已对齐的目标架构，不是当前代码依赖扫描结果。16 个插件逐个展开，Rust 为插件外宿主。ICode / CodeAgent 是 agents 的内部模块，不额外计为插件。
+这是已对齐的目标架构，不是当前代码依赖扫描结果。17 个插件逐个展开，Rust 为插件外宿主。ICode / CodeAgent 是 agents 的内部模块，不额外计为插件。
 
 - 箭头指向被依赖或被注册的服务，不表示启动顺序或事件流向。
-- 实线表示必需服务依赖。虚线标签区分启动注入、可选业务接入、UI 注册、界面调用、界面订阅、健康检查注册、安装退出调用、关闭参与者注册和导航检查注册。
-- 全图共 **82 条边**，包括 43 条必需服务依赖、5 条启动注入、9 条可选业务接入、10 条 UI 注册、5 条界面调用、1 条界面订阅、1 条健康检查注册、1 条探查会话工厂注册、1 条安装退出调用、5 条关闭参与者注册和 1 条导航检查注册。
+- 实线表示必需服务依赖。虚线标签区分启动注入、可选业务接入、UI 注册、界面调用、界面订阅、安装退出调用、关闭参与者注册和导航检查注册。
+- 全图共 **89 条唯一关系**，包括 50 条必需服务依赖，以及 39 条启动注入、可选业务接入、UI 注册、界面调用与订阅、安装退出和关闭相关关系。
 - 同一对插件间的不同关系保留为独立边，例如 updates → workbench 的 UI 注册和安装退出调用。
 - UI 和关闭参与者由子模块/装配层注册，不将其变为业务核心的强制依赖。documents → project 的关闭注册与 project → documents 的可选上下文接入，不代表核心服务循环注入。
 - 公共基础依赖逐条绘制，不合并节点、不省略公共连线。通过中间插件形成的间接依赖不新增为直接边。
@@ -28,6 +28,7 @@ flowchart TB
     skills["skills<br/>技能"]
     account["account<br/>账户"]
     updates["updates<br/>更新"]
+    browser["browser<br/>内嵌浏览器"]
     scheduledTasks["scheduledTasks<br/>定时任务"]
   end
   rust["Rust / Tauri<br/>非插件"]
@@ -87,6 +88,7 @@ flowchart TB
   updates --> host
   updates --> configuration
   updates --> diagnostics
+  browser --> host
 
   %% 可选业务能力
   project -. "可选：技能候选" .-> skills
@@ -110,6 +112,7 @@ flowchart TB
   skills -. "技能页读取项目目录" .-> project
   account -. "UI 注册" .-> workbench
   updates -. "UI 注册" .-> workbench
+  browser -. "UI 注册" .-> workbench
   agents -. "设置页读取项目上下文并请求切换 Agent" .-> project
   project -. "注册标题区与新建会话入口" .-> workbench
   documents -. "登记文件路径解析" .-> workbench
@@ -133,29 +136,31 @@ flowchart TB
   classDef external fill:#eeeeee,stroke:#666666,color:#222222
   class host,configuration,diagnostics,workbench base
   class agents,acpConnection,acpRuntime runtime
-  class project,documents,git,terminal,workflow,skills,account,updates product
+  class project,documents,git,terminal,workflow,skills,account,updates,browser,scheduledTasks product
   class rust external
 ```
 
 ## 边清单核对
 
-| 来源 | 必需依赖目标 | 可选接入目标 | UI 注册目标 | 界面调用、能力注册与条件调用 |
-| --- | --- | --- | --- | --- |
-| host | rust | — | — | 由启动装配传入 Diagnostics 的日志入口 |
-| configuration | host | — | — | — |
-| diagnostics | host、configuration | — | workbench（帮助菜单） | — |
-| workbench | host、configuration | — | — | 启动时注入 Diagnostics 日志入口和 Documents、Git、Workflow 的历史布局规则 |
-| agents | host、configuration、diagnostics、acpConnection | — | workbench（Agent 设置、关于页展示项） | project（设置页读取探查路径并请求切换 Agent） |
-| acpConnection | host、diagnostics（提交当前根的 ACP 原文） | — | — | — |
-| acpRuntime | acpConnection、agents、diagnostics | — | — | agents（注册探查会话工厂） |
-| project | acpRuntime、agents、configuration、diagnostics（含会话打开诊断）、host | skills（技能候选、技能设置视图）、documents（批注、文件候选、文件树和本地链接）、git、workflow | workbench（项目视图、标题区、新建会话入口、退出提示详情、启动等待条件） | workbench（使用当前工作台导航、订阅视图打开、登记退出检查与收尾） |
-| documents | host、configuration、diagnostics | git、project（订阅工作区活动、读写批注草稿、从批注打开或新建会话） | workbench（文件视图及入口） | workbench（登记路径解析、退出检查与收尾、未保存导航检查），project（登记项目关闭处理） |
-| git | host、configuration、diagnostics | project（订阅工作区活动） | workbench（审查视图及入口） | — |
-| terminal | host、configuration、diagnostics | — | workbench（底部面板及入口） | workbench（登记退出检查与收尾），project（登记项目关闭处理） |
-| workflow | host（acpProcess tracker 进程面、workflowEngine 引擎 IPC）、project（收养和打开节点会话、工作区状态、会话活动感知）、agents（节点 Agent 身份与配置）、acpRuntime（节点会话与普通会话共享的连接池）、configuration、diagnostics | — | workbench（右栏面板和入口） | — |
-| skills | host、agents、configuration、diagnostics | project（技能页读取项目目录） | workbench（插件管理、恢复默认设置） | — |
-| account | host、configuration、diagnostics | — | workbench（访问门槛、侧栏身份和菜单） | — |
-| updates | host、configuration、diagnostics | — | workbench（设置、顶栏指示、窗口弹层） | workbench（安装前请求退出） |
+| 来源           | 必需依赖目标                                                                                                                                                                                                                   | 可选接入目标                                                                                   | UI 注册目标                                                             | 界面调用、能力注册与条件调用                                                           |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| host           | rust                                                                                                                                                                                                                           | —                                                                                              | —                                                                       | 由启动装配传入 Diagnostics 的日志入口                                                  |
+| configuration  | host                                                                                                                                                                                                                           | —                                                                                              | —                                                                       | —                                                                                      |
+| diagnostics    | host、configuration                                                                                                                                                                                                            | —                                                                                              | workbench（帮助菜单）                                                   | —                                                                                      |
+| workbench      | host、configuration                                                                                                                                                                                                            | —                                                                                              | —                                                                       | 启动时注入 Diagnostics 日志入口和 Documents、Git、Workflow 的历史布局规则              |
+| agents         | host、configuration、diagnostics、acpConnection                                                                                                                                                                                | —                                                                                              | workbench（Agent 设置、关于页展示项）                                   | project（设置页读取探查路径并请求切换 Agent）                                          |
+| acpConnection  | host、diagnostics（提交当前根的 ACP 原文）                                                                                                                                                                                     | —                                                                                              | —                                                                       | —                                                                                      |
+| acpRuntime     | acpConnection、agents、diagnostics                                                                                                                                                                                             | —                                                                                              | —                                                                       | agents（注册探查会话工厂）                                                             |
+| project        | acpRuntime、agents、configuration、diagnostics（含会话打开诊断）、host                                                                                                                                                         | skills（技能候选、技能设置视图）、documents（批注、文件候选、文件树和本地链接）、git、workflow | workbench（项目视图、标题区、新建会话入口、退出提示详情、启动等待条件） | workbench（使用当前工作台导航、订阅视图打开、登记退出检查与收尾）                      |
+| documents      | host、configuration、diagnostics                                                                                                                                                                                               | git、project（订阅工作区活动、读写批注草稿、从批注打开或新建会话）                             | workbench（文件视图及入口）                                             | workbench（登记路径解析、退出检查与收尾、未保存导航检查），project（登记项目关闭处理） |
+| git            | host、configuration、diagnostics                                                                                                                                                                                               | project（订阅工作区活动）                                                                      | workbench（审查视图及入口）                                             | —                                                                                      |
+| terminal       | host、configuration、diagnostics                                                                                                                                                                                               | —                                                                                              | workbench（底部面板及入口）                                             | workbench（登记退出检查与收尾），project（登记项目关闭处理）                           |
+| workflow       | host（acpProcess tracker 进程面、workflowEngine 引擎 IPC）、project（收养和打开节点会话、工作区状态、会话活动感知）、agents（节点 Agent 身份与配置）、acpRuntime（节点会话与普通会话共享的连接池）、configuration、diagnostics | —                                                                                              | workbench（右栏面板和入口）                                             | —                                                                                      |
+| skills         | host、agents、configuration、diagnostics                                                                                                                                                                                       | project（技能页读取项目目录）                                                                  | workbench（插件管理、恢复默认设置）                                     | —                                                                                      |
+| account        | host、configuration、diagnostics                                                                                                                                                                                               | —                                                                                              | workbench（访问门槛、侧栏身份和菜单）                                   | —                                                                                      |
+| updates        | host、configuration、diagnostics                                                                                                                                                                                               | —                                                                                              | workbench（设置、顶栏指示、窗口弹层）                                   | workbench（安装前请求退出）                                                            |
+| scheduledTasks | host、project、agents、account、workbench                                                                                                                                                                                      | —                                                                                              | —                                                                       | —                                                                                      |
+| browser        | host                                                                                                                                                                                                                           | —                                                                                              | workbench（浏览器面板、设置、元素引用与恢复交互）                       | —                                                                                      |
 
 配置注册、诊断记录等能力已包含在对应必需依赖中，不重复计边。待后续明确的其他关闭参与者不凭空补入本图。
 

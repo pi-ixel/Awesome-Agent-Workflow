@@ -1,5 +1,6 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod acp_process;
+pub mod browser;
 mod commands;
 mod skill_library;
 mod codeagent_history;
@@ -29,6 +30,7 @@ pub fn run() {
     let context = tauri::generate_context!();
     tauri::Builder::default()
         .manage(panel_files::PanelWatchers::default())
+        .manage(browser::host::BrowserHost::default())
         .manage(codeagent_credit::CreditQuota::default())
         .manage(workflow_service::WorkflowHost::default())
         .manage(desktop_update::Updates::new(&context.package_info().name))
@@ -54,6 +56,7 @@ pub fn run() {
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
                 if webview.label() == "main" {
                     webview.state::<panel_files::PanelWatchers>().clear();
+                    browser::host::retire_page(webview.app_handle(), "main");
                 }
                 acp_process::retire_page(webview.label().to_owned());
                 terminal_pty::retire_page(webview.label().to_owned());
@@ -61,9 +64,62 @@ pub fn run() {
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry, ()>::new("aawBrowserDialogBridge")
+                .js_init_script(browser::native_dialog::capture_script())
+                .build(),
+        )
         // 工作区目录选择（@tauri-apps/plugin-dialog）
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            browser::host::browser_create_space,
+            browser::host::browser_create_tab,
+            browser::host::browser_recover_tab,
+            browser::host::browser_navigate,
+            browser::host::browser_close_tab,
+            browser::host::browser_set_bounds,
+            browser::host::browser_set_visible,
+            browser::host::browser_set_zoom,
+            browser::host::browser_snapshot,
+            browser::host::browser_back,
+            browser::host::browser_forward,
+            browser::host::browser_reload,
+            browser::host::browser_stop,
+            browser::host::browser_approval_decide,
+            browser::host::browser_approval_snapshot,
+            browser::host::browser_dialog_snapshot,
+            browser::host::browser_dialog_decide,
+            browser::download::browser_download_snapshot,
+            browser::download::browser_download_decide,
+            browser::host::browser_agent_control_status,
+            browser::host::browser_set_agent_control,
+            browser::host::browser_begin_work,
+            browser::host::browser_cancel_requests,
+            browser::host::browser_cancel_work,
+            browser::host::browser_close_session,
+            browser::security::browser_permission_snapshot,
+            browser::security::browser_permission_decide,
+            browser::security::browser_permission_revoke,
+            browser::data::browser_data_catalog,
+            browser::data::browser_cleanup_preview,
+            browser::data::browser_clear_cache,
+            browser::data::browser_clear_session_data,
+            browser::data::browser_clear_site_data,
+            browser::data::browser_clear_workspace_data,
+            browser::data::browser_clear_all_data,
+            browser::data::browser_cleanup_cancel,
+            browser::evidence::browser_screenshot,
+            browser::evidence::browser_evidence_read,
+            browser::evidence::browser_evidence_delete,
+            browser::enhancements::browser_set_viewport,
+            browser::enhancements::browser_clear_viewport,
+            browser::enhancements::browser_pick_start,
+            browser::enhancements::browser_pick_cancel,
+            browser::mcp::browser_mcp_create,
+            browser::mcp::browser_mcp_status,
+            browser::mcp::browser_mcp_bind,
+            browser::mcp::browser_mcp_capabilities,
+            browser::mcp::browser_mcp_revoke,
             codeagent_history::agent_history_evidence,
             codeagent_delete::agent_delete_session,
             codeagent_credit::codeagent_credit_quota,
@@ -188,6 +244,7 @@ pub fn run() {
                         }
                     }
                 }
+                browser::host::retire_page(window.app_handle(), window.label());
                 if let Some(attempt_id) = window
                     .label()
                     .strip_prefix(sso_login::SSO_LOGIN_WINDOW_PREFIX)

@@ -115,6 +115,14 @@ export class AcpSession implements AcpSessionPort {
   };
   /** 会话创建/恢复时下发的 MCP server 清单（缺省 []，ADR 024 §7 改动 1）。 */
   private readonly mcpServers: readonly McpServer[];
+  private readonly onSessionReady: AcpSessionOptions["onSessionReady"];
+  private readonly onCapabilitiesReady: AcpSessionOptions["onCapabilitiesReady"];
+  private readonly onSessionDisposed: AcpSessionOptions["onSessionDisposed"];
+  private readonly onCancel: AcpSessionOptions["onCancel"];
+  private readonly onPromptStart: AcpSessionOptions["onPromptStart"];
+  private readonly onPromptSettled: AcpSessionOptions["onPromptSettled"];
+  private readonly onPromptContext: AcpSessionOptions["onPromptContext"];
+  private disposal?: Promise<void>;
 
   /** 握手结果（initialize 成功后有效）。 */
   private handshake: InitializeResult | null = null;
@@ -147,12 +155,25 @@ export class AcpSession implements AcpSessionPort {
     this.dialect = options.dialect;
     this.clientInfo = options.clientInfo ?? DEFAULT_CLIENT_INFO;
     this.mcpServers = options.mcpServers ?? [];
+    this.onSessionReady = options.onSessionReady;
+    this.onCapabilitiesReady = options.onCapabilitiesReady;
+    this.onSessionDisposed = options.onSessionDisposed;
+    this.onCancel = options.onCancel;
+    this.onPromptStart = options.onPromptStart;
+    this.onPromptSettled = options.onPromptSettled;
+    this.onPromptContext = options.onPromptContext;
     this.connection.setNotificationHandler((method, params) => {
       this.dispatchNotification(method, params);
     });
     this.connection.setServerRequestHandler(async (method, params) =>
       this.handleServerRequest(method, params),
     );
+  }
+
+  private disposeResources(): Promise<void> {
+    return (this.disposal ??= Promise.resolve(this.onSessionDisposed?.()).then(
+      () => {},
+    ));
   }
 
   invalidateConnection(): void {
@@ -162,6 +183,9 @@ export class AcpSession implements AcpSessionPort {
     this.invalidateConfiguration();
     this.invalidateForms();
     this.clearCancellation();
+    void this.disposeResources().catch((error: unknown) => {
+      this.logger.warn("会话附属资源撤销失败", { reason: String(error) });
+    });
   }
 
   /** Session-only release; transport ownership remains with the shared connection. */
@@ -180,7 +204,11 @@ export class AcpSession implements AcpSessionPort {
         this.sessionId = null;
       }
     } finally {
-      this.releaseSession();
+      try {
+        await this.disposeResources();
+      } finally {
+        this.releaseSession();
+      }
     }
   }
 
@@ -234,6 +262,7 @@ export class AcpSession implements AcpSessionPort {
       );
     }
     this.handshake = result;
+    await this.onCapabilitiesReady?.(result.agentCapabilities);
     this.logger.info(
       `ACP 已初始化 · agent ${result.agentInfo.name} ${result.agentInfo.version ?? "?"}`,
     );
@@ -270,6 +299,7 @@ export class AcpSession implements AcpSessionPort {
       );
     }
     this.sessionId = result.sessionId;
+    await this.onSessionReady?.(result.sessionId);
     this.sessionCwd = cwd;
     this.configOptions = Array.isArray(asRecord(raw)?.configOptions)
       ? parseConfigOptions(
@@ -312,6 +342,7 @@ export class AcpSession implements AcpSessionPort {
       );
     }
     this.sessionId = sessionId;
+    await this.onSessionReady?.(sessionId);
     this.sessionCwd = cwd;
     this.configOptions = Array.isArray(asRecord(raw)?.configOptions)
       ? parseConfigOptions(
@@ -365,7 +396,13 @@ export class AcpSession implements AcpSessionPort {
     const sessionId = this.sessionId!;
     const generation = this.configurationGeneration;
     const promptRevision = ++this.promptRevision;
-    const blocks = typeof text === "string" ? [{ type: "text", text }] : text;
+    const content =
+      typeof text === "string" ? [{ type: "text" as const, text }] : text;
+    if (this.onPromptStart) await this.onPromptStart(sessionId);
+    const context = this.onPromptContext
+      ? await this.onPromptContext(sessionId)
+      : [];
+    const blocks = [...content, ...context];
     this.pendingPrompts++;
     if (this.pendingPrompts === 1) {
       // 本地轮次开始（真实 pendingPrompts 状态发声）：任何驱动方（用户
@@ -373,7 +410,12 @@ export class AcpSession implements AcpSessionPort {
       this.emit({ type: "turn_started", sessionId });
     }
     if (options.echo && typeof text === "string") {
-      this.emit({ type: "user_message_chunk", sessionId, text, display: options.echo });
+      this.emit({
+        type: "user_message_chunk",
+        sessionId,
+        text,
+        display: options.echo,
+      });
     }
     let result: PromptResult | null = null;
     try {
@@ -381,7 +423,10 @@ export class AcpSession implements AcpSessionPort {
         .request(
           ACP_METHOD.sessionPrompt,
           { sessionId: this.sessionId, prompt: blocks },
-          { timeoutMs: options.timeoutMs ?? null, beforeDispatch: options.beforeDispatch },
+          {
+            timeoutMs: options.timeoutMs ?? null,
+            beforeDispatch: options.beforeDispatch,
+          },
         )
         .finally(() => {
           this.invalidateForms();
@@ -406,6 +451,14 @@ export class AcpSession implements AcpSessionPort {
           stopReason: result?.stopReason ?? null,
         });
       }
+      void Promise.resolve(this.onPromptSettled?.(sessionId)).catch(
+        (error: unknown) => {
+          this.logger.warn("浏览器轮次清理失败", {
+            sessionId,
+            reason: String(error),
+          });
+        },
+      );
     }
     if (
       this.dialect?.refreshSessionInfoAfterPrompt &&
@@ -473,6 +526,13 @@ export class AcpSession implements AcpSessionPort {
       { throwOnError: true },
     );
     this.logger.info("已请求取消当前轮次（session/cancel）");
+    const sessionId = this.sessionId;
+    void Promise.resolve(this.onCancel?.(sessionId)).catch((error: unknown) => {
+      this.logger.warn("浏览器轮次取消失败", {
+        sessionId,
+        reason: String(error),
+      });
+    });
     const grace = this.cancellationGraceMs;
     if (
       this.pendingPrompts &&
@@ -807,6 +867,7 @@ export class AcpSession implements AcpSessionPort {
       if (this.modes)
         this.modes = { ...this.modes, currentModeId: event.modeId };
     }
+
     for (const listener of [...this.listeners]) {
       if (this.invalidated) break;
       try {
@@ -1302,7 +1363,12 @@ function asPromptResult(raw: unknown): PromptResult | null {
   const inputTokens = asNumber(usageRecord["inputTokens"]);
   const outputTokens = asNumber(usageRecord["outputTokens"]);
   const totalTokens = asNumber(usageRecord["totalTokens"]);
-  if ([inputTokens, outputTokens, totalTokens].some((n) => n === null || !Number.isFinite(n) || n < 0)) return { stopReason, ...model };
+  if (
+    [inputTokens, outputTokens, totalTokens].some(
+      (n) => n === null || !Number.isFinite(n) || n < 0,
+    )
+  )
+    return { stopReason, ...model };
   const cachedReadTokens = asNumber(usageRecord["cachedReadTokens"]);
   return {
     stopReason,

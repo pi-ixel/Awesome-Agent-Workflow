@@ -42,7 +42,9 @@ it("工具路径页保持挂载，Skills 卸载和重装只更新技能设置区
     await openTab("工具路径");
     const directory = "D:/skills-settings-reload";
     act(() => skills.setSourceDirectory(directory));
-    const toolPath = screen.getAllByRole("heading", { name: "工具路径" }).at(-1);
+    const toolPath = screen
+      .getAllByRole("heading", { name: "工具路径" })
+      .at(-1);
     expect(screen.getByLabelText("AAW skills 安装源目录")).toHaveValue(
       directory,
     );
@@ -56,7 +58,9 @@ it("工具路径页保持挂载，Skills 卸载和重装只更新技能设置区
     expect(confirmation).not.toHaveTextContent("Skills 源目录");
     expect(screen.queryByLabelText("AAW skills 安装源目录")).toBeNull();
     expect(screen.queryByLabelText("AAW skills 安装器")).toBeNull();
-    expect(screen.getAllByRole("heading", { name: "工具路径" }).at(-1)).toBe(toolPath);
+    expect(screen.getAllByRole("heading", { name: "工具路径" }).at(-1)).toBe(
+      toolPath,
+    );
     await act(async () => {
       await context.plugin(skillsPlugin);
     });
@@ -65,7 +69,9 @@ it("工具路径页保持挂载，Skills 卸载和重装只更新技能设置区
       directory,
     );
     expect(screen.getByLabelText("AAW skills 安装器")).toBeInTheDocument();
-    expect(screen.getAllByRole("heading", { name: "工具路径" }).at(-1)).toBe(toolPath);
+    expect(screen.getAllByRole("heading", { name: "工具路径" }).at(-1)).toBe(
+      toolPath,
+    );
     act(() => context.skills.setSourceDirectory(oldSource));
   } finally {
     await runtime.shutdown();
@@ -77,15 +83,19 @@ describe("SettingsPage（侧边 Tab 版）", () => {
 
   it("侧栏 Tab 切换分片；默认落在「外观」", async () => {
     await renderSettingsPage();
-    const groups = within(screen.getByRole("tablist", { name: "设置页签" }))
-      .getAllByRole("group");
+    const groups = within(
+      screen.getByRole("tablist", { name: "设置页签" }),
+    ).getAllByRole("group");
     expect(
       groups.map((group) => [
-        document.getElementById(group.getAttribute("aria-labelledby")!)?.textContent,
-        within(group).getAllByRole("tab").map((tab) => tab.textContent),
+        document.getElementById(group.getAttribute("aria-labelledby")!)
+          ?.textContent,
+        within(group)
+          .getAllByRole("tab")
+          .map((tab) => tab.textContent),
       ]),
     ).toEqual([
-      ["基础设置", ["外观", "更新", "定时任务"]],
+      ["基础设置", ["外观", "更新", "浏览器", "定时任务"]],
       ["Agent能力", ["Agent", "工具路径", "会话与审批"]],
       ["数据与统计", ["存储", "归档管理"]],
     ]);
@@ -99,7 +109,10 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     expect(
       within(screen.getByLabelText("关于")).getByText(desktopVersion),
     ).toBeVisible();
-    expect(screen.getByRole("dialog", { name: "设置" })).toHaveAttribute("aria-modal", "true");
+    expect(screen.getByRole("dialog", { name: "设置" })).toHaveAttribute(
+      "aria-modal",
+      "true",
+    );
     expect(screen.getByRole("button", { name: "关闭设置" })).toBeVisible();
     expect(screen.getByRole("status")).toHaveTextContent("自动保存");
     expect(screen.getByRole("status")).toHaveClass(
@@ -171,7 +184,9 @@ describe("SettingsPage（侧边 Tab 版）", () => {
       name: "恢复默认设置确认",
     });
     expect(firstConfirm).toHaveAttribute("aria-modal", "true");
-    expect(within(firstConfirm).getByRole("button", { name: "取消" })).toHaveFocus();
+    expect(
+      within(firstConfirm).getByRole("button", { name: "取消" }),
+    ).toHaveFocus();
     await userEvent.keyboard("{Escape}");
     expect(firstConfirm).not.toBeInTheDocument();
     expect(projectPreferences.getState().approvalMode).toBe("auto-allow");

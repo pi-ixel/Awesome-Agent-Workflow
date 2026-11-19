@@ -1,0 +1,144 @@
+@startuml
+title AAW 内嵌浏览器——Agent 页面操作子用例图
+
+top to bottom direction
+skinparam shadowing false
+skinparam linetype polyline
+skinparam nodesep 60
+skinparam ranksep 70
+skinparam defaultFontName "Microsoft YaHei"
+skinparam defaultFontSize 15
+skinparam packageStyle rectangle
+skinparam rectangle {
+  BorderColor #64748B
+  BackgroundColor #F8FAFC
+}
+skinparam package {
+  BorderColor #94A3B8
+  BackgroundColor #FFFFFF
+  FontColor #0F172A
+}
+skinparam actor {
+  BorderColor #334155
+  BackgroundColor #E2E8F0
+  FontColor #0F172A
+}
+skinparam usecase {
+  BorderColor #2563EB
+  BackgroundColor #EFF6FF
+  FontColor #0F172A
+  ArrowColor #475569
+}
+skinparam note {
+  BorderColor #94A3B8
+  BackgroundColor #F8FAFC
+  FontColor #334155
+}
+
+actor "主 Agent\n（iCode / ACP）" as Agent
+actor "子 Agent\n（同会话平权）" as SubAgent
+actor "开发者用户" as User
+actor "Web 应用 / 目标网站" as Web
+
+rectangle "Agent Browser Use 子系统" {
+  usecase "使用内嵌浏览器" as UC_USE
+  usecase "读取网页信息（只读）" as UC_READ
+  usecase "自动验证 Web 页面" as UC_AUTO
+
+  package "目标准备" {
+    usecase "发现真实可用浏览器" as UC_DISCOVER
+    usecase "读取有效能力与操作文档" as UC_DOCS
+    usecase "创建、复用或选择标签页" as UC_TARGET
+    usecase "在用户关闭人工接管后\n枚举并选择已交还标签页" as UC_CLAIM
+    usecase "校验会话与标签页归属" as UC_SCOPE
+    usecase "同会话主子 Agent 共享浏览器\n（会话级平权）" as UC_SUBAGENT
+  }
+
+  package "页面观察与操作" {
+    usecase "导航并读取页面状态" as UC_NAV
+    usecase "获取语义 DOM / ARIA 快照" as UC_DOM
+    usecase "严格定位页面元素" as UC_LOCATE
+    usecase "点击、输入、按键、滚动等交互\n（需要变更或验证交互时）" as UC_ACT
+    usecase "等待 URL、加载或元素状态\n（页面异步变化时）" as UC_WAIT
+    usecase "获取截图并保存验证证据\n（需要视觉证据时）" as UC_SCREENSHOT
+    usecase "处理 JavaScript 对话框\n（页面弹出对话框时）" as UC_DIALOG
+  }
+
+  package "安全与异常" {
+    usecase "执行高风险操作\n（命中高风险动作时）" as UC_RISK
+    usecase "请求用户审批" as UC_APPROVAL
+    usecase "取消或超时并判定副作用\n（用户取消或操作超时时）" as UC_CANCEL
+    usecase "恢复页面并失效旧代次\n（页面异常退出时）" as UC_CRASH
+  }
+
+  package "结果与接续" {
+    usecase "展示工具状态与结果" as UC_VIEW
+    usecase "移交标签页给用户\n（任务完成并交付页面时）" as UC_HANDOFF
+  }
+
+  package "后续协同（P1）" {
+    usecase "使用当前页面作为会话上下文" as UC_CONTEXT #FFF7ED
+    usecase "显示或隐藏既有浏览器面板" as UC_VISIBILITY #FFF7ED
+  }
+}
+
+Agent -- UC_USE
+SubAgent -- UC_SUBAGENT
+SubAgent --|> Agent
+User -- UC_APPROVAL
+User -- UC_CLAIM
+User -- UC_VIEW
+
+UC_USE ..> UC_DISCOVER : <<include>>
+UC_USE ..> UC_DOCS : <<include>>
+UC_USE ..> UC_TARGET : <<include>>
+UC_USE ..> UC_NAV : <<include>>
+UC_USE ..> UC_DOM : <<include>>
+UC_USE ..> UC_VIEW : <<include>>
+UC_READ --|> UC_USE
+UC_AUTO --|> UC_USE
+UC_AUTO ..> UC_ACT : <<include>>
+UC_TARGET ..> UC_SCOPE : <<include>>
+UC_CLAIM ..> UC_SCOPE : <<include>>
+UC_SUBAGENT ..> UC_SCOPE : <<include>>
+UC_ACT ..> UC_SCOPE : <<include>>
+UC_ACT ..> UC_LOCATE : <<include>>
+
+UC_CLAIM ..> UC_TARGET : <<extend>>
+UC_WAIT ..> UC_NAV : <<extend>>
+UC_WAIT ..> UC_ACT : <<extend>>
+UC_SCREENSHOT ..> UC_AUTO : <<extend>>
+UC_DIALOG ..> UC_USE : <<extend>>
+UC_RISK ..> UC_ACT : <<extend>>
+UC_RISK ..> UC_APPROVAL : <<include>>
+UC_CANCEL ..> UC_USE : <<extend>>
+UC_CRASH ..> UC_USE : <<extend>>
+UC_HANDOFF ..> UC_AUTO : <<extend>>
+UC_CONTEXT ..> UC_USE : <<extend>>
+UC_VISIBILITY ..> UC_USE : <<extend>>
+
+UC_NAV -- Web
+UC_ACT -- Web
+
+note bottom of UC_DOM
+DOM-first 是默认观察方式；只读查询不经过页面交互。
+截图仅在需要布局、像素、图片或视觉证据时启用。
+end note
+
+note bottom of UC_CANCEL
+动作未下发：无副作用；
+动作可能已下发：副作用不确定，不虚假宣称已回滚。
+end note
+
+note bottom of UC_SUBAGENT
+同会话主、子 Agent 平权共享端点、标签页、站点数据和动作权限。
+子 Agent 结束不关闭页面或撤销会话端点；审计与取消只承诺到顶层会话。
+end note
+
+legend bottom
+  <<include>>：主成功路径中的必经子流程
+  <<extend>>：满足扩展用例注明的条件时才发生
+  --|>：用例或参与者泛化，子项继承父项的公共行为
+  标签页释放控制权后仍归原会话，不向其他会话开放
+endlegend
+@enduml

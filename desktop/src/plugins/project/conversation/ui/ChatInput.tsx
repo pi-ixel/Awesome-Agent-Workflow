@@ -39,6 +39,7 @@ import {
   encodeAnnotationMessage,
 } from "../../composer/annotationMessage.ts";
 import { AnnotationSummary } from "./AnnotationSummary.tsx";
+import { BrowserElementSummary } from "./BrowserElementSummary.tsx";
 import { SkillReferenceTokens } from "./SkillReferenceTokens.tsx";
 /**
  * 输入区（悬浮形态）：不贴边贴底的圆角卡片——外层 `0 16px 16px` 留白，
@@ -143,11 +144,7 @@ function ArrowUpIcon() {
 /** 停止：ZCode 式次级钮（variant=secondary）内的实心方块（SquareIcon size-4）。 */
 function StopIcon() {
   return (
-    <UiIcon
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      className="ui-icon-16"
-    >
+    <UiIcon viewBox="0 0 24 24" fill="currentColor" className="ui-icon-16">
       <rect x="6" y="6" width="12" height="12" rx="2" />
     </UiIcon>
   );
@@ -173,7 +170,10 @@ function ComposerActionHint({
       onBlur={() => setFocused(false)}
     >
       {children}
-      <HintSurface open={hovered || focused} className="pointer-events-none absolute bottom-full right-0 z-30 mb-0.5 flex items-center gap-2 whitespace-nowrap px-2.5 py-1 pr-1 text-ui-sm font-medium">
+      <HintSurface
+        open={hovered || focused}
+        className="pointer-events-none absolute bottom-full right-0 z-30 mb-0.5 flex items-center gap-2 whitespace-nowrap px-2.5 py-1 pr-1 text-ui-sm font-medium"
+      >
         {label}
         <kbd className="inline-flex h-4 items-center rounded-sm bg-tooltip-tag px-1.5 font-mono text-ui-xs font-medium text-tooltip-tag-ink">
           {shortcut}
@@ -239,7 +239,8 @@ export function ChatInput({
   const steerAgentId = useSessionValue((state) => state.steerAgentId);
   const steerPhase = useSessionValue((state) => state.steerPhase);
   const awaitingUser = useSessionValue((state) => state.isAwaitingUser);
-  const { clear, retryLastPrompt, removeQueuedPromptById, retryQueueSave } = useSessionCommands();
+  const { clear, retryLastPrompt, removeQueuedPromptById, retryQueueSave } =
+    useSessionCommands();
   const queuedPrompts = useSessionValue((state) => state.queuedPrompts);
   const activeSteerIds = useSessionValue((state) => state.activeSteerIds);
   const queueSaveError = useSessionValue((state) => state.queueSaveError);
@@ -339,11 +340,10 @@ export function ChatInput({
     ? interactionByAgent[steerAgentId]
     : undefined;
   const running = isAgentRunning || !!steerPhase;
-  const steering = running && supportsSteer && agentInteraction?.mode === "steer";
+  const steering =
+    running && supportsSteer && agentInteraction?.mode === "steer";
   const steerDisabled =
-    steering &&
-    (awaitingUser ||
-      (turnState !== "running" && !steerPhase));
+    steering && (awaitingUser || (turnState !== "running" && !steerPhase));
   const images =
     imageStorage && imagesLoaded ? (imagesByScope[imageScope] ?? []) : [];
   const hasUnsupportedImages =
@@ -382,6 +382,7 @@ export function ChatInput({
   const hasContent =
     draft.trim().length > 0 ||
     annotationDraft.annotations.length > 0 ||
+    annotationDraft.browserElements.length > 0 ||
     images.length > 0;
   const draftKeyRef = useRef<string | null>(null);
   const draftTextRef = useRef("");
@@ -589,13 +590,26 @@ export function ChatInput({
         const store = annotationDrafts;
         if (!store) return false;
         store.ensure(scope);
-        const existing =
-          annotationDrafts?.getState().drafts[scope]?.annotations ?? [];
+        const draft = store.getState().drafts[scope];
+        const existing = draft?.annotations ?? [];
         if (
           !store.put(scope, [
             ...existing,
             ...parsed.annotations.filter(
               (a) => !existing.some((b) => b.id === a.id),
+            ),
+          ])
+        )
+          return false;
+        const existingElements = draft?.browserElements ?? [];
+        if (
+          !store.putBrowserElements(scope, [
+            ...existingElements,
+            ...parsed.browserElements.filter(
+              (element) =>
+                !existingElements.some(
+                  (existing) => existing.referenceId === element.referenceId,
+                ),
             ),
           ])
         )
@@ -624,7 +638,9 @@ export function ChatInput({
   // An older client may have saved an outbox entry into the draft before leaving the queue.
   useEffect(() => {
     if (!draftKey || isConnecting || !queuedPrompts.length) return;
-    const recovered = new Set(readDraftRecoveries(draftKey).map(({ id }) => id));
+    const recovered = new Set(
+      readDraftRecoveries(draftKey).map(({ id }) => id),
+    );
     for (const item of queuedPrompts) {
       if (
         isSteerOutboxEntry(item) &&
@@ -634,7 +650,13 @@ export function ChatInput({
       )
         removeQueuedPromptById(item.id);
     }
-  }, [activeSteerIds, draftKey, isConnecting, queuedPrompts, removeQueuedPromptById]);
+  }, [
+    activeSteerIds,
+    draftKey,
+    isConnecting,
+    queuedPrompts,
+    removeQueuedPromptById,
+  ]);
 
   // 自动增长：先瞬时归零再按 scrollHeight 撑开，钳制在 MAX_HEIGHT_PX 内
   useEffect(() => {
@@ -849,10 +871,12 @@ export function ChatInput({
     const prompt = encodeAnnotationMessage(
       message.text,
       annotationDraft.annotations,
+      annotationDraft.browserElements,
     );
     const submittedScope = draftKeyRef.current;
     if (
-      annotationDraft.annotations.length &&
+      (annotationDraft.annotations.length ||
+        annotationDraft.browserElements.length) &&
       (!submittedScope || !annotationDrafts?.submit(submittedScope, prompt))
     )
       return;
@@ -1270,6 +1294,19 @@ export function ChatInput({
               );
           }}
         />
+        <BrowserElementSummary
+          elements={annotationDraft.browserElements}
+          onRemove={(referenceId) =>
+            draftKey
+              ? (annotationDrafts?.putBrowserElements(
+                  draftKey,
+                  annotationDraft.browserElements.filter(
+                    (element) => element.referenceId !== referenceId,
+                  ),
+                ) ?? false)
+              : false
+          }
+        />
         {Object.entries(annotationDraft.submissions)
           .filter(([, entry]) => entry.state === "uncertain")
           .map(([id, entry]) => (
@@ -1299,7 +1336,9 @@ export function ChatInput({
         {queueSaveError ? (
           <div role="alert" className="px-3 pt-2 text-ui-caption text-warn-ink">
             {queueSaveError}{" "}
-            <button type="button" onClick={retryQueueSave}>重试保存</button>
+            <button type="button" onClick={retryQueueSave}>
+              重试保存
+            </button>
           </div>
         ) : null}
         <ImageAttachments
@@ -1432,14 +1471,20 @@ export function ChatInput({
             /* 停止：ZCode variant=secondary 次级钮（raised 即 zai secondary
                #363636 同档），非圆形危险钮；Esc 提示挂在自绘 tooltip 上 */
             <ComposerActionHint
-              label={!steering && turnState === "cancelling" ? "正在取消，等待确认" : "停止"}
+              label={
+                !steering && turnState === "cancelling"
+                  ? "正在取消，等待确认"
+                  : "停止"
+              }
               shortcut="Esc"
             >
               <IconButton
                 type="button"
                 onClick={onCancel}
                 disabled={!steering && turnState === "cancelling"}
-                aria-label={!steering && turnState === "cancelling" ? "正在取消" : "停止"}
+                aria-label={
+                  !steering && turnState === "cancelling" ? "正在取消" : "停止"
+                }
                 className="flex shrink-0 items-center justify-center rounded-lg bg-raised text-ink transition-colors hover:bg-raised/80 disabled:pointer-events-none disabled:opacity-50"
               >
                 <StopIcon />
@@ -1450,7 +1495,9 @@ export function ChatInput({
                text-foreground-inverse hover:bg-brand/80：zai-dark 白底黑箭头
                #ffffff/#000000，zai-light 黑底白字）；运行中即「加入队列」 */
             <ComposerActionHint
-              label={running && !steering ? "加入队列，当前轮结束后按序发出" : "发送"}
+              label={
+                running && !steering ? "加入队列，当前轮结束后按序发出" : "发送"
+              }
               shortcut="Enter"
             >
               <IconButton

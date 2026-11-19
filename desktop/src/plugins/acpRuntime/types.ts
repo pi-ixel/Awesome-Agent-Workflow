@@ -58,6 +58,20 @@ export interface AgentDialectHooks {
  * 仍由本层负责。由 Agent 适配注册层构造（见 registry.ts 的
  * `createDialect`）。
  */
+export type AgentParticipantLifecycle =
+  | {
+      type: "start";
+      sessionId: string;
+      participantId: string;
+      parentCallId: string;
+    }
+  | {
+      type: "finish";
+      sessionId: string;
+      participantId?: string;
+      parentCallId?: string;
+    };
+
 export interface AcpDialect {
   readonly normalizeConfigOptions?: (raw: unknown) => unknown;
   readonly requireConfigurationConfirmation?: boolean;
@@ -80,6 +94,10 @@ export interface AcpDialect {
     method: string,
     params: Readonly<Record<string, unknown>>,
   ) => AcpSessionEvent | null;
+  readonly participantFromNotification?: (
+    method: string,
+    params: Readonly<Record<string, unknown>>,
+  ) => AgentParticipantLifecycle | null;
   /**
    * 私有反向请求处理器（按 method 精确匹配）。未命中的方法交回协议层
    * （标准 ACP 反向请求或 -32601 method not found）。
@@ -111,6 +129,20 @@ export interface AcpSessionOptions {
    * 缺省 []，与远端现状逐字节一致；结果通道 MCP 挂载的使能项。
    */
   readonly mcpServers?: readonly McpServer[];
+  readonly onSessionReady?: (sessionId: string) => void | Promise<void>;
+  readonly onCapabilitiesReady?: (
+    capabilities: InitializeResult["agentCapabilities"],
+  ) => void | Promise<void>;
+  readonly onSessionDisposed?: () => void | Promise<void>;
+  readonly onParticipantEvent?: (
+    event: AgentParticipantLifecycle,
+  ) => void | Promise<void>;
+  readonly onCancel?: (sessionId: string) => void | Promise<void>;
+  readonly onPromptStart?: (sessionId: string) => void | Promise<void>;
+  readonly onPromptSettled?: (sessionId: string) => void | Promise<void>;
+  readonly onPromptContext?: (
+    sessionId: string,
+  ) => Promise<readonly ContentBlock[]>;
 }
 
 export type ChannelSessionOptions = AcpSessionOptions & {
@@ -209,7 +241,11 @@ export interface AcpProtocolResources {
   abortSwitch(revision: number): Promise<void>;
   setSelection(agentKey: string, agentId: string): void;
   open(agentKey: string, options?: AcpProtocolSessionOptions): AcpSessionPort;
-  openBackground?(adapter: AgentAdapter, toolPaths: object, options: AcpProtocolSessionOptions): Promise<AcpSessionPort>;
+  openBackground?(
+    adapter: AgentAdapter,
+    toolPaths: object,
+    options: AcpProtocolSessionOptions,
+  ): Promise<AcpSessionPort>;
   readProjectHistory(
     session: AcpSessionPort,
     workspacePath: string,

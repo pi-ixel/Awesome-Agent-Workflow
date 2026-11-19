@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+  <defs>
+    <style>
+      text { font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif; fill: #263241; }
+      .title { font-size: 18px; font-weight: 600; }
+      .body { font-size: 14px; }
+      .small { font-size: 12px; fill: #667085; }
+      .muted { fill: #667085; }
+      .line { stroke: #c7d0dc; stroke-width: 1; fill: #fff; }
+      .button { stroke: #98a5b5; stroke-width: 1; fill: #fff; }
+      .blue { fill: #eaf3ff; stroke: #77a8e8; stroke-width: 1; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1440" height="900" fill="#f5f7fa"/>
+  <rect x="0" y="0" width="1440" height="42" fill="#263241"/>
+  <text x="20" y="27" class="body" fill="#fff" style="fill:#fff">AAW Desktop</text>
+  <text x="1270" y="27" class="small" fill="#fff" style="fill:#fff">—  □  ×</text>
+
+  <rect x="0" y="42" width="48" height="858" fill="#344154"/>
+  <text x="14" y="78" fill="#fff" style="fill:#fff;font-size:18px">≡</text>
+  <text x="14" y="116" fill="#fff" style="fill:#fff;font-size:18px">＋</text>
+  <text x="14" y="850" fill="#fff" style="fill:#fff;font-size:18px">⚙</text>
+
+  <rect x="48" y="42" width="220" height="858" fill="#eef1f5" stroke="#c7d0dc"/>
+  <text x="66" y="75" class="title">项目</text>
+  <text x="228" y="75" class="title">＋</text>
+  <rect x="58" y="94" width="200" height="34" fill="#dce8f7"/>
+  <text x="70" y="116" class="body">▾  Awesome-Agent-Workflow</text>
+  <text x="86" y="153" class="body">当前会话</text>
+  <text x="86" y="184" class="body muted">历史会话</text>
+  <text x="86" y="215" class="body muted">Web 验收会话</text>
+
+  <rect x="268" y="42" width="390" height="858" fill="#fff" stroke="#c7d0dc"/>
+  <text x="288" y="75" class="title">当前会话</text>
+  <text x="288" y="101" class="small">iCode · 正在执行</text>
+  <rect x="288" y="132" width="350" height="82" rx="4" fill="#f5f7fa" stroke="#d8dee7"/>
+  <text x="304" y="158" class="body">请验证本地 Web 应用的登录表单。</text>
+  <rect x="288" y="234" width="350" height="104" rx="4" fill="#f8fafc" stroke="#d8dee7"/>
+  <text x="304" y="260" class="body">Agent 工具调用</text>
+  <text x="304" y="285" class="small">browser.navigate → 已完成</text>
+  <text x="304" y="309" class="small">browser.fill → 正在执行</text>
+  <rect x="288" y="810" width="350" height="58" rx="4" fill="#fff" stroke="#aeb9c7"/>
+  <text x="304" y="845" class="small">输入消息…</text>
+
+  <rect x="658" y="42" width="782" height="858" fill="#fff" stroke="#98a5b5"/>
+  <rect x="658" y="42" width="782" height="42" fill="#e9edf3"/>
+  <text x="678" y="69" class="title">Browser</text>
+  <text x="760" y="69" class="small">当前会话 · 会话 A</text>
+  <text x="1320" y="69" class="body">数据管理  ×</text>
+
+  <rect x="658" y="84" width="782" height="44" fill="#f5f7fa"/>
+  <rect x="670" y="92" width="260" height="34" rx="4" fill="#fff" stroke="#98a5b5"/>
+  <circle cx="686" cy="109" r="5" fill="#4b93dd"/>
+  <text x="700" y="114" class="body">本地登录页 · Agent 操作中</text>
+  <text x="910" y="114" class="body muted">×</text>
+  <rect x="938" y="92" width="170" height="34" rx="4" fill="#eef1f5" stroke="#d0d6df"/>
+  <text x="954" y="114" class="body muted">结果页</text>
+  <text x="1120" y="114" class="title muted">＋</text>
+
+  <rect x="658" y="128" width="782" height="54" fill="#fff"/>
+  <rect x="674" y="139" width="34" height="32" rx="3" class="button"/>
+  <text x="685" y="161" class="body">←</text>
+  <rect x="714" y="139" width="34" height="32" rx="3" class="button"/>
+  <text x="725" y="161" class="body">→</text>
+  <rect x="754" y="139" width="34" height="32" rx="3" class="button"/>
+  <text x="765" y="161" class="body">↻</text>
+  <rect x="798" y="139" width="390" height="32" rx="4" fill="#fff" stroke="#98a5b5"/>
+  <text x="812" y="160" class="small">http://localhost:5173/login</text>
+  <rect x="1198" y="139" width="96" height="32" rx="4" fill="#fff" stroke="#d18383"/>
+  <text x="1214" y="160" class="body" fill="#a13d3d" style="fill:#a13d3d">停止 Agent</text>
+  <rect x="1302" y="139" width="120" height="32" rx="4" fill="#fff" stroke="#98a5b5"/>
+  <text x="1320" y="160" class="body">选择页面元素</text>
+
+  <rect x="674" y="190" width="748" height="40" rx="4" class="blue"/>
+  <circle cx="694" cy="210" r="6" fill="#4b93dd"/>
+  <text x="710" y="215" class="body">Agent 正在验证登录表单；你直接操作页面即可自动接管。</text>
+
+  <rect x="674" y="238" width="748" height="600" fill="#f8fafc" stroke="#c7d0dc"/>
+  <rect x="674" y="238" width="748" height="54" fill="#eef1f5"/>
+  <text x="698" y="271" class="title">Example Web App</text>
+  <text x="1300" y="270" class="body muted">登录</text>
+
+  <rect x="884" y="346" width="330" height="306" rx="6" fill="#fff" stroke="#c7d0dc"/>
+  <text x="914" y="390" class="title">登录账号</text>
+  <text x="914" y="430" class="small">用户名</text>
+  <rect x="914" y="442" width="270" height="40" rx="4" fill="#fff" stroke="#4b93dd" stroke-width="2"/>
+  <text x="928" y="467" class="body">test-user</text>
+  <text x="914" y="520" class="small">密码</text>
+  <rect x="914" y="532" width="270" height="40" rx="4" fill="#fff" stroke="#aeb9c7"/>
+  <text x="928" y="557" class="body muted">••••••••</text>
+  <rect x="914" y="596" width="270" height="40" rx="4" fill="#dce8f7" stroke="#77a8e8"/>
+  <text x="1020" y="621" class="body">登录</text>
+
+  <rect x="658" y="850" width="782" height="50" fill="#eef1f5"/>
+  <circle cx="680" cy="875" r="5" fill="#4b93dd"/>
+  <text x="694" y="880" class="small">会话 A · 标签页归属明确 · Agent 控制中 · 页面内容不可信</text>
+</svg>

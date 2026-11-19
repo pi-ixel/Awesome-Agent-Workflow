@@ -9,8 +9,16 @@ import {
   type AnnotationDraftSnapshot,
   type AnnotationSubmission,
 } from "./annotationTypes.ts";
-import { annotationLimitError, decodeAnnotationMessage } from "./annotationMessage.ts";
-import { finishProjectDraftMigration, prepareProjectDraft } from "./projectDraftMigration.ts";
+import {
+  annotationLimitError,
+  browserElementLimitError,
+  decodeAnnotationMessage,
+  validBrowserElement,
+} from "./annotationMessage.ts";
+import {
+  finishProjectDraftMigration,
+  prepareProjectDraft,
+} from "./projectDraftMigration.ts";
 import { validAnnotation } from "../../documents/service.ts";
 
 const keyOf = (scope: string) => `${scope}/document-annotations-v1`;
@@ -21,6 +29,9 @@ function read(storage: HostStorage, scope: string): AnnotationDraft {
     const data = raw as Record<string, unknown>;
     const annotations = Array.isArray(data.annotations)
       ? data.annotations.filter(validAnnotation)
+      : [];
+    const browserElements = Array.isArray(data.browserElements)
+      ? data.browserElements.filter(validBrowserElement)
       : [];
     const submissions: Record<string, AnnotationSubmission> = {};
     if (data.submissions && typeof data.submissions === "object") {
@@ -35,6 +46,9 @@ function read(storage: HostStorage, scope: string): AnnotationDraft {
     }
     return {
       annotations: annotationLimitError(annotations) ? [] : annotations,
+      browserElements: browserElementLimitError(browserElements)
+        ? []
+        : browserElements,
       submissions,
     };
   } catch {
@@ -43,10 +57,18 @@ function read(storage: HostStorage, scope: string): AnnotationDraft {
 }
 const emptyState = { drafts: {}, error: null, migrations: {} };
 
-type AnnotationDraftState = AnnotationDraftSnapshot & Pick<
-  AnnotationDraftService,
-  "ensure" | "put" | "submit" | "settle" | "recover" | "migrate" | "consumeMigration"
->;
+type AnnotationDraftState = AnnotationDraftSnapshot &
+  Pick<
+    AnnotationDraftService,
+    | "ensure"
+    | "put"
+    | "putBrowserElements"
+    | "submit"
+    | "settle"
+    | "recover"
+    | "migrate"
+    | "consumeMigration"
+  >;
 
 export function createAnnotationDraftStore(storage: HostStorage) {
   let active = true;
@@ -58,6 +80,7 @@ export function createAnnotationDraftStore(storage: HostStorage) {
       try {
         if (
           !draft.annotations.length &&
+          !draft.browserElements.length &&
           !Object.keys(draft.submissions).length
         ) {
           if (storage.removeItem) storage.removeItem(keyOf(scope));
@@ -95,6 +118,15 @@ export function createAnnotationDraftStore(storage: HostStorage) {
         }
         return save(scope, { ...load(scope), annotations });
       },
+      putBrowserElements: (scope, browserElements) => {
+        if (!active) return false;
+        const error = browserElementLimitError(browserElements);
+        if (error) {
+          set({ error });
+          return false;
+        }
+        return save(scope, { ...load(scope), browserElements });
+      },
       submit: (scope, prompt) => {
         if (!active) return false;
         const message = decodeAnnotationMessage(prompt);
@@ -105,8 +137,14 @@ export function createAnnotationDraftStore(storage: HostStorage) {
           return false;
         }
         const ids = new Set(message.annotations.map((a) => a.id));
+        const referenceIds = new Set(
+          message.browserElements.map((element) => element.referenceId),
+        );
         return save(scope, {
           annotations: draft.annotations.filter((a) => !ids.has(a.id)),
+          browserElements: draft.browserElements.filter(
+            (element) => !referenceIds.has(element.referenceId),
+          ),
           submissions: {
             ...draft.submissions,
             [message.id]: { prompt, state: "pending" },
@@ -144,14 +182,27 @@ export function createAnnotationDraftStore(storage: HostStorage) {
             (a) => !draft.annotations.some((b) => b.id === a.id),
           ),
         ];
-        const error = annotationLimitError(annotations);
+        const browserElements = [
+          ...draft.browserElements,
+          ...parsed.browserElements.filter(
+            (element) =>
+              !draft.browserElements.some(
+                (existing) => existing.referenceId === element.referenceId,
+              ),
+          ),
+        ];
+        const error =
+          annotationLimitError(annotations) ??
+          browserElementLimitError(browserElements);
         if (error) {
           set({ error });
           return null;
         }
         const submissions = { ...draft.submissions };
         delete submissions[id];
-        return save(scope, { annotations, submissions }) ? parsed.text : null;
+        return save(scope, { annotations, browserElements, submissions })
+          ? parsed.text
+          : null;
       },
       consumeMigration: (from, to) => {
         if (!active) return false;
@@ -168,6 +219,7 @@ export function createAnnotationDraftStore(storage: HostStorage) {
           next = load(to);
         if (
           !previous.annotations.length &&
+          !previous.browserElements.length &&
           !Object.keys(previous.submissions).length
         ) {
           set((s) => ({ migrations: { ...s.migrations, [from]: to } }));
@@ -179,13 +231,26 @@ export function createAnnotationDraftStore(storage: HostStorage) {
             (a) => !next.annotations.some((b) => b.id === a.id),
           ),
         ];
-        if (annotationLimitError(merged)) {
+        const mergedBrowserElements = [
+          ...next.browserElements,
+          ...previous.browserElements.filter(
+            (element) =>
+              !next.browserElements.some(
+                (existing) => existing.referenceId === element.referenceId,
+              ),
+          ),
+        ];
+        if (
+          annotationLimitError(merged) ||
+          browserElementLimitError(mergedBrowserElements)
+        ) {
           set({ error: "新会话批注迁移超出容量，原草稿已保留。" });
           return;
         }
         if (
           save(to, {
             annotations: merged,
+            browserElements: mergedBrowserElements,
             submissions: { ...previous.submissions, ...next.submissions },
           })
         ) {
@@ -200,12 +265,21 @@ export function createAnnotationDraftStore(storage: HostStorage) {
     error,
     migrations,
   }));
-  const { ensure, put, submit, settle, recover, migrate, consumeMigration } =
-    store.getState();
+  const {
+    ensure,
+    put,
+    putBrowserElements,
+    submit,
+    settle,
+    recover,
+    migrate,
+    consumeMigration,
+  } = store.getState();
   const service: AnnotationDraftService = {
     ...view.snapshot,
     ensure,
     put,
+    putBrowserElements,
     submit,
     settle,
     recover,
@@ -213,11 +287,15 @@ export function createAnnotationDraftStore(storage: HostStorage) {
     consumeMigration,
     isActive: () => active,
   };
-  const composerView = createSnapshotView(store, ({ drafts, error }) => ({ drafts, error }));
+  const composerView = createSnapshotView(store, ({ drafts, error }) => ({
+    drafts,
+    error,
+  }));
   const composer: ProjectAnnotationDrafts = {
     ...composerView.snapshot,
     ensure,
     put,
+    putBrowserElements,
     submit,
     recover,
     consumeMigration,
@@ -226,8 +304,10 @@ export function createAnnotationDraftStore(storage: HostStorage) {
       const message = decodeAnnotationMessage(prompt);
       if (scope && message) recover(scope, message.id);
     },
-    prepareLegacyDraft: (scope, legacyScope) => prepareProjectDraft(service, scope, legacyScope),
-    finishLegacyDraft: (scope, from) => finishProjectDraftMigration(service, scope, from),
+    prepareLegacyDraft: (scope, legacyScope) =>
+      prepareProjectDraft(service, scope, legacyScope),
+    finishLegacyDraft: (scope, from) =>
+      finishProjectDraftMigration(service, scope, from),
   };
   return {
     service,

@@ -10,9 +10,16 @@ import { createAnnotationDraftStore } from "../../../../src/plugins/project/comp
 import { webviewStorage } from "../../../../src/plugins/host/storage/storage.ts";
 import { createTestWorkspace } from "../../../helpers/workspace.ts";
 const useWorkspaceStore = createTestWorkspace();
-import { draftScopeKey, readDraft } from "../../../../src/plugins/project/composer/draftStore.ts";
-import { decodeAnnotationMessage, encodeAnnotationMessage } from "../../../../src/plugins/project/composer/annotationMessage.ts";
+import {
+  draftScopeKey,
+  readDraft,
+} from "../../../../src/plugins/project/composer/draftStore.ts";
+import {
+  decodeAnnotationMessage,
+  encodeAnnotationMessage,
+} from "../../../../src/plugins/project/composer/annotationMessage.ts";
 import type { DocumentAnnotation } from "../../../../src/plugins/documents/types.ts";
+import { browserElement } from "../../../helpers/browserElement.ts";
 const project = "D:/project";
 const scope = draftScopeKey(project, "A");
 const annotation: DocumentAnnotation = {
@@ -56,13 +63,9 @@ describe("批注与输入框", () => {
     expect(
       decodeAnnotationMessage(send.mock.calls[0]![0] ?? "")?.annotations,
     ).toEqual([annotation]);
+    expect(annotationDrafts.getState().drafts[scope]?.annotations).toEqual([]);
     expect(
-      annotationDrafts.getState().drafts[scope]?.annotations,
-    ).toEqual([]);
-    expect(
-      Object.values(
-        annotationDrafts.getState().drafts[scope]!.submissions,
-      ),
+      Object.values(annotationDrafts.getState().drafts[scope]!.submissions),
     ).toHaveLength(1);
     expect(
       screen.queryByText("批注消息已提交，等待结果"),
@@ -109,9 +112,7 @@ describe("批注与输入框", () => {
     await userEvent.type(screen.getByLabelText("消息输入框"), "正文要保留");
     await userEvent.hover(screen.getByRole("button", { name: "2 条评论" }));
     await userEvent.click(screen.getByRole("button", { name: "删除全部评论" }));
-    expect(
-      annotationDrafts.getState().drafts[scope]?.annotations,
-    ).toEqual([]);
+    expect(annotationDrafts.getState().drafts[scope]?.annotations).toEqual([]);
     expect(screen.getByLabelText("消息输入框")).toHaveValue("正文要保留");
     expect(
       screen.queryByRole("dialog", { name: "文档评论" }),
@@ -126,9 +127,9 @@ describe("批注与输入框", () => {
     expect(
       screen.getByRole("button", { name: "1 条评论" }),
     ).toBeInTheDocument();
-    expect(
-      annotationDrafts.getState().drafts[scope]?.annotations,
-    ).toEqual([annotation]);
+    expect(annotationDrafts.getState().drafts[scope]?.annotations).toEqual([
+      annotation,
+    ]);
   });
   it("切到另一会话不显示之前的卡片，切回恢复", () => {
     annotationDrafts.put(scope, [annotation]);
@@ -213,9 +214,42 @@ describe("批注与输入框", () => {
     ).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "填回输入框" }));
     expect(screen.getByLabelText("消息输入框")).toHaveValue("修改建议");
-    expect(
-      annotationDrafts.getState().drafts[scope]?.annotations,
-    ).toEqual([annotation]);
+    expect(annotationDrafts.getState().drafts[scope]?.annotations).toEqual([
+      annotation,
+    ]);
+  });
+  it("TD-026-A01 公开 prefill 加入元素芯片但不自动发送，用户发送时保留正文与结构化引用", async () => {
+    const send = vi.fn<(text: string) => boolean>(() => true);
+    setup(send);
+    await userEvent.type(screen.getByLabelText("消息输入框"), "说明这个元素");
+    const { testComposer } = await import("../../../helpers/composer.ts");
+    const prompt = encodeAnnotationMessage("", [], [browserElement]);
+    let accepted = false;
+    act(() => {
+      accepted = testComposer.prefill(prompt);
+    });
+    expect(accepted).toBe(true);
+    expect(send).not.toHaveBeenCalled();
+    expect(await screen.findByText("点击验证")).toBeInTheDocument();
+    expect(screen.getByLabelText("消息输入框")).toHaveValue("说明这个元素");
+
+    await userEvent.click(screen.getByRole("button", { name: "发送" }));
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(decodeAnnotationMessage(send.mock.calls[0]![0])).toMatchObject({
+      text: "说明这个元素",
+      browserElements: [browserElement],
+    });
+  });
+  it("TD-026-B03 元素引用发送被拒绝时保留正文、芯片和持久化草稿", async () => {
+    annotationDrafts.putBrowserElements(scope, [browserElement]);
+    setup(() => false);
+    await userEvent.type(screen.getByLabelText("消息输入框"), "发送失败也保留");
+    await userEvent.click(screen.getByRole("button", { name: "发送" }));
+    expect(screen.getByLabelText("消息输入框")).toHaveValue("发送失败也保留");
+    expect(screen.getByText("点击验证")).toBeInTheDocument();
+    expect(annotationDrafts.getState().drafts[scope]?.browserElements).toEqual([
+      browserElement,
+    ]);
   });
 });
 
@@ -234,28 +268,47 @@ it("仅评论的历史消息不渲染空文字气泡", () => {
   expect(container.querySelector('[data-item-kind="user"] p')).toBeNull();
 });
 
-vi.mock("../../../../src/plugins/project/ui/bindings/workspaceView.ts", async () => {
-  const { workspaceViewFixture } = await import("../../../helpers/workspace.ts");
-  return workspaceViewFixture(() => useWorkspaceStore);
-});
+vi.mock(
+  "../../../../src/plugins/project/ui/bindings/workspaceView.ts",
+  async () => {
+    const { workspaceViewFixture } =
+      await import("../../../helpers/workspace.ts");
+    return workspaceViewFixture(() => useWorkspaceStore);
+  },
+);
 
-vi.mock(import("../../../../src/plugins/project/ui/bindings/annotationDraftView.ts"), async (original) => ({
-  ...(await original()),
-  useAnnotationDraftService: () => annotationOwner.composer,
-}));
+vi.mock(
+  import("../../../../src/plugins/project/ui/bindings/annotationDraftView.ts"),
+  async (original) => ({
+    ...(await original()),
+    useAnnotationDraftService: () => annotationOwner.composer,
+  }),
+);
 
-vi.mock("../../../../src/plugins/project/ui/bindings/conversationView.ts", async () => {
-  const { conversationViewFixture } = await import("../../../helpers/foreground.ts");
-  return conversationViewFixture();
-});
+vi.mock(
+  "../../../../src/plugins/project/ui/bindings/conversationView.ts",
+  async () => {
+    const { conversationViewFixture } =
+      await import("../../../helpers/foreground.ts");
+    return conversationViewFixture();
+  },
+);
 
-vi.mock("../../../../src/plugins/project/ui/bindings/composerView.ts", async () => {
-  const { testComposer } = await import("../../../helpers/composer.ts");
-  return { useProjectComposer: () => testComposer };
-});
+vi.mock(
+  "../../../../src/plugins/project/ui/bindings/composerView.ts",
+  async () => {
+    const { testComposer } = await import("../../../helpers/composer.ts");
+    return { useProjectComposer: () => testComposer };
+  },
+);
 
 it("folds what a plugin told the Agent into one line and keeps the user's own words visible", () => {
-  const message = pluginMessage({ source: "workflow", foldLabel: "工作流给 Agent 的说明", folded: "规则：先读格式说明，改完调用 check_workflow。", visible: "用户的要求：加一个人工确认" });
+  const message = pluginMessage({
+    source: "workflow",
+    foldLabel: "工作流给 Agent 的说明",
+    folded: "规则：先读格式说明，改完调用 check_workflow。",
+    visible: "用户的要求：加一个人工确认",
+  });
   render(
     <UserMessage
       item={{
@@ -272,5 +325,7 @@ it("folds what a plugin told the Agent into one line and keeps the user's own wo
   expect(fold).not.toHaveAttribute("open");
   expect(fold).toHaveTextContent("规则：先读格式说明");
   // 气泡里只有用户自己的话，规则不在气泡里。
-  expect(screen.getByText("用户的要求：加一个人工确认").textContent).not.toContain("规则");
+  expect(
+    screen.getByText("用户的要求：加一个人工确认").textContent,
+  ).not.toContain("规则");
 });

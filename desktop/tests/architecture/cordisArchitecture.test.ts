@@ -21,6 +21,7 @@ const plugins = [
   "skills",
   "account",
   "updates",
+  "browser",
   "scheduledTasks",
 ] as const;
 const uiOwners = [
@@ -34,6 +35,7 @@ const uiOwners = [
   "skills",
   "account",
   "updates",
+  "browser",
 ] as const;
 const root = resolve(import.meta.dirname, "../..");
 const read = (path: string) => readFileSync(resolve(root, path), "utf8");
@@ -46,23 +48,37 @@ const pluginRootFiles = new Set([
 ]);
 const typeScriptFile = /\.(?:[cm]?ts|tsx)$/;
 
-function isPluginImportAllowed(source: string, target: string, runtime: boolean): boolean {
+function isPluginImportAllowed(
+  source: string,
+  target: string,
+  runtime: boolean,
+): boolean {
   if (!target.startsWith("src/plugins/")) return true;
   const [, , owner, file, ...remaining] = target.split("/");
   if (source.startsWith(`src/plugins/${owner}/`)) return true;
   if (remaining.length > 0) return false;
-  return file === "service.ts" || file === "events.ts" ||
+  return (
+    file === "service.ts" ||
+    file === "events.ts" ||
     (file === "types.ts" && !runtime) ||
-    (file === "index.ts" && source.startsWith("src/bootstrap/"));
+    (file === "index.ts" && source.startsWith("src/bootstrap/"))
+  );
 }
 
 function* productionImports(directory: string) {
-  for (const file of readdirSync(resolve(root, directory), { recursive: true })) {
+  for (const file of readdirSync(resolve(root, directory), {
+    recursive: true,
+  })) {
     if (typeof file !== "string" || !typeScriptFile.test(file)) continue;
     const path = `${directory}/${file.replaceAll("\\", "/")}`;
     const targets = new Set<string>();
     const runtimeTargets = new Set<string>();
-    const source = ts.createSourceFile(path, read(path), ts.ScriptTarget.Latest, true);
+    const source = ts.createSourceFile(
+      path,
+      read(path),
+      ts.ScriptTarget.Latest,
+      true,
+    );
     function add(specifier: ts.Node | undefined, runtime: boolean) {
       if (!specifier || !ts.isStringLiteralLike(specifier)) return;
       const entry = specifier.text;
@@ -70,10 +86,14 @@ function* productionImports(directory: string) {
       if (!local && !entry.startsWith("@tauri-apps/")) return;
       let target = entry;
       if (local) {
-        target = entry.startsWith("/") ? posix.normalize(entry).slice(1) : posix.join(posix.dirname(path), entry);
+        target = entry.startsWith("/")
+          ? posix.normalize(entry).slice(1)
+          : posix.join(posix.dirname(path), entry);
         if (!posix.extname(target)) {
-          target = [target + ".ts", target + ".tsx", target + "/index.ts"]
-            .find((candidate) => existsSync(resolve(root, candidate))) ?? target;
+          target =
+            [target + ".ts", target + ".tsx", target + "/index.ts"].find(
+              (candidate) => existsSync(resolve(root, candidate)),
+            ) ?? target;
         }
       }
       targets.add(target);
@@ -84,13 +104,22 @@ function* productionImports(directory: string) {
         add(node.moduleSpecifier, !node.importClause?.isTypeOnly);
       } else if (ts.isExportDeclaration(node)) {
         add(node.moduleSpecifier, !node.isTypeOnly);
-      } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
+      } else if (
+        ts.isImportTypeNode(node) &&
+        ts.isLiteralTypeNode(node.argument)
+      ) {
         add(node.argument.literal, false);
-      } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
+      } else if (
+        ts.isImportEqualsDeclaration(node) &&
+        ts.isExternalModuleReference(node.moduleReference)
+      ) {
         add(node.moduleReference.expression, !node.isTypeOnly);
-      } else if (ts.isCallExpression(node) &&
+      } else if (
+        ts.isCallExpression(node) &&
         (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
-          (ts.isIdentifier(node.expression) && node.expression.text === "require"))) {
+          (ts.isIdentifier(node.expression) &&
+            node.expression.text === "require"))
+      ) {
         add(node.arguments[0], true);
       }
       ts.forEachChild(node, visit);
@@ -102,7 +131,10 @@ function* productionImports(directory: string) {
 
 it("keeps the production runtime import graph acyclic", () => {
   const graph = new Map(
-    Array.from(productionImports("src"), ({ path, runtimeTargets }) => [path, runtimeTargets]),
+    Array.from(productionImports("src"), ({ path, runtimeTargets }) => [
+      path,
+      runtimeTargets,
+    ]),
   );
   const checked = new Set<string>();
   const active = new Map<string, number>();
@@ -110,7 +142,9 @@ it("keeps the production runtime import graph acyclic", () => {
   function visit(path: string) {
     const cycleStart = active.get(path);
     if (cycleStart !== undefined) {
-      throw new Error(`Runtime import cycle: ${[...trace.slice(cycleStart), path].join(" -> ")}`);
+      throw new Error(
+        `Runtime import cycle: ${[...trace.slice(cycleStart), path].join(" -> ")}`,
+      );
     }
     const targets = graph.get(path);
     if (!targets || checked.has(path)) return;
@@ -137,17 +171,24 @@ it("locates entry points, shared code and production implementations under their
   for (const name of plugins) {
     const files = readdirSync(resolve(root, "src/plugins", name), {
       withFileTypes: true,
-    }).filter((entry) => !entry.isDirectory() && typeScriptFile.test(entry.name));
-    expect(files.map((entry) => entry.name), name).toEqual(
-      expect.arrayContaining(["index.ts", "service.ts"]),
+    }).filter(
+      (entry) => !entry.isDirectory() && typeScriptFile.test(entry.name),
     );
     expect(
-      files.filter((entry) => !pluginRootFiles.has(entry.name)).map((entry) => entry.name),
+      files.map((entry) => entry.name),
+      name,
+    ).toEqual(expect.arrayContaining(["index.ts", "service.ts"]));
+    expect(
+      files
+        .filter((entry) => !pluginRootFiles.has(entry.name))
+        .map((entry) => entry.name),
       `${name} has implementation files at the plugin root`,
     ).toEqual([]);
     const service = read(`src/plugins/${name}/service.ts`);
     expect(service, `${name} owns its Cordis service declaration`).toMatch(
-      new RegExp(`declare module "cordis" \\{\\s+interface Context \\{\\s+${name}:`),
+      new RegExp(
+        `declare module "cordis" \\{\\s+interface Context \\{\\s+${name}:`,
+      ),
     );
   }
   expect(existsSync(resolve(root, "src/bootstrap/services.ts"))).toBe(false);
@@ -173,11 +214,14 @@ it("locates entry points, shared code and production implementations under their
   }
 });
 
-it("keeps all 16 plugin names and 87 dependency relations aligned with their production owners", async () => {
+it("keeps all 17 plugin names and 89 dependency relations aligned with their production owners", async () => {
   const diagram = read("docs/architecture/cordis-plugin-dependencies.mmd");
-  const documented = read("docs/architecture/cordis-plugin-dependencies.md")
-    .match(/```mermaid\r?\n([\s\S]*?)\r?\n```/)?.[1];
-  expect(documented?.replaceAll("\r\n", "\n")).toBe(diagram.trim().replaceAll("\r\n", "\n"));
+  const documented = read(
+    "docs/architecture/cordis-plugin-dependencies.md",
+  ).match(/```mermaid\r?\n([\s\S]*?)\r?\n```/)?.[1];
+  expect(documented?.replaceAll("\r\n", "\n")).toBe(
+    diagram.trim().replaceAll("\r\n", "\n"),
+  );
   const nodes = [...diagram.matchAll(/^[ ]{4}(\w+)\[/gm)].map(
     (match) => match[1],
   );
@@ -192,7 +236,13 @@ it("keeps all 16 plugin names and 87 dependency relations aligned with their pro
     }
   }
   const optional = [
-    ["skills", "技能页读取项目目录", "project", "src/plugins/skills/ui/workbench.tsx", "project.projects.workspace.getState()"],
+    [
+      "skills",
+      "技能页读取项目目录",
+      "project",
+      "src/plugins/skills/ui/workbench.tsx",
+      "project.projects.workspace.getState()",
+    ],
     [
       "acpRuntime",
       "注册探查会话工厂",
@@ -366,22 +416,30 @@ it("keeps all 16 plugin names and 87 dependency relations aligned with their pro
     expect(read(file), file).toContain(marker);
     return `${source} -. "${label}" .-> ${target}`;
   });
-  expect(read("src/bootstrap/bootstrap.ts")).toContain("panelLayoutCompatibility: desktopPanelLayouts");
+  expect(read("src/bootstrap/bootstrap.ts")).toContain(
+    "panelLayoutCompatibility: desktopPanelLayouts",
+  );
   const legacyPanels = read("src/bootstrap/panelLayouts.ts");
   for (const [owner, rule] of [
     ["documents", "documentPanelCompatibility"],
     ["git", "gitPanelCompatibility"],
     ["workflow", "workflowPanelCompatibility"],
   ] as const) {
-    expect(legacyPanels).toContain(`import { ${rule} } from "../plugins/${owner}/service.ts"`);
+    expect(legacyPanels).toContain(
+      `import { ${rule} } from "../plugins/${owner}/service.ts"`,
+    );
     weak.push(`workbench -. "启动注入历史布局规则" .-> ${owner}`);
   }
   const assembly = read("src/bootstrap/installDesktopWorkbench.ts");
   for (const owner of ["workbench", ...uiOwners]) {
-    expect(assembly).toContain(`import * as ${owner} from "../plugins/${owner}/index.ts"`);
+    expect(assembly).toContain(
+      `import * as ${owner} from "../plugins/${owner}/index.ts"`,
+    );
     expect(assembly).toContain(`await ${owner}.installWorkbench(context)`);
   }
-  expect(read("src/plugins/agents/index.ts")).toContain("ctx.plugin(workbench.agentSettings)");
+  expect(read("src/plugins/agents/index.ts")).toContain(
+    "ctx.plugin(workbench.agentSettings)",
+  );
   for (const owner of uiOwners) {
     weak.push(`${owner} -. "UI 注册" .-> workbench`);
   }
@@ -389,7 +447,7 @@ it("keeps all 16 plugin names and 87 dependency relations aligned with their pro
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => /^(?:\w+ --> \w+|\w+ -\. ".+" \.-> \w+)$/.test(line));
-  expect(new Set(edges).size).toBe(87);
+  expect(new Set(edges).size).toBe(89);
   expect(edges.sort()).toEqual([...required, ...weak].sort());
 
   const runtime = createTestDesktopRuntime(
@@ -400,7 +458,8 @@ it("keeps all 16 plugin names and 87 dependency relations aligned with their pro
     undefined,
     async (context) => {
       await installDesktopWorkbench(context);
-      for (const name of plugins.filter((item) => item !== "scheduledTasks")) expect(context.get(name), name).toBeDefined();
+      for (const name of plugins.filter((item) => item !== "scheduledTasks"))
+        expect(context.get(name), name).toBeDefined();
     },
   );
   try {
@@ -411,18 +470,36 @@ it("keeps all 16 plugin names and 87 dependency relations aligned with their pro
       "session",
       "settings",
     ]);
-    expect(view.pages.filter((page) => page.default).map(({ id }) => id)).toEqual(["project-overview"]);
-    expect(view.pages.filter((page) => page.fullView).map(({ id }) => id)).toEqual(["session"]);
-    const rail = [...view.sidebar].sort((a,b) => (a.order ?? 0) - (b.order ?? 0));
-    expect(rail.map(({ id }) => id)).toEqual(["project-tree", "workflow", "scheduled-tasks", "plugin-management"]);
-    expect(rail.filter(({ WorkArea }) => WorkArea).map(({ id }) => id)).toEqual(["scheduled-tasks", "plugin-management"]);
-    expect(view.sidebar.filter((entry) => entry.default).map(({ id }) => id)).toEqual(["project-tree"]);
+    expect(
+      view.pages.filter((page) => page.default).map(({ id }) => id),
+    ).toEqual(["project-overview"]);
+    expect(
+      view.pages.filter((page) => page.fullView).map(({ id }) => id),
+    ).toEqual(["session"]);
+    const rail = [...view.sidebar].sort(
+      (a, b) => (a.order ?? 0) - (b.order ?? 0),
+    );
+    expect(rail.map(({ id }) => id)).toEqual([
+      "project-tree",
+      "workflow",
+      "scheduled-tasks",
+      "plugin-management",
+    ]);
+    expect(rail.filter(({ WorkArea }) => WorkArea).map(({ id }) => id)).toEqual(
+      ["scheduled-tasks", "plugin-management"],
+    );
+    expect(
+      view.sidebar.filter((entry) => entry.default).map(({ id }) => id),
+    ).toEqual(["project-tree"]);
     expect(view.accessGates.map(({ id }) => id)).toEqual(["account-login"]);
-    expect(view.sidebarFooters.map(({ id }) => id)).toEqual(["account-profile"]);
+    expect(view.sidebarFooters.map(({ id }) => id)).toEqual([
+      "account-profile",
+    ]);
     expect(view.startup.map(({ id }) => id)).toEqual(["project-preloading"]);
     expect(view.about.map(({ id }) => id)).toEqual(["active-agent"]);
     expect(view.panels.map(({ id }) => id).sort()).toEqual([
       "aaw",
+      "browser",
       "diff",
       "directory",
       "file",
@@ -432,6 +509,7 @@ it("keeps all 16 plugin names and 87 dependency relations aligned with their pro
     expect(view.settings.map(({ id }) => id).sort()).toEqual([
       "agents",
       "archive",
+      "browser",
       "general",
       "scheduled-tasks",
       "session",
@@ -449,9 +527,18 @@ it("keeps all 16 plugin names and 87 dependency relations aligned with their pro
       ["documents-dialogs", "window"],
     ]);
     expect(view.headerIndicators.map(({ id }) => id)).toEqual(["updates"]);
-    expect(view.settingsReset.map(({ id }) => id).sort()).toEqual(["agents", "project", "skills"]);
-    expect(view.headers.map(({ id }) => id).sort()).toEqual(["project-overview", "session"]);
-    expect(view.collapsedHeaderActions.map(({ id }) => id)).toEqual(["new-session"]);
+    expect(view.settingsReset.map(({ id }) => id).sort()).toEqual([
+      "agents",
+      "project",
+      "skills",
+    ]);
+    expect(view.headers.map(({ id }) => id).sort()).toEqual([
+      "project-overview",
+      "session",
+    ]);
+    expect(view.collapsedHeaderActions.map(({ id }) => id)).toEqual([
+      "new-session",
+    ]);
     expect(view.exitDetails.map(({ id }) => id)).toEqual(["project-approvals"]);
     expect(view.docks.map(({ id }) => id)).toEqual(["terminal"]);
   } finally {
@@ -480,11 +567,17 @@ it("rejects config, internal modules and runtime types while preserving the asse
   expect(isPluginImportAllowed(caller, target("types.ts"), true)).toBe(false);
   expect(isPluginImportAllowed(caller, target("config.ts"), true)).toBe(false);
   expect(isPluginImportAllowed(caller, target("config.ts"), false)).toBe(false);
-  expect(isPluginImportAllowed(caller, target("registry/service.ts"), true)).toBe(false);
+  expect(
+    isPluginImportAllowed(caller, target("registry/service.ts"), true),
+  ).toBe(false);
   expect(isPluginImportAllowed(caller, target("index.ts"), true)).toBe(false);
   expect(isPluginImportAllowed(bootstrap, target("index.ts"), true)).toBe(true);
-  expect(isPluginImportAllowed(bootstrap, target("config.ts"), true)).toBe(false);
-  expect(isPluginImportAllowed(target("index.ts"), target("config.ts"), true)).toBe(true);
+  expect(isPluginImportAllowed(bootstrap, target("config.ts"), true)).toBe(
+    false,
+  );
+  expect(
+    isPluginImportAllowed(target("index.ts"), target("config.ts"), true),
+  ).toBe(true);
 });
 
 it("keeps protocol and connection code out of feature UI and product state", () => {
@@ -493,12 +586,17 @@ it("keeps protocol and connection code out of feature UI and product state", () 
     "src/plugins/acpRuntime": ["src/plugins/acpConnection/service.ts"],
   };
   for (const [directory, errorModules] of Object.entries(publicErrorModules)) {
-    for (const { path, targets, runtimeTargets } of productionImports(directory)) {
-      const invalid = targets.filter((target) =>
-        (target.startsWith("src/plugins/") && !target.startsWith(`${directory}/`) &&
-          (!isPluginImportAllowed(path, target, runtimeTargets.has(target)) ||
-            (runtimeTargets.has(target) && !errorModules.includes(target)))) ||
-        /(?:^|\/)(?:ui|stores)\/|^src\/bootstrap\//.test(target),
+    for (const { path, targets, runtimeTargets } of productionImports(
+      directory,
+    )) {
+      const invalid = targets.filter(
+        (target) =>
+          (target.startsWith("src/plugins/") &&
+            !target.startsWith(`${directory}/`) &&
+            (!isPluginImportAllowed(path, target, runtimeTargets.has(target)) ||
+              (runtimeTargets.has(target) &&
+                !errorModules.includes(target)))) ||
+          /(?:^|\/)(?:ui|stores)\/|^src\/bootstrap\//.test(target),
       );
       expect(invalid, path).toEqual([]);
     }
@@ -507,57 +605,87 @@ it("keeps protocol and connection code out of feature UI and product state", () 
 
 it("keeps shared ACP wire definitions independent of Desktop services and product models", () => {
   for (const { path, targets } of productionImports("src/contracts/acp")) {
-    expect(targets.filter((target) =>
-      target.startsWith("src/") && !target.startsWith("src/contracts/acp/") &&
-      target !== "src/shared/valueGuards.ts",
-    ), path).toEqual([]);
+    expect(
+      targets.filter(
+        (target) =>
+          target.startsWith("src/") &&
+          !target.startsWith("src/contracts/acp/") &&
+          target !== "src/shared/valueGuards.ts",
+      ),
+      path,
+    ).toEqual([]);
   }
 });
 
 it("keeps public models and shared utilities independent of plugin implementations", () => {
-  expect(readdirSync(resolve("src/contracts"))).toEqual(["acp"]);
+  expect(readdirSync(resolve("src/contracts"))).toEqual(["acp", "browser"]);
   expect(readdirSync(resolve("src/shared"))).not.toContain("diagnosticEvents");
   const forbidden = {
     "src/plugins/host": /^src\/plugins\/(?!host\/)/,
-    "src/plugins/workbench": /^src\/plugins\/(?!(?:workbench|host|configuration)\/)/,
+    "src/plugins/workbench":
+      /^src\/plugins\/(?!(?:workbench|host|configuration)\/)/,
     "src/shared": /^(?:src\/(?:plugins|bootstrap)\/|@tauri-apps\/)/,
   };
   for (const [directory, pattern] of Object.entries(forbidden)) {
     for (const { path, targets } of productionImports(directory))
-      expect(targets.filter((target) => pattern.test(target)), path).toEqual([]);
+      expect(
+        targets.filter((target) => pattern.test(target)),
+        path,
+      ).toEqual([]);
   }
   const forbiddenRuntime = {
-    "src/plugins/agents": /^(?:src\/plugins\/(?:acpConnection\/(?!service\.ts$)|(?:acpRuntime|host)\/)|@tauri-apps\/)/,
+    "src/plugins/agents":
+      /^(?:src\/plugins\/(?:acpConnection\/(?!service\.ts$)|(?:acpRuntime|host)\/)|@tauri-apps\/)/,
     "src/plugins/account": /^(?:src\/plugins\/host\/|@tauri-apps\/)/,
     "src/plugins/documents": /^src\/plugins\/project\//,
-    "src/plugins/project": /^(?:src\/plugins\/(?:acpRuntime\/(?!service\.ts$)|workflow\/(?!(?:service|config)\.ts$)|(?:acpConnection|host)\/)|@tauri-apps\/)/,
+    "src/plugins/project":
+      /^(?:src\/plugins\/(?:acpRuntime\/(?!service\.ts$)|workflow\/(?!(?:service|config)\.ts$)|(?:acpConnection|host)\/)|@tauri-apps\/)/,
   };
   for (const [directory, pattern] of Object.entries(forbiddenRuntime)) {
     for (const { path, runtimeTargets } of productionImports(directory))
-      expect([...runtimeTargets].filter((target) => pattern.test(target)), path).toEqual([]);
+      expect(
+        [...runtimeTargets].filter((target) => pattern.test(target)),
+        path,
+      ).toEqual([]);
   }
   for (const { path, targets } of productionImports("src/plugins")) {
     const owner = path.split("/").slice(0, 3).join("/");
-    expect(targets.filter((target) =>
-      target.startsWith("src/bootstrap/"),
-    ), path).toEqual([]);
+    expect(
+      targets.filter((target) => target.startsWith("src/bootstrap/")),
+      path,
+    ).toEqual([]);
     if (owner !== "src/plugins/host")
-      expect(targets.filter((target) => target.startsWith("@tauri-apps/")), path).toEqual([]);
+      expect(
+        targets.filter((target) => target.startsWith("@tauri-apps/")),
+        path,
+      ).toEqual([]);
   }
   for (const { path, targets } of productionImports("src/bootstrap")) {
-    expect(targets.filter((target) =>
-      target.startsWith("@tauri-apps/"),
-    ), path).toEqual([]);
+    expect(
+      targets.filter((target) => target.startsWith("@tauri-apps/")),
+      path,
+    ).toEqual([]);
   }
 
   const localizedViews = new Set([
     "src/plugins/project/ui/settings.tsx",
     "src/plugins/skills/ui/SkillsSourceSettings.tsx",
   ]);
-  for (const plugin of ["documents", "project", "skills", "terminal", "workflow"]) {
-    for (const { path, runtimeTargets } of productionImports(`src/plugins/${plugin}/ui`)) {
+  for (const plugin of [
+    "documents",
+    "project",
+    "skills",
+    "terminal",
+    "workflow",
+  ]) {
+    for (const { path, runtimeTargets } of productionImports(
+      `src/plugins/${plugin}/ui`,
+    )) {
       if (!localizedViews.has(path))
-        expect(runtimeTargets.has("src/plugins/workbench/service.ts"), path).toBe(false);
+        expect(
+          runtimeTargets.has("src/plugins/workbench/service.ts"),
+          path,
+        ).toBe(false);
     }
   }
 });

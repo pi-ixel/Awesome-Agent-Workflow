@@ -36,10 +36,9 @@ export default tseslint.config(
       ecmaVersion: 2022,
       globals: globals.browser,
       parserOptions: {
-        // vite.config.ts 属于 tsconfig.node.json（不被主 tsconfig include），
-        // 交给 projectService 的默认项目兜底
+        // Vite 已由项目服务覆盖，Playwright 配置走 Node 默认项目。
         projectService: {
-          allowDefaultProject: ["vite.config.ts", "playwright.config.ts"],
+          allowDefaultProject: ["playwright.config.ts"],
           defaultProject: "tsconfig.node.json",
         },
         tsconfigRootDir: import.meta.dirname,
@@ -79,11 +78,14 @@ export default tseslint.config(
       "no-restricted-syntax": [
         "error",
         {
-          selector: "JSXOpeningElement[name.name=/^[a-z]/] > JSXAttribute[name.name='title']",
-          message: "Use data-hint for Desktop tooltips. Native title tooltips ignore the app theme.",
+          selector:
+            "JSXOpeningElement[name.name=/^[a-z]/] > JSXAttribute[name.name='title']",
+          message:
+            "Use data-hint for Desktop tooltips. Native title tooltips ignore the app theme.",
         },
         {
-          selector: "JSXOpeningElement[name.name=/^[a-z]/] > JSXAttribute[name.name='role'][value.value='tooltip']",
+          selector:
+            "JSXOpeningElement[name.name=/^[a-z]/] > JSXAttribute[name.name='role'][value.value='tooltip']",
           message: "Use HintSurface for rich Desktop tooltips.",
         },
       ],

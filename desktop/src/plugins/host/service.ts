@@ -1,3 +1,4 @@
+import type { BrowserHost } from "./browser/types.ts";
 import type {
   AcpProcessHost,
   AcpTransport,
@@ -35,7 +36,10 @@ declare module "cordis" {
 export interface HostService {
   isNative(): boolean;
   readonly acpProcess: AcpProcessHost;
-  openDevelopmentAcpTransport(options: AcpTransportLaunchOptions): Promise<AcpTransport | null>;
+  readonly browser: BrowserHost;
+  openDevelopmentAcpTransport(
+    options: AcpTransportLaunchOptions,
+  ): Promise<AcpTransport | null>;
   readonly storage: HostStorage;
   readonly diagnostics: DiagnosticsHost;
   registerExitDiagnostics(flush: ExitDiagnostics): () => void;

@@ -1,4 +1,9 @@
-import type { CodeAgentCreditResult, CodeAgentTokenResult, ExitDiagnostics, HostOptions } from "../types.ts";
+import type {
+  CodeAgentCreditResult,
+  CodeAgentTokenResult,
+  ExitDiagnostics,
+  HostOptions,
+} from "../types.ts";
 import type { HostService } from "../service.ts";
 import { createTauriAcpProcessHost } from "../process/acpProcess.ts";
 import { createAccountHost } from "../adapters/account.ts";
@@ -18,6 +23,7 @@ import { createHostProcessRunner } from "../process/processRunner.ts";
 import { createUpdatesHost } from "../adapters/updates.ts";
 import { createWorkflowEngineHost } from "../adapters/workflowEngine.ts";
 import { createInvoke, type NativeInvoke } from "../adapters/invoke.ts";
+import { createBrowserHost } from "../browser/tauri.ts";
 import { createLogger } from "../../../shared/logging/logger.ts";
 import { NativePanelService } from "../filesystem/panelService.ts";
 import { HostResources, trackProcesses } from "./effects.ts";
@@ -35,13 +41,16 @@ export class DesktopHost implements HostService {
     isTauriEnv()
       ? this.resources.run(() => this.invoke("codeagent_credit_quota"))
       : Promise.resolve({ status: "unsupported" });
-  readonly readCodeAgentTokenQuota = (modelId?: string): Promise<CodeAgentTokenResult> =>
+  readonly readCodeAgentTokenQuota = (
+    modelId?: string,
+  ): Promise<CodeAgentTokenResult> =>
     isTauriEnv()
-      ? this.resources.run(() => this.invoke("codeagent_token_quota", { modelId }))
+      ? this.resources.run(() =>
+          this.invoke("codeagent_token_quota", { modelId }),
+        )
       : Promise.resolve({ status: "unsupported" });
   private readonly flushForExit: ExitDiagnostics = (entry) =>
-    this.exitDiagnostics?.(entry) ??
-    this.diagnostics.flush(entry);
+    this.exitDiagnostics?.(entry) ?? this.diagnostics.flush(entry);
 
   registerExitDiagnostics(flush: ExitDiagnostics): () => void {
     if (!this.resources.isActive()) throw new Error("宿主实例正在卸载");
@@ -56,13 +65,17 @@ export class DesktopHost implements HostService {
   readonly archives: HostService["archives"];
   readonly window: HostService["window"] = {
     ...windowHost,
-    chrome: isTauriEnv() ? {
-      ...windowChromeHost,
-      listenForResize: (receive) =>
-        this.resources.listen(() => windowChromeHost.listenForResize(() => {
-          if (this.resources.isActive()) receive();
-        })),
-    } : undefined,
+    chrome: isTauriEnv()
+      ? {
+          ...windowChromeHost,
+          listenForResize: (receive) =>
+            this.resources.listen(() =>
+              windowChromeHost.listenForResize(() => {
+                if (this.resources.isActive()) receive();
+              }),
+            ),
+        }
+      : undefined,
     forceClose: () =>
       this.invoke("force_close", undefined, undefined, this.flushForExit),
     listenForClose: (receive) =>
@@ -86,32 +99,38 @@ export class DesktopHost implements HostService {
     },
   };
   readonly shell: HostService["shell"] = {
-    openExternal: (url) => this.resources.isActive()
-      ? openExternal(url)
-      : Promise.reject(new Error("宿主实例正在卸载")),
+    openExternal: (url) =>
+      this.resources.isActive()
+        ? openExternal(url)
+        : Promise.reject(new Error("宿主实例正在卸载")),
   };
   readonly notifications: HostService["notifications"] = {
-    isAvailable: () => this.resources.isActive() && notificationHost.isAvailable(),
-    listen: (receive) => this.resources.acquire(async () => {
-      let active = true;
-      const unregister = await notificationHost.listen((action) => {
-        if (active && this.resources.isActive()) receive(action);
-      });
-      const release = this.resources.own(() => {
-        active = false;
-        return unregister();
-      });
-      return () => release();
-    }),
-    ensurePermission: () => this.resources.isActive()
-      ? notificationHost.ensurePermission()
-      : Promise.resolve(false),
-    send: (notification) => this.resources.isActive()
-      ? notificationHost.send(notification)
-      : Promise.resolve(),
-    remove: (tag) => this.resources.isActive()
-      ? notificationHost.remove(tag)
-      : Promise.resolve(),
+    isAvailable: () =>
+      this.resources.isActive() && notificationHost.isAvailable(),
+    listen: (receive) =>
+      this.resources.acquire(async () => {
+        let active = true;
+        const unregister = await notificationHost.listen((action) => {
+          if (active && this.resources.isActive()) receive(action);
+        });
+        const release = this.resources.own(() => {
+          active = false;
+          return unregister();
+        });
+        return () => release();
+      }),
+    ensurePermission: () =>
+      this.resources.isActive()
+        ? notificationHost.ensurePermission()
+        : Promise.resolve(false),
+    send: (notification) =>
+      this.resources.isActive()
+        ? notificationHost.send(notification)
+        : Promise.resolve(),
+    remove: (tag) =>
+      this.resources.isActive()
+        ? notificationHost.remove(tag)
+        : Promise.resolve(),
   };
   readonly files: HostService["files"];
   readonly git: HostService["git"];
@@ -120,37 +139,42 @@ export class DesktopHost implements HostService {
   readonly skills: HostService["skills"];
   readonly account: HostService["account"];
   readonly updates: HostService["updates"];
-  readonly workflowEngine: HostService["workflowEngine"] = createWorkflowEngineHost();
+  readonly workflowEngine: HostService["workflowEngine"] =
+    createWorkflowEngineHost();
   readonly acpProcess: HostService["acpProcess"];
+  readonly browser: HostService["browser"];
 
   isNative(): boolean {
     return isTauriEnv();
   }
 
-  readonly openDevelopmentAcpTransport: HostService["openDevelopmentAcpTransport"] = (options) => {
-    if (!import.meta.env.DEV || import.meta.env.VITEST)
-      return Promise.resolve(null);
-    return this.resources.acquire(async () => {
-      this.bridge ??= createBridgeAcpClient(() => this.resources.isActive());
-      const transport = await this.bridge.open(options, () => {
-        void release(() => {}).catch(() => {});
+  readonly openDevelopmentAcpTransport: HostService["openDevelopmentAcpTransport"] =
+    (options) => {
+      if (!import.meta.env.DEV || import.meta.env.VITEST)
+        return Promise.resolve(null);
+      return this.resources.acquire(async () => {
+        this.bridge ??= createBridgeAcpClient(() => this.resources.isActive());
+        const transport = await this.bridge.open(options, () => {
+          void release(() => {}).catch(() => {});
+        });
+        const release = this.resources.own(async () => {
+          if (!transport.isClosed) await transport.kill();
+          transport.dispose();
+        });
+        return transport;
       });
-      const release = this.resources.own(async () => {
-        if (!transport.isClosed) await transport.kill();
-        transport.dispose();
-      });
-      return transport;
-    });
-  };
+    };
 
   constructor(options: HostOptions = {}) {
     this.invoke = createInvoke((options.createLogger ?? createLogger)("host"));
+    this.browser = createBrowserHost(this.invoke);
     const backend = options.createBackend?.() ?? createHostRuntime(this.invoke);
     const runner = createHostProcessRunner(this.invoke);
     const updates = createUpdatesHost(this.invoke);
     this.updates = {
       ...updates,
-      install: () => this.invoke("update_install", undefined, undefined, this.flushForExit),
+      install: () =>
+        this.invoke("update_install", undefined, undefined, this.flushForExit),
       listen: (receive) => this.resources.listen(() => updates.listen(receive)),
     };
     const pathExists = (path: string) =>
@@ -172,21 +196,41 @@ export class DesktopHost implements HostService {
           this.resources.run(() =>
             backend.deleteAgentSession!(agentId, program, sessionId, cwd),
           )),
-      readAgentHistoryEvidence: backend.readAgentHistoryEvidence && ((agentId, sessionId, cwd) => this.resources.run(() => backend.readAgentHistoryEvidence!(agentId, sessionId, cwd))),
+      readAgentHistoryEvidence:
+        backend.readAgentHistoryEvidence &&
+        ((agentId, sessionId, cwd) =>
+          this.resources.run(() =>
+            backend.readAgentHistoryEvidence!(agentId, sessionId, cwd),
+          )),
       userDataDir,
-      readTextFile: (path) => this.resources.run(() => backend.readTextFile(path)),
+      readTextFile: (path) =>
+        this.resources.run(() => backend.readTextFile(path)),
     };
     this.skills = {
-      library: isTauriEnv() ? {
-        candidates: (from) => this.resources.run(() => this.invoke("skill_library_candidates",{from})),
-        list: (query) => this.resources.run(() => this.invoke("skill_library_list", { query })),
-        change: (query, action) => this.resources.run(() => this.invoke("skill_library_change", { query, action })),
-      } : undefined,
+      library: isTauriEnv()
+        ? {
+            candidates: (from) =>
+              this.resources.run(() =>
+                this.invoke("skill_library_candidates", { from }),
+              ),
+            list: (query) =>
+              this.resources.run(() =>
+                this.invoke("skill_library_list", { query }),
+              ),
+            change: (query, action) =>
+              this.resources.run(() =>
+                this.invoke("skill_library_change", { query, action }),
+              ),
+          }
+        : undefined,
       pathExists,
       userDataDir,
-      listDirNames: (path) => this.resources.run(() => backend.listDirNames(path)),
-      copyDir: (from, to) => this.resources.run(() => backend.copyDir(from, to)),
-      writeTextFile: (path, text) => this.resources.run(() => backend.writeTextFile(path, text)),
+      listDirNames: (path) =>
+        this.resources.run(() => backend.listDirNames(path)),
+      copyDir: (from, to) =>
+        this.resources.run(() => backend.copyDir(from, to)),
+      writeTextFile: (path, text) =>
+        this.resources.run(() => backend.writeTextFile(path, text)),
     };
     this.account = createAccountHost(backend, this.resources);
     this.process = {
@@ -194,7 +238,11 @@ export class DesktopHost implements HostService {
       exists: (path) => this.resources.run(() => runner.exists(path)),
     };
     const panel = new NativePanelService(this.invoke);
-    const files = createDocumentFileHost(this.exitGate.isExiting, panel, this.invoke);
+    const files = createDocumentFileHost(
+      this.exitGate.isExiting,
+      panel,
+      this.invoke,
+    );
     const git = createGitHost(this.exitGate.isExiting, panel);
     this.files = {
       ...files,
@@ -204,7 +252,8 @@ export class DesktopHost implements HostService {
       ...git,
       watch: (...args) => this.resources.listen(() => git.watch(...args)),
     };
-    const process = options.acpProcess ?? createTauriAcpProcessHost(this.invoke);
+    const process =
+      options.acpProcess ?? createTauriAcpProcessHost(this.invoke);
     const acp = trackProcesses<number>(
       this.resources,
       (handle) => handle,

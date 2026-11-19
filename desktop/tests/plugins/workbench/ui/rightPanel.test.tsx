@@ -1,7 +1,10 @@
 import { getByHint } from "../../../helpers/hintQueries.ts";
 import { documentTab } from "../../../../src/plugins/documents/ui/documentTabs.tsx";
 import type { FilePreview } from "../../../../src/plugins/host/types.ts";
-import { useRightPanelStore, useWorkbenchUiStore } from "../../../helpers/layout.ts";
+import {
+  useRightPanelStore,
+  useWorkbenchUiStore,
+} from "../../../helpers/layout.ts";
 import { createGitWorkbench } from "../../../helpers/gitWorkbench.tsx";
 import {
   act,
@@ -16,6 +19,9 @@ import { PanelWorkspace } from "../../../../src/plugins/workbench/ui/right-panel
 import { panelService } from "../../../../src/plugins/host/filesystem/panelService.ts";
 import { restoreDesktopPanels as restorePanels } from "../../../helpers/layout.ts";
 import { usePanelWatch } from "../../../../src/plugins/documents/ui/usePanelWatch.ts";
+import { BrowserPanel } from "../../../../src/plugins/browser/ui/BrowserPanel.tsx";
+import { createTestBrowserHost } from "../../../helpers/browserHost.ts";
+import type { BrowserSpace } from "../../../../src/contracts/browser/types.ts";
 
 let fixture: ReturnType<typeof createGitWorkbench>;
 function render(
@@ -181,21 +187,37 @@ describe("项目右栏", () => {
       notice: null,
     });
     const id = "diff:d:/repo:staged:app/a.txt";
-    const projects = restorePanels(JSON.stringify({
-      version: 1,
-      projects: {
-        "D:/repo/app": {
-          open: true,
-          active: id,
-          tabs: [{
-            id, kind: "diff", repoRoot: "D:/repo", path: "D:/repo/app/a.txt",
-            change: { path: "app/a.txt", oldPath: null, source: "staged", status: "修改" },
-          }],
+    const projects = restorePanels(
+      JSON.stringify({
+        version: 1,
+        projects: {
+          "D:/repo/app": {
+            open: true,
+            active: id,
+            tabs: [
+              {
+                id,
+                kind: "diff",
+                repoRoot: "D:/repo",
+                path: "D:/repo/app/a.txt",
+                change: {
+                  path: "app/a.txt",
+                  oldPath: null,
+                  source: "staged",
+                  status: "修改",
+                },
+              },
+            ],
+          },
         },
-      },
-    }));
+      }),
+    );
     useRightPanelStore.setState({ projects });
-    const view = render(<PanelWorkspace project="D:/repo/app" enabled>聊天</PanelWorkspace>);
+    const view = render(
+      <PanelWorkspace project="D:/repo/app" enabled>
+        聊天
+      </PanelWorkspace>,
+    );
     const tab = getByHint(document.body, "已暂存 · D:/repo/app/a.txt");
     expect(tab).toHaveTextContent("a.txt");
     expect(tab).toHaveTextContent("Diff");
@@ -251,8 +273,12 @@ describe("项目右栏", () => {
             mime: "",
           }),
     );
-    useRightPanelStore.getState().openTab("D:/a", documentTab("D:/a/test.txt", false));
-    useRightPanelStore.getState().openTab("D:/b", documentTab("D:/b/test.txt", false));
+    useRightPanelStore
+      .getState()
+      .openTab("D:/a", documentTab("D:/a/test.txt", false));
+    useRightPanelStore
+      .getState()
+      .openTab("D:/b", documentTab("D:/b/test.txt", false));
     const view = render(
       <PanelWorkspace project="D:/a" enabled>
         <div>聊天</div>
@@ -281,7 +307,11 @@ describe("项目右栏", () => {
         }),
     );
     function Consumer() {
-      usePanelWatch(fixture.documents, [{ path: "D:/a", recursive: false }], true);
+      usePanelWatch(
+        fixture.documents,
+        [{ path: "D:/a", recursive: false }],
+        true,
+      );
       return null;
     }
     const view = render(<Consumer />);
@@ -293,7 +323,9 @@ describe("项目右栏", () => {
     expect(stop).toHaveBeenCalledOnce();
   });
   it("Esc 收起右栏，持久化的标签仍在", async () => {
-    useRightPanelStore.getState().openTab("D:/a", documentTab("D:/a/gone.txt", false));
+    useRightPanelStore
+      .getState()
+      .openTab("D:/a", documentTab("D:/a/gone.txt", false));
     vi.spyOn(panelService, "preview").mockRejectedValue(
       new Error("文件不存在"),
     );
@@ -320,7 +352,9 @@ it("图片预览的 Esc 只关闭浮层，再次 Esc 才收起侧边栏", async 
     mime: "",
     bytes: 64,
   });
-  useRightPanelStore.getState().openTab("D:/a", documentTab("D:/a/readme.md", false));
+  useRightPanelStore
+    .getState()
+    .openTab("D:/a", documentTab("D:/a/readme.md", false));
   render(
     <PanelWorkspace project="D:/a" enabled>
       <div>信息流</div>
@@ -344,7 +378,9 @@ it("文件预览随外层重绘时保留图片和已打开的全屏浮层", asyn
     mime: "",
     bytes: 64,
   });
-  useRightPanelStore.getState().openTab("D:/a", documentTab("D:/a/readme.md", false));
+  useRightPanelStore
+    .getState()
+    .openTab("D:/a", documentTab("D:/a/readme.md", false));
   const view = render(
     <PanelWorkspace project="D:/a" enabled>
       <div>信息流</div>
@@ -366,7 +402,190 @@ it("文件预览随外层重绘时保留图片和已打开的全屏浮层", asyn
   ).not.toBeInTheDocument();
 });
 
-vi.mock(import("../../../../src/plugins/workbench/ui/bindings/layoutView.ts"), async (original) => {
-  const { layoutViewFixture } = await import("../../../helpers/layout.ts");
-  return { ...(await original()), ...layoutViewFixture() };
+it("TD-026-B02 拾取中 Esc 只取消拾取，第二次 Esc 才收起右栏", async () => {
+  const browser = createTestBrowserHost();
+  const space: BrowserSpace = {
+    browserId: "browser-a",
+    windowId: "main",
+    workspaceId: "workspace",
+    sessionId: "session-a",
+    generation: 1,
+    agentActive: false,
+    manualTakeover: false,
+    tabs: [
+      {
+        tabId: "tab-1",
+        sessionId: "session-a",
+        generation: 1,
+        lifecycle: "ready",
+        committedUrl: "https://local.test",
+        control: {
+          controller: "user",
+          generation: 1,
+          ownerSessionId: "session-a",
+        },
+      },
+    ],
+  };
+  browser.createSpace = vi.fn().mockResolvedValue(space);
+  const pickStart = vi.fn().mockResolvedValue(undefined);
+  const pickCancel = vi.fn().mockResolvedValue(undefined);
+  browser.pickStart = pickStart;
+  browser.pickCancel = pickCancel;
+  useRightPanelStore.getState().tool("D:/a", "browser");
+  render(
+    <PanelWorkspace project="D:/a" enabled>
+      <BrowserPanel host={browser} sessionId="session-a" visible />
+    </PanelWorkspace>,
+  );
+
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "拾取元素" })).toBeEnabled(),
+  );
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "拾取元素" }));
+  await waitFor(() =>
+    expect(pickStart).toHaveBeenCalledWith("session-a", "tab-1"),
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "取消拾取" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    ),
+  );
+  const firstEscape = new KeyboardEvent("keydown", {
+    key: "Escape",
+    bubbles: true,
+    cancelable: true,
+  });
+  fireEvent(window, firstEscape);
+
+  expect(firstEscape.defaultPrevented).toBe(true);
+  await waitFor(() =>
+    expect(pickCancel).toHaveBeenCalledWith("session-a", "tab-1"),
+  );
+  expect(useRightPanelStore.getState().projects["d:/a"]?.open).toBe(true);
+
+  const secondEscape = new KeyboardEvent("keydown", {
+    key: "Escape",
+    bubbles: true,
+    cancelable: true,
+  });
+  fireEvent(window, secondEscape);
+  expect(secondEscape.defaultPrevented).toBe(false);
+  expect(useRightPanelStore.getState().projects["d:/a"]?.open).toBe(false);
+});
+
+vi.mock(
+  import("../../../../src/plugins/workbench/ui/bindings/layoutView.ts"),
+  async (original) => {
+    const { layoutViewFixture } = await import("../../../helpers/layout.ts");
+    return { ...(await original()), ...layoutViewFixture() };
+  },
+);
+
+function setupBrowserPicker() {
+  const browser = createTestBrowserHost();
+  const space: BrowserSpace = {
+    browserId: "browser-a",
+    windowId: "main",
+    workspaceId: "workspace",
+    sessionId: "session-a",
+    generation: 1,
+    agentActive: false,
+    manualTakeover: false,
+    tabs: [
+      {
+        tabId: "tab-1",
+        sessionId: "session-a",
+        generation: 1,
+        lifecycle: "ready",
+        committedUrl: "https://local.test",
+        control: {
+          controller: "user",
+          generation: 1,
+          ownerSessionId: "session-a",
+        },
+      },
+    ],
+  };
+  browser.createSpace = vi.fn().mockResolvedValue(space);
+  const pickStart = vi.fn().mockResolvedValue(undefined);
+  const pickCancel = vi.fn().mockResolvedValue(undefined);
+  browser.pickStart = pickStart;
+  browser.pickCancel = pickCancel;
+  useRightPanelStore.getState().tool("D:/a", "browser");
+  const view = render(
+    <PanelWorkspace project="D:/a" enabled>
+      <BrowserPanel host={browser} sessionId="session-a" visible />
+    </PanelWorkspace>,
+  );
+  return { browser, pickStart, pickCancel, view };
+}
+
+it("TD-031-A01 再次点击按钮只取消拾取，不重复启动且不收起右栏", async () => {
+  const { pickStart, pickCancel } = setupBrowserPicker();
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "拾取元素" })).toBeEnabled(),
+  );
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "拾取元素" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "取消拾取" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    ),
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "取消拾取" }));
+  await waitFor(() =>
+    expect(pickCancel).toHaveBeenCalledWith("session-a", "tab-1"),
+  );
+  expect(pickStart).toHaveBeenCalledTimes(1);
+  expect(pickCancel).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("button", { name: "拾取元素" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+  expect(useRightPanelStore.getState().projects["d:/a"]?.open).toBe(true);
+});
+
+it("TD-031-A03 启动或取消失败时不伪造拾取状态", async () => {
+  const started = setupBrowserPicker();
+  started.browser.pickStart = vi
+    .fn()
+    .mockRejectedValue(new Error("START_FAILED"));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "拾取元素" })).toBeEnabled(),
+  );
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "拾取元素" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("START_FAILED");
+  expect(screen.getByRole("button", { name: "拾取元素" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+
+  started.view.unmount();
+  const cancelled = setupBrowserPicker();
+  cancelled.browser.pickCancel = vi
+    .fn()
+    .mockRejectedValue(new Error("CANCEL_FAILED"));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "拾取元素" })).toBeEnabled(),
+  );
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "拾取元素" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "取消拾取" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    ),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "取消拾取" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("CANCEL_FAILED");
+  expect(screen.getByRole("button", { name: "取消拾取" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
 });

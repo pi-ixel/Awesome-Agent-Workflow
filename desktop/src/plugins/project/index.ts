@@ -63,7 +63,10 @@ export async function apply(
     projectPreferenceFields,
   );
   ctx.effect(() => () => scope.dispose(), "project:preferences-configuration");
-  const preferences = createProjectPreferences(scope, loggerFactory("settings"));
+  const preferences = createProjectPreferences(
+    scope,
+    loggerFactory("settings"),
+  );
   ctx.effect(() => () => preferences.dispose(), "project:preferences-state");
   ctx.effect(() => registerStorage(settingsStorageCategory(
     "project.settings", "会话设置", () => scope.read(), () => preferences.resetStorage(), scope.saveFailure,
@@ -71,11 +74,17 @@ export async function apply(
   const protocol = ctx.acpRuntime.protocol;
   const agents = ctx.agents;
   const forms = createElicitationQueue(loggerFactory("acp"));
-  const indexes = createProjectSessionIndexes(ctx.host.storage, loggerFactory("session-archive-store"));
+  const indexes = createProjectSessionIndexes(
+    ctx.host.storage,
+    loggerFactory("session-archive-store"),
+  );
   const annotationDrafts = createAnnotationDraftStore(ctx.host.storage);
   const composer = createProjectComposer(ctx.host.storage);
   const messageImages = createMessageImageHistory();
-  const foreground = createProjectForeground(annotationDrafts.service, loggerFactory);
+  const foreground = createProjectForeground(
+    annotationDrafts.service,
+    loggerFactory,
+  );
   const workspace = createWorkspaceStore(
     ctx.host.storage,
     (resume, path) => getLayout()?.navigationGuard.guard(resume, path) ?? true,
@@ -92,14 +101,16 @@ export async function apply(
       foreground,
       getProtocol: () => protocol,
       getAgents: () => agents,
+      getBrowser: () => ctx.host.browser,
       getApprovalMode: () => preferences.getState().approvalMode,
       interactionPreferences: preferences,
       navigation: {
-        getState: () => getLayout()?.navigation.getState() ?? {
-          viewId: null,
-          contextPath: null,
-          openView: () => {},
-        },
+        getState: () =>
+          getLayout()?.navigation.getState() ?? {
+            viewId: null,
+            contextPath: null,
+            openView: () => {},
+          },
       },
       loggerFactory,
     });
@@ -223,7 +234,12 @@ export async function apply(
   if (options.startBackground) {
     ctx.effect(() => project.startPreloading(), "project:preloading");
     ctx.effect(
-      () => attachSessionNotifications(project.service.sessions, ctx.host, loggerFactory("app")),
+      () =>
+        attachSessionNotifications(
+          project.service.sessions,
+          ctx.host,
+          loggerFactory("app"),
+        ),
       "project:notifications",
     );
   }

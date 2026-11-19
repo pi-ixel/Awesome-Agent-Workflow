@@ -1,0 +1,147 @@
+@startuml
+title AAW 桌面端内嵌浏览器——总体 UML 用例图
+
+top to bottom direction
+skinparam shadowing false
+skinparam linetype polyline
+skinparam nodesep 70
+skinparam ranksep 80
+skinparam defaultFontName "Microsoft YaHei"
+skinparam defaultFontSize 16
+skinparam packageStyle rectangle
+skinparam rectangle {
+  BorderColor #64748B
+  BackgroundColor #F8FAFC
+}
+skinparam package {
+  BorderColor #94A3B8
+  BackgroundColor #FFFFFF
+  FontColor #0F172A
+}
+skinparam actor {
+  BorderColor #334155
+  BackgroundColor #E2E8F0
+  FontColor #0F172A
+}
+skinparam usecase {
+  BorderColor #2563EB
+  BackgroundColor #EFF6FF
+  FontColor #0F172A
+  ArrowColor #475569
+}
+skinparam note {
+  BorderColor #94A3B8
+  BackgroundColor #F8FAFC
+  FontColor #334155
+}
+
+actor "开发者用户" as User
+actor "Agent\n（iCode / ACP）" as Agent
+actor "Web 应用 / 目标网站" as Web
+
+rectangle "AAW 桌面端内嵌浏览器系统" {
+  package "用户场景" {
+    usecase "浏览网页与管理标签页" as UC_MANUAL
+    usecase "通过人工接管开关取得或交还控制权" as UC_COLLABORATE
+    usecase "查看 Agent 活动与证据" as UC_VIEW
+    usecase "审批权限与高风险操作\n（需要用户决策时）" as UC_APPROVAL
+    usecase "停止 Agent 浏览器操作\n（用户取消时）" as UC_STOP
+    usecase "关闭会话、项目或应用\n并回收浏览器资源" as UC_CLOSE
+    usecase "启用或禁用 Agent 浏览器控制" as UC_TOGGLE
+    usecase "查看、清除缓存与站点数据\n（P0）" as UC_DATA
+  }
+
+  package "Agent 场景" {
+    usecase "读取网页信息（只读）" as UC_READ
+    usecase "自动验证 Web 页面" as UC_AUTO
+    usecase "导航、观察与操作网页" as UC_OPERATE
+    usecase "获取截图与验证证据\n（需要视觉证据时）" as UC_EVIDENCE
+    usecase "同会话主子 Agent 共享浏览器\n（会话级平权）" as UC_SUBAGENT
+  }
+
+  package "系统保障场景" {
+    usecase "校验会话与标签页归属" as UC_SCOPE
+    usecase "处理内部弹窗标签页\n（打开新窗口时）" as UC_POPUP
+    usecase "处理 JavaScript 对话框\n（页面弹出对话框时）" as UC_DIALOG
+    usecase "页面崩溃恢复\n（页面异常退出时）" as UC_CRASH
+  }
+
+  package "后续增强（非 P0）" {
+    usecase "使用当前页面作为会话上下文\n（P1）" as UC_CONTEXT #FFF7ED
+    usecase "显示或隐藏浏览器面板\n（P1）" as UC_VISIBILITY #FFF7ED
+    usecase "选择网页元素加入会话\n（P1）" as UC_PICKER #FFF7ED
+    usecase "检查浏览器运行环境\n（P1）" as UC_HEALTH #FFF7ED
+    usecase "响应式、文件与录制增强\n（P1/P2）" as UC_ENHANCE #FFF7ED
+  }
+}
+
+User -- UC_MANUAL
+User -- UC_COLLABORATE
+User -- UC_VIEW
+User -- UC_APPROVAL
+User -- UC_STOP
+User -- UC_CLOSE
+User -- UC_TOGGLE
+User -- UC_PICKER
+User -- UC_HEALTH
+User -- UC_DATA
+
+Agent -- UC_READ
+Agent -- UC_AUTO
+Agent -- UC_COLLABORATE
+Agent -- UC_SUBAGENT
+Agent -- UC_CONTEXT
+Agent -- UC_VISIBILITY
+
+UC_AUTO ..> UC_OPERATE : <<include>>
+UC_AUTO ..> UC_SCOPE : <<include>>
+UC_READ ..> UC_SCOPE : <<include>>
+UC_SUBAGENT ..> UC_SCOPE : <<include>>
+
+UC_OPERATE -- Web
+UC_READ -- Web
+
+UC_APPROVAL ..> UC_AUTO : <<extend>>
+UC_POPUP ..> UC_MANUAL : <<extend>>
+UC_POPUP ..> UC_AUTO : <<extend>>
+UC_DIALOG ..> UC_READ : <<extend>>
+UC_DIALOG ..> UC_AUTO : <<extend>>
+UC_EVIDENCE ..> UC_AUTO : <<extend>>
+UC_STOP ..> UC_READ : <<extend>>
+UC_STOP ..> UC_AUTO : <<extend>>
+UC_CRASH ..> UC_MANUAL : <<extend>>
+UC_CRASH ..> UC_READ : <<extend>>
+UC_CRASH ..> UC_AUTO : <<extend>>
+UC_CONTEXT ..> UC_READ : <<extend>>
+UC_CONTEXT ..> UC_AUTO : <<extend>>
+UC_VISIBILITY ..> UC_AUTO : <<extend>>
+UC_PICKER ..> UC_MANUAL : <<extend>>
+UC_ENHANCE ..> UC_AUTO : <<extend>>
+
+note bottom of UC_SCOPE
+所有浏览器发现、标签页和命令都按窗口 + 工作区 + 顶层会话隔离；
+同会话主、子 Agent 平权共享标签页，不需要额外身份登记。
+人工接管开关按会话控制全部标签；开启时取消未决 Agent 动作，关闭时允许 Agent 并阻止用户输入。
+网页输入和空闲不改变开关；新标签继承；崩溃或重连必须失效旧代次与迟到请求。
+end note
+
+note bottom of UC_TOGGLE
+应用级 Agent 控制总开关默认允许；禁用后所有会话不得发现或调用工具。
+禁用同时取消未决 Agent 请求，不影响人工浏览、既有页面和站点数据。
+已有缺工具会话在重新开启后需确认重连，不自动恢复旧端点。
+end note
+
+note bottom of UC_DATA
+每个顶层会话使用独立的 AAW 持久化分区，同会话主、子 Agent 平权共享；
+登录态和必要数据可跨重启保留，不同会话和工作区不共享站点数据。
+按工作区、会话、站点查看和清理，也可清理全部 AAW 浏览器数据；
+清缓存与清除登录态分开，破坏性操作按影响范围二次确认。
+end note
+
+legend bottom
+  实线：参与者与用例的无向关联
+  <<include>>：基用例执行时必经的子用例
+  <<extend>>：满足扩展用例注明的条件时才发生
+  原子操作、只读/自动验证泛化及子 Agent 关系见 Agent 操作用例图
+endlegend
+@enduml

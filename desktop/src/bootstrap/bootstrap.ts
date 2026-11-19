@@ -18,6 +18,7 @@ import * as workflowPlugin from "../plugins/workflow/index.ts";
 import * as skillsPlugin from "../plugins/skills/index.ts";
 import * as accountPlugin from "../plugins/account/index.ts";
 import * as updatesPlugin from "../plugins/updates/index.ts";
+import * as browserPlugin from "../plugins/browser/index.ts";
 import * as scheduledTasksPlugin from "../plugins/scheduledTasks/index.ts";
 import { desktopPanelLayouts } from "./panelLayouts.ts";
 
@@ -46,17 +47,25 @@ export function createDesktopRuntime(
       const foundation = await installDesktopFoundation(
         context,
         { acpProcess: processHost, createBackend: options.createHostBackend },
-        diagnosticsSnapshot && (() => ({
-          ...diagnosticsSnapshot(),
-          connections: context.acpConnection?.diagnostics() ?? [],
-        })),
+        diagnosticsSnapshot &&
+          (() => ({
+            ...diagnosticsSnapshot(),
+            connections: context.acpConnection?.diagnostics() ?? [],
+          })),
         async (id) => context.acpConnection?.probe(id),
       );
       await context.plugin(workbenchPlugin, {
         createLogger: foundation.diagnostics.createLogger,
-        registerAppearanceStorage: (scope, reset) => foundation.diagnostics.registerStorage(
-          settingsStorageCategory("workbench.appearance", "界面外观设置", () => scope.read(), reset, scope.saveFailure),
-        ),
+        registerAppearanceStorage: (scope, reset) =>
+          foundation.diagnostics.registerStorage(
+            settingsStorageCategory(
+              "workbench.appearance",
+              "界面外观设置",
+              () => scope.read(),
+              reset,
+              scope.saveFailure,
+            ),
+          ),
         appearanceRoot: options.appearanceRoot,
         suppressNativeContextMenu: options.suppressNativeContextMenu,
         panelLayoutCompatibility: desktopPanelLayouts,
@@ -79,6 +88,7 @@ export function createDesktopRuntime(
       await context.plugin(skillsPlugin);
       await context.plugin(accountPlugin);
       await context.plugin(updatesPlugin);
+      await context.plugin(browserPlugin);
       await contribute?.(context);
       await context.plugin(scheduledTasksPlugin);
       context.project.sessions.resumePendingDeletions?.();

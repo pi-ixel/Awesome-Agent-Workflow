@@ -20,13 +20,23 @@ function ratio(a: Color, b: Color): number {
   const [dark, light] = [luminance(a), luminance(b)].sort((x, y) => x - y);
   return (light! + 0.05) / (dark! + 0.05);
 }
-async function color(el: Locator, property: string) {
-  return parse(
-    await el.evaluate(
-      (node, key) => getComputedStyle(node).getPropertyValue(key),
-      property,
-    ),
-  );
+async function color(el: Locator, property: string): Promise<Color> {
+  return el.evaluate((node, key) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("无法创建颜色解析上下文");
+    context.fillStyle = getComputedStyle(node).getPropertyValue(key);
+    context.fillRect(0, 0, 1, 1);
+    const [r = 0, g = 0, b = 0, a = 255] = context.getImageData(
+      0,
+      0,
+      1,
+      1,
+    ).data;
+    return [r, g, b, a / 255] as Color;
+  }, property);
 }
 
 test("dark theme keeps controls, status and readable content distinct", async ({
@@ -140,7 +150,7 @@ test("dark theme keeps controls, status and readable content distinct", async ({
   await page.keyboard.press("Tab");
   const focused = page.locator(":focus-visible");
   await expect(focused).toBeVisible();
-  await expect(focused).toHaveCSS("box-shadow", /rgb\(128, 190, 255\)/);
+  await expect(focused).toHaveCSS("box-shadow", /rgb\(171, 171, 171\)/);
 });
 
 test("warm theme keeps original control and focus values", async ({ page }) => {

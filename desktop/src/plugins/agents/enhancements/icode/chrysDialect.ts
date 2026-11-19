@@ -28,14 +28,16 @@ import { normalizeChrysRuntime } from "./chrysRuntime.ts";
  * 第二种带私有扩展的 agent 时，在它自己的适配项里提供各自的方言即可。
  * 未注入方言时，协议层把未知消息兜底透传（数据不丢、UI 不崩）。
  */
-import { createLogger, type Logger } from "../../../../shared/logging/logger.ts";
+import {
+  createLogger,
+  type Logger,
+} from "../../../../shared/logging/logger.ts";
 import {
   asBoolean,
   asNumber,
   asRecord,
   asString,
 } from "../../../../shared/valueGuards.ts";
-
 
 import type { QuestionResponder } from "../../../acpRuntime/types.ts";
 export type { QuestionResponder } from "../../../acpRuntime/types.ts";
@@ -93,6 +95,7 @@ export function createChrysDialect(
         ...(edit ? { edit } : {}),
       };
     },
+
     normalizePermissionOutcome: (outcome, params) => {
       if (outcome.outcome !== "cancelled" || !Array.isArray(params.options))
         return outcome;
@@ -111,7 +114,8 @@ export function createChrysDialect(
     serverRequestHandlers: new Map<string, ServerRequestHandler>([
       [
         ICODE_METHOD.chrysRequestInput,
-        (_method, params) => handleRequestInput(params, options.onQuestion, logger),
+        (_method, params) =>
+          handleRequestInput(params, options.onQuestion, logger),
       ],
     ]),
   };

@@ -355,7 +355,8 @@ export interface RequestPermissionRequestParams {
   readonly options: readonly {
     readonly optionId: string;
     readonly name: string;
-    readonly kind: "allow_once" | "allow_always" | "reject_once" | "reject_always";
+    readonly kind:
+      "allow_once" | "allow_always" | "reject_once" | "reject_always";
   }[];
 }
 
