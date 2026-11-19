@@ -6,6 +6,7 @@ import type { ProjectService } from "../../service.ts";
 import type { ForegroundSessionTarget } from "../viewState.ts";
 import type { QuestionDraft } from "../../interactions/types.ts";
 import type { ContentBlock } from "../../../../contracts/acp/protocol.ts";
+import type { SendOptions } from "../sessionStore.ts";
 
 /** Capture the rendered owner: a late callback must never act on another session. */
 export function useSessionCommands() {
@@ -82,19 +83,39 @@ export function useSessionCommands() {
           (service, owner) => service.interactions.cancelQuestions(owner, id),
           undefined,
         ),
-      sendPrompt: (text: string, attachments?: readonly ContentBlock[]) =>
+      sendPrompt: (
+        text: string,
+        attachments?: readonly ContentBlock[],
+        ...options: [options?: SendOptions]
+      ) =>
         run(
           (service, owner) =>
-            service.conversation.send(owner, text, attachments),
+            service.conversation.send(owner, text, attachments, ...options),
           false,
         ),
-      steerPrompt: (text: string, attachments?: readonly ContentBlock[]) =>
-        run((service, owner) => service.conversation.steer(owner, text, attachments), false),
-      stopSteering: () => run((service, owner) => service.conversation.stopSteering(owner), undefined),
-      enqueuePrompt: (text: string, attachments?: readonly ContentBlock[]) =>
+      steerPrompt: (
+        text: string,
+        attachments?: readonly ContentBlock[],
+        ...options: [options?: SendOptions]
+      ) =>
         run(
           (service, owner) =>
-            service.conversation.enqueue(owner, text, attachments),
+            service.conversation.steer(owner, text, attachments, ...options),
+          false,
+        ),
+      stopSteering: () =>
+        run(
+          (service, owner) => service.conversation.stopSteering(owner),
+          undefined,
+        ),
+      enqueuePrompt: (
+        text: string,
+        attachments?: readonly ContentBlock[],
+        ...options: [options?: SendOptions]
+      ) =>
+        run(
+          (service, owner) =>
+            service.conversation.enqueue(owner, text, attachments, ...options),
           false,
         ),
       requestCancel: () =>

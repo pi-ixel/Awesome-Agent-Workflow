@@ -236,10 +236,12 @@ export function SkillCard({
   skill,
   actions,
   onDetail,
+  reviewLabel,
 }: {
   skill: NativeSkill;
   actions: Actions;
   onDetail: (button: HTMLButtonElement) => void;
+  reviewLabel?: string;
 }) {
   const needsReview = !["正常", "配置内定义"].includes(skill.status);
   return (
@@ -259,7 +261,12 @@ export function SkillCard({
             {skill.name}
           </span>
           {needsReview && (
-            <span className="shrink-0 text-xs text-danger-ink">待检查</span>
+            <span
+              className="max-w-[45%] shrink-0 truncate text-xs text-danger-ink"
+              data-hint={reviewLabel ? skill.status : undefined}
+            >
+              {reviewLabel ?? "待检查"}
+            </span>
           )}
         </button>
       </div>

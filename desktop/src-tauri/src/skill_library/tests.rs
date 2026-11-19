@@ -287,6 +287,48 @@ fn codeagent_usage_counts_skill_name_for_each_matching_entry() {
     assert_eq!(count(&unknown), None);
 }
 #[test]
+fn codeagent_catalog_exposes_short_issue_labels_and_original_details() {
+    let (_tmp, loc, q) = setup(Provider::CodeAgent);
+    let root = loc.home.join(".cac/skills");
+    for (name, markdown) in [
+        (
+            "bad-yaml",
+            "---\nname: bad-yaml\ndescription: words: more\n---\n",
+        ),
+        (
+            "missing-description",
+            "---\nname: missing-description\n---\n",
+        ),
+        ("missing-header", "# 无文件头\n"),
+        ("unclosed-header", "---\nname: unclosed-header\n"),
+    ] {
+        let path = root.join(name);
+        fs::create_dir_all(&path).unwrap();
+        fs::write(path.join("SKILL.md"), markdown).unwrap();
+    }
+
+    let catalog = catalog::list(&loc, &q).unwrap();
+    let entry = |name: &str| catalog.entries.iter().find(|e| e.name == name).unwrap();
+    assert_eq!(
+        entry("bad-yaml").status_label.as_deref(),
+        Some("YAML 格式错误")
+    );
+    assert!(entry("bad-yaml").status.contains("line 2"));
+    assert_eq!(
+        entry("missing-description").status_label.as_deref(),
+        Some("名称或描述不完整")
+    );
+    assert_eq!(
+        entry("missing-header").status_label.as_deref(),
+        Some("缺少 YAML 文件头")
+    );
+    assert_eq!(
+        entry("unclosed-header").status_label.as_deref(),
+        Some("YAML 文件头未结束")
+    );
+}
+
+#[test]
 fn changed_skill_and_manufactured_paths_are_rejected() {
     let (_tmp, loc, q) = setup(Provider::CodeAgent);
     let path = loc.home.join(".cac/skills/one");

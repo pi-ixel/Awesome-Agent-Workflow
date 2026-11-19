@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { UserMessage } from "../../../../src/plugins/project/conversation/ui/UserMessage.tsx";
 import { ChatInput } from "../../../../src/plugins/project/conversation/ui/ChatInput.tsx";
+import { restoreStoppedTurns } from "../../../../src/plugins/project/conversation/SessionFactory.ts";
 
 const ITEM = {
   kind: "user" as const,
@@ -17,6 +18,24 @@ const ITEM = {
 };
 
 describe("UserMessage 操作行", () => {
+  it("replays selected skill references while preserving identical plain messages", () => {
+    const text = "/grill-me 评审方案";
+    const plain = { ...ITEM, text };
+    const marked = {
+      ...plain,
+      skillReferences: [{ name: "grill-me", command: "grill-me", offset: 0 }],
+    };
+    const [restored] = restoreStoppedTurns([plain], [marked]);
+    if (restored?.kind !== "user") throw new Error("缺少恢复的用户消息");
+    const { rerender } = render(<UserMessage item={restored} />);
+    const chip = screen.getByText("grill-me", { exact: true });
+    expect(chip).toHaveClass("bg-clip-text");
+    expect(chip.parentElement?.querySelector("svg")).toBeInTheDocument();
+    expect(screen.queryByText(/\/grill-me/)).not.toBeInTheDocument();
+    rerender(<UserMessage item={plain} />);
+    expect(screen.getByText(text)).toBeInTheDocument();
+  });
+
   it("「再次发送」把消息文本预填进输入框（不自动发送）", async () => {
     const onSend = vi.fn();
     render(

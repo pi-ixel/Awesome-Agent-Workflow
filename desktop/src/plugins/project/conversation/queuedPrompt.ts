@@ -11,6 +11,11 @@ export const queuedAttachments = (
 ): readonly ContentBlock[] =>
   typeof prompt === "string" ? [] : prompt.attachments;
 
+export const queuedSkillOptions = (prompt: QueuedPrompt) =>
+  typeof prompt !== "string" && prompt.skillReferences?.length
+    ? { skillReferences: prompt.skillReferences }
+    : undefined;
+
 export const identifyQueuedPrompt = (prompt: QueuedPrompt): QueuedPrompt =>
   typeof prompt === "string"
     ? { id: crypto.randomUUID(), text: prompt, attachments: [] }

@@ -13,6 +13,8 @@
  */
 import type { ProjectSlashEntry } from "../../ui/extension.ts";
 import type { AgentCommandEntry } from "../../../acpRuntime/types.ts";
+import type { SlashSkillCatalog } from "../../../skills/service.ts";
+import type { SkillReference } from "../../composer/skillReferences.ts";
 
 /** slash 命令条目。 */
 export interface SlashItem {
@@ -30,6 +32,8 @@ export interface SlashItem {
   readonly run?: () => void;
   /** insert 类的插入文本。 */
   readonly insertText?: string;
+  readonly skillReference?: SkillReference;
+  readonly searchAlias?: string;
 }
 
 /** 检测光标前是否处在行首 slash 触发段；返回查询串（可空）或 null。 */
@@ -84,7 +88,17 @@ export function buildSlashItems(
   invocations?: Readonly<Record<string, string>>,
   extensionEntries: readonly ProjectSlashEntry[] = [],
   extensionGroup = "扩展",
+  localSkills?: SlashSkillCatalog,
+  useSkillReferences = false,
+  descriptions?: ReadonlyMap<string, string>,
 ): readonly SlashItem[] {
+  const isCatalogSkill = (name: string) =>
+    localSkills?.commandNames.has(name.toLowerCase()) === true;
+  const commandNames = new Map(
+    localSkills
+      ? agentCommands.map(({ name }) => [name.toLowerCase(), name])
+      : [],
+  );
   return [
     ...STATIC_ITEMS,
     ...extensionEntries.map((entry): SlashItem => ({
@@ -92,30 +106,55 @@ export function buildSlashItems(
       group: extensionGroup,
       kind: "action",
     })),
-    ...agentCommands.map((command): SlashItem => ({
-      id: `agent:${command.name}`,
-      label: command.name,
-      group: "Agent 命令",
-      description:
-        command.description === null || command.description.length === 0
-          ? command.inputHint === null
-            ? "agent 侧命令"
-            : `参数：${command.inputHint}`
-          : command.inputHint === null
-            ? command.description
-            : `${command.description}（参数：${command.inputHint}）`,
+    ...(localSkills?.skills ?? []).map((skill): SlashItem => ({
+      id: `local-skill:${skill.path}`,
+      label: skill.name,
+      searchAlias: skill.directoryName,
+      group: skill.project ? "当前项目技能" : "全局技能",
+      description: skill.description,
       kind: "insert",
-      // 以 `/名 ` 形式插入，参数由用户补——执行在 agent 侧
-      insertText: `/${command.name} `,
+      skillReference: {
+        name: skill.name,
+        path: skill.path,
+        command:
+          commandNames.get(skill.name.toLowerCase()) ??
+          commandNames.get(skill.directoryName.toLowerCase()) ??
+          (/\s/.test(skill.name) ? skill.directoryName : skill.name),
+      },
     })),
-    ...skillNames.map((name): SlashItem => ({
-      id: `skill:${name}`,
-      label: name,
-      group: "Skills",
-      description: "插入使用该 skill 的提示",
-      kind: "insert",
-      insertText: invocations?.[name] ?? skillInsertText(name),
-    })),
+    ...agentCommands
+      .filter((command) => !isCatalogSkill(command.name))
+      .map((command): SlashItem => ({
+        id: `agent:${command.name}`,
+        label: command.name,
+        group: "Agent 命令",
+        description:
+          command.description === null || command.description.length === 0
+            ? command.inputHint === null
+              ? "agent 侧命令"
+              : `参数：${command.inputHint}`
+            : command.inputHint === null
+              ? command.description
+              : `${command.description}（参数：${command.inputHint}）`,
+        kind: "insert",
+        // 以 `/名 ` 形式插入，参数由用户补——执行在 agent 侧
+        insertText: `/${command.name} `,
+      })),
+    ...skillNames
+      .filter((name) => !isCatalogSkill(name))
+      .map((name): SlashItem => ({
+        id: `skill:${name}`,
+        label: name,
+        group: "Skills",
+        description: useSkillReferences
+          ? (descriptions?.get(name.toLowerCase()) ?? "")
+          : "插入使用该 skill 的提示",
+        kind: "insert",
+        insertText: invocations?.[name] ?? skillInsertText(name),
+        skillReference: useSkillReferences
+          ? { name, command: name }
+          : undefined,
+      })),
   ];
 }
 
@@ -154,15 +193,30 @@ function matches(candidate: string, query: string): number | null {
 export function filterSlashItems(
   items: readonly SlashItem[],
   query: string,
+  keepGroups = false,
 ): SlashItem[] {
   const scored: { item: SlashItem; score: number; order: number }[] = [];
+  const groups = new Map<string, number>();
   items.forEach((item, order) => {
-    const score = matches(item.label, query);
+    if (keepGroups && !groups.has(item.group)) groups.set(item.group, order);
+    const labelScore = matches(item.label, query);
+    const aliasScore = item.searchAlias
+      ? matches(item.searchAlias, query)
+      : null;
+    const score =
+      labelScore === null
+        ? aliasScore
+        : Math.min(labelScore, aliasScore ?? labelScore);
     if (score !== null) {
       scored.push({ item, score, order });
     }
   });
   scored.sort((left, right) => {
+    if (keepGroups && left.item.group !== right.item.group) {
+      return (
+        (groups.get(left.item.group) ?? 0) - (groups.get(right.item.group) ?? 0)
+      );
+    }
     if (left.score !== right.score) {
       return left.score - right.score;
     }

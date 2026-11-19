@@ -26,4 +26,20 @@ describe("restoreStoppedTurns", () => {
     const replay = [user("new1", "repeat"), user("new2", "repeat")];
     expect(restoreStoppedTurns(replay, saved)).toEqual(replay);
   });
+
+  it("restores only the selected skill when identical typed text is also replayed", () => {
+    const text = "/grill-me review";
+    const skillReferences = [
+      { name: "grill-me", command: "grill-me", offset: 0 },
+    ];
+    const saved = [
+      user("typed", text),
+      { ...user("selected", text), skillReferences },
+    ];
+    const replay = [user("first", text), user("second", text)];
+    expect(restoreStoppedTurns(replay, saved)).toEqual([
+      replay[0],
+      { ...replay[1], skillReferences },
+    ]);
+  });
 });

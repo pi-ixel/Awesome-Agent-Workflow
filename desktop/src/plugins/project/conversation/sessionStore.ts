@@ -21,6 +21,10 @@ import { parseTurnUsage, type TurnUsage } from "./turnUsage.ts";
 import type { UsageScope, UsageStart } from "../usage/service.ts";
 import { rememberUsageModels } from "../usage/service.ts";
 import { queuedText } from "./queuedPrompt.ts";
+import {
+  readPromptSkillReferences,
+  type PromptSkillReference,
+} from "../composer/skillReferences.ts";
 import type { QueuedPrompt } from "./types.ts";
 import { supportsImagePrompt } from "../../../contracts/acp/content.ts";
 import type { ContentBlock } from "../../../contracts/acp/protocol.ts";
@@ -279,6 +283,7 @@ export const TURN_IDLE_NOTICE_MS = 90_000;
 export interface SendOptions {
   /** 插件替用户发的消息：会话里怎么显示（见 shared/messageDisplay.ts）。 */
   readonly display?: MessageDisplay;
+  readonly skillReferences?: readonly PromptSkillReference[];
 }
 
 export interface SessionStoreState extends ConversationViewState {
@@ -355,7 +360,11 @@ export interface SessionStoreState extends ConversationViewState {
   /** 切换会话模型（session/set_model；乐观更新，失败回滚并提示）。 */
   readonly switchModel: (modelId: string) => void;
   /** 发送一轮用户消息（无绑定时如实提示，不伪造轮次）。 */
-  readonly steerPrompt: (text: string, attachments?: readonly ContentBlock[]) => boolean;
+  readonly steerPrompt: (
+    text: string,
+    attachments?: readonly ContentBlock[],
+    options?: SendOptions,
+  ) => boolean;
   readonly stopSteering: () => void;
   readonly sendPrompt: (
     text: string,
@@ -366,6 +375,7 @@ export interface SessionStoreState extends ConversationViewState {
   readonly enqueuePrompt: (
     text: string,
     attachments?: readonly ContentBlock[],
+    options?: SendOptions,
   ) => boolean;
   /** 放行挂起的队列：立即发下一条并恢复正常自动出队。 */
   readonly retryQueueSave: () => void;
@@ -575,11 +585,16 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
   }
   const text = typeof record["text"] === "string" ? record["text"] : "";
   switch (record["kind"]) {
-    case "user":
+    case "user": {
+      const skillReferences = readPromptSkillReferences(
+        record.skillReferences,
+        text,
+      );
       return {
         kind: "user",
         id,
         text,
+        ...(skillReferences ? { skillReferences } : {}),
         ...(record.stopped === true ? { stopped: true as const } : {}),
         ...(record.steer === true ? { steer: true as const } : {}),
         ...(parseDisplay(record.display) ? { display: parseDisplay(record.display) } : {}),
@@ -591,6 +606,7 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
         createdAt:
           typeof record["createdAt"] === "string" ? record["createdAt"] : "",
       };
+    }
     case "assistant":
       return {
         kind: "assistant",
@@ -809,6 +825,7 @@ export const createSessionStore = (
     let interruptedPrompt: {
       text: string;
       attachments?: readonly ContentBlock[];
+      skillReferences?: readonly PromptSkillReference[];
       replayed: boolean;
       imageFallbackText?: string;
       statistics?: UsageStart;
@@ -1078,8 +1095,11 @@ export const createSessionStore = (
     };
 
     /** 落笔用户消息并标记轮次开始（轮次生命周期的真实领域入口）。 */
-    const beginTurn = (text: string, display?: MessageDisplay): void => {
-      if (!get().performanceTotals) set({ performanceTotals: collectPerformance(get().items, false, Date.now()) });
+    const beginTurn = (text: string, options?: SendOptions): void => {
+      if (!get().performanceTotals)
+        set({
+          performanceTotals: collectPerformance(get().items, false, Date.now()),
+        });
       historyReplaySessionId = null;
       set({ historyPreview: undefined });
       turnGeneration += 1;
@@ -1094,7 +1114,10 @@ export const createSessionStore = (
             text,
             performance: beginPerformance(Date.now()),
             createdAt: new Date().toISOString(),
-            ...(display ? { display } : {}),
+            ...(options?.display ? { display: options.display } : {}),
+            ...(options?.skillReferences?.length
+              ? { skillReferences: options.skillReferences }
+              : {}),
           },
         ],
         isAgentRunning: true,

@@ -36,6 +36,7 @@ export const codeAgentAdapter: AgentAdapter = {
   usageModelId: (model) => model && !model.includes("/") ? `w3/${model}` : model,
   id: "codeagent",
   skillLibrary: "codeagent",
+  slashSkillSource: "catalog",
   skillPackages: codeAgentSkillPackages,
   promptUsageBasis: "prompt-total",
   displayName: "CodeAgent",

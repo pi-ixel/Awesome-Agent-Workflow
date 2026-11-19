@@ -7,7 +7,12 @@ import type { ContentBlock } from "../../../../contracts/acp/protocol.ts";
 import { MessageAttachments } from "./MessageAttachments.tsx";
 import { decodeAnnotationMessage } from "../../composer/annotationMessage.ts";
 import { AnnotationSummary } from "./AnnotationSummary.tsx";
-import { memo } from "react";
+import { Fragment, memo } from "react";
+import {
+  promptWithEditableSkills,
+  readPromptSkillReferences,
+} from "../../composer/skillReferences.ts";
+import { SkillReferenceToken } from "./SkillReferenceTokens.tsx";
 /**
  * 用户消息：右侧气泡（保留换行）+ hover 浮现的操作行。
  *
@@ -31,6 +36,18 @@ function UserMessageBase({
   const visible = item.display ? item.display.visible : item.text;
   const annotated = decodeAnnotationMessage(visible);
   const text = annotated?.text ?? visible;
+  const references = readPromptSkillReferences(item.skillReferences, text);
+  let offset = 0;
+  const renderedSkills = references?.map((reference) => {
+    const preceding = text.slice(offset, reference.offset);
+    offset = reference.offset + reference.command.length + 1;
+    return (
+      <Fragment key={reference.offset}>
+        {preceding}
+        <SkillReferenceToken reference={reference} />
+      </Fragment>
+    );
+  });
   return (
     <div
       className="group flex flex-col items-end gap-1"
@@ -48,7 +65,10 @@ function UserMessageBase({
           data-hint={formatClock(item.createdAt) ?? undefined}
           className="max-w-full rounded-xl rounded-tr-xs border border-line bg-surface px-4 py-3 text-ui-base leading-relaxed break-words text-ink @min-[624px]/conversation:max-w-xl"
         >
-          <p className="whitespace-pre-wrap break-words">{text}</p>
+          <p className="whitespace-pre-wrap break-words">
+            {renderedSkills}
+            {text.slice(offset)}
+          </p>
         </div>
       )}
       {item.display && (
@@ -62,7 +82,7 @@ function UserMessageBase({
             type="button"
             onClick={() => {
               composer?.prefill(
-                visible,
+                promptWithEditableSkills(visible, references),
                 item.attachments as readonly ContentBlock[] | undefined,
               );
             }}

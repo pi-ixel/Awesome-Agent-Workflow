@@ -326,7 +326,7 @@ pub(super) fn metadata(text: &str) -> Result<Value> {
     let mut yaml = String::new();
     for line in lines {
         if line.trim_end() == "---" {
-            return serde_yaml::from_str(&yaml).map_err(error);
+            return serde_yaml::from_str(&yaml).map_err(io::Error::other);
         }
         yaml.push_str(line);
         yaml.push('\n');
@@ -341,6 +341,7 @@ pub(super) fn read_preview(path: &Path, bytes: &mut Vec<u8>) -> Result<usize> {
 pub(super) fn file_entry(root: &Source, path: &Path) -> Result<Entry> {
     let mut bytes = Vec::new();
     let read = read_preview(path, &mut bytes);
+    let read_failed = read.is_err();
     let preview = String::from_utf8_lossy(&bytes).into_owned();
     let meta = read.and_then(|_| metadata(&preview));
     let status = match &meta {
@@ -352,6 +353,18 @@ pub(super) fn file_entry(root: &Source, path: &Path) -> Result<Entry> {
             "名称或描述不完整".into()
         }
         Ok(_) => "正常".into(),
+    };
+    let status_label = match &meta {
+        Err(_) if read_failed => Some("技能文件读取失败".into()),
+        Err(e)
+            if e.get_ref()
+                .is_some_and(|cause| cause.is::<serde_yaml::Error>()) =>
+        {
+            Some("YAML 格式错误".into())
+        }
+        Err(_) => Some(status.clone()),
+        Ok(_) if status != "正常" => Some(status.clone()),
+        Ok(_) => None,
     };
     let meta = meta.unwrap_or(Value::Null);
     let real_path = path.canonicalize()?;
@@ -374,6 +387,8 @@ pub(super) fn file_entry(root: &Source, path: &Path) -> Result<Entry> {
         is_link: info.is_symlink() || fs::read_link(path).is_ok(),
         kind: root.kind,
         status,
+        status_label,
+        skill_file_path: path.join("SKILL.md").canonicalize().ok(),
         usage_count: None,
     })
 }

@@ -4,7 +4,13 @@ import { useRef, useState } from "react";
 import { useSessionValue } from "../../ui/bindings/conversationView.ts";
 import { useProjectComposer } from "../../ui/bindings/composerView.ts";
 import { useSessionCommands } from "./useSessionCommands.ts";
-import { isSteerOutboxEntry, queuedText, queuedAttachments } from "../queuedPrompt.ts";
+import {
+  isSteerOutboxEntry,
+  queuedText,
+  queuedAttachments,
+  queuedSkillOptions,
+} from "../queuedPrompt.ts";
+import { promptWithEditableSkills } from "../../composer/skillReferences.ts";
 import { GripVerticalIcon, PencilIcon } from "../../../../shared/ui/icons.tsx";
 
 export function QueueDock(): React.JSX.Element | null {
@@ -150,9 +156,16 @@ export function QueueDock(): React.JSX.Element | null {
                 onClick={() => {
                   if (!id) return;
                   if (
-                    composer?.prefill(content, queuedAttachments(item), {
-                      ifEmpty: true,
-                    })
+                    composer?.prefill(
+                      promptWithEditableSkills(
+                        content,
+                        queuedSkillOptions(item)?.skillReferences,
+                      ),
+                      queuedAttachments(item),
+                      {
+                        ifEmpty: true,
+                      },
+                    )
                   ) {
                     removeQueuedPromptById(id);
                     setNotice("");

@@ -458,6 +458,11 @@ function LibraryPage(
                         />
                       ) : (
                         <SkillCard
+                          reviewLabel={
+                            props.provider === "codeagent"
+                              ? (skill.statusLabel ?? skill.status)
+                              : undefined
+                          }
                           key={skillKey(skill)}
                           skill={skill}
                           actions={actions}

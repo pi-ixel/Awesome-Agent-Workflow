@@ -3,9 +3,17 @@ import type {
   ContentBlock,
   StopReason,
 } from "../../../contracts/acp/protocol.ts";
-import type { SessionBinding, SessionStoreState } from "./sessionStore.ts";
-import { isSteerOutboxEntry } from "./queuedPrompt.ts";
+import type {
+  SendOptions,
+  SessionBinding,
+  SessionStoreState,
+} from "./sessionStore.ts";
+import { isSteerOutboxEntry, queuedSkillOptions } from "./queuedPrompt.ts";
 import type { QueuedPrompt } from "./types.ts";
+import {
+  appendPromptSkillReferences,
+  type PromptSkillReference,
+} from "../composer/skillReferences.ts";
 
 export const STEER_AFTER_CANCEL_DELAY_MS = 1_000;
 export const STEER_WAIT_LIMIT_MS = 30_000;
@@ -37,7 +45,11 @@ export function createSteering(context: {
   cancel: () => void;
   persist: () => Promise<void>;
   hasProgress: () => boolean;
-  original: () => { text: string; attachments?: readonly ContentBlock[] } | null;
+  original: () => {
+    text: string;
+    attachments?: readonly ContentBlock[];
+    skillReferences?: readonly PromptSkillReference[];
+  } | null;
 }) {
   const { get, set } = context;
   let pending: Intent | undefined;
@@ -140,7 +152,11 @@ export function createSteering(context: {
       sending = intent;
       deliveries.add(intent);
       set({ steerPhase: undefined });
-      const accepted = get().sendPrompt(item.text, item.attachments);
+      const accepted = get().sendPrompt(
+        item.text,
+        item.attachments,
+        queuedSkillOptions(item),
+      );
       sending = undefined;
       if (!accepted) {
         deliveries.delete(intent);
@@ -299,6 +315,7 @@ export function createSteering(context: {
       this: void,
       text: string,
       attachments: readonly ContentBlock[] = [],
+      options?: SendOptions,
     ): boolean {
       const binding = context.binding();
       const state = get();
@@ -323,15 +340,21 @@ export function createSteering(context: {
         const id = pending.id;
         pending.revision++;
         set({
-          queuedPrompts: state.queuedPrompts.map((item) =>
-            typeof item !== "string" && item.id === id
-              ? {
-                  ...item,
-                  text: [item.text, text.trim()].filter(Boolean).join("\n\n"),
-                  attachments: [...item.attachments, ...attachments],
-                }
-              : item,
-          ),
+          queuedPrompts: state.queuedPrompts.map((item) => {
+            if (typeof item === "string" || item.id !== id) return item;
+            const supplement = text.trim();
+            const skillReferences = appendPromptSkillReferences(
+              item.skillReferences,
+              options?.skillReferences,
+              item.text && supplement ? item.text.length + 2 : item.text.length,
+            );
+            return {
+              ...item,
+              text: [item.text, supplement].filter(Boolean).join("\n\n"),
+              attachments: [...item.attachments, ...attachments],
+              ...(skillReferences ? { skillReferences } : {}),
+            };
+          }),
         });
         return true;
       }
@@ -359,15 +382,25 @@ export function createSteering(context: {
             id: intent.id,
             text: text.trim(),
             attachments,
+            ...(options?.skillReferences?.length
+              ? { skillReferences: options.skillReferences }
+              : {}),
             steerDelivery: "pending",
           },
-          ...(intent.originalId && original ? [{
-            id: intent.originalId,
-            text: original.text,
-            attachments: original.attachments ?? [],
-            steerDelivery: "unknown" as const,
-            steerOriginal: true as const,
-          }] : []),
+          ...(intent.originalId && original
+            ? [
+                {
+                  id: intent.originalId,
+                  text: original.text,
+                  attachments: original.attachments ?? [],
+                  ...(original.skillReferences
+                    ? { skillReferences: original.skillReferences }
+                    : {}),
+                  steerDelivery: "unknown" as const,
+                  steerOriginal: true as const,
+                },
+              ]
+            : []),
           ...state.queuedPrompts,
         ],
       });

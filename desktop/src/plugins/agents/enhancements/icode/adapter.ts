@@ -28,6 +28,7 @@ export function createChrysAgentAdapter(loggerFactory?: LoggerFactory): AgentAda
     maxConcurrentRequests: 5,
     id: "chrys",
     skillLibrary: "icode",
+    slashSkillSource: "session",
     turnUsageBasis: "prompt-total",
     sessionUsageCachePrefix: "aaw-desktop/icode-usage/",
     settingsDefaults: icodeSettingsDefaults,

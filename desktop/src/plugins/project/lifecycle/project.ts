@@ -772,11 +772,19 @@ export class DesktopProject {
       session.store.getState().sendPrompt(text, attachments, options)
     );
   }
-  steer(target: SessionTarget, text: string, attachments?: readonly ContentBlock[]): boolean {
+  steer(
+    target: SessionTarget,
+    text: string,
+    attachments?: readonly ContentBlock[],
+    ...options: [options?: SendOptions]
+  ): boolean {
     // During promotion, ACP can already have an ID while the foreground still
     // owns the draft scope. Route the early supplement through that exact view.
     const foreground = this.currentForeground(target);
-    return foreground?.supportsSteer === true && foreground.steerPrompt(text, attachments);
+    return (
+      foreground?.supportsSteer === true &&
+      foreground.steerPrompt(text, attachments, ...options)
+    );
   }
   stopSteering(target: SessionTarget): void {
     this.session(target).store.getState().stopSteering();
@@ -785,12 +793,13 @@ export class DesktopProject {
     target: SessionTarget,
     text: string,
     attachments?: readonly ContentBlock[],
+    options?: SendOptions,
   ): boolean {
     const session = this.session(target);
     return (
       !session.disposed &&
       !session.store.getState().operationsBlocked &&
-      session.store.getState().enqueuePrompt(text, attachments)
+      session.store.getState().enqueuePrompt(text, attachments, options)
     );
   }
   clearQueue(target: SessionTarget): void {

@@ -38,6 +38,7 @@ export function apply(ctx: Context): void {
   }>(() => ({}));
   const skills = createStore<{
     readonly candidates?: SkillsService["candidates"];
+    readonly resolveSlashSkills?: SkillsService["resolveSlashSkills"];
   }>(() => ({}));
   const documentView = createStore<{
     view?: ConversationDocumentView;
@@ -83,7 +84,9 @@ export function apply(ctx: Context): void {
       const provider = scoped.skills;
       scoped.effect(() => {
         skills.setState({
-          candidates: (names, invocations) => provider.candidates(names, invocations),
+          candidates: (names, invocations) =>
+            provider.candidates(names, invocations),
+          resolveSlashSkills: provider.resolveSlashSkills,
         });
         return () => skills.setState({}, true);
       });
