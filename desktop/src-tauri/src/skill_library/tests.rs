@@ -194,7 +194,7 @@ fn link_recovery_keeps_the_original_target_and_sibling_intact() {
 }
 
 #[test]
-fn usage_requires_exact_skill_path_and_source_activation_is_explicit() {
+fn usage_matches_absolute_paths_and_source_activation_is_explicit() {
     let (tmp, loc, q) = setup(Provider::ICode);
     let profile = loc.chrys.join("agents/Code.yaml");
     fs::create_dir_all(profile.parent().unwrap()).unwrap();
@@ -244,13 +244,47 @@ fn usage_requires_exact_skill_path_and_source_activation_is_explicit() {
     );
     fs::write(
         loc.home.join(".cac/skill-usage.jsonl"),
-        json!({"type":"active","skillPath":dest.join("sample")}).to_string(),
+        json!({"type":"active","skillPath":dest.join("sample/SKILL.md")}).to_string(),
     )
     .unwrap();
     assert_eq!(
         catalog::list(&loc, &ca).unwrap().entries[0].usage_count,
         Some(1)
     );
+}
+#[test]
+fn codeagent_usage_counts_skill_name_for_each_matching_entry() {
+    let (_tmp, loc, q) = setup(Provider::CodeAgent);
+    let global = loc.home.join(".cac/skills/review");
+    let project = q.projects[0].join(".cac/skills/project-review");
+    let unknown = q.projects[0].join(".cac/skills/unknown");
+    skill(&global, "Review");
+    skill(&project, "review");
+    skill(&unknown, "unknown");
+    let events = [
+        json!({"type":"active","skillPath":global,"skillName":"Review"}),
+        json!({"type":"active","skillPath":"an-alias","skillName":"REVIEW"}),
+        json!({"type":"active","skillName":"PROJECT-REVIEW"}),
+        json!({"type":"active","skillPath":"review"}),
+        json!({"type":"active","skillPath":loc.home.join("missing/review"),"skillName":"review"}),
+        json!({"type":"inactive","skillName":"review"}),
+        json!({"type":"active","name":"unknown"}),
+    ];
+    let log = events.map(|event| event.to_string()).join("\n");
+    fs::write(loc.home.join(".cac/skill-usage.jsonl"), log).unwrap();
+
+    let catalog = catalog::list(&loc, &q).unwrap();
+    let count = |path: &Path| {
+        catalog
+            .entries
+            .iter()
+            .find(|entry| entry.path == path)
+            .unwrap()
+            .usage_count
+    };
+    assert_eq!(count(&global), Some(2));
+    assert_eq!(count(&project), Some(2));
+    assert_eq!(count(&unknown), None);
 }
 #[test]
 fn changed_skill_and_manufactured_paths_are_rejected() {

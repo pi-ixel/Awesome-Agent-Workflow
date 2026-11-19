@@ -245,7 +245,7 @@ pub(super) fn list(loc: &Locations, query: &Query) -> Result<Catalog> {
     Ok(result)
 }
 
-// 只采用可以归属到实际技能目录的使用事件，同名或缺失日志均无法证明使用次数。
+// 绝对路径事件只计入对应目录。名称事件计入每个匹配的技能条目。
 fn usage(path: &Path, entries: &mut [Entry]) -> Result<()> {
     use std::collections::HashMap;
     use std::io::{BufRead, BufReader};
@@ -254,7 +254,8 @@ fn usage(path: &Path, entries: &mut [Entry]) -> Result<()> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(e),
     };
-    let mut counts: HashMap<PathBuf, u64> = HashMap::new();
+    let mut path_counts: HashMap<PathBuf, u64> = HashMap::new();
+    let mut name_counts: HashMap<String, u64> = HashMap::new();
     for line in BufReader::new(file).lines() {
         let Ok(event) = serde_json::from_str::<serde_json::Value>(&line?) else {
             continue;
@@ -262,25 +263,35 @@ fn usage(path: &Path, entries: &mut [Entry]) -> Result<()> {
         if event["type"] != "active" {
             continue;
         }
-        let Some(value) = ["skillPath", "skillDir", "skill_path", "skill_dir"]
+        let absolute_path = ["skillPath", "skillDir", "skill_path", "skill_dir"]
             .iter()
             .find_map(|key| event[*key].as_str())
-        else {
-            continue;
-        };
-        let p = Path::new(value);
-        if !p.is_absolute() {
-            continue;
+            .map(Path::new)
+            .filter(|path| path.is_absolute());
+        if let Some(path) = absolute_path {
+            let dir = if basename(path).eq_ignore_ascii_case("SKILL.md") {
+                path.parent().unwrap_or(path)
+            } else {
+                path
+            };
+            *path_counts.entry(dir.to_owned()).or_default() += 1;
+        } else if let Some(name) = event["skillName"]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            *name_counts.entry(name.to_lowercase()).or_default() += 1;
         }
-        let dir = if basename(p).eq_ignore_ascii_case("SKILL.md") {
-            p.parent().unwrap_or(p)
-        } else {
-            p
-        };
-        *counts.entry(dir.to_owned()).or_default() += 1;
     }
     for entry in entries {
-        entry.usage_count = counts.get(&entry.path).copied();
+        let name = entry.name.to_lowercase();
+        let directory = basename(&entry.path).to_lowercase();
+        let mut count = path_counts.get(&entry.path).copied().unwrap_or(0)
+            + name_counts.get(&name).copied().unwrap_or(0);
+        if directory != name {
+            count += name_counts.get(&directory).copied().unwrap_or(0);
+        }
+        entry.usage_count = (count > 0).then_some(count);
     }
     Ok(())
 }
