@@ -3,6 +3,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { ImagePreviewDialog } from "../../../../shared/ui/markdown/MarkdownImage.tsx";
 import type { DraftImage } from "../../composer/types.ts";
+import { ImageAttachmentThumbnail } from "./ImageAttachmentThumbnail.tsx";
 
 export function ImageAttachments({
   images,
@@ -27,20 +28,15 @@ export function ImageAttachments({
       {items.length > 0 && (
         <div className="flex flex-wrap gap-2 px-3 pt-3">
           {items.map((item, index) => (
-            <div key={index} className="group/image relative size-16 shrink-0">
-              <button
-                type="button"
-                aria-label={`预览 ${item.alt}`}
-                onClick={() => setPreview(index)}
-                className="block size-full overflow-hidden rounded-xl border border-line bg-raised hover:border-ink-faint"
-              >
-                <img
-                  src={item.src}
-                  alt={item.alt}
-                  className="size-full object-cover"
-                />
-              </button>
-              <IconButton iconSize="compact"
+            <div key={index} className="group/image relative shrink-0">
+              <ImageAttachmentThumbnail
+                src={item.src}
+                alt={item.alt}
+                label={`预览 ${item.alt}`}
+                onPreview={() => setPreview(index)}
+              />
+              <IconButton
+                iconSize="compact"
                 type="button"
                 aria-label={`移除 ${item.alt}`}
                 onClick={() => onRemove(index)}

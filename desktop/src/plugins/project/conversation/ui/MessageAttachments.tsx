@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { ImagePreviewDialog } from "../../../../shared/ui/markdown/MarkdownImage.tsx";
+import { ImageAttachmentThumbnail } from "./ImageAttachmentThumbnail.tsx";
 
 /** Unsupported content stays inspectable; no remote resource is fetched implicitly. */
 export function MessageAttachments({
@@ -18,7 +19,7 @@ export function MessageAttachments({
       className={
         compact
           ? "flex max-w-full flex-wrap justify-end gap-2"
-          : "w-full space-y-2"
+          : "flex w-full flex-wrap gap-2"
       }
     >
       {blocks.map((value, index) => {
@@ -33,33 +34,18 @@ export function MessageAttachments({
           /^image\/(png|jpeg|gif|webp)$/.test(block.mimeType)
         ) {
           const src = `data:${block.mimeType};base64,${block.data}`;
-          if (compact)
-            return (
-              <button
-                key={index}
-                type="button"
-                aria-label={`预览消息图片 ${index + 1}`}
-                onClick={() => setPreview(src)}
-                className="min-w-20 min-h-20 shrink-0 overflow-hidden rounded-xl border border-line bg-raised transition-colors hover:border-ink-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-              >
-                <img
-                  alt={`消息图片 ${index + 1}`}
-                  className="size-full object-cover"
-                  src={src}
-                />
-              </button>
-            );
           return (
-            <img
+            <ImageAttachmentThumbnail
               key={index}
-              alt="Agent 消息图片"
-              className="max-h-96 max-w-full object-contain"
-              src={`data:${block.mimeType};base64,${block.data}`}
+              alt={`消息图片 ${index + 1}`}
+              label={`预览消息图片 ${index + 1}`}
+              src={src}
+              onPreview={() => setPreview(src)}
             />
           );
         }
         return (
-          <details key={index}>
+          <details key={index} className={compact ? undefined : "w-full"}>
             <summary>
               {typeof block.type === "string" ? block.type : "未知内容"}
             </summary>
