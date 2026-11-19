@@ -1637,6 +1637,24 @@ it("离开项目不终止已经打开的工作会话", async () => {
 });
 
 describe("新会话草稿先行", () => {
+  it("TD-007-A01 恢复历史失败后新建不得复用旧恢复运行时", async () => {
+    fakeSessionControl.listed = [
+      { sessionId: "sess-expired", cwd: WORKSPACE },
+    ];
+    fakeSessionControl.loadShouldFail = true;
+    await openRealWorkspace(WORKSPACE, { sessionId: "sess-expired" });
+    expect(useSessionStore.getState().recovery.state).toBe("failed");
+
+    fakeSessionControl.loadShouldFail = false;
+    const result = await navigationProject.sessions.startNewSession(WORKSPACE);
+    const state = useSessionStore.getState();
+    expect(result.ok).toBe(true);
+    expect(state.activeSessionId).toBeNull();
+    expect(state.recovery.state).toBe("idle");
+    expect(state.items).toEqual([]);
+    expect(state.isBound).toBe(true);
+  });
+
   it("慢连接期间立即切换空草稿，旧任务保活，迟到结果不抢回焦点", async () => {
     fakeSessionControl.listed = [{ sessionId: "running-A", cwd: WORKSPACE }];
     await openRealWorkspace(WORKSPACE, { sessionId: "running-A" });

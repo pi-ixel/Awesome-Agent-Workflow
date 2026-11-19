@@ -17,6 +17,7 @@ import { createTerminalHost } from "../process/terminal.ts";
 import { createHostProcessRunner } from "../process/processRunner.ts";
 import { createUpdatesHost } from "../adapters/updates.ts";
 import { createInvoke, type NativeInvoke } from "../adapters/invoke.ts";
+import { createBrowserHost } from "../browser/tauri.ts";
 import { createLogger } from "../../../shared/logging/logger.ts";
 import { NativePanelService } from "../filesystem/panelService.ts";
 import { HostResources, trackProcesses } from "./effects.ts";
@@ -31,8 +32,7 @@ export class DesktopHost implements HostService {
   readonly exitGate = createHostExitGate();
   private exitDiagnostics?: ExitDiagnostics;
   private readonly flushForExit: ExitDiagnostics = (entry) =>
-    this.exitDiagnostics?.(entry) ??
-    this.diagnostics.flush(entry);
+    this.exitDiagnostics?.(entry) ?? this.diagnostics.flush(entry);
 
   registerExitDiagnostics(flush: ExitDiagnostics): () => void {
     if (!this.resources.isActive()) throw new Error("宿主实例正在卸载");
@@ -47,13 +47,17 @@ export class DesktopHost implements HostService {
   readonly archives: HostService["archives"];
   readonly window: HostService["window"] = {
     ...windowHost,
-    chrome: isTauriEnv() ? {
-      ...windowChromeHost,
-      listenForResize: (receive) =>
-        this.resources.listen(() => windowChromeHost.listenForResize(() => {
-          if (this.resources.isActive()) receive();
-        })),
-    } : undefined,
+    chrome: isTauriEnv()
+      ? {
+          ...windowChromeHost,
+          listenForResize: (receive) =>
+            this.resources.listen(() =>
+              windowChromeHost.listenForResize(() => {
+                if (this.resources.isActive()) receive();
+              }),
+            ),
+        }
+      : undefined,
     forceClose: () =>
       this.invoke("force_close", undefined, undefined, this.flushForExit),
     listenForClose: (receive) =>
@@ -72,29 +76,34 @@ export class DesktopHost implements HostService {
     },
   };
   readonly shell: HostService["shell"] = {
-    openExternal: (url) => this.resources.isActive()
-      ? openExternal(url)
-      : Promise.reject(new Error("宿主实例正在卸载")),
+    openExternal: (url) =>
+      this.resources.isActive()
+        ? openExternal(url)
+        : Promise.reject(new Error("宿主实例正在卸载")),
   };
   readonly notifications: HostService["notifications"] = {
-    isAvailable: () => this.resources.isActive() && notificationHost.isAvailable(),
-    listen: (receive) => this.resources.acquire(async () => {
-      let active = true;
-      const unregister = await notificationHost.listen((action) => {
-        if (active && this.resources.isActive()) receive(action);
-      });
-      const release = this.resources.own(() => {
-        active = false;
-        return unregister();
-      });
-      return () => release();
-    }),
-    ensurePermission: () => this.resources.isActive()
-      ? notificationHost.ensurePermission()
-      : Promise.resolve(false),
-    send: (notification) => this.resources.isActive()
-      ? notificationHost.send(notification)
-      : Promise.resolve(),
+    isAvailable: () =>
+      this.resources.isActive() && notificationHost.isAvailable(),
+    listen: (receive) =>
+      this.resources.acquire(async () => {
+        let active = true;
+        const unregister = await notificationHost.listen((action) => {
+          if (active && this.resources.isActive()) receive(action);
+        });
+        const release = this.resources.own(() => {
+          active = false;
+          return unregister();
+        });
+        return () => release();
+      }),
+    ensurePermission: () =>
+      this.resources.isActive()
+        ? notificationHost.ensurePermission()
+        : Promise.resolve(false),
+    send: (notification) =>
+      this.resources.isActive()
+        ? notificationHost.send(notification)
+        : Promise.resolve(),
   };
   readonly files: HostService["files"];
   readonly git: HostService["git"];
@@ -104,35 +113,39 @@ export class DesktopHost implements HostService {
   readonly account: HostService["account"];
   readonly updates: HostService["updates"];
   readonly acpProcess: HostService["acpProcess"];
+  readonly browser: HostService["browser"];
 
   isNative(): boolean {
     return isTauriEnv();
   }
 
-  readonly openDevelopmentAcpTransport: HostService["openDevelopmentAcpTransport"] = (options) => {
-    if (!import.meta.env.DEV || import.meta.env.VITEST)
-      return Promise.resolve(null);
-    return this.resources.acquire(async () => {
-      this.bridge ??= createBridgeAcpClient(() => this.resources.isActive());
-      const transport = await this.bridge.open(options, () => {
-        void release(() => {}).catch(() => {});
+  readonly openDevelopmentAcpTransport: HostService["openDevelopmentAcpTransport"] =
+    (options) => {
+      if (!import.meta.env.DEV || import.meta.env.VITEST)
+        return Promise.resolve(null);
+      return this.resources.acquire(async () => {
+        this.bridge ??= createBridgeAcpClient(() => this.resources.isActive());
+        const transport = await this.bridge.open(options, () => {
+          void release(() => {}).catch(() => {});
+        });
+        const release = this.resources.own(async () => {
+          if (!transport.isClosed) await transport.kill();
+          transport.dispose();
+        });
+        return transport;
       });
-      const release = this.resources.own(async () => {
-        if (!transport.isClosed) await transport.kill();
-        transport.dispose();
-      });
-      return transport;
-    });
-  };
+    };
 
   constructor(options: HostOptions = {}) {
     this.invoke = createInvoke((options.createLogger ?? createLogger)("host"));
+    this.browser = createBrowserHost(this.invoke);
     const backend = options.createBackend?.() ?? createHostRuntime(this.invoke);
     const runner = createHostProcessRunner(this.invoke);
     const updates = createUpdatesHost(this.invoke);
     this.updates = {
       ...updates,
-      install: () => this.invoke("update_install", undefined, undefined, this.flushForExit),
+      install: () =>
+        this.invoke("update_install", undefined, undefined, this.flushForExit),
       listen: (receive) => this.resources.listen(() => updates.listen(receive)),
     };
     const pathExists = (path: string) =>
@@ -149,14 +162,18 @@ export class DesktopHost implements HostService {
     };
     this.archives = {
       userDataDir,
-      readTextFile: (path) => this.resources.run(() => backend.readTextFile(path)),
+      readTextFile: (path) =>
+        this.resources.run(() => backend.readTextFile(path)),
     };
     this.skills = {
       pathExists,
       userDataDir,
-      listDirNames: (path) => this.resources.run(() => backend.listDirNames(path)),
-      copyDir: (from, to) => this.resources.run(() => backend.copyDir(from, to)),
-      writeTextFile: (path, text) => this.resources.run(() => backend.writeTextFile(path, text)),
+      listDirNames: (path) =>
+        this.resources.run(() => backend.listDirNames(path)),
+      copyDir: (from, to) =>
+        this.resources.run(() => backend.copyDir(from, to)),
+      writeTextFile: (path, text) =>
+        this.resources.run(() => backend.writeTextFile(path, text)),
     };
     this.account = createAccountHost(backend, this.resources);
     this.process = {
@@ -164,7 +181,11 @@ export class DesktopHost implements HostService {
       exists: (path) => this.resources.run(() => runner.exists(path)),
     };
     const panel = new NativePanelService(this.invoke);
-    const files = createDocumentFileHost(this.exitGate.isExiting, panel, this.invoke);
+    const files = createDocumentFileHost(
+      this.exitGate.isExiting,
+      panel,
+      this.invoke,
+    );
     const git = createGitHost(this.exitGate.isExiting, panel);
     this.files = {
       ...files,
@@ -174,7 +195,8 @@ export class DesktopHost implements HostService {
       ...git,
       watch: (...args) => this.resources.listen(() => git.watch(...args)),
     };
-    const process = options.acpProcess ?? createTauriAcpProcessHost(this.invoke);
+    const process =
+      options.acpProcess ?? createTauriAcpProcessHost(this.invoke);
     const acp = trackProcesses<number>(
       this.resources,
       (handle) => handle,

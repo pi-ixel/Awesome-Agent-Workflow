@@ -42,7 +42,7 @@ actor "Web 应用 / 目标网站" as Web
 rectangle "AAW 桌面端内嵌浏览器系统" {
   package "用户场景" {
     usecase "浏览网页与管理标签页" as UC_MANUAL
-    usecase "授权接管与接收标签页移交" as UC_COLLABORATE
+    usecase "通过人工接管开关取得或交还控制权" as UC_COLLABORATE
     usecase "查看 Agent 活动与证据" as UC_VIEW
     usecase "审批权限与高风险操作\n（需要用户决策时）" as UC_APPROVAL
     usecase "停止 Agent 浏览器操作\n（用户取消时）" as UC_STOP
@@ -56,7 +56,7 @@ rectangle "AAW 桌面端内嵌浏览器系统" {
     usecase "自动验证 Web 页面" as UC_AUTO
     usecase "导航、观察与操作网页" as UC_OPERATE
     usecase "获取截图与验证证据\n（需要视觉证据时）" as UC_EVIDENCE
-    usecase "子 Agent 使用浏览器\n（经父运行时登记）" as UC_SUBAGENT
+    usecase "同会话主子 Agent 共享浏览器\n（会话级平权）" as UC_SUBAGENT
   }
 
   package "系统保障场景" {
@@ -119,19 +119,20 @@ UC_PICKER ..> UC_MANUAL : <<extend>>
 UC_ENHANCE ..> UC_AUTO : <<extend>>
 
 note bottom of UC_SCOPE
-所有浏览器发现、标签页和命令都按窗口 + 工作区 + 会话隔离；
-子 Agent 必须经父运行时登记，桌面标签页默认归属父会话。
-用户实际点击、输入、滚动或按键时自动收回控制权，并取消该标签页未决动作。
-释放或收回控制权不改变原会话归属；崩溃或重连必须失效旧代次与迟到请求。
+所有浏览器发现、标签页和命令都按窗口 + 工作区 + 顶层会话隔离；
+同会话主、子 Agent 平权共享标签页，不需要额外身份登记。
+人工接管开关按会话控制全部标签；开启时取消未决 Agent 动作，关闭时允许 Agent 并阻止用户输入。
+网页输入和空闲不改变开关；新标签继承；崩溃或重连必须失效旧代次与迟到请求。
 end note
 
 note bottom of UC_TOGGLE
-应用级 Agent 控制总开关默认关闭；禁用后所有会话不得发现或调用工具。
+应用级 Agent 控制总开关默认允许；禁用后所有会话不得发现或调用工具。
 禁用同时取消未决 Agent 请求，不影响人工浏览、既有页面和站点数据。
+已有缺工具会话在重新开启后需确认重连，不自动恢复旧端点。
 end note
 
 note bottom of UC_DATA
-每个顶层会话使用独立的 AAW 持久化分区，子 Agent 继承父会话；
+每个顶层会话使用独立的 AAW 持久化分区，同会话主、子 Agent 平权共享；
 登录态和必要数据可跨重启保留，不同会话和工作区不共享站点数据。
 按工作区、会话、站点查看和清理，也可清理全部 AAW 浏览器数据；
 清缓存与清除登录态分开，破坏性操作按影响范围二次确认。

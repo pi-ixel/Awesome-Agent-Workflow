@@ -9,9 +9,16 @@ import { createAnnotationDraftStore } from "../../src/plugins/project/composer/a
 import { webviewStorage } from "../../src/plugins/host/storage/storage.ts";
 import { createTestWorkspace } from "../helpers/workspace.ts";
 const useWorkspaceStore = createTestWorkspace();
-import { draftScopeKey, readDraft } from "../../src/plugins/project/composer/draftStore.ts";
-import { decodeAnnotationMessage, encodeAnnotationMessage } from "../../src/plugins/project/composer/annotationMessage.ts";
+import {
+  draftScopeKey,
+  readDraft,
+} from "../../src/plugins/project/composer/draftStore.ts";
+import {
+  decodeAnnotationMessage,
+  encodeAnnotationMessage,
+} from "../../src/plugins/project/composer/annotationMessage.ts";
 import type { DocumentAnnotation } from "../../src/plugins/documents/types.ts";
+import { browserElement } from "../helpers/browserElement.ts";
 const project = "D:/project";
 const scope = draftScopeKey(project, "A");
 const annotation: DocumentAnnotation = {
@@ -55,13 +62,9 @@ describe("批注与输入框", () => {
     expect(
       decodeAnnotationMessage(send.mock.calls[0]![0] ?? "")?.annotations,
     ).toEqual([annotation]);
+    expect(annotationDrafts.getState().drafts[scope]?.annotations).toEqual([]);
     expect(
-      annotationDrafts.getState().drafts[scope]?.annotations,
-    ).toEqual([]);
-    expect(
-      Object.values(
-        annotationDrafts.getState().drafts[scope]!.submissions,
-      ),
+      Object.values(annotationDrafts.getState().drafts[scope]!.submissions),
     ).toHaveLength(1);
     expect(
       screen.queryByText("批注消息已提交，等待结果"),
@@ -108,9 +111,7 @@ describe("批注与输入框", () => {
     await userEvent.type(screen.getByLabelText("消息输入框"), "正文要保留");
     await userEvent.hover(screen.getByRole("button", { name: "2 条评论" }));
     await userEvent.click(screen.getByRole("button", { name: "删除全部评论" }));
-    expect(
-      annotationDrafts.getState().drafts[scope]?.annotations,
-    ).toEqual([]);
+    expect(annotationDrafts.getState().drafts[scope]?.annotations).toEqual([]);
     expect(screen.getByLabelText("消息输入框")).toHaveValue("正文要保留");
     expect(
       screen.queryByRole("dialog", { name: "文档评论" }),
@@ -125,9 +126,9 @@ describe("批注与输入框", () => {
     expect(
       screen.getByRole("button", { name: "1 条评论" }),
     ).toBeInTheDocument();
-    expect(
-      annotationDrafts.getState().drafts[scope]?.annotations,
-    ).toEqual([annotation]);
+    expect(annotationDrafts.getState().drafts[scope]?.annotations).toEqual([
+      annotation,
+    ]);
   });
   it("切到另一会话不显示之前的卡片，切回恢复", () => {
     annotationDrafts.put(scope, [annotation]);
@@ -212,9 +213,42 @@ describe("批注与输入框", () => {
     ).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "填回输入框" }));
     expect(screen.getByLabelText("消息输入框")).toHaveValue("修改建议");
-    expect(
-      annotationDrafts.getState().drafts[scope]?.annotations,
-    ).toEqual([annotation]);
+    expect(annotationDrafts.getState().drafts[scope]?.annotations).toEqual([
+      annotation,
+    ]);
+  });
+  it("TD-026-A01 公开 prefill 加入元素芯片但不自动发送，用户发送时保留正文与结构化引用", async () => {
+    const send = vi.fn<(text: string) => boolean>(() => true);
+    setup(send);
+    await userEvent.type(screen.getByLabelText("消息输入框"), "说明这个元素");
+    const { testComposer } = await import("../helpers/composer.ts");
+    const prompt = encodeAnnotationMessage("", [], [browserElement]);
+    let accepted = false;
+    act(() => {
+      accepted = testComposer.prefill(prompt);
+    });
+    expect(accepted).toBe(true);
+    expect(send).not.toHaveBeenCalled();
+    expect(await screen.findByText("点击验证")).toBeInTheDocument();
+    expect(screen.getByLabelText("消息输入框")).toHaveValue("说明这个元素");
+
+    await userEvent.click(screen.getByRole("button", { name: "发送" }));
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(decodeAnnotationMessage(send.mock.calls[0]![0])).toMatchObject({
+      text: "说明这个元素",
+      browserElements: [browserElement],
+    });
+  });
+  it("TD-026-B03 元素引用发送被拒绝时保留正文、芯片和持久化草稿", async () => {
+    annotationDrafts.putBrowserElements(scope, [browserElement]);
+    setup(() => false);
+    await userEvent.type(screen.getByLabelText("消息输入框"), "发送失败也保留");
+    await userEvent.click(screen.getByRole("button", { name: "发送" }));
+    expect(screen.getByLabelText("消息输入框")).toHaveValue("发送失败也保留");
+    expect(screen.getByText("点击验证")).toBeInTheDocument();
+    expect(annotationDrafts.getState().drafts[scope]?.browserElements).toEqual([
+      browserElement,
+    ]);
   });
 });
 
@@ -238,15 +272,22 @@ vi.mock("../../src/plugins/project/ui/bindings/workspaceView.ts", async () => {
   return workspaceViewFixture(() => useWorkspaceStore);
 });
 
-vi.mock(import("../../src/plugins/project/ui/bindings/annotationDraftView.ts"), async (original) => ({
-  ...(await original()),
-  useAnnotationDraftService: () => annotationOwner.composer,
-}));
+vi.mock(
+  import("../../src/plugins/project/ui/bindings/annotationDraftView.ts"),
+  async (original) => ({
+    ...(await original()),
+    useAnnotationDraftService: () => annotationOwner.composer,
+  }),
+);
 
-vi.mock("../../src/plugins/project/ui/bindings/conversationView.ts", async () => {
-  const { conversationViewFixture } = await import("../helpers/foreground.ts");
-  return conversationViewFixture();
-});
+vi.mock(
+  "../../src/plugins/project/ui/bindings/conversationView.ts",
+  async () => {
+    const { conversationViewFixture } =
+      await import("../helpers/foreground.ts");
+    return conversationViewFixture();
+  },
+);
 
 vi.mock("../../src/plugins/project/ui/bindings/composerView.ts", async () => {
   const { testComposer } = await import("../helpers/composer.ts");

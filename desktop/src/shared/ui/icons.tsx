@@ -716,3 +716,57 @@ export function LogOutIcon(props: IconProps) {
     </Svg>
   );
 }
+
+export function ArrowLeftIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="m15 18-6-6 6-6" />
+      <path d="M9 12h12" />
+    </Svg>
+  );
+}
+
+export function ArrowRightIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="m9 18 6-6-6-6" />
+      <path d="M3 12h12" />
+    </Svg>
+  );
+}
+
+export function MousePointer2Icon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 3l7.07 17 2.51-7.39L21 10.07z" />
+      <path d="M13.6 12.6 19 18" />
+    </Svg>
+  );
+}
+
+export function CameraIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z" />
+      <circle cx="12" cy="13" r="3.5" />
+    </Svg>
+  );
+}
+
+export function SquareIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="5" y="5" width="14" height="14" rx="2" />
+    </Svg>
+  );
+}
+
+export function DatabaseIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <ellipse cx="12" cy="5" rx="9" ry="3" />
+      <path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5" />
+      <path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3" />
+    </Svg>
+  );
+}

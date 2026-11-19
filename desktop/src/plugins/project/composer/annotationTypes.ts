@@ -1,5 +1,6 @@
 import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
 import type { DocumentAnnotation } from "../../documents/types.ts";
+import type { BrowserElement } from "../../../contracts/browser/types.ts";
 
 export interface AnnotationSubmission {
   readonly prompt: string;
@@ -8,12 +9,14 @@ export interface AnnotationSubmission {
 
 export interface AnnotationDraft {
   readonly annotations: readonly DocumentAnnotation[];
+  readonly browserElements: readonly BrowserElement[];
   /** Submitted snapshots remain durable and require explicit recovery after reload. */
   readonly submissions: Readonly<Record<string, AnnotationSubmission>>;
 }
 
 export const emptyAnnotationDraft: AnnotationDraft = {
   annotations: [],
+  browserElements: [],
   submissions: {},
 };
 
@@ -25,7 +28,14 @@ export interface AnnotationDraftSnapshot {
 
 export interface AnnotationDraftService extends ReadonlySnapshot<AnnotationDraftSnapshot> {
   readonly ensure: (scope: string) => void;
-  readonly put: (scope: string, annotations: readonly DocumentAnnotation[]) => boolean;
+  readonly put: (
+    scope: string,
+    annotations: readonly DocumentAnnotation[],
+  ) => boolean;
+  readonly putBrowserElements: (
+    scope: string,
+    elements: readonly BrowserElement[],
+  ) => boolean;
   readonly submit: (scope: string, prompt: string) => boolean;
   readonly settle: (prompt: string, failed: boolean) => void;
   readonly recover: (scope: string, id: string) => string | null;

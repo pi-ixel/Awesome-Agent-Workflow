@@ -5,6 +5,7 @@ import type {
   WorkspaceView,
 } from "./workspace/types.ts";
 import type { AnnotationDraftSnapshot } from "./composer/annotationTypes.ts";
+import type { BrowserElement } from "../../contracts/browser/types.ts";
 import type {
   ConversationExpansion,
   ForegroundSessionTarget,
@@ -53,7 +54,10 @@ declare module "cordis" {
 
 export interface ProjectWorkspace {
   readonly workspace: WorkspaceView;
-  readonly subscribeWorkspaceActivity: (path: string, listener: () => void) => () => void;
+  readonly subscribeWorkspaceActivity: (
+    path: string,
+    listener: () => void,
+  ) => () => void;
   readonly selectWorkspace: (path: string) => void;
   readonly openWorkspace: (path?: string) => void;
   readonly closeWorkspace: () => void;
@@ -65,7 +69,9 @@ export interface ProjectWorkspace {
   ) => void;
   readonly dismissConnectError: (path: string) => void;
   readonly patchToolPaths: (paths: Partial<WorkspaceToolPaths>) => void;
-  readonly runHealthChecks: (paths?: Partial<WorkspaceToolPaths>) => Promise<void>;
+  readonly runHealthChecks: (
+    paths?: Partial<WorkspaceToolPaths>,
+  ) => Promise<void>;
   readonly reloadWorkspacePreferences: () => void;
   pickDirectory(): Promise<string | null>;
   registerWorkspaceHealthCheck(check: WorkspaceHealthCheck): () => void;
@@ -75,7 +81,10 @@ export interface ProjectWorkspace {
   registerProjectClose(participant: ProjectCloseParticipant): () => void;
 }
 
-export interface ProjectSessions extends Pick<ProjectSessionIndexes, "catalog" | "activity"> {
+export interface ProjectSessions extends Pick<
+  ProjectSessionIndexes,
+  "catalog" | "activity"
+> {
   readonly archive: ReadonlySnapshot<SessionArchiveSnapshot>;
   readonly dismissArchiveNotice: SessionArchiveState["dismissNotice"];
   readonly archiveWithNotice: SessionArchiveState["archiveWithNotice"];
@@ -145,21 +154,35 @@ export interface ProjectConversation {
 export interface ProjectAnnotationEditor {
   readonly current: (project: string) => AnnotationDraftTarget | undefined;
   readonly subscribeTarget: (listener: () => void) => () => void;
-  readonly read: (target: AnnotationDraftTarget) => readonly DocumentAnnotation[];
+  readonly read: (
+    target: AnnotationDraftTarget,
+  ) => readonly DocumentAnnotation[];
   readonly subscribeDrafts: (listener: () => void) => () => void;
   readonly ensure: (target: AnnotationDraftTarget) => void;
-  readonly upsert: (target: AnnotationDraftTarget, annotation: DocumentAnnotation) => string | null;
+  readonly upsert: (
+    target: AnnotationDraftTarget,
+    annotation: DocumentAnnotation,
+  ) => string | null;
   readonly remove: (target: AnnotationDraftTarget, id: string) => boolean;
   readonly followPromotion: (
     target: AnnotationDraftTarget,
     listener: (replacement: AnnotationDraftTarget) => void,
   ) => () => void;
-  readonly showAfterSave: (project: string, target: AnnotationDraftTarget) => Promise<StartSessionResult | undefined>;
+  readonly showAfterSave: (
+    project: string,
+    target: AnnotationDraftTarget,
+  ) => Promise<StartSessionResult | undefined>;
 }
 
-export interface ProjectAnnotationDrafts extends ReadonlySnapshot<Pick<AnnotationDraftSnapshot, "drafts" | "error">> {
+export interface ProjectAnnotationDrafts extends ReadonlySnapshot<
+  Pick<AnnotationDraftSnapshot, "drafts" | "error">
+> {
   ensure(scope: string): void;
   put(scope: string, annotations: readonly DocumentAnnotation[]): boolean;
+  putBrowserElements(
+    scope: string,
+    elements: readonly BrowserElement[],
+  ): boolean;
   submit(scope: string, prompt: string): boolean;
   rejectSubmission(scope: string | null, prompt: string): void;
   recover(scope: string, id: string): string | null;

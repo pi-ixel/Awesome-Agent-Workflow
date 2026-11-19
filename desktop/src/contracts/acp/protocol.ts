@@ -91,13 +91,22 @@ export interface InitializeResult {
 // session/new | load | list
 // ---------------------------------------------------------------------------
 
-/** stdio MCP server 配置（session/new 的 mcpServers 元素；当前客户端只发空数组）。 */
+/** ACP 会话创建/恢复时提交的 MCP 配置。 */
 export interface McpServerStdio {
   readonly type: "stdio";
   readonly command: string;
   readonly args?: readonly string[];
   readonly env?: Readonly<Record<string, string>>;
 }
+
+export interface McpServerHttp {
+  readonly type: "http";
+  readonly name: string;
+  readonly url: string;
+  readonly headers?: readonly { readonly name: string; readonly value: string }[];
+}
+
+export type McpServer = McpServerStdio | McpServerHttp;
 
 export interface SessionMode {
   readonly id: string;
@@ -124,7 +133,7 @@ export interface SessionModelState {
 
 export interface NewSessionRequestParams {
   readonly cwd: string;
-  readonly mcpServers: readonly McpServerStdio[];
+  readonly mcpServers: readonly McpServer[];
   readonly additionalDirectories?: readonly string[];
 }
 
@@ -137,7 +146,7 @@ export interface NewSessionResult {
 export interface LoadSessionRequestParams {
   readonly sessionId: string;
   readonly cwd: string;
-  readonly mcpServers: readonly McpServerStdio[];
+  readonly mcpServers: readonly McpServer[];
   readonly additionalDirectories?: readonly string[];
 }
 
@@ -334,7 +343,8 @@ export interface RequestPermissionRequestParams {
   readonly options: readonly {
     readonly optionId: string;
     readonly name: string;
-    readonly kind: "allow_once" | "allow_always" | "reject_once" | "reject_always";
+    readonly kind:
+      "allow_once" | "allow_always" | "reject_once" | "reject_always";
   }[];
 }
 

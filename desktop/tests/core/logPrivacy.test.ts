@@ -1,5 +1,9 @@
 import { expect, it, vi } from "vitest";
-import { redactContext, redactText } from "../../src/shared/logging/logPrivacy.ts";
+import {
+  redactAcpRaw,
+  redactContext,
+  redactText,
+} from "../../src/shared/logging/logPrivacy.ts";
 import { LogSink } from "../../src/plugins/diagnostics/capture/logSink.ts";
 
 it("日志在进入内存和订阅前移除凭据、正文及 URL 查询", () => {
@@ -26,4 +30,22 @@ it("错误字符串中的 JSON 密钥和 Authorization Bearer 被脱敏", () => 
   expect(
     redactText('Authorization: Bearer secret-value {"password":"json-secret"}'),
   ).not.toMatch(/secret-value|json-secret/);
+});
+it("ACP 原文脱敏 MCP 令牌且保留完整诊断报文", () => {
+  const raw = JSON.stringify({
+    jsonrpc: "2.0",
+    method: "session/new",
+    params: {
+      mcpServers: [
+        {
+          headers: [{ name: "Authorization", value: "Bearer browser-secret" }],
+        },
+      ],
+      prompt: "x".repeat(5000),
+    },
+  });
+  const sanitized = redactAcpRaw(raw);
+  expect(sanitized).not.toContain("browser-secret");
+  expect(sanitized).toContain("Bearer [REDACTED]");
+  expect(sanitized).toContain("x".repeat(5000));
 });

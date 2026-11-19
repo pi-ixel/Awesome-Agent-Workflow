@@ -48,7 +48,10 @@ import { sessionActivityKey } from "./sessionActivityStore.ts";
  *
  * 生命周期与视图解耦：切换或离开项目只改变聚焦，显式退出才关闭所有会话。
  */
-import { createLogger, type LoggerFactory } from "../../../shared/logging/logger.ts";
+import {
+  createLogger,
+  type LoggerFactory,
+} from "../../../shared/logging/logger.ts";
 import type { SessionInfo } from "../../../contracts/acp/protocol.ts";
 import type { AgentAdapter } from "../../agents/types.ts";
 import type { AgentsService } from "../../agents/service.ts";
@@ -58,6 +61,7 @@ import {
 } from "../conversation/sessionStore.ts";
 import type { WorkspaceStoreState } from "../workspace/types.ts";
 import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
+import type { HostService } from "../../host/service.ts";
 import type { createMessageImageHistory } from "../conversation/messageImageHistory.ts";
 import type { AnnotationDraftService } from "../composer/annotationTypes.ts";
 import { attachSessionViews } from "../conversation/projection.ts";
@@ -66,7 +70,8 @@ import {
   prepareDraftPromotion,
 } from "../composer/draftPromotion.ts";
 import { resolveAutoPermission } from "../interactions/permissionPolicy.ts";
-
+import { browserObservationUrl } from "../../../shared/urlPrivacy.ts";
+import { asRecord } from "../../../shared/valueGuards.ts";
 
 export type RealWorkspaceOpenResult = NonNullable<OpenSessionResult>;
 
@@ -74,11 +79,15 @@ export interface ProjectSessionDependencies {
   readonly workspace: ReadonlySnapshot<WorkspaceStoreState>;
   readonly annotationDrafts: AnnotationDraftService;
   readonly messageImages: ReturnType<typeof createMessageImageHistory>;
-  readonly foreground: Pick<ReturnType<typeof createProjectForeground>, "view" | "select" | "activity">;
+  readonly foreground: Pick<
+    ReturnType<typeof createProjectForeground>,
+    "view" | "select" | "activity"
+  >;
   readonly indexes: ReturnType<typeof createProjectSessionIndexes>;
   readonly forms: ReturnType<typeof createElicitationQueue>;
   readonly getProtocol: () => AcpProtocolResources;
   readonly getAgents: () => AgentsService;
+  readonly getBrowser: () => HostService["browser"];
   readonly getApprovalMode: () => ApprovalMode;
   readonly loggerFactory?: LoggerFactory;
   readonly navigation: {
@@ -87,6 +96,15 @@ export interface ProjectSessionDependencies {
 }
 
 /** 项目 Fiber 持有的会话协调状态，协议资源通过运行时端口申请。 */
+export async function disposeBrowserSession(
+  browser: HostService["browser"],
+  sessionId: string,
+  endpointId: string,
+): Promise<void> {
+  await browser.closeSession(sessionId);
+  await browser.revokeMcpEndpoint(endpointId);
+}
+
 export function createSessionCoordinator({
   workspace: workspaceStore,
   indexes,
@@ -96,6 +114,7 @@ export function createSessionCoordinator({
   foreground,
   getProtocol,
   getAgents,
+  getBrowser,
   getApprovalMode,
   navigation,
   loggerFactory = createLogger,
@@ -155,9 +174,7 @@ export function createSessionCoordinator({
     const id =
       runtime.session.sessionId ?? runtime.store.getState().activeSessionId;
     if (id)
-      activity
-        .getState()
-        .read(runtime.workspacePath, id, runtime.agentKey);
+      activity.getState().read(runtime.workspacePath, id, runtime.agentKey);
   }
   function observeRuntime(runtime: SessionRuntime): () => void {
     let wasRunning = runtime.store.getState().isAgentRunning;
@@ -250,7 +267,9 @@ export function createSessionCoordinator({
     return protocol;
   }
 
-  async function releaseSessionResources(session: AcpSessionPort): Promise<void> {
+  async function releaseSessionResources(
+    session: AcpSessionPort,
+  ): Promise<void> {
     try {
       session.cancel();
     } catch {
@@ -557,7 +576,12 @@ export function createSessionCoordinator({
     focusRevision += 1;
     activeRuntime = null;
     const history = closing ? {} : catalogStore.getState().sessionsByPath;
-    const empty = createSessionStore(selectedAgentKey(), annotationDrafts, messageImages, sessionLogger);
+    const empty = createSessionStore(
+      selectedAgentKey(),
+      annotationDrafts,
+      messageImages,
+      sessionLogger,
+    );
     empty.setState({ sessionsByPath: history });
     selectForeground(empty);
   }
@@ -565,7 +589,12 @@ export function createSessionCoordinator({
   /** 新建先切独立视图；旧运行时仍在 runtimes 中接收事件，绝不清空旧 store。 */
   function beginDraftWorkspace(workspacePath: string) {
     const history = catalogStore.getState().sessionsByPath;
-    const store = createSessionStore(selectedAgentKey(), annotationDrafts, messageImages, sessionLogger);
+    const store = createSessionStore(
+      selectedAgentKey(),
+      annotationDrafts,
+      messageImages,
+      sessionLogger,
+    );
     store.setState({
       sessionsByPath: history,
       isDraftPreparing: true,
@@ -654,7 +683,11 @@ export function createSessionCoordinator({
       focusRevision += 1;
       activeRuntime = loadingSession.runtime;
       loadingSession.store.getState().beginOpenSession(sessionId);
-      selectForeground(loadingSession.store, loadingSession.approval, loadingSession.status);
+      selectForeground(
+        loadingSession.store,
+        loadingSession.approval,
+        loadingSession.status,
+      );
       return true;
     }
     const runtime = [...projectFactory.sessions()].find(
@@ -778,7 +811,8 @@ export function createSessionCoordinator({
           draft &&
           preferredSessionId === null &&
           !runtime.store.getState().agentCrashed &&
-          runtime.session.sessionId === null,
+          runtime.session.sessionId === null &&
+          runtime.store.getState().activeSessionId === null,
       ) ?? null;
     if (draftRuntime !== null) {
       if (options.shouldFocus?.() !== false) focusRuntime(draftRuntime);
@@ -832,9 +866,7 @@ export function createSessionCoordinator({
       if (candidate) await disposeRuntime(candidate);
       if (!closing && agentKey === selectedAgentKey()) {
         const status =
-          catalogStore.getState().statusByPath[
-            pathKey(workspacePath)
-          ];
+          catalogStore.getState().statusByPath[pathKey(workspacePath)];
         reportFailure(
           status?.state === "error" ? status.message : "无法建立 Agent 连接",
         );
@@ -957,7 +989,9 @@ export function createSessionCoordinator({
       // 上次对话）；全新 newSession 不切，保持项目总览——是否进会话由
       // 用户的动作决定（连接按钮 = 只看状态，新建会话 = 直接进对话）
       if (restoredHistoric && activeRuntime === candidate) {
-        navigation.getState().openView(projectConversationPageId, workspacePath);
+        navigation
+          .getState()
+          .openView(projectConversationPageId, workspacePath);
       }
 
       // 成功连接：清除该项目此前的连接失败态（错误横幅 / 失败徽标退场）
@@ -1010,9 +1044,7 @@ export function createSessionCoordinator({
   }
 
   function selectedAgentKey(): string {
-    return getAgents().selectionKey(
-      workspaceStore.getState().toolPaths,
-    );
+    return getAgents().selectionKey(workspaceStore.getState().toolPaths);
   }
 
   const connectionKey = (agentKey: string, path: string) =>
@@ -1053,7 +1085,10 @@ export function createSessionCoordinator({
     if (closing || retired) return;
     directory.updateCatalog(selectedAgentKey(), owner, entries);
     const catalog = catalogStore.getState();
-    if (catalog.agentKey === owner.agentKey && foregroundSession.getState().agentKey === owner.agentKey)
+    if (
+      catalog.agentKey === owner.agentKey &&
+      foregroundSession.getState().agentKey === owner.agentKey
+    )
       foregroundSession.setState({ sessionsByPath: catalog.sessionsByPath });
   }
 
@@ -1171,7 +1206,14 @@ export function createSessionCoordinator({
         workspaceStore.getState().toolPaths,
         workspacePath,
       );
-    const viewStore = retained?.store ?? createSessionStore(selectedAgentKey(), annotationDrafts, messageImages, sessionLogger),
+    const viewStore =
+        retained?.store ??
+        createSessionStore(
+          selectedAgentKey(),
+          annotationDrafts,
+          messageImages,
+          sessionLogger,
+        ),
       approvalStore = retained?.approval ?? createApprovalStore(approvalLogger),
       statusStore = retained?.status ?? createRuntimeStatusStore(usageLogger);
     if (!retained)
@@ -1182,6 +1224,13 @@ export function createSessionCoordinator({
     try {
       const protocol = await prepareProtocol(adapter, agentKey);
       if (retained && !isCurrent()) return null;
+      const browser = getBrowser();
+      const browserEndpoint = browser.isAvailable()
+        ? await browser.createMcpEndpoint().catch((error: unknown) => {
+            if (String(error).includes("AGENT_CONTROL_DISABLED")) return null;
+            throw error;
+          })
+        : null;
       const approval = approvalStore.getState();
       const acceptsRequests = () => {
         const target = retained ?? candidate;
@@ -1197,6 +1246,87 @@ export function createSessionCoordinator({
         );
       };
       const sessionOptions: AcpProtocolSessionOptions = {
+        mcpServers: browserEndpoint
+          ? [
+              {
+                type: "http",
+                name: browserEndpoint.name,
+                url: browserEndpoint.url,
+                headers: [
+                  {
+                    name: "Authorization",
+                    value: `Bearer ${browserEndpoint.token}`,
+                  },
+                ],
+              },
+            ]
+          : [],
+        ...(browserEndpoint
+          ? {
+              onSessionReady: (sessionId: string) =>
+                browser
+                  .bindMcpEndpoint(browserEndpoint.endpointId, sessionId)
+                  .then(() => {}),
+              onCapabilitiesReady: (capabilities) =>
+                browser
+                  .setMcpCapabilities(
+                    browserEndpoint.endpointId,
+                    asRecord(capabilities["promptCapabilities"])?.["image"] ===
+                      true,
+                  )
+                  .then(() => {}),
+              onSessionDisposed: () =>
+                disposeBrowserSession(
+                  browser,
+                  browserEndpoint.sessionId ?? "",
+                  browserEndpoint.endpointId,
+                ),
+
+              onCancel: (sessionId: string) =>
+                browser.cancelWork(sessionId).then(() => {}),
+              onPromptStart: (sessionId: string) =>
+                browser.beginWork(sessionId).then(() => {}),
+              onPromptSettled: (sessionId: string) =>
+                browser.cancelWork(sessionId).then(() => {}),
+            }
+          : {}),
+        onPromptContext: async (sessionId: string) => {
+          if (!browser.isAvailable()) return [];
+          const enabled = await browser.agentControlEnabled();
+          const mcpStatus = await browser.mcpStatus(sessionId);
+          const status = statusStore.getState();
+          const runtimeKnown = status.lastSessionId === sessionId;
+          const hasBrowserTools =
+            runtimeKnown &&
+            status.runtime.toolNames.some((name) => name.startsWith("browser_"));
+          if (
+            !enabled ||
+            mcpStatus !== "active" ||
+            (runtimeKnown && !hasBrowserTools)
+          ) {
+            return [
+              {
+                type: "text" as const,
+                text: "AAW 内嵌浏览器工具当前不可用。不得改用系统默认浏览器；请指导用户在 AAW 中开启“Agent 浏览器控制”，并在浏览器面板确认“重连并恢复浏览器工具”。",
+              },
+            ];
+          }
+          if (!browserEndpoint) return [];
+          try {
+            const space = await browser.snapshot(sessionId);
+            const tab = space.tabs.at(-1);
+            if (!tab) return [];
+            const url = browserObservationUrl(tab.committedUrl ?? "about:blank");
+            return [
+              {
+                type: "text" as const,
+                text: `当前浏览器页面上下文（只读，不构成操作授权）：URL=${url}；状态=${tab.lifecycle}`,
+              },
+            ];
+          } catch {
+            return [{ type: "text" as const, text: "当前页面上下文不可用" }];
+          }
+        },
         onElicitation: (form, signal, scopeMethod) => {
           if (!acceptsRequests()) return Promise.resolve({ action: "cancel" });
           viewStore.getState().sealStreamingItems();
@@ -1213,7 +1343,9 @@ export function createSessionCoordinator({
                 const target = retained ?? candidate;
                 if (target && !target.disposed) {
                   focusRuntime(target);
-                  navigation.getState().openView(projectConversationPageId, workspacePath);
+                  navigation
+                    .getState()
+                    .openView(projectConversationPageId, workspacePath);
                 }
               },
             },
@@ -1374,10 +1506,7 @@ export function createSessionCoordinator({
     if (closing || switchingAgent || projectClosures.has(pathKey(path)))
       return Promise.resolve(null);
     const agentKey = activateCatalog();
-    if (
-      catalogStore.getState().statusByPath[pathKey(path)] ===
-      undefined
-    )
+    if (catalogStore.getState().statusByPath[pathKey(path)] === undefined)
       setListStatus(path, agentKey, { state: "loading" });
     return projectFactory.prepare(
       path,

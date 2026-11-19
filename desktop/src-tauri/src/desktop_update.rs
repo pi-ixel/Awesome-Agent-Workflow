@@ -843,6 +843,9 @@ pub fn update_cancel(app: AppHandle) {
 }
 #[tauri::command]
 pub async fn update_install(app: AppHandle) -> Result<(), String> {
+    if app.state::<crate::browser::host::BrowserHost>().has_active_operations() {
+        return Err("仍有浏览器操作执行中，请等待完成或取消后再安装更新".into());
+    }
     let service = app.state::<Updates>();
     if !*service.frozen.lock().unwrap() {
         return Err("请先确认更新版本".into());

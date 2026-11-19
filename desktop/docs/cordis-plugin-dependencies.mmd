@@ -15,6 +15,7 @@ flowchart TB
     skills["skills<br/>技能"]
     account["account<br/>账户"]
     updates["updates<br/>更新"]
+    browser["browser<br/>内嵌浏览器"]
   end
   rust["Rust / Tauri<br/>非插件"]
 
@@ -67,6 +68,7 @@ flowchart TB
   updates --> host
   updates --> configuration
   updates --> diagnostics
+  browser --> host
 
   %% 可选业务能力
   project -. "可选：技能候选" .-> skills
@@ -90,6 +92,7 @@ flowchart TB
   skills -. "UI 注册" .-> workbench
   account -. "UI 注册" .-> workbench
   updates -. "UI 注册" .-> workbench
+  browser -. "UI 注册" .-> workbench
   agents -. "设置页读取项目上下文并请求切换 Agent" .-> project
   project -. "注册标题区与新建会话入口" .-> workbench
   documents -. "登记文件路径解析" .-> workbench
@@ -114,5 +117,5 @@ flowchart TB
   classDef external fill:#eeeeee,stroke:#666666,color:#222222
   class host,configuration,diagnostics,workbench base
   class agents,acpConnection,acpRuntime runtime
-  class project,documents,git,terminal,workflow,skills,account,updates product
+  class project,documents,git,terminal,workflow,skills,account,updates,browser product
   class rust external

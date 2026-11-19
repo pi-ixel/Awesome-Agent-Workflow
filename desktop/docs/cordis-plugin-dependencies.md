@@ -1,10 +1,10 @@
 # Desktop 完整插件依赖图
 
-这是已对齐的目标架构，不是当前代码依赖扫描结果。15 个插件逐个展开，Rust 为插件外宿主。ICode / CodeAgent 是 agents 的内部模块，不额外计为插件。
+这是已对齐的目标架构，不是当前代码依赖扫描结果。16 个插件逐个展开，Rust 为插件外宿主。ICode / CodeAgent 是 agents 的内部模块，不额外计为插件。
 
 - 箭头指向被依赖或被注册的服务，不表示启动顺序或事件流向。
 - 实线表示必需服务依赖。虚线标签区分启动注入、可选业务接入、UI 注册、界面调用、界面订阅、健康检查注册、安装退出调用、关闭参与者注册和导航检查注册。
-- 全图共 **82 条边**，包括 43 条必需服务依赖、5 条启动注入、9 条可选业务接入、10 条 UI 注册、5 条界面调用、1 条界面订阅、1 条健康检查注册、1 条探查会话工厂注册、1 条安装退出调用、5 条关闭参与者注册和 1 条导航检查注册。
+- 全图共 **84 条边**，包括 44 条必需服务依赖、5 条启动注入、9 条可选业务接入、11 条 UI 注册、5 条界面调用、1 条界面订阅、1 条健康检查注册、1 条探查会话工厂注册、1 条安装退出调用、5 条关闭参与者注册和 1 条导航检查注册。
 - 同一对插件间的不同关系保留为独立边，例如 updates → workbench 的 UI 注册和安装退出调用。
 - UI 和关闭参与者由子模块/装配层注册，不将其变为业务核心的强制依赖。documents → project 的关闭注册与 project → documents 的可选上下文接入，不代表核心服务循环注入。
 - 公共基础依赖逐条绘制，不合并节点、不省略公共连线。通过中间插件形成的间接依赖不新增为直接边。
@@ -28,6 +28,7 @@ flowchart TB
     skills["skills<br/>技能"]
     account["account<br/>账户"]
     updates["updates<br/>更新"]
+    browser["browser<br/>内嵌浏览器"]
   end
   rust["Rust / Tauri<br/>非插件"]
 
@@ -80,6 +81,7 @@ flowchart TB
   updates --> host
   updates --> configuration
   updates --> diagnostics
+  browser --> host
 
   %% 可选业务能力
   project -. "可选：技能候选" .-> skills
@@ -103,6 +105,7 @@ flowchart TB
   skills -. "UI 注册" .-> workbench
   account -. "UI 注册" .-> workbench
   updates -. "UI 注册" .-> workbench
+  browser -. "UI 注册" .-> workbench
   agents -. "设置页读取项目上下文并请求切换 Agent" .-> project
   project -. "注册标题区与新建会话入口" .-> workbench
   documents -. "登记文件路径解析" .-> workbench
@@ -127,7 +130,7 @@ flowchart TB
   classDef external fill:#eeeeee,stroke:#666666,color:#222222
   class host,configuration,diagnostics,workbench base
   class agents,acpConnection,acpRuntime runtime
-  class project,documents,git,terminal,workflow,skills,account,updates product
+  class project,documents,git,terminal,workflow,skills,account,updates,browser product
   class rust external
 ```
 

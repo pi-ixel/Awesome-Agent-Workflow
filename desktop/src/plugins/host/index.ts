@@ -11,6 +11,7 @@ export function apply(ctx: Context, options?: HostOptions): void {
   ctx.provide(name, {
     isNative: host.isNative.bind(host),
     acpProcess: host.acpProcess,
+    browser: host.browser,
     openDevelopmentAcpTransport: host.openDevelopmentAcpTransport,
     storage: host.storage,
     diagnostics: host.diagnostics,

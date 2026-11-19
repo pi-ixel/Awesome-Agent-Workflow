@@ -8,14 +8,21 @@ import { createProjectSessionIndexes } from "../../src/plugins/project/sessions/
 import { webviewStorage } from "../../src/plugins/host/storage/storage.ts";
 import type { AgentsService } from "../../src/plugins/agents/service.ts";
 import { createElicitationQueue } from "../../src/plugins/project/interactions/elicitationStore.ts";
-import { createSessionCoordinator, type ProjectSessionDependencies } from "../../src/plugins/project/sessions/sessionCoordinator.ts";
+import {
+  createSessionCoordinator,
+  type ProjectSessionDependencies,
+} from "../../src/plugins/project/sessions/sessionCoordinator.ts";
 import { createTestProjectPreferences } from "./projectPreferences.tsx";
+import { createTestBrowserHost } from "./browserHost.ts";
 
 export type { RealWorkspaceOpenResult } from "../../src/plugins/project/sessions/sessionCoordinator.ts";
 
+export const browser = createTestBrowserHost();
 let workspace: ProjectSessionDependencies["workspace"] = createTestWorkspace();
 let annotationDrafts = createAnnotationDraftStore(webviewStorage).service;
-export function bindProjectDependencies(dependencies: ProjectSessionDependencies): void {
+export function bindProjectDependencies(
+  dependencies: ProjectSessionDependencies,
+): void {
   workspace = dependencies.workspace;
   annotationDrafts = dependencies.annotationDrafts;
   bindForeground(dependencies.foreground);
@@ -75,6 +82,8 @@ export const {
     isActive: () => annotationDrafts.isActive(),
     ensure: (scope) => annotationDrafts.ensure(scope),
     put: (scope, annotations) => annotationDrafts.put(scope, annotations),
+    putBrowserElements: (scope, elements) =>
+      annotationDrafts.putBrowserElements(scope, elements),
     submit: (scope, prompt) => annotationDrafts.submit(scope, prompt),
     settle: (prompt, failed) => annotationDrafts.settle(prompt, failed),
     recover: (scope, id) => annotationDrafts.recover(scope, id),
@@ -89,6 +98,7 @@ export const {
     if (!agents) throw new Error("Test Agents service is not bound");
     return agents;
   },
+  getBrowser: () => browser,
   getApprovalMode: () => projectPreferences.getState().approvalMode,
   navigation: useWorkbenchUiStore,
 });

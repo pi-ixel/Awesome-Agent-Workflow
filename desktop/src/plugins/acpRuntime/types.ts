@@ -4,12 +4,16 @@ import type {
   InitializeResult,
   ListSessionsResult,
   LoadSessionResult,
+  McpServer,
   NewSessionResult,
   PromptResult,
   RequestPermissionOutcome,
   SessionInfo,
 } from "../../contracts/acp/protocol.ts";
-import type { ElicitationForm, FormResponse } from "../../contracts/acp/elicitation.ts";
+import type {
+  ElicitationForm,
+  FormResponse,
+} from "../../contracts/acp/elicitation.ts";
 import type { AgentAdapter } from "../agents/types.ts";
 import type { AcpSessionEvent } from "./events.ts";
 import type { SessionConfigOption } from "./protocol/configurationTypes.ts";
@@ -54,6 +58,20 @@ export interface AgentDialectHooks {
  * 仍由本层负责。由 Agent 适配注册层构造（见 registry.ts 的
  * `createDialect`）。
  */
+export type AgentParticipantLifecycle =
+  | {
+      type: "start";
+      sessionId: string;
+      participantId: string;
+      parentCallId: string;
+    }
+  | {
+      type: "finish";
+      sessionId: string;
+      participantId?: string;
+      parentCallId?: string;
+    };
+
 export interface AcpDialect {
   readonly normalizeConfigOptions?: (raw: unknown) => unknown;
   readonly requireConfigurationConfirmation?: boolean;
@@ -80,6 +98,10 @@ export interface AcpDialect {
     method: string,
     params: Readonly<Record<string, unknown>>,
   ) => AcpSessionEvent | null;
+  readonly participantFromNotification?: (
+    method: string,
+    params: Readonly<Record<string, unknown>>,
+  ) => AgentParticipantLifecycle | null;
   /**
    * 私有反向请求处理器（按 method 精确匹配）。未命中的方法交回协议层
    * （标准 ACP 反向请求或 -32601 method not found）。
@@ -104,6 +126,21 @@ export interface AcpSessionOptions {
   readonly dialect?: AcpDialect;
   /** 客户端标识（initialize 握手用）。 */
   readonly clientInfo?: { readonly name: string; readonly version?: string };
+  readonly mcpServers?: readonly McpServer[];
+  readonly onSessionReady?: (sessionId: string) => void | Promise<void>;
+  readonly onCapabilitiesReady?: (
+    capabilities: InitializeResult["agentCapabilities"],
+  ) => void | Promise<void>;
+  readonly onSessionDisposed?: () => void | Promise<void>;
+  readonly onParticipantEvent?: (
+    event: AgentParticipantLifecycle,
+  ) => void | Promise<void>;
+  readonly onCancel?: (sessionId: string) => void | Promise<void>;
+  readonly onPromptStart?: (sessionId: string) => void | Promise<void>;
+  readonly onPromptSettled?: (sessionId: string) => void | Promise<void>;
+  readonly onPromptContext?: (
+    sessionId: string,
+  ) => Promise<readonly ContentBlock[]>;
 }
 
 export type ChannelSessionOptions = AcpSessionOptions & {
@@ -123,7 +160,10 @@ export interface AcpSessionPort {
   closeSession(): Promise<void>;
   onEvent(listener: (event: AcpSessionEvent) => void): () => void;
   initialize(options?: SessionRequestOptions): Promise<InitializeResult>;
-  newSession(cwd: string, options?: SessionRequestOptions): Promise<NewSessionResult>;
+  newSession(
+    cwd: string,
+    options?: SessionRequestOptions,
+  ): Promise<NewSessionResult>;
   loadSession(
     sessionId: string,
     cwd: string,
@@ -140,7 +180,11 @@ export interface AcpSessionPort {
   cancel(): void;
   setMode(modeId: string, options?: SessionRequestOptions): Promise<void>;
   setModel(modelId: string, options?: SessionRequestOptions): Promise<void>;
-  setConfigOption(configId: string, value: string, options?: SessionRequestOptions): Promise<void>;
+  setConfigOption(
+    configId: string,
+    value: string,
+    options?: SessionRequestOptions,
+  ): Promise<void>;
 }
 
 export interface AcpProtocolRestoreOptions {

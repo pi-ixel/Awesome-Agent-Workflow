@@ -11,6 +11,9 @@ export function redactText(value: string): string {
       url.includes("@") ? "[REDACTED URL]" : url.split(/[?#]/)[0]!,
     );
 }
+export function redactAcpRaw(value: string): string {
+  return value.replace(/(bearer\s+)[^\s"',;}\\]+/gi, "$1[REDACTED]");
+}
 export function redactContext(value: unknown, depth = 0): unknown {
   if (depth > 5) return "[truncated]";
   if (typeof value === "string") return redactText(value);

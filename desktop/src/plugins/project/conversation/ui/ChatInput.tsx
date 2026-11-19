@@ -1,5 +1,12 @@
-import { useSessionValue, useRuntimeValue, useConversation } from "../../ui/bindings/conversationView.ts";
-import { useAnnotationDraft, useAnnotationDraftService } from "../../ui/bindings/annotationDraftView.ts";
+import {
+  useSessionValue,
+  useRuntimeValue,
+  useConversation,
+} from "../../ui/bindings/conversationView.ts";
+import {
+  useAnnotationDraft,
+  useAnnotationDraftService,
+} from "../../ui/bindings/annotationDraftView.ts";
 import { useProjectComposer } from "../../ui/bindings/composerView.ts";
 import { useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
 import { useRegisteredSnapshot } from "../../../../shared/state/useRegisteredSnapshot.ts";
@@ -15,6 +22,7 @@ import {
   encodeAnnotationMessage,
 } from "../../composer/annotationMessage.ts";
 import { AnnotationSummary } from "./AnnotationSummary.tsx";
+import { BrowserElementSummary } from "./BrowserElementSummary.tsx";
 /**
  * 输入区（悬浮形态）：不贴边贴底的圆角卡片——外层 `0 16px 16px` 留白，
  * 内部 max-w-4xl 居中，surface 植面 + 圆角 16 + 投影。
@@ -196,7 +204,8 @@ export function ChatInput({
     if (!imageStorage) return;
     let alive = true;
     imagesRef.current = {};
-    void imageStorage.load()
+    void imageStorage
+      .load()
       .then((saved) => {
         if (!alive) return;
         const combined = { ...saved };
@@ -217,9 +226,9 @@ export function ChatInput({
   useEffect(() => {
     if (!imageStorage || !imagesLoaded) return;
     imagesRef.current = imagesByScope;
-    void imageStorage.save(imagesByScope).catch(() =>
-      setAttachmentError("图片草稿保存失败，重启后可能丢失"),
-    );
+    void imageStorage
+      .save(imagesByScope)
+      .catch(() => setAttachmentError("图片草稿保存失败，重启后可能丢失"));
   }, [imagesByScope, imagesLoaded, imageStorage]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const turnState = useSessionValue((state) => state.turnState);
@@ -243,7 +252,8 @@ export function ChatInput({
       ? null
       : draftScopeKey(activePath, activeSessionId, agentKey);
   const imageScope = draftKey ?? "unbound";
-  const images = imageStorage && imagesLoaded ? (imagesByScope[imageScope] ?? []) : [];
+  const images =
+    imageStorage && imagesLoaded ? (imagesByScope[imageScope] ?? []) : [];
   const hasUnsupportedImages =
     images.length > 0 && !supportsImages && !sendDisabled;
   async function addImageFiles(files: File[]) {
@@ -273,10 +283,14 @@ export function ChatInput({
   }
   const annotationDrafts = useAnnotationDraftService();
   const annotationDraft = useAnnotationDraft(annotationDrafts, draftKey);
-  const annotationError = useRegisteredSnapshot(annotationDrafts, (state) => state?.error ?? null);
+  const annotationError = useRegisteredSnapshot(
+    annotationDrafts,
+    (state) => state?.error ?? null,
+  );
   const hasContent =
     draft.trim().length > 0 ||
     annotationDraft.annotations.length > 0 ||
+    annotationDraft.browserElements.length > 0 ||
     images.length > 0;
   const draftKeyRef = useRef<string | null>(null);
   const draftTextRef = useRef("");
@@ -309,9 +323,7 @@ export function ChatInput({
   const runtimeSkillNames = useRuntimeValue(
     (state) => state.runtime.skillNames,
   );
-  const agentCommands = useRuntimeValue(
-    (state) => state.availableCommands,
-  );
+  const agentCommands = useRuntimeValue((state) => state.availableCommands);
   const skillInvocations = useRuntimeValue(
     (state) => state.runtime.skillInvocations,
   );
@@ -325,7 +337,8 @@ export function ChatInput({
     readonly paths: readonly string[];
   }>();
   if (files && files.owner !== fileCandidates) setFiles(undefined);
-  const filesReady = files?.owner === fileCandidates && files?.project === activePath;
+  const filesReady =
+    files?.owner === fileCandidates && files?.project === activePath;
   const mentioning = mention !== null;
   useEffect(() => {
     if (!mentioning || !fileCandidates || !activePath || filesReady) return;
@@ -388,17 +401,32 @@ export function ChatInput({
   }, [draftKey, activePath, activeSessionId, agentKey, annotationDrafts]);
 
   useEffect(() => {
-    if (!annotationDrafts || !imageStorage || !imagesLoaded || !draftKey || activeSessionId !== null) return;
+    if (
+      !annotationDrafts ||
+      !imageStorage ||
+      !imagesLoaded ||
+      !draftKey ||
+      activeSessionId !== null
+    )
+      return;
     const migration = projectDraftImageMigration(draftKey, imagesRef.current);
     if (!migration) return;
     imagesRef.current = migration.images;
     setImagesByScope(migration.images);
-    void imageStorage.save(migration.images)
+    void imageStorage
+      .save(migration.images)
       .then(() => annotationDrafts.finishLegacyDraft(draftKey, migration.from))
       .catch(() =>
         setAttachmentError("图片草稿迁移失败，旧附件已保留，请重试"),
       );
-  }, [draftKey, imagesLoaded, activeSessionId, agentKey, annotationDrafts, imageStorage]);
+  }, [
+    draftKey,
+    imagesLoaded,
+    activeSessionId,
+    agentKey,
+    annotationDrafts,
+    imageStorage,
+  ]);
 
   // Project 的预填通道：外部送来的文本落进草稿并聚焦
   useEffect(() => {
@@ -407,7 +435,10 @@ export function ChatInput({
       const imagesToAdd = attachments
         .filter((block) => block.type === "image")
         .map((block, index) => ({ name: `图片 ${index + 1}`, block }));
-      const combined = [...(imagesRef.current[attachmentScope] ?? []), ...imagesToAdd];
+      const combined = [
+        ...(imagesRef.current[attachmentScope] ?? []),
+        ...imagesToAdd,
+      ];
       if (imagesToAdd.length) {
         const error = imageLimitError(combined);
         if (error) {
@@ -421,13 +452,26 @@ export function ChatInput({
         const store = annotationDrafts;
         if (!store) return false;
         store.ensure(scope);
-        const existing =
-          annotationDrafts?.getState().drafts[scope]?.annotations ?? [];
+        const draft = store.getState().drafts[scope];
+        const existing = draft?.annotations ?? [];
         if (
           !store.put(scope, [
             ...existing,
             ...parsed.annotations.filter(
               (a) => !existing.some((b) => b.id === a.id),
+            ),
+          ])
+        )
+          return false;
+        const existingElements = draft?.browserElements ?? [];
+        if (
+          !store.putBrowserElements(scope, [
+            ...existingElements,
+            ...parsed.browserElements.filter(
+              (element) =>
+                !existingElements.some(
+                  (existing) => existing.referenceId === element.referenceId,
+                ),
             ),
           ])
         )
@@ -480,11 +524,24 @@ export function ChatInput({
       slash === null
         ? []
         : filterSlashItems(
-            buildSlashItems(skillNames, agentCommands, skillInvocations, workflowEntries)
-              .filter((item) => item.actionId !== "diagnostics" || openDiagnostics),
+            buildSlashItems(
+              skillNames,
+              agentCommands,
+              skillInvocations,
+              workflowEntries,
+            ).filter(
+              (item) => item.actionId !== "diagnostics" || openDiagnostics,
+            ),
             slash.query,
           ),
-    [slash, skillNames, agentCommands, skillInvocations, workflowEntries, openDiagnostics],
+    [
+      slash,
+      skillNames,
+      agentCommands,
+      skillInvocations,
+      workflowEntries,
+      openDiagnostics,
+    ],
   );
 
   /** 面板渲染行：分组变化处带一行组头（与前一项比较，无渲染中可变量）。 */
@@ -627,12 +684,13 @@ export function ChatInput({
     const prompt = encodeAnnotationMessage(
       trimmed,
       annotationDraft.annotations,
+      annotationDraft.browserElements,
     );
     const submittedScope = draftKeyRef.current;
     if (
-      annotationDraft.annotations.length &&
-      (!submittedScope ||
-        !annotationDrafts?.submit(submittedScope, prompt))
+      (annotationDraft.annotations.length ||
+        annotationDraft.browserElements.length) &&
+      (!submittedScope || !annotationDrafts?.submit(submittedScope, prompt))
     )
       return;
     const rejected = () => {
@@ -980,18 +1038,18 @@ export function ChatInput({
           key={draftKey}
           annotations={annotationDraft.annotations}
           onClear={() =>
-            draftKey
-              ? (annotationDrafts?.put(draftKey, []) ?? false)
-              : false
+            draftKey ? (annotationDrafts?.put(draftKey, []) ?? false) : false
           }
           onChange={(a) => {
             if (draftKey)
-              return annotationDrafts?.put(
-                draftKey,
-                annotationDraft.annotations.map((item) =>
-                  item.id === a.id ? a : item,
-                ),
-              ) ?? false;
+              return (
+                annotationDrafts?.put(
+                  draftKey,
+                  annotationDraft.annotations.map((item) =>
+                    item.id === a.id ? a : item,
+                  ),
+                ) ?? false
+              );
             return false;
           }}
           onRemove={(id) => {
@@ -1001,6 +1059,19 @@ export function ChatInput({
                 annotationDraft.annotations.filter((a) => a.id !== id),
               );
           }}
+        />
+        <BrowserElementSummary
+          elements={annotationDraft.browserElements}
+          onRemove={(referenceId) =>
+            draftKey
+              ? (annotationDrafts?.putBrowserElements(
+                  draftKey,
+                  annotationDraft.browserElements.filter(
+                    (element) => element.referenceId !== referenceId,
+                  ),
+                ) ?? false)
+              : false
+          }
         />
         {Object.entries(annotationDraft.submissions)
           .filter(([, entry]) => entry.state === "uncertain")

@@ -35,8 +35,8 @@ skinparam note {
   FontColor #334155
 }
 
-actor "Agent\n（iCode / ACP）" as Agent
-actor "子 Agent" as SubAgent
+actor "主 Agent\n（iCode / ACP）" as Agent
+actor "子 Agent\n（同会话平权）" as SubAgent
 actor "开发者用户" as User
 actor "Web 应用 / 目标网站" as Web
 
@@ -49,9 +49,9 @@ rectangle "Agent Browser Use 子系统" {
     usecase "发现真实可用浏览器" as UC_DISCOVER
     usecase "读取有效能力与操作文档" as UC_DOCS
     usecase "创建、复用或选择标签页" as UC_TARGET
-    usecase "枚举并显式接管用户标签页\n（存在已授权页面时）" as UC_CLAIM
+    usecase "在用户关闭人工接管后\n枚举并选择已交还标签页" as UC_CLAIM
     usecase "校验会话与标签页归属" as UC_SCOPE
-    usecase "子 Agent 使用浏览器\n（经父运行时登记）" as UC_SUBAGENT
+    usecase "同会话主子 Agent 共享浏览器\n（会话级平权）" as UC_SUBAGENT
   }
 
   package "页面观察与操作" {
@@ -131,8 +131,8 @@ note bottom of UC_CANCEL
 end note
 
 note bottom of UC_SUBAGENT
-未登记的子会话请求一律拒绝；桌面子 Agent 默认共用父会话标签页。
-子 Agent 结束只撤销登记，不关闭父会话页面。
+同会话主、子 Agent 平权共享端点、标签页、站点数据和动作权限。
+子 Agent 结束不关闭页面或撤销会话端点；审计与取消只承诺到顶层会话。
 end note
 
 legend bottom

@@ -36,11 +36,8 @@ export default tseslint.config(
       ecmaVersion: 2022,
       globals: globals.browser,
       parserOptions: {
-        // vite.config.ts 属于 tsconfig.node.json（不被主 tsconfig include），
-        // 交给 projectService 的默认项目兜底
-        projectService: {
-          allowDefaultProject: ["vite.config.ts"],
-        },
+        // projectService 同时识别主 tsconfig 与 tsconfig.node.json。
+        projectService: true,
         tsconfigRootDir: import.meta.dirname,
       },
     },
