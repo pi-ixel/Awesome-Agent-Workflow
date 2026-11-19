@@ -1,0 +1,126 @@
+/*
+ * 启动器小窗的存在时间只有几秒（快捷键唤起 → 选一个 → 消失），所以配色必须
+ * 跟主窗一致：主窗默认深色，此前这里写死浅色，半夜唤起就是一块白板。
+ * 主题由主进程经 IPC 下发（`launcher:theme`），默认深色，与主窗 defaultAppearance 对齐。
+ */
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+:root {
+  color-scheme: dark;
+  --bg: #16181f;
+  --surface: #1c202a;
+  --border: #2b2f3b;
+  --line: #242833;
+  --ink: #e5e8f0;
+  --ink-strong: #f3f5fa;
+  --muted: #9aa2b5;
+  --faint: #7b8396;
+  --hover: #1f2330;
+  --hover-border: #2a2f3d;
+  --selected: #262c41;
+  --selected-ring: #7c8bf0;
+  --brand: #2a3149;
+  --pin-bg: #16181f;
+  --notice-bg: #372a16;
+  --notice-ink: #e3b578;
+  --input-bg: #1c202a;
+  --input-border: #333a49;
+  --primary: #6675e6;
+  --focus: #7c8bf0;
+  font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+}
+:root[data-theme="warm"] {
+  color-scheme: light;
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --border: #dee1e7;
+  --line: #e7e9ef;
+  --ink: #242837;
+  --ink-strong: #1d2233;
+  --muted: #818899;
+  --faint: #969daa;
+  --hover: #eef1f7;
+  --hover-border: #e3e7f0;
+  --selected: #e4e8f7;
+  --selected-ring: #5b6ad8;
+  --brand: #252c3c;
+  --pin-bg: #f7f8fa;
+  --notice-bg: #fff5e6;
+  --notice-ink: #986024;
+  --input-bg: #ffffff;
+  --input-border: #d7dce6;
+  --primary: #5968d9;
+  --focus: #8290ed;
+}
+body { margin: 0; height: 100vh; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+button, input { font: inherit; }
+button { color: inherit; cursor: pointer; border: 0; background: transparent; }
+button:disabled { cursor: wait; opacity: .6; }
+header { display: flex; align-items: center; gap: 14px; padding: 14px 20px; border-bottom: 1px solid var(--line); -webkit-app-region: drag; }
+.search { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; -webkit-app-region: no-drag; }
+.search svg { width: 20px; height: 20px; flex: none; stroke: var(--faint); fill: none; stroke-width: 1.6; }
+input { min-width: 0; width: 100%; color: var(--ink); background: transparent; border: 0; outline: none; }
+#query { font-size: 17px; line-height: 28px; letter-spacing: 0; }
+#query::placeholder { color: var(--faint); }
+.brand { -webkit-app-region: no-drag; width: 32px; height: 32px; border-radius: 10px; background: var(--brand); color: #fff; font-size: 19px; font-weight: 650; position: relative; }
+.brand span { position: absolute; font-size: 12px; top: 1px; right: 3px; color: #d1d7ff; }
+main { min-height: 0; flex: 1; display: flex; flex-direction: column; overflow-y: auto; padding: 13px 18px 12px; scrollbar-width: thin; }
+/* 固定区贴底：内容少时把余白放在两区之间，而不是全堆在窗口最下方。 */
+#pinned-section { margin-top: auto; }
+.section-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 6px; margin-bottom: 7px; }
+h2 { margin: 0; font-size: 12px; font-weight: 600; }
+.section-label button { font-size: 12px; color: var(--muted); padding: 3px 0; }
+.section-label button:hover { color: var(--selected-ring); }
+section + section { margin-top: 14px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 4px; list-style: none; padding: 0; margin: 0; }
+.grid li { min-width: 0; position: relative; }
+.item { position: relative; width: 100%; min-height: 86px; padding: 9px 5px 7px; display: flex; align-items: center; flex-direction: column; gap: 7px; border: 1px solid transparent; border-radius: 10px; }
+.item:hover { background: var(--hover); border-color: var(--hover-border); }
+/*
+ * 键盘选中态必须和 hover 一眼分得开：这个小窗主要靠方向键操作，之前选中
+ * 只把底色压深一档，和鼠标悬停几乎一致，用户按四下不知道光标在哪。
+ * 这里用「边框 + 内描边」做双线环（不占布局、不引起位移）+ 标签加粗。
+ */
+.item[aria-current="true"] { background: var(--selected); border-color: var(--selected-ring); box-shadow: inset 0 0 0 1px var(--selected-ring); }
+.item[aria-current="true"] .item-label { font-weight: 600; color: var(--ink-strong); }
+.item[data-busy="true"] { cursor: progress; }
+.item[data-busy="true"] .item-mark { animation: mark-pulse 1s ease-in-out infinite; }
+.item[data-busy="true"] .item-label { color: var(--selected-ring); }
+@keyframes mark-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .item[data-busy="true"] .item-mark { animation: none; opacity: .6; } }
+.item-mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; color: white; background: #6b72df; box-shadow: inset 0 1px 0 #ffffff40, 0 2px 5px #29365310; }
+.item-mark svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.item-glyph { font-size: 16px; font-weight: 600; line-height: 1; }
+.item-mark[data-icon="workflow"] { background: #5873df; }
+.item-mark[data-icon="library"] { background: #2b9b8d; }
+.item-mark[data-tone="0"] { background: #6b72df; }
+.item-mark[data-tone="1"] { background: #9670ce; }
+.item-mark[data-tone="2"] { background: #cf8950; }
+.item-mark[data-tone="3"] { background: #4f97b4; }
+.item-label { font-size: 12px; line-height: 16px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.pin { position: absolute; right: 3px; top: 2px; width: 23px; height: 23px; padding: 0; border-radius: 50%; background: var(--pin-bg); color: var(--muted); opacity: 0; font-size: 16px; }
+li:hover .pin, li:focus-within .pin { opacity: 1; }
+.pin[aria-pressed="true"] { color: #8a93c8; }
+.empty { min-height: 76px; display: flex; align-items: center; margin: 0 6px; color: var(--faint); font-size: 12px; }
+footer { flex: none; min-height: 30px; border-top: 1px solid var(--line); padding: 7px 23px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; font-size: 10px; color: var(--muted); }
+footer button { font-size: inherit; color: inherit; padding: 0; }
+#close { margin-left: 8px; }
+kbd { font: inherit; color: var(--muted); margin-right: 4px; }
+footer kbd:not(:first-child) { margin-left: 8px; }
+#shortcut:hover { color: var(--selected-ring); }
+#message { margin: 0; padding: 9px 24px; background: var(--notice-bg); color: var(--notice-ink); font-size: 12px; overflow-wrap: anywhere; max-height: 76px; overflow-y: auto; }
+#settings { flex: 1; min-height: 0; padding: 22px 24px; overflow-y: auto; margin: 0; }
+#settings .section-label { padding: 0; margin-bottom: 22px; }
+#settings label { font-size: 14px; font-weight: 600; }
+#settings p { font-size: 12px; color: var(--muted); line-height: 1.6; }
+form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 15px 0; }
+#accelerator { width: 235px; max-width: 100%; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); padding: 9px 12px; font-size: 14px; font-weight: 600; letter-spacing: .3px; }
+#accelerator:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+form button { padding: 9px 12px; font-size: 12px; border-radius: 8px; }
+form button:not(.primary) { border: 1px solid var(--input-border); }
+.primary { background: var(--primary); color: white; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+#query:focus-visible { outline: none; }
+@media (max-width: 580px) { header { padding: 12px 14px; } #query { font-size: 16px; } main { padding: 12px; } .grid { grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); } footer { padding-inline: 16px; } }

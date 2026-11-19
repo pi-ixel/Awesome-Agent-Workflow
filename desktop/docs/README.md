@@ -18,6 +18,7 @@
 ## 功能说明
 
 - [界面功能参考](features/ui-reference.md)。
+- 工具专栏：开发规范与红线见仓库内 [工具开发技能手册](../../skills/tool-dev/SKILL.md)；架构设计、变更清单与各轮整改记录统一收录在独立文档仓库，不在本代码仓维护。
 - [文档批注](features/document-annotations.md)。
 - [会话状态悬浮卡](features/session-status-card.md)。
 - [CodeAgent 压缩历史验收](codeagent-compaction-acceptance.md)。

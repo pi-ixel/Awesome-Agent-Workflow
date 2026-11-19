@@ -18,6 +18,7 @@ import * as workflowPlugin from "../plugins/workflow/index.ts";
 import * as skillsPlugin from "../plugins/skills/index.ts";
 import * as mcpPlugin from "../plugins/mcp/index.ts";
 import * as accountPlugin from "../plugins/account/index.ts";
+import * as toolsPlugin from "../plugins/tools/index.ts";
 import * as updatesPlugin from "../plugins/updates/index.ts";
 import * as browserPlugin from "../plugins/browser/index.ts";
 import * as scheduledTasksPlugin from "../plugins/scheduledTasks/index.ts";
@@ -89,6 +90,7 @@ export function createDesktopRuntime(
       await context.plugin(skillsPlugin);
       await context.plugin(mcpPlugin);
       await context.plugin(accountPlugin);
+      await context.plugin(toolsPlugin);
       await context.plugin(updatesPlugin);
       await context.plugin(browserPlugin);
       await contribute?.(context);

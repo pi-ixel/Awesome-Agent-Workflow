@@ -76,6 +76,22 @@ export interface CommandResult {
  * 宿主能力接口：
  * copy_dir 为「先删目标再整树复制」的覆盖语义。
  */
+/** 卸载清理：删掉某工具的项目目录与用户数据。 */
+export interface ToolPurgeInput {
+  readonly toolId: string;
+  /** 账号标识（已规整过的目录段）。 */
+  readonly owner: string;
+  /** 要删除的项目目录；宿主会校验每个目录确实含该工具的 manifest.json。 */
+  readonly projectDirs: readonly string[];
+}
+
+export interface ToolPurgeReport {
+  readonly removedDirs: readonly string[];
+  /** 校验没过或删除失败的目录，界面要如实告诉用户"这几个没删掉"。 */
+  readonly skippedDirs: readonly string[];
+  readonly removedData: boolean;
+}
+
 export interface HostRuntime {
   /** 实现类别：tauri（真实宿主）| demo（内存替身）。 */
   readonly kind: "tauri" | "demo";
@@ -100,8 +116,36 @@ export interface HostRuntime {
   readTextFile(path: string): Promise<string>;
   /** 写入 UTF-8 文本文件（自动创建父目录）。 */
   writeTextFile(path: string, contents: string): Promise<void>;
+  /**
+   * 写入二进制文件（内容以 base64 传入，自动创建父目录）。
+   *
+   * 工具可以自带 `node_modules`、图片、wasm，这些不是 UTF-8 文本，走
+   * `writeTextFile` 会把字节改坏。ZIP 导入解压后逐个落盘用它。
+   */
+  writeBinaryFile?(path: string, base64: string): Promise<void>;
+  /** 读取二进制文件（base64）；超过 `limit` 字节时报错，避免把大文件读进内存。 */
+  readBinaryFile?(path: string, limit?: number): Promise<string>;
+  /**
+   * 递归列举目录内全部文件（相对路径、`/` 分隔）。
+   *
+   * 与 `listWorkspaceFiles` 的区别：**不跳过** `node_modules`——导出带依赖的
+   * 工具时必须把依赖一起打包。
+   */
+  listToolFiles?(root: string, limit?: number): Promise<readonly string[]>;
   /** Resolve a namespaced user data directory; both arguments are single safe segments. */
   userDataDir(namespace: string, directory: string): Promise<string>;
+  /**
+   * 卸载清理：删除工具的项目目录与 `aawStore` 数据文件。
+   *
+   * 传进来的目录不会被无条件删除——宿主先确认其中的 manifest.json 属于该
+   * 工具，对不上就跳过并在报告里返回，避免误删用户选过的父目录。
+   */
+  toolPurge(input: ToolPurgeInput): Promise<ToolPurgeReport>;
+  /**
+   * 移动文件或目录（目标必须不存在）。工具项目改名用它——同盘原子移动，
+   * 不复制、不删除、不碰工具数据。
+   */
+  moveToolPath(from: string, to: string): Promise<void>;
   /**
    * 打开（或唤起）SSO 登录窗口：首次调用创建 **隐藏** 窗口（给持久
    * cookie 的静默探测留窗口期），再次调用即唤起显示。语义见 sso_login.rs。
@@ -307,7 +351,9 @@ export type {
 } from "./filesystem/skillLibrary.ts";
 export type SkillFiles = Pick<
   HostRuntime,
-  "userDataDir" | "listDirNames" | "pathExists" | "copyDir" | "writeTextFile"
+  | "userDataDir" | "listDirNames" | "pathExists" | "copyDir" | "writeTextFile" | "toolPurge" | "moveToolPath"
+  // 工具带依赖之后要落二进制（node_modules / 图片 / wasm）并整树导出
+  | "writeBinaryFile" | "readBinaryFile" | "listToolFiles"
 > & { readonly library?: NativeSkillLibrary };
 
 /**

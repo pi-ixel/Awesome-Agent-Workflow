@@ -142,6 +142,12 @@ jobs:
       - name: Build workflow engine sidecar
         run: npm run workflow:build:debug
 
+      - name: Build Electron tools runtime
+        run: npm run tools:build
+
+      - name: Smoke test Electron tool actions
+        run: npm run tools:test
+
       - name: Workflow engine tests
         run: cargo test --manifest-path workflow-engine-rs/Cargo.toml --locked --no-fail-fast -- --skip real_icode
 
@@ -240,7 +246,11 @@ jobs:
           if ($installers.Count -ne 1) { throw "Expected one NSIS installer, found $($installers.Count)" }
           $stem = "AAW-Desktop-$env:DESKTOP_VERSION-windows-x64"
           Copy-Item -LiteralPath $installers[0].FullName -Destination "$output/$stem-setup.exe"
-          Compress-Archive -LiteralPath "$release/desktop.exe" -DestinationPath "$output/$stem-portable.zip"
+          $portable = Join-Path $env:RUNNER_TEMP 'aaw-desktop-portable'
+          New-Item -ItemType Directory -Path $portable | Out-Null
+          Copy-Item -LiteralPath "$release/desktop.exe" -Destination $portable
+          Copy-Item -LiteralPath 'tools-runtime/dist' -Destination "$portable/tools-runtime" -Recurse
+          Compress-Archive -Path "$portable/*" -DestinationPath "$output/$stem-portable.zip"
           $checksums = Get-ChildItem -LiteralPath $output -File | Sort-Object Name | ForEach-Object {
             $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash  $($_.Name)"

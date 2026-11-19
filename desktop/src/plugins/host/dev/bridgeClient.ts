@@ -220,6 +220,16 @@ export function createBridgeHost(): HostRuntime {
     async writeTextFile(path, contents) {
       await request("POST", "/fs/write", { path, contents });
     },
+    /**
+     * 卸载清理在浏览器 dev 模式下不可用：删文件是不可逆操作，而 dev bridge
+     * 没有等价的安全校验，宁可明确拒绝也不要假装成功。
+     */
+    toolPurge() {
+      return Promise.reject(new Error("浏览器预览模式不支持删除工具文件，请在桌面版中操作。"));
+    },
+    moveToolPath() {
+      return Promise.reject(new Error("浏览器预览模式不支持移动目录，请在桌面版中改名。"));
+    },
     async userDataDir(namespace, directory) {
       const raw = await request("POST", "/user-data-dir", {
         namespace,

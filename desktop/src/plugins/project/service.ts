@@ -12,6 +12,7 @@ import type {
 } from "./sessions/sessionDeletion.ts";
 export { projectOverviewPageId } from "./workspace/pageIds.ts";
 export { knownWorkspacePaths } from "./workspace/knownPaths.ts";
+export { prepareProjectLauncher } from "./workspace/launcherContext.ts";
 import type { ForegroundSessionListener } from "./events.ts";
 import type { WorkspaceToolPaths, WorkspaceView } from "./workspace/types.ts";
 import type { AnnotationDraftSnapshot } from "./composer/annotationTypes.ts";
@@ -117,6 +118,8 @@ export interface ProjectWorkspace {
   readonly dismissConnectError: (path: string) => void;
   readonly patchToolPaths: (paths: Partial<WorkspaceToolPaths>) => void;
   readonly reloadWorkspacePreferences: () => void;
+  /** 注册不进入「最近项目」的路径前缀（工具项目用）。 */
+  readonly setRecentExclusions: (prefixes: readonly string[]) => void;
   pickDirectory(): Promise<string | null>;
   registerProject(path: string): void;
   /** Check and release the addressed project's resources before removing its list entry. */

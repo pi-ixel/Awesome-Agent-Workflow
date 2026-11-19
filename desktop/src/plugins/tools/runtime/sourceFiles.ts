@@ -1,0 +1,34 @@
+/**
+ * 清单里文本文件的配额。
+ *
+ * 从 64 个 / 512 KB 放宽到 512 个 / 4 MB：工具能带 `node_modules` 之后，跟着
+ * 一起进来的手写模块（`lib/*.js`）不再是"两个文件"的量级。二进制资源不进这个
+ * 字段，它们落盘在工具目录里。
+ */
+export const sourceFileLimit = { files: 512, bytes: 4 * 1024 * 1024 } as const;
+
+export function safeSourcePath(path: string): boolean {
+  // 320 而不是 200：`node_modules` 里嵌套包名 + 目录经常超过 200 字符
+  // （`node_modules/@babel/plugin-transform-xxx/lib/helpers/yyy.js` 这种）。
+  // 再长就接近 Windows 的 260 字符路径上限了，那时候问题在文件系统，
+  // 不是在路径校验。
+  return path.length > 0 && path.length <= 320 && !/[\\:<>"|?*]/.test(path) && ![...path].some((ch) => ch.charCodeAt(0) < 32)
+    && path.split("/").every((part) => part && part !== "." && part !== ".."
+      && !/[. ]$/.test(part) && !/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(part)
+      && !["__proto__", "prototype", "constructor"].includes(part));
+}
+
+export function readSourceFiles(value: unknown): Readonly<Record<string, string>> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value);
+  if (entries.length > sourceFileLimit.files) return undefined;
+  const paths = new Set<string>();
+  let bytes = 0;
+  for (const [path, source] of entries) {
+    if (!safeSourcePath(path) || paths.has(path.toLowerCase()) || ["manifest.json", "index.html"].includes(path.toLowerCase()) || typeof source !== "string") return undefined;
+    paths.add(path.toLowerCase());
+    bytes += new TextEncoder().encode(source).length;
+    if (bytes > sourceFileLimit.bytes) return undefined;
+  }
+  return Object.fromEntries(entries);
+}

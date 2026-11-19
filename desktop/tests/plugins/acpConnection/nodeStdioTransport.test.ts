@@ -7,9 +7,10 @@
  *
  * 半包用例直接覆盖「分帧解析含半包」的端到端路径（子进程分段写出）。
  *
- * 超时纪律：本文件全部用例真实 spawn 子进程（node + taskkill），在 vitest
- * 全量并行负载下进程拉起可能显著变慢；且实现的强杀宽限本身就是 5s + 1s、
- * 优雅关闭宽限 5s——统一给 15s 显式超时，不用 vitest 默认 5s。
+ * 超时纪律：本文件全部用例真实 spawn 子进程（node + taskkill / tasklist），
+ * 在 vitest 全量并行负载下进程拉起可能显著变慢；实现侧仍有 5s 强杀宽限与
+ * 5s 优雅关闭宽限作为最坏路径的兜底——统一给 15s 显式超时，不用 vitest
+ * 默认 5s。正常路径（强杀在 exit 事件上收口）每个用例都在 1s 内。
  */
 
 import { spawn } from "node:child_process";
@@ -243,8 +244,27 @@ describe("NodeStdioTransport 行为", () => {
     expect(transport.isClosed).toBe(true);
     // 幂等
     await expect(transport.kill()).resolves.toEqual(exit);
-    // 实现的强杀宽限本身就是 5s + 1s 兜底窗口（KILL_GRACE_MS / KILL_FINAL_MS），
-    // 全量并行下 taskkill 可能贴近上限：显式给 15s，不用 vitest 默认的 5s
+    // 15s 是最坏路径的兜底（见文件头的超时纪律），正常路径几百毫秒收口。
+  }, 15_000);
+
+  /**
+   * 回归：强杀不能吃满宽限窗口。
+   *
+   * 曾经的实现是「先 await taskkill 再挂 close 监听」——taskkill 返回时子进程
+   * 早已退出、close 也已派发完，监听永远等不到，于是每次都白等 KILL_GRACE_MS
+   * （5s）才靠 exitCode 兜底。用户点「停止」要卡 5 秒；全量并行下还会把
+   * 上层用例的超时预算吃穿（表现为本文件偶发超时）。
+   */
+  it("kill 在 exit 事件上收口，不白等 5s 强杀宽限", async () => {
+    const transport = new NodeStdioTransport({
+      command: runNode("setInterval(() => {}, 1000);"),
+    });
+    const startedAt = Date.now();
+    const exit = await transport.kill();
+    const elapsed = Date.now() - startedAt;
+    expect(exit.code !== 0 || exit.signal !== null).toBe(true);
+    // 阈值 4s：远低于 5s 宽限（能抓住回归），又给并行负载留足余量。
+    expect(elapsed).toBeLessThan(4_000);
   }, 15_000);
 
   it("Windows 进程树终止：孙进程一并被杀（taskkill /T /F）", async () => {
@@ -396,7 +416,8 @@ describe.skipIf(process.platform !== "win32")(
         transport.onLine((line) => lines.push(line));
         await waitFor(
           () => (lines.includes("hello-from-shim") ? lines : undefined),
-          5_000,
+          // 经 cmd.exe 拉起：并行负载下光进程启动就可能几秒，别用 5s 去赌。
+          10_000,
           "shim 输出",
         );
         await transport.kill();
@@ -425,7 +446,8 @@ describe.skipIf(process.platform !== "win32")(
         await waitFor(
           () =>
             lines.includes("argument=value with spaces") ? true : undefined,
-          5_000,
+          // 同样经 cmd.exe：并行负载下给进程启动留足余量。
+          10_000,
           "带空格参数",
         );
       } finally {

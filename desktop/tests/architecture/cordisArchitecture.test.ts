@@ -21,6 +21,7 @@ const plugins = [
   "skills",
   "mcp",
   "account",
+  "tools",
   "updates",
   "browser",
   "scheduledTasks",
@@ -35,6 +36,7 @@ const uiOwners = [
   "workflow",
   "skills",
   "account",
+  "tools",
   "updates",
   "browser",
 ] as const;
@@ -455,7 +457,7 @@ it("keeps plugin names and dependency relations aligned with their production ow
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => /^(?:\w+ --> \w+|\w+ -\. ".+" \.-> \w+)$/.test(line));
-  expect(new Set(edges).size).toBe(94);
+  expect(new Set(edges).size).toBe(98);
   expect(edges.sort()).toEqual([...required, ...weak].sort());
 
   const runtime = createTestDesktopRuntime(
@@ -513,6 +515,9 @@ it("keeps plugin names and dependency relations aligned with their production ow
       "file",
       "files",
       "git",
+      // 工具预览是独立标签：能和工具列表、文件、终端并排存在。
+      "tool-preview",
+      "tools",
     ]);
     expect(view.settings.map(({ id }) => id).sort()).toEqual([
       "agents",
