@@ -1,4 +1,5 @@
 import type {
+  BrowserApproval,
   BrowserCleanupPreview,
   BrowserCleanupResult,
   BrowserDataCatalogEntry,
@@ -11,6 +12,8 @@ import type {
   BrowserZoomEvent,
   BrowserTab,
 } from "../../../contracts/browser/types.ts";
+
+export type { BrowserApproval } from "../../../contracts/browser/types.ts";
 
 export interface BrowserBounds {
   x: number;
@@ -28,15 +31,6 @@ export interface BrowserMcpEndpoint {
   generation: number;
   revoked: boolean;
   imageCapable: boolean;
-}
-
-export interface BrowserApproval {
-  approvalId: string;
-  sessionId: string;
-  tabId: string;
-  action: string;
-  status: "pending" | "approved" | "denied" | "invalidated" | "consumed";
-  generation: number;
 }
 
 export interface BrowserEvidence {

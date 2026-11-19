@@ -164,6 +164,15 @@ const PUBLISHED_TOOLS: &[&str] = &[
 fn description(name: &str) -> &'static str {
     match name {
         "browser_capabilities" => "读取当前实例有效工具、限制和恢复文档",
+        "browser_execute_script" => {
+            "执行受限页面脚本；缺少 approvalId 时创建审批并等待决策，批准后在同一调用内执行，超时返回 APPROVAL_REQUIRED，需携带同一 approvalId 重试"
+        }
+        "browser_submit" => {
+            "提交表单；缺少 approvalId 时创建审批并等待决策，超时返回 APPROVAL_REQUIRED，需携带同一 approvalId 重试"
+        }
+        "browser_upload" => {
+            "上传文件；缺少 approvalId 时创建审批并等待决策，超时返回 APPROVAL_REQUIRED，需携带同一 approvalId 重试"
+        }
         "browser_select_tab" => "选择当前会话后续操作的标签",
         "browser_close_tab" => "关闭当前会话的指定标签",
         "browser_back" => "后退到上一页",

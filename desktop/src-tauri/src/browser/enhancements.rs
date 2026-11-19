@@ -109,6 +109,10 @@ let root=null;
 let box=null;
 let label=null;
 let resizeObserver=null;
+let rafId=0;
+let timerId=0;
+let targetSelector=null;
+let targetRole=null;
 const selectorFor=(element)=>{
 if(element.id)return '#'+CSS.escape(element.id);
 const parts=[];
@@ -169,37 +173,52 @@ state.overlayCount=1;
 };
 const update=()=>{
 state.viewport={width:window.innerWidth,height:window.innerHeight};
-if(!target||!target.isConnected){target=null;state.targetSelector=null;state.targetRect=null;removeOverlay();return;}
+if(!target||!target.isConnected){target=null;targetSelector=null;targetRole=null;state.targetSelector=null;state.targetRect=null;removeOverlay();return;}
 const rect=target.getBoundingClientRect();
 if(![rect.x,rect.y,rect.width,rect.height].every(Number.isFinite)||rect.width<=0||rect.height<=0){removeOverlay();return;}
 ensureOverlay();
-state.targetSelector=selectorFor(target);
+if(targetSelector===null)targetSelector=selectorFor(target);
+if(targetRole===null)targetRole=roleFor(target);
+state.targetSelector=targetSelector;
 state.targetRect=rectOf(rect);
-box.style.left=rect.x+'px';
-box.style.top=rect.y+'px';
-box.style.width=rect.width+'px';
-box.style.height=rect.height+'px';
-const role=roleFor(target);
-const summary=role+' · '+state.targetSelector;
+const summary=targetRole+' · '+targetSelector;
 if(label.textContent!==summary)label.textContent=summary.slice(0,160);
 const labelWidth=Math.min(320,label.offsetWidth||160);
 const labelHeight=label.offsetHeight||20;
 const left=Math.max(0,Math.min(rect.x,window.innerWidth-labelWidth));
 const above=rect.y-labelHeight-4;
 const top=above>=0?above:Math.max(0,Math.min(rect.bottom+4,window.innerHeight-labelHeight));
+box.style.left=rect.x+'px';
+box.style.top=rect.y+'px';
+box.style.width=rect.width+'px';
+box.style.height=rect.height+'px';
 label.style.left=left+'px';
 label.style.top=top+'px';
-state.overlayRect=rectOf(box.getBoundingClientRect());
-state.labelRect=rectOf(label.getBoundingClientRect());
+state.overlayRect=rectOf(rect);
+state.labelRect={x:left,y:top,width:labelWidth,height:labelHeight};
+};
+const schedule=()=>{
+if(rafId||timerId)return;
+const run=()=>{
+cancelAnimationFrame(rafId);
+clearTimeout(timerId);
+rafId=0;
+timerId=0;
+update();
+};
+rafId=requestAnimationFrame(run);
+timerId=setTimeout(run,32);
 };
 const hover=event=>{
 if(!(event.target instanceof Element))return;
-if(target===event.target){update();return;}
+if(target===event.target)return;
 target=event.target;
+targetSelector=null;
+targetRole=null;
 resizeObserver?.disconnect();
-resizeObserver=new ResizeObserver(update);
+resizeObserver=new ResizeObserver(schedule);
 resizeObserver.observe(target);
-update();
+schedule();
 };
 const post=(element)=>{
 const rect=element.getBoundingClientRect();
@@ -221,19 +240,25 @@ framePath:[]
 }));
 };
 const cleanup=()=>{
+cancelAnimationFrame(rafId);
+clearTimeout(timerId);
+rafId=0;
+timerId=0;
 document.removeEventListener('pointermove',hover,true);
 document.removeEventListener('click',select,true);
 document.removeEventListener('keydown',key,true);
-document.removeEventListener('scroll',update,true);
-window.removeEventListener('resize',update);
+document.removeEventListener('scroll',schedule,true);
+window.removeEventListener('resize',schedule);
 window.removeEventListener('pagehide',cleanup);
-window.visualViewport?.removeEventListener('resize',update);
-window.visualViewport?.removeEventListener('scroll',update);
+window.visualViewport?.removeEventListener('resize',schedule);
+window.visualViewport?.removeEventListener('scroll',schedule);
 mutationObserver.disconnect();
 resizeObserver?.disconnect();
 removeOverlay();
 cursorStyle.remove();
 target=null;
+targetSelector=null;
+targetRole=null;
 state.status='inactive';
 state.targetSelector=null;
 state.targetRect=null;
@@ -246,7 +271,13 @@ event.preventDefault();
 event.stopImmediatePropagation();
 const selected=event.target;
 post(selected);
-cleanup();
+target=null;
+targetSelector=null;
+targetRole=null;
+resizeObserver?.disconnect();
+state.targetSelector=null;
+state.targetRect=null;
+removeOverlay();
 };
 const key=event=>{
 if(event.key!=='Escape')return;
@@ -255,7 +286,7 @@ event.stopImmediatePropagation();
 window.chrome.webview.postMessage(JSON.stringify({type:'pick-cancel',sessionId,tabId,tabGeneration}));
 cleanup();
 };
-const mutationObserver=new MutationObserver(()=>update());
+const mutationObserver=new MutationObserver(schedule);
 mutationObserver.observe(document.documentElement,{childList:true,subtree:true});
 const cursorStyle=document.createElement('style');
 cursorStyle.setAttribute('data-aaw-picker-cursor','');
@@ -264,11 +295,11 @@ cursorStyle.textContent='*{cursor:crosshair !important}';
 document.addEventListener('pointermove',hover,true);
 document.addEventListener('click',select,true);
 document.addEventListener('keydown',key,true);
-document.addEventListener('scroll',update,true);
-window.addEventListener('resize',update);
+document.addEventListener('scroll',schedule,true);
+window.addEventListener('resize',schedule);
 window.addEventListener('pagehide',cleanup);
-window.visualViewport?.addEventListener('resize',update);
-window.visualViewport?.addEventListener('scroll',update);
+window.visualViewport?.addEventListener('resize',schedule);
+window.visualViewport?.addEventListener('scroll',schedule);
 window.__aawCancelPicker=cleanup;
 })()"#;
     Ok(script

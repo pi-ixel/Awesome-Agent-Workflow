@@ -52,6 +52,12 @@ export class FakeAcpSession {
   modes = null;
   configOptions = [];
   private released = false;
+  private disposed = false;
+  private disposeBrowser(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    void this.options.onSessionDisposed?.();
+  }
   get isReleased(): boolean {
     return this.released;
   }
@@ -60,6 +66,7 @@ export class FakeAcpSession {
     if (!this.released) {
       this.released = true;
       if (this.options.onPermissionRequest) fakeSessionControl.closeCount++;
+      this.disposeBrowser();
     }
   }
   closeSession(): Promise<void> {
@@ -68,10 +75,12 @@ export class FakeAcpSession {
       if (this.options.onPermissionRequest) fakeSessionControl.closeCount++;
       this.releaseSession();
     }
+    this.disposeBrowser();
     return Promise.resolve();
   }
   kill(): Promise<{ code: number; signal: null }> {
     this.sessionId = null;
+    this.disposeBrowser();
     return Promise.resolve({ code: 0, signal: null });
   }
   permissionResponder: PermissionResponder | null = null;
@@ -111,32 +120,34 @@ export class FakeAcpSession {
     return Promise.resolve({ sessions: fakeSessionControl.listed });
   }
 
-  loadSession(sessionId: string): Promise<{
+  async loadSession(sessionId: string): Promise<{
     modes: null;
     models: null;
   }> {
     fakeSessionControl.loadCalls.push(sessionId);
     if (fakeSessionControl.loadShouldFail) {
-      return Promise.reject(new Error("会话已过期，无法恢复"));
+      throw new Error("会话已过期，无法恢复");
     }
     this.sessionId = sessionId;
+    await this.options.onSessionReady?.(sessionId);
     for (const event of fakeSessionControl.replayOnLoad) {
       this.emit(event);
     }
-    return Promise.resolve({ modes: null, models: null });
+    return { modes: null, models: null };
   }
 
-  newSession(): Promise<{
+  async newSession(): Promise<{
     sessionId: string;
     modes: null;
     models: null;
   }> {
     this.sessionId = fakeSessionControl.newSessionId;
-    return Promise.resolve({
+    await this.options.onSessionReady?.(this.sessionId);
+    return {
       sessionId: this.sessionId,
       modes: null,
       models: null,
-    });
+    };
   }
 
   onEvent(listener: (event: AcpSessionEvent) => void): () => void {
@@ -157,6 +168,7 @@ export class FakeAcpSession {
     exit: { code: number | null; signal: number | null };
   }> {
     fakeSessionControl.closeCount += 1;
+    this.disposeBrowser();
     return Promise.resolve({
       sessionClose: "skipped",
       exit: { code: 0, signal: null },

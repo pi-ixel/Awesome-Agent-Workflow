@@ -98,7 +98,9 @@ import {
   prepareDraftPromotion,
 } from "../composer/draftPromotion.ts";
 import { resolveAutoPermission } from "../interactions/permissionPolicy.ts";
+import { attachBrowserApprovals } from "../interactions/browserApprovalBridge.ts";
 import { browserObservationUrl } from "../../../shared/urlPrivacy.ts";
+import { browserToolsUnavailable } from "../../../shared/browser/toolAvailability.ts";
 import { asRecord } from "../../../shared/valueGuards.ts";
 
 export type RealWorkspaceOpenResult = NonNullable<OpenSessionResult>;
@@ -1691,6 +1693,7 @@ export function createSessionCoordinator({
         sessionsByPath: catalogStore.getState().sessionsByPath,
       });
     let candidate: SessionRuntime | null = null;
+    let releaseBrowserApprovals = () => {};
     try {
       const protocol = backgroundAdapter
         ? getProtocol()
@@ -1738,7 +1741,16 @@ export function createSessionCoordinator({
               onSessionReady: (sessionId: string) =>
                 browser
                   .bindMcpEndpoint(browserEndpoint.endpointId, sessionId)
-                  .then(() => {}),
+                  .then((endpoint) => {
+                    releaseBrowserApprovals();
+                    releaseBrowserApprovals = attachBrowserApprovals({
+                      browser,
+                      sessionId: endpoint.sessionId ?? sessionId,
+                      approvalStore: approvalStore.getState(),
+                      getApprovalMode,
+                      logger: approvalLogger,
+                    });
+                  }),
               onCapabilitiesReady: (capabilities) =>
                 browser
                   .setMcpCapabilities(
@@ -1747,12 +1759,14 @@ export function createSessionCoordinator({
                       true,
                   )
                   .then(() => {}),
-              onSessionDisposed: () =>
-                disposeBrowserSession(
+              onSessionDisposed: () => {
+                releaseBrowserApprovals();
+                return disposeBrowserSession(
                   browser,
                   browserEndpoint.sessionId ?? "",
                   browserEndpoint.endpointId,
-                ),
+                );
+              },
 
               onCancel: (sessionId: string) =>
                 browser.cancelWork(sessionId).then(() => {}),
@@ -1767,17 +1781,14 @@ export function createSessionCoordinator({
           const enabled = await browser.agentControlEnabled();
           const mcpStatus = await browser.mcpStatus(sessionId);
           const status = statusStore.getState();
-          const runtimeKnown = status.lastSessionId === sessionId;
-          const hasBrowserTools =
-            runtimeKnown &&
-            status.runtime.toolNames.some((name) =>
-              name.startsWith("browser_"),
-            );
-          if (
-            !enabled ||
-            mcpStatus !== "active" ||
-            (runtimeKnown && !hasBrowserTools)
-          ) {
+          const unavailable = browserToolsUnavailable({
+            enabled,
+            mcpStatus,
+            runtimeKnown: status.lastSessionId === sessionId,
+            toolInventoryKnown: status.runtime.toolInventoryKnown,
+            toolNames: status.runtime.toolNames,
+          });
+          if (unavailable) {
             return [
               {
                 type: "text" as const,
@@ -1962,6 +1973,7 @@ export function createSessionCoordinator({
       }
       return runtime;
     } catch (error) {
+      releaseBrowserApprovals();
       if (candidate) {
         if (retained) {
           candidate.disposed = true;

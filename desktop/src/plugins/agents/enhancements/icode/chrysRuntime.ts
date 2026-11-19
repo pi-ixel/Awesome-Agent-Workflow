@@ -135,6 +135,7 @@ export function normalizeChrysRuntime(
   const toolNames = asStringList(incoming.toolNames);
   if (toolNames !== null) {
     next.toolNames = toolNames;
+    next.toolInventoryKnown = true;
   }
   const skillNames = asStringList(incoming.skillNames);
   if (skillNames !== null) {
@@ -146,6 +147,7 @@ export function normalizeChrysRuntime(
     next.modelProvider = details.modelProvider;
     if (toolNames === null && details.toolNames !== null) {
       next.toolNames = details.toolNames;
+      next.toolInventoryKnown = true;
     }
     next.mcpServers = details.mcpServers;
     next.mcpFailures = details.mcpFailures;
