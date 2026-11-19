@@ -347,7 +347,87 @@ it("全局分区优先，同一项目的多个来源合并，搜索和刷新保�
   await expectOrder();
   expect(list).toHaveBeenCalledTimes(2);
 });
-it("只有原生清单中路径和作用域匹配的插件才能卸载", async () => {
+it("插件包技能支持单项回收和批量全选", async () => {
+  const source = "C:/Users/test/.cac/plugins/cache/local/tools/1.0/skills";
+  const entry = {
+    ...skill,
+    kind: "package" as const,
+    source,
+    path: source + "/sample",
+  };
+  const sibling = { ...entry, name: "other", path: source + "/other" };
+  const change = vi.fn<NativeSkillLibrary["change"]>().mockResolvedValue([]);
+  const selection = ({ name, path, revision }: typeof entry) => ({
+    name,
+    path,
+    revision,
+  });
+  const query = { provider: "codeagent", profile: null, projects: [] };
+  render(
+    <SkillLibrary
+      library={{
+        list: () =>
+          Promise.resolve({
+            ...catalog,
+            entries: [entry, sibling],
+            sources: [
+              {
+                ...catalog.sources[0]!,
+                path: source,
+                kind: "package",
+                canImport: false,
+              },
+            ],
+          }),
+        candidates: () => Promise.resolve([]),
+        change,
+      }}
+      provider="codeagent"
+      storage={window.localStorage}
+      knownProjects={() => []}
+      pick={() => Promise.resolve(null)}
+      reveal={async () => {}}
+    />,
+  );
+  const card = await screen.findByRole("article", { name: "sample" });
+  await userEvent.click(
+    within(card).getByRole("button", { name: "移入回收站" }),
+  );
+  const confirm = async () => {
+    const dialog = await screen.findByRole("dialog", {
+      name: "确认技能操作",
+    });
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "移入回收站" }),
+    );
+  };
+  await confirm();
+  expect(change).toHaveBeenLastCalledWith(query, {
+    type: "delete",
+    items: [selection(entry)],
+  });
+
+  await userEvent.click(screen.getByRole("button", { name: "批量选择" }));
+  await userEvent.click(screen.getByRole("button", { name: "全选" }));
+  expect(screen.getByRole("button", { name: "选择 sample" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(screen.getByRole("button", { name: "选择 other" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "将所选技能移入回收站" }),
+  );
+  await confirm();
+  expect(change).toHaveBeenLastCalledWith(query, {
+    type: "delete",
+    items: [selection(entry), selection(sibling)],
+  });
+});
+
+it("保留已卸载插件包记录的原生重装能力", async () => {
   let items = [
     { id: "tools@local", scope: "user", installPath: "C:/plugins/tools" },
   ];
@@ -356,7 +436,7 @@ it("只有原生清单中路径和作用域匹配的插件才能卸载", async (
       code: 0,
       stderr: "",
       stdout: args.includes("--help")
-        ? "plugin list install uninstall --json --scope"
+        ? "plugin list install --json --scope"
         : JSON.stringify(items),
     }),
   );
@@ -364,21 +444,10 @@ it("只有原生清单中路径和作用域匹配的插件才能卸载", async (
     { pathExists: () => Promise.resolve(true), runCommand },
     "codeagent",
   );
-  const pkg = await packages.inspect("C:/plugins/tools/skills/example");
-  await expect(
-    packages.inspect("C:/plugins/tools-other/skills/example"),
-  ).rejects.toThrow();
-  await packages.uninstall(pkg);
-  expect(runCommand).toHaveBeenCalledWith("codeagent", [
-    "plugin",
-    "uninstall",
-    "tools@local",
-    "--scope",
-    "user",
-  ]);
+  const pkg = { id: "tools@local", path: "C:/plugins/tools" };
+  await expect(packages.install(pkg)).resolves.toContain("已跳过");
   items = [];
-  await expect(packages.uninstall(pkg)).rejects.toThrow(/变化/);
-  await packages.install(pkg);
+  await expect(packages.install(pkg)).resolves.toContain("已重新安装");
   expect(runCommand).toHaveBeenCalledWith("codeagent", [
     "plugin",
     "install",

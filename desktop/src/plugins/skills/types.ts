@@ -11,8 +11,6 @@ export interface SkillPackage {
   path: string;
 }
 export interface SkillPackageManager {
-  inspect(skill: string): Promise<SkillPackage>;
-  uninstall(pkg: SkillPackage): Promise<void>;
   install(pkg: SkillPackage): Promise<string>;
 }
 

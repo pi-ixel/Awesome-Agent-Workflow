@@ -1,5 +1,5 @@
 import type { HostStorage } from "../../host/types.ts";
-import type { SkillPackage, SkillPackageManager } from "../types.ts";
+import type { SkillPackage } from "../types.ts";
 export const packageReceiptsKey = "aaw-desktop/skill-packages.v1";
 
 export function receipts(storage: HostStorage): SkillPackage[] {
@@ -14,16 +14,4 @@ export function receipts(storage: HostStorage): SkillPackage[] {
       "path" in p &&
       typeof p.path === "string",
   );
-}
-export async function uninstallSkillPackage(
-  manager: SkillPackageManager,
-  storage: HostStorage,
-  pkg: SkillPackage,
-) {
-  // 保存原生标识以便卸载后从回收站重装。
-  storage.setItem(
-    packageReceiptsKey,
-    JSON.stringify([...receipts(storage).filter((r) => r.id !== pkg.id), pkg]),
-  );
-  await manager.uninstall(pkg);
 }
