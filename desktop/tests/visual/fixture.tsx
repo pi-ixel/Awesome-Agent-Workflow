@@ -3,6 +3,7 @@ import { PerformanceFixture } from "./performanceFixture.tsx";
 import { HintTooltip } from "../../src/shared/ui/controls/HintTooltip.tsx";
 import { HintMotionFixture } from "./hintMotionFixture.tsx";
 import { ImageAttachments } from "../../src/plugins/project/conversation/ui/ImageAttachments.tsx";
+import { MessageAttachments } from "../../src/plugins/project/conversation/ui/MessageAttachments.tsx";
 import "../../src/shared/styles/index.css";
 import SettingsPage from "../../src/plugins/workbench/ui/SettingsPage.tsx";
 import { WorkbenchContext } from "../../src/plugins/workbench/ui/bindings/react.ts";
@@ -97,25 +98,33 @@ const workbench = {
 } as unknown as WorkbenchService;
 performance.mark("usage-fixture-mount");
 if (params.has("protocol")) void initializeUsage();
+
+function renderAttachmentFixture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1200;
+  canvas.height = 900;
+  const block = {
+    type: "image" as const,
+    mimeType: "image/png",
+    data: canvas.toDataURL("image/png").split(",")[1]!,
+  };
+  const mode = params.get("image-attachments");
+  if (mode === "user" || mode === "agent") {
+    return <MessageAttachments blocks={[block]} compact={mode === "user"} />;
+  }
+  return (
+    <ImageAttachments
+      images={[{ name: "screenshot.png", block }]}
+      onRemove={() => {}}
+    />
+  );
+}
+
 createRoot(document.querySelector("#root")!).render(
   <div className="h-screen bg-base p-3 text-ink">
     <HintTooltip />
     {params.has("image-attachments") ? (
-      <ImageAttachments
-        images={[
-          {
-            name: "screenshot.svg",
-            block: {
-              type: "image",
-              mimeType: "image/svg+xml",
-              data: btoa(
-                '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900"><rect width="1200" height="900" fill="blue"/></svg>',
-              ),
-            },
-          },
-        ]}
-        onRemove={() => {}}
-      />
+      renderAttachmentFixture()
     ) : params.has("hint-motion") ? (
       <HintMotionFixture />
     ) : params.has("performance") ? (
