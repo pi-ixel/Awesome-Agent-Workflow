@@ -1,17 +1,5 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { useWorkbenchUiValue } from "./bindings/layoutView.ts";
-/**
- * 侧栏底部 footer（ZCode WorkspaceSidebarFooter.tsx:232-493 同位同形态）：
- * 左侧「身份区 + 统一设置菜单入口」（头像位 + 用户名位，点击弹设置菜单），
- * 右侧设置齿轮直入设置页。
- *
- * 身份区接收注册视图提供的徽标和菜单项。头像位为 32px 圆形，
- * ZCode Avatar size default=size-8，fallback bg-background text-foreground
- * → desktop bg-base text-ink）。标签使用 text-ui-base font-semibold，
- * 菜单内置设置项，其余条目由贡献视图提供。
- *
- * ZCode footer 复用于 Settings 页的形态不适用：desktop 设置页为全屏
- * 覆盖层，自带「← 返回」条。
- */
 import { useEffect, useRef, useState } from "react";
 
 import type { SidebarFooterProps } from "../types.ts";
@@ -21,6 +9,7 @@ import {
   type MenuPlacement,
 } from "../../../shared/ui/ContextMenu.tsx";
 import { SettingsIcon, SparkleIcon } from "../../../shared/ui/icons.tsx";
+import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
 
 /** 退场动画时长（与 index.css 的 .context-menu-out 同拍）。 */
 const MENU_CLOSE_MS = 100;
@@ -75,7 +64,7 @@ export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
         // 可直接切到该页签
         id: "settings",
         label: "设置",
-        icon: <SettingsIcon className="h-4 w-4" />,
+        icon: <SettingsIcon className="ui-icon-16" />,
         onSelect: () => {
           toggleOverlay("settings");
         },
@@ -84,11 +73,10 @@ export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
     ];
     setMenu({
       entries,
-      // ZCode DropdownMenuContent align="start"：菜单左缘对齐触发器左缘
       placement: {
         x: anchor.left,
-        y: anchor.bottom + 4,
-        side: "bottom",
+        y: anchor.top - 4,
+        side: "top",
         align: "start",
       },
       closing: false,
@@ -105,57 +93,40 @@ export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
   };
 
   return (
-    <footer className="flex shrink-0 items-center gap-2 px-4 pt-2 pb-4">
-      {/* 左：身份 + 统一设置菜单入口（ZCode footer :238-252 ghost size
-          lg=h-8 rounded-lg pl-0） */}
-      <button
+    <>
+      <IconButton iconSize="rail"
         type="button"
-        aria-label="打开设置菜单"
+        aria-label="打开账号菜单"
+        aria-description={badge?.tooltip}
         aria-haspopup="menu"
         aria-expanded={menu !== null && !menu.closing}
-        title={badge?.tooltip ?? "打开设置菜单"}
+        data-hint={badge?.tooltip ?? "打开账号菜单"}
         onClick={(event) => {
           toggleFooterMenu(event.currentTarget.getBoundingClientRect());
         }}
-        className="flex h-8 min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-tl-2xl rounded-bl-2xl pl-0 text-left transition-colors hover:bg-hover"
+        className={`grid shrink-0 place-items-center rounded-lg transition-colors hover:bg-hover ${focusVisibleRing}`}
       >
-        <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-base text-ink">
+        <span
+          aria-hidden="true"
+          className={`grid size-7 place-items-center overflow-hidden rounded-full ${badge ? "sidebar-account-avatar" : "bg-base text-ink"}`}
+        >
           {!badge ? (
-            <SparkleIcon className="h-4 w-4" />
+            <SparkleIcon className="ui-icon-16" />
           ) : (
-            <span aria-hidden="true" className="text-ui-sm font-semibold">
-              {badge.avatar}
-            </span>
+            <span className="text-ui-sm font-semibold">{badge.avatar}</span>
           )}
         </span>
-        <span className="min-w-0 truncate text-ui-base font-semibold text-ink">
-          {badge?.label ?? "AAW"}
-        </span>
-      </button>
-      {/* 右：设置齿轮（ZCode footer :478-490 ghost icon-lg=size-8
-          rounded-lg + Settings size-4） */}
-      <button
-        type="button"
-        data-testid="task-settings-button"
-        aria-label="设置"
-        title="设置"
-        onClick={() => {
-          toggleOverlay("settings");
-        }}
-        className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink"
-      >
-        <SettingsIcon className="h-4 w-4" />
-      </button>
+      </IconButton>
       {menu !== null && (
         <ContextMenu
           entries={menu.entries}
           placement={menu.placement}
-          label="设置菜单"
+          label="账号菜单"
           closing={menu.closing}
           onDismiss={dismiss}
         />
       )}
-    </footer>
+    </>
   );
 }
 

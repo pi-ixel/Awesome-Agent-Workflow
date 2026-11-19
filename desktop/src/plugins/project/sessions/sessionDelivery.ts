@@ -4,6 +4,7 @@ import { pathKey } from "../../../shared/panelPaths.ts";
 import type { DesktopProject } from "../lifecycle/project.ts";
 import type { SessionDeliveryResult, SessionSelection } from "../types.ts";
 import type { SessionTarget } from "./types.ts";
+import { isSteerOutboxEntry } from "../conversation/queuedPrompt.ts";
 
 /** Resolve an explicit target and deliver only while it is still the selected one. */
 export async function deliverToSession(
@@ -48,7 +49,8 @@ export async function deliverToSession(
       if (
         !sameTarget &&
         (state.isAgentRunning ||
-          state.queuedPrompts.length > 0 ||
+          !!state.steerPhase ||
+          (!state.directSteering && state.queuedPrompts.some((item) => !isSteerOutboxEntry(item))) ||
           state.isConnecting)
       )
         return {
@@ -105,7 +107,9 @@ export async function deliverToSession(
         current.activeSessionId !== selectedId
       )
         return { ok: false, reason: "项目或会话目标已变化，未发送命令" };
-      if (current.queuePaused)
+      if (current.directSteering && (current.isAgentRunning || current.steerPhase))
+        return { ok: false, reason: "会话正在执行，请等待当前轮结束后再发送" };
+      if (!current.directSteering && current.queuePaused)
         return {
           ok: false,
           reason: "消息队列已暂停，请手动继续或清空队列后再发送",
@@ -119,7 +123,7 @@ export async function deliverToSession(
       try {
         const accepted = deliver(
           owner,
-          current.isAgentRunning || current.queuedPrompts.length > 0,
+          !current.directSteering && (current.isAgentRunning || current.queuedPrompts.some((item) => !isSteerOutboxEntry(item))),
         );
         if (!accepted)
           return {
@@ -134,7 +138,7 @@ export async function deliverToSession(
       }
       if (
         !session.getState().isAgentRunning &&
-        session.getState().queuedPrompts.length === 0
+        !session.getState().queuedPrompts.some((item) => !isSteerOutboxEntry(item))
       )
         return {
           ok: false,

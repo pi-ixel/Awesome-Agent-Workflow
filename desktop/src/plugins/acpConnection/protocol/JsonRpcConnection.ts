@@ -1,4 +1,9 @@
-import type { AcpSessionConnection, NotificationHandler, ServerRequestHandler } from "../types.ts";
+import { hasResponseWriteObserver, observeResponseWrite } from "../../../contracts/acp/responseWrite.ts";
+import type {
+  AcpSessionConnection,
+  NotificationHandler,
+  ServerRequestHandler,
+} from "../types.ts";
 /**
  * ACP JSON-RPC 2.0 连接层。
  *
@@ -58,12 +63,13 @@ interface PendingRequest {
 
 export class JsonRpcConnection implements AcpSessionConnection {
   private readonly connectionId = crypto.randomUUID();
+  get id(): string {
+    return this.connectionId;
+  }
   private readonly onExit: (() => void) | undefined;
   private nextId = 0;
   private readonly requestScopes = new Map<JsonRpcId, AbortController>();
-  requestScope(
-    id: JsonRpcId,
-  ): {
+  requestScope(id: JsonRpcId): {
     signal: AbortSignal;
     method: string;
     sessionId?: string;
@@ -81,6 +87,10 @@ export class JsonRpcConnection implements AcpSessionConnection {
       : null;
   }
   private readonly pending = new Map<JsonRpcId, PendingRequest>();
+  /** Requests on control paths also make a diagnostic probe non-idle. */
+  get inFlightRequests(): number {
+    return this.pending.size;
+  }
   private readonly requestTimeoutMs: number;
   private readonly logger: Logger | undefined;
   private readonly recordRaw: AcpRawWriter | undefined;
@@ -131,7 +141,12 @@ export class JsonRpcConnection implements AcpSessionConnection {
   async request(
     method: string,
     params?: Readonly<Record<string, unknown>>,
-    options: { timeoutMs?: number | null; owner?: object } = {},
+    options: {
+      timeoutMs?: number | null;
+      owner?: object;
+      cancelOnTimeout?: boolean;
+      beforeDispatch?: () => void;
+    } = {},
   ): Promise<unknown> {
     if (this.closed) {
       throw new AcpClosedError("ACP 连接已关闭，无法发送请求");
@@ -164,6 +179,13 @@ export class JsonRpcConnection implements AcpSessionConnection {
           : setTimeout(() => {
               if (this.pending.get(id) !== undefined) {
                 this.pending.delete(id);
+                if (options.cancelOnTimeout) {
+                  try {
+                    this.notify("$/cancel_request", { requestId: id });
+                  } catch {
+                    // Cancellation is best-effort; the original timeout still settles.
+                  }
+                }
                 reject(new AcpTimeoutError(method, timeoutMs));
               }
             }, timeoutMs);
@@ -181,7 +203,7 @@ export class JsonRpcConnection implements AcpSessionConnection {
 
     void responsePromise.catch(() => {});
     try {
-      this.sendLine(payload);
+      this.sendLine(payload, options.beforeDispatch);
     } catch (error) {
       this.logger?.error("ACP 请求发送失败", {
         ...context,
@@ -283,8 +305,9 @@ export class JsonRpcConnection implements AcpSessionConnection {
     return this.nextId;
   }
 
-  private sendLine(payload: Readonly<Record<string, unknown>>): void {
+  private sendLine(payload: Readonly<Record<string, unknown>>, beforeDispatch?: () => void): void {
     const line = JSON.stringify(payload);
+    beforeDispatch?.();
     try {
       this.transport.writeLine(line);
     } catch (error) {
@@ -407,7 +430,27 @@ export class JsonRpcConnection implements AcpSessionConnection {
     }
     try {
       const result = await handler(method, params);
-      this.respondSafely(id, method, () => this.respond(id, result ?? null));
+      try {
+        if (hasResponseWriteObserver(result) && this.transport.writeLineConfirmed) {
+          const line = JSON.stringify({ jsonrpc: "2.0", id, result: result ?? null });
+          try {
+            await this.transport.writeLineConfirmed(line);
+            this.traceRaw(line, "out");
+            observeResponseWrite(result, true);
+          } catch (error) {
+            this.failChannel(String(error));
+            observeResponseWrite(result, false);
+          }
+        } else {
+          const written = this.respondSafely(id, method, () =>
+            this.respond(id, result ?? null),
+          );
+          observeResponseWrite(result, written);
+        }
+      } catch (error) {
+        observeResponseWrite(result, false);
+        throw error;
+      }
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
       this.logger?.error("ACP 反向请求处理失败", {
@@ -457,16 +500,17 @@ export class JsonRpcConnection implements AcpSessionConnection {
     id: JsonRpcId,
     method: string,
     write: () => void,
-  ): void {
+  ): boolean {
     try {
       write();
+      return true;
     } catch (error) {
       if (error instanceof AcpWriteError) {
         this.logger?.warn(`反向请求 ${method} 的响应无法回写（连接已断）`, {
           id: String(id),
           reason: error.message,
         });
-        return;
+        return false;
       }
       throw error;
     }

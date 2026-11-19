@@ -1,5 +1,6 @@
 import type { BrowserElement } from "../../../../contracts/browser/types.ts";
 import { MousePointer2Icon, XIcon } from "../../../../shared/ui/icons.tsx";
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 
 export function BrowserElementSummary({
   elements,
@@ -15,24 +16,23 @@ export function BrowserElementSummary({
         <span
           key={element.referenceId}
           className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-brand/30 bg-brand/10 py-1 pl-2.5 pr-1 text-ui-caption text-ink"
-          title={`${element.role} · ${element.selector}`}
+          data-hint={`${element.role} · ${element.selector}`}
         >
-          <MousePointer2Icon className="size-3.5 shrink-0 text-brand" />
+          <MousePointer2Icon className="ui-icon-16 shrink-0 text-brand" />
           <span className="max-w-40 truncate font-medium">
             {element.text || element.role}
           </span>
           <span className="max-w-52 truncate font-mono text-ink-mute">
             {element.selector}
           </span>
-          <button
-            type="button"
+          <IconButton
             aria-label={`删除元素引用 ${element.text || element.role}`}
-            title="删除元素引用"
-            className="flex size-5 shrink-0 items-center justify-center rounded-full text-ink-mute transition-colors hover:bg-brand/15 hover:text-ink"
+            data-hint="删除元素引用"
+            className="rounded-full text-ink-mute hover:bg-brand/15 hover:text-ink"
             onClick={() => onRemove(element.referenceId)}
           >
-            <XIcon className="size-3" />
-          </button>
+            <XIcon className="ui-icon-12" />
+          </IconButton>
         </span>
       ))}
     </div>

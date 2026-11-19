@@ -396,7 +396,7 @@ pub(crate) async fn spawn_pty(
     // 控制台，CREATE_NO_WINDOW 不适用。
     #[cfg(target_os = "windows")]
     if let Some(pid) = pid {
-        assign_kill_on_close_job(pid);
+        let _ = assign_kill_on_close_job(pid);
     }
 
     // 读线程：阻塞读、64KB 块级 base64 直发（不分行、不去 \r）；

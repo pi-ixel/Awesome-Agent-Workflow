@@ -1,3 +1,7 @@
+import {
+  sameSessionAgent,
+  type DeleteSessionTarget,
+} from "./sessionDeletion.ts";
 import { createStore } from "zustand";
 import type {
   SessionCatalogState,
@@ -11,6 +15,7 @@ import {
   type SessionSummary,
 } from "../conversation/sessionStore.ts";
 import type { SessionInfo } from "../../../contracts/acp/protocol.ts";
+import type { SessionTarget } from "./types.ts";
 
 export interface CatalogOwner {
   readonly workspacePath: string;
@@ -130,9 +135,39 @@ export const emptyCatalog: SessionCatalogState = {
 };
 
 /** Directory and per-Agent cached indexes are owned by one Project Fiber. */
-export function createSessionCatalog(signal: AbortSignal) {
+export function createSessionCatalog(
+  signal: AbortSignal,
+  deleted: (target: DeleteSessionTarget) => boolean = () => false,
+) {
   const store = createStore<SessionCatalogState>()(() => emptyCatalog);
   const catalogCache = new Map<string, SessionCatalogState>();
+  const externalSessions = new Set<string>();
+  const externalKey = (agent: string, path: string, id: string) =>
+    JSON.stringify([agent, pathKey(path), id]);
+  const visibleEntries = (
+    agent: string,
+    path: string,
+    entries: readonly SessionSummary[],
+  ) =>
+    entries.filter(
+      (entry) =>
+        !externalSessions.has(externalKey(agent, path, entry.id)) &&
+        !deleted({ agentKey: agent, workspacePath: path, sessionId: entry.id }),
+    );
+
+  function excludeSessions(sessions: readonly SessionTarget[]): void {
+    if (signal.aborted) return;
+    for (const session of sessions) {
+      if (session.sessionId) externalSessions.add(externalKey(session.agentKey, session.workspacePath, session.sessionId));
+    }
+    const filter = (state: SessionCatalogState): SessionCatalogState => ({
+      ...state,
+      sessionsByPath: Object.fromEntries(Object.entries(state.sessionsByPath).map(([path, entries]) =>
+        [path, visibleEntries(state.agentKey ?? "", path, entries)])),
+    });
+    for (const [agent, state] of catalogCache) catalogCache.set(agent, filter(state));
+    store.setState(filter(store.getState()));
+  }
 
   function selectCatalog(
     agentKey: string,
@@ -175,11 +210,12 @@ export function createSessionCatalog(signal: AbortSignal) {
     sessionId: string,
     title: string,
     updateOpenViews: () => void,
-  ): void {
+  ): void | Promise<void> {
     if (signal.aborted) return;
-    setManualTitle(sessionId, title, agentKey);
-    updateOpenViews();
-    store.setState((state) => {
+    const publish = () => {
+      if (signal.aborted) return;
+      updateOpenViews();
+      store.setState((state) => {
       if (state.agentKey !== agentKey) return state;
       return {
         sessionsByPath: Object.fromEntries(
@@ -197,7 +233,11 @@ export function createSessionCatalog(signal: AbortSignal) {
           ]),
         ),
       };
-    });
+      });
+    };
+    const save = setManualTitle(sessionId, title, agentKey);
+    if (save) return save.then(publish);
+    publish();
   }
 
   function updateCatalog(
@@ -211,14 +251,15 @@ export function createSessionCatalog(signal: AbortSignal) {
       store.getState().agentKey !== runtime.agentKey
     )
       return;
-    if (store.getState().sessionsByPath[runtime.workspacePath] === entries)
-      return;
+    const visible = visibleEntries(runtime.agentKey, runtime.workspacePath, entries);
+    const previous = store.getState().sessionsByPath[runtime.workspacePath];
+    if (previous?.length === visible.length && previous.every((entry, index) => entry === visible[index])) return;
     store.setState((state) => {
       const byPath = { ...state.sessionsByPath };
       for (const path of Object.keys(byPath))
         if (pathKey(path) === pathKey(runtime.workspacePath))
           delete byPath[path];
-      byPath[runtime.workspacePath] = entries;
+      byPath[runtime.workspacePath] = visible;
       return { sessionsByPath: byPath };
     });
   }
@@ -235,5 +276,15 @@ export function createSessionCatalog(signal: AbortSignal) {
     renameCatalogEntry,
     updateCatalog,
     resetCatalog,
+    excludeSessions,
+    isExternal: (target: DeleteSessionTarget) =>
+      [...externalSessions].some((key) => {
+        const [agent, path, id] = JSON.parse(key) as [string, string, string];
+        return (
+          path === pathKey(target.workspacePath) &&
+          id === target.sessionId &&
+          sameSessionAgent(agent, target.agentKey)
+        );
+      }),
   };
 }

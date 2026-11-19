@@ -1,16 +1,10 @@
 import { sessionPinKey, parseSessionPinKey } from "../sessions/sessionPin.ts";
 /**
- * 工作区 store：工作区选择、最近打开与置顶（本地持久化）、健康检查，
- * 以及「打开项目」（activePath 即 ACP session 的 cwd 绑定点，参考 chrys
- * 服务端 session/new 的 cwd 参数）。
+ * 工作区 store：工作区选择、最近打开与置顶（本地持久化），以及「打开项目」
+ * （activePath 即 ACP session 的 cwd 绑定点，参考 chrys 服务端 session/new
+ * 的 cwd 参数）。
  *
- * 数据流约定（docs/conventions.md）：
- * - 异步探测（runWorkspaceHealthChecks）完成后的回填统一走
- *   applyHealthReport，UI 数据流单一路径；
- * - 回填带 path：与 selectedPath 不一致（用户已切走）的结果直接丢弃，
- *   防过期覆盖；
- * - AAW 工作流状态不在这里：唯一状态源是 aawStatusStore（loader 注入式
- *   只读视图，见 src/aaw/statusLoader.ts）；
+ * 数据流约定（docs/engineering/conventions.md）：
  * - recent / pinned / toolPaths 持久化到本机记录，Project 实例创建时恢复。
  *
  * 置顶语义对齐 ZCode：置顶首先是**会话级**——task.pinned 使会话进入
@@ -35,12 +29,10 @@ import type { HostStorage } from "../../host/types.ts";
 import { defaultToolPaths, emptyWorkspace } from "./types.ts";
 import type {
   WorkspaceEntry,
-  WorkspaceHealthCheck,
   WorkspaceSnapshot,
   WorkspaceStoreState,
   WorkspaceToolPaths,
 } from "./types.ts";
-import type { ProcessRunner } from "../../host/types.ts";
 
 
 /** 最近打开列表上限。 */
@@ -62,6 +54,7 @@ interface PersistedShape {
   readonly favorites: readonly string[];
   /** 可选新增（不升版本，见文件头）：会话级置顶键集合。 */
   readonly pinnedSessions?: readonly string[];
+  readonly starredSessions?: readonly string[];
   readonly toolPaths: WorkspaceToolPaths;
 }
 
@@ -94,6 +87,7 @@ function sanitizePersisted(
     recent?: WorkspaceEntry[];
     favorites?: string[];
     pinnedSessions?: string[];
+    starredSessions?: string[];
     toolPaths?: WorkspaceToolPaths;
   } = {};
   if (Array.isArray(record["recent"])) {
@@ -118,28 +112,22 @@ function sanitizePersisted(
       (item): item is string => typeof item === "string",
     );
   }
-  if (Array.isArray(record["pinnedSessions"])) {
-    out.pinnedSessions = record["pinnedSessions"].filter(
-      (item): item is string =>
-        typeof item === "string" && parseSessionPinKey(item) !== null,
-    );
+  for (const field of ["pinnedSessions", "starredSessions"] as const) {
+    const keys = record[field];
+    if (Array.isArray(keys)) {
+      out[field] = keys.filter((item): item is string =>
+        typeof item === "string" && parseSessionPinKey(item) !== null);
+    }
   }
   if (typeof record["toolPaths"] === "object" && record["toolPaths"] !== null) {
     const paths = record["toolPaths"] as Record<string, unknown>;
     out.toolPaths = {
+      ...defaultToolPaths,
       ...Object.fromEntries(
         Object.entries(paths).filter(
           (entry): entry is [string, string] => typeof entry[1] === "string",
         ),
       ),
-      uvCommand:
-        typeof paths["uvCommand"] === "string"
-          ? paths["uvCommand"]
-          : defaultToolPaths.uvCommand,
-      aawScriptPath:
-        typeof paths["aawScriptPath"] === "string"
-          ? paths["aawScriptPath"]
-          : defaultToolPaths.aawScriptPath,
     };
   }
   return Object.keys(out).length > 0 ? out : null;
@@ -156,6 +144,7 @@ function writePersisted(
       recent: state.recentWorkspaces,
       favorites: state.pinnedPaths,
       pinnedSessions: state.pinnedSessions,
+      starredSessions: state.starredSessions,
       toolPaths: state.toolPaths,
     };
     storage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -190,6 +179,7 @@ export function workspaceCommands(source: ReadonlySnapshot<WorkspaceStoreState>)
     closeWorkspace,
     togglePinned,
     toggleSessionPinned,
+    toggleSessionStarred,
     dismissConnectError,
     hydrateFromStorage,
   } = source.getState();
@@ -199,31 +189,23 @@ export function workspaceCommands(source: ReadonlySnapshot<WorkspaceStoreState>)
     closeWorkspace,
     togglePinned,
     toggleSessionPinned,
+    toggleSessionStarred,
     dismissConnectError,
     patchToolPaths(paths: Partial<WorkspaceToolPaths>) {
       const { toolPaths, setToolPaths } = source.getState();
       setToolPaths({ ...toolPaths, ...paths });
     },
-    runHealthChecks: (paths?: Partial<WorkspaceToolPaths>) =>
-      source.getState().runHealthChecks(undefined, paths),
     reloadWorkspacePreferences: hydrateFromStorage,
   };
 }
 
 export function createWorkspaceStore(
   storage: HostStorage,
-  processRunner: ProcessRunner,
   guardNavigation: (resume: () => void, path: string) => boolean,
   logger = createLogger("store"),
 ) {
   const lifecycle = new AbortController();
   const { signal } = lifecycle;
-  let healthProvider: { check: WorkspaceHealthCheck } | undefined;
-  let healthCheck: AbortController | undefined;
-  const stopHealthCheck = () => {
-    healthCheck?.abort();
-    healthCheck = undefined;
-  };
   const store = createStore<WorkspaceStoreState>()((set, get) => ({
     ...emptyWorkspace,
 
@@ -233,14 +215,8 @@ export function createWorkspaceStore(
       if (trimmed === "") {
         return;
       }
-      if (get().selectedPath !== trimmed) stopHealthCheck();
       set((state) => ({
         selectedPath: trimmed,
-        // 切换目录即清空旧目录的报告，防止跨目录串数据
-        health: null,
-        // 切到不同目录时复位 in-flight 标志：在途检查属于旧目录，其回填
-        // 必被丢弃，若不复位按钮会永久禁用（新目录的检查发起后会再次置 true）
-        ...(state.selectedPath !== trimmed ? { isCheckingHealth: false } : {}),
         recentWorkspaces: withRecentEntry(state.recentWorkspaces, trimmed),
       }));
       if (!signal.aborted) writePersisted(storage, get(), logger);
@@ -249,13 +225,7 @@ export function createWorkspaceStore(
 
     clearSelection: () => {
       if (signal.aborted) return;
-      stopHealthCheck();
-      set({
-        selectedPath: null,
-        health: null,
-        // 在途结果将因 selectedPath=null 被丢弃，标志一并复位
-        isCheckingHealth: false,
-      });
+      set({ selectedPath: null });
     },
 
     openWorkspace: (path) => {
@@ -264,10 +234,7 @@ export function createWorkspaceStore(
       if (target === undefined || target === "") {
         return;
       }
-      const changed = get().selectedPath !== target;
-      if (changed) stopHealthCheck();
       set((state) => ({
-        ...(changed ? { health: null, isCheckingHealth: false } : {}),
         activePath: target,
         selectedPath: target,
         recentWorkspaces: withRecentEntry(state.recentWorkspaces, target),
@@ -330,11 +297,21 @@ export function createWorkspaceStore(
       if (!signal.aborted) writePersisted(storage, get(), logger);
     },
 
+    toggleSessionStarred: (path, sessionId, agentKey) => {
+      if (signal.aborted) return;
+      const key = sessionPinKey(path, sessionId, agentKey);
+      set((state) => ({
+        starredSessions: state.starredSessions.includes(key)
+          ? state.starredSessions.filter((item) => item !== key)
+          : [...state.starredSessions, key],
+      }));
+      if (!signal.aborted) writePersisted(storage, get(), logger);
+    },
+
     removeFromRecent: (path) => {
       if (signal.aborted) return;
       const key = pathKey(path);
       const matches = (candidate: string | null) => candidate !== null && pathKey(candidate) === key;
-      if (matches(get().selectedPath)) stopHealthCheck();
       const pathPrefix = `${key}\u0000`;
       set((state) => ({
         recentWorkspaces: state.recentWorkspaces.filter(
@@ -346,11 +323,9 @@ export function createWorkspaceStore(
         pinnedSessions: state.pinnedSessions.filter(
           (item) => !item.startsWith(pathPrefix),
         ),
+        starredSessions: state.starredSessions.filter((item) => !item.startsWith(pathPrefix)),
         // 移除的正是当前选中目录时同步清空选择，避免详情区悬挂
-        //（连带复位 in-flight 标志：在途回填将因选择清空被丢弃）
-        ...(matches(state.selectedPath)
-          ? { selectedPath: null, health: null, isCheckingHealth: false }
-          : {}),
+        ...(matches(state.selectedPath) ? { selectedPath: null } : {}),
         ...(matches(state.activePath) ? { activePath: null } : {}),
         ...(matches(state.lastConnectError?.path ?? null) ? { lastConnectError: null } : {}),
       }));
@@ -364,58 +339,6 @@ export function createWorkspaceStore(
       logger.info("工具路径已更新", { ...paths });
     },
 
-    applyHealthReport: (path, items) => {
-      if (signal.aborted) return;
-      if (get().selectedPath !== path) {
-        // 用户已切换目录：过期报告丢弃
-        logger.debug("丢弃过期健康检查报告", { path });
-        return;
-      }
-      set({
-        health: { path, items, checkedAt: new Date().toISOString() },
-        isCheckingHealth: false,
-      });
-    },
-
-    runHealthChecks: async (runner = processRunner, pathsOverride) => {
-      const { selectedPath, toolPaths } = get();
-      const provider = healthProvider;
-      if (signal.aborted || selectedPath === null || !provider) {
-        return;
-      }
-      stopHealthCheck();
-      const check = new AbortController();
-      healthCheck = check;
-      const isCurrent = () =>
-        healthCheck === check && get().selectedPath === selectedPath;
-      set({ isCheckingHealth: true });
-      try {
-        const items = await provider.check({
-          workspacePath: selectedPath,
-          toolPaths: { ...toolPaths, ...pathsOverride },
-          runner,
-          signal: check.signal,
-        });
-        if (isCurrent()) get().applyHealthReport(selectedPath, items);
-      } catch (error) {
-        // 领域层不抛（执行失败落 CliRunResult），这里兜底意外异常并记日志；
-        // 标志复位统一交给 finally
-        if (isCurrent())
-          logger.error("健康检查执行异常", {
-            path: selectedPath,
-            error: error instanceof Error ? error.message : String(error),
-          });
-      } finally {
-        // 过期回填（applyHealthReport 的丢弃分支）不复位标志：只有本次
-        // 运行结束且当前仍选中该目录时才复位，防止标志卡在 true 把
-        // 「重新检查」按钮永久禁用
-        if (isCurrent()) {
-          healthCheck = undefined;
-          set({ isCheckingHealth: false });
-        }
-      }
-    },
-
     hydrateFromStorage: () => {
       if (signal.aborted) return;
       const persisted = readPersisted(storage);
@@ -426,6 +349,7 @@ export function createWorkspaceStore(
         recentWorkspaces: persisted.recent ?? state.recentWorkspaces,
         pinnedPaths: persisted.favorites ?? state.pinnedPaths,
         pinnedSessions: persisted.pinnedSessions ?? state.pinnedSessions,
+        starredSessions: persisted.starredSessions ?? state.starredSessions,
         toolPaths: persisted.toolPaths ?? state.toolPaths,
       }));
     },
@@ -436,11 +360,9 @@ export function createWorkspaceStore(
     recentWorkspaces: state.recentWorkspaces,
     pinnedPaths: state.pinnedPaths,
     pinnedSessions: state.pinnedSessions,
+    starredSessions: state.starredSessions,
     selectedPath: state.selectedPath,
     activePath: state.activePath,
-    health: state.health,
-    isCheckingHealth: state.isCheckingHealth,
-    healthCheckAvailable: state.healthCheckAvailable,
     toolPaths: state.toolPaths,
     lastConnectError: state.lastConnectError,
   }));
@@ -448,23 +370,9 @@ export function createWorkspaceStore(
     store,
     view: view.snapshot,
     commands: workspaceCommands(store),
-    registerHealthCheck(check: WorkspaceHealthCheck): () => void {
-      if (signal.aborted || healthProvider) throw new Error("无法注册工作区健康检查");
-      const provider = { check };
-      healthProvider = provider;
-      store.setState({ healthCheckAvailable: true });
-      return () => {
-        if (healthProvider !== provider) return;
-        healthProvider = undefined;
-        stopHealthCheck();
-        store.setState({ healthCheckAvailable: false, isCheckingHealth: false });
-      };
-    },
     dispose() {
       if (signal.aborted) return;
       lifecycle.abort();
-      healthProvider = undefined;
-      stopHealthCheck();
       store.setState(emptyWorkspace);
       view.dispose();
     },

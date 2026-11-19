@@ -72,8 +72,10 @@ type AnnotationDraftState = AnnotationDraftSnapshot &
 
 export function createAnnotationDraftStore(storage: HostStorage) {
   let active = true;
+  const deletedScopes = new Set<string>();
   const store = createStore<AnnotationDraftState>((set, get) => {
     const save = (scope: string, draft: AnnotationDraft): boolean => {
+      if (deletedScopes.has(scope)) return false;
       if (!active) return false;
       try {
         if (
@@ -310,6 +312,20 @@ export function createAnnotationDraftStore(storage: HostStorage) {
   return {
     service,
     composer,
+    removeScope(scope: string) {
+      if (!deletedScopes.has(scope) && !put(scope, []))
+        throw new Error("批注草稿清理失败");
+      storage.removeItem?.(keyOf(scope));
+      deletedScopes.add(scope);
+      const drafts = { ...store.getState().drafts };
+      delete drafts[scope];
+      const migrations = Object.fromEntries(
+        Object.entries(store.getState().migrations).filter(
+          ([from, to]) => from !== scope && to !== scope,
+        ),
+      );
+      store.setState({ drafts, migrations });
+    },
     dispose() {
       if (!active) return;
       active = false;

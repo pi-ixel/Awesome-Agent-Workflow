@@ -2,6 +2,8 @@
 
 `adapter.ts` 是功能入口，注册表只负责注册和查找。`../types.ts` 定义通用适配能力，不引用本模块类型。普通 ACP Agent 不自动获得这些能力。
 
+轮次用量来自 prompt 响应的 usage，随用户消息保存；错误响应中有有效 usage 时同样保存。圆环只使用标准 ACP 的 `used/size`，缺少占用数据时显示“未知”。会话总用量、输入、输出和缓存读取直接使用扩展通知的累计值，按工作区与会话缓存，恢复后由新通知刷新。缓存命中率为累计缓存读取除以累计输入；旧轮次没有可靠数据时不补算。
+
 | 功能                               | 实现位置                                                          | 通用层接收的内容                          |
 | ---------------------------------- | ----------------------------------------------------------------- | ----------------------------------------- |
 | 私有通知、结构化提问、错误和警告   | `chrysDialect.ts`、`types.ts`                                     | 通用会话事件、问题模型                    |
@@ -22,4 +24,4 @@
 
 旧顶层 `chrysPath` 由 ICode 迁移器读取为 `agentSettings.chrys.executablePath`。新记录存在时以新记录为准（包括空路径），避免重置或清空后被旧值覆盖；保存通用设置时保留原始旧字段，但运行时不再使用该字段。工作区通用 store 对所有未知字符串键只保留、不解释；`launch.ts` 独立解释旧 `chrysCommand`，将空值和旧默认值 `chrys` 迁移为 `icode`，显式配置优先。宿主专属目录方法及 IPC 已替换为通用 `userDataDir` / `user_data_dir`。
 
-`tests/agents/icodeBoundary.test.ts` 检查通用协议、领域、store 和 UI 中没有可执行的 `_chrys/*` 或 `_meta.chrys` 解释，并验证普通 Agent 不获得 ICode 审批、历史读取和配置初始化能力。对应功能测试继续覆盖转换后的内容。
+`tests/architecture/icodeBoundary.test.ts` 检查通用协议、领域、store 和 UI 中没有可执行的 `_chrys/*` 或 `_meta.chrys` 解释。`tests/plugins/agents/enhancements/icode/icodeBoundary.behavior.test.ts` 验证普通 Agent 不获得 ICode 审批、历史读取和配置初始化能力。

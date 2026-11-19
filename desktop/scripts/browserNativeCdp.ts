@@ -30,7 +30,7 @@ const invoke = async (command: string, args: Record<string, unknown> = {}) => {
 };
 
 const fixture = fileURLToPath(
-  new URL("../tests/browser/fixtures/index.html", import.meta.url),
+  new URL("../tests/plugins/browser/fixtures/index.html", import.meta.url),
 );
 const server = createServer((request, response) => {
   if (request.url === "/payload.txt") {

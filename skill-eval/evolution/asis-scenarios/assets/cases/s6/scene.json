@@ -1,0 +1,7 @@
+{
+  "id": "s6-tobe-leak",
+  "sr": "SR-OPS-F",
+  "module_dir": "pkg-sessionmanager",
+  "expect": "declared",
+  "allow_missing_artifact": false
+}

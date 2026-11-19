@@ -247,6 +247,9 @@ export function createBridgeHost(): HostRuntime {
         await request("POST", "/sso-poll-login", { endpoint }),
       );
     },
+    listenForSsoClose() {
+      return Promise.resolve(() => {});
+    },
     async ssoCloseLogin() {
       await request("POST", "/sso-close-login", {});
     },
@@ -368,7 +371,7 @@ export function createBridgeProcessRunner(): ProcessRunner {
         );
         return wire.exists;
       } catch {
-        // 探测失败按「不存在」处理（健康检查项会给出修复指引）
+        // 探测失败按「不存在」处理
         return false;
       }
     },
@@ -462,6 +465,18 @@ export class BridgeAcpTransport implements AcpTransport {
         this.stderrSlot.emit(`stdin 写入失败：${describeUnknownError(error)}`);
       },
     );
+  }
+
+  async writeLineConfirmed(line: string): Promise<void> {
+    if (this.closed || this.writeBroken) throw new AcpWriteError("ACP stdin 已关闭，无法写入");
+    try {
+      await request("POST", "/acp/write", { handle: this.handle, line });
+    } catch (error) {
+      this.writeBroken = true;
+      this.failureSlot.emit(String(error));
+      this.stderrSlot.emit(`stdin 写入失败：${describeUnknownError(error)}`);
+      throw new AcpWriteError("ACP stdin 写入失败", error);
+    }
   }
 
   onLine(handler: TransportLineHandler): void {

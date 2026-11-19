@@ -19,8 +19,7 @@ import { pathKey } from "../../../shared/panelPaths.ts";
  * 在项目有历史时实际打开的是旧对话——标签在说谎。现在按语义拆开：想继续
  * 上次的对话就点树上那条会话行，点「＋ 新会话」就得到一条新的。
  *
- * 流程：内容区先切到独立的可编辑草稿，连接在后台队列中建立；连接完成
- * 只在用户仍停留于这份草稿时接管视图。
+ * 内容区先切到可编辑草稿，真实会话创建后再接管视图，提供首发前的模型选择。
  *
  * 连接失败保留草稿，显示原因并允许重试；旧会话继续后台运行。
  */
@@ -62,7 +61,7 @@ export function startNewSession(
         let activated = false;
         const opened = await project.openSession(path, {
           forceNew: true,
-          draft: true,
+          createFromDraft: true,
           shouldFocus: () => {
             const current = isCurrent() && isLatest() && draft.isCurrent();
             if (current) activated = true;

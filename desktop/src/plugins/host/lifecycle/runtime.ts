@@ -1,4 +1,9 @@
-import type { ExitDiagnostics, HostOptions } from "../types.ts";
+import type {
+  CodeAgentCreditResult,
+  CodeAgentTokenResult,
+  ExitDiagnostics,
+  HostOptions,
+} from "../types.ts";
 import type { HostService } from "../service.ts";
 import { createTauriAcpProcessHost } from "../process/acpProcess.ts";
 import { createAccountHost } from "../adapters/account.ts";
@@ -16,6 +21,7 @@ import { createHostExitGate } from "./exitGate.ts";
 import { createTerminalHost } from "../process/terminal.ts";
 import { createHostProcessRunner } from "../process/processRunner.ts";
 import { createUpdatesHost } from "../adapters/updates.ts";
+import { createWorkflowEngineHost } from "../adapters/workflowEngine.ts";
 import { createInvoke, type NativeInvoke } from "../adapters/invoke.ts";
 import { createBrowserHost } from "../browser/tauri.ts";
 import { createLogger } from "../../../shared/logging/logger.ts";
@@ -31,6 +37,18 @@ export class DesktopHost implements HostService {
   readonly diagnostics = diagnosticsHost;
   readonly exitGate = createHostExitGate();
   private exitDiagnostics?: ExitDiagnostics;
+  readonly readCodeAgentCredit = (): Promise<CodeAgentCreditResult> =>
+    isTauriEnv()
+      ? this.resources.run(() => this.invoke("codeagent_credit_quota"))
+      : Promise.resolve({ status: "unsupported" });
+  readonly readCodeAgentTokenQuota = (
+    modelId?: string,
+  ): Promise<CodeAgentTokenResult> =>
+    isTauriEnv()
+      ? this.resources.run(() =>
+          this.invoke("codeagent_token_quota", { modelId }),
+        )
+      : Promise.resolve({ status: "unsupported" });
   private readonly flushForExit: ExitDiagnostics = (entry) =>
     this.exitDiagnostics?.(entry) ?? this.diagnostics.flush(entry);
 
@@ -69,6 +87,11 @@ export class DesktopHost implements HostService {
       const path = await dialogHost.pickDirectory(title);
       return this.resources.isActive() ? path : null;
     },
+    pickFiles: async (title) => {
+      if (!this.resources.isActive()) return [];
+      const paths = await dialogHost.pickFiles(title);
+      return this.resources.isActive() ? paths : [];
+    },
     saveFile: async (options) => {
       if (!this.resources.isActive()) return null;
       const path = await dialogHost.saveFile(options);
@@ -104,6 +127,10 @@ export class DesktopHost implements HostService {
       this.resources.isActive()
         ? notificationHost.send(notification)
         : Promise.resolve(),
+    remove: (tag) =>
+      this.resources.isActive()
+        ? notificationHost.remove(tag)
+        : Promise.resolve(),
   };
   readonly files: HostService["files"];
   readonly git: HostService["git"];
@@ -112,6 +139,8 @@ export class DesktopHost implements HostService {
   readonly skills: HostService["skills"];
   readonly account: HostService["account"];
   readonly updates: HostService["updates"];
+  readonly workflowEngine: HostService["workflowEngine"] =
+    createWorkflowEngineHost();
   readonly acpProcess: HostService["acpProcess"];
   readonly browser: HostService["browser"];
 
@@ -161,11 +190,39 @@ export class DesktopHost implements HostService {
         this.resources.run(() => backend.runCommand(program, args)),
     };
     this.archives = {
+      deleteAgentSession:
+        backend.deleteAgentSession &&
+        ((agentId, program, sessionId, cwd) =>
+          this.resources.run(() =>
+            backend.deleteAgentSession!(agentId, program, sessionId, cwd),
+          )),
+      readAgentHistoryEvidence:
+        backend.readAgentHistoryEvidence &&
+        ((agentId, sessionId, cwd) =>
+          this.resources.run(() =>
+            backend.readAgentHistoryEvidence!(agentId, sessionId, cwd),
+          )),
       userDataDir,
       readTextFile: (path) =>
         this.resources.run(() => backend.readTextFile(path)),
     };
     this.skills = {
+      library: isTauriEnv()
+        ? {
+            candidates: (from) =>
+              this.resources.run(() =>
+                this.invoke("skill_library_candidates", { from }),
+              ),
+            list: (query) =>
+              this.resources.run(() =>
+                this.invoke("skill_library_list", { query }),
+              ),
+            change: (query, action) =>
+              this.resources.run(() =>
+                this.invoke("skill_library_change", { query, action }),
+              ),
+          }
+        : undefined,
       pathExists,
       userDataDir,
       listDirNames: (path) =>

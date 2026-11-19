@@ -5,12 +5,11 @@ import { useRegisteredSnapshot } from "../../../../shared/state/useRegisteredSna
 import { useProjectGit, type GitService } from "../../../git/service.ts";
 import type { GitReviewNavigation } from "../../../git/types.ts";
 import type { ProjectWorkspace } from "../../service.ts";
-import type { WorkflowView } from "../../../workflow/types.ts";
-import { useMemo, useState, type ReactNode } from "react";
+import type { ProjectActivity, ProjectExtension } from "../../ui/extension.ts";
+import { useId, useMemo, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { pathKey } from "../../../../shared/panelPaths.ts";
 import {
-  aawStatusSummary,
   compactStatusSummary,
   gitStatusSummary,
   taskProgressSummary,
@@ -18,8 +17,12 @@ import {
 import type { StatusCardMode } from "../../types.ts";
 import { ScopedErrorBoundary } from "../../../../shared/ui/ErrorBoundary.tsx";
 import { StatusTaskProgress } from "./StatusTaskProgress.tsx";
-import { Maximize2Icon, Minimize2Icon } from "../../../../shared/ui/icons.tsx";
-import { useHintTooltip } from "../../../../shared/ui/controls/HintTooltip.tsx";
+import { ChevronRightIcon, EllipsisIcon, Maximize2Icon, Minimize2Icon } from "../../../../shared/ui/icons.tsx";
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
+import { TreeBranch, treeChevronClass } from "../../../../shared/ui/TreeMotion.tsx";
+import { useLayoutMotion } from "../../../../shared/ui/controls/useLayoutMotion.ts";
+import "./SessionStatusOverlay.css";
+import { hintTooltipProps } from "../../../../shared/ui/controls/HintTooltip.tsx";
 
 function Section({
   title,
@@ -30,16 +33,32 @@ function Section({
   metric?: ReactNode;
   children: ReactNode;
 }) {
+  const [open, setOpen] = useState(true);
+  const branchId = useId();
   return (
-    <details open className="border-b border-line py-2 last:border-b-0">
-      <summary className="flex cursor-pointer list-none items-center gap-3 rounded px-2 py-1 text-sm text-ink-faint hover:bg-raised">
+    <section className="border-b border-line py-2 last:border-b-0">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={branchId}
+        className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm text-ink-faint hover:bg-raised"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <ChevronRightIcon
+          aria-hidden="true"
+          className={`ui-icon-12 ${treeChevronClass} ${open ? "rotate-90" : ""}`}
+        />
         <span>{title}</span>
         {metric}
-      </summary>
-      {children}
-    </details>
+      </button>
+      <TreeBranch id={branchId} open={open}>
+        {children}
+      </TreeBranch>
+    </section>
   );
 }
+
+const NO_ACTIVITIES: readonly ProjectActivity[] = [];
 
 /** 会话消息容器内的摘要，开关浮层不重挂消息流或输入区。 */
 export function SessionStatusOverlay({
@@ -47,7 +66,7 @@ export function SessionStatusOverlay({
   queryGit,
   openGitReview,
   watchActivity,
-  workflow,
+  extension,
   enabled,
   centered = false,
   topLeft,
@@ -58,7 +77,7 @@ export function SessionStatusOverlay({
   queryGit?: GitService["query"];
   openGitReview?: GitReviewNavigation["open"];
   watchActivity?: ProjectWorkspace["subscribeWorkspaceActivity"];
-  workflow?: Pick<WorkflowView, "status" | "openProgress">;
+  extension?: Pick<ProjectExtension, "activities" | "openActivity" | "activityTitle">;
   enabled: boolean;
   /** 空态居中（ZCode 式）：滚动区改为内容高并以 mt-auto 下推，与 footer
    * （mb-auto）作为一组垂直居中；溢出时自动边距归零，内容从顶部可滚。 */
@@ -69,9 +88,10 @@ export function SessionStatusOverlay({
   children: ReactNode;
   footer?: ReactNode;
 }) {
-  const hintCollapse = useHintTooltip("收起为胶囊");
+  const hintCollapse = hintTooltipProps("收起为胶囊");
   const conversation = useProject()?.conversation;
   const mode = useRegisteredSnapshot(conversation?.statusView, (state) => state?.mode ?? "auto");
+  const moving = useLayoutMotion(mode, { scope: project });
   const setMode = (next: StatusCardMode) => conversation?.setStatusMode(next);
   const [menu, setMenu] = useState(false);
   const git = useProjectGit(enabled ? project : null, queryGit, watchActivity);
@@ -102,73 +122,51 @@ export function SessionStatusOverlay({
     () => (plan?.kind === "plan" ? taskProgressSummary(plan.entries) : null),
     [plan],
   );
-  const aaw = useRegisteredSnapshot(
-    workflow?.status,
+  const extensionStatus = useRegisteredSnapshot(
+    extension?.activities,
     useShallow((state) => ({
       project: state?.workspacePath ?? null,
-      currentSr: state?.currentSr ?? null,
-      status: state?.status ?? null,
-      next: state?.next ?? null,
-      loading: state?.isLoading ?? false,
-      error: state?.lastError ?? null,
+      items: state?.items ?? NO_ACTIVITIES,
     })),
   );
-  const matchingAaw =
-    !!project && !!aaw.project && pathKey(project) === pathKey(aaw.project);
-  const aawModel = useMemo(
-    () =>
-      matchingAaw && aaw.status?.sr === aaw.currentSr
-        ? aawStatusSummary(aaw.status, aaw.next)
-        : null,
-    [matchingAaw, aaw.status, aaw.next, aaw.currentSr],
-  );
-  const aawError = matchingAaw ? aaw.error : null;
-  const aawLoading = matchingAaw && aaw.loading;
+  const activities =
+    !!project && !!extensionStatus.project && pathKey(project) === pathKey(extensionStatus.project)
+      ? extensionStatus.items
+      : NO_ACTIVITIES;
+  const leadRun = activities[0] ?? null;
   const hasContent =
     enabled &&
     !!project &&
     !!(
       gitModel ||
       task ||
-      aawModel ||
+      leadRun ||
       git.error ||
       git.watchError ||
-      aawError ||
-      (git.loading && !git.data) ||
-      aawLoading
+      (git.loading && !git.data)
     );
-  const miniText = compactStatusSummary(task, aawModel, gitModel);
+  const miniText = compactStatusSummary(task, leadRun, gitModel);
   const compactLabel =
-    gitModel || task || aawModel
+    gitModel || task || leadRun
       ? miniText
-      : git.error || aawError
+      : git.error
         ? "状态读取失败"
         : git.watchError
           ? "自动刷新不可用"
           : "正在读取状态…";
-  const hasWarning = !!(
-    git.error ||
-    git.watchError ||
-    aawError ||
-    aawModel?.warning
-  );
+  const hasWarning = !!(git.error || git.watchError || leadRun?.attention);
   const openGit = (): void => {
     if (!project || !gitModel) return;
     openGitReview?.(project, "changes");
-  };
-  const openAaw = (): void => {
-    if (!project) return;
-    workflow?.openProgress(project);
   };
   return (
     <div
       className="relative @container/conversation min-h-0 flex-1"
       data-status-mode={hasContent ? mode : "none"}
+      data-layout-moving={moving || undefined}
     >
       {topLeft}
-      <div
-        className={`relative flex h-full min-h-0 flex-col [--session-card-inset:0px] ${hasContent && mode !== "mini" ? "@min-[1280px]/conversation:[--session-card-inset:352px]" : ""}`}
-      >
+      <div className="relative flex h-full min-h-0 flex-col">
         {/* ZCode 式：消息流内容直达会话区顶部，状态卡直接悬浮在内容上
             （不设 pt-12 顶条——那是自创的整条留白，内容永远够不到顶）。 */}
         <div className={`relative ${centered ? "mt-auto" : "min-h-0 flex-1"}`}>
@@ -180,18 +178,18 @@ export function SessionStatusOverlay({
         <ScopedErrorBoundary scope="会话状态" resetKey={project}>
           <aside
             aria-label="会话状态悬浮卡"
-            className="pointer-events-none absolute right-4 top-2 z-20 max-w-[calc(100cqw-2rem)]"
+            className="pointer-events-none absolute right-4 top-2 z-20"
           >
-            {mode !== "panel" && (
               <button
+                inert={mode === "panel"}
                 type="button"
                 aria-label={`展开会话状态：${compactLabel}`}
-                title={compactLabel}
+                data-hint={compactLabel}
                 onClick={() => {
                   setMenu(false);
                   setMode("panel");
                 }}
-                className={`pointer-events-auto max-w-[min(20rem,calc(100cqw-1.5rem))] items-center gap-2 rounded-full border border-line-strong bg-surface px-3 py-2 text-xs text-ink-soft shadow-md ${mode === "auto" ? "inline-flex @min-[1280px]/conversation:hidden" : "inline-flex"}`}
+                className="session-status-mini absolute right-0 top-0 inline-flex w-max max-w-[min(20rem,calc(100cqw-2rem))] items-center gap-2 rounded-full border border-line-strong bg-surface px-3 py-2 text-xs text-ink-soft shadow-floating"
               >
                 <span
                   aria-hidden="true"
@@ -202,42 +200,39 @@ export function SessionStatusOverlay({
                 <span className="truncate">{compactLabel}</span>
                 <Maximize2Icon
                   aria-hidden="true"
-                  className="h-3.5 w-3.5 shrink-0 text-ink-faint"
+                  className="ui-icon-14 shrink-0 text-ink-faint"
                 />
               </button>
-            )}
-            {mode !== "mini" && (
               <div
-                className={`pointer-events-auto w-80 max-w-[calc(100cqw-1.5rem)] rounded-2xl border border-line-strong bg-surface text-ink shadow-md ${mode === "auto" ? "hidden @min-[1280px]/conversation:block" : "block"}`}
+                inert={mode === "mini"}
+                className="session-status-panel absolute right-0 top-0 w-80 max-w-[calc(100cqw-2rem)] rounded-2xl border border-line-strong bg-surface text-ink shadow-floating"
               >
                 <div className="relative flex items-center justify-end gap-1 px-2 pt-2">
                   <span className="mr-auto pl-2 text-sm text-ink-faint">
                     会话状态
                   </span>
-                  <button
+                  <IconButton
                     type="button"
                     aria-label="状态卡显示选项"
                     aria-expanded={menu}
-                    className="rounded px-2 py-0.5 text-ink-faint hover:bg-raised"
                     onClick={() => setMenu((old) => !old)}
                   >
-                    ···
-                  </button>
-                  <button
+                    <EllipsisIcon className="ui-icon-14" />
+                  </IconButton>
+                  <IconButton
                     type="button"
                     aria-label="收起会话状态"
-                    className="flex h-5 w-5 items-center justify-center rounded text-ink-faint hover:bg-raised hover:text-ink"
                     {...hintCollapse}
                     onClick={() => {
                       setMenu(false);
                       setMode("mini");
                     }}
                   >
-                    <Minimize2Icon className="h-3.5 w-3.5" />
-                  </button>
+                    <Minimize2Icon className="ui-icon-14" />
+                  </IconButton>
                   {menu && (
                     <div
-                      className="absolute right-9 top-9 z-30 rounded-lg border border-line-strong bg-surface p-1 shadow-lg"
+                      className="absolute right-9 top-9 z-30 rounded-lg border border-line-strong bg-surface p-1 shadow-floating"
                       onKeyDown={(event) => {
                         if (event.key === "Escape") {
                           event.stopPropagation();
@@ -310,7 +305,7 @@ export function SessionStatusOverlay({
                           </button>
                           <p
                             className="truncate px-2 py-1 text-xs text-ink-soft"
-                            title={gitModel.branch}
+                            data-hint={gitModel.branch}
                           >
                             ⑂ {gitModel.branch}
                           </p>
@@ -360,62 +355,31 @@ export function SessionStatusOverlay({
                       />
                     </Section>
                   )}
-                  {(aawModel || aawError || aawLoading) && (
-                    <Section title="AAW 工作流">
-                      <button
-                        type="button"
-                        aria-label="查看 AAW 工作流进度"
-                        onClick={openAaw}
-                        className="block w-full rounded px-2 py-2 text-left text-sm hover:bg-raised"
-                      >
-                        {aawModel ? (
-                          <>
-                            <span className="flex items-center justify-between gap-2">
-                              <span>{aawModel.sr}</span>
-                              <span
-                                className={
-                                  aawModel.warning
-                                    ? "text-warn-ink"
-                                    : aawModel.completed
-                                      ? "text-ok-ink"
-                                      : "text-info"
-                                }
-                              >
-                                {aawModel.label}
-                              </span>
+                  {activities.length > 0 && extension && (
+                    <Section title={extension.activityTitle}>
+                      {activities.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          aria-label={item.openLabel}
+                          onClick={() => {
+                            if (project) extension.openActivity(project, item.id);
+                          }}
+                          className="block w-full rounded px-2 py-2 text-left text-sm hover:bg-raised"
+                        >
+                          <span className="flex items-center justify-between gap-2">
+                            <span className="truncate" data-hint={item.title}>{item.title}</span>
+                            <span className={item.attention ? "shrink-0 text-warn-ink" : "shrink-0 text-info"}>
+                              {item.label}
                             </span>
-                            <span className="mt-1 block text-ink-faint">
-                              已完成 {aawModel.done}/{aawModel.total}{" "}
-                              个已生成步骤
-                            </span>
-                            {aawModel.step && (
-                              <span
-                                className="mt-1 line-clamp-2 break-words text-ink-soft"
-                                title={aawModel.step}
-                              >
-                                {aawModel.step}
-                              </span>
-                            )}
-                          </>
-                        ) : (
-                          <span>
-                            {aawLoading ? "正在读取工作流…" : "查看工作流详情"}
                           </span>
-                        )}
-                        {aawError && (
-                          <span className="mt-1 block break-words text-danger-ink">
-                            {aawModel
-                              ? "刷新失败，显示上次读取结果。"
-                              : "读取失败。"}
-                            {aawError}
-                          </span>
-                        )}
-                      </button>
+                          <span className="mt-1 block truncate text-ink-faint">{item.detail}</span>
+                        </button>
+                      ))}
                     </Section>
                   )}
                 </div>
               </div>
-            )}
           </aside>
         </ScopedErrorBoundary>
       )}

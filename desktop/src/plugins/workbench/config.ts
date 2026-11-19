@@ -14,7 +14,7 @@ export const languageOptions: readonly { readonly value: Language; readonly labe
  * 基准变量的取值与下发：
  *
  * - 取值范围 12–20px,取整夹取（越界/非法一律回落默认 14）；
- * - Workbench 写入根元素的变量，保留图标、间距和圆角的 rem 基准。
+ * - Workbench 写入根变量供文字和图标读取，间距和圆角沿用 rem 基准。
  */
 
 export const DEFAULT_UI_FONT_SIZE_PX = 14;
@@ -25,9 +25,12 @@ export const defaultAppearance: WorkbenchAppearancePreferences = {
   theme: "dark",
   language: "zh-CN",
   uiFontSize: DEFAULT_UI_FONT_SIZE_PX,
+  fileTreePosition: "right",
 };
 
-export const appearanceFields = ["theme", "language", "uiFontSize"] as const;
+export const appearanceFields = ["theme", "language", "uiFontSize", "fileTreePosition"] as const;
+
+export const FILE_TREE_POSITION_SETTING_ID = "settings-file-tree-position";
 
 /** 非法/越界值一律取整夹取回合法区间（NaN 回落默认 14）。 */
 export function normalizeUiFontSizePx(value: unknown): number {

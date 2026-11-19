@@ -11,13 +11,18 @@ import {
   SegmentedControl,
   SettingCard,
   SettingRow,
-  settingsInputClass,
 } from "../../../shared/ui/SettingsPageParts.tsx";
 import { ToggleSwitch } from "../../../shared/ui/controls.tsx";
-import { ArchiveIcon, ShieldCheckIcon, TerminalIcon } from "../../../shared/ui/icons.tsx";
+import {
+  ArchiveIcon,
+  ShieldCheckIcon,
+  TerminalIcon,
+} from "../../../shared/ui/icons.tsx";
 import { LegacyAgentDataSection } from "./LegacyAgentDataSection.tsx";
-import { useToolPathSettings } from "./workspaces/settingsLinks.ts";
 import { ArchiveManagementSection } from "./ArchiveManagementSection.tsx";
+import type { AgentsService } from "../../agents/service.ts";
+import { InteractionPicker } from "./InteractionPicker.tsx";
+import { MessageStreamPicker } from "./MessageStreamPicker.tsx";
 
 const settingsText = {
   "settings.approvalSection": "审批默认模式",
@@ -73,20 +78,55 @@ function ArchiveDaysInput({
           commit();
         }
       }}
-      className="w-20 rounded-md border border-line bg-surface px-2 py-1 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info"
+      className="w-20 rounded-md border border-line bg-surface px-2 py-1 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
     />
   );
 }
 
-function SessionSettings() {
+function SessionSettings({
+  active,
+  selection,
+}: {
+  readonly active: boolean;
+  readonly selection?: Pick<AgentsService, "configuration" | "resolve">;
+}) {
+  const agentId = useRegisteredSnapshot(
+    selection?.configuration,
+    (state) => state?.activeAgentId,
+  );
+  const supportsSteer = agentId && selection?.resolve(agentId)?.supportsSteer;
   const language = useWorkbenchLanguage();
   const {
     preferences,
-    values: { approvalMode, autoAnswerQuestions, messageStreamShowTodos },
+    values: {
+      approvalMode,
+      autoAnswerQuestions,
+      messageStreamShowTodos,
+      messageStreamMode,
+      interactionByAgent,
+    },
   } = useProjectPreferences();
   const t = createTranslator(language, settingsText);
   return (
     <>
+      {active && (
+        <SettingCard label="信息流呈现方式">
+          <MessageStreamPicker
+            value={messageStreamMode}
+            onChange={(value) => preferences?.setMessageStreamMode(value)}
+          />
+        </SettingCard>
+      )}
+      {active && supportsSteer && (
+        <SettingCard label="交互行为">
+          <InteractionPicker
+            value={interactionByAgent[agentId]?.mode ?? "queue"}
+            onChange={(value) =>
+              preferences?.setAgentInteraction(agentId, value)
+            }
+          />
+        </SettingCard>
+      )}
       <SettingCard label="会话策略">
         <SettingRow label="在消息流中显示任务步骤" desc="显示 Agent 的任务进度">
           <ToggleSwitch
@@ -137,7 +177,11 @@ function SessionSettings() {
   );
 }
 
-function ArchiveSettings({ LegacyAgentData }: { readonly LegacyAgentData: ComponentType }) {
+function ArchiveSettings({
+  LegacyAgentData,
+}: {
+  readonly LegacyAgentData: ComponentType;
+}) {
   const {
     preferences,
     values: { sessionAutoArchiveEnabled, sessionAutoArchiveOlderThanDays },
@@ -186,51 +230,14 @@ function ArchiveSettings({ LegacyAgentData }: { readonly LegacyAgentData: Compon
   );
 }
 
-const textInputClass = `${settingsInputClass} font-mono`;
-
 function ToolSettings({ skills }: { readonly skills?: SkillsSettingsView }) {
   const SkillsInstaller = skills?.Installer;
   const SkillsSource = skills?.Source;
   const language = useWorkbenchLanguage();
-  const toolPaths = useToolPathSettings();
   const t = createTranslator(language, settingsText);
   return (
     <>
       <SettingCard label={t("settings.toolPathsSection")}>
-        <SettingRow
-          label="uv 命令"
-          desc="执行 aaw CLI 与工作流脚本的解释器命令（可写绝对路径）"
-          htmlFor="uv-command"
-        >
-          <input
-            id="uv-command"
-            type="text"
-            value={toolPaths.uvCommand}
-            onChange={(event) => {
-              toolPaths.setUvCommand(event.target.value);
-            }}
-            placeholder="uv"
-            className={textInputClass}
-          />
-        </SettingRow>
-
-        <SettingRow
-          label="aaw 脚本路径"
-          desc="留空则按下方 skills 源目录推导"
-          htmlFor="aaw-script"
-        >
-          <input
-            id="aaw-script"
-            type="text"
-            value={toolPaths.aawScriptPath}
-            onChange={(event) => {
-              toolPaths.setAawScriptPath(event.target.value);
-            }}
-            placeholder="skills/aaw-workflow/scripts/aaw.py"
-            className={textInputClass}
-          />
-        </SettingRow>
-
         {SkillsSource && <SkillsSource />}
       </SettingCard>
 
@@ -243,6 +250,7 @@ const spaced = "flex flex-col gap-5";
 export function createProjectSettings(
   LegacyAgentData: ComponentType = LegacyAgentDataSection,
   skillsSettings?: ReadonlySnapshot<{ readonly view?: SkillsSettingsView }>,
+  selection?: Pick<AgentsService, "configuration" | "resolve">,
 ): readonly WorkbenchContributions["settings"][] {
   return [
     {
@@ -251,7 +259,10 @@ export function createProjectSettings(
       label: "工具路径",
       Icon: TerminalIcon,
       View: function ToolSettingsView() {
-        const skills = useRegisteredSnapshot(skillsSettings, (state) => state?.view);
+        const skills = useRegisteredSnapshot(
+          skillsSettings,
+          (state) => state?.view,
+        );
         return <ToolSettings skills={skills} />;
       },
       layoutClass: spaced,
@@ -261,7 +272,7 @@ export function createProjectSettings(
       order: 40,
       label: "会话与审批",
       Icon: ShieldCheckIcon,
-      View: SessionSettings,
+      View: (props) => <SessionSettings {...props} selection={selection} />,
       layoutClass: spaced,
     },
     {

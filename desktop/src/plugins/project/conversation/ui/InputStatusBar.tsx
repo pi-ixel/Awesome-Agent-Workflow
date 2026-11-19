@@ -1,3 +1,10 @@
+import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
+import { SessionPerformanceBadge } from "./SessionPerformanceBadge.tsx";
+import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
+import { HintNumber } from "../../../../shared/ui/controls/HintNumber.tsx";
+import { UsageMeter } from "../../../../shared/ui/controls/UsageMeter.tsx";
+import { formatTokenCount } from "../../../../shared/formatTokenCount.ts";
 import { useSessionValue, useApprovalValue, useRuntimeValue } from "../../ui/bindings/conversationView.ts";
 import { useSessionCommands } from "./useSessionCommands.ts";
 /**
@@ -30,20 +37,6 @@ function hoverLines(lines: readonly string[]): string {
   return lines.filter((line) => line.length > 0).join("\n");
 }
 
-/** token 数的人读短格式（ZCode 浮框口径：177_000 → 17.7万，1_000_000 →
- *  100万，120_000_000 → 1.2亿；整数不带小数）。 */
-function formatWanTokens(value: number): string {
-  if (value >= 100_000_000) {
-    const yi = value / 100_000_000;
-    return `${Number.isInteger(yi) ? yi : yi.toFixed(1)}亿`;
-  }
-  if (value >= 10_000) {
-    const wan = value / 10_000;
-    return `${Number.isInteger(wan) ? wan : wan.toFixed(1)}万`;
-  }
-  return String(Math.round(value));
-}
-
 /** 百分比短格式（ZCode 口径：92.7% 一位小数，0% 整数）。 */
 function formatPercent(value: number): string {
   const rounded = Math.round(value * 10) / 10;
@@ -72,17 +65,21 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 /** 上下文用量圆环（ZCode 同款：无行内百分比，悬停弹「上下文容量」浮框；
  *  轨道 opacity 0.25 / 进度弧 0.7，颜色随文字 currentColor）。 */
-export function ContextRing(): React.JSX.Element | null {
+export function ContextRing(): React.JSX.Element {
   const usage = useRuntimeValue((state) => state.usage);
-  const maxContextTokens = useRuntimeValue(
+  const reportedCapacity = useRuntimeValue(
     (state) => state.usage?.maxContextTokens ?? state.runtime.maxContextTokens,
   );
+  const cachedContext = useRuntimeValue((state) => state.cachedContext);
+  const hasReportedCapacity =
+    reportedCapacity !== null && Number.isFinite(reportedCapacity) && reportedCapacity > 0;
+  const maxContextTokens = hasReportedCapacity ? reportedCapacity : cachedContext?.capacity ?? null;
   const [open, setOpen] = useState(false);
   const [cardPos, setCardPos] = useState<{
     readonly left: number;
     readonly bottom: number;
   } | null>(null);
-  const anchorRef = useRef<HTMLSpanElement | null>(null);
+  const anchorRef = useRef<HTMLButtonElement | null>(null);
   // 打开期间视口滚动/缩放会让 fixed 定位失准，直接收卡（HintTooltip 同策略）
   useEffect(() => {
     if (!open) {
@@ -98,11 +95,11 @@ export function ContextRing(): React.JSX.Element | null {
       window.removeEventListener("resize", close);
     };
   }, [open]);
-  if (usage === null) {
-    return null;
-  }
   // 上下文口径与会话累计消耗严格分离。
-  const used = usage.contextUsed;
+  const used = !hasReportedCapacity && cachedContext
+    ? cachedContext.used
+    : usage?.contextUsed ??
+      (cachedContext?.capacity === maxContextTokens ? cachedContext.used : null);
   const capacityKnown =
     maxContextTokens !== null &&
     Number.isFinite(maxContextTokens) &&
@@ -117,13 +114,18 @@ export function ContextRing(): React.JSX.Element | null {
     (capacityKnown && usedKnown && used > maxContextTokens);
   const clamped =
     invalidUsage || pct === null ? 0 : Math.min(100, Math.max(0, pct));
-  // 缓存命中率：会话口径优先（chrys 不推分类明细，浮框暂只这两块数据）
-  const cacheRate =
-    usage.cacheHitTokens !== null &&
-    usage.inputTokens !== null &&
-    usage.inputTokens > 0
-      ? (usage.cacheHitTokens / usage.inputTokens) * 100
-      : null;
+  const cacheReadTokens = usage?.totalSessionCacheHitTokens;
+  const cacheDenominator = usage?.basis === "prompt-total"
+    ? usage.totalSessionTokens
+    : usage?.totalSessionInputTokens;
+  const hasSessionUsage = usage?.basis === "prompt-total" ||
+    [usage?.totalSessionTokens, usage?.totalSessionInputTokens, usage?.totalSessionOutputTokens, cacheReadTokens]
+      .some((value) => value != null);
+  const cacheRate = cacheReadTokens != null && cacheDenominator != null && cacheDenominator > 0
+    ? (cacheReadTokens / cacheDenominator) * 100
+    : null;
+  const tokens = (value: number | null | undefined) => value == null
+    ? "未知" : `${value.toLocaleString("en-US")} tok`;
   // 构成明细（消息/系统工具/MCP 工具/技能/系统提示词/其他）：chrys 的
   // _chrys/usage_update 尚不推送分类数据，接上后填充此数组即出明细区
   const breakdown: readonly {
@@ -151,13 +153,14 @@ export function ContextRing(): React.JSX.Element | null {
     setOpen(true);
   };
   return (
-    <span
+    <>
+    <IconButton
+      iconSize="compact"
       ref={anchorRef}
-      className="flex min-w-0 shrink-0 items-center text-ink-mute"
+      className="flex shrink-0 items-center justify-center rounded-md text-ink-mute hover:bg-hover"
       data-status="context"
-      role="button"
-      tabIndex={0}
       aria-label={pct === null ? "上下文用量：容量或用量未知" : "上下文用量"}
+      onClick={openCard}
       onFocus={openCard}
       onBlur={() => setOpen(false)}
       onMouseEnter={openCard}
@@ -165,7 +168,7 @@ export function ContextRing(): React.JSX.Element | null {
         setOpen(false);
       }}
     >
-      <svg viewBox="0 0 24 24" aria-hidden={true} className="size-3.5 shrink-0">
+      <UiIcon viewBox="0 0 24 24" className="ui-icon-14 shrink-0">
         {/* 轨道：currentColor @ 0.25（ZCode kJt 同款） */}
         <circle
           cx="12"
@@ -185,59 +188,41 @@ export function ContextRing(): React.JSX.Element | null {
           strokeLinecap="round"
           strokeDasharray={`${RING_CIRCUMFERENCE} ${RING_CIRCUMFERENCE}`}
           strokeDashoffset={RING_CIRCUMFERENCE * (1 - clamped / 100)}
-          className="stroke-current opacity-70"
+          className={`stroke-current ${clamped > 0 ? "opacity-70" : "opacity-0"}`}
           style={{ transform: "rotate(-90deg)", transformOrigin: "center" }}
         />
-      </svg>
-      {pct === null ? <span className="ml-1 text-xs">未知</span> : null}
-      {open && cardPos !== null
-        ? createPortal(
-            <div
+      </UiIcon>
+    </IconButton>
+      {createPortal(
+            <HintSurface
+              open={open && cardPos !== null}
+              unfoldFrom="bottom"
               role="dialog"
               aria-label="上下文容量"
-              className="pointer-events-none fixed z-[60] w-80 overflow-hidden rounded-xl border border-line bg-surface shadow-md"
-              style={{ left: cardPos.left, bottom: cardPos.bottom }}
+              className="pointer-events-none fixed z-[60] w-80 overflow-hidden"
+              style={cardPos ?? undefined}
             >
               <div className="w-full space-y-3 p-3">
-                {/* 头部：标题 + 已用/总量（占比） */}
+                {/* 头部保留用量，百分比固定在进度条内右侧。 */}
                 <div className="space-y-2">
-                  <div className="mb-3 flex min-w-0 items-center gap-3">
+                  <div className="mb-3 flex min-w-0 items-baseline gap-3">
                     <span className="shrink-0 text-ui-base font-medium text-ink">
                       上下文容量
                     </span>
-                    <span className="ml-auto shrink-0 text-right font-mono text-ui-sm text-ink-mute">
-                      {usedKnown ? formatWanTokens(used) : "未知"}/
-                      {capacityKnown
-                        ? formatWanTokens(maxContextTokens)
-                        : "容量未知"}
-                      （
-                      {invalidUsage
-                        ? "上报异常"
-                        : pct === null
-                          ? "比例未知"
-                          : formatPercent(pct)}
-                      ）
+                    <span className="ml-auto shrink-0 text-right text-ui-sm text-ink-mute">
+                      <HintNumber value={usedKnown ? formatTokenCount(used) : "未知"} />/
+                      <HintNumber value={capacityKnown
+                        ? formatTokenCount(maxContextTokens)
+                        : "容量未知"} />
+                      {(invalidUsage || pct === null) && (
+                        <>（{invalidUsage ? "上报异常" : "未知"}）</>
+                      )}
                     </span>
                   </div>
-                  {pct !== null ? (
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-raised">
-                      <div
-                        className="h-full min-w-2 rounded-full bg-info"
-                        style={{ width: `${clamped}%` }}
-                      />
-                    </div>
-                  ) : (
-                    <p className="text-xs text-ink-mute">
-                      Agent 未上报有效的上下文用量或容量，无法计算占比。
-                    </p>
-                  )}
+                  {pct !== null && !invalidUsage ? (
+                    <UsageMeter label="上下文占用" percent={pct} />
+                  ) : null}
                 </div>
-                <p className="text-xs text-ink-mute">
-                  {`来源：${usage.sourceLabel ?? "Agent 用量上报"}`}
-                  {usage.totalSessionTokens !== null
-                    ? ` · 会话累计 ${formatWanTokens(usage.totalSessionTokens)}`
-                    : ""}
-                </p>
                 {/* 构成明细：色块 + 名称 + 占比（ZCode 同款行式） */}
                 {breakdown.length > 0 ? (
                   <div className="grid gap-1.5" aria-label="上下文构成">
@@ -259,31 +244,46 @@ export function ContextRing(): React.JSX.Element | null {
                         <span className="min-w-0 truncate text-ink-mute">
                           {item.label}
                         </span>
-                        <span className="ml-auto min-w-10 shrink-0 text-right font-mono text-ui-sm tabular-nums text-ink">
-                          {formatPercent(item.percent)}
+                        <span className="ml-auto min-w-10 shrink-0 text-right text-ui-sm text-ink">
+                          <HintNumber value={formatPercent(item.percent)} />
                         </span>
                       </div>
                     ))}
                   </div>
                 ) : null}
-                {cacheRate !== null ? (
-                  <div
-                    className={`flex items-center justify-between gap-3 text-ui-sm ${
-                      breakdown.length > 0 ? "border-t border-line pt-3" : ""
-                    }`}
-                  >
-                    <span className="text-ink-mute">本次缓存命中率</span>
-                    <span className="font-mono text-ui-sm text-ink">
-                      {formatPercent(cacheRate)}
-                    </span>
-                  </div>
-                ) : null}
+                {usage && (
+                  <>
+                    <div className="flex items-baseline justify-between gap-3 text-ui-sm">
+                      <span className="text-ink-mute">缓存命中率</span>
+                      <span className="shrink-0 text-right text-ink"><HintNumber value={cacheRate === null ? "未知" : formatPercent(cacheRate)} /></span>
+                    </div>
+                    <div className="flex items-baseline justify-between gap-3 text-ui-sm">
+                      <span className="text-ink-mute">缓存读取</span>
+                      <span className="shrink-0 text-right text-ink"><HintNumber value={tokens(cacheReadTokens)} /></span>
+                    </div>
+                    <div className="space-y-3 border-t border-line pt-3">
+                      {hasSessionUsage && (
+                        <div className="flex items-baseline justify-between gap-3 text-ui-sm">
+                          <span className="text-ink-mute">会话总用量</span>
+                          <span className="shrink-0 text-right text-ink"><HintNumber value={tokens(usage.totalSessionTokens)} /></span>
+                        </div>
+                      )}
+                      <div className="flex items-baseline justify-between gap-3 text-ui-sm">
+                        <span className="text-ink-mute">输入累计</span>
+                        <span className="shrink-0 text-right text-ink"><HintNumber value={tokens(usage.totalSessionInputTokens)} /></span>
+                      </div>
+                      <div className="flex items-baseline justify-between gap-3 text-ui-sm">
+                        <span className="text-ink-mute">输出累计</span>
+                        <span className="shrink-0 text-right text-ink"><HintNumber value={tokens(usage.totalSessionOutputTokens)} /></span>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
-            </div>,
+            </HintSurface>,
             document.body,
-          )
-        : null}
-    </span>
+          )}
+    </>
   );
 }
 
@@ -317,8 +317,8 @@ export function ModelTag(): React.JSX.Element {
   if (availableModels.length === 0) {
     return (
       <span
-        className="flex min-w-0 items-center px-1 py-0.5 text-sm text-ink-mute"
-        title={hoverLines([label ?? "", runtime.modelProvider ?? ""])}
+        className="flex min-w-0 items-center px-1.5 py-0.5 text-sm text-ink-mute"
+        data-hint={hoverLines([label ?? "", runtime.modelProvider ?? ""])}
       >
         <span className="truncate">
           {pendingModelId
@@ -367,56 +367,24 @@ export function ModelTag(): React.JSX.Element {
   );
 }
 
-/** Agent-provided modes are independent from the client's approval policy. */
-export function ModeTag(): React.JSX.Element | null {
-  const modes = useSessionValue((state) => state.availableModes);
-  const current = useSessionValue((state) => state.approvalMode);
-  const pending = useSessionValue((state) => state.pendingModeId);
-  const { switchMode } = useSessionCommands();
-  if (!modes.length) return null;
-  return (
-    <StatusChipMenu
-      title="Agent 会话模式（与客户端审批默认方式独立）"
-      menuLabel="会话模式选择"
-      label={
-        <span className="max-w-32 truncate">
-          {pending ? "正在确认模式…" : (current?.name ?? "会话模式")}
-        </span>
-      }
-    >
-      <div className="max-h-52 overflow-y-auto py-1">
-        {modes.map((mode) => (
-          <MenuItemRow
-            key={mode.id}
-            title={mode.name}
-            description={mode.description ?? " "}
-            selected={mode.id === current?.id}
-            onClick={() => switchMode(mode.id)}
-          />
-        ))}
-      </div>
-    </StatusChipMenu>
-  );
-}
-
 /** 右簇：上下文圆环 + 模型（ZCode 工具栏同序：环在模型名前）。单一
  *  items-center 容器——外层工具栏行是 items-end，拆散成兄弟会被贴底
  *  对齐，环和模型文字就错位了。 */
 export function InputStatusRight(): React.JSX.Element {
   return (
-    <span className="flex min-w-0 items-center gap-2">
+    <div className="flex min-w-0 items-center gap-2">
+      <SessionPerformanceBadge />
       <ContextRing />
-      <ModelTag />
-      <ModeTag />
-    </span>
+      {/* 抵消模型控件的左侧内边距，让可见内容之间保持相同间隔。 */}
+      <div className="-ms-1.5 min-w-0">
+        <ModelTag />
+      </div>
+    </div>
   );
 }
 
 /**
- * 对话流末尾的诊断行：只承载相位行不覆盖的异常态——执行状态未确认 /
- * 取消中 / 等待响应，以及排队计数。常规的「思考中/生成中」指示由流内的
- * 思考行与工具卡标题的流光承担（ZCode 结构：无独立相位行），轮次正常
- * 且无排队时本行退场。
+ * 对话流末尾显示执行状态提示和排队计数。
  */
 export function TurnStatusRow(): React.JSX.Element | null {
   const isAgentRunning = useSessionValue((state) => state.isAgentRunning);

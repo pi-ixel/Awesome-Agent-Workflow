@@ -1,8 +1,12 @@
 import { type ReactNode } from "react";
-import { focusVisibleRing } from "./controls";
+export { SegmentedControl } from "./controls/SegmentedControl.tsx";
 
 export const settingsInputClass =
-  "h-8 w-full min-w-0 rounded-md border border-line-strong bg-base px-2.5 text-ui-base text-ink placeholder:text-ink-ghost focus:border-ink-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/60 disabled:opacity-50";
+  "min-h-8 w-full min-w-0 rounded-md border border-line-strong bg-base px-2.5 text-ui-base text-ink placeholder:text-ink-ghost focus:border-ink-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50";
+
+/** 多行输入：与单行输入同一套边框、圆角、焦点环，高度可拖。 */
+export const settingsTextareaClass =
+  "block min-h-16 w-full min-w-0 resize-y rounded-md border border-line-strong bg-base px-2.5 py-1.5 text-ui-base leading-relaxed text-ink placeholder:text-ink-ghost focus:border-ink-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50";
 
 export function SettingCard({
   label,
@@ -14,9 +18,7 @@ export function SettingCard({
   return (
     <div aria-label={label} className="min-w-0">
       <h3 className="mb-2 text-ui-base font-semibold text-ink">{label}</h3>
-      <div className="min-w-0 overflow-hidden rounded-xl border border-line bg-surface">
-        {children}
-      </div>
+      <div className="min-w-0 border-b border-line bg-surface">{children}</div>
     </div>
   );
 }
@@ -24,6 +26,7 @@ export function SettingCard({
 /** 设置行：左「标题 + 说明」右控件；footer 承接状态行 / 推导提示等
  * 附属信息（占整行宽，视觉上仍是本行的一部分）。 */
 export function SettingRow({
+  id,
   label,
   desc,
   htmlFor,
@@ -31,6 +34,7 @@ export function SettingRow({
   footerAlign = "end",
   children,
 }: {
+  readonly id?: string;
   readonly label: string;
   readonly desc?: string;
   /** 可聚焦控件（input）的关联 id；纯展示行省略。 */
@@ -40,7 +44,7 @@ export function SettingRow({
   readonly children?: ReactNode;
 }) {
   return (
-    <div className="border-t border-line px-4 py-3 first:border-t-0">
+    <div id={id} className="border-t border-line py-4 first:border-t-0">
       <div className="grid grid-cols-1 items-center gap-2.5 gap-y-1 @min-[560px]/settings:grid-cols-[minmax(0,1fr)_minmax(0,240px)] @min-[560px]/settings:gap-4">
         <div className="min-w-0">
           {htmlFor !== undefined ? (
@@ -74,54 +78,6 @@ export function SettingRow({
           {footer}
         </div>
       ) : null}
-    </div>
-  );
-}
-
-/** 分段控件（语言 / 主题 / 审批模式共用）：扁平胶囊选中态。 */
-export function SegmentedControl<T extends string>({
-  groupLabel,
-  value,
-  options,
-  onChange,
-  warnValue,
-}: {
-  readonly groupLabel: string;
-  readonly value: T;
-  readonly options: readonly { readonly value: T; readonly label: string }[];
-  readonly onChange: (next: T) => void;
-  /** 选中时以琥珀警示呈现的选项值（如「自动拒绝」）。 */
-  readonly warnValue?: T;
-}) {
-  return (
-    <div
-      role="group"
-      aria-label={groupLabel}
-      className="inline-flex max-w-full flex-wrap gap-1 rounded-full bg-surface p-1"
-    >
-      {options.map((option) => {
-        const isSelected = option.value === value;
-        const isWarn = isSelected && option.value === warnValue;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={isSelected}
-            onClick={() => {
-              onChange(option.value);
-            }}
-            className={`press min-h-7 shrink-0 rounded-full px-3 py-1 text-ui-base font-medium transition-colors ${
-              isWarn
-                ? "bg-warn-bg/70 text-warn-ink"
-                : isSelected
-                  ? "bg-raised text-ink"
-                  : "text-ink-mute hover:bg-hover hover:text-ink-soft"
-            } ${focusVisibleRing}`}
-          >
-            {option.label}
-          </button>
-        );
-      })}
     </div>
   );
 }

@@ -16,7 +16,8 @@ export function createProjectForeground(
     createSessionStore(undefined, annotationDrafts, undefined, loggerFactory("session")),
   );
   const approval = createStoreView(createApprovalStore(loggerFactory("approval")));
-  const runtime = createStoreView(createRuntimeStatusStore(loggerFactory("usage")));
+  const selectedStatus = createRuntimeStatusStore(loggerFactory("usage"));
+  const runtime = createStoreView(selectedStatus);
   const activity = createForegroundActivity(loggerFactory("project"));
   const view = {
     session: session.view,
@@ -24,9 +25,17 @@ export function createProjectForeground(
     runtime: runtime.view,
   };
   const sessionSnapshot = createSnapshotView(view.session, (state) => ({
+    performanceTotals: state.performanceTotals,
     agentKey: state.agentKey,
     supportsImages: state.supportsImages,
+    supportsSteer: state.supportsSteer,
+    directSteering: state.directSteering,
+    activeSteerIds: state.activeSteerIds,
+    steerAgentId: state.steerAgentId,
+    steerPhase: state.steerPhase,
+    steerEditableId: state.steerEditableId,
     items: state.items,
+    hasCumulativePromptUsage: state.hasCumulativePromptUsage,
     recovery: state.recovery,
     connectionFailure: state.connectionFailure,
     queuedPrompts: state.queuedPrompts,
@@ -54,6 +63,7 @@ export function createProjectForeground(
     turnError: state.turnError,
     agentCrashed: state.agentCrashed,
     lastError: state.lastError,
+    queueSaveError: state.queueSaveError,
   }));
   const approvalSnapshot = createSnapshotView(
     view.approval,
@@ -62,6 +72,7 @@ export function createProjectForeground(
   const runtimeSnapshot = createSnapshotView(view.runtime, (state) => ({
     runtime: state.runtime,
     usage: state.usage,
+    cachedContext: state.cachedContext,
     usageSource: state.usageSource,
     availableCommands: state.availableCommands,
     isTurnActive: state.isTurnActive,
@@ -84,6 +95,7 @@ export function createProjectForeground(
       approvals = createApprovalStore(loggerFactory("approval")),
       status = createRuntimeStatusStore(loggerFactory("usage")),
     ) {
+      if (session.view.getState() !== store.getState()) session.view.getState().stopSteering();
       session.select(store);
       approval.select(approvals);
       runtime.select(status);

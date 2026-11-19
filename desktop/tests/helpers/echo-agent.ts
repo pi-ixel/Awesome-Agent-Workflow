@@ -1,6 +1,6 @@
 /**
  * 进程内仿真 agent（echo-agent）：讲与 chrys 相同的 ACP 方言，供
- * 单测在无 chrys 环境下驱动完整协议通路（tests/acp/* 的测试替身）。
+ * 单测在无 chrys 环境下驱动完整协议通路。
  *
  * 实现（对照 chrys server.py 的行为）：
  * - `initialize`：回 `min(请求版本, 支持版本)`（可注入配置以测试协商失败）；

@@ -20,7 +20,7 @@ const invoke = async (
   );
 
 const fixture = fileURLToPath(
-  new URL("../tests/browser/fixtures/index.html", import.meta.url),
+  new URL("../tests/plugins/browser/fixtures/index.html", import.meta.url),
 );
 const server = createServer((_request, response) => {
   response.setHeader("Content-Type", "text/html; charset=utf-8");

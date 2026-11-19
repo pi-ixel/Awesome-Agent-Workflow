@@ -1,8 +1,10 @@
+import type { HistoryEvidence } from "../../host/types.ts";
+import type { SkillProvider } from "../../host/types.ts";
 import type { AcpDialect, AgentDialectHooks } from "../../acpRuntime/types.ts";
 import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
 import type { AgentSettingsData } from "../configuration/types.ts";
 import type { AgentExecutableConfiguration } from "../configuration/types.ts";
-import type { SkillInstallation } from "../../skills/types.ts";
+import type { SkillInstallation, SkillPackageManager } from "../../skills/types.ts";
 import type { HostAgentCommands, HostCommands } from "../../host/types.ts";
 import type { HostArchiveFiles } from "../../host/types.ts";
 import type { LoggerFactory } from "../../../shared/logging/logger.ts";
@@ -32,6 +34,27 @@ export interface AgentConfigurationContext {
 }
 
 export interface AgentAdapter {
+  readonly deleteSession?: (
+    host: HostArchiveFiles & HostCommands,
+    launch: AgentLaunch,
+    sessionId: string,
+  ) => Promise<void>;
+  readonly imageOnlyPromptFallback?: boolean;
+  /** Opt-in cancel-and-follow-up interaction, never a native ACP steer claim. */
+  readonly supportsSteer?: boolean;
+  readonly readHistoryEvidence?: (host: HostArchiveFiles, sessionId: string, cwd: string) => Promise<HistoryEvidence | null>;
+  /** Canonical identity for reporting only; never changes ACP model IDs. */
+  readonly usageModelId?: (model: string) => string;
+  /** Whether prompt-result totals define the displayed context usage. */
+  readonly promptUsageBasis?: "prompt-total";
+  /** Record prompt totals while retaining the independently reported context. */
+  readonly turnUsageBasis?: "prompt-total";
+  /** Optional storage prefix for reported session counters. */
+  readonly sessionUsageCachePrefix?: string;
+  /** Scope of the counters returned in a prompt response. */
+  readonly promptUsage?: {
+    readonly accounting: "turn" | "turn-delta";
+  };
   /** Shared per-connection budget for list/new/load/prompt; not a session limit. */
   readonly maxConcurrentRequests?: number;
   /** Optional force-stop grace after a user cancellation. Omitted means no timer. */
@@ -55,6 +78,12 @@ export interface AgentAdapter {
     toolPaths: object,
   ) => string | undefined;
   readonly skillInstallation?: SkillInstallation;
+  readonly skillLibrary?: SkillProvider;
+  readonly slashSkillSource?: "catalog" | "session";
+  readonly skillPackages?: (
+    host: HostCommands,
+    executable: string,
+  ) => SkillPackageManager;
   /** 稳定标识（日志与设置引用）。 */
   readonly id: string;
   /** 展示名（界面与日志）。 */

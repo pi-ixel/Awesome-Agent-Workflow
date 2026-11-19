@@ -78,7 +78,7 @@ export function MemoryChart({
         <polyline
           points={points}
           fill="none"
-          className="stroke-info-line"
+          className="stroke-chart-line"
           strokeWidth="2"
           strokeLinejoin="round"
         />

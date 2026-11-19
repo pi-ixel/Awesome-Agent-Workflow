@@ -37,6 +37,7 @@ export interface DocumentsService extends Omit<
 }
 
 export { validAnnotation } from "./annotations/anchors.ts";
+export { COMMENT_LIMIT, documentPanelCompatibility } from "./config.ts";
 
 export interface DocumentNavigation {
   readonly openFileTree: (project: string) => void;

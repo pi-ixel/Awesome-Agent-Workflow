@@ -1,5 +1,4 @@
-import type { ConfigurationService } from "../../configuration/service.ts";
-import { desktopSettingsKey } from "../../configuration/config.ts";
+import { desktopSettingsKey, type ConfigurationService } from "../../configuration/service.ts";
 import type { DiagnosticsHost, HostDialogs } from "../../host/types.ts";
 import type { HostService } from "../../host/service.ts";
 import type { DiagnosticsService } from "../service.ts";
@@ -15,10 +14,16 @@ import { createDiagnosticsReader } from "../reader/nativeReader.ts";
 import { createLogStore } from "../capture/logStore.ts";
 import { measureConversationStorage } from "../capture/conversationStorage.ts";
 
+import { createStorageRegistry, type StorageRequest, type StorageResponse } from "../capture/storageRegistry.ts";
+import { openWindowRequests } from "../../host/service.ts";
+
 export type DiagnosticsTab = "logs" | "perf" | "runtime";
 
 export class DesktopDiagnostics {
   readonly service: DiagnosticsService;
+  private readonly storage = createStorageRegistry();
+  private readonly storageCleaned = new Set<() => void>();
+  private readonly storageBridge;
   private readonly logOwner: ReturnType<typeof createLogStore>;
   readonly createLogger: DiagnosticsService["createLogger"];
   readonly logs: ReturnType<typeof createLogStore>["view"];
@@ -46,17 +51,37 @@ export class DesktopDiagnostics {
     private readonly configuration: ConfigurationService,
     saveFile: HostDialogs["saveFile"],
     private readonly logSink: LogSink = createDiagnosticsLogSink(),
+    ownsStorage = false,
   ) {
     this.createLogger = logSink.createLogger;
     this.logOwner = createLogStore(logSink);
     this.logs = this.logOwner.view;
     this.setLogLevel = this.logOwner.setLevel;
     this.clearLogs = this.logOwner.clear;
-    this.reader = createDiagnosticsReader(host, saveFile, () => !this.disposed);
+    const reader = createDiagnosticsReader(host, saveFile, () => !this.disposed);
+    const requestStorage = async (request: StorageRequest) => {
+      const response = await this.storage.request(request);
+      if (request.action === "clean") {
+        for (const listener of this.storageCleaned) listener();
+      }
+      return response;
+    };
+    this.storageBridge = openWindowRequests<StorageRequest, StorageResponse>(
+      "aaw-desktop:diagnostics-storage.v1", ownsStorage ? requestStorage : undefined,
+    );
+    this.reader = {
+      ...reader,
+      storage: ownsStorage ? requestStorage : (request) => this.storageBridge.request(request),
+      onStorageCleaned: (listener) => {
+        this.storageCleaned.add(listener);
+        return () => this.storageCleaned.delete(listener);
+      },
+    };
     this.service = {
       createLogger: this.createLogger,
       recordAcpRaw: this.recordAcpRaw,
       reader: this.reader,
+      registerStorage: (category) => this.storage.register(category),
       open: () => this.open(),
       startupTheme: () => this.startupTheme(),
     };
@@ -65,6 +90,8 @@ export class DesktopDiagnostics {
   dispose(): Promise<void> {
     if (this.disposal) return this.disposal;
     this.disposed = true;
+    this.storageBridge.dispose();
+    this.storageCleaned.clear();
     this.logOwner.dispose();
     this.memoryOwner.dispose();
     this.tab.setState({ value: "logs" });
@@ -117,6 +144,7 @@ export class DesktopDiagnostics {
     const collector = this.host.isNative()
       ? startDiagnosticsCollector(this.host, this.logSink, {
           cursor: capture.cursor,
+          probeConnection: capture.probeConnection,
           snapshot: () => ({
             ...capture.snapshot(),
             memory: this.memory.samples.getState(),

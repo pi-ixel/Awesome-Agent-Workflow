@@ -36,11 +36,15 @@ export function registerDocumentPaths(workbench: WorkbenchService, documents: Pi
 
 export function documentPanels(
   documents: DocumentsService,
-  { panels, openExternal }: Pick<WorkbenchService, "panels" | "openExternal">,
+  { panels, openExternal, appearance, navigation }: Pick<
+    WorkbenchService,
+    "panels" | "openExternal" | "appearance" | "navigation"
+  >,
   git?: GitReader,
   projectView?: ReadonlySnapshot<DocumentProjectView>,
 ): readonly WorkbenchContributions["panels"][] {
   function WorkbenchFileTree(props: ComponentProps<typeof FileTree>) {
+    const { fileTreePosition } = useSyncExternalStore(appearance.subscribe, appearance.getSnapshot);
     const latestFileTabPath = useStore(panels, (state) => {
       const tabs = state.projects[pathKey(props.root)]?.tabs;
       if (!tabs) return undefined;
@@ -66,6 +70,10 @@ export function documentPanels(
           readGitStatus={gitStatus?.read}
           watchActivity={view?.watchActivity}
           openExternal={openExternal}
+          treePosition={fileTreePosition}
+          onOpenTreeSettings={() =>
+            navigation.getState().openFileTreeSettings(() => documents.isActive())
+          }
         />
       </DocumentAnnotationContext.Provider>
     );

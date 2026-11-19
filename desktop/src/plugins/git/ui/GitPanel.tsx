@@ -1,3 +1,4 @@
+import { TreeBranch, treeChevronClass } from "../../../shared/ui/TreeMotion.tsx";
 import type { GitChange, GitSnapshot } from "../../host/types.ts";
 import { useProjectGit } from "./useProjectGit.ts";
 import type { ProjectWorkspace } from "../../project/service.ts";
@@ -233,8 +234,8 @@ function GitReview({
         <button
           aria-expanded={isOpen}
           aria-label={`${isOpen ? "收起" : "展开"} ${change.path}`}
-          title={`${change.oldPath ? `${change.oldPath} → ` : ""}${change.path} · ${change.status}`}
-          className={`sticky top-0 z-10 flex h-8 w-full items-center gap-3 bg-base px-3 text-left transition-colors hover:bg-surface-hover ${isOpen ? "bg-surface-hover" : ""}`}
+          data-hint={`${change.oldPath ? `${change.oldPath} → ` : ""}${change.path} · ${change.status}`}
+          className={`sticky top-0 z-10 flex min-h-8 w-full items-center gap-3 bg-base px-3 text-left transition-colors hover:bg-surface-hover ${isOpen ? "bg-surface-hover" : ""}`}
           onClick={() => {
             setExpanded(isOpen ? null : key);
           }}
@@ -254,7 +255,7 @@ function GitReview({
           </span>
           <GitLineStats changes={[change]} />
           <ChevronDownIcon
-            className={`h-4 w-4 shrink-0 text-ink-soft transition-transform ${isOpen ? "rotate-180" : ""}`}
+            className={`ui-icon-16 shrink-0 text-ink-soft transition-transform ${isOpen ? "rotate-180" : ""}`}
           />
         </button>
         {isOpen && (
@@ -355,7 +356,7 @@ function GitReview({
                     setGroups((old) => ({ ...old, [group]: !old[group] }))
                   }
                 >
-                  <span aria-hidden="true">{isOpen ? "▾" : "▸"}</span>
+                  <span aria-hidden="true" className={`inline-block ${treeChevronClass} ${isOpen ? "rotate-90" : ""}`}>▸</span>
                   <span>{label}</span>
                   <span>
                     ({new Set(all.map((change) => change.path)).size})
@@ -364,7 +365,7 @@ function GitReview({
                     <GitLineStats changes={all} />
                   </span>
                 </button>
-                {isOpen && (
+                <TreeBranch open={isOpen}>
                   <GitFileTree
                     key={`${group}-${group === revealedGroup ? revealWave : 0}`}
                     initiallyExpanded={
@@ -388,7 +389,7 @@ function GitReview({
                       setNavigation((old) => old + 1);
                     }}
                   />
-                )}
+                </TreeBranch>
               </section>
             );
           })}
@@ -486,15 +487,15 @@ function GitFileTree({
             >
               <span
                 aria-hidden={true}
-                className="shrink-0 text-ink-faint transition-transform"
+                className={`shrink-0 text-ink-faint ${treeChevronClass}`}
                 style={{ transform: isOpen ? "rotate(90deg)" : "rotate(0deg)" }}
               >
-                <ChevronRightIcon className="h-3 w-3" />
+                <ChevronRightIcon className="ui-icon-12" />
               </span>
               <FolderGlyph isExpanded={isOpen} />
               <span className="min-w-0 flex-1 truncate">{name}</span>
             </button>
-            {isOpen && (
+            <TreeBranch open={isOpen}>
               <div className="ml-3 border-l border-line pl-2">
                 <GitFileTree
                   changes={changes.filter((change) =>
@@ -507,14 +508,14 @@ function GitFileTree({
                   initiallyExpanded={initiallyExpanded}
                 />
               </div>
-            )}
+            </TreeBranch>
           </div>
         );
       })}
       {files.map((path) => (
         <button
           key={path}
-          title={path}
+          data-hint={path}
           aria-label={`定位 ${path}`}
           aria-current={selectedPath === path ? "true" : undefined}
           className={`flex w-full items-center gap-2 rounded px-1 py-1 text-left hover:bg-raised ${selectedPath === path ? "bg-selected" : ""} ${red || changes.some((c) => c.path === path && c.source === "conflict") ? "text-danger-ink" : ""}`}

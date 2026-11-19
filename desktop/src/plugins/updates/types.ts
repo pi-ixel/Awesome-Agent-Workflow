@@ -11,4 +11,4 @@ export interface UpdateState {
 }
 
 export type UpdateInstallResult = "installed" | "busy" | "cancelled";
-export type UpdateExit = Pick<WorkbenchExit, "hasExitWork" | "requestExit">;
+export type UpdateExit = Pick<WorkbenchExit, "getExitWork" | "hasExitWork" | "requestExit">;

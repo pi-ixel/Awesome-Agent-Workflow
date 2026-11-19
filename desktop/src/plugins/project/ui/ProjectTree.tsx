@@ -1,6 +1,9 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
+import { TreeBranch, treeChevronClass } from "../../../shared/ui/TreeMotion.tsx";
 import { useSessionValue } from "./bindings/conversationView.ts";
 import { useWorkspaceCommands, useWorkspaceValue } from "./bindings/workspaceView.ts";
-import { useProject, useProjectNavigation, useProjectPageValue, useProjectSidebarValue } from "./bindings/projectView.tsx";
+import { useProject, useProjectNavigation, useProjectPageValue, useProjectSidebarValue, useProjectExtension } from "./bindings/projectView.tsx";
 import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
 import { parseSessionPinKey } from "../sessions/sessionPin.ts";
 import { sessionArchiveKey } from "../sessions/sessionArchiveStore.ts";
@@ -57,18 +60,17 @@ import type { SessionActivityState, SessionCatalogState } from "../sessions/inde
  *   「设置 / 诊断」入口在底部 footer（SidebarFooter，ZCode
  *   WorkspaceSidebarFooter 同位）。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { sessionPinKey } from "../sessions/sessionPin.ts";
 import { SESSION_LIST_PAGE_SIZE } from "./sidebarState.ts";
-import { Badge, focusVisibleRing, rowSelectedClass } from "../../../shared/ui/controls.tsx";
+import { StatusDot, focusVisibleRing, rowSelectedClass } from "../../../shared/ui/controls.tsx";
 import {
   ContextMenu,
   type ContextMenuEntry,
   type MenuPlacement,
 } from "../../../shared/ui/ContextMenu.tsx";
 import {
-  ChevronDownIcon,
   ChevronRightIcon,
   ClockIcon,
   CornerDownRightIcon,
@@ -82,20 +84,25 @@ import {
   EllipsisIcon,
   MessageCirclePlusIcon,
   PencilIcon,
-  WorkflowIcon,
   ArchiveIcon,
   FileTreeIcon,
+  StarFilledIcon,
+  StarOutlineIcon,
 } from "../../../shared/ui/icons.tsx";
 import { basenameOf } from "../../../shared/workspaceText.ts";
-import { useHintTooltip } from "../../../shared/ui/controls/HintTooltip.tsx";
+import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
 import { useFeedback } from "../../../shared/ui/feedback.ts";
 import type { SessionSummary } from "../conversation/sessionStore.ts";
 import AddProjectPanel from "./AddProjectPanel.tsx";
 import { NewTaskButtonGroup } from "./NewTaskButtonGroup.tsx";
+import { SidebarItemTitle } from "../../../shared/ui/SidebarItemTitle.tsx";
 import { RemoveProjectDialog } from "./workspaces/RemoveProjectDialog.tsx";
 import { flattenRecentSessions } from "../sessions/sessionEntry.ts";
 import { createContext, useContext } from "react";
 import type { ProjectService } from "../service.ts";
+import type { SessionGroup, SessionGroupMember } from "../sessions/sessionGroups.ts";
+import { arrangeSessionChildren, prioritizeStarredSessions, type SessionChildItem } from "./sessionGroupLayout.ts";
+import { useSessionRename } from "./useSessionRename.ts";
 
 const emptyActivity: SessionActivityState = { entries: {} };
 const emptyArchiveKeys: ReadonlySet<string> = new Set<string>();
@@ -117,6 +124,23 @@ function useArchiveFilter() {
   return (path: string, sessionId: string) => archived.has(sessionArchiveKey(path, sessionId, agentKey));
 }
 
+const emptyGroups: readonly SessionGroup[] = [];
+
+function useSessionGroups(path: string): readonly SessionGroup[] {
+  const project = useProject();
+  return useRegisteredSnapshot(project?.sessions.groups, (state) => state?.byPath[pathKey(path)] ?? emptyGroups);
+}
+
+/** 会话所属的分组与成员信息（会话视角的副行用；不属于任何分组返回 undefined）。 */
+function useSessionGroupMembership(path: string, sessionId: string) {
+  const groups = useSessionGroups(path);
+  for (const group of groups) {
+    const member = group.members.find((item) => item.sessionId === sessionId);
+    if (member) return { group, member };
+  }
+  return undefined;
+}
+
 function useCatalogOwner() {
   return useProjectCatalog((state) => state.agentKey ?? undefined);
 }
@@ -133,50 +157,21 @@ function useSessionLists() {
  */
 function FolderIcon({ isExpanded }: { readonly isExpanded: boolean }) {
   return (
-    <svg
+    <UiIcon
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
       strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
-      aria-hidden={true}
-      className="h-4 w-4 shrink-0 text-ink-subtle"
+      className="ui-icon-16 shrink-0 text-ink-subtle"
     >
       {isExpanded ? (
         <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />
       ) : (
         <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
       )}
-    </svg>
-  );
-}
-
-/** 健康徽标：全部通过 ✓n/n；存在警告/失败 ⚠；无检查结果不显示。 */
-function HealthBadge({ path }: { readonly path: string }) {
-  const health = useWorkspaceValue((state) => state.health);
-  if (health === null || health.path !== path) {
-    return null;
-  }
-  const total = health.items.length;
-  const passed = health.items.filter((item) => item.status === "pass").length;
-  if (passed === total) {
-    return (
-      <Badge
-        tone="ok"
-        compact={true}
-        title={`健康检查 ${passed}/${total} 项通过`}
-      >
-        <span className="font-mono">
-          ✓{passed}/{total}
-        </span>
-      </Badge>
-    );
-  }
-  return (
-    <Badge tone="warn" compact={true} title="健康检查存在警告或失败项">
-      ⚠
-    </Badge>
+    </UiIcon>
   );
 }
 
@@ -314,13 +309,15 @@ function ProjectNodeRow({
 }) {
   const projectService = useProject();
   const navigation = useProjectNavigation();
+  // 扩展经 zustand store 发布（不是 ReadonlySnapshot），渲染时现取。
+  const treeAction = useProjectExtension()?.getState().view?.treeAction;
   const togglePinned = projectService?.projects.togglePinned;
   const toggleExpanded = useProjectSidebarValue((state) => state.toggleExpanded);
   const name = basenameOf(path);
-  const hintNewSession = useHintTooltip("新建会话");
-  const hintWorkflow = useHintTooltip("打开工作流");
-  const hintFiles = useHintTooltip("浏览项目文件");
-  const hintMoreActions = useHintTooltip("更多操作");
+  const hintNewSession = hintTooltipProps("新建会话");
+  const hintExtension = hintTooltipProps(treeAction?.hint ?? "");
+  const hintFiles = hintTooltipProps("浏览项目文件");
+  const hintMoreActions = hintTooltipProps("更多操作");
   const feedback = useFeedback();
   const [confirmRemoval, setConfirmRemoval] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -343,7 +340,7 @@ function ProjectNodeRow({
       {
         id: "new-session",
         label: "新建会话",
-        icon: <PlusIcon className="h-4 w-4" />,
+        icon: <PlusIcon className="ui-icon-16" />,
         onSelect: () => {
           void projectService?.sessions.startNewSession(path);
         },
@@ -353,9 +350,9 @@ function ProjectNodeRow({
         id: "pin",
         label: isPinned ? "取消置顶" : "置顶",
         icon: isPinned ? (
-          <PinOffIcon className="h-4 w-4" />
+          <PinOffIcon className="ui-icon-16" />
         ) : (
-          <PinIcon className="h-4 w-4" />
+          <PinIcon className="ui-icon-16" />
         ),
         onSelect: () => {
           togglePinned?.(path);
@@ -364,7 +361,7 @@ function ProjectNodeRow({
       {
         id: "remove",
         label: "从列表移除",
-        icon: <XIcon className="h-4 w-4" />,
+        icon: <XIcon className="ui-icon-16" />,
         danger: true,
         disabled: !navigation || removing,
         onSelect: () => setConfirmRemoval(true),
@@ -397,15 +394,15 @@ function ProjectNodeRow({
         isSelected ? rowSelectedClass : "hover:bg-surface-hover"
       }`}
     >
-      {/* 点项目名进总览（title=路径与【+】面板、测试的定位约定一致） */}
+      {/* 点项目名进总览，悬停显示完整路径。 */}
       <button
         type="button"
         onClick={() => {
           toggleExpanded(path, isExpanded);
         }}
         aria-expanded={isExpanded}
-        className={`flex h-8 min-w-0 flex-1 items-center justify-start gap-2 rounded-lg pl-2.5 pr-1 text-left ${focusVisibleRing}`}
-        title={path}
+        className={`flex min-h-8 min-w-0 flex-1 items-center justify-start gap-2 rounded-lg pl-1.5 pr-1 text-left ${focusVisibleRing}`}
+        data-hint={path}
       >
         {/* 前导槽（ZCode ProjectNodeContent.tsx:231-255 同构）：置顶提示
             复用固定槽位，仅悬停时替换图标，避免行尾常驻钉子占位 */}
@@ -421,18 +418,16 @@ function ProjectNodeRow({
             <FolderIcon isExpanded={isExpanded} />
           </span>
           {isPinned ? (
-            <PinIcon className="hidden size-4 text-ink-subtle group-hover/project-row:block" />
+            <PinIcon className="hidden ui-icon-16 text-ink-subtle group-hover/project-row:block" />
           ) : null}
         </span>
         <span className="min-w-0 flex-1 truncate text-ui-base text-ink-subtle transition-colors group-hover:text-ink">
           {name}
         </span>
       </button>
-      <HealthBadge path={path} />
-      {/* 行尾动作栏（ZCode project-actions 布局）：hover/键盘聚焦浮现，
-          菜单开着时常显；新建会话与工作流是「打开该项目」的两个入口 */}
-      <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-        <button
+      {/* 未操作时让项目名称使用整行空间，键盘进入该行后也能继续聚焦行尾动作。 */}
+      <div className="hidden shrink-0 items-center gap-1 group-hover/project-row:flex group-focus-within/project-row:flex [@media(hover:none)]:flex">
+        <IconButton iconSize="compact"
           type="button"
           aria-label="更多操作"
           {...hintMoreActions}
@@ -444,11 +439,11 @@ function ProjectNodeRow({
               buildEntries(),
             );
           }}
-          className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
+          className="rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
         >
-          <EllipsisIcon className="h-3.5 w-3.5" />
-        </button>
-        <button
+          <EllipsisIcon className="ui-icon-14" />
+        </IconButton>
+        <IconButton iconSize="compact"
           type="button"
           aria-label="浏览项目文件"
           {...hintFiles}
@@ -456,11 +451,11 @@ function ProjectNodeRow({
             event.stopPropagation();
             navigation?.openFiles(path);
           }}
-          className={`rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
+          className={`rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
         >
-          <FileTreeIcon className="h-3.5 w-3.5" />
-        </button>
-        <button
+          <FileTreeIcon className="ui-icon-14" />
+        </IconButton>
+        <IconButton iconSize="compact"
           type="button"
           aria-label="新建会话"
           {...hintNewSession}
@@ -468,22 +463,26 @@ function ProjectNodeRow({
             event.stopPropagation();
             void projectService?.sessions.startNewSession(path);
           }}
-          className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
+          className="rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
         >
-          <MessageCirclePlusIcon className="h-3.5 w-3.5" />
-        </button>
-        <button
-          type="button"
-          aria-label="工作流"
-          {...hintWorkflow}
-          onClick={(event) => {
-            event.stopPropagation();
-            navigation?.selectOverview(path);
-          }}
-          className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
-        >
-          <WorkflowIcon className="h-3.5 w-3.5" />
-        </button>
+          <MessageCirclePlusIcon className="ui-icon-14" />
+        </IconButton>
+        {treeAction && (
+          <IconButton iconSize="compact"
+            type="button"
+            aria-label={treeAction.label}
+            {...hintExtension}
+            onClick={(event) => {
+              event.stopPropagation();
+              // 先落到项目总览（扩展的区块在那里），再交给扩展。
+              navigation?.selectOverview(path);
+              treeAction.run(path);
+            }}
+            className="rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
+          >
+            <treeAction.Icon className="ui-icon-14" />
+          </IconButton>
+        )}
       </div>
       {confirmRemoval && (
         <RemoveProjectDialog
@@ -504,17 +503,21 @@ function ProjectNodeRow({
  * 只亮「内容区正在显示谁」：总览亮项目行，会话亮会话行，互斥。
  */
 function useIsSessionActive(path: string, sessionId: string): boolean {
+  return useActiveSessionIds(path).includes(sessionId);
+}
+
+/** 这个项目里此刻高亮的会话（聚焦的与正在打开的）；不在它的会话视图时为空。 */
+function useActiveSessionIds(path: string): readonly string[] {
   const owner = useCatalogOwner();
   const focusedOwner = useSessionValue((state) => state.agentKey);
   const activeSessionId = useSessionValue((state) => state.activeSessionId);
   const openingSessionId = useSessionValue((state) => state.openingSessionId);
   const conversationPage = useProjectPageValue((state) => state.conversationPage);
   const contextPath = useProjectPageValue((state) => state.contextPath);
-  return (
-    owner === focusedOwner &&
-    conversationPage &&
-    pathKey(contextPath ?? "") === pathKey(path) &&
-    (sessionId === activeSessionId || sessionId === openingSessionId)
+  const here = owner === focusedOwner && conversationPage && pathKey(contextPath ?? "") === pathKey(path);
+  return useMemo(
+    () => (here ? [activeSessionId, openingSessionId].filter((id): id is string => !!id) : []),
+    [here, activeSessionId, openingSessionId],
   );
 }
 
@@ -533,44 +536,18 @@ function SessionLeadingBadge({
   const activity = useProjectActivity(
     (state) => state.entries[sessionActivityKey(path, id, agentKey)],
   );
-  const hintFailed = useHintTooltip("失败");
-  const hintUnread = useHintTooltip("已完成，未查看");
-  const hintRunning = useHintTooltip("运行中");
   if (!activity || activity.status === "idle") {
     return null;
   }
   if (activity.status === "failed") {
-    return (
-      <span
-        role="img"
-        aria-label="失败"
-        {...hintFailed}
-        className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger"
-      />
-    );
+    return <StatusDot tone="danger" label="失败" hint="失败" />;
   }
   if (activity.status === "completed") {
     return activity.unread ? (
-      <span
-        role="img"
-        aria-label="已完成，未查看"
-        {...hintUnread}
-        className="size-[7px] shrink-0 rounded-full bg-icon-blue"
-      />
+      <StatusDot tone="info" label="已完成，未查看" hint="已完成，未查看" className="ui-icon-7" />
     ) : null;
   }
-  if (activity.status === "running") {
-    return (
-      <span
-        role="img"
-        aria-label="运行中"
-        {...hintRunning}
-        className="flex size-4 items-center justify-center"
-      >
-        <LoaderIcon className="h-4 w-4 shrink-0 animate-spin text-icon-blue" />
-      </span>
-    );
-  }
+  if (activity.status === "running") return <SessionRunningIcon />;
   return null;
 }
 
@@ -620,23 +597,11 @@ function SessionActivityBadge({
     return null;
   }
   if (activity.status === "failed") {
-    return (
-      <span
-        role="img"
-        aria-label="失败"
-        title="失败"
-        className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger"
-      />
-    );
+    return <StatusDot tone="danger" label="失败" hint="失败" />;
   }
   if (activity.status === "completed") {
     return activity.unread ? (
-      <span
-        role="img"
-        aria-label="已完成，未查看"
-        title="已完成，未查看"
-        className="size-[7px] shrink-0 rounded-full bg-icon-blue"
-      />
+      <StatusDot tone="info" label="已完成，未查看" hint="已完成，未查看" className="ui-icon-7" />
     ) : null;
   }
   if (activity.status === "running") {
@@ -644,10 +609,10 @@ function SessionActivityBadge({
       <span
         role="img"
         aria-label="运行中"
-        title="运行中"
+        data-hint="运行中"
         className="flex size-4 items-center justify-center"
       >
-        <LoaderIcon className="h-3.5 w-3.5 shrink-0 animate-spin text-ink-subtle" />
+        <LoaderIcon className="ui-icon-14 shrink-0 animate-spin text-ink-subtle" />
       </span>
     );
   }
@@ -669,6 +634,36 @@ function useSessionPinned(path: string, sessionId: string): boolean {
   );
 }
 
+function useSessionStar(path: string, sessionId: string) {
+  const agentKey = useCatalogOwner();
+  const toggleStar = useWorkspaceCommands()?.toggleSessionStarred;
+  const starred = useWorkspaceValue((state) =>
+    state.starredSessions.includes(sessionPinKey(path, sessionId, agentKey)),
+  );
+  return { starred, toggle: () => toggleStar?.(path, sessionId, agentKey) };
+}
+
+function SessionStarAction({ star }: { readonly star: ReturnType<typeof useSessionStar> }) {
+  const label = star.starred ? "取消星标会话" : "星标会话";
+  const Star = star.starred ? StarFilledIcon : StarOutlineIcon;
+  return (
+    <IconButton
+      iconSize="compact"
+      type="button"
+      aria-label={label}
+      aria-pressed={star.starred}
+      {...hintTooltipProps(label)}
+      className={`shrink-0 rounded opacity-0 transition-opacity hover:bg-surface-hover group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100 ${star.starred ? "text-session-star" : "text-ink-soft hover:text-ink"}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        star.toggle();
+      }}
+    >
+      <Star className={star.starred ? "size-4 stroke-session-star-outline" : "size-4"} />
+    </IconButton>
+  );
+}
+
 /**
  * 会话行右键菜单（ZCode 会话行菜单 TaskActionMenuContent 的 desktop
  * 等位）：打开会话 + 重命名 + 归档；置顶动作位于会话行尾
@@ -682,6 +677,8 @@ function buildSessionMenuEntries(
   session: SessionSummary,
   onRename: (() => void) | undefined,
   onArchive: () => void,
+  star: ReturnType<typeof useSessionStar>,
+  onOpen?: () => void,
 ): ContextMenuEntry[] {
   const liveRuntime = busySessionIds(
     projectService?.sessions.catalog.getState().agentKey ?? undefined,
@@ -691,9 +688,10 @@ function buildSessionMenuEntries(
     {
       id: "open",
       label: "打开会话",
-      icon: <CornerDownRightIcon className="h-4 w-4" />,
+      icon: <CornerDownRightIcon className="ui-icon-16" />,
       onSelect: () => {
-        void projectService?.sessions.openSessionFromEntry(path, session.id);
+        if (onOpen) onOpen();
+        else void projectService?.sessions.openSessionFromEntry(path, session.id);
       },
     },
     ...(onRename === undefined
@@ -702,90 +700,90 @@ function buildSessionMenuEntries(
           {
             id: "rename",
             label: "重命名",
-            icon: <PencilIcon className="h-4 w-4" />,
+            icon: <PencilIcon className="ui-icon-16" />,
             onSelect: onRename,
           },
         ]),
+    {
+      id: "star",
+      label: star.starred ? "取消星标" : "星标",
+      icon: star.starred ? <StarFilledIcon className="ui-icon-16 text-session-star stroke-session-star-outline" /> : <StarOutlineIcon className="ui-icon-16" />,
+      onSelect: star.toggle,
+    },
     { type: "separator" },
     {
       id: "archive",
       label: liveRuntime ? "归档（会话运行中，暂不可归档）" : "归档",
-      icon: <ArchiveIcon className="h-4 w-4" />,
+      icon: <ArchiveIcon className="ui-icon-16" />,
       disabled: liveRuntime,
       onSelect: onArchive,
     },
   ];
 }
 
-/** 会话行内改名：菜单「重命名」触发行内编辑框。Enter 提交 / Esc 或失焦
- *  取消（与顶栏 ContextBar 同款：只认显式回车，避免误触丢半截输入）；
- *  空字符串提交 = 清除手动名恢复自动命名（sessionStore.renameSession）。 */
-function useSessionInlineRename(session: SessionSummary): {
-  readonly renaming: boolean;
-  readonly draft: string;
-  readonly setDraft: (value: string) => void;
-  readonly start: () => void;
-  readonly commit: () => void;
-  readonly cancel: () => void;
-} {
+function useSessionInlineRename(path: string, session: SessionSummary) {
   const projectService = useProject();
   const catalogOwner = useProjectCatalog((state) => state.agentKey);
-  const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState("");
-  return {
-    renaming,
-    draft,
-    setDraft,
-    start: () => {
-      setDraft(session.title);
-      setRenaming(true);
-    },
-    commit: () => {
-      setRenaming(false);
-      if (catalogOwner !== null)
-        projectService?.sessions.renameSession(catalogOwner, session.id, draft);
-    },
-    cancel: () => {
-      setRenaming(false);
-    },
-  };
+  return useSessionRename(sessionPinKey(path, session.id, catalogOwner ?? undefined), session.title, (draft) =>
+    catalogOwner === null ? undefined : projectService?.sessions.renameSession(catalogOwner, session.id, draft),
+  );
 }
 
-/** 行内改名输入框（占主行按钮位，flex-1 同宽）。 */
-function SessionRenameInput({
-  draft,
-  setDraft,
-  commit,
-  cancel,
-}: {
-  readonly draft: string;
-  readonly setDraft: (value: string) => void;
-  readonly commit: () => void;
-  readonly cancel: () => void;
+function SessionRenameInput({ rename }: { readonly rename: ReturnType<typeof useSessionRename> }) {
+  return (
+    <span className="-ml-1 min-w-0 flex-1">
+      <input
+        autoFocus
+        value={rename.draft}
+        aria-label="重命名会话"
+        aria-invalid={rename.error ? true : undefined}
+        readOnly={rename.saving}
+        onChange={(event) => rename.setDraft(event.target.value)}
+        onKeyDown={rename.onKeyDown}
+        onBlur={rename.onBlur}
+        className="block w-full min-w-0 rounded-md bg-base px-1 py-0 text-ui-base text-ink caret-ink outline-none ring-1 ring-inset ring-line-strong focus:ring-focus-ring/80"
+      />
+      {rename.error && <span role="alert" className="block text-xs text-danger-ink">改名未保存，按回车重试。{rename.error}</span>}
+    </span>
+  );
+}
+
+function SessionRowTitle({ starred, rename, children }: {
+  readonly starred: boolean;
+  readonly rename: ReturnType<typeof useSessionRename>;
+  readonly children: ReactNode;
 }) {
   return (
-    <input
-      autoFocus
-      value={draft}
-      aria-label="重命名会话"
-      onChange={(event) => {
-        setDraft(event.target.value);
-      }}
-      onKeyDown={(event) => {
-        if (event.nativeEvent.isComposing) {
-          return;
-        }
-        if (event.key === "Enter") {
-          event.preventDefault();
-          commit();
-        } else if (event.key === "Escape") {
-          event.preventDefault();
-          cancel();
-        }
-      }}
-      onBlur={cancel}
-      className="min-w-0 flex-1 rounded border border-line-strong bg-surface px-1.5 py-0.5 text-ui-base text-ink outline-none focus:border-ink-faint"
-    />
+    <span className="flex min-w-0 flex-1 items-center gap-1">
+      {starred && (
+        <span role="img" aria-label="已星标" className="shrink-0 text-session-star">
+          <StarFilledIcon className="ui-icon-16 stroke-session-star-outline" />
+        </span>
+      )}
+      {rename.renaming ? <SessionRenameInput rename={rename} /> : children}
+    </span>
+  );
+}
+
+function SessionRowBody({ active, renaming, hint, className, onOpen, children }: {
+  readonly active: boolean;
+  readonly renaming: boolean;
+  readonly hint?: string;
+  readonly className: string;
+  readonly onOpen: () => void;
+  readonly children: ReactNode;
+}) {
+  if (renaming) return <div className={className}>{children}</div>;
+  return (
+    <button
+      type="button"
+      aria-current={active ? "true" : undefined}
+      data-hint={hint}
+      onClick={onOpen}
+      className={`${className} cursor-pointer ${focusVisibleRing}`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -826,25 +824,25 @@ function SessionPinAction({
   const agentKey = useCatalogOwner();
   const pinned = useSessionPinned(path, sessionId);
   const label = pinned ? "取消置顶会话" : "置顶会话";
-  const hint = useHintTooltip(label);
+  const hint = hintTooltipProps(label);
   return (
-    <button
+    <IconButton iconSize="compact"
       type="button"
       aria-label={label}
       aria-pressed={pinned}
       {...hint}
-      className="shrink-0 rounded p-1 text-ink-soft opacity-0 transition-opacity hover:bg-surface-hover hover:text-ink group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100"
+      className="shrink-0 rounded text-ink-soft opacity-0 transition-opacity hover:bg-surface-hover hover:text-ink group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100"
       onClick={(event) => {
         event.stopPropagation();
         toggleSessionPinned?.(path, sessionId, agentKey);
       }}
     >
       {pinned ? (
-        <PinOffIcon className="size-4" />
+        <PinOffIcon className="ui-icon-16" />
       ) : (
-        <PinIcon className="size-4" />
+        <PinIcon className="ui-icon-16" />
       )}
-    </button>
+    </IconButton>
   );
 }
 
@@ -902,7 +900,7 @@ function SessionArchiveAction({
     : activityStatus === "waiting"
       ? "归档任务（会话有待处理审批，暂不可归档）"
       : "归档任务（会话回合运行中，暂不可归档）";
-  const hintProps = useHintTooltip(hint);
+  const hintProps = hintTooltipProps(hint);
   return (
     <div
       ref={container}
@@ -924,25 +922,24 @@ function SessionArchiveAction({
               projectService?.sessions.archiveWithNotice(path, sessionId);
             setConfirming(false);
           }}
-          className="rounded-md bg-red-500 px-2 py-0.5 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+          className="contrast-danger-solid rounded-md bg-red-500 px-2 py-0.5 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-40"
         >
           确认
         </button>
       ) : (
-        <button
+        <IconButton iconSize="compact"
           type="button"
           aria-label={hint}
           {...hintProps}
           disabled={liveRuntime}
           onClick={(event) => {
             event.stopPropagation();
-            hintProps.onMouseLeave();
             setConfirming(true);
           }}
-          className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+          className="rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
         >
-          <ArchiveIcon className="h-4 w-4" />
-        </button>
+          <ArchiveIcon className="ui-icon-16" />
+        </IconButton>
       )}
     </div>
   );
@@ -955,15 +952,19 @@ function SessionNode({
   path,
   session,
   menu,
+  display,
 }: {
   readonly path: string;
   readonly session: SessionSummary;
   readonly menu: SidebarMenuApi;
+  /** 分组内的显示覆盖（显示名 / 附注 / 提醒胶囊），见 sessionGroups.ts。 */
+  readonly display?: Omit<SessionGroupMember, "sessionId">;
 }) {
   const projectService = useProject();
   const busySessionIds = useContext(BusySessionsContext);
   const isActive = useIsSessionActive(path, session.id);
-  const rename = useSessionInlineRename(session);
+  const rename = useSessionInlineRename(path, session);
+  const star = useSessionStar(path, session.id);
   const [archiveConfirm, setArchiveConfirm] = useState(false);
 
   return (
@@ -975,7 +976,7 @@ function SessionNode({
           event.clientY,
           "会话菜单",
           buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-            setArchiveConfirm(true),
+            setArchiveConfirm(true), star, display?.open,
           ),
         );
       }}
@@ -986,7 +987,7 @@ function SessionNode({
             event.currentTarget.getBoundingClientRect(),
             "会话菜单",
             buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-              setArchiveConfirm(true),
+              setArchiveConfirm(true), star, display?.open,
             ),
           );
         }
@@ -995,33 +996,37 @@ function SessionNode({
         isActive ? rowSelectedClass : "hover:bg-surface-hover"
       }`}
     >
-      {rename.renaming ? (
-        <SessionRenameInput
-          draft={rename.draft}
-          setDraft={rename.setDraft}
-          commit={rename.commit}
-          cancel={rename.cancel}
-        />
-      ) : (
-        <button
-          type="button"
-          aria-current={isActive ? "true" : undefined}
-          onClick={() => {
-            void projectService?.sessions.openSessionFromEntry(path, session.id);
+      <SessionRowBody
+          active={isActive}
+          renaming={rename.renaming}
+          onOpen={() => {
+            if (display?.open) display.open();
+            else void projectService?.sessions.openSessionFromEntry(path, session.id);
           }}
-          className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1 pl-2.5 text-left ${focusVisibleRing}`}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 pl-2.5 text-left"
         >
           <span className="flex size-4 shrink-0 items-center justify-center">
-            <SessionLeadingBadge path={path} id={session.id} />
+            {display?.attention ? null : <SessionLeadingBadge path={path} id={session.id} />}
           </span>
-          <span className="min-w-0 flex-1 truncate text-ui-base text-ink">
-            {session.title}
-          </span>
-          <SessionTrailingBadge path={path} id={session.id} />
-        </button>
-      )}
+          <SessionRowTitle starred={star.starred} rename={rename}>
+          <SidebarItemTitle
+            hint={display && display.title !== session.title ? session.title : undefined}
+          >
+            {display?.title ?? session.title}
+            {display?.note ? <span className="text-ink-mute"> · {display.note}</span> : null}
+          </SidebarItemTitle>
+          </SessionRowTitle>
+          {display?.attention ? (
+            <AttentionChip text={display.attention} />
+          ) : (
+            <SessionTrailingBadge path={path} id={session.id} />
+          )}
+      </SessionRowBody>
       {!archiveConfirm && (
-        <SessionPinAction path={path} sessionId={session.id} />
+        <>
+          <SessionStarAction star={star} />
+          <SessionPinAction path={path} sessionId={session.id} />
+        </>
       )}
       <SessionArchiveAction
         path={path}
@@ -1030,6 +1035,222 @@ function SessionNode({
         setConfirming={setArchiveConfirm}
       />
     </li>
+  );
+}
+
+/** 提醒胶囊（与「待处理」同款视觉）。 */
+function AttentionChip({ text }: { readonly text: string }) {
+  return (
+    <span className="inline-flex h-5 shrink-0 items-center rounded-full bg-interaction-confirmation-surface px-2 text-ui-sm font-medium text-ok-ink">
+      {text}
+    </span>
+  );
+}
+
+function SessionRunningIcon() {
+  return (
+    <span role="img" aria-label="运行中" {...hintTooltipProps("运行中")} className="flex size-4 shrink-0 items-center justify-center">
+      <LoaderIcon className="ui-icon-16 shrink-0 animate-spin text-icon-blue" />
+    </span>
+  );
+}
+
+/** 分组行的状态：运行中转圈、失败红点、已停止灰字；其余不占位。 */
+function SessionGroupStatusBadge({ status }: { readonly status: SessionGroup["status"] }) {
+  if (status === "running") return <SessionRunningIcon />;
+  if (status === "failed") {
+    return <StatusDot tone="danger" label="失败" />;
+  }
+  if (status === "stopped") {
+    return <span className="shrink-0 text-ui-sm text-ink-mute">已停止</span>;
+  }
+  return null;
+}
+
+/** 会话分组行（扩展点 sessionGroups 的渲染）：箭头展开 / 收起组内会话，点标题打开分组的页面；
+ *  收起时显示提醒胶囊或会话数。 */
+function SessionGroupNode({
+  path,
+  item,
+  menu,
+}: {
+  readonly path: string;
+  readonly item: Extract<SessionChildItem, { kind: "group" }>;
+  readonly menu: SidebarMenuApi;
+}) {
+  const { group, members } = item;
+  const [expanded, setExpanded] = useState(group.defaultExpanded ?? false);
+  const [showDone, setShowDone] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  // 做完的会话收进组尾的「已完成」折叠区；全部做完时不再拆分。
+  const current = members.filter(({ member }) => !member.done);
+  const done = current.length > 0 ? members.filter(({ member }) => member.done) : [];
+  const shown = done.length > 0 ? current : members;
+  // 打开的会话在组里（含「已完成」区）时自动展开到它；只在它刚成为当前会话时展开一次，
+  // 之后用户仍可以收起。
+  const active = useActiveSessionIds(path);
+  const inside = active.find((id) => members.some(({ member }) => member.sessionId === id)) ?? "";
+  const [revealed, setRevealed] = useState("");
+  if (inside !== revealed) {
+    setRevealed(inside);
+    if (inside) {
+      setExpanded(true);
+      if (done.some(({ member }) => member.sessionId === inside)) setShowDone(true);
+    }
+  }
+  const renderMember = ({ member, session }: (typeof members)[number]) => (
+    <SessionNode
+      key={member.sessionId}
+      path={path}
+      session={session}
+      menu={menu}
+      display={member}
+    />
+  );
+  return (
+    <li className="flex min-w-0 flex-col">
+      <div className="group/session-row flex min-w-0 items-center gap-1 rounded-lg pr-1 transition-colors hover:bg-surface-hover">
+        {/* 箭头只管展开 / 收起。有页面的分组，点标题打开页面并保留折叠状态。 */}
+        <IconButton iconSize="compact"
+          type="button"
+          aria-expanded={expanded}
+          aria-label={expanded ? `收起 ${group.title}` : `展开 ${group.title}`}
+          onClick={() => setExpanded(!expanded)}
+          className={`ml-1 flex shrink-0 cursor-pointer items-center justify-center rounded text-ink-mute hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
+        >
+          <ChevronRightIcon className={`ui-icon-14 ${treeChevronClass} ${expanded ? "rotate-90" : ""}`} />
+        </IconButton>
+        <button
+          type="button"
+          aria-expanded={group.open ? undefined : expanded}
+          aria-label={`${group.title}，${members.length} 个会话`}
+          data-hint={group.open ? group.openLabel ?? "打开" : undefined}
+          onClick={() => {
+            if (group.open) {
+              group.open();
+            } else {
+              setExpanded(!expanded);
+            }
+          }}
+          className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1 pl-0.5 text-left ${focusVisibleRing}`}
+        >
+          <SidebarItemTitle>{group.title}</SidebarItemTitle>
+          <SessionGroupStatusBadge status={group.status} />
+          {group.attention ? (
+            <AttentionChip text={group.attention} />
+          ) : expanded ? null : (
+            <span className="shrink-0 text-ui-sm text-ink-mute">{members.length} 个会话</span>
+          )}
+        </button>
+        {group.archive ? (
+          <GroupArchiveAction
+            label={group.archiveLabel ?? "归档"}
+            confirming={confirmArchive}
+            setConfirming={setConfirmArchive}
+            onArchive={group.archive}
+          />
+        ) : null}
+      </div>
+      <TreeBranch open={expanded}>
+        <ul className="flex flex-col gap-0.5 pl-4" aria-label={`${group.title} 的会话`}>
+          {members.length === 0 ? (
+            <li className="py-0.5 pl-2.5 text-ui-sm text-ink-ghost">尚无会话</li>
+          ) : (
+            shown.map(renderMember)
+          )}
+          {done.length > 0 ? (
+            <li className="flex min-w-0 flex-col">
+              <button
+                type="button"
+                aria-expanded={showDone}
+                aria-label={`已完成的会话，${done.length} 个`}
+                onClick={() => setShowDone(!showDone)}
+                className={`flex min-w-0 cursor-pointer items-center gap-2 rounded-lg py-0.5 pl-2.5 text-left text-ui-sm text-ink-mute transition-colors hover:bg-surface-hover hover:text-ink-soft ${focusVisibleRing}`}
+              >
+                <span className="flex size-4 shrink-0 items-center justify-center">
+                  <ChevronRightIcon className={`ui-icon-12 ${treeChevronClass} ${showDone ? "rotate-90" : ""}`} />
+                </span>
+                已完成 · {done.length}
+              </button>
+              <TreeBranch open={showDone}>
+                <ul className="flex flex-col gap-0.5 pl-4" aria-label={`${group.title} 已完成的会话`}>
+                  {done.map(renderMember)}
+                </ul>
+              </TreeBranch>
+            </li>
+          ) : null}
+        </ul>
+      </TreeBranch>
+    </li>
+  );
+}
+
+/** 分组行的归档按钮：点一下变成「确认」，点外面或按 Esc 取消（同会话行的归档）。 */
+function GroupArchiveAction({
+  label,
+  confirming,
+  setConfirming,
+  onArchive,
+}: {
+  readonly label: string;
+  readonly confirming: boolean;
+  readonly setConfirming: (value: boolean) => void;
+  readonly onArchive: () => void;
+}) {
+  const container = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!confirming) return;
+    const outside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !container.current?.contains(event.target)) setConfirming(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setConfirming(false);
+      }
+    };
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape, true);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", escape, true);
+    };
+  }, [confirming, setConfirming]);
+  const hintProps = hintTooltipProps(label);
+  return (
+    <div
+      ref={container}
+      className={`flex shrink-0 items-center transition-opacity ${confirming ? "opacity-100" : "opacity-0 group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100"}`}
+    >
+      {confirming ? (
+        <button
+          type="button"
+          aria-label={`确认${label}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            setConfirming(false);
+            onArchive();
+          }}
+          className="contrast-danger-solid rounded-md bg-red-500 px-2 py-0.5 text-sm font-medium text-white transition-colors hover:bg-red-600"
+        >
+          确认
+        </button>
+      ) : (
+        <IconButton iconSize="compact"
+          type="button"
+          aria-label={label}
+          {...hintProps}
+          onClick={(event) => {
+            event.stopPropagation();
+            setConfirming(true);
+          }}
+          className="rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
+        >
+          <ArchiveIcon className="ui-icon-16" />
+        </IconButton>
+      )}
+    </div>
   );
 }
 
@@ -1047,6 +1268,8 @@ function ProjectChildren({
 }) {
   const projectService = useProject();
   const isArchived = useArchiveFilter();
+  const owner = useCatalogOwner();
+  const starredSessions = useWorkspaceValue((state) => state.starredSessions);
   const status = useProjectCatalog(
     (state) => state.statusByPath[pathKey(path)],
   );
@@ -1056,6 +1279,7 @@ function ProjectChildren({
   const expandSessionList = useProjectSidebarValue(
     (state) => state.expandSessionList,
   );
+  const groups = useSessionGroups(path);
   useEffect(() => {
     if (sessions === undefined && status === undefined)
       void projectService?.sessions.preloadSessionList(path);
@@ -1076,7 +1300,7 @@ function ProjectChildren({
         当前 Agent 不支持查询历史会话
       </p>
     ) : null;
-  if (sessions === undefined || sessions.length === 0) {
+  if ((sessions === undefined || sessions.length === 0) && groups.length === 0) {
     return (
       <>
         {feedback ?? (
@@ -1091,10 +1315,13 @@ function ProjectChildren({
   }
   // 归档过滤只发生在渲染层（本机覆盖层，设置页「归档管理」可恢复）；
   // sessions 数据层缓存保持完整，session/list 回填不会让会话忽隐忽现
-  const unarchived = sessions.filter(
-    (session) => !isArchived(path, session.id),
+  // 分组：属于某个分组的会话收进分组行（分组占它最近一条会话的位置）
+  const items = arrangeSessionChildren(
+    sessions ?? [],
+    groups,
+    (sessionId) => isArchived(path, sessionId),
   );
-  if (unarchived.length === 0) {
+  if (items.length === 0) {
     return (
       <>
         <div className="ml-2 pl-2 pt-1">
@@ -1105,20 +1332,33 @@ function ProjectChildren({
   }
   // 分页呈现：默认最近 SESSION_LIST_PAGE_SIZE 条，「加载更多」逐页纳新；
   // 只裁显示不裁数据——store 仍持有全量列表，连接回填不受影响
-  const visible = unarchived.slice(0, limit);
-  const hiddenCount = unarchived.length - visible.length;
+  const { visible, hiddenCount } = prioritizeStarredSessions(
+    items,
+    (id) => starredSessions.includes(sessionPinKey(path, id, owner)),
+    limit,
+  );
 
   return (
     <ul className="flex flex-col gap-0.5 pl-2 pt-1">
       {feedback ? <li>{feedback}</li> : null}
-      {visible.map((session) => (
-        <SessionNode
-          key={session.id}
-          path={path}
-          session={session}
-          menu={menu}
-        />
-      ))}
+      {visible.map((item) =>
+        item.kind === "group" ? (
+          <SessionGroupNode
+            key={`group:${item.group.id}`}
+            path={path}
+            item={item}
+            menu={menu}
+          />
+        ) : (
+          <SessionNode
+            key={item.session.id}
+            path={path}
+            session={item.session}
+            display={item.display}
+            menu={menu}
+          />
+        ),
+      )}
       {hiddenCount > 0 ? (
         <li>
           <button
@@ -1150,9 +1390,9 @@ function TreeViewSwitchButton({
   readonly viewMenuOpen: boolean;
   readonly onToggleViewMenu: (anchor: DOMRect) => void;
 }) {
-  const hint = useHintTooltip("切换视角");
+  const hint = hintTooltipProps("切换视角");
   return (
-    <button
+    <IconButton iconSize="compact"
       type="button"
       aria-label="切换视角"
       aria-haspopup="menu"
@@ -1163,8 +1403,8 @@ function TreeViewSwitchButton({
       }}
       className={TREE_HEADER_BUTTON_CLASS}
     >
-      <ListFilterIcon className="h-3.5 w-3.5" />
-    </button>
+      <ListFilterIcon className="ui-icon-14" />
+    </IconButton>
   );
 }
 
@@ -1178,9 +1418,9 @@ function SectionAddButton({
 }) {
   const isAddPanelOpen = useProjectSidebarValue((state) => state.isAddPanelOpen);
   const toggleAddPanel = useProjectSidebarValue((state) => state.toggleAddPanel);
-  const hint = useHintTooltip("新建会话或添加项目");
+  const hint = hintTooltipProps("新建会话或添加项目");
   return (
-    <button
+    <IconButton iconSize="compact"
       type="button"
       aria-label="新建会话或添加项目"
       aria-haspopup="true"
@@ -1192,8 +1432,8 @@ function SectionAddButton({
       }}
       className={TREE_HEADER_BUTTON_CLASS}
     >
-      <PlusIcon className="h-3.5 w-3.5" />
-    </button>
+      <PlusIcon className="ui-icon-14" />
+    </IconButton>
   );
 }
 
@@ -1221,28 +1461,24 @@ function TreeSection({
           onClick={() => {
             setIsCollapsed((value) => !value);
           }}
-          className={`flex h-7 min-w-0 flex-1 items-center gap-1 px-2.5 text-left text-ui-base font-medium text-ink-subtlest outline-none transition-colors hover:text-ink focus-visible:text-ink ${focusVisibleRing}`}
+          className={`flex min-h-7 min-w-0 flex-1 items-center gap-1 pl-1.5 pr-2.5 text-left text-ui-base font-medium text-ink-mute outline-none transition-colors hover:text-ink focus-visible:text-ink ${focusVisibleRing}`}
         >
           <span className="min-w-0 truncate">{title}</span>
-          {isCollapsed ? (
-            <ChevronRightIcon className="h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 [@media(hover:none)]:opacity-100" />
-          ) : (
-            <ChevronDownIcon className="h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 [@media(hover:none)]:opacity-100" />
-          )}
+          <ChevronRightIcon className={`ui-icon-14 shrink-0 opacity-0 group-hover/section:opacity-100 group-focus-within/section:opacity-100 [@media(hover:none)]:opacity-100 ${treeChevronClass} ${isCollapsed ? "" : "rotate-90"}`} />
         </button>
         <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 has-[[aria-expanded=true]]:opacity-100 [@media(hover:none)]:opacity-100">
           {action}
         </div>
       </div>
-      {!isCollapsed ? (
+      <TreeBranch open={!isCollapsed}>
         <ul className="flex flex-col gap-0.5">{children}</ul>
-      ) : null}
+      </TreeBranch>
     </section>
   );
 }
 
 /** 置顶任务带的一行：钉子前导槽（本带身份标记）+ 会话标题 + 随行徽标；
- *  title=所属项目路径（跨项目行带，悬停可见归属），右键菜单与会话行同源
+ *  悬停提示显示所属项目路径，右键菜单与会话行同源
  *  （打开 / 归档），取消置顶在行尾按钮。 */
 function PinnedSessionRow({
   path,
@@ -1256,7 +1492,8 @@ function PinnedSessionRow({
   const projectService = useProject();
   const busySessionIds = useContext(BusySessionsContext);
   const isActive = useIsSessionActive(path, session.id);
-  const rename = useSessionInlineRename(session);
+  const rename = useSessionInlineRename(path, session);
+  const star = useSessionStar(path, session.id);
   const [archiveConfirm, setArchiveConfirm] = useState(false);
 
   return (
@@ -1268,7 +1505,7 @@ function PinnedSessionRow({
           event.clientY,
           "会话菜单",
           buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-            setArchiveConfirm(true),
+            setArchiveConfirm(true), star,
           ),
         );
       }}
@@ -1279,7 +1516,7 @@ function PinnedSessionRow({
             event.currentTarget.getBoundingClientRect(),
             "会话菜单",
             buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-              setArchiveConfirm(true),
+              setArchiveConfirm(true), star,
             ),
           );
         }
@@ -1288,34 +1525,28 @@ function PinnedSessionRow({
         isActive ? rowSelectedClass : "hover:bg-surface-hover"
       }`}
     >
-      {rename.renaming ? (
-        <SessionRenameInput
-          draft={rename.draft}
-          setDraft={rename.setDraft}
-          commit={rename.commit}
-          cancel={rename.cancel}
-        />
-      ) : (
-        <button
-          type="button"
-          aria-current={isActive ? "true" : undefined}
-          title={path}
-          onClick={() => {
+      <SessionRowBody
+          active={isActive}
+          renaming={rename.renaming}
+          hint={path}
+          onOpen={() => {
             void projectService?.sessions.openSessionFromEntry(path, session.id);
           }}
-          className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1 pl-2.5 text-left ${focusVisibleRing}`}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 pl-2.5 text-left"
         >
           <span className="flex size-4 shrink-0 items-center justify-center">
-            <PinIcon className="h-4 w-4 shrink-0 text-ink-subtle" />
+            <PinIcon className="ui-icon-16 shrink-0 text-ink-subtle" />
           </span>
-          <span className="min-w-0 flex-1 truncate text-ui-base text-ink">
-            {session.title}
-          </span>
+          <SessionRowTitle starred={star.starred} rename={rename}>
+            <SidebarItemTitle>{session.title}</SidebarItemTitle>
+          </SessionRowTitle>
           <SessionTrailingBadge path={path} id={session.id} />
-        </button>
-      )}
+      </SessionRowBody>
       {!archiveConfirm && (
-        <SessionPinAction path={path} sessionId={session.id} />
+        <>
+          <SessionStarAction star={star} />
+          <SessionPinAction path={path} sessionId={session.id} />
+        </>
       )}
       <SessionArchiveAction
         path={path}
@@ -1394,7 +1625,20 @@ function ProjectsView({
   );
   const isAddPanelOpen = useProjectSidebarValue((state) => state.isAddPanelOpen);
   const closeAddPanel = useProjectSidebarValue((state) => state.closeAddPanel);
+  const toggleExpanded = useProjectSidebarValue((state) => state.toggleExpanded);
   const addTriggerRef = useRef<HTMLButtonElement | null>(null);
+  // 打开的会话所在的项目被用户收起过时自动展开，侧栏里才看得到当前会话；
+  // 只在打开的会话变化时展开一次，之后用户仍可以收起。
+  const activeSessionId = useSessionValue((state) => state.activeSessionId);
+  const openingSessionId = useSessionValue((state) => state.openingSessionId);
+  const shownSession = conversationPage && contextPath ? `${contextPath}#${openingSessionId ?? activeSessionId ?? ""}` : "";
+  useEffect(() => {
+    if (!shownSession || !contextPath) return;
+    const key = Object.keys(expandedOverrides).find((path) => pathKey(path) === pathKey(contextPath));
+    if (key !== undefined && expandedOverrides[key] === false) toggleExpanded(key, false);
+    // 只跟着打开的会话变化，不跟着用户的展开 / 收起变化。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownSession]);
 
   const lastOpenedByPath = new Map(
     recentWorkspaces.map((entry) => [entry.path, entry.lastOpenedAt] as const),
@@ -1448,9 +1692,9 @@ function ProjectsView({
           isSelected={isSelected}
           menu={menu}
         />
-        {isExpanded ? (
+        <TreeBranch open={isExpanded}>
           <ProjectChildren path={path} sessions={sessions} menu={menu} />
-        ) : null}
+        </TreeBranch>
       </li>
     );
   }
@@ -1515,10 +1759,13 @@ function RecentSessionRow({
   readonly session: SessionSummary;
   readonly menu: SidebarMenuApi;
 }) {
+  // 会话视角不分组：属于某个分组的会话在副行注明「分组 · 组内显示名」。
+  const membership = useSessionGroupMembership(path, session.id);
   const projectService = useProject();
   const busySessionIds = useContext(BusySessionsContext);
   const isActive = useIsSessionActive(path, session.id);
-  const rename = useSessionInlineRename(session);
+  const rename = useSessionInlineRename(path, session);
+  const star = useSessionStar(path, session.id);
   const [archiveConfirm, setArchiveConfirm] = useState(false);
 
   return (
@@ -1530,7 +1777,7 @@ function RecentSessionRow({
           event.clientY,
           "会话菜单",
           buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-            setArchiveConfirm(true),
+            setArchiveConfirm(true), star, membership?.member.open,
           ),
         );
       }}
@@ -1541,7 +1788,7 @@ function RecentSessionRow({
             event.currentTarget.getBoundingClientRect(),
             "会话菜单",
             buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-              setArchiveConfirm(true),
+              setArchiveConfirm(true), star, membership?.member.open,
             ),
           );
         }
@@ -1550,38 +1797,40 @@ function RecentSessionRow({
         isActive ? rowSelectedClass : "hover:bg-surface-hover"
       }`}
     >
-      {rename.renaming ? (
-        <SessionRenameInput
-          draft={rename.draft}
-          setDraft={rename.setDraft}
-          commit={rename.commit}
-          cancel={rename.cancel}
-        />
-      ) : (
-        <button
-          type="button"
-          aria-current={isActive ? "true" : undefined}
-          title={path}
-          onClick={() => {
-            void projectService?.sessions.openSessionFromEntry(path, session.id);
+      <SessionRowBody
+          active={isActive}
+          renaming={rename.renaming}
+          hint={path}
+          onOpen={() => {
+            if (membership?.member.open) membership.member.open();
+            else void projectService?.sessions.openSessionFromEntry(path, session.id);
           }}
           // 行体对照 ZCode TaskListItem.tsx:570-574：pl-2.5 pr-1，timeline
           // 两行变体 py-1.5（左 10px / 右 4px / 上下 6px）
-          className={`flex min-w-0 flex-1 cursor-pointer flex-col gap-0.5 rounded-lg py-1.5 pl-2.5 text-left ${focusVisibleRing}`}
+          className="flex min-w-0 flex-1 flex-col items-stretch gap-0.5 rounded-lg py-1.5 pl-2.5 text-left"
         >
-          <span className="min-w-0 truncate text-ui-base text-ink">
-            {session.title}
-          </span>
+          <SessionRowTitle starred={star.starred} rename={rename}>
+            <SidebarItemTitle>{session.title}</SidebarItemTitle>
+          </SessionRowTitle>
           {/* 副行对照 ZCode TaskListItem.tsx:668：text-ui-base 定高 h-6 */}
           <div className="flex h-6 items-center gap-1.5 text-ui-base text-ink-subtle">
-            <CornerDownRightIcon className="h-3.5 w-3.5 shrink-0" />
-            <span className="min-w-0 flex-1 truncate">{basenameOf(path)}</span>
-            <SessionActivityBadge path={path} id={session.id} />
+            <CornerDownRightIcon className="ui-icon-14 shrink-0" />
+            <span className="min-w-0 flex-1 truncate">
+              {basenameOf(path)}
+              {membership ? ` · ${membership.group.title} · ${membership.member.title}` : null}
+            </span>
+            {membership?.member.attention ? (
+              <AttentionChip text={membership.member.attention} />
+            ) : (
+              <SessionActivityBadge path={path} id={session.id} />
+            )}
           </div>
-        </button>
-      )}
+      </SessionRowBody>
       {!archiveConfirm && (
-        <SessionPinAction path={path} sessionId={session.id} />
+        <>
+          <SessionStarAction star={star} />
+          <SessionPinAction path={path} sessionId={session.id} />
+        </>
       )}
       <SessionArchiveAction
         path={path}
@@ -1643,7 +1892,7 @@ function SessionsView({ menu }: { readonly menu: SidebarMenuApi }) {
 /**
  * 树头部/分组头的小方钮（视角菜单、【+】动作位共用）。
  */
-const TREE_HEADER_BUTTON_CLASS = `flex size-6 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-hover hover:text-ink ${focusVisibleRing}`;
+const TREE_HEADER_BUTTON_CLASS = `flex shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-hover hover:text-ink ${focusVisibleRing}`;
 
 /**
  * 最近会话视角的列表头：标题 + 视角切换钮。项目视角不渲染本行（切换钮
@@ -1708,7 +1957,7 @@ function ProjectTreeContent() {
           icon: (
             <FolderGlyph
               isExpanded={false}
-              className="h-4 w-4 text-ink-subtle"
+              className="ui-icon-16 text-ink-subtle"
             />
           ),
           onSelect: () => {
@@ -1720,7 +1969,7 @@ function ProjectTreeContent() {
           label: "最近会话",
           radio: true,
           selected: treeViewMode === "sessions",
-          icon: <ClockIcon className="h-4 w-4 text-ink-subtle" />,
+          icon: <ClockIcon className="ui-icon-16 text-ink-subtle" />,
           onSelect: () => {
             setTreeViewMode("sessions");
           },
@@ -1756,10 +2005,10 @@ function ProjectTreeContent() {
           同位；desktop 无自动化 / 插件能力只迁新建）——侧栏收起后的全局
           新建入口由顶栏左端承接（ContextBar 的收起态新建钮，ZCode
           DesktopTopOverlay 的强制显示位） */}
-      <div className="flex flex-col gap-1 px-2 py-3">
+      <div className="shrink-0 px-2 py-2">
         <NewTaskButtonGroup />
       </div>
-      <div className="flex min-h-0 flex-1 flex-col border-t border-line/50 pt-3">
+      <div className="flex min-h-0 flex-1 flex-col pt-1">
         {/* 项目视角不渲染列表头：标题「项目」与分组头重复，切换钮已并入
             分组头行尾；最近会话视角无分组头，保留独立单行 */}
         {treeViewMode === "sessions" ? (

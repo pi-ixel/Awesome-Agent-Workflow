@@ -1,4 +1,8 @@
-import type { UsageSnapshot, RuntimeStatusValues } from "./runtimeStatusTypes.ts";
+import type { TurnUsage } from "./turnUsage.ts";
+import type {
+  UsageSnapshot,
+  RuntimeStatusValues,
+} from "./runtimeStatusTypes.ts";
 import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
 import type { AgentUsageReport } from "../../acpRuntime/types.ts";
 import { emptyRuntime } from "./viewState.ts";
@@ -20,13 +24,25 @@ import { emptyRuntime } from "./viewState.ts";
 import { create } from "zustand";
 import { createUsageDiagnostics } from "./usageDiagnostics.ts";
 import type { Logger } from "../../../shared/logging/logger.ts";
+import type { ContextUsage } from "./contextUsageStorage.ts";
 
 export type {
   RuntimeSnapshot,
   McpServerEntry,
 } from "../../acpRuntime/types.ts";
 
+const sessionCounterKeys = [
+  "totalSessionTokens",
+  "totalSessionInputTokens",
+  "totalSessionOutputTokens",
+  "totalSessionCacheHitTokens",
+] as const;
+type SessionCounters = Partial<Pick<UsageSnapshot, (typeof sessionCounterKeys)[number]>>;
+
 export interface RuntimeStatusState extends RuntimeStatusValues {
+  setCachedContext: (usage: ContextUsage | null) => void;
+  restoreSessionCounters: (counters: SessionCounters) => void;
+  setTurnUsage: (usage: TurnUsage | null) => void;
   handleSessionEvent: (event: AcpSessionEvent) => void;
   /** 轮次开始（桥接层驱动：sessionStore.isAgentRunning 翻 true）。 */
   beginTurn: () => void;
@@ -41,6 +57,23 @@ export interface RuntimeStatusState extends RuntimeStatusValues {
 /** Scope is normalized by the adapter; source IDs have no generic semantics. */
 function isMainAgentUsage(usage: AgentUsageReport): boolean {
   return usage.scope !== "subagent";
+}
+
+/** Session counters may arrive on main or subagent reports; absent fields do not clear them. */
+function pickSessionCounters(
+  usage: SessionCounters,
+  previous?: UsageSnapshot | null,
+) {
+  const counters: Partial<Record<(typeof sessionCounterKeys)[number], number>> = {};
+  for (const key of sessionCounterKeys) {
+    const value = usage[key];
+    const selected =
+      typeof value === "number" && Number.isFinite(value) && value >= 0
+        ? value
+        : previous?.[key];
+    if (selected != null) counters[key] = selected;
+  }
+  return counters;
 }
 
 function pickUsage(usage: AgentUsageReport): UsageSnapshot {
@@ -59,10 +92,7 @@ function pickUsage(usage: AgentUsageReport): UsageSnapshot {
       typeof usage.maxContextTokens === "number"
         ? usage.maxContextTokens
         : null,
-    totalSessionTokens:
-      typeof usage.totalSessionTokens === "number"
-        ? usage.totalSessionTokens
-        : null,
+    totalSessionTokens: null,
     cacheHitTokens:
       typeof usage.cacheHitTokens === "number" ? usage.cacheHitTokens : null,
   };
@@ -92,8 +122,37 @@ function pickStandardUsage(
 export const createRuntimeStatusStore = (logger?: Logger) => {
   const runningToolIds = new Set<string>();
   const usageDiagnostics = createUsageDiagnostics(logger);
-  return create<RuntimeStatusState>()((set, get) => ({
+  const store = create<RuntimeStatusState>()((set, get) => ({
     ...emptyRuntime,
+    setCachedContext: (cachedContext) => set({ cachedContext }),
+    restoreSessionCounters: (counters) => set((state) => ({
+      usage: {
+        ...(state.usage ?? pickStandardUsage(null, null)),
+        ...pickSessionCounters(counters),
+        ...pickSessionCounters(state.usage ?? {}),
+      },
+    })),
+    setTurnUsage: (usage) =>
+      set((state) =>
+        usage === null
+          ? { usage: null, usageSource: null }
+          : {
+              usage: {
+                ...pickStandardUsage(
+                  state.usage?.maxContextTokens ?? state.runtime.maxContextTokens,
+                  state.usageSource === "standard"
+                    ? state.usage?.contextUsed ?? null
+                    : null,
+                ),
+                basis: "prompt-total",
+                sourceLabel: "标准 ACP 上下文",
+                totalSessionTokens: usage.totalTokens,
+                totalSessionInputTokens: usage.inputTokens,
+                totalSessionOutputTokens: usage.outputTokens,
+                totalSessionCacheHitTokens: usage.cachedReadTokens,
+              },
+            },
+      ),
     handleSessionEvent: (event) => {
       switch (event.type) {
         case "agent_runtime": {
@@ -104,6 +163,7 @@ export const createRuntimeStatusStore = (logger?: Logger) => {
           return;
         }
         case "agent_usage": {
+          if (get().usage?.basis === "prompt-total") return;
           const raw = event.usage;
           const used = raw.contextUsed ?? null;
           usageDiagnostics.record({
@@ -140,17 +200,21 @@ export const createRuntimeStatusStore = (logger?: Logger) => {
               ? state.usageSource === "standard" && state.usage
                 ? {
                     ...pickUsage(event.usage),
+                    ...pickSessionCounters(raw, state.usage),
                     contextUsed: state.usage.contextUsed,
                     maxContextTokens: state.usage.maxContextTokens,
                     pct: state.usage.pct,
                     sourceLabel: state.usage.sourceLabel,
                   }
-                : pickUsage(event.usage)
-              : typeof raw.totalSessionTokens === "number"
+                : {
+                    ...pickUsage(event.usage),
+                    ...pickSessionCounters(raw, state.usage),
+                  }
+              : Object.keys(pickSessionCounters(raw)).length > 0
                 ? {
                     ...(state.usage ??
                       pickUsage({ sessionId: event.sessionId })),
-                    totalSessionTokens: raw.totalSessionTokens,
+                    ...pickSessionCounters(raw, state.usage),
                   }
                 : state.usage,
             ...(isMainAgentUsage(event.usage) &&
@@ -175,12 +239,15 @@ export const createRuntimeStatusStore = (logger?: Logger) => {
             lastSessionId: event.sessionId,
             usage: {
               ...pickStandardUsage(event.contextSize, event.contextUsed),
+              ...(state.usage?.basis === "prompt-total"
+                ? { basis: "prompt-total" as const }
+                : {}),
               sourceLabel: "标准 ACP 上下文",
               totalTokens: state.usage?.totalTokens ?? null,
               inputTokens: state.usage?.inputTokens ?? null,
               outputTokens: state.usage?.outputTokens ?? null,
               cacheHitTokens: state.usage?.cacheHitTokens ?? null,
-              totalSessionTokens: state.usage?.totalSessionTokens ?? null,
+              ...pickSessionCounters({}, state.usage),
             },
             usageSource: "standard",
           }));
@@ -207,12 +274,11 @@ export const createRuntimeStatusStore = (logger?: Logger) => {
           set({ runningToolCount: runningToolIds.size });
           return;
         }
-        case "agent_thought_chunk": {
-          set({ lastSessionId: event.sessionId, lastSignal: "thought" });
-          return;
-        }
+        case "agent_thought_chunk":
         case "agent_message_chunk": {
-          set({ lastSessionId: event.sessionId, lastSignal: "message" });
+          const channel =
+            event.type === "agent_thought_chunk" ? "thought" : "message";
+          set({ lastSessionId: event.sessionId, lastSignal: channel });
           return;
         }
         default:
@@ -233,6 +299,7 @@ export const createRuntimeStatusStore = (logger?: Logger) => {
       set({ ...emptyRuntime });
     },
   }));
+  return store;
 };
 
 /**

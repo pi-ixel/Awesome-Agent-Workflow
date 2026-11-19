@@ -46,10 +46,10 @@ function FileChangeCard({
         type="button"
         aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
-        className="flex h-10 w-full items-center gap-2 px-3 text-left text-ui-base hover:bg-hover"
+        className="flex min-h-10 w-full items-center gap-2 px-3 text-left text-ui-base hover:bg-hover"
       >
         <ChevronRightIcon
-          className={`size-3.5 shrink-0 text-ink-mute transition-transform ${expanded ? "rotate-90" : ""}`}
+          className={`ui-icon-14 shrink-0 text-ink-mute transition-transform ${expanded ? "rotate-90" : ""}`}
         />
         <span className="shrink-0 font-medium">{label}</span>
         <span className="min-w-0 flex-1 truncate text-ink-soft">{path}</span>

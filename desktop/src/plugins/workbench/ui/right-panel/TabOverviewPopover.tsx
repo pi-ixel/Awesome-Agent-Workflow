@@ -1,3 +1,4 @@
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import type { PanelTab } from "../../layout/types.ts";
 import type { PanelTabPresentation, WorkbenchSnapshot } from "../../types.ts";
 /**
@@ -6,7 +7,7 @@ import type { PanelTabPresentation, WorkbenchSnapshot } from "../../types.ts";
  *
  * - 定位复用 ui/ContextMenu.tsx 的「首帧 hidden 量测 → 夹取视口 → 上下翻转」
  *   等价实现（Radix Popper 碰撞避让的 desktop 手写版）；浮层容器对齐 ZCode
- *   popover.tsx 基元：z-[60] / w-72 / rounded-xl / border-border / shadow-md /
+ *   popover.tsx 基元：z-[60] / w-72 / rounded-xl / border-border / shadow-floating /
  *   sideOffset 4；入退场沿用既有 100ms context-menu-in-* 动效；
  * - 搜索面与评分用 panelTabModel 的纯函数（sidePaneTabSearch.ts 逐行移植）；
  * - 键盘：↑↓ roving + Enter 激活（原生 button）+ Esc 关闭（照 ContextMenu
@@ -35,10 +36,10 @@ import {
 /** 触发钮统一写法（desktop 无 Button 基元的 ghost icon-md 等价，28px）；
     基色 text-ink 对齐 ZCode ghost 的 text-foreground（100%，非 60% 洗色）。 */
 export const GHOST_ICON_MD =
-  "flex size-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink";
+  "flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink";
 /** ghost icon-sm 等价（24px，浮窗操作栏用）。 */
 export const GHOST_ICON_SM =
-  "flex size-6 shrink-0 items-center justify-center rounded-md text-ink transition-colors hover:bg-hover hover:text-ink";
+  "flex shrink-0 items-center justify-center rounded-md text-ink transition-colors hover:bg-hover hover:text-ink";
 
 interface OverviewRow {
   tab: PanelTab;
@@ -101,7 +102,6 @@ export function TabOverviewPopover({
   const [pos, setPos] = useState<{
     x: number;
     y: number;
-    side: "bottom" | "top";
   } | null>(null);
   const [measured, setMeasured] = useState(false);
 
@@ -144,8 +144,8 @@ export function TabOverviewPopover({
     restoreFocusRef.current = document.activeElement as HTMLElement | null;
     setPos(
       rect
-        ? { x: rect.left, y: rect.bottom + 4, side: "bottom" }
-        : { x: 8, y: 8, side: "bottom" },
+        ? { x: rect.left, y: rect.bottom + 4 }
+        : { x: 8, y: 8 },
     );
     setMeasured(false);
     setCurrentTime(Date.now());
@@ -171,15 +171,13 @@ export function TabOverviewPopover({
     const height = rect?.height ?? 0;
     let x = Math.min(pos.x, window.innerWidth - width - 8);
     x = Math.max(8, x);
-    let side = pos.side;
     let y = pos.y;
     if (y + height > window.innerHeight - 8 && height > 0) {
-      side = "top";
       const triggerRect = triggerRef.current?.getBoundingClientRect();
       y = (triggerRect?.top ?? pos.y) - height - 4;
     }
     y = Math.max(8, y);
-    setPos({ x, y, side });
+    setPos({ x, y });
     setMeasured(true);
     panelRef.current?.querySelector<HTMLInputElement>("input")?.focus();
     // 仅开启时量测定稿一次（placement 由 toggle 给定，不随后续渲染复算）
@@ -236,11 +234,6 @@ export function TabOverviewPopover({
     rows[nextIndex]?.focus();
   }
 
-  const rowClasses = (isActive: boolean): string =>
-    `mb-0.5 flex min-h-8 cursor-pointer items-center gap-2 rounded-md px-2 text-left text-ui-base last:mb-0 hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:outline-none ${
-      isActive ? "bg-selected" : ""
-    }`;
-
   const renderRows = (
     rows: OverviewRow[],
     onOpen: (tab: PanelTab) => void,
@@ -249,50 +242,46 @@ export function TabOverviewPopover({
     rows.map(({ tab, presentation, title, timeLabel }) => {
       const isActive = tab.id === activeTabId;
       return (
-        <button
+        <div
           key={tab.id}
-          type="button"
-          role="option"
-          aria-selected={isActive}
-          data-overview-row=""
-          title={title}
-          className={rowClasses(isActive)}
-          onClick={() => onOpen(tab)}
+          className={`mb-0.5 flex items-center rounded-md px-2 last:mb-0 hover:bg-menu-hover focus-within:bg-menu-hover ${isActive ? "bg-selected" : ""}`}
         >
-          <span className="flex size-5 shrink-0 items-center justify-center text-ink-subtle">
-            <PanelTabIcon presentation={presentation} />
-          </span>
-          <span className="min-w-0 flex-1 truncate text-ui-base font-medium text-ink">
-            {title}
-          </span>
-          <span className="mr-0.5 shrink-0 text-ui-base text-ink-subtle">
-            {timeLabel}
-          </span>
-          {closable && (
-            <span
-              role="button"
-              aria-label={`关闭 ${title}`}
-              className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-subtle opacity-70 hover:bg-hover hover:opacity-100"
-              onPointerDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-              }}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onCloseTab(tab.id);
-              }}
-            >
-              <XIcon className="size-3" />
+          <button
+            type="button"
+            role="option"
+            aria-selected={isActive}
+            data-overview-row=""
+            data-hint={title}
+            className="flex min-h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 text-left outline-none"
+            onClick={() => onOpen(tab)}
+          >
+            <span className="flex size-5 shrink-0 items-center justify-center text-ink-subtle">
+              <PanelTabIcon presentation={presentation} />
             </span>
+            <span className="min-w-0 flex-1 truncate text-ui-base font-medium text-ink">
+              {title}
+            </span>
+            <span className="mr-0.5 shrink-0 text-ui-base text-ink-subtle">
+              {timeLabel}
+            </span>
+          </button>
+          {closable && (
+            <IconButton
+              iconSize="compact"
+              aria-label={`关闭 ${title}`}
+              className="flex shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-subtle opacity-70 hover:bg-hover hover:opacity-100"
+              onClick={() => onCloseTab(tab.id)}
+            >
+              <XIcon className="ui-icon-12" />
+            </IconButton>
           )}
-        </button>
+        </div>
       );
     });
 
   return (
     <>
-      <button
+      <IconButton
         ref={triggerRef}
         type="button"
         data-testid="tab-overview-trigger"
@@ -301,8 +290,8 @@ export function TabOverviewPopover({
         className={GHOST_ICON_MD}
         onClick={toggle}
       >
-        <ChevronsDownIcon className="size-4" />
-      </button>
+        <ChevronsDownIcon className="ui-icon-16" />
+      </IconButton>
       {open &&
         pos &&
         createPortal(
@@ -319,15 +308,11 @@ export function TabOverviewPopover({
               top: pos.y,
               visibility: measured ? "visible" : "hidden",
             }}
-            className={`z-[60] flex w-72 flex-col overflow-hidden rounded-xl border border-border bg-menu p-0 text-ink shadow-md outline-none ${
-              pos.side === "top"
-                ? "context-menu-in-top"
-                : "context-menu-in-bottom"
-            }`}
+            className={`z-[60] flex w-72 flex-col overflow-hidden rounded-xl border border-border bg-menu p-0 text-ink shadow-floating outline-none ${measured ? "selection-popup" : ""}`}
           >
             <div className="border-b border-border p-1">
               <div className="flex h-8 items-center gap-2 px-2">
-                <SearchIcon className="size-4 shrink-0 text-ink-subtlest" />
+                <SearchIcon className="ui-icon-16 shrink-0 text-ink-subtlest" />
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}

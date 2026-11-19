@@ -1,5 +1,5 @@
 import type { AcpRuntimeService } from "../service.ts";
-import type { AcpConnectionService } from "../../acpConnection/service.ts";
+import type { AcpConnectionInternals } from "../../acpConnection/service.ts";
 import type { AgentsService } from "../../agents/service.ts";
 import type { AgentProbeSessionFactory } from "../../agents/types.ts";
 import { RuntimeConnections } from "./connections.ts";
@@ -12,11 +12,16 @@ export class DesktopAcpRuntime {
   readonly service: AcpRuntimeService;
 
   constructor(
-    private readonly base: AcpConnectionService,
+    /** 全仓唯一的建池点（架构守卫 acpPoolBoundary 只放行本目录装配）。 */
+    private readonly base: AcpConnectionInternals,
     agents: AgentsService,
     private readonly logger: Logger,
   ) {
-    this.connections = new RuntimeConnections(base, agents, logger);
+    this.connections = new RuntimeConnections(base, agents, logger, (agentId) =>
+      agents.configuration.getState().agents.some(
+        (agent) => agent.id === agentId && agent.supportsCustomAnswers === true,
+      ),
+    );
     const connections = this.connections;
     this.service = {
       protocol: {
@@ -27,6 +32,7 @@ export class DesktopAcpRuntime {
         abortSwitch: connections.abortSwitch.bind(connections),
         setSelection: connections.setSelection.bind(connections),
         open: connections.open.bind(connections),
+        openBackground: connections.openBackground.bind(connections),
         readProjectHistory: connections.readProjectHistory.bind(connections),
         has: connections.has.bind(connections),
         promote: connections.promote.bind(connections),

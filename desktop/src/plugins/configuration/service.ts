@@ -13,3 +13,5 @@ export interface ConfigurationService {
   /** 独占记录，或只登记本插件负责的字段。同一字段只允许一个所有者。 */
   register(key: string, fields?: readonly string[]): ConfigurationScope;
 }
+
+export { desktopSettingsKey } from "./config.ts";

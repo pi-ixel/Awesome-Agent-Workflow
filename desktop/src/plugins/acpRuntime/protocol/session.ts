@@ -1,3 +1,4 @@
+import type { MessageDisplay } from "../../../shared/messageDisplay.ts";
 import type {
   AcpDialect,
   AcpSessionOptions,
@@ -6,6 +7,7 @@ import type {
   PermissionOption,
   PermissionOptionKind,
   PermissionResponder,
+  SessionSetupOptions,
 } from "../types.ts";
 import type { AcpSessionEvent } from "../events.ts";
 import type { AcpSessionConnection } from "../../acpConnection/types.ts";
@@ -15,7 +17,7 @@ import {
 } from "../../../contracts/acp/content.ts";
 import { parseToolLocations } from "../../../contracts/acp/toolLocations.ts";
 import { parseToolKind } from "../../../contracts/acp/tools.ts";
-import { parseElicitationForm } from "../../../contracts/acp/elicitation.ts";
+import { parseRuntimeElicitationForm } from "./elicitation.ts";
 import {
   parseConfigOptions,
   configModels,
@@ -56,6 +58,7 @@ import type {
   InitializeResult,
   ListSessionsResult,
   LoadSessionResult,
+  McpServer,
   ModelInfo,
   NewSessionResult,
   PlanEntry,
@@ -103,12 +106,15 @@ export class AcpSession implements AcpSessionPort {
   }
   private readonly listeners = new Set<(event: AcpSessionEvent) => void>();
   private readonly permissionResponder: PermissionResponder | undefined;
+  private readonly agentId: string | undefined;
+  private readonly supportsCustomAnswers: AcpSessionOptions["supportsCustomAnswers"];
   private readonly dialect: AcpDialect | undefined;
   private readonly clientInfo: {
     readonly name: string;
     readonly version?: string;
   };
-  private readonly mcpServers: AcpSessionOptions["mcpServers"];
+  /** 会话创建/恢复时下发的 MCP server 清单（缺省 []，ADR 024 §7 改动 1）。 */
+  private readonly mcpServers: readonly McpServer[];
   private readonly onSessionReady: AcpSessionOptions["onSessionReady"];
   private readonly onCapabilitiesReady: AcpSessionOptions["onCapabilitiesReady"];
   private readonly onSessionDisposed: AcpSessionOptions["onSessionDisposed"];
@@ -144,6 +150,8 @@ export class AcpSession implements AcpSessionPort {
     this.elicitationResponder = options.onElicitation;
     this.connection = connection;
     this.permissionResponder = options.onPermissionRequest;
+    this.agentId = options.agentId;
+    this.supportsCustomAnswers = options.supportsCustomAnswers;
     this.dialect = options.dialect;
     this.clientInfo = options.clientInfo ?? DEFAULT_CLIENT_INFO;
     this.mcpServers = options.mcpServers ?? [];
@@ -274,14 +282,15 @@ export class AcpSession implements AcpSessionPort {
   /** 建新会话。 */
   async newSession(
     cwd: string,
-    options: { timeoutMs?: number } = {},
+    options: SessionSetupOptions = {},
   ): Promise<NewSessionResult> {
     this.invalidateConfiguration();
     this.latestConfigurationSessionId = null;
+    const { mcpServers = this.mcpServers, ...requestOptions } = options;
     const raw = await this.connection.request(
       ACP_METHOD.sessionNew,
-      { cwd, mcpServers: this.mcpServers },
-      options,
+      { cwd, mcpServers },
+      requestOptions,
     );
     const result = asNewSessionResult(raw);
     if (result === null) {
@@ -311,16 +320,17 @@ export class AcpSession implements AcpSessionPort {
   async loadSession(
     sessionId: string,
     cwd: string,
-    options: { timeoutMs?: number } = {},
+    options: SessionSetupOptions = {},
   ): Promise<LoadSessionResult> {
     this.invalidateConfiguration();
     this.latestConfigurationSessionId = null;
     this.loadingConfigurationSessionId = sessionId;
+    const { mcpServers = this.mcpServers, ...requestOptions } = options;
     const raw = await this.connection
       .request(
         ACP_METHOD.sessionLoad,
-        { sessionId, cwd, mcpServers: this.mcpServers },
-        options,
+        { sessionId, cwd, mcpServers },
+        requestOptions,
       )
       .finally(() => {
         this.loadingConfigurationSessionId = null;
@@ -375,7 +385,12 @@ export class AcpSession implements AcpSessionPort {
    */
   async prompt(
     text: string | readonly ContentBlock[],
-    options: { timeoutMs?: number } = {},
+    options: {
+      timeoutMs?: number;
+      beforeDispatch?: () => void;
+      /** 插件替用户发的消息：轮次开始后把原文连同显示方式作为用户消息告诉会话视图。 */
+      echo?: MessageDisplay;
+    } = {},
   ): Promise<PromptResult> {
     this.assertSession();
     const sessionId = this.sessionId!;
@@ -389,31 +404,60 @@ export class AcpSession implements AcpSessionPort {
       : [];
     const blocks = [...content, ...context];
     this.pendingPrompts++;
-    const raw = await this.connection
-      .request(
-        ACP_METHOD.sessionPrompt,
-        { sessionId: this.sessionId, prompt: blocks },
-        { timeoutMs: options.timeoutMs ?? null },
-      )
-      .finally(() => {
-        this.invalidateForms();
-        this.pendingPrompts--;
-        if (!this.pendingPrompts) this.clearCancellation();
-        void Promise.resolve(this.onPromptSettled?.(sessionId)).catch(
-          (error: unknown) => {
-            this.logger.warn("浏览器轮次清理失败", {
-              sessionId,
-              reason: String(error),
-            });
-          },
-        );
+    if (this.pendingPrompts === 1) {
+      // 本地轮次开始（真实 pendingPrompts 状态发声）：任何驱动方（用户
+      // 输入、工作流调度）一视同仁，会话视图运行态以它为准。
+      this.emit({ type: "turn_started", sessionId });
+    }
+    if (options.echo && typeof text === "string") {
+      this.emit({
+        type: "user_message_chunk",
+        sessionId,
+        text,
+        display: options.echo,
       });
-    const result = asPromptResult(raw);
-    if (result === null) {
-      throw new AcpResponseError(
-        ACP_METHOD.sessionPrompt,
-        -32603,
-        `响应形状不合法（stopReason 缺失或非法）：${JSON.stringify(raw)?.slice(0, 300)}`,
+    }
+    let result: PromptResult | null = null;
+    try {
+      const raw = await this.connection
+        .request(
+          ACP_METHOD.sessionPrompt,
+          { sessionId: this.sessionId, prompt: blocks },
+          {
+            timeoutMs: options.timeoutMs ?? null,
+            beforeDispatch: options.beforeDispatch,
+          },
+        )
+        .finally(() => {
+          this.invalidateForms();
+        });
+      result = asPromptResult(raw);
+      if (result === null) {
+        throw new AcpResponseError(
+          ACP_METHOD.sessionPrompt,
+          -32603,
+          `响应形状不合法（stopReason 缺失或非法）：${JSON.stringify(raw)?.slice(0, 300)}`,
+        );
+      }
+    } finally {
+      this.pendingPrompts--;
+      if (!this.pendingPrompts) {
+        this.clearCancellation();
+        // 本地轮次结束：stopReason 取自响应；失败（无响应）为 null——
+        // 「取消绝不伪装成功」，结局语义由 store 的 endTurn 归约。
+        this.emit({
+          type: "turn_ended",
+          sessionId,
+          stopReason: result?.stopReason ?? null,
+        });
+      }
+      void Promise.resolve(this.onPromptSettled?.(sessionId)).catch(
+        (error: unknown) => {
+          this.logger.warn("浏览器轮次清理失败", {
+            sessionId,
+            reason: String(error),
+          });
+        },
       );
     }
     if (
@@ -552,6 +596,32 @@ export class AcpSession implements AcpSessionPort {
   ): Promise<void> {
     this.assertSession();
     await this.changeConfiguration("model", modelId, options);
+  }
+
+  /**
+   * 客户端发起的 agent 私有扩展请求（`_` 前缀方法，如
+   * `_session/switch_agent`）；通用逃生门，不进标准 ACP 方法面的
+   * agent 私有请求从这里发出（ADR 024 §7 改动 2）。
+   *
+   * 约束：会话须已建立；method 必须以 `_` 开头；params 不得自带
+   * sessionId（由本方法自动附上当前会话 id）。
+   */
+  async requestExtension(
+    method: string,
+    params: Readonly<Record<string, unknown>> = {},
+    options: { timeoutMs?: number } = {},
+  ): Promise<unknown> {
+    this.assertSession();
+    if (!method.startsWith("_") || "sessionId" in params) {
+      throw new Error(
+        "extension method must start with _ and cannot override sessionId",
+      );
+    }
+    return this.connection.request(
+      method,
+      { ...params, sessionId: this.sessionId },
+      options,
+    );
   }
 
   /** Optional acknowledgement policy; all vendor interpretation stays in the dialect. */
@@ -701,10 +771,18 @@ export class AcpSession implements AcpSessionPort {
     params: Readonly<Record<string, unknown>>,
   ): void {
     if (this.invalidated) return;
+    const receivedAt = performance.now();
     try {
       const event = this.translateNotification(method, params);
       if (event !== null) {
-        this.emit(event);
+        this.emit(
+          method === "session/update" &&
+            (event.type === "agent_message_chunk" ||
+              event.type === "agent_thought_chunk") &&
+            event.sessionId === this.sessionId
+            ? { ...event, receivedAt }
+            : event,
+        );
         for (const derived of this.dialect?.deriveEvents?.(event) ?? [])
           this.emit(derived);
       }
@@ -809,9 +887,12 @@ export class AcpSession implements AcpSessionPort {
     method: string,
     params: Readonly<Record<string, unknown>>,
   ): Promise<unknown> {
-    params = this.dialect?.normalizeServerRequest?.(method, params) ?? params;
     if (method === "elicitation/create" && this.elicitationResponder) {
-      const form = parseElicitationForm(params);
+      const form = parseRuntimeElicitationForm(
+        params,
+        this.agentId,
+        this.supportsCustomAnswers?.() === true,
+      );
       if (!form) {
         this.logger.warn("拒绝不支持或无效的 ACP 表单", { mode: params.mode });
         return { action: "decline" };
@@ -1273,17 +1354,29 @@ function asPromptResult(raw: unknown): PromptResult | null {
   if (stopReason === undefined) {
     return null;
   }
+  const modelId = asString(record["modelId"]);
+  const model = modelId ? { modelId } : {};
   const usageRecord = asRecord(record["usage"]);
   if (usageRecord === null) {
-    return { stopReason };
+    return { stopReason, ...model };
   }
+  const inputTokens = asNumber(usageRecord["inputTokens"]);
+  const outputTokens = asNumber(usageRecord["outputTokens"]);
+  const totalTokens = asNumber(usageRecord["totalTokens"]);
+  if (
+    [inputTokens, outputTokens, totalTokens].some(
+      (n) => n === null || !Number.isFinite(n) || n < 0,
+    )
+  )
+    return { stopReason, ...model };
   const cachedReadTokens = asNumber(usageRecord["cachedReadTokens"]);
   return {
     stopReason,
+    ...model,
     usage: {
-      inputTokens: asNumber(usageRecord["inputTokens"]) ?? 0,
-      outputTokens: asNumber(usageRecord["outputTokens"]) ?? 0,
-      totalTokens: asNumber(usageRecord["totalTokens"]) ?? 0,
+      inputTokens: inputTokens!,
+      outputTokens: outputTokens!,
+      totalTokens: totalTokens!,
       ...(cachedReadTokens === null ? {} : { cachedReadTokens }),
     },
   };

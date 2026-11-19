@@ -1,0 +1,7 @@
+{
+  "id": "s3-wrong-module",
+  "sr": "SR-OPS-C",
+  "module_dir": "pkg-session",
+  "expect": "declared",
+  "allow_missing_artifact": false
+}

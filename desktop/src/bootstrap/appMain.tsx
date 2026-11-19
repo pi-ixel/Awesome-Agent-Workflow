@@ -5,8 +5,12 @@ import {
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { installDesktopWorkbench } from "./installDesktopWorkbench.ts";
-import type { WorkbenchService } from "../plugins/workbench/service.ts";
+import {
+  publishWorkbenchFontSize,
+  type WorkbenchService,
+} from "../plugins/workbench/service.ts";
 import { LoggerContext } from "../shared/logging/react.ts";
+import { HintTooltip } from "../shared/ui/controls/HintTooltip.tsx";
 import "../shared/styles/index.css";
 const runtimeDebugSnapshot = () =>
   readDesktopProjectService()?.sessions.runtimeDebugSnapshot() ?? [];
@@ -50,16 +54,22 @@ void runtime.ready
       document.getElementById("root") as HTMLElement,
     );
     let mounted: WorkbenchService | undefined;
+    let stopPublishingFontSize: (() => void) | undefined;
     const renderWorkbench = () => {
       const workbench = runtime.workbench;
       if (workbench === mounted) return;
       if (!workbench && mounted?.windowClose.getState().kind === "exiting")
         return;
+      stopPublishingFontSize?.();
+      stopPublishingFontSize = workbench && publishWorkbenchFontSize(
+        workbench.appearance,
+      );
       mounted = workbench;
       root.render(
         workbench ? (
           <React.StrictMode>
             <LoggerContext.Provider value={diagnostics.createLogger}>
+              <HintTooltip />
               <workbench.Window />
             </LoggerContext.Provider>
           </React.StrictMode>
@@ -68,8 +78,12 @@ void runtime.ready
     };
     const unsubscribe = runtime.subscribeWorkbench(renderWorkbench);
     renderWorkbench();
+    window.addEventListener("pagehide", () => stopPublishingFontSize?.(), {
+      once: true,
+    });
     import.meta.hot?.dispose(() => {
       unsubscribe();
+      stopPublishingFontSize?.();
       root.unmount();
     });
   })

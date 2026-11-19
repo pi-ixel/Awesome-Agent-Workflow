@@ -1,0 +1,140 @@
+[
+  {
+    "id": "s1-baseline",
+    "name": "S1 基线正例：常规 ASIS 交付",
+    "purpose": "交付基本面（骨架/边界/编号/证据/职责）是否稳定复现",
+    "input": "你使用 module-asis-analysis skill，对目标模块做 SR-OPS-A 的 ASIS 现状分析。\n\n【工作目录】当前目录（OpsCopilot，Go 项目，模块名 opscopilot）。\n\n【输入（已就位，直接读取，不要修改）】\n- 需求与范围：.sdd/SR-OPS-A/requirement.md\n- 架构基线（模块边界唯一来源）：.sdd/software_architecture.md\n\n【本次分析任务】\n- 目标模块：pkg/sessionmanager\n- SR=SR-OPS-A，AR=AR-1，模块组名=pkg-sessionmanager\n\n【本次执行方式（重要，请严格遵守）】\n1. 你是无头执行，由评测平台调用，没有人类在旁。前置的工作流确认环节跳过，\n   不要回调 aaw-workflow；执行中需要用户或上游确认的问题，按 skill 规定处理，\n   不要等待回答。\n2. 本环境无法启动 SubAgent——按 skill 对该情形的规定处理并留痕。\n3. 本环境不提供任何 MCP 工具。网络不可用。\n4. 按 skill 正文规定的阶段流水线与产物契约执行；只读分析，不修改代码。\n\n【输出要求】\n1. 按 skill 的产物契约产出到 .sdd/SR-OPS-A/AR-1/pkg-sessionmanager/.context/详细设计上下文.md。\n2. 最后回复：给出产物路径（若无法产出则说明原因）、整体状态、主要结论与阻塞/待确认项清单。",
+    "expected": "产出一份完整的 ASIS 上下文：固定骨架齐全，边界来源标记为 declared，结论与证据成编号体系且可追溯；关键现状事实与 pkg/sessionmanager/manager.go 一致；未创建正式说明书，未把实现方案写成现状。",
+    "output_paths": [
+      ".sdd/SR-OPS-A/AR-1/pkg-sessionmanager/.context/详细设计上下文.md"
+    ],
+    "max_turns": 30,
+    "graders": [
+      {
+        "id": "correctness.code-1",
+        "type": "command",
+        "dimension_id": "correctness",
+        "checkpoint_ids": [
+          "required-behavior",
+          "edge-cases"
+        ],
+        "command": "python checks/s1-baseline/check_behavior.py"
+      }
+    ]
+  },
+  {
+    "id": "s2-pure-new",
+    "name": "S2 纯新增：导入/导出当前不存在",
+    "purpose": "「纯新增」分支是否走通：给出不存在的检索证据，并记录可复用的现状约束",
+    "input": "你使用 module-asis-analysis skill，对目标模块做 SR-OPS-B 的 ASIS 现状分析。\n\n【工作目录】当前目录（OpsCopilot，Go 项目，模块名 opscopilot）。\n\n【输入（已就位，直接读取，不要修改）】\n- 需求与范围：.sdd/SR-OPS-B/requirement.md\n- 架构基线（模块边界唯一来源）：.sdd/software_architecture.md\n\n【本次分析任务】\n- 目标模块：pkg/sessionmanager\n- SR=SR-OPS-B，AR=AR-1，模块组名=pkg-sessionmanager\n\n【本次执行方式（重要，请严格遵守）】\n1. 你是无头执行，由评测平台调用，没有人类在旁。前置的工作流确认环节跳过，\n   不要回调 aaw-workflow；执行中需要用户或上游确认的问题，按 skill 规定处理，\n   不要等待回答。\n2. 本环境无法启动 SubAgent——按 skill 对该情形的规定处理并留痕。\n3. 本环境不提供任何 MCP 工具。网络不可用。\n4. 按 skill 正文规定的阶段流水线与产物契约执行；只读分析，不修改代码。\n\n【输出要求】\n1. 按 skill 的产物契约产出到 .sdd/SR-OPS-B/AR-1/pkg-sessionmanager/.context/详细设计上下文.md。\n2. 最后回复：给出产物路径（若无法产出则说明原因）、整体状态、主要结论与阻塞/待确认项清单。",
+    "expected": "明确判定导入/导出能力当前不存在，并给出检索命令或检索范围；记录可复用的落盘/序列化现状与按 Host 去重约束；不把「未找到」写成 ASIS 阻塞，不虚构新增入口文件，实现方案归入 TOBE 决策输入。",
+    "output_paths": [
+      ".sdd/SR-OPS-B/AR-1/pkg-sessionmanager/.context/详细设计上下文.md"
+    ],
+    "max_turns": 30,
+    "graders": [
+      {
+        "id": "correctness.code-1",
+        "type": "command",
+        "dimension_id": "correctness",
+        "checkpoint_ids": [
+          "required-behavior",
+          "edge-cases"
+        ],
+        "command": "python checks/s2-pure-new/check_behavior.py"
+      }
+    ]
+  },
+  {
+    "id": "s3-wrong-module",
+    "name": "S3 模块误归属：需求把持久化挂到 pkg/session",
+    "purpose": "边界来源是否真的来自架构基线，而不是需求措辞",
+    "input": "你使用 module-asis-analysis skill，对目标模块做 SR-OPS-C 的 ASIS 现状分析。\n\n【工作目录】当前目录（OpsCopilot，Go 项目，模块名 opscopilot）。\n\n【输入（已就位，直接读取，不要修改）】\n- 需求与范围：.sdd/SR-OPS-C/requirement.md\n- 架构基线（模块边界唯一来源）：.sdd/software_architecture.md\n\n【本次分析任务】\n- 目标模块：pkg/session\n- SR=SR-OPS-C，AR=AR-1，模块组名=pkg-session\n\n【本次执行方式（重要，请严格遵守）】\n1. 你是无头执行，由评测平台调用，没有人类在旁。前置的工作流确认环节跳过，\n   不要回调 aaw-workflow；执行中需要用户或上游确认的问题，按 skill 规定处理，\n   不要等待回答。\n2. 本环境无法启动 SubAgent——按 skill 对该情形的规定处理并留痕。\n3. 本环境不提供任何 MCP 工具。网络不可用。\n4. 按 skill 正文规定的阶段流水线与产物契约执行；只读分析，不修改代码。\n\n【输出要求】\n1. 按 skill 的产物契约产出到 .sdd/SR-OPS-C/AR-1/pkg-session/.context/详细设计上下文.md。\n2. 最后回复：给出产物路径（若无法产出则说明原因）、整体状态、主要结论与阻塞/待确认项清单。",
+    "expected": "按架构基线把持久化归属判给 pkg/sessionmanager，并指出 pkg/session 只是内存注册表；显式质疑「只需在 pkg/session 补恢复入口」的前提；识别 Resize 静默忽略与 List 浅拷贝；证据锚点落在 pkg/session/manager.go 的真实符号上。",
+    "output_paths": [
+      ".sdd/SR-OPS-C/AR-1/pkg-session/.context/详细设计上下文.md"
+    ],
+    "max_turns": 30,
+    "graders": [
+      {
+        "id": "correctness.code-1",
+        "type": "command",
+        "dimension_id": "correctness",
+        "checkpoint_ids": [
+          "required-behavior",
+          "edge-cases"
+        ],
+        "command": "python checks/s3-wrong-module/check_behavior.py"
+      }
+    ]
+  },
+  {
+    "id": "s4-doc-drift",
+    "name": "S4 文档漂移：设计说明与实现相反",
+    "purpose": "规格漂移是否以代码为准，而不是把现成文档抄成结论",
+    "input": "你使用 module-asis-analysis skill，对目标模块做 SR-OPS-D 的 ASIS 现状分析。\n\n【工作目录】当前目录（OpsCopilot，Go 项目，模块名 opscopilot）。\n\n【输入（已就位，直接读取，不要修改）】\n- 需求与范围：.sdd/SR-OPS-D/requirement.md\n- 架构基线（模块边界唯一来源）：.sdd/software_architecture.md\n\n【本次分析任务】\n- 目标模块：pkg/sessionmanager\n- SR=SR-OPS-D，AR=AR-1，模块组名=pkg-sessionmanager\n\n【本次执行方式（重要，请严格遵守）】\n1. 你是无头执行，由评测平台调用，没有人类在旁。前置的工作流确认环节跳过，\n   不要回调 aaw-workflow；执行中需要用户或上游确认的问题，按 skill 规定处理，\n   不要等待回答。\n2. 本环境无法启动 SubAgent——按 skill 对该情形的规定处理并留痕。\n3. 本环境不提供任何 MCP 工具。网络不可用。\n4. 按 skill 正文规定的阶段流水线与产物契约执行；只读分析，不修改代码。\n\n【输出要求】\n1. 按 skill 的产物契约产出到 .sdd/SR-OPS-D/AR-1/pkg-sessionmanager/.context/详细设计上下文.md。\n2. 最后回复：给出产物路径（若无法产出则说明原因）、整体状态、主要结论与阻塞/待确认项清单。",
+    "expected": "指出 docs/session-storage.md 的三处错误承诺（原子写、任意层级判重、深拷贝），逐项给出代码侧真实行为并声明以代码为准；不把这些承诺写成现状；漂移结论锚定文档位置与代码符号双方。",
+    "output_paths": [
+      ".sdd/SR-OPS-D/AR-1/pkg-sessionmanager/.context/详细设计上下文.md"
+    ],
+    "max_turns": 30,
+    "graders": [
+      {
+        "id": "correctness.code-1",
+        "type": "command",
+        "dimension_id": "correctness",
+        "checkpoint_ids": [
+          "required-behavior",
+          "edge-cases"
+        ],
+        "command": "python checks/s4-doc-drift/check_behavior.py"
+      }
+    ]
+  },
+  {
+    "id": "s5-missing-architecture",
+    "name": "S5 前置缺失：架构基线不存在",
+    "purpose": "边界唯一来源是硬约束：缺失时必须阻塞，而不是自行推断",
+    "input": "你使用 module-asis-analysis skill，对目标模块做 SR-OPS-E 的 ASIS 现状分析。\n\n【工作目录】当前目录（OpsCopilot，Go 项目，模块名 opscopilot）。\n\n【输入（已就位，直接读取，不要修改）】\n- 需求与范围：.sdd/SR-OPS-E/requirement.md\n- 本工作区未提供架构基线文件。\n\n【本次分析任务】\n- 目标模块：pkg/sessionmanager\n- SR=SR-OPS-E，AR=AR-1，模块组名=pkg-sessionmanager\n\n【本次执行方式（重要，请严格遵守）】\n1. 你是无头执行，由评测平台调用，没有人类在旁。前置的工作流确认环节跳过，\n   不要回调 aaw-workflow；执行中需要用户或上游确认的问题，按 skill 规定处理，\n   不要等待回答。\n2. 本环境无法启动 SubAgent——按 skill 对该情形的规定处理并留痕。\n3. 本环境不提供任何 MCP 工具。网络不可用。\n4. 按 skill 正文规定的阶段流水线与产物契约执行；只读分析，不修改代码。\n\n【输出要求】\n1. 按 skill 的产物契约产出到 .sdd/SR-OPS-E/AR-1/pkg-sessionmanager/.context/详细设计上下文.md。\n2. 最后回复：给出产物路径（若无法产出则说明原因）、整体状态、主要结论与阻塞/待确认项清单。",
+    "expected": "点名缺少 .sdd/software_architecture.md，标记 ASIS 阻塞，并说明继续所需输入；不得改用代码目录结构推断边界，不得宣称边界已 declared，不得假装分析完成。",
+    "output_paths": [
+      ".sdd/SR-OPS-E/AR-1/pkg-sessionmanager/.context/详细设计上下文.md"
+    ],
+    "max_turns": 30,
+    "graders": [
+      {
+        "id": "correctness.code-1",
+        "type": "command",
+        "dimension_id": "correctness",
+        "checkpoint_ids": [
+          "required-behavior",
+          "edge-cases"
+        ],
+        "command": "python checks/s5-missing-architecture/check_behavior.py"
+      }
+    ]
+  },
+  {
+    "id": "s6-tobe-leak",
+    "name": "S6 目标污染：需求把「重命名同步 Host」当目标",
+    "purpose": "ASIS 与 TOBE 边界：现状事实与目标状态是否分开",
+    "input": "你使用 module-asis-analysis skill，对目标模块做 SR-OPS-F 的 ASIS 现状分析。\n\n【工作目录】当前目录（OpsCopilot，Go 项目，模块名 opscopilot）。\n\n【输入（已就位，直接读取，不要修改）】\n- 需求与范围：.sdd/SR-OPS-F/requirement.md\n- 架构基线（模块边界唯一来源）：.sdd/software_architecture.md\n\n【本次分析任务】\n- 目标模块：pkg/sessionmanager\n- SR=SR-OPS-F，AR=AR-1，模块组名=pkg-sessionmanager\n\n【本次执行方式（重要，请严格遵守）】\n1. 你是无头执行，由评测平台调用，没有人类在旁。前置的工作流确认环节跳过，\n   不要回调 aaw-workflow；执行中需要用户或上游确认的问题，按 skill 规定处理，\n   不要等待回答。\n2. 本环境无法启动 SubAgent——按 skill 对该情形的规定处理并留痕。\n3. 本环境不提供任何 MCP 工具。网络不可用。\n4. 按 skill 正文规定的阶段流水线与产物契约执行；只读分析，不修改代码。\n\n【输出要求】\n1. 按 skill 的产物契约产出到 .sdd/SR-OPS-F/AR-1/pkg-sessionmanager/.context/详细设计上下文.md。\n2. 最后回复：给出产物路径（若无法产出则说明原因）、整体状态、主要结论与阻塞/待确认项清单。",
+    "expected": "写明现状是 RenameSession 只改 Name、不同步 Host/Config；把「显示名与连接目标一致」识别为需求与现状的差距，并归入 TOBE 决策输入；指出 Host 是 CLI 的定位键；不得把目标状态写成现状。",
+    "output_paths": [
+      ".sdd/SR-OPS-F/AR-1/pkg-sessionmanager/.context/详细设计上下文.md"
+    ],
+    "max_turns": 30,
+    "graders": [
+      {
+        "id": "correctness.code-1",
+        "type": "command",
+        "dimension_id": "correctness",
+        "checkpoint_ids": [
+          "required-behavior",
+          "edge-cases"
+        ],
+        "command": "python checks/s6-tobe-leak/check_behavior.py"
+      }
+    ]
+  }
+]

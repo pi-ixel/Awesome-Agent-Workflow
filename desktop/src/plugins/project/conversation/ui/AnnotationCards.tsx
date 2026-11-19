@@ -1,7 +1,9 @@
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
+import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
 import { PencilIcon } from "../../../../shared/ui/icons.tsx";
 import { useContext, useState } from "react";
 import { ConversationDocumentContext } from "./documentView.ts";
-import { COMMENT_LIMIT } from "../../../documents/config.ts";
+import { COMMENT_LIMIT } from "../../../documents/service.ts";
 import type { DocumentAnnotation } from "../../../documents/types.ts";
 export function AnnotationCards({
   annotations,
@@ -30,7 +32,7 @@ export function AnnotationCards({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              title={a.path}
+              data-hint={a.path}
               disabled={!openAnnotation}
               className="min-w-0 flex-1 truncate text-left font-medium text-ink hover:underline"
               onClick={() => openAnnotation?.(a, !!onRemove)}
@@ -41,31 +43,30 @@ export function AnnotationCards({
                 : ""}
             </button>
             {onChange && (
-              <button
+              <IconButton iconSize="compact"
                 type="button"
                 aria-label={`编辑批注 ${a.path.split(/[\\/]/).at(-1)}`}
-                title="编辑评论"
-                className="flex size-7 shrink-0 items-center justify-center rounded hover:bg-hover"
+                data-hint="编辑评论"
+                className="flex shrink-0 items-center justify-center rounded hover:bg-hover"
                 onClick={() => {
                   setEditing(a.id);
                   setComment(a.comment);
                 }}
               >
-                <PencilIcon className="size-3.5" />
-              </button>
+                <PencilIcon className="ui-icon-14" />
+              </IconButton>
             )}
             {onRemove && (
-              <button
+              <IconButton iconSize="compact"
                 type="button"
                 aria-label={`删除批注 ${a.path.split(/[\\/]/).at(-1)}`}
-                title="删除评论"
-                className="flex size-7 shrink-0 items-center justify-center rounded border border-danger-line bg-danger-bg text-danger-ink hover:brightness-95"
+                data-hint="删除评论"
+                className="flex shrink-0 items-center justify-center rounded border border-danger-line bg-danger-bg text-danger-ink hover:brightness-95"
                 onClick={() => onRemove(a.id)}
               >
-                <svg
-                  aria-hidden="true"
+                <UiIcon
                   viewBox="0 0 16 16"
-                  className="size-3.5"
+                  className="ui-icon-14"
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="1.3"
@@ -73,8 +74,8 @@ export function AnnotationCards({
                   strokeLinejoin="round"
                 >
                   <path d="M2.5 4h11M6 4V2.5h4V4M4 4l.6 9.5h6.8L12 4M6.5 6.5v4.5M9.5 6.5v4.5" />
-                </svg>
-              </button>
+                </UiIcon>
+              </IconButton>
             )}
           </div>
           <blockquote className="mt-1 max-h-20 overflow-auto whitespace-pre-wrap border-l-2 border-info-line pl-2 leading-[1.35] text-ink-mute">

@@ -1281,6 +1281,12 @@ Section Uninstall
     ${EndIf}
   {{/each}}
 
+  ; 通知链接 aaw:// 由应用启动时注册（notification_links.rs），仍指向本程序时一并删除
+  ReadRegStr $R7 HKCU "Software\Classes\aaw\shell\open\command" ""
+  ${If} $R7 == "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\""
+    DeleteRegKey HKCU "Software\Classes\aaw"
+  ${EndIf}
+
 
   ; Delete uninstaller
   Delete "$INSTDIR\uninstall.exe"

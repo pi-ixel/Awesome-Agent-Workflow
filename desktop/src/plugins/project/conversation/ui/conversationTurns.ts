@@ -1,5 +1,10 @@
 import type { SessionItem, TurnState } from "../types.ts";
 import { stopReasonNotices } from "../sessionStore.ts";
+import {
+  sessionUsageDelta,
+  type TurnUsageDetails,
+  type TurnUsage,
+} from "../turnUsage.ts";
 
 const interruptedNotices = new Set(Object.values(stopReasonNotices));
 
@@ -8,8 +13,10 @@ export interface ConversationTurn {
   readonly user?: Extract<SessionItem, { kind: "user" }>;
   readonly history: readonly SessionItem[];
   readonly answer?: Extract<SessionItem, { kind: "assistant" }>;
-  readonly forceOpen: boolean;
   readonly running: boolean;
+  readonly stopped?: boolean;
+  readonly canCollapseHistory?: boolean;
+  readonly tokenCounts?: TurnUsageDetails | null;
 }
 
 /** Only the currently rendered window is kept for reference stability. */
@@ -26,29 +33,36 @@ export function createConversationTurns() {
     running: boolean,
     turnState: TurnState,
     showPlans: boolean,
+    hasCumulativePromptUsage = false,
   ): readonly ConversationTurn[] {
     const start = Math.max(0, items.length - visibleCount);
     const result: ConversationTurn[] = [];
     const next = new Map<string, ConversationTurn>();
     let from = 0;
+    let previousUsage: TurnUsage | undefined;
     const flush = (end: number) => {
-      if (end <= start || from === end) return;
+      if (from === end) return;
       const first = items[from]!;
       const user = first.kind === "user" ? first : undefined;
+      const tokenCounts =
+        hasCumulativePromptUsage && from >= start && user?.turnUsage
+          ? sessionUsageDelta(user.turnUsage, previousUsage)
+          : undefined;
+      if (user) previousUsage = user.turnUsage;
+      if (end <= start) return;
       const bodyStart = from + (user ? 1 : 0);
       const body = items.slice(bodyStart, end);
       const isLast = end === items.length;
       const isRunning = isLast && running;
-      const abnormal =
-        body.some(
-          (item) =>
-            item.kind === "system" &&
-            (item.level === "error" || interruptedNotices.has(item.text)),
-        ) ||
-        (isLast &&
-          (turnState === "failed" ||
-            turnState === "cancelled" ||
-            turnState === "unknown"));
+      const stopped =
+        !isRunning &&
+        (user?.stopped === true ||
+          (isLast && turnState === "cancelled") ||
+          body.some(
+            (item) =>
+              item.kind === "system" &&
+              item.text === stopReasonNotices.cancelled,
+          ));
       let answerIndex = -1;
       for (let i = end - 1; i >= bodyStart; i--) {
         const item = items[i]!;
@@ -60,10 +74,29 @@ export function createConversationTurns() {
       }
       const visible = items
         .slice(Math.max(bodyStart, start), end)
-        .filter((item) => showPlans || item.kind !== "plan");
+        .filter(
+          (item) =>
+            (showPlans || item.kind !== "plan") &&
+            !(
+              item.kind === "system" &&
+              (item.text === stopReasonNotices.cancelled ||
+                item.text.startsWith(
+                  "本轮已取消，agent 未执行任何修改操作。",
+                ) ||
+                item.text.startsWith("本轮已取消。期间 agent 完成了 "))
+            ),
+        );
       const answer = answerIndex >= start ? items[answerIndex] : undefined;
       const history = visible.filter((item) => item !== answer);
-      const forceOpen = isRunning || abnormal || answerIndex === -1;
+      const interrupted =
+        stopped ||
+        (isLast && (turnState === "failed" || turnState === "unknown")) ||
+        body.some(
+          (item) =>
+            item.kind === "system" &&
+            (item.level === "error" || interruptedNotices.has(item.text)),
+        );
+      const canCollapseHistory = !isRunning && !interrupted && answerIndex !== -1;
       const id = user?.id ?? `history-${first.id}`;
       // 引用稳定性缓存：条目对象在流式期只追加不改动，历史 turn 的可见内容
       // 逐项引用相等即整对象复用——memo 化的回合组件因此在流式 chunk 间跳过
@@ -73,8 +106,15 @@ export function createConversationTurns() {
       if (
         cached !== undefined &&
         cached.running === isRunning &&
-        cached.forceOpen === forceOpen &&
+        cached.stopped === stopped &&
+        cached.canCollapseHistory === canCollapseHistory &&
         cached.user === visibleUser &&
+        (cached.tokenCounts === tokenCounts ||
+          (cached.tokenCounts != null && tokenCounts != null &&
+            cached.tokenCounts.inputTokens === tokenCounts.inputTokens &&
+            cached.tokenCounts.outputTokens === tokenCounts.outputTokens &&
+            cached.tokenCounts.totalTokens === tokenCounts.totalTokens &&
+            cached.tokenCounts.cachedReadTokens === tokenCounts.cachedReadTokens)) &&
         cached.answer === answer &&
         cached.history.length === history.length &&
         cached.history.every((item, index) => item === history[index])
@@ -88,14 +128,21 @@ export function createConversationTurns() {
         ...(visibleUser ? { user: visibleUser } : {}),
         history,
         ...(answer?.kind === "assistant" ? { answer } : {}),
-        forceOpen,
         running: isRunning,
+        stopped,
+        canCollapseHistory,
+        tokenCounts,
       };
       next.set(id, turn);
       result.push(turn);
     };
     for (let i = 0; i < items.length; i++) {
-      if (items[i]!.kind === "user") {
+      if (items[i]!.kind === "compaction") {
+        flush(i);
+        from = i;
+        flush(i + 1);
+        from = i + 1;
+      } else if (items[i]!.kind === "user") {
         flush(i);
         from = i;
       }

@@ -5,24 +5,21 @@
  * lucide 图标在这里就近补齐；已有同形的（ChevronRight/Search/X/
  * Ellipsis/Copy/Refresh）继续复用统一集。
  */
-import type { SVGProps } from "react";
-
-export type IconProps = Omit<SVGProps<SVGSVGElement>, "aria-hidden">;
+import { UiIcon, type IconProps } from "../UiIcon.tsx";
 
 function Svg({ children, ...rest }: IconProps) {
   return (
-    <svg
+    <UiIcon
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
       strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
-      aria-hidden={true}
       {...rest}
     >
       {children}
-    </svg>
+    </UiIcon>
   );
 }
 

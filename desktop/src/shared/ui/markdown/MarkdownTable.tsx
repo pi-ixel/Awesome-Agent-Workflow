@@ -1,3 +1,4 @@
+import { IconButton } from "../IconButton.tsx";
 /**
  * Markdown 表格(移植自 ZCode components/ai-elements/markdown-table.tsx
  * 的核心体验:圆角容器 + 横向溢出 + 边缘渐隐阴影 + 复制 Markdown /
@@ -13,7 +14,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { useHintTooltip } from "../controls/HintTooltip.tsx";
+import { hintTooltipProps } from "../controls/HintTooltip.tsx";
 import { useFeedback } from "../feedback.ts";
 import {
   ArrowDownToLineIcon,
@@ -130,17 +131,18 @@ function TableToolbarButton({
   readonly onClick: () => void;
   readonly children: ReactNode;
 }) {
-  const hint = useHintTooltip(label);
+  const hint = hintTooltipProps(label);
   return (
-    <button
+    <IconButton
+      iconSize="compact"
       type="button"
       aria-label={label}
       onClick={onClick}
       {...hint}
-      className="shrink-0 rounded p-1 text-ink-faint transition-colors hover:bg-raised hover:text-ink"
+      className="shrink-0 rounded text-ink-faint transition-colors hover:bg-raised hover:text-ink"
     >
       {children}
-    </button>
+    </IconButton>
   );
 }
 
@@ -237,19 +239,19 @@ function TablePreviewDialog({
         aria-modal="true"
         aria-label="表格预览"
         tabIndex={-1}
-        className="flex h-[86dvh] w-[92vw] max-w-6xl flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-xl outline-none"
+        className="flex h-[86dvh] w-[92vw] max-w-6xl flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-floating outline-none"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-line px-3 text-ui-base">
           <span className="font-medium text-ink">表格预览</span>
-          <button
+          <IconButton iconSize="dialog"
             type="button"
             aria-label="关闭预览"
             onClick={onClose}
-            className="flex size-8 items-center justify-center rounded text-ink-mute hover:bg-raised hover:text-ink"
+            className="flex items-center justify-center rounded text-ink-mute hover:bg-raised hover:text-ink"
           >
-            <XIcon className="size-3.5" />
-          </button>
+            <XIcon className="ui-icon-14" />
+          </IconButton>
         </div>
         <div className="min-h-0 flex-1 p-3">
           <div className="h-full overflow-auto rounded-xl border border-line bg-surface">
@@ -363,16 +365,16 @@ export function MarkdownTable({
     <div className="group/table my-3 flex w-full flex-col gap-2">
       <div className="flex items-center justify-end gap-1">
         <TableToolbarButton label="复制 Markdown" onClick={handleCopyMarkdown}>
-          <CopyIcon className="size-3.5" />
+          <CopyIcon className="ui-icon-14" />
         </TableToolbarButton>
         <TableToolbarButton label="下载 CSV" onClick={handleDownloadCsv}>
-          <ArrowDownToLineIcon className="size-3.5" />
+          <ArrowDownToLineIcon className="ui-icon-14" />
         </TableToolbarButton>
         <TableToolbarButton
           label="表格预览"
           onClick={() => setPreviewOpen(true)}
         >
-          <Maximize2Icon className="size-3.5" />
+          <Maximize2Icon className="ui-icon-14" />
         </TableToolbarButton>
       </div>
       <div className="relative w-full overflow-hidden rounded-xl border border-line">

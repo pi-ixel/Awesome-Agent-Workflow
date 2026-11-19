@@ -1,6 +1,7 @@
 import type { ContentBlock } from "../../../contracts/acp/protocol.ts";
 
 export interface PromptHistory {
+  removeSession?(path: string, id: string, agentKey: string): void;
   setScope(
     workspacePath: string | null,
     sessionId?: string,
@@ -13,16 +14,19 @@ export interface PromptHistory {
 export type ComposerPrefillListener = (
   text: string,
   attachments: readonly ContentBlock[],
+  options?: { ifEmpty?: boolean },
 ) => boolean | void;
 
 export interface DraftImage {
   readonly name: string;
   readonly block: ContentBlock;
+  readonly recoveryId?: string;
 }
 
 export type ImageDrafts = Record<string, readonly DraftImage[]>;
 
 export interface ImageDraftStorage {
+  acquireEditor?(): () => void;
   load(): Promise<ImageDrafts>;
   save(drafts: ImageDrafts): Promise<void>;
 }
@@ -30,6 +34,10 @@ export interface ImageDraftStorage {
 export interface ProjectComposer {
   readonly history: PromptHistory;
   readonly imageDrafts: ImageDraftStorage;
-  prefill(text: string, attachments?: readonly ContentBlock[]): boolean;
+  prefill(
+    text: string,
+    attachments?: readonly ContentBlock[],
+    options?: { ifEmpty?: boolean },
+  ): boolean;
   subscribePrefill(listener: ComposerPrefillListener): () => void;
 }

@@ -75,7 +75,7 @@ export function createTauriProcessRunner(invoke: NativeInvoke = defaultInvoke): 
       try {
         return (await invoke<boolean>("path_exists", { path })) === true;
       } catch {
-        // 探测失败按「不存在」处理，健康检查项会给出修复指引
+        // 探测失败按「不存在」处理
         return false;
       }
     },

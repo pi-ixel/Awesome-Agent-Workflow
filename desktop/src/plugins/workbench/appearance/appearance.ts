@@ -16,6 +16,8 @@ function restore(scope: ConfigurationScope, logger: Logger): WorkbenchAppearance
       theme: saved.theme === "warm" ? "warm" : "dark",
       language: defaultAppearance.language,
       uiFontSize: normalizeUiFontSizePx(saved.uiFontSize),
+      fileTreePosition:
+        saved.fileTreePosition === "left" ? "left" : defaultAppearance.fileTreePosition,
     };
   } catch (error) {
     logger.warn("读取外观设置失败，使用默认值", { error: String(error) });
@@ -28,14 +30,15 @@ export function createWorkbenchAppearance(scope: ConfigurationScope, logger = cr
   let disposed = false;
   const listeners = new Set<() => void>();
 
-  function update(patch: Partial<WorkbenchAppearancePreferences>): void {
+  function update(patch: Partial<WorkbenchAppearancePreferences>, strict = false): void {
     if (disposed) return;
-    snapshot = { ...snapshot, ...patch };
     try {
       scope.update(patch);
     } catch (error) {
+      if (strict) throw error;
       logger.warn("写入外观设置失败", { error: String(error) });
     }
+    snapshot = { ...snapshot, ...patch };
     for (const listener of listeners) listener();
   }
 
@@ -48,14 +51,16 @@ export function createWorkbenchAppearance(scope: ConfigurationScope, logger = cr
     setTheme: (theme) => update({ theme }),
     setLanguage: (language) => update({ language }),
     setUiFontSize: (px) => update({ uiFontSize: normalizeUiFontSizePx(px) }),
+    setFileTreePosition: (fileTreePosition) => update({ fileTreePosition }),
     reset: () => update(defaultAppearance),
+    resetStorage: () => update(defaultAppearance, true),
     dispose() {
       disposed = true;
       snapshot = defaultAppearance;
       for (const listener of listeners) listener();
       listeners.clear();
     },
-  } satisfies WorkbenchAppearance & { dispose(): void };
+  } satisfies WorkbenchAppearance & { dispose(): void; resetStorage(): void };
 }
 
 export function bindWorkbenchAppearance(

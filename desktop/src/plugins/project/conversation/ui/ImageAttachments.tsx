@@ -1,3 +1,4 @@
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { ImagePreviewDialog } from "../../../../shared/ui/markdown/MarkdownImage.tsx";
@@ -31,7 +32,7 @@ export function ImageAttachments({
                 type="button"
                 aria-label={`预览 ${item.alt}`}
                 onClick={() => setPreview(index)}
-                className="size-16 overflow-hidden rounded-xl border border-line bg-raised hover:border-ink-faint"
+                className="min-w-16 min-h-16 overflow-hidden rounded-xl border border-line bg-raised hover:border-ink-faint"
               >
                 <img
                   src={item.src}
@@ -39,14 +40,14 @@ export function ImageAttachments({
                   className="size-full object-cover"
                 />
               </button>
-              <button
+              <IconButton iconSize="compact"
                 type="button"
                 aria-label={`移除 ${item.alt}`}
                 onClick={() => onRemove(index)}
-                className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full border border-line bg-surface text-ink opacity-0 group-hover/image:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100"
+                className="absolute -right-1 -top-1 flex items-center justify-center rounded-full border border-line bg-surface text-ink opacity-0 group-hover/image:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100"
               >
                 ×
-              </button>
+              </IconButton>
             </div>
           ))}
         </div>

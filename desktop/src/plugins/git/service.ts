@@ -17,3 +17,4 @@ export interface GitService extends Pick<GitHost, "status" | "diff"> {
 }
 
 export { useProjectGit } from "./ui/useProjectGit.ts";
+export { gitPanelCompatibility } from "./config.ts";

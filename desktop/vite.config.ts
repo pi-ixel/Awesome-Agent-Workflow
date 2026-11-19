@@ -38,6 +38,17 @@ const disableDevClient: Plugin = {
   },
 };
 
+// mock 隔离敏感（vi.mock 模块状态在 vmThreads 下不可靠）的用例，留在默认
+// forks 池全隔离执行；其余文件进 vmThreads 复用 jsdom 环境（全量 110s→约30s）。
+const isolatedPoolTests = [
+  "tests/plugins/project/conversation/SessionFactory.compaction.test.ts",
+  "tests/plugins/project/conversation/historyCompaction.test.ts",
+  "tests/plugins/agents/SettingsPage.test.tsx",
+  "tests/integration/SettingsPage.test.tsx",
+  "tests/plugins/project/sessions/viteConfig.test.ts",
+  "tests/architecture/cordisArchitecture.test.ts",
+];
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
@@ -51,8 +62,24 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
-    include: ["tests/**/*.test.{ts,tsx}"],
     setupFiles: ["tests/setup.ts"],
+    maxWorkers: 4,
+    projects: [
+      {
+        test: {
+          name: "isolated",
+          include: isolatedPoolTests,
+        },
+      },
+      {
+        test: {
+          name: "fast",
+          include: ["tests/**/*.test.{ts,tsx}"],
+          exclude: isolatedPoolTests,
+          pool: "vmThreads",
+        },
+      },
+    ],
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`

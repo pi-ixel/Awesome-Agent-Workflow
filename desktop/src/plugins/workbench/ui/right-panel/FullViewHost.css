@@ -1,0 +1,15 @@
+@media (prefers-reduced-motion: no-preference) {
+  [data-full-view-motion="leaving"] {
+    animation: full-view-fade 70ms ease-in both reverse;
+  }
+
+  [data-full-view-motion="arriving"] {
+    animation: full-view-fade 130ms ease-out both;
+    transition: none;
+  }
+}
+
+@keyframes full-view-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

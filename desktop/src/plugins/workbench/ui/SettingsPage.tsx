@@ -1,11 +1,40 @@
-import { readWorkbenchUi, useWorkbenchLayout, useWorkbenchUiValue } from "./bindings/layoutView.ts";
-import { useState } from "react";
-import logo from "../../../shared/assets/aaw-logo.png";
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
+import { DangerButton } from "../../../shared/ui/controls.tsx";
+import {
+  readWorkbenchUi,
+  useWorkbenchLayout,
+  useWorkbenchUiValue,
+} from "./bindings/layoutView.ts";
+import { useEffect, useRef, useState } from "react";
+import { useStore } from "zustand";
+import { nativeConfigurationStatus } from "../../host/service.ts";
+import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
 import { translateWorkbenchSettings } from "./settingsText.ts";
-import { btnDanger, btnSecondary, focusVisibleRing } from "../../../shared/ui/controls";
-import { useWorkbenchAppearance, useWorkbenchEntries } from "./bindings/react.ts";
+import { focusVisibleRing } from "../../../shared/ui/controls";
+import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
+import {
+  useWorkbenchAppearance,
+  useWorkbenchEntries,
+} from "./bindings/react.ts";
 
-/** 「恢复默认设置」的行内确认：取消不动作，确认才写默认值。 */
+const settingsGroups = [
+  { id: "basic", label: "基础设置" },
+  { id: "agent", label: "Agent能力" },
+  { id: "data", label: "数据与统计" },
+] as const;
+
+const settingsGroupByTab: Readonly<
+  Partial<Record<string, (typeof settingsGroups)[number]["id"]>>
+> = {
+  agents: "agent",
+  tools: "agent",
+  session: "agent",
+  storage: "data",
+  "usage-statistics": "data",
+  archive: "data",
+};
+
 function ResetConfirm({
   labels,
   onConfirm,
@@ -16,35 +45,35 @@ function ResetConfirm({
   readonly onCancel: () => void;
 }) {
   return (
-    <span
+    <ConfirmationDialog
       role="alertdialog"
-      aria-label="恢复默认设置确认"
-      className="flex items-center gap-2 rounded-md border border-line-strong bg-raised px-2 py-1 shadow-elev-2"
+      label="恢复默认设置确认"
+      title="恢复默认设置？"
+      confirmLabel="恢复默认"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
     >
-      <span className="text-xs text-ink">
-        {labels.length > 0 ? `确定将${labels.join("、")}恢复为默认设置？` : "确定恢复默认设置？"}
-      </span>
-      <button
-        type="button"
-        onClick={onCancel}
-        className={`${btnSecondary} px-2 py-0.5 text-xs`}
-      >
-        取消
-      </button>
-      <button
-        type="button"
-        onClick={onConfirm}
-        className={`${btnDanger} px-2 py-0.5 text-xs`}
-      >
-        恢复默认
-      </button>
-    </span>
+      <p>
+        {labels.length > 0
+          ? `这会将${labels.join("、")}恢复为默认设置。`
+          : "这会将当前配置恢复为默认设置。"}
+      </p>
+    </ConfirmationDialog>
   );
 }
 
 function SettingsPage() {
   const initialTab = useWorkbenchUiValue((state) => state.settingsInitialTab);
-  return <SettingsContent key={initialTab} initialTab={initialTab} />;
+  const workbenchLayout = useWorkbenchLayout();
+  return (
+    <ModalShell
+      label="设置"
+      size="settings"
+      onDismiss={() => readWorkbenchUi(workbenchLayout).closeOverlay()}
+    >
+      <SettingsContent key={initialTab} initialTab={initialTab} />
+    </ModalShell>
+  );
 }
 
 function SettingsContent({ initialTab }: { readonly initialTab: string }) {
@@ -53,132 +82,189 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
     (left, right) => (left.order ?? 100) - (right.order ?? 100),
   );
   const [selectedTab, setActiveTab] = useState(initialTab);
-  const activeTab =
-    tabs.find((tab) => tab.id === selectedTab)?.id ?? tabs[0]?.id;
+  const activeEntry = tabs.find((tab) => tab.id === selectedTab) ?? tabs[0];
+  const activeTab = activeEntry?.id;
+  const HeaderAction = activeEntry?.HeaderAction;
   const [isResetConfirmOpen, setResetConfirmOpen] = useState(false);
-  const { appearance, preferences: { language } } = useWorkbenchAppearance();
+  const resetTrigger = useRef<HTMLButtonElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const focusRequest = useWorkbenchUiValue((state) => state.settingsFocus);
+  const handledFocus = useRef<typeof focusRequest>(null);
+  useEffect(() => {
+    if (!focusRequest || handledFocus.current === focusRequest) return;
+    const row = document.getElementById(focusRequest.elementId);
+    if (!row || !contentRef.current?.contains(row) || row.closest("[hidden]")) return;
+    handledFocus.current = focusRequest;
+    const control = row.querySelector<HTMLElement>('button[aria-pressed="true"], input, select');
+    control?.focus({ preventScroll: true });
+    row.scrollIntoView?.({ block: "nearest" });
+  }, [activeTab, focusRequest]);
+  const dismissReset = () => {
+    setResetConfirmOpen(false);
+    requestAnimationFrame(() => resetTrigger.current?.focus());
+  };
+  const {
+    appearance,
+    preferences: { language },
+  } = useWorkbenchAppearance();
   const settingsReset = useWorkbenchEntries("settingsReset");
   const t = translateWorkbenchSettings(language);
+  const storage = useStore(nativeConfigurationStatus);
 
   return (
-    <section
-      aria-label="设置"
-      className="relative flex h-full min-h-0 flex-row bg-sidebar"
-    >
-      {/* 设置专属侧栏：品牌、返回与圆角导航；窄窗口缩窄侧栏。 */}
-      <nav
-        aria-label="设置分组"
-        className="flex w-64 shrink-0 flex-col gap-1 overflow-y-auto px-2 pb-4 max-[880px]:w-52"
-      >
+    <>
+      <header className="flex h-16 shrink-0 items-center justify-between px-6">
+        <h2 className="text-ui-base font-semibold text-ink">设置</h2>
         <div
-          className="flex h-14 shrink-0 items-center gap-2 px-2"
-          data-tauri-drag-region=""
+          role="group"
+          aria-label="设置操作"
+          inert={isResetConfirmOpen}
+          className="ml-auto mr-3 flex flex-wrap items-center justify-end gap-3"
         >
-          <img src={logo} alt="AAW" className="size-7" />
+          <h1 className="sr-only">{activeEntry?.label}</h1>
+          {activeTab !== "usage-statistics" && (
+            <DangerButton
+              ref={resetTrigger}
+              type="button"
+              onClick={() => setResetConfirmOpen(true)}
+              className="px-3 py-1.5 text-sm"
+            >
+              {t("settings.reset")}
+            </DangerButton>
+          )}
+          {HeaderAction && <HeaderAction />}
         </div>
-        <button
+        <IconButton iconSize="dialog"
           type="button"
+          aria-label="关闭设置"
+          data-hint="关闭设置"
           onClick={() => readWorkbenchUi(workbenchLayout).closeOverlay()}
-          className={`mb-5 flex h-9 shrink-0 items-center gap-2 rounded-xl bg-ink/80 px-3 text-left text-ui-base leading-6 font-semibold text-base transition-colors hover:bg-ink/90 ${focusVisibleRing}`}
+          className={`flex items-center justify-center rounded-lg hover:bg-surface-hover ${focusVisibleRing}`}
         >
-          <svg
-            aria-hidden="true"
-            className="size-4"
+          <UiIcon
+            className="ui-icon-16"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
             strokeWidth="1.5"
           >
-            <path d="m12 5-7 7 7 7M5 12h14" />
-          </svg>
-          返回工作区
-        </button>
-        <p className="px-3 pb-1 text-ui-caption text-ink-mute">基础设置</p>
-        {tabs.map((tab) => {
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              id={`settings-tab-${tab.id}`}
-              aria-selected={isActive}
-              aria-controls={`settings-panel-${tab.id}`}
-              onClick={() => {
-                setActiveTab(tab.id);
-              }}
-              className={`flex h-8 w-full shrink-0 items-center gap-2 rounded-xl px-3 text-left text-ui-base leading-6 font-normal transition-colors ${
-                isActive
-                  ? "bg-selected text-ink"
-                  : "text-ink-soft hover:bg-surface-hover hover:text-ink"
-              } ${focusVisibleRing}`}
-            >
-              <tab.Icon
-                className={`size-4 shrink-0 ${isActive ? "text-ink" : "text-ink-soft"}`}
-              />
-              {tab.label}
-            </button>
-          );
-        })}
-      </nav>
-
-      {/* 内容独立滚动；自动保存提示固定在整体右下角。 */}
-      <div className="@container/settings my-1 mr-1 min-h-0 min-w-0 flex-1 overflow-y-auto rounded-xl border border-line bg-base pb-12 text-ui-base text-ink">
-        <div className="mx-auto w-full max-w-[880px] px-6 pt-14 pb-6 max-[880px]:px-4">
-          <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
-            <h1 className="text-3xl font-semibold tracking-tight">
-              {tabs.find((tab) => tab.id === activeTab)?.label}
-            </h1>
-            {isResetConfirmOpen ? (
-              <ResetConfirm
-                labels={[
-                  ...(appearance ? ["界面语言、主题与字号"] : []),
-                  ...settingsReset.map(({ label }) => label),
-                ]}
-                onConfirm={() => {
-                  appearance?.reset();
-                  for (const entry of settingsReset) entry.reset();
-                  setResetConfirmOpen(false);
-                }}
-                onCancel={() => {
-                  setResetConfirmOpen(false);
-                }}
-              />
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setResetConfirmOpen(true);
-                }}
-                className="rounded-md border border-line-strong px-3 py-1.5 text-sm text-danger-ink transition-colors hover:bg-danger-bg/60"
-              >
-                {t("settings.reset")}
-              </button>
-            )}
+            <path d="m6 6 12 12M18 6 6 18" />
+          </UiIcon>
+        </IconButton>
+      </header>
+      <section className="relative flex min-h-0 flex-1 flex-row max-[560px]:flex-col">
+        {/* 设置导航独立滚动；窄窗口改为上下布局，留足内容宽度。 */}
+        <nav
+          aria-label="设置分组"
+          inert={isResetConfirmOpen}
+          className="flex w-48 shrink-0 flex-col gap-1 overflow-y-auto px-3 pb-4 max-[700px]:w-40 max-[560px]:max-h-36 max-[560px]:w-full"
+        >
+          <div
+            role="tablist"
+            aria-label="设置页签"
+            aria-orientation="vertical"
+            className="flex flex-col gap-5"
+          >
+            {settingsGroups.map(({ id, label }) => {
+              const groupTabs = tabs.filter(
+                (tab) => (tab.group ?? settingsGroupByTab[tab.id] ?? "basic") === id,
+              );
+              if (!groupTabs.length) return null;
+              return (
+                <div
+                  key={id}
+                  role="group"
+                  aria-labelledby={`settings-group-${id}`}
+                  className="flex flex-col gap-1"
+                >
+                  <p
+                    id={`settings-group-${id}`}
+                    className="px-3 pb-1 text-ui-caption text-ink-mute"
+                  >
+                    {label}
+                  </p>
+                  {groupTabs.map((tab) => {
+                    const isActive = activeTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        role="tab"
+                        id={`settings-tab-${tab.id}`}
+                        aria-selected={isActive}
+                        aria-controls={`settings-panel-${tab.id}`}
+                        onClick={() => {
+                          setActiveTab(tab.id);
+                          if (contentRef.current)
+                            contentRef.current.scrollTop = 0;
+                        }}
+                        className={`flex min-h-8 w-full shrink-0 items-center gap-2 rounded-xl px-3 text-left text-ui-base leading-6 font-normal transition-colors ${
+                          isActive
+                            ? "bg-selected text-ink"
+                            : "text-ink-soft hover:bg-surface-hover hover:text-ink"
+                        } ${focusVisibleRing}`}
+                      >
+                        <tab.Icon
+                          className={`ui-icon-16 shrink-0 ${isActive ? "text-ink" : "text-ink-soft"}`}
+                        />
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })}
           </div>
+        </nav>
 
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              id={`settings-panel-${tab.id}`}
-              role="tabpanel"
-              aria-labelledby={`settings-tab-${tab.id}`}
-              hidden={activeTab !== tab.id}
-              className={tab.layoutClass}
-            >
-              <tab.View />
-            </div>
-          ))}
+        {/* 内容独立滚动；自动保存提示固定在整体右下角。 */}
+        <div
+          ref={contentRef}
+          inert={isResetConfirmOpen}
+          className="@container/settings min-h-0 min-w-0 flex-1 overflow-auto bg-surface pb-12 text-ui-base text-ink"
+        >
+          <div className="mx-auto w-full max-w-[880px] px-6 pb-6 max-[880px]:px-4">
+            {tabs.map((tab) => (
+              <div
+                key={tab.id}
+                id={`settings-panel-${tab.id}`}
+                role="tabpanel"
+                aria-labelledby={`settings-tab-${tab.id}`}
+                hidden={activeTab !== tab.id}
+                className={tab.layoutClass}
+              >
+                <tab.View active={activeTab === tab.id} />
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
-      <p
-        role="status"
-        className="pointer-events-none absolute bottom-4 right-6 flex items-center gap-2 rounded-md bg-base/90 px-2 py-1 text-xs text-ink-mute"
-      >
-        <span aria-hidden="true" className="size-1 rounded-full bg-ok-ink" />
-        自动保存
-      </p>
-    </section>
+        <p
+          role="status"
+          className="pointer-events-none absolute bottom-4 right-6 flex items-center gap-2 rounded-md bg-base/90 px-2 py-1 text-xs text-ink-mute"
+        >
+          <span aria-hidden="true" className="size-1 rounded-full bg-ok-ink" />
+          {storage.saving
+            ? "正在保存…"
+            : storage.error
+              ? "有未保存的配置"
+              : "自动保存"}
+        </p>
+        {isResetConfirmOpen && (
+          <ResetConfirm
+            labels={[
+              ...(appearance ? ["界面语言、主题、字号和文件树位置"] : []),
+              ...settingsReset.map(({ label }) => label),
+            ]}
+            onConfirm={() => {
+              appearance?.reset();
+              for (const entry of settingsReset) entry.reset();
+              dismissReset();
+            }}
+            onCancel={dismissReset}
+          />
+        )}
+      </section>
+    </>
   );
 }
 

@@ -1,0 +1,33 @@
+# AAW 轻量开发（预置工作流）。格式说明见 docs/workflow-format.md。
+format: aaw-workflow/1
+id: aaw-dev
+name: AAW 轻量开发
+version: 1.0.0
+description: 设计与开发由同一人完成的小需求：确认需求 → 设计与独立检查 → 测试设计 → 设计门禁 → 任务规划 → 逐任务实现、双人评审、代码扫描 → 最终交接。
+root: main
+
+entries:
+  - id: dev
+    label: 从需求开始
+    description: 输入本次要做的事情，流程会先和你确认需求与边界。
+    start: requirement
+    inputs:
+      requirement:
+        label: 本次需求
+        required: true
+        placeholder: 用一段话描述这次要完成的事情
+
+stages:
+  - {id: design, label: 需求与设计}
+  - {id: task, label: 任务}
+  - {id: review, label: 评审与处置}
+  - {id: delivery, label: 交付}
+
+# 初始变量：整改次数等计数器，供去向条件判断是否到达上限。
+vars:
+  designRepairs: 0
+  gateRepairs: 0
+  scanRepairs: 0
+  reviewRepairs: 0
+  forceRecheckA: false
+  forceRecheckB: false

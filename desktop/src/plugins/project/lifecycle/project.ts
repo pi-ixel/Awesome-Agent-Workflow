@@ -1,3 +1,22 @@
+import type { SendOptions } from "../conversation/sessionStore.ts";
+import { removeSessionDraft } from "../composer/draftStore.ts";
+import {
+  sameSessionAgent,
+  type DeleteSessionTarget,
+} from "../sessions/sessionDeletion.ts";
+import { draftScopeKey } from "../composer/scope.ts";
+import { projectStorage, managedProjectStorage } from "./persistence.ts";
+import { flushContextUsageWrites } from "../conversation/contextUsageStorage.ts";
+import {
+  nativeSnapshots,
+  nativePromptQueue,
+  nativeMessageImages,
+  sessionLogKey,
+} from "../conversation/snapshotStorage.ts";
+import { queuePrefix } from "../conversation/queuePersistence.ts";
+import { removeSessionTitles } from "../sessions/sessionTitles.ts";
+import { parseSessionPinKey } from "../sessions/sessionPin.ts";
+import { conversationScope, draftScope } from "./storage.ts";
 import { createLogger } from "../../../shared/logging/logger.ts";
 import type { createProjectForeground } from "../conversation/foreground.ts";
 import type { createMessageImageHistory } from "../conversation/messageImageHistory.ts";
@@ -12,13 +31,19 @@ import type { ContentBlock } from "../../../contracts/acp/protocol.ts";
 import type { ForegroundSessionListener } from "../events.ts";
 import type { ForegroundSessionTarget } from "../conversation/viewState.ts";
 import type { QuestionDraft } from "../interactions/types.ts";
-import type { ProjectCloseParticipant, ProjectPreferences, SessionDraft, SessionSelection } from "../types.ts";
-import type { ProjectService, ProjectWorkspace, ProjectSessions } from "../service.ts";
-import { pathKey } from "../../../shared/panelPaths.ts";
 import type {
-  OpenSessionOptions,
-  SessionTarget,
-} from "../sessions/types.ts";
+  ProjectCloseParticipant,
+  ProjectPreferences,
+  SessionDraft,
+  SessionSelection,
+} from "../types.ts";
+import type {
+  ProjectService,
+  ProjectWorkspace,
+  ProjectSessions,
+} from "../service.ts";
+import { pathKey } from "../../../shared/panelPaths.ts";
+import type { OpenSessionOptions, SessionTarget } from "../sessions/types.ts";
 import type { createSessionStore } from "../conversation/sessionStore.ts";
 import { createSessionStatusView } from "../conversation/sessionStatusUiStore.ts";
 import type { createApprovalStore } from "../interactions/approvalStore.ts";
@@ -26,13 +51,13 @@ import type { createElicitationQueue } from "../interactions/elicitationStore.ts
 import { startSessionAutoArchiveScheduler } from "../sessions/sessionArchive.ts";
 import type { createWorkspaceStore } from "../workspace/workspaceStore.ts";
 import { createWorkspaceActivity } from "../workspace/workspaceActivity.ts";
-import type { WorkspaceHealthCheck } from "../workspace/types.ts";
 import { startNewSession } from "../sessions/sessionStart.ts";
 import { projectConversationPageId } from "../workspace/pageIds.ts";
 import { openSessionFromEntry } from "../sessions/sessionEntry.ts";
 import { deliverToSession } from "../sessions/sessionDelivery.ts";
 import { SessionNavigationQueue } from "../sessions/sessionNavigationQueue.ts";
 import type { createProjectSessionIndexes } from "../sessions/sessionIndexes.ts";
+import type { AgentSwitchProgressListener } from "../types.ts";
 
 interface ProjectSessionView {
   readonly disposed: boolean;
@@ -42,43 +67,56 @@ interface ProjectSessionView {
 }
 
 /** 项目操作与现有会话资源之间的装配端口。 */
-export type ProjectOperations = Pick<
-  ProjectWorkspace,
-  "registerProject"
-> & Pick<
-  ProjectSessions,
-  | "renameSession"
-  | "preloadSessionList"
-  | "hasRunningSessions"
-  | "busySessionIds"
-  | "runtimeDebugSnapshot"
-  | "openSession"
-  | "recoverSession"
-  | "stopRecovery"
-  | "switchAgent"
-> & {
-  attachPreloading(): () => void;
-  beginDraft(path: string): SessionDraft;
-  focusSession(path: string, sessionId: string, agentKey?: string): boolean;
-  close(options?: { force?: boolean }): Promise<void>;
-  closeProject(path: string): Promise<void>;
-  dispose?(options?: { force?: boolean }): Promise<void>;
-  findSession(target: SessionTarget): ProjectSessionView | undefined;
-};
+export type ProjectOperations = Pick<ProjectWorkspace, "registerProject"> &
+  Pick<
+    ProjectSessions,
+    | "renameSession"
+    | "preloadSessionList"
+    | "hasRunningSessions"
+    | "busySessionIds"
+    | "runtimeDebugSnapshot"
+    | "openSession"
+    | "registerSessionTools"
+    | "openPluginSession"
+    | "watchTurns"
+    | "watchEvents"
+    | "recoverSession"
+    | "stopRecovery"
+    | "switchAgent"
+  > & {
+    canDeleteArchivedSession?: (agentKey: string) => boolean;
+    deleteArchivedSession?: (
+      target: DeleteSessionTarget,
+      cleanup: () => Promise<void>,
+    ) => Promise<void>;
+  } & Partial<Pick<ProjectSessions, "runBackgroundPrompt" | "backgroundPromptOptions">> & {
+    attachPreloading(): () => void;
+    beginDraft(path: string): SessionDraft;
+    focusSession(path: string, sessionId: string, agentKey?: string): boolean;
+    close(options?: { force?: boolean }): Promise<void>;
+    closeProject(path: string): Promise<void>;
+    dispose?(options?: { force?: boolean }): Promise<void>;
+    findSession(target: SessionTarget): ProjectSessionView | undefined;
+  };
 
 export class DesktopProject {
   readonly service: ProjectService;
   private readonly navigationQueue = new SessionNavigationQueue();
   private readonly statusViewOwner = createSessionStatusView();
   private readonly expansionOwner = createConversationExpansion();
-  readonly expansion: ProjectService["conversation"]["expansion"] = this.expansionOwner;
+  readonly expansion: ProjectService["conversation"]["expansion"] =
+    this.expansionOwner;
   readonly catalog: ProjectService["sessions"]["catalog"];
   readonly archive: ReturnType<typeof createProjectSessionIndexes>["archive"];
   readonly foreground: ReturnType<typeof createProjectForeground>["view"];
   readonly composer: ProjectService["drafts"]["composer"];
-  private readonly annotationEditing: ReturnType<typeof createAnnotationEditing>;
+  private readonly annotationEditing: ReturnType<
+    typeof createAnnotationEditing
+  >;
   readonly workspace: ReturnType<typeof createWorkspaceStore>["store"];
-  private readonly workspaceActivity: ReturnType<typeof createWorkspaceActivity>;
+  private readonly workspaceActivity: ReturnType<
+    typeof createWorkspaceActivity
+  >;
   private detachPreloading?: () => void;
   private stopping = false;
   private shutdownTask?: Promise<void>;
@@ -95,10 +133,16 @@ export class DesktopProject {
     private readonly formQueue: ReturnType<typeof createElicitationQueue>,
     private readonly indexes: ReturnType<typeof createProjectSessionIndexes>,
     private readonly workspaceOwner: ReturnType<typeof createWorkspaceStore>,
-    private readonly annotationOwner: ReturnType<typeof createAnnotationDraftStore>,
-    private readonly foregroundOwner: ReturnType<typeof createProjectForeground>,
+    private readonly annotationOwner: ReturnType<
+      typeof createAnnotationDraftStore
+    >,
+    private readonly foregroundOwner: ReturnType<
+      typeof createProjectForeground
+    >,
     private readonly composerOwner: ReturnType<typeof createProjectComposer>,
-    private readonly messageImages: ReturnType<typeof createMessageImageHistory>,
+    private readonly messageImages: ReturnType<
+      typeof createMessageImageHistory
+    >,
     private readonly getLayout: () => WorkbenchLayout | undefined,
     private readonly dialogs: HostDialogs,
     private readonly loggerFactory = createLogger,
@@ -117,7 +161,10 @@ export class DesktopProject {
     this.catalog = indexes.catalog.store;
     this.archive = indexes.archive;
     this.workspace = workspaceOwner.store;
-    this.workspaceActivity = createWorkspaceActivity(workspaceOwner.view, foregroundOwner.snapshot.session);
+    this.workspaceActivity = createWorkspaceActivity(
+      workspaceOwner.view,
+      foregroundOwner.snapshot.session,
+    );
     const { dismissNotice, archiveWithNotice, unarchiveSession } =
       this.archive.getState();
     this.service = {
@@ -126,20 +173,50 @@ export class DesktopProject {
         subscribeWorkspaceActivity: this.workspaceActivity.subscribe,
         ...workspaceOwner.commands,
         pickDirectory: this.pickDirectory.bind(this),
-        registerWorkspaceHealthCheck: this.registerWorkspaceHealthCheck.bind(this),
         registerProject: this.registerProject.bind(this),
         removeProject: this.removeProject.bind(this),
         registerProjectClose: this.registerProjectClose.bind(this),
       },
       sessions: {
         catalog: indexes.catalogView,
+        deletions: indexes.deletionView,
+        canDeleteArchivedSession: (agentKey) =>
+          operations.canDeleteArchivedSession?.(agentKey) ?? false,
+        resumePendingDeletions: () => {
+          for (const entry of Object.values(
+            indexes.deletions.store.getState().entries,
+          )) {
+            if (entry.phase !== "done" && !entry.error)
+              void this.service.sessions
+                .deleteArchivedSession?.(entry)
+                .catch(() => {});
+          }
+        },
+        deleteArchivedSession: (target) => {
+          this.assertOpen();
+          if (!operations.deleteArchivedSession)
+            return Promise.reject(new Error("会话删除不可用"));
+          return operations.deleteArchivedSession(target, () =>
+            this.removeSessionData(target),
+          );
+        },
         activity: indexes.activityView,
         archive: indexes.archiveView,
+        groups: indexes.groups.snapshot,
+        registerSessionGroups: () => indexes.groups.register(),
+        excludeSessionsFromCatalog: (sessions) => indexes.catalog.excludeSessions(sessions),
         dismissArchiveNotice: dismissNotice,
         archiveWithNotice,
         unarchiveSession,
         startNewSession: this.startNewSession.bind(this),
         showConversation: this.showConversation.bind(this),
+        runBackgroundPrompt: (request, observe) => {
+          if (this.stopping || !this.operations.runBackgroundPrompt)
+            return Promise.reject(new Error("后台会话当前不可用"));
+          return this.operations.runBackgroundPrompt(request, observe);
+        },
+        backgroundPromptOptions: (path, agentId) =>
+          this.operations.backgroundPromptOptions?.(path, agentId) ?? Promise.reject(new Error("后台会话当前不可用")),
         isConversationVisible: this.isConversationVisible.bind(this),
         openSessionFromEntry: this.openSessionFromEntry.bind(this),
         deliverToSession: this.deliverToSession.bind(this),
@@ -147,6 +224,13 @@ export class DesktopProject {
         renameDisplayedSession: this.renameDisplayedSession.bind(this),
         preloadSessionList: this.preloadSessionList.bind(this),
         openSession: this.openSession.bind(this),
+        registerSessionTools: (provider) => this.operations.registerSessionTools(provider),
+        openPluginSession: (options) => {
+          this.assertOpen();
+          return this.operations.openPluginSession(options);
+        },
+        watchTurns: (target, listener) => this.operations.watchTurns(target, listener),
+        watchEvents: (target, listener) => this.operations.watchEvents(target, listener),
         recoverSession: this.recoverSession.bind(this),
         stopRecovery: this.stopRecovery.bind(this),
         switchAgent: this.switchAgent.bind(this),
@@ -165,13 +249,21 @@ export class DesktopProject {
         reportCommandFailure: this.reportCommandFailure.bind(this),
         send: this.send.bind(this),
         enqueue: this.enqueue.bind(this),
+        steer: this.steer.bind(this),
+        stopSteering: this.stopSteering.bind(this),
         clearQueue: this.clearQueue.bind(this),
         removeQueuedPrompt: this.removeQueuedPrompt.bind(this),
+        removeQueuedPromptById: this.removeQueuedPromptById.bind(this),
+        moveQueuedPrompt: this.moveQueuedPrompt.bind(this),
         switchModel: this.switchModel.bind(this),
         switchMode: this.switchMode.bind(this),
         cancel: this.cancel.bind(this),
         retry: this.retry.bind(this),
         continueQueue: this.continueQueue.bind(this),
+        retryQueueSave: (target) => {
+          const session = this.session(target);
+          if (!session.disposed) session.store.getState().retryQueueSave();
+        },
       },
       drafts: {
         annotationDrafts: annotationOwner.composer,
@@ -217,9 +309,146 @@ export class DesktopProject {
     return release;
   }
 
-  registerWorkspaceHealthCheck(check: WorkspaceHealthCheck): () => void {
-    this.assertOpen();
-    return this.workspaceOwner.registerHealthCheck(check);
+  private async removeSessionData(target: DeleteSessionTarget): Promise<void> {
+    const { workspacePath: path, sessionId: id, agentKey: agent } = target;
+    const paths = [...new Set([path, pathKey(path)])];
+        const historyScope = `${pathKey(path)}#${id}`;
+    const agents = new Set([agent]);
+    const matches = (scope: string) => {
+      try {
+        const owner = conversationScope(scope);
+        const match =
+          owner.session === id &&
+          owner.project !== undefined &&
+          pathKey(owner.project) === pathKey(path) &&
+          (owner.agent === undefined || sameSessionAgent(owner.agent, agent));
+        if (match && owner.agent) agents.add(owner.agent);
+        return match;
+      } catch {
+        return false;
+      }
+    };
+    const scopes = new Set([
+      historyScope,
+      JSON.stringify([agent, historyScope]),
+    ]);
+    if (nativeSnapshots.available()) {
+      for (const data of [
+        nativeSnapshots,
+        nativePromptQueue,
+        nativeMessageImages,
+      ])
+        for (const entry of await data.list())
+          if (matches(entry.key)) scopes.add(entry.key);
+    }
+    for (const scope of await this.messageImages.listScopes())
+      if (matches(scope)) scopes.add(scope);
+    const conversationKeys = [
+      ...new Set([
+        ...Object.keys(localStorage),
+        ...(managedProjectStorage()?.conversationKeys?.() ?? []),
+      ]),
+    ];
+    for (const key of conversationKeys) {
+      for (const prefix of ["aaw-desktop/session-log/", queuePrefix]) {
+        if (!key.startsWith(prefix)) continue;
+        try {
+          const scope = decodeURIComponent(key.slice(prefix.length));
+          if (matches(scope)) scopes.add(scope);
+        } catch {
+          /* 跳过无关的损坏旧版键。 */
+        }
+      }
+    }
+    for (const scope of scopes) {
+      if (nativeSnapshots.available()) {
+        await nativeSnapshots.deleteSession(scope);
+        await nativePromptQueue.deleteSession(scope);
+      }
+      localStorage.removeItem(sessionLogKey(scope));
+      localStorage.removeItem(queuePrefix + encodeURIComponent(scope));
+      await this.messageImages.removeSession(scope);
+    }
+    const draftScopes = paths.flatMap((value) => [
+      ...[...agents].map((owner) => draftScopeKey(value, id, owner)),
+      draftScopeKey(value, id),
+    ]);
+    const images = await this.composerOwner.imageDrafts.load();
+    for (const scope of [
+      ...Object.keys(images),
+      ...Object.keys(localStorage),
+    ]) {
+      const promptHistory = scope.startsWith("aaw-desktop/prompt-history/");
+      if (!scope.startsWith("aaw-desktop/draft/") && !promptHistory) continue;
+      try {
+        const owner = draftScope(
+          promptHistory
+            ? scope.replace("aaw-desktop/prompt-history/", "aaw-desktop/draft/")
+            : scope,
+        );
+        if (
+          owner.session === id &&
+          owner.project &&
+          pathKey(owner.project) === pathKey(path) &&
+          (owner.agent === undefined || sameSessionAgent(owner.agent, agent))
+        ) {
+          if (promptHistory) projectStorage.removeItem?.(scope);
+          else
+            draftScopes.push(scope.replace(/\/document-annotations-v1$/, ""));
+          if (owner.agent) agents.add(owner.agent);
+        }
+      } catch {
+        /* 跳过无关的损坏旧版键。 */
+      }
+    }
+    await this.composerOwner.imageDrafts.removeScopes(draftScopes);
+    for (const scope of draftScopes) {
+      removeSessionDraft(scope);
+      this.annotationOwner.removeScope(scope);
+    }
+    for (const value of paths)
+      this.composer.history.removeSession?.(value, id, agent);
+    await removeSessionTitles(id, agent);
+    const belongs = (key: string) => {
+      const owner = parseSessionPinKey(key);
+      return (
+        owner?.sessionId === id &&
+        pathKey(owner.path) === pathKey(path) &&
+        (owner.agentKey === undefined ||
+          sameSessionAgent(owner.agentKey, agent))
+      );
+    };
+    for (const key of this.workspace
+      .getState()
+      .pinnedSessions.filter(belongs)) {
+      const owner = parseSessionPinKey(key)!;
+      this.workspace
+        .getState()
+        .toggleSessionPinned(owner.path, id, owner.agentKey);
+    }
+    for (const key of this.workspace
+      .getState()
+      .starredSessions.filter(belongs)) {
+      const owner = parseSessionPinKey(key)!;
+      this.workspace
+        .getState()
+        .toggleSessionStarred(owner.path, id, owner.agentKey);
+    }
+    const activity = Object.fromEntries(
+      Object.entries(this.indexes.activity.getState().entries).filter(
+        ([, entry]) =>
+          entry.sessionId !== id ||
+          pathKey(entry.project) !== pathKey(path) ||
+          (entry.agentKey !== undefined &&
+            !sameSessionAgent(entry.agentKey, agent)),
+      ),
+    );
+    this.indexes.activity.setState({ entries: activity });
+    await managedProjectStorage()?.flush?.();
+    const error =
+      managedProjectStorage()?.configurationError?.() ||
+      managedProjectStorage()?.conversationError?.();
+    if (error) throw new Error(error);
   }
 
   private assertOpen(): void {
@@ -250,25 +479,34 @@ export class DesktopProject {
     const layout = this.getLayout();
     if (!layout)
       return Promise.resolve({ ok: false as const, reason: "工作台尚未就绪" });
-    return startNewSession(this, layout, path, () => !this.stopping && this.getLayout() === layout);
+    return startNewSession(
+      this,
+      layout,
+      path,
+      () => !this.stopping && this.getLayout() === layout,
+    );
   }
 
   showConversation(path: string): void {
     const layout = this.getLayout();
     if (!layout || !this.isActive()) return;
-    layout.navigation.getState().openView(
-      projectConversationPageId,
-      path,
-      () => this.isActive() && this.getLayout() === layout,
-    );
+    layout.navigation
+      .getState()
+      .openView(
+        projectConversationPageId,
+        path,
+        () => this.isActive() && this.getLayout() === layout,
+      );
   }
 
   isConversationVisible(path: string): boolean {
     if (!this.isActive()) return false;
     const page = this.getLayout()?.navigation.getState();
-    return page?.overlay === null &&
+    return (
+      page?.overlay === null &&
       page.viewId === projectConversationPageId &&
-      pathKey(page.contextPath ?? "") === pathKey(path);
+      pathKey(page.contextPath ?? "") === pathKey(path)
+    );
   }
 
   openSessionFromEntry(path: string, sessionId: string, agentKey?: string) {
@@ -317,16 +555,16 @@ export class DesktopProject {
     this.assertOpen();
     return this.operations.focusSession(path, sessionId, agentKey);
   }
-  renameSession(agentKey: string, sessionId: string, title: string): void {
+  renameSession(agentKey: string, sessionId: string, title: string): void | Promise<void> {
     this.assertOpen();
-    this.operations.renameSession(agentKey, sessionId, title);
+    return this.operations.renameSession(agentKey, sessionId, title);
   }
   renameDisplayedSession(
     path: string,
     agentKey: string | undefined,
     sessionId: string,
     title: string,
-  ): void {
+  ): void | Promise<void> {
     const contextPath = this.getLayout()?.navigation.getState().contextPath;
     const session = this.foreground.session.getState();
     if (
@@ -336,7 +574,7 @@ export class DesktopProject {
       session.agentKey === agentKey &&
       (session.openingSessionId ?? session.activeSessionId) === sessionId
     )
-      session.renameSession(sessionId, title);
+      return session.renameSession(sessionId, title);
   }
 
   private currentForeground(target: ForegroundSessionTarget) {
@@ -367,7 +605,11 @@ export class DesktopProject {
       this.foreground.approval.getState().select(id);
   }
 
-  setQuestionDraft(target: ForegroundSessionTarget, id: string, draft: QuestionDraft): void {
+  setQuestionDraft(
+    target: ForegroundSessionTarget,
+    id: string,
+    draft: QuestionDraft,
+  ): void {
     if (this.currentForeground(target))
       this.foreground.approval.getState().setQuestionDraft(id, draft);
   }
@@ -387,9 +629,9 @@ export class DesktopProject {
     this.assertOpen();
     return this.operations.stopRecovery(target);
   }
-  switchAgent(agentId: string): Promise<void> {
+  switchAgent(agentId: string, onProgress?: AgentSwitchProgressListener): Promise<void> {
     this.assertOpen();
-    return this.operations.switchAgent(agentId);
+    return this.operations.switchAgent(agentId, onProgress);
   }
   removeProject(path: string, isCurrent = () => true): Promise<boolean> {
     this.assertOpen();
@@ -425,7 +667,8 @@ export class DesktopProject {
         const failures = results.flatMap((result) =>
           result.status === "rejected" ? [result.reason as unknown] : [],
         );
-        if (failures.length) throw new AggregateError(failures, "项目资源释放失败");
+        if (failures.length)
+          throw new AggregateError(failures, "项目资源释放失败");
         if (this.stopping) return false;
         this.workspace.getState().removeFromRecent(path);
         return true;
@@ -455,8 +698,8 @@ export class DesktopProject {
     const { session, approval } = this.foregroundOwner.view;
     const active = session.getState();
     if (reason === "update") {
-      active.flushSessionLog();
-      return this.closeProjects({ force });
+      const save = active.flushSessionLog();
+      return save ? save.then(() => this.closeProjects({ force })) : this.closeProjects({ force });
     }
     if (active.isAgentRunning) active.requestCancel();
     const approvals = approval.getState();
@@ -521,23 +764,42 @@ export class DesktopProject {
     target: SessionTarget,
     text: string,
     attachments?: readonly ContentBlock[],
+    options?: SendOptions,
   ): boolean {
     const session = this.session(target);
     return (
       !session.disposed &&
-      session.store.getState().sendPrompt(text, attachments)
+      session.store.getState().sendPrompt(text, attachments, options)
     );
+  }
+  steer(
+    target: SessionTarget,
+    text: string,
+    attachments?: readonly ContentBlock[],
+    ...options: [options?: SendOptions]
+  ): boolean {
+    // During promotion, ACP can already have an ID while the foreground still
+    // owns the draft scope. Route the early supplement through that exact view.
+    const foreground = this.currentForeground(target);
+    return (
+      foreground?.supportsSteer === true &&
+      foreground.steerPrompt(text, attachments, ...options)
+    );
+  }
+  stopSteering(target: SessionTarget): void {
+    this.session(target).store.getState().stopSteering();
   }
   enqueue(
     target: SessionTarget,
     text: string,
     attachments?: readonly ContentBlock[],
+    options?: SendOptions,
   ): boolean {
     const session = this.session(target);
     return (
       !session.disposed &&
       !session.store.getState().operationsBlocked &&
-      session.store.getState().enqueuePrompt(text, attachments)
+      session.store.getState().enqueuePrompt(text, attachments, options)
     );
   }
   clearQueue(target: SessionTarget): void {
@@ -547,6 +809,24 @@ export class DesktopProject {
   removeQueuedPrompt(target: SessionTarget, index: number): void {
     const session = this.session(target);
     if (!session.disposed) session.store.getState().removeQueuedPrompt(index);
+  }
+  removeQueuedPromptById(target: SessionTarget, id: string): boolean {
+    const session = this.session(target);
+    return (
+      !session.disposed && session.store.getState().removeQueuedPromptById(id)
+    );
+  }
+  moveQueuedPrompt(
+    target: SessionTarget,
+    id: string,
+    targetId: string,
+    position: "before" | "after",
+  ): boolean {
+    const session = this.session(target);
+    return (
+      !session.disposed &&
+      session.store.getState().moveQueuedPrompt(id, targetId, position)
+    );
   }
   switchModel(target: SessionTarget, modelId: string): void {
     const session = this.session(target);
@@ -586,6 +866,8 @@ export class DesktopProject {
     this.annotationEditing.dispose();
     this.shutdownTask = (async () => {
       try {
+        const deleting = this.indexes.deletions.settle();
+        if (deleting) await deleting;
         this.navigationQueue.dispose();
         this.formQueue.dispose();
         this.stopArchive?.();
@@ -604,7 +886,11 @@ export class DesktopProject {
           if (this.operations.dispose) await this.operations.dispose(options);
           else await this.operations.close(options);
         } finally {
-          await Promise.all([flushImageDrafts, this.messageImages.dispose()]);
+          await Promise.all([
+            flushImageDrafts,
+            this.messageImages.dispose(),
+            flushContextUsageWrites(),
+          ]);
         }
       }
     })();

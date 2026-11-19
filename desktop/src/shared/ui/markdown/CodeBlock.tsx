@@ -1,8 +1,10 @@
+import { IconButton } from "../IconButton.tsx";
 /**
  * 代码块 chrome(移植自 ZCode components/ai-elements/code-block.tsx 的
  * 头栏与动作按钮;高亮本体来自 streamdown 的 @streamdown/code 插件,
  * 这里只包壳:语言图标 + 语言标签 + 换行切换 + 复制 + mermaid 分支与放大预览)。
  */
+import { UiIcon } from "../UiIcon.tsx";
 import {
   createContext,
   useCallback,
@@ -16,7 +18,7 @@ import {
   type ReactNode,
 } from "react";
 import { CopyButton } from "../CopyButton.tsx";
-import { useHintTooltip } from "../controls/HintTooltip.tsx";
+import { hintTooltipProps } from "../controls/HintTooltip.tsx";
 import { useLogger } from "../../logging/react.ts";
 import { FileDisplayIcon } from "../file-icons/fileDisplay.tsx";
 import { resolveIconName } from "../file-icons/fileDisplayHelpers.ts";
@@ -123,7 +125,7 @@ function CodeBlockIcon({ children }: { readonly children: ReactNode }) {
   return (
     <span
       aria-hidden={true}
-      className="inline-flex size-3.5 items-center justify-center [&_svg]:h-3.5 [&_svg]:w-3.5"
+      className="inline-flex items-center justify-center"
     >
       {children}
     </span>
@@ -133,20 +135,20 @@ function CodeBlockIcon({ children }: { readonly children: ReactNode }) {
 /** 换行切换钮(无 lucide 依赖:内联 WrapText 语义图形)。 */
 function CodeBlockWrapButton() {
   const { toggleWrapLongLines, wrapLongLines } = useContext(CodeBlockContext);
-  const hint = useHintTooltip("自动换行");
+  const hint = hintTooltipProps("自动换行");
   return (
-    <button
+    <IconButton
       type="button"
       aria-label="自动换行"
       aria-pressed={wrapLongLines}
       onClick={toggleWrapLongLines}
       {...hint}
-      className={`flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-raised hover:text-ink ${
-        wrapLongLines ? "bg-raised text-ink" : ""
-      }`}
+      className={`flex shrink-0 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-raised hover:text-ink ${
+ wrapLongLines ? "bg-raised text-ink" : ""
+ }`}
     >
       <CodeBlockIcon>
-        <svg
+        <UiIcon
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -158,9 +160,9 @@ function CodeBlockWrapButton() {
           <path d="M3 12h13a3 3 0 1 1 0 6h-4" />
           <path d="m14 16-2 2 2 2" />
           <path d="M3 18h4" />
-        </svg>
+        </UiIcon>
       </CodeBlockIcon>
-    </button>
+    </IconButton>
   );
 }
 
@@ -172,18 +174,18 @@ function CodeBlockPreviewButton({
   readonly disabled: boolean;
   readonly onClick: () => void;
 }) {
-  const hint = useHintTooltip("放大查看(双击图表亦可)");
+  const hint = hintTooltipProps("放大查看(双击图表亦可)");
   return (
-    <button
+    <IconButton
       type="button"
       aria-label="放大预览图表"
       disabled={disabled}
       {...hint}
       onClick={onClick}
-      className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-raised hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+      className="flex shrink-0 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-raised hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
     >
       <CodeBlockIcon>
-        <svg
+        <UiIcon
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -195,9 +197,9 @@ function CodeBlockPreviewButton({
           <path d="M9 21H3v-6" />
           <path d="M21 3l-7 7" />
           <path d="M3 21l7-7" />
-        </svg>
+        </UiIcon>
       </CodeBlockIcon>
-    </button>
+    </IconButton>
   );
 }
 
@@ -343,8 +345,7 @@ export function CodeBlock({
           <span className="flex min-w-0 items-center gap-2">
             <FileDisplayIcon
               name={fileIconName}
-              size={16}
-              className="shrink-0"
+              className="ui-icon-16 shrink-0"
             />
             <span className="min-w-0 truncate font-mono lowercase">
               {languageLabel}

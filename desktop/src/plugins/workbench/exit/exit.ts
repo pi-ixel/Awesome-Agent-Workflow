@@ -36,10 +36,17 @@ export class ExitCoordinator implements WorkbenchExit {
     };
   }
 
+  getExitWork(reason: ExitReason): readonly string[] {
+    const work: string[] = [];
+    for (const participant of this.participants.values()) {
+      const description = participant.describeWork?.(reason);
+      if (description) work.push(description);
+    }
+    return work;
+  }
+
   hasExitWork(reason: ExitReason): boolean {
-    return [...this.participants.values()].some((item) =>
-      item.isBusy?.(reason),
-    );
+    return this.getExitWork(reason).length > 0;
   }
 
   listenForClose(onClose: () => void): () => void {
@@ -106,22 +113,25 @@ export class ExitCoordinator implements WorkbenchExit {
         await request.handoff();
       } else {
         request.onAccepted();
-        const display = delay(EXIT_MIN_DISPLAY_MS).then(() => {
-          void this.window.hide().catch(() => {});
-        });
+        const hidden = delay(EXIT_MIN_DISPLAY_MS)
+          .then(() => this.window.hide())
+          .catch((error: unknown) =>
+            console.error("Window hide failed", error),
+          );
         let timeout: ReturnType<typeof setTimeout> | undefined;
         const budget = new Promise<void>((resolve) => {
           timeout = setTimeout(resolve, EXIT_CLEANUP_BUDGET_MS);
         });
-        const cleanup = prepare()
-          .catch((error: unknown) =>
-            console.error("Exit preparation failed", error),
-          )
+        const prepared = prepare().catch((error: unknown) =>
+          console.error("Exit preparation failed", error),
+        );
+        // Keep the workbench rendered until the native window has hidden.
+        const cleanup = Promise.all([hidden, prepared])
           .then(() => request.shutdown(request.force))
           .catch((error: unknown) =>
             console.error("Desktop shutdown failed", error),
           );
-        await Promise.all([display, Promise.race([cleanup, budget])]);
+        await Promise.race([cleanup, budget]);
         clearTimeout(timeout);
         await this.window.forceClose();
       }

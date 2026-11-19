@@ -9,7 +9,7 @@ import type { ProjectService, ProjectSessions, ProjectWorkspace } from "../servi
 import type { SkillsService } from "../../skills/service.ts";
 import type { GitService } from "../../git/service.ts";
 import type { GitReviewNavigation } from "../../git/types.ts";
-import type { WorkflowView } from "../../workflow/types.ts";
+import type { ProjectExtension } from "./extension.ts";
 import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
 import { useStore } from "zustand";
 import { ElicitationModal } from "../interactions/ui/ElicitationModal.tsx";
@@ -36,23 +36,23 @@ function ProjectDialogs() {
 }
 
 export function createProjectPages({
-  readSkillSource,
   skills,
   gitReview,
-  workflowUi,
+  extension,
   documentView,
   watchActivity,
   openDiagnostics,
   openArchiveSettings,
   openExternal,
 }: {
-  readonly readSkillSource: () => string;
-  readonly skills: ReadonlySnapshot<{ readonly candidates?: SkillsService["candidates"] }>;
+  readonly skills: ReadonlySnapshot<
+    Pick<Partial<SkillsService>, "candidates" | "resolveSlashSkills">
+  >;
   readonly gitReview: ReadonlySnapshot<{
     readonly query?: GitService["query"];
     readonly open?: GitReviewNavigation["open"];
   }>;
-  readonly workflowUi: ReadonlySnapshot<{ readonly view?: WorkflowView }>;
+  readonly extension: ReadonlySnapshot<{ readonly view?: ProjectExtension }>;
   readonly documentView: ReadonlySnapshot<{ readonly view?: ConversationDocumentView }>;
   readonly watchActivity: ProjectWorkspace["subscribeWorkspaceActivity"];
   readonly openDiagnostics: () => void;
@@ -60,18 +60,18 @@ export function createProjectPages({
   readonly openExternal: (url: string) => Promise<void>;
 }): readonly WorkbenchContributions["pages"][] {
   function OverviewPage({ project }: ProjectViewProps) {
-    const WorkflowOverview = useStore(workflowUi, (state) => state.view?.Overview);
+    const ExtensionOverview = useStore(extension, (state) => state.view?.Overview);
     return (
       <div className="relative h-full overflow-y-auto p-3">
         <ArchiveNotice openSettings={openArchiveSettings} />
-        <ProjectOverview path={project} readSkillSource={readSkillSource} WorkflowOverview={WorkflowOverview} />
+        <ProjectOverview path={project} ExtensionOverview={ExtensionOverview} />
       </div>
     );
   }
   function SessionPage() {
-    const candidates = useStore(skills, (state) => state.candidates);
+    const { candidates, resolveSlashSkills } = useStore(skills);
     const git = useStore(gitReview);
-    const workflow = useStore(workflowUi, (state) => state.view);
+    const projectExtension = useStore(extension, (state) => state.view);
     const documents = useStore(documentView, (state) => state.view);
     const links = useMemo(() => ({
       assetUrl: documents?.assetUrl,
@@ -85,10 +85,11 @@ export function createProjectPages({
           fileCandidates={documents?.fileCandidates}
           ownsFindShortcut={documents?.ownsFindShortcut}
           skillCandidates={candidates}
+          resolveSlashSkills={resolveSlashSkills}
           queryGit={git.query}
           openGitReview={git.open}
           watchActivity={watchActivity}
-          workflow={workflow}
+          extension={projectExtension}
           openDiagnostics={openDiagnostics}
           openArchiveSettings={openArchiveSettings}
         />

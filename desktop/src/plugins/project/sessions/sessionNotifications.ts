@@ -4,13 +4,16 @@ import type { ProjectSessions } from "../service.ts";
 import { sessionActivityKey } from "./sessionActivityStore.ts";
 import type { SessionActivity } from "./indexTypes.ts";
 
+const NOTIFIED_STATUSES: readonly SessionActivity["status"][] = ["completed", "failed", "waiting"];
+
 export function shouldNotifySession(
   next: SessionActivity,
   previous?: SessionActivity,
 ): boolean {
   return (
+    (next.externallyManaged !== true || (next.status === "waiting" && next.pending > 0)) &&
     next.status !== previous?.status &&
-    ["completed", "failed", "waiting"].includes(next.status)
+    NOTIFIED_STATUSES.includes(next.status)
   );
 }
 
@@ -47,7 +50,19 @@ export function attachSessionNotifications(
       logger.warn("通知定位会话失败", { reason: String(error) }),
     );
   });
+  // 发过通知的会话；会话继续往下走（回复、重新运行）后删掉那条通知，避免通知中心堆积。
+  const notified = new Set<string>();
+  const tagOf = (key: string) => `session:${key}`;
   const stop = service.activity.subscribe((state, old) => {
+    for (const key of notified) {
+      const entry = state.entries[key];
+      if (entry && entry.status === old.entries[key]?.status) continue;
+      if (entry && NOTIFIED_STATUSES.includes(entry.status)) continue;
+      notified.delete(key);
+      void notifications.remove(tagOf(key)).catch((error: unknown) =>
+        logger.warn("系统通知删除失败", { reason: String(error) }),
+      );
+    }
     for (const [key, entry] of Object.entries(state.entries)) {
       if (!shouldNotifySession(entry, old.entries[key])) continue;
       void ready
@@ -57,8 +72,10 @@ export function attachSessionNotifications(
           if (!granted || disposed || (await window.isFocused())) return;
           const latest = service.activity.getState().entries[key];
           if (latest?.status !== entry.status) return;
+          notified.add(key);
           await notifications.send({
             id: ++sequence,
+            tag: tagOf(key),
             title:
               entry.status === "waiting"
                 ? "会话需要处理"

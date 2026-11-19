@@ -15,9 +15,7 @@ use std::{
 };
 use tauri::Manager;
 
-const MAX_BYTES: u64 = 100 * 1024 * 1024;
 const SEGMENT_BYTES: u64 = 1024 * 1024;
-const RETENTION_MS: u64 = 7 * 24 * 3600 * 1000;
 static SERVICE: OnceLock<Service> = OnceLock::new();
 fn now() -> u64 {
     SystemTime::now()
@@ -66,6 +64,7 @@ struct Service {
     raw_pending_bytes: AtomicU64,
     error: Arc<Mutex<Option<String>>>,
     snapshot: Mutex<Value>,
+    probes: Mutex<VecDeque<String>>,
 }
 enum WriteRequest {
     Append(String, Vec<Input>),
@@ -92,7 +91,10 @@ fn clean_text(value: &str) -> String {
         .into_owned()
 }
 fn sanitize(value: &Value, depth: usize) -> Value {
-    if depth > 5 {
+    sanitize_with_limit(value, depth, 5)
+}
+fn sanitize_with_limit(value: &Value, depth: usize, max_depth: usize) -> Value {
+    if depth > max_depth {
         return json!("[truncated]");
     }
     match value {
@@ -126,7 +128,7 @@ fn sanitize(value: &Value, depth: usize) -> Value {
                         if private {
                             json!("[REDACTED]")
                         } else {
-                            sanitize(value, depth + 1)
+                            sanitize_with_limit(value, depth + 1, max_depth)
                         },
                     )
                 })
@@ -136,7 +138,7 @@ fn sanitize(value: &Value, depth: usize) -> Value {
             items
                 .iter()
                 .take(600)
-                .map(|v| sanitize(v, depth + 1))
+                .map(|v| sanitize_with_limit(v, depth + 1, max_depth))
                 .collect(),
         ),
         Value::String(s) => json!(clean_text(s)),
@@ -155,7 +157,6 @@ impl Store {
             size: 0,
             day: now() / 86_400_000,
         };
-        store.cleanup(now(), MAX_BYTES)?;
         if let Some(last) = read_records(store.files()?, &Query::default(), 1)
             .map_err(std::io::Error::other)?
             .last()
@@ -177,31 +178,6 @@ impl Store {
             .collect::<Vec<_>>();
         files.sort();
         Ok(files)
-    }
-    fn cleanup(&mut self, at: u64, budget: u64) -> std::io::Result<()> {
-        let files = self.files()?;
-        let mut total = files
-            .iter()
-            .filter_map(|p| fs::metadata(p).ok())
-            .map(|m| m.len())
-            .sum::<u64>();
-        for file in files {
-            let metadata = fs::metadata(&file)?;
-            let modified = metadata
-                .modified()?
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64;
-            if at.saturating_sub(modified) > RETENTION_MS || total > budget {
-                fs::remove_file(&file)?;
-                total = total.saturating_sub(metadata.len());
-                if self.segment.as_ref() == Some(&file) {
-                    self.segment = None;
-                    self.size = 0;
-                }
-            }
-        }
-        Ok(())
     }
     fn append(&mut self, source: &str, inputs: Vec<Input>) -> std::io::Result<()> {
         self.append_impl(source, inputs, None)
@@ -250,34 +226,36 @@ impl Store {
         if bytes.is_empty() {
             return Ok(());
         }
-        if self.segment.is_none()
-            || self.size + bytes.len() as u64 > SEGMENT_BYTES
-            || self.day != now() / 86_400_000
-        {
-            self.day = now() / 86_400_000;
+        let batch_size = bytes.len() as u64;
+        let day = now() / 86_400_000;
+        if self.segment.is_none() || self.size + batch_size > SEGMENT_BYTES || self.day != day {
+            self.day = day;
             self.segment = Some(self.root.join(format!("log-{:020}.jsonl", self.last)));
             self.size = 0;
         }
-        let mut file = OpenOptions::new()
+        let result = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(self.segment.as_ref().unwrap())?;
-        file.write_all(&bytes)?;
-        file.flush()?;
-        self.size += bytes.len() as u64;
+            .open(self.segment.as_ref().unwrap())
+            .and_then(|mut file| {
+                file.write_all(&bytes)?;
+                file.flush()
+            });
+        if let Err(error) = result {
+            // A partial write makes the current segment size uncertain.
+            self.segment = None;
+            return Err(error);
+        }
+        self.size += batch_size;
         self.recent.extend(records);
         while self.recent.len() > 2000 {
             self.recent.pop_front();
         }
-        self.cleanup(now(), MAX_BYTES)
+        Ok(())
     }
 }
 pub fn start(app: &tauri::AppHandle) -> Result<(), String> {
-    let root = app
-        .path()
-        .app_log_dir()
-        .map_err(|e| e.to_string())?
-        .join("diagnostics");
+    let root = crate::storage_location::logs_dir(app)?;
     let store = Arc::new(Mutex::new(Store::new(root).map_err(|e| e.to_string())?));
     let error = Arc::new(Mutex::new(None));
     let (sender, receiver) = mpsc::sync_channel::<WriteRequest>(128);
@@ -291,11 +269,12 @@ pub fn start(app: &tauri::AppHandle) -> Result<(), String> {
             dropped: AtomicU64::new(0),
             raw_pending_bytes: AtomicU64::new(0),
             snapshot: Mutex::new(Value::Null),
+            probes: Mutex::new(VecDeque::new()),
         })
         .map_err(|_| "logger already started")?;
     std::thread::spawn(move || {
         loop {
-            let result = match receiver.recv_timeout(Duration::from_secs(60)) {
+            let result = match receiver.recv() {
                 Ok(WriteRequest::Append(source, batch)) => {
                     writer.lock().unwrap().append(&source, batch)
                 }
@@ -339,10 +318,7 @@ pub fn start(app: &tauri::AppHandle) -> Result<(), String> {
                 }
                 Ok(WriteRequest::Flush(done)) => {
                     let _ = done.send(());
-                    Ok(())
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    writer.lock().unwrap().cleanup(now(), MAX_BYTES)
+                    continue;
                 }
                 Err(_) => break,
             };
@@ -586,6 +562,87 @@ pub async fn diagnostics_query(query: Query) -> Result<Vec<Record>, String> {
     .await
     .map_err(|e| e.to_string())?
 }
+fn storage_log_name(name: &str) -> bool {
+    name.strip_prefix("log-")
+        .and_then(|name| name.strip_suffix(".jsonl"))
+        .is_some_and(|id| id.len() == 20 && id.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+#[tauri::command]
+pub fn diagnostics_storage_list(window: tauri::WebviewWindow) -> Result<Value, String> {
+    if window.label() != "main" {
+        return Err("只有主窗口可以管理日志存储".into());
+    }
+    let service = service()?;
+    let store = service.store.lock().map_err(|e| e.to_string())?;
+    let mut rows = Vec::new();
+    for path in store.files().map_err(|e| e.to_string())? {
+        let Some(key) = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| storage_log_name(name))
+        else {
+            continue;
+        };
+        let meta = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
+        if !meta.is_file() {
+            continue;
+        }
+        rows.push(json!({
+            "key": key,
+            "bytes": meta.len(),
+            "revision": log_revision(&meta)?,
+        }));
+    }
+    Ok(json!(rows))
+}
+
+fn log_revision(meta: &fs::Metadata) -> Result<String, String> {
+    let modified = meta
+        .modified()
+        .map_err(|e| e.to_string())?
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    Ok(format!("{}:{}", meta.len(), modified))
+}
+
+#[tauri::command]
+pub fn diagnostics_storage_remove(
+    window: tauri::WebviewWindow,
+    key: String,
+    revision: String,
+) -> Result<bool, String> {
+    if window.label() != "main" {
+        return Err("只有主窗口可以管理日志存储".into());
+    }
+    if !storage_log_name(&key) {
+        return Err("无效的日志文件名".into());
+    }
+    let service = service()?;
+    let mut store = service.store.lock().map_err(|e| e.to_string())?;
+    let Some(path) = store
+        .files()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|path| path.file_name().and_then(|name| name.to_str()) == Some(key.as_str()))
+    else {
+        return Ok(false);
+    };
+    let meta = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
+    if !meta.is_file() || log_revision(&meta)? != revision {
+        return Ok(false);
+    }
+    fs::remove_file(&path).map_err(|e| e.to_string())?;
+    if store.segment.as_ref() == Some(&path) {
+        store.segment = None;
+        store.size = 0;
+    }
+    // Recent entries carry no segment identity. Queries can rebuild from remaining files.
+    store.recent.clear();
+    Ok(true)
+}
+
 #[tauri::command]
 pub fn diagnostics_status(app: tauri::AppHandle) -> Result<Value, String> {
     let service = service()?;
@@ -606,9 +663,44 @@ pub fn diagnostics_snapshot(
         if serde_json::to_vec(&value).map_err(|e| e.to_string())?.len() > 512 * 1024 {
             return Err("状态快照过大".into());
         }
-        *service.snapshot.lock().unwrap() = json!({"at": now(), "data": sanitize(&value, 0)});
+        *service.snapshot.lock().unwrap() =
+            json!({"at": now(), "data": sanitize_with_limit(&value, 0, 8)});
     }
     Ok(service.snapshot.lock().unwrap().clone())
+}
+
+/// Diagnostics can request a bounded, deduplicated probe; only the main
+/// window may consume it and execute against its own connection service.
+#[tauri::command]
+pub fn diagnostics_probe_request(window: tauri::WebviewWindow, id: String) -> Result<(), String> {
+    if window.label() != "diagnostics" {
+        return Err("只有诊断窗口可以请求连接测试".into());
+    }
+    let service = service()?;
+    let mut queue = service.probes.lock().map_err(|e| e.to_string())?;
+    enqueue_probe(&mut queue, id)
+}
+fn enqueue_probe(queue: &mut VecDeque<String>, id: String) -> Result<(), String> {
+    if id.len() != 36 || !id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') {
+        return Err("连接标识不合法".into());
+    }
+    if !queue.contains(&id) {
+        if queue.len() >= 128 {
+            return Err("连接测试请求过多".into());
+        }
+        queue.push_back(id);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn diagnostics_probe_take(window: tauri::WebviewWindow) -> Result<Vec<String>, String> {
+    if window.label() != "main" {
+        return Err("只有主窗口可以执行连接测试".into());
+    }
+    let service = service()?;
+    let mut queue = service.probes.lock().map_err(|e| e.to_string())?;
+    Ok(queue.drain(..).collect())
 }
 #[tauri::command]
 pub async fn diagnostics_export(path: String, query: Query) -> Result<usize, String> {
@@ -670,6 +762,39 @@ pub async fn diagnostics_open(app: tauri::AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn probe_queue_is_bounded_and_deduplicated() {
+        let mut queue = VecDeque::new();
+        let id = "00000000-0000-0000-0000-000000000001".to_string();
+        enqueue_probe(&mut queue, id.clone()).unwrap();
+        enqueue_probe(&mut queue, id).unwrap();
+        assert_eq!(queue.len(), 1);
+        assert!(enqueue_probe(&mut queue, "not-an-id".to_owned()).is_err());
+        for n in 2..=128 {
+            enqueue_probe(&mut queue, format!("00000000-0000-0000-0000-{n:012x}")).unwrap();
+        }
+        assert!(
+            enqueue_probe(
+                &mut queue,
+                "00000000-0000-0000-0000-000000000100".to_owned()
+            )
+            .is_err()
+        );
+        assert_eq!(queue.len(), 128);
+    }
+    #[test]
+    fn snapshot_preserves_project_identity_and_redacts_secrets() {
+        let input = json!({"connections":[{"sessions":[{"project":{"id":"c:/project","path":"C:/Project"}, "token":"private"}]}]});
+        let output = sanitize_with_limit(&input, 0, 8);
+        assert_eq!(
+            output["connections"][0]["sessions"][0]["project"]["id"],
+            "c:/project"
+        );
+        assert_eq!(
+            output["connections"][0]["sessions"][0]["token"],
+            "[REDACTED]"
+        );
+    }
     static ID: AtomicU64 = AtomicU64::new(0);
     fn root() -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -744,18 +869,21 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    fn cleanup_age_and_budget_only_remove_owned_segments() {
+    fn opening_the_store_preserves_old_segments() {
         let root = root();
         let mut store = Store::new(root.clone()).unwrap();
         fs::write(root.join("keep.txt"), "not a log").unwrap();
         store.append("main", vec![input(1)]).unwrap();
-        store.cleanup(now(), 1).unwrap();
-        assert!(store.files().unwrap().is_empty());
-        store.append("main", vec![input(2)]).unwrap();
-        store
-            .cleanup(now() + RETENTION_MS + 1000, MAX_BYTES)
+        let segment = store.files().unwrap().pop().unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&segment)
+            .unwrap()
+            .set_modified(UNIX_EPOCH + Duration::from_secs(1))
             .unwrap();
-        assert!(store.files().unwrap().is_empty());
+        drop(store);
+        let reopened = Store::new(root.clone()).unwrap();
+        assert_eq!(reopened.files().unwrap(), vec![segment]);
         assert!(root.join("keep.txt").exists());
         fs::remove_dir_all(root).unwrap();
     }
@@ -780,7 +908,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    fn segments_rotate_and_budget_keeps_the_newest_records() {
+    fn segments_rotate_and_keep_old_records() {
         let root = root();
         let mut store = Store::new(root.clone()).unwrap();
         for n in 0..8 {
@@ -795,19 +923,37 @@ mod tests {
             store.append("main", entries).unwrap();
         }
         assert!(store.files().unwrap().len() > 1);
-        store.cleanup(now(), SEGMENT_BYTES).unwrap();
         let files = store.files().unwrap();
-        assert!(
-            files
-                .iter()
-                .map(|p| fs::metadata(p).unwrap().len())
-                .sum::<u64>()
-                <= SEGMENT_BYTES
+        assert_eq!(
+            read_records(files.clone(), &Query::default(), 800)
+                .unwrap()
+                .len(),
+            800
         );
         assert_eq!(
             read_records(files, &Query::default(), 1).unwrap()[0].context["batch"],
             7
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn new_segment_preserves_existing_logs_over_the_reminder_threshold() {
+        let root = root();
+        let mut store = Store::new(root.clone()).unwrap();
+        let oldest = root.join("log-00000000000000000001.jsonl");
+        fs::File::create(&oldest)
+            .unwrap()
+            .set_len(100 * SEGMENT_BYTES)
+            .unwrap();
+
+        store.append("main", vec![input(1)]).unwrap();
+        assert!(oldest.exists());
+        let segment = store.segment.clone();
+        store.append("main", vec![input(2)]).unwrap();
+        assert_eq!(store.segment, segment);
+        let rows = read_records(vec![segment.unwrap()], &Query::default(), 10).unwrap();
+        assert_eq!(rows.len(), 2);
         fs::remove_dir_all(root).unwrap();
     }
 }

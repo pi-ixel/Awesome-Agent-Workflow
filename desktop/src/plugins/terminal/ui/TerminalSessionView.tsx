@@ -52,7 +52,9 @@ import { ClipboardPasteIcon, CopyIcon } from "../../../shared/ui/icons.tsx";
 
 
 /** xterm 基础字号（px，对齐 ZCode 终端规格）。 */
-const FONT_SIZE = 13;
+function readTerminalFontSize(host: HTMLElement): number {
+  return Number.parseFloat(getComputedStyle(host).fontSize) || 13;
+}
 
 /** 面板拖拽中 fit+PTY resize 的低频预览间隔（ZCode TERMINAL_RESIZE_DRAG_THROTTLE_MS 同值）。 */
 const DRAG_RESIZE_THROTTLE_MS = 300;
@@ -275,7 +277,7 @@ export function TerminalSessionView({
     exitedRef.current = false;
     const openLink = (url: string) => void openTerminalUrl(url, openExternal, logger);
     const term = new Terminal({
-      fontSize: FONT_SIZE,
+      fontSize: readTerminalFontSize(host),
       fontFamily:
         getComputedStyle(document.documentElement)
           .getPropertyValue("--font-mono")
@@ -325,6 +327,16 @@ export function TerminalSessionView({
 
     const unwatchTheme = watchTerminalTheme((theme) => {
       term.options.theme = theme;
+    });
+    const watchFontSize = new MutationObserver(() => {
+      const fontSize = readTerminalFontSize(host);
+      if (fontSize === term.options.fontSize) return;
+      term.options.fontSize = fontSize;
+      if (visibleRef.current) scheduleFitAndResize("final");
+    });
+    watchFontSize.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["style"],
     });
 
     // 键入回传（连接可能晚于本 effect 到位，经 connRef 间接；exited 停发）
@@ -448,6 +460,7 @@ export function TerminalSessionView({
     return () => {
       cancelled = true;
       unwatchTheme();
+      watchFontSize.disconnect();
       // 摘除本视图的消费回调：卸载窗口里连接的输出/退出不得再打进已
       // dispose 的 term——输出转入连接内缓冲、退出缓存码，重挂 adopt
       // 注册回调的瞬间补发（markExited 不丢）
@@ -458,7 +471,7 @@ export function TerminalSessionView({
       // 连接不 dispose：留在 ptyHost 注册表，错误边界重挂后按 handle adopt
       term.dispose();
     };
-  }, [terminal, tab.id, openExternal, logger]);
+  }, [terminal, tab.id, openExternal, logger, scheduleFitAndResize]);
 
   // visible false→true：调度 fit + 聚焦（hidden 期间 fit 为 NaN no-op，
   // 重见时这里补一次）
@@ -503,7 +516,7 @@ export function TerminalSessionView({
     {
       id: "terminal-copy",
       label: "复制",
-      icon: <CopyIcon className="h-4 w-4" />,
+      icon: <CopyIcon className="ui-icon-16" />,
       disabled: !(menu?.hasSelection ?? false),
       onSelect: () => {
         const term = termRef.current;
@@ -520,7 +533,7 @@ export function TerminalSessionView({
     {
       id: "terminal-paste",
       label: "粘贴",
-      icon: <ClipboardPasteIcon className="h-4 w-4" />,
+      icon: <ClipboardPasteIcon className="ui-icon-16" />,
       onSelect: () => {
         const term = termRef.current;
         if (term === null) {
@@ -565,7 +578,7 @@ export function TerminalSessionView({
         data-testid={`terminal-session-${tab.id}`}
         hidden={!visible}
         onContextMenu={openContextMenu}
-        className="terminal-xterm-shell min-h-0 w-full flex-1 overflow-hidden"
+        className="terminal-xterm-shell min-h-0 w-full flex-1 overflow-hidden text-ui-caption"
       />
       {connectionError === undefined ? null : (
         <p

@@ -1,0 +1,1302 @@
+import { getByHint, queryByHint } from "../../../helpers/hintQueries.ts";
+import { useWorkbenchUiStore } from "../../../helpers/layout.ts";
+import { testComposer } from "../../../helpers/composer.ts";
+import { useRegisteredSnapshot } from "../../../../src/shared/state/useRegisteredSnapshot.ts";
+import {
+  useSessionStore,
+  useRuntimeStatusStore,
+} from "../../../helpers/foreground.ts";
+/**
+ * 输入区交互：Enter 发送 / Shift+Enter 换行 / IME 组词 / 运行中变「停止」；
+ * 悬浮形态（rounded-2xl 卡片、透明输入行、下行元信息条）见「悬浮形态」组。
+ */
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { PropsWithChildren } from "react";
+import { createStore } from "zustand";
+import type { ReadonlySnapshot } from "../../../../src/shared/state/readonlySnapshot.ts";
+import type { FileCandidates } from "../../../../src/plugins/project/conversation/ui/documentView.ts";
+import type { SkillCatalog } from "../../../../src/plugins/host/types.ts";
+import type { SkillsService } from "../../../../src/plugins/skills/service.ts";
+import { slashSkillCatalog } from "../../../../src/plugins/skills/sources/slashSkillCatalog.ts";
+import {
+  createTestSkills,
+  skillsWorkbenchFixture,
+} from "../../../helpers/skills.tsx";
+import {
+  createTestProjectPreferences,
+  projectPreferencesWrapper,
+} from "../../../helpers/projectPreferences.tsx";
+
+const openDiagnostics = vi.fn();
+
+import { ChatInput } from "../../../../src/plugins/project/conversation/ui/ChatInput.tsx";
+import { createAnnotationDraftStore } from "../../../../src/plugins/project/composer/annotationDraftStore.ts";
+import { webviewStorage } from "../../../../src/plugins/host/storage/storage.ts";
+import {
+  draftScopeKey,
+  legacyNewDraftScopeKey,
+  readDraft,
+  writeDraft,
+} from "../../../../src/plugins/project/composer/draftStore.ts";
+
+const projectPreferences = createTestProjectPreferences();
+const PreferencesWrapper = projectPreferencesWrapper(projectPreferences);
+
+function setup(
+  options: {
+    isAgentRunning?: boolean;
+    skills?: ReturnType<typeof skillsWorkbenchFixture>;
+    openDiagnostics?: () => void;
+    documentsWorkbench?: ReturnType<typeof createTestProjectWorkbench>;
+    fileCandidates?: ReadonlySnapshot<FileCandidates | undefined>;
+    resolveSlashSkills?: SkillsService["resolveSlashSkills"];
+    skillWorkspace?: string | null;
+  } = {},
+) {
+  const onSend = vi.fn();
+  const onEnqueue = vi.fn();
+  const onCancel = vi.fn();
+  const Workbench =
+    options.skills?.Wrapper ?? options.documentsWorkbench?.Wrapper;
+  function Wrapper({ children }: PropsWithChildren) {
+    return (
+      <PreferencesWrapper>
+        {Workbench ? <Workbench>{children}</Workbench> : children}
+      </PreferencesWrapper>
+    );
+  }
+  function TestInput() {
+    const skillCandidates = useRegisteredSnapshot(
+      options.skills?.candidates,
+      (state) => state,
+    );
+    const fileCandidates = useRegisteredSnapshot(
+      options.fileCandidates,
+      (state) => state,
+    );
+    return (
+      <ChatInput
+        fileCandidates={fileCandidates}
+        skillCandidates={skillCandidates}
+        resolveSlashSkills={options.resolveSlashSkills}
+        skillWorkspace={options.skillWorkspace}
+        openDiagnostics={options.openDiagnostics}
+        isAgentRunning={options.isAgentRunning ?? false}
+        onSend={onSend}
+        onEnqueue={onEnqueue}
+        onCancel={onCancel}
+      />
+    );
+  }
+  const view = render(<TestInput />, { wrapper: Wrapper });
+  return { onSend, onEnqueue, onCancel, unmount: view.unmount };
+}
+
+function getTextarea(): HTMLTextAreaElement {
+  return screen.getByLabelText("消息输入框");
+}
+
+// 草稿/输入历史现在按（工作区 × 会话）持久化到 localStorage：
+// 不清仓会让前一个用例的草稿被下一个用例恢复，破坏 @ 触发等前置条件
+beforeEach(() => {
+  window.localStorage.clear();
+});
+
+describe("ChatInput", () => {
+  it("Enter 发送并清空草稿", async () => {
+    const { onSend } = setup();
+    await userEvent.type(getTextarea(), "帮我跑下测试{Enter}");
+    expect(onSend).toHaveBeenCalledWith("帮我跑下测试");
+    expect(getTextarea()).toHaveValue("");
+  });
+
+  it("Shift+Enter 换行而不发送", async () => {
+    const { onSend } = setup();
+    await userEvent.type(getTextarea(), "第一行{Shift>}{Enter}{/Shift}第二行");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(getTextarea()).toHaveValue("第一行\n第二行");
+  });
+
+  it("输入法组词中的 Enter 不发送", () => {
+    const { onSend } = setup();
+    const textarea = getTextarea();
+    fireEvent.change(textarea, { target: { value: "拼字中" } });
+    fireEvent.keyDown(textarea, { key: "Enter", isComposing: true });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(textarea).toHaveValue("拼字中");
+  });
+
+  it("空输入（纯空白）禁用发送", async () => {
+    const { onSend } = setup();
+    const sendButton = screen.getByRole("button", { name: "发送" });
+    expect(sendButton).toBeDisabled();
+    await userEvent.type(getTextarea(), "   ");
+    expect(sendButton).toBeDisabled();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("运行中：无草稿=停止钮；有草稿=发送（入队）钮，Enter 入队不发送", async () => {
+    const { onSend, onEnqueue, onCancel } = setup({ isAgentRunning: true });
+    // 无草稿：停止钮（发送钮不出现）
+    expect(screen.getByRole("button", { name: "停止" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "加入队列" }),
+    ).not.toBeInTheDocument();
+
+    // 打字后：切换为「加入队列」发送钮，Enter 入队（不直接发送）
+    await userEvent.type(getTextarea(), "排队消息{Enter}");
+    expect(onEnqueue).toHaveBeenCalledWith("排队消息");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(getTextarea()).toHaveValue("");
+
+    // 草稿清空后回到停止钮，点击触发取消
+    expect(screen.getByRole("button", { name: "停止" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "停止" }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ChatInput 悬浮形态", () => {
+  afterEach(() => {
+    // 模型 / 审批模式元信息是本组注入的，收口避免影响其他用例
+    useSessionStore.setState({ modelLabel: null, approvalMode: null });
+    useRuntimeStatusStore.getState().reset();
+  });
+
+  it("模型标识：runtime 模型名优先，回落 sessionStore 的 profile id；短格式与占位 —", () => {
+    useSessionStore.setState({
+      modelLabel: "0123456789abcdef0123456789abcdef",
+    });
+    const { rerender } = render(
+      <ChatInput
+        isAgentRunning={false}
+        onSend={vi.fn()}
+        onEnqueue={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    // runtime 无模型信息：回落 sessionStore 的 modelLabel（裸 hash 截 12 位）
+    expect(getByHint(document.body, /0123456789abcdef/)).toHaveTextContent(
+      "0123456789ab",
+    );
+
+    // runtimeDetails 带模型名时优先于 profile id
+    useRuntimeStatusStore.getState().handleSessionEvent({
+      type: "agent_runtime",
+      sessionId: "s-test",
+      runtime: {
+        modelProfileId: "glm-max",
+        modelName: "glm-5.3-flash",
+        modelProvider: "zhipu",
+      },
+    });
+    rerender(
+      <ChatInput
+        isAgentRunning={false}
+        onSend={vi.fn()}
+        onEnqueue={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(getByHint(document.body, /glm-5/)).toHaveTextContent("glm-5.3-flash");
+
+    // 两处都无模型时占位 —
+    useSessionStore.setState({ modelLabel: null });
+    useRuntimeStatusStore.getState().reset();
+    rerender(
+      <ChatInput
+        isAgentRunning={false}
+        onSend={vi.fn()}
+        onEnqueue={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("—")).toBeInTheDocument();
+  });
+
+  it("仅显示 AAW 审批策略，不展示 Agent 模式徽标", () => {
+    useSessionStore.setState({
+      approvalMode: { id: "manual", name: "手动审批" },
+    });
+    render(
+      <ChatInput
+        isAgentRunning={false}
+        onSend={vi.fn()}
+        onEnqueue={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(queryByHint(document.body, "审批模式")).toBeNull();
+    expect(screen.queryByText("手动审批")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "审批默认模式" }),
+    ).toBeInTheDocument();
+  });
+
+  it("发送为圆角主钮：空输入禁用、填写后可用并发出", async () => {
+    const onSend = vi.fn();
+    render(
+      <ChatInput
+        isAgentRunning={false}
+        onSend={onSend}
+        onEnqueue={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    const sendButton = screen.getByRole("button", { name: "发送" });
+    expect(sendButton).toHaveClass(
+      "rounded-lg",
+      "bg-brand",
+      "text-foreground-inverse",
+    );
+    expect(sendButton).toHaveAttribute("data-icon-button-size", "standard");
+    expect(sendButton).toBeDisabled();
+    await userEvent.type(getTextarea(), "悬浮输入");
+    expect(sendButton).toBeEnabled();
+    await userEvent.click(sendButton);
+    expect(onSend).toHaveBeenCalledWith("悬浮输入");
+  });
+
+  it("运行中停止钮为 ZCode 式次级钮", () => {
+    render(
+      <ChatInput
+        isAgentRunning={true}
+        onSend={vi.fn()}
+        onEnqueue={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "停止" })).toHaveClass(
+      "rounded-lg",
+      "bg-raised",
+    );
+  });
+
+  it("附件占位已移除：功能接入前不留可点却无动作的图标", () => {
+    render(
+      <ChatInput
+        isAgentRunning={false}
+        onSend={vi.fn()}
+        onEnqueue={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.queryByLabelText(/附件/)).not.toBeInTheDocument();
+    expect(queryByHint(document.body, /附件/)).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------- 输入历史 / @ 提及
+import { createTestWorkspace } from "../../../helpers/workspace.ts";
+const useWorkspaceStore = createTestWorkspace();
+import type { DocumentFileHost } from "../../../../src/plugins/host/types.ts";
+import { documentFileHost } from "../../../helpers/documents.ts";
+import { createTestDocuments } from "../../../helpers/documents.ts";
+import { createTestProjectWorkbench } from "../../../helpers/projectWorkbench.tsx";
+
+const listWorkspaceFiles = vi.fn<DocumentFileHost["listWorkspaceFiles"]>();
+
+describe("ChatInput 输入历史", () => {
+  it("空输入按 ↑ 回溯最近发送，↑↑ 再上一条，↓ 前进并回到空草稿", async () => {
+    testComposer.history.setScope("reset-test");
+    testComposer.history.setScope(null);
+    const { onSend } = setup();
+    const textarea = getTextarea();
+    await userEvent.type(textarea, "第一条{Enter}");
+    await userEvent.type(textarea, "第二条{Enter}");
+    expect(onSend).toHaveBeenCalledTimes(2);
+
+    await userEvent.type(textarea, "{ArrowUp}");
+    expect(textarea).toHaveValue("第二条");
+    await userEvent.type(textarea, "{ArrowUp}");
+    expect(textarea).toHaveValue("第一条");
+    await userEvent.type(textarea, "{ArrowDown}");
+    expect(textarea).toHaveValue("第二条");
+    await userEvent.type(textarea, "{ArrowDown}");
+    // 退出浏览：回到起步时的草稿（空）
+    expect(textarea).toHaveValue("");
+  });
+
+  it("非空输入且不在浏览态时 ↑ 不劫持（多行编辑自由移动光标）", async () => {
+    const { onSend } = setup();
+    const textarea = getTextarea();
+    await userEvent.type(textarea, "多行内容不劫持");
+    await userEvent.type(textarea, "{ArrowUp}");
+    expect(textarea).toHaveValue("多行内容不劫持");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+});
+
+describe("ChatInput @ 文件提及", () => {
+  const fileCandidates = createStore<FileCandidates | undefined>(
+    () => undefined,
+  );
+  let documents: ReturnType<typeof createTestDocuments>;
+  beforeEach(() => {
+    documents = createTestDocuments({
+      ...documentFileHost,
+      listWorkspaceFiles,
+    });
+    fileCandidates.setState(documents, true);
+  });
+  afterEach(() => {
+    fileCandidates.setState(undefined, true);
+    documents.dispose();
+  });
+  it("输入 @ 弹候选面板，Enter 插入 @路径 并关闭面板", async () => {
+    useWorkspaceStore.setState({ activePath: "D:/dev/demo" });
+    vi.mocked(listWorkspaceFiles).mockResolvedValue([
+      "README.md",
+      "src/app.ts",
+    ]);
+    setup({ fileCandidates });
+    const textarea = getTextarea();
+    await userEvent.type(textarea, "看 @rea");
+    const option = await screen.findByRole("option", { name: /README/ });
+    expect(option).toBeInTheDocument();
+
+    await userEvent.type(textarea, "{Enter}");
+    expect(textarea).toHaveValue("看 @README.md ");
+    expect(
+      screen.queryByRole("listbox", { name: "提及候选" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("文档服务重装时重新获取候选并忽略旧实例的迟到结果", async () => {
+    useWorkspaceStore.setState({ activePath: "D:/dev/demo" });
+    let finish!: (paths: readonly string[]) => void;
+    listWorkspaceFiles.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    setup({ fileCandidates });
+    await userEvent.type(getTextarea(), "@");
+    await screen.findByText("正在读取文件列表…");
+    const replacement = createTestDocuments({
+      ...documentFileHost,
+      listWorkspaceFiles: () => Promise.resolve(["new-instance.md"]),
+    });
+    try {
+      act(() => {
+        documents.dispose();
+        fileCandidates.setState(replacement, true);
+      });
+      expect(
+        await screen.findByRole("option", { name: /new-instance\.md/ }),
+      ).toBeInTheDocument();
+      await act(() => {
+        finish(["retired-instance.md"]);
+        return Promise.resolve();
+      });
+      expect(
+        screen.queryByRole("option", { name: /retired-instance\.md/ }),
+      ).toBeNull();
+    } finally {
+      act(() => fileCandidates.setState(undefined, true));
+      replacement.dispose();
+      finish([]);
+    }
+  });
+
+  it("无匹配显示空态提示，Esc 关闭面板", async () => {
+    useWorkspaceStore.setState({ activePath: "D:/dev/demo" });
+    vi.mocked(listWorkspaceFiles).mockResolvedValue(["README.md"]);
+    setup({ fileCandidates });
+    const textarea = getTextarea();
+    await userEvent.type(textarea, "@zzz");
+    expect(
+      await screen.findByText("没有匹配的文件或 skill"),
+    ).toBeInTheDocument();
+    await userEvent.type(textarea, "{Escape}");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("面板内 ↑↓ 移动选中项（aria-selected 跟随）", async () => {
+    useWorkspaceStore.setState({ activePath: "D:/dev/demo" });
+    vi.mocked(listWorkspaceFiles).mockResolvedValue([
+      "README.md",
+      "src/app.ts",
+      "docs/guide.md",
+    ]);
+    setup({ fileCandidates });
+    const textarea = getTextarea();
+    await userEvent.type(textarea, "@");
+    const options = await screen.findAllByRole("option");
+    expect(options).toHaveLength(3);
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
+
+    await userEvent.type(textarea, "{ArrowDown}");
+    expect(options[1]).toHaveAttribute("aria-selected", "true");
+    await userEvent.type(textarea, "{ArrowUp}");
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
+  });
+});
+
+// ---------------------------------------------------------------- 草稿持久化（M1）
+describe("ChatInput 草稿按（工作区 × 会话）持久化", () => {
+  it("未发送的新会话按项目保留文字，切到历史会话或其他项目不串档", async () => {
+    useSessionStore.setState({ activeSessionId: null });
+    const view = setup();
+    await userEvent.type(getTextarea(), "项目A未发送");
+    act(() => useSessionStore.setState({ activeSessionId: "history" }));
+    expect(getTextarea()).toHaveValue("");
+    await userEvent.type(getTextarea(), "历史会话文字");
+    act(() => {
+      useWorkspaceStore.setState({ activePath: "D:/dev/other" });
+      useSessionStore.setState({ activeSessionId: null });
+    });
+    expect(getTextarea()).toHaveValue("");
+    await userEvent.type(getTextarea(), "项目B未发送");
+    act(() => useWorkspaceStore.setState({ activePath: "D:/dev/demo" }));
+    expect(getTextarea()).toHaveValue("项目A未发送");
+    await userEvent.type(getTextarea(), "{Enter}");
+    expect(view.onSend).toHaveBeenCalledWith("项目A未发送");
+    act(() => useWorkspaceStore.setState({ activePath: "D:/dev/other" }));
+    expect(getTextarea()).toHaveValue("项目B未发送");
+    act(() => useWorkspaceStore.setState({ activePath: "D:/dev/demo" }));
+    expect(getTextarea()).toHaveValue("");
+  });
+
+  beforeEach(() => {
+    useWorkspaceStore.setState({ activePath: "D:/dev/demo" });
+    useSessionStore.setState({ activeSessionId: "s-1" });
+  });
+
+  it("草稿落盘；重挂载恢复；发送后存稿清空", async () => {
+    const first = setup();
+    await userEvent.type(getTextarea(), "写到一半的");
+    first.unmount();
+
+    const second = setup();
+    expect(getTextarea()).toHaveValue("写到一半的");
+    await userEvent.type(getTextarea(), "{Enter}");
+    expect(second.onSend).toHaveBeenCalledWith("写到一半的");
+    expect(getTextarea()).toHaveValue("");
+    second.unmount();
+
+    // 发送即清存稿：再挂载不再恢复
+    setup();
+    expect(getTextarea()).toHaveValue("");
+  });
+
+  it("切换会话档位：各会话草稿互不串档", async () => {
+    const first = setup();
+    await userEvent.type(getTextarea(), "会话一草稿");
+    first.unmount();
+
+    useSessionStore.setState({ activeSessionId: "s-2" });
+    const second = setup();
+    expect(getTextarea()).toHaveValue("");
+    second.unmount();
+
+    useSessionStore.setState({ activeSessionId: "s-1" });
+    setup();
+    expect(getTextarea()).toHaveValue("会话一草稿");
+  });
+});
+
+// ---------------------------------------------------------------- Slash 命令面板（M6）
+
+describe("ChatInput slash 命令面板", () => {
+  let skills: ReturnType<typeof createTestSkills>;
+  let skillWorkbench: ReturnType<typeof skillsWorkbenchFixture>;
+  let documents: ReturnType<typeof createTestDocuments>;
+  beforeEach(() => {
+    skills = createTestSkills();
+    skillWorkbench = skillsWorkbenchFixture(skills);
+    skillWorkbench.workbench.navigation
+      .getState()
+      .openView("session", "D:/slash");
+    documents = createTestDocuments({
+      ...documentFileHost,
+      listWorkspaceFiles,
+    });
+    useSessionStore.getState().clear();
+    useWorkbenchUiStore.setState({
+      overlay: null,
+    });
+    useRuntimeStatusStore.getState().reset();
+  });
+  afterEach(async () => {
+    documents.dispose();
+    skillWorkbench.dispose();
+    await skills.dispose();
+  });
+
+  // 「工作流入口」分组与 /sr 向导定位随旧 workflow 状态模型退役（ADR 024：
+  // 启动改由工作流面板的启动器承担），本组只覆盖命令与 Skills。
+  it("行首 / 弹面板（命令/Skills 分组）；Enter 执行 /diagnostics 并移除 token", async () => {
+    useRuntimeStatusStore.setState({
+      runtime: {
+        ...useRuntimeStatusStore.getState().runtime,
+        skillNames: ["aaw-workflow"],
+        skillInvocations: {
+          "aaw-workflow": "请使用 skill「aaw-workflow」来处理这次任务",
+        },
+      },
+    });
+    setup({ skills: skillWorkbench, openDiagnostics });
+    const textarea = getTextarea();
+    await userEvent.type(textarea, "/");
+    // 空查询：命令与 Skills 分组齐全
+    const panel = await screen.findByRole("listbox", { name: "命令面板" });
+    expect(panel.textContent).toContain("命令");
+    expect(panel.textContent).toContain("Skills");
+    act(skillWorkbench.release);
+    expect(panel).not.toHaveTextContent("aaw-workflow");
+    expect(panel).toHaveTextContent("命令");
+    // 过滤到 diagnostics
+    await userEvent.type(textarea, "dia");
+    expect(panel).toHaveTextContent("/diagnostics");
+
+    await userEvent.type(textarea, "{Enter}");
+    // 诊断单独打开，不阻挡主窗口操作。
+    expect(openDiagnostics).toHaveBeenCalled();
+    expect(useWorkbenchUiStore.getState().overlay).not.toBe("settings");
+    // action 执行后 /token 从草稿移除
+    expect(textarea).toHaveValue("");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("行中 / 不触发；顿号行首归一触发", async () => {
+    setup();
+    const textarea = getTextarea();
+    await userEvent.type(textarea, "看 /cl");
+    expect(
+      screen.queryByRole("listbox", { name: "命令面板" }),
+    ).not.toBeInTheDocument();
+    await userEvent.clear(textarea);
+    await userEvent.type(textarea, "、");
+    expect(
+      await screen.findByRole("listbox", { name: "命令面板" }),
+    ).toBeInTheDocument();
+  });
+
+  it("/clear 清空会话条目", async () => {
+    useSessionStore.getState().beginTurn("待清空的消息");
+    const fixture = createTestProjectWorkbench({
+      conversation: { clear: () => useSessionStore.getState().clear() },
+    });
+    try {
+      setup({ documentsWorkbench: fixture });
+      await userEvent.type(getTextarea(), "/clear{Enter}");
+      expect(useSessionStore.getState().items).toHaveLength(0);
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it("iCode 的技能候选保留会话来源，选中后显示引用并发送斜杠命令", async () => {
+    useSessionStore.setState({ agentKey: JSON.stringify(["chrys"]) });
+    useRuntimeStatusStore.setState({
+      runtime: {
+        ...useRuntimeStatusStore.getState().runtime,
+        skillNames: ["aaw-workflow"],
+        skillInvocations: {
+          "aaw-workflow": "请使用 skill「aaw-workflow」来处理这次任务",
+        },
+      },
+    });
+    const listDescriptions = vi.fn(() =>
+      Promise.resolve({
+        descriptions: new Map([
+          ["aaw-workflow", "从需求澄清开始，按阶段执行工作流"],
+          ["local-only", "没有被本次会话上报"],
+        ]),
+      }),
+    );
+    const resolveSlashSkills = vi.fn(() => ({ listDescriptions }));
+    const { onSend } = setup({
+      skills: skillWorkbench,
+      openDiagnostics,
+      resolveSlashSkills,
+      skillWorkspace: "D:/demo",
+    });
+    const textarea = getTextarea();
+    await userEvent.type(textarea, "/aaw");
+    const panel = await screen.findByRole("listbox", { name: "命令面板" });
+    expect(panel).toHaveTextContent("Skills");
+    expect(panel).toHaveTextContent("aaw-workflow");
+    expect(
+      await screen.findByText("从需求澄清开始，按阶段执行工作流"),
+    ).toBeInTheDocument();
+    expect(panel).not.toHaveTextContent("关联技能");
+    expect(listDescriptions).toHaveBeenCalledWith("D:/demo");
+    // 选中 skill 项：面板首项此时应为 skill（aaw 无静态命令命中）
+    await userEvent.type(textarea, "{Enter}");
+    const reference = screen.getByText("aaw-workflow", {
+      exact: true,
+    }).parentElement;
+    expect(reference?.querySelector("svg")).toBeInTheDocument();
+    expect(reference?.querySelector("button")).toBeNull();
+    expect(reference?.querySelector(".bg-clip-text")).toBeInTheDocument();
+    expect(textarea.value).toBe("");
+    expect(resolveSlashSkills).toHaveBeenCalledWith("chrys");
+    await userEvent.type(textarea, "{Backspace}");
+    expect(
+      screen.queryByText("aaw-workflow", { exact: true }),
+    ).not.toBeInTheDocument();
+    await userEvent.type(textarea, "/aaw{Enter}");
+    await userEvent.type(textarea, "{Enter}");
+    expect(onSend).toHaveBeenCalledWith("/aaw-workflow", undefined, {
+      skillReferences: [
+        { name: "aaw-workflow", command: "aaw-workflow", offset: 0 },
+      ],
+    });
+  });
+
+  it("CodeAgent 按本地文件列出技能，关联后显示图标并发送原生命令", async () => {
+    const project = "D:/demo";
+    const source = "D:/home/.cac/skills";
+    const projectSource = project + "/.cac/skills";
+    const otherSource = "D:/other/.cac/skills";
+    const global = {
+      name: "review",
+      path: source + "/review",
+      realPath: source + "/review",
+      source,
+      description: "全局检查",
+      preview: "",
+      kind: "directory" as const,
+      revision: "r",
+      isLink: false,
+      status: "正常",
+      usageCount: null,
+    };
+    const catalog: SkillCatalog = {
+      profile: null,
+      profiles: [],
+      trash: [],
+      warnings: [],
+      sources: [source, projectSource, otherSource].map((path) => ({
+        path,
+        label: ".cac",
+        kind: "directory",
+        enabled: true,
+        canImport: true,
+        project:
+          path === source
+            ? null
+            : path === projectSource
+              ? project
+              : "D:/other",
+      })),
+      entries: [
+        global,
+        {
+          ...global,
+          path: projectSource + "/project-review",
+          realPath: projectSource + "/project-review",
+          source: projectSource,
+          description: "项目检查",
+        },
+        {
+          ...global,
+          name: "alias",
+          path: projectSource + "/alias",
+          source: projectSource,
+        },
+        {
+          ...global,
+          name: "broken",
+          path: source + "/broken",
+          status: "YAML 格式错误",
+        },
+        {
+          ...global,
+          name: "other",
+          path: otherSource + "/other",
+          source: otherSource,
+        },
+      ],
+    };
+    const list = vi.fn((path: string | null) =>
+      Promise.resolve(slashSkillCatalog(catalog, path)),
+    );
+    useWorkspaceStore.setState({ activePath: project });
+    useSessionStore.setState({ agentKey: JSON.stringify(["codeagent"]) });
+    useRuntimeStatusStore.setState({
+      availableCommands: [
+        "REVIEW",
+        "project-review",
+        "alias",
+        "broken",
+        "review-all",
+      ].map((name) => ({
+        name,
+        description: null,
+        inputHint: null,
+      })),
+    });
+    const { onSend } = setup({
+      resolveSlashSkills: () => ({ listCatalog: list }),
+    });
+    await userEvent.type(getTextarea(), "/rev");
+    await screen.findByRole("option", { name: /项目检查/ });
+    expect(screen.getByText("全局技能")).toBeInTheDocument();
+    expect(screen.getByText("当前项目技能")).toBeInTheDocument();
+    expect(screen.getAllByRole("option")).toHaveLength(3);
+    expect(screen.getByText("/review-all")).toBeInTheDocument();
+    await userEvent.clear(getTextarea());
+    await userEvent.type(getTextarea(), "/");
+    await screen.findByText("项目检查");
+    expect(
+      screen.queryByText(/broken|\/alias|\/project-review/),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("other")).not.toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByRole("option", { name: /项目检查/ }));
+    const reference = screen.getByText("review", { exact: true }).parentElement;
+    expect(reference?.querySelector("svg")).toBeInTheDocument();
+    expect(getTextarea()).toHaveValue("");
+
+    await userEvent.type(
+      getTextarea(),
+      "检查这次改动{Shift>}{Enter}{/Shift}核对结果{Enter}",
+    );
+    expect(onSend).toHaveBeenCalledWith(
+      "/REVIEW 检查这次改动\n核对结果",
+      undefined,
+      {
+        skillReferences: [
+          {
+            name: "review",
+            command: "REVIEW",
+            path: projectSource + "/project-review/SKILL.md",
+            offset: 0,
+          },
+        ],
+      },
+    );
+    expect(
+      screen.queryByText("review", { exact: true }),
+    ).not.toBeInTheDocument();
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(list).toHaveBeenLastCalledWith(project);
+  });
+
+  it("@ 多源：skill 名与文件同面板分组出现", async () => {
+    useWorkspaceStore.setState({ activePath: "D:/dev/demo" });
+    useRuntimeStatusStore.setState({
+      runtime: {
+        ...useRuntimeStatusStore.getState().runtime,
+        skillNames: ["aaw-workflow"],
+        skillInvocations: {
+          "aaw-workflow": "请使用 skill「aaw-workflow」来处理这次任务",
+        },
+      },
+    });
+    vi.mocked(listWorkspaceFiles).mockResolvedValue(["aaw-config.ts"]);
+    const fileCandidates = createStore<FileCandidates | undefined>(
+      () => documents,
+    );
+    setup({ skills: skillWorkbench, fileCandidates });
+    const textarea = getTextarea();
+    await userEvent.type(textarea, "@aaw");
+    const options = await screen.findAllByRole("option");
+    const labels = options.map((option) => option.textContent ?? "");
+    expect(labels.some((l) => l.includes("aaw-config.ts"))).toBe(true);
+    expect(labels.some((l) => l.includes("aaw-workflow"))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------- 审批默认模式切换器（重构后）
+describe("ChatInput 审批默认模式切换器", () => {
+  beforeEach(() => {
+    projectPreferences.setApprovalMode("ask");
+  });
+
+  it("芯片显示当前策略；菜单两项（无自动拒绝）即时切换", async () => {
+    setup();
+    expect(
+      screen.getByRole("button", { name: "审批默认模式" }),
+    ).toHaveTextContent("每次询问");
+    await userEvent.click(screen.getByRole("button", { name: "审批默认模式" }));
+    const menu = screen.getByRole("menu", { name: "审批默认模式" });
+    // ZCode 式富行：标题 + 一句描述
+    expect(menu).toHaveTextContent("每次询问");
+    expect(menu).toHaveTextContent("收到权限请求时，由你确认。");
+    expect(menu).toHaveTextContent("自动放行");
+    expect(menu).toHaveTextContent("自动批准可放行的请求，其余仍询问。");
+    // 「自动拒绝」已下线：菜单不再出现
+    expect(menu).not.toHaveTextContent("自动拒绝");
+
+    await userEvent.click(screen.getByRole("menuitem", { name: /自动放行/ }));
+    expect(projectPreferences.getState().approvalMode).toBe("auto-allow");
+    expect(
+      screen.queryByRole("menu", { name: "审批默认模式" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "审批默认模式" }),
+    ).toHaveTextContent("自动放行");
+  });
+});
+
+it("上键只读当前会话回放，切换后重置浏览，重开后仍可恢复", () => {
+  useWorkspaceStore.setState({ activePath: "D:/history-project" });
+  const item = (id: string, text: string) => ({
+    kind: "user" as const,
+    id,
+    text,
+    createdAt: "2026-11-04T00:00:00Z",
+  });
+  useSessionStore.setState({
+    activeSessionId: "A",
+    items: [item("a", "A历史")],
+  });
+  const view = setup();
+  fireEvent.keyDown(getTextarea(), { key: "ArrowUp" });
+  expect(getTextarea()).toHaveValue("A历史");
+  act(() =>
+    useSessionStore.setState({
+      activeSessionId: "B",
+      items: [item("b", "B历史")],
+    }),
+  );
+  expect(getTextarea()).toHaveValue("");
+  fireEvent.keyDown(getTextarea(), { key: "ArrowUp" });
+  expect(getTextarea()).toHaveValue("B历史");
+  view.unmount();
+  testComposer.history.setScope("reset-test");
+  testComposer.history.setScope(null);
+  setup();
+  fireEvent.change(getTextarea(), { target: { value: "" } });
+  fireEvent.keyDown(getTextarea(), { key: "ArrowUp" });
+  expect(getTextarea()).toHaveValue("B历史");
+  act(() => useSessionStore.setState({ activeSessionId: null, items: [] }));
+  expect(getTextarea()).toHaveValue("");
+  fireEvent.keyDown(getTextarea(), { key: "ArrowUp" });
+  expect(getTextarea()).toHaveValue("");
+});
+
+describe("图片粘贴和拖入", () => {
+  afterEach(() => useSessionStore.setState({ supportsImages: false }));
+  it("仅有图片时可以发送", async () => {
+    useSessionStore.setState({ supportsImages: true });
+    const { onSend } = setup();
+    await act(async () => {});
+    fireEvent.paste(getTextarea(), { clipboardData: { files: [new File(["image"], "shot.png", { type: "image/png" })] } });
+    await screen.findByRole("button", { name: "预览 shot.png" });
+    fireEvent.keyDown(getTextarea(), { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith("", [expect.objectContaining({ type: "image", mimeType: "image/png" })]);
+  });
+  it("粘贴图片显示缩略图，随消息发送且清空附件", async () => {
+    useSessionStore.setState({ supportsImages: true });
+    const { onSend } = setup();
+    await act(async () => {});
+    expect(document.querySelector('input[type="file"]')).toBeNull();
+    fireEvent.paste(getTextarea(), {
+      clipboardData: {
+        files: [new File(["image"], "shot.png", { type: "image/png" })],
+      },
+    });
+    expect(
+      await screen.findByRole("button", { name: "预览 shot.png" }),
+    ).toBeInTheDocument();
+    await userEvent.type(getTextarea(), "看看{Enter}");
+    expect(onSend).toHaveBeenCalledWith("看看", [
+      expect.objectContaining({ type: "image", mimeType: "image/png" }),
+    ]);
+    expect(screen.queryByRole("button", { name: "预览 shot.png" })).toBeNull();
+  });
+  it("不支持图片时粘贴明确提示，不添加附件", async () => {
+    useSessionStore.setState({ supportsImages: false });
+    setup();
+    await act(async () => {});
+    fireEvent.paste(getTextarea(), {
+      clipboardData: {
+        files: [new File(["image"], "shot.png", { type: "image/png" })],
+      },
+    });
+    expect(
+      await screen.findByText("当前 Agent 不支持图片"),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "预览 shot.png" })).toBeNull();
+  });
+  it("拖入多图可逐个移除，超过五张整批拒绝", async () => {
+    useSessionStore.setState({ supportsImages: true });
+    setup();
+    await act(async () => {});
+    const files = Array.from(
+      { length: 6 },
+      (_, i) => new File(["image"], `${i}.png`, { type: "image/png" }),
+    );
+    fireEvent.drop(getTextarea(), { dataTransfer: { files } });
+    expect(
+      await screen.findByText("每条消息最多添加 5 张图片"),
+    ).toBeInTheDocument();
+    fireEvent.drop(getTextarea(), {
+      dataTransfer: { files: files.slice(0, 2) },
+    });
+    await screen.findByRole("button", { name: "预览 1.png" });
+    await userEvent.click(screen.getByRole("button", { name: "移除 0.png" }));
+    expect(screen.queryByRole("button", { name: "预览 0.png" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "预览 1.png" }),
+    ).toBeInTheDocument();
+  });
+});
+
+it("旧版当前 Agent 的草稿完整迁入项目档位，后续切换不恢复其他旧副本", async () => {
+  const project = "D:/legacy-agent-draft";
+  const from = legacyNewDraftScopeKey(project, "legacy-a");
+  const scope = draftScopeKey(project, null, "legacy-a");
+  writeDraft(from, "旧版未发送文字");
+  writeDraft(
+    legacyNewDraftScopeKey(project, "legacy-b"),
+    "不能复活的旧 B 草稿",
+  );
+  annotationDrafts.put(from, [
+    {
+      id: "legacy-comment",
+      project,
+      path: `${project}/a.md`,
+      source: false,
+      quote: "原文",
+      prefix: "",
+      suffix: "",
+      offset: 0,
+      revision: "r1",
+      comment: "旧版批注",
+    },
+  ]);
+  await testComposer.imageDrafts.save({
+    [from]: [
+      {
+        name: "old.png",
+        block: { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+      },
+    ],
+  });
+  useWorkspaceStore.setState({ activePath: project });
+  useSessionStore.setState({
+    agentKey: "legacy-a",
+    activeSessionId: null,
+    supportsImages: true,
+  });
+  const view = setup();
+  expect(getTextarea()).toHaveValue("旧版未发送文字");
+  expect(
+    await screen.findByRole("button", { name: "预览 old.png" }),
+  ).toBeInTheDocument();
+  await waitFor(async () => {
+    expect((await testComposer.imageDrafts.load())[scope]).toHaveLength(1);
+    expect((await testComposer.imageDrafts.load())[from]).toBeUndefined();
+    expect(localStorage.getItem(`${scope}/project-draft-migration-v1`)).toBe(
+      "done",
+    );
+  });
+  expect(readDraft(from)).toBe("");
+  expect(
+    annotationDrafts.getState().drafts[scope]?.annotations[0]?.comment,
+  ).toBe("旧版批注");
+  expect(annotationDrafts.getState().drafts[from]?.annotations).toHaveLength(0);
+  view.unmount();
+  writeDraft(scope, "");
+  await testComposer.imageDrafts.save({});
+  useSessionStore.setState({ agentKey: "legacy-b" });
+  setup();
+  expect(getTextarea()).toHaveValue("");
+});
+
+it("取回图片和文字时保留已有草稿，会话切换隔离附件", async () => {
+  useSessionStore.setState({
+    supportsImages: true,
+    activeSessionId: "image-a",
+  });
+  setup();
+  await act(async () => {});
+  await userEvent.type(getTextarea(), "已有草稿");
+  act(() => {
+    expect(
+      testComposer.prefill("失败消息", [
+        { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+      ]),
+    ).toBe(true);
+  });
+  expect(getTextarea()).toHaveValue("已有草稿\n\n失败消息");
+  expect(
+    screen.getByRole("button", { name: "预览 图片 1" }),
+  ).toBeInTheDocument();
+  act(() => useSessionStore.setState({ activeSessionId: "image-b" }));
+  expect(screen.queryByRole("button", { name: "预览 图片 1" })).toBeNull();
+  act(() => useSessionStore.setState({ activeSessionId: "image-a" }));
+  expect(
+    screen.getByRole("button", { name: "预览 图片 1" }),
+  ).toBeInTheDocument();
+});
+
+it("队列编辑只在草稿和附件为空时回填", async () => {
+  useSessionStore.setState({
+    supportsImages: true,
+    activeSessionId: "queue-edit",
+  });
+  setup();
+  await act(async () => {});
+  await userEvent.type(getTextarea(), "现有草稿");
+  act(() =>
+    expect(testComposer.prefill("排队消息", [], { ifEmpty: true })).toBe(false),
+  );
+  expect(getTextarea()).toHaveValue("现有草稿");
+  await userEvent.clear(getTextarea());
+  act(() =>
+    expect(
+      testComposer.prefill(
+        "",
+        [{ type: "image", mimeType: "image/png", data: "aW1hZ2U=" }],
+        { ifEmpty: true },
+      ),
+    ).toBe(true),
+  );
+  act(() =>
+    expect(testComposer.prefill("排队消息", [], { ifEmpty: true })).toBe(false),
+  );
+  expect(getTextarea()).toHaveValue("");
+});
+
+it("草稿 A→B→A 保留文字图片和批注，等待和图片不兼容时可编辑但不发送", async () => {
+  const project = "D:/switch-agent-composer";
+  useWorkspaceStore.setState({ activePath: project });
+  useSessionStore.setState({
+    agentKey: "agent-a",
+    activeSessionId: null,
+    supportsImages: true,
+  });
+  const scope = draftScopeKey(project, null, "agent-a");
+  const send = vi.fn();
+  const props = {
+    isAgentRunning: false,
+    onSend: send,
+    onEnqueue: vi.fn(),
+    onCancel: vi.fn(),
+  };
+  const view = render(<ChatInput {...props} />);
+  await act(async () => {});
+  act(() => {
+    testComposer.prefill("未发送文字", [
+      { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+    ]);
+    annotationDrafts.put(scope, [
+      {
+        id: "switch-comment",
+        project,
+        path: `${project}/a.md`,
+        source: false,
+        quote: "原文",
+        prefix: "",
+        suffix: "",
+        offset: 0,
+        revision: "r1",
+        comment: "保留批注",
+      },
+    ]);
+  });
+  expect(
+    screen.getByRole("button", { name: "预览 图片 1" }),
+  ).toBeInTheDocument();
+  act(() =>
+    useSessionStore.setState({ agentKey: "agent-b", supportsImages: false }),
+  );
+  view.rerender(<ChatInput {...props} sendDisabled={true} />);
+  expect(getTextarea()).toBeEnabled();
+  fireEvent.change(getTextarea(), {
+    target: { value: "未发送文字，继续编辑" },
+  });
+  fireEvent.keyDown(getTextarea(), { key: "Enter" });
+  expect(send).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+  view.rerender(<ChatInput {...props} sendDisabled={false} />);
+  expect(screen.getByRole("alert")).toHaveTextContent("请移除图片或切换");
+  fireEvent.keyDown(getTextarea(), { key: "Enter" });
+  expect(send).not.toHaveBeenCalled();
+  expect(getTextarea()).toHaveValue("未发送文字，继续编辑");
+  expect(
+    annotationDrafts.getState().drafts[scope]?.annotations[0]?.comment,
+  ).toBe("保留批注");
+  act(() =>
+    useSessionStore.setState({ agentKey: "agent-a", supportsImages: true }),
+  );
+  expect(getTextarea()).toHaveValue("未发送文字，继续编辑");
+  expect(screen.getByRole("button", { name: "发送" })).toBeEnabled();
+  expect(
+    screen.getByRole("button", { name: "预览 图片 1" }),
+  ).toBeInTheDocument();
+  expect(readDraft(scope)).toBe("未发送文字，继续编辑");
+  await waitFor(async () =>
+    expect((await testComposer.imageDrafts.load())[scope]).toHaveLength(1),
+  );
+  const draftKeys = Object.keys(localStorage).filter(
+    (key) => key.startsWith("aaw-desktop/draft/") && key.endsWith("/__new__"),
+  );
+  expect(draftKeys).toEqual([scope]);
+  view.unmount();
+  render(<ChatInput {...props} />);
+  expect(getTextarea()).toHaveValue("未发送文字，继续编辑");
+  expect(
+    await screen.findByRole("button", { name: "预览 图片 1" }),
+  ).toBeInTheDocument();
+});
+
+const annotationOwner = createAnnotationDraftStore(webviewStorage);
+const annotationDrafts = annotationOwner.service;
+vi.mock(
+  "../../../../src/plugins/project/ui/bindings/workspaceView.ts",
+  async () => {
+    const { workspaceViewFixture } =
+      await import("../../../helpers/workspace.ts");
+    return workspaceViewFixture(() => useWorkspaceStore);
+  },
+);
+
+vi.mock(
+  import("../../../../src/plugins/project/ui/bindings/annotationDraftView.ts"),
+  async (original) => ({
+    ...(await original()),
+    useAnnotationDraftService: () => annotationOwner.composer,
+  }),
+);
+
+vi.mock(
+  "../../../../src/plugins/project/ui/bindings/conversationView.ts",
+  async () => {
+    const { conversationViewFixture } =
+      await import("../../../helpers/foreground.ts");
+    return conversationViewFixture();
+  },
+);
+
+vi.mock(
+  "../../../../src/plugins/project/ui/bindings/composerView.ts",
+  async () => {
+    const { testComposer } = await import("../../../helpers/composer.ts");
+    return { useProjectComposer: () => testComposer };
+  },
+);
+
+vi.mock(
+  import("../../../../src/plugins/workbench/ui/bindings/layoutView.ts"),
+  async (original) => {
+    const { layoutViewFixture } = await import("../../../helpers/layout.ts");
+    return { ...(await original()), ...layoutViewFixture() };
+  },
+);
+
+
+it("按设置直接引导，发送区不显示提示、模式选择或首次确认", async () => {
+  projectPreferences.setAgentInteraction("codeagent", "steer");
+  useSessionStore.setState({ supportsSteer: true, steerAgentId: "codeagent", activeSessionId: "steer-ui", turnState: "running", isAwaitingUser: false });
+  const steer = vi.fn(() => true);
+  const enqueue = vi.fn();
+  render(<ChatInput isAgentRunning onSend={vi.fn()} onEnqueue={enqueue} onCancel={vi.fn()} onSteer={steer} />, { wrapper: PreferencesWrapper });
+  const input = screen.getByRole("textbox", { name: "消息输入框" });
+  await userEvent.type(input, "第一条补充{Enter}");
+  await userEvent.type(input, "第二条补充");
+  await userEvent.click(screen.getByRole("button", { name: "发送" }));
+  expect(steer.mock.calls).toEqual([["第一条补充"], ["第二条补充"]]);
+  expect(enqueue).not.toHaveBeenCalled();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "交互行为" })).not.toBeInTheDocument();
+  expect(screen.queryByText(/会中断当前执行/)).not.toBeInTheDocument();
+});
+
+it("等待审批时禁用引导提交", async () => {
+  projectPreferences.setAgentInteraction("codeagent", "steer");
+  useSessionStore.setState({ supportsSteer: true, steerAgentId: "codeagent", activeSessionId: "steer-ui", turnState: "running", isAwaitingUser: true });
+  const steer = vi.fn();
+  render(<ChatInput isAgentRunning onSend={vi.fn()} onEnqueue={vi.fn()} onCancel={vi.fn()} onSteer={steer} />, { wrapper: PreferencesWrapper });
+  await userEvent.type(screen.getByRole("textbox", { name: "消息输入框" }), "等待{Enter}");
+  expect(steer).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+  expect(screen.getByRole("textbox", { name: "消息输入框" })).toHaveValue("等待");
+});
+
+it("会话未取得 ID 时可提交补充，审批中断后保留队列", async () => {
+  useWorkspaceStore.setState({ activePath: "D:/new-steer-session" });
+  useSessionStore.setState({
+    supportsSteer: true, steerAgentId: "codeagent", agentKey: "codeagent",
+    activeSessionId: null, turnState: "running", isAwaitingUser: false,
+    isConnecting: false, queuedPrompts: [], activeSteerIds: [],
+  });
+  projectPreferences.setAgentInteraction("codeagent", "steer");
+  const onSteer = vi.fn(() => true);
+  const onEnqueue = vi.fn();
+  const input = render(
+    <ChatInput isAgentRunning onSend={vi.fn()} onEnqueue={onEnqueue} onCancel={vi.fn()} onSteer={onSteer} />,
+    { wrapper: PreferencesWrapper },
+  );
+  try {
+    await userEvent.type(getTextarea(), "补充{Enter}");
+    expect(onSteer).toHaveBeenCalledExactlyOnceWith("补充");
+    expect(onEnqueue).not.toHaveBeenCalled();
+    expect(getTextarea()).toHaveValue("");
+    act(() => useSessionStore.setState({
+      isAwaitingUser: true,
+      queuedPrompts: [{ id: "approval", text: "补充", attachments: [], steerDelivery: "pending", steerQuiet: true }],
+    }));
+    expect(getTextarea()).toHaveValue("");
+    expect(useSessionStore.getState().queuedPrompts).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "发送" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  } finally {
+    input.unmount();
+    useSessionStore.setState({ queuedPrompts: [], activeSteerIds: [], isAwaitingUser: false });
+  }
+});
+
+it("引导投递结果未知时保留原有草稿，且不回填、不提示或重发", async () => {
+  const project = "D:/steer-recovery";
+  useWorkspaceStore.setState({ activePath: project });
+  useSessionStore.setState({
+    activeSessionId: "recover",
+    agentKey: "codeagent",
+    supportsImages: true,
+    isAwaitingUser: false,
+    queuedPrompts: [],
+    activeSteerIds: [],
+    isConnecting: false,
+    steerPhase: "cancelling",
+  });
+  projectPreferences.setAgentInteraction("codeagent", "steer");
+  const onSend = vi.fn();
+  const mount = () => render(
+    <ChatInput isAgentRunning={false} onSend={onSend} onEnqueue={vi.fn()} onCancel={vi.fn()} onSteer={vi.fn()} />,
+    { wrapper: PreferencesWrapper },
+  );
+  let input = mount();
+  try {
+    await userEvent.type(getTextarea(), "现有内容");
+    act(() => useSessionStore.setState({
+      queuedPrompts: [{
+        id: "recovered",
+        text: "未确认的补充",
+        attachments: [{ type: "image", mimeType: "image/png", data: "abc" }],
+        steerDelivery: "unknown",
+      }],
+      activeSteerIds: ["recovered"],
+    }));
+    expect(getTextarea()).toHaveValue("现有内容");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText(/正在保存引导|等待当前轮停止|稍后发送引导/)).not.toBeInTheDocument();
+    act(() => useSessionStore.setState({ activeSteerIds: [], steerPhase: undefined }));
+    expect(getTextarea()).toHaveValue("现有内容");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "图片 1" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    input.unmount();
+    input = mount();
+    await waitFor(() => expect(getTextarea()).toHaveValue("现有内容"));
+    expect(screen.queryByRole("img", { name: "图片 1" })).not.toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
+  } finally {
+    input.unmount();
+    useSessionStore.setState({ queuedPrompts: [], activeSteerIds: [], steerPhase: undefined });
+  }
+});

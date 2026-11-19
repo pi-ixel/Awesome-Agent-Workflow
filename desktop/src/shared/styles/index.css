@@ -10,6 +10,133 @@
 /* Tailwind 扫描 streamdown 产物里的类名(data-streamdown 结构使用工具类) */
 @source "../../../node_modules/streamdown/dist";
 
+/* Shared elevation for Desktop dialogs, menus, and other floating surfaces. */
+@theme inline {
+  --shadow-floating: var(--shadow-md);
+}
+
+[data-icon-hover-button][data-icon-button-size] {
+  --icon-button-box: 28px;
+  --icon-button-glyph: 16;
+  inline-size: var(--icon-button-box);
+  block-size: var(--icon-button-box);
+  min-inline-size: var(--icon-button-box);
+  min-block-size: var(--icon-button-box);
+  padding: 0;
+}
+
+[data-icon-hover-button][data-icon-button-size="compact"] {
+  --icon-button-box: 24px;
+  --icon-button-glyph: 14;
+}
+
+[data-icon-hover-button][data-icon-button-size="dialog"] {
+  --icon-button-box: 32px;
+}
+
+[data-icon-hover-button][data-icon-button-size="rail"] {
+  --icon-button-box: 36px;
+  --icon-button-glyph: 18;
+}
+
+[data-icon-hover-button][data-icon-button-size="large"] {
+  --icon-button-box: 40px;
+  --icon-button-glyph: 18;
+}
+
+[data-icon-hover-button][data-icon-button-size="floating"] {
+  --icon-button-box: 48px;
+}
+
+[data-icon-button-size] > .icon-hover-glyph svg {
+  inline-size: calc(var(--ui-icon-unit) * var(--icon-button-glyph));
+  block-size: calc(var(--ui-icon-unit) * var(--icon-button-glyph));
+}
+
+@layer components {
+  [data-icon-hover-button] {
+    display: inline-grid;
+    place-items: center;
+    flex-shrink: 0;
+  }
+
+  .sidebar-account-avatar {
+    color: #393653;
+    background: linear-gradient(150deg, #c8bff0 50%, #9acde2 50%);
+  }
+
+  .icon-hover-glyph {
+    --icon-hover-distance: 2.5px;
+    --icon-hover-duration: 240ms;
+    --icon-hover-scale: 1.09;
+    --icon-hover-x: 0px;
+    --icon-hover-y: calc(-1 * var(--icon-hover-distance));
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    pointer-events: none;
+    translate: 0 0;
+    scale: 1;
+    transition: translate var(--icon-hover-duration) cubic-bezier(.2,.8,.2,1), scale var(--icon-hover-duration) cubic-bezier(.2,.8,.2,1);
+  }
+
+  .icon-hover-glyph[data-icon-hover-placement="left"] {
+    --icon-hover-x: var(--icon-hover-distance);
+    --icon-hover-y: 0px;
+  }
+
+  .icon-hover-glyph[data-icon-hover-placement="right"] {
+    --icon-hover-x: calc(-1 * var(--icon-hover-distance));
+    --icon-hover-y: 0px;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    [data-icon-hover-button]:focus-visible:not(:disabled):not([aria-disabled="true"]) > .icon-hover-glyph {
+      translate: var(--icon-hover-x) var(--icon-hover-y);
+      scale: var(--icon-hover-scale);
+    }
+
+    @media (hover: hover) and (pointer: fine) {
+      [data-icon-hover-button]:hover:not(:disabled):not([aria-disabled="true"]) > .icon-hover-glyph {
+        translate: var(--icon-hover-x) var(--icon-hover-y);
+        scale: var(--icon-hover-scale);
+      }
+    }
+
+    [data-icon-hover-button]:active:not(:disabled):not([aria-disabled="true"]) > .icon-hover-glyph {
+      translate: 0 0;
+      scale: .97;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .icon-hover-glyph { transition: none; }
+  }
+
+  .ui-icon {
+    inline-size: var(--ui-font-size);
+    block-size: var(--ui-font-size);
+    flex-shrink: 0;
+  }
+
+  .hint-surface {
+    @apply rounded-lg border border-line-strong bg-surface text-ink shadow-floating;
+  }
+}
+
+/* N is the glyph size in CSS pixels at the default 14px interface font. */
+@utility ui-icon-* {
+  inline-size: calc(var(--ui-icon-unit) * --value(integer));
+  block-size: calc(var(--ui-icon-unit) * --value(integer));
+}
+
+@layer base {
+  body {
+    font-size: var(--text-ui-lg);
+  }
+}
+
 /**
  * 原生控件配色与全局滚动条（一次收口，组件不再各自写滚动条样式）：
  *
@@ -71,8 +198,21 @@ html.theme-warm {
 }
 
 /* 会话正文参考 ZCode：透明轨道、圆角滑块；刻度目录自身不露滚动条。 */
+@property --conversation-thumb-opacity {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 100%;
+}
 .conversation-scroll {
   scrollbar-width: auto;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .conversation-scroll {
+    transition: --conversation-thumb-opacity 100ms ease-out;
+  }
+  [data-panel-slide="closing"] .conversation-scroll {
+    --conversation-thumb-opacity: 15%;
+  }
 }
 /* Chromium 的标准 scrollbar-color 会覆盖下方圆角/箭头样式，交回伪元素绘制。 */
 @supports selector(::-webkit-scrollbar) {
@@ -87,7 +227,7 @@ html.theme-warm {
   min-height: 32px;
   border: 3px solid transparent;
   border-radius: 9999px;
-  background: var(--color-line-strong);
+  background: color-mix(in srgb, var(--color-line-strong) var(--conversation-thumb-opacity), transparent);
   background-clip: padding-box;
 }
 .conversation-scroll::-webkit-scrollbar-button {
@@ -158,8 +298,7 @@ html.theme-warm {
  *   暗夜为深底亮字（green/yellow/red/sky 的 950/300~400/700 一族），
  *   浅色为浅底深字（50/700~800/200 一族）；
  * - accent-ink：accent 文字级（暗夜 sky-300 / 暖白 sky-700）——纯
- *   sky-300 在浅底下对比不足，故单列一个随主题取值的文字 token；
- *   accent 实底（bg-sky-600 系）两主题均可读，不设 token。
+ *   sky-300 在浅底下对比不足，故单列一个随主题取值的文字 token。
  *
  * 字号刻度（`--text-*`）同样收在这里（复刻 ZCode 的基准派生方案）：全站
  * 只允许**四档**,且全部从基准变量 `--ui-font-size`（默认 14px,设置页可
@@ -172,8 +311,7 @@ html.theme-warm {
  * | text-sm    | = 基准      | 14px | 主操作字：主按钮                        |
  * | text-title | 基准 +1px   | 15px | 面板标题 / 顶栏标题（密度放宽档）        |
  *
- * 改设置页的「界面字号」即全站联动（只有文字缩放,rem 几何不跟随——
- * 刻意不改根 font-size,理由见 core/uiFontSize）。
+ * 设置页的「界面字号」联动文字和界面图标，rem 布局仍使用浏览器根字号。
  *
  * 之前是 nine 档碎片（9 / 10 / 10.5 / 11 / 11.5 / 12 / 12.5 / 13 / 14），
  * 因为缺刻度，每次「看着差一点」就手写一个 `text-[11.5px]`——感觉每次
@@ -196,6 +334,7 @@ html.theme-warm {
   /* 界面字号基准（复刻 ZCode）：设置页可调 12–20px,默认 14px 与旧固定
      值一致;运行时经 documentElement.style 覆盖（core/uiFontSize） */
   --ui-font-size: 14px;
+  --ui-icon-unit: calc(var(--ui-font-size) / 14);
 
   /* ZCode UI 字号语义；旧工具类暂留，避免影响尚未迁移的组件。 */
   --text-ui-settings-title: calc(var(--ui-font-size) + 10px);
@@ -237,29 +376,33 @@ html.theme-warm {
   --color-surface: #2b2b2b; /* 卡片 / 面板 / 输入卡：Zai dark card */
   --color-raised: #363636; /* 浮起元素 / 行悬停：Zai dark menu-hover / secondary */
 
-  /* 描边（Zai：白 10% 常规 / 15% hover；取叠加后的等效实色） */
-  --color-line: #2e2e2e;
-  --color-line-strong: #3d3d3d;
+  /* 暗夜常态边框统一使用输入框的柔和线色；焦点使用独立颜色。 */
+  --color-line: #484848;
+  --color-line-strong: #484848;
+  --color-control-line: #484848;
+  --color-dialog-line: #484848;
+  --color-focus-ring: #ababab;
+  --color-chart-line: #80beff;
+  --color-annotation-underline: #f5c64b;
 
   /* 选中行 / 激活页签底：Zai 的 selected = 白 10%（中性，无色相） */
   --color-selected: rgb(255 255 255 / 0.1);
 
-  /* 文字五级（Zai dark foreground = neutral-300，沿灰阶下行） */
+  /* 文本层级使用清晰可读的暗色前景。 */
   --color-ink: #d4d4d4; /* 主文字（neutral-300） */
-  --color-ink-soft: #a3a3a3; /* 次级（neutral-400） */
-  --color-ink-mute: #737373; /* 弱化（neutral-500） */
-  --color-ink-faint: #525252; /* 更弱（neutral-600） */
-  --color-ink-ghost: #404040; /* 最弱（neutral-700） */
+  --color-ink-soft: #c2c2c2; /* 次级 */
+  --color-ink-mute: #b0b0b0; /* 弱化 */
+  --color-ink-faint: #ababab; /* 辅助 */
+  --color-ink-ghost: #ababab; /* 占位 */
 
-  /* diff 饱和绿红（ZCode --color-diff-added/removed zai-dark 原值
-     styles.css:793/:795）：diffstat 与 diff 行底/行号/±计数同源 */
-  --color-diff-added: #46bf72;
-  --color-diff-removed: #ff5c5c;
+  /* diff 行、标记和统计共享可辨的绿红颜色。 */
+  --color-diff-added: #67d887;
+  --color-diff-removed: #ff8585;
 
-  /* 查找高亮（ZCode --color-find-highlight[-active] zai-dark 原值
-     styles.css:693-694；文字用主前景，同 ZCode ::highlight 规则） */
+  /* 当前查找命中使用深色文字，与亮橙背景区分。 */
   --color-find-highlight: #542500;
   --color-find-highlight-active: #ff8a30;
+  --color-find-highlight-active-ink: #161616;
 
   /* tooltip（zai-dark styles.css:806-809） */
   --color-tooltip: #2b2b2b;
@@ -281,16 +424,15 @@ html.theme-warm {
   /* 未读/状态蓝点（ZCode bg-icon-blue = terminal-bright-blue，zai-dark :734；
      不是 #4099ff——那是 zai-dark --color-terminal-blue :726，不经 bg-icon-blue 使用） */
   --color-icon-blue: #80beff;
-  /* foreground-subtle 同位级：前景 60% 洗色（zai-dark :774 neutral-300@60%） */
-  --color-ink-subtle: rgb(212 212 212 / 0.6);
+  /* 次要前景在常见暗色表面上保持可读。 */
+  --color-ink-subtle: #b0b0b0;
 
   /* 行悬停（ZCode bg-surface-hover，zai-dark styles.css:703；行 hover 语义——
      ZCode 行悬停即 bg-surface-hover，TaskListItem.tsx:577/ProjectNodeContent.tsx:212） */
   --color-surface-hover: rgba(255, 255, 255, 0.1);
 
-  /* foreground-subtlest（zai-dark = neutral-300@30%，styles.css:776；
-     neutral-300=#d4d4d4） */
-  --color-ink-subtlest: rgb(212 212 212 / 0.3);
+  /* 弱化标签及占位符也需要在暗色表面上可读。 */
+  --color-ink-subtlest: #ababab;
 
   /* 发送钮主色 brand（ZCode bg-brand zai-dark #ffffff 白底黑箭头）与
      text-foreground-inverse（zai-dark #000000，styles.css:778；亮底配黑字，
@@ -333,7 +475,7 @@ html.theme-warm {
 
   /* 状态：警告（Zai 橙 #ff8a30 族） */
   --color-warn-bg: #3b2820;
-  --color-warn-ink: #ffa159;
+  --color-warn-ink: #ffad66;
   --color-warn-line: #784721;
 
   /* 状态：危险（Zai 红 #ff5c5c 族） */
@@ -347,12 +489,14 @@ html.theme-warm {
   --color-info-ink: #80beff;
   --color-info-line: #284d78;
 
-  /* accent 文字级（Zai dark 交互蓝 #80beff；accent 实底保持 bg-sky-600 原样） */
+  /* accent 文字级（Zai dark 交互蓝 #80beff） */
   --color-accent-ink: #80beff;
   --color-accent-ink-strong: #9dceff;
 
   /* ZCode SubAgent type-name colors (dark: 300, light: 700). */
   --color-subagent-yellow: #fcd34d;
+  --color-session-star: #FFCD24;
+  --color-session-star-outline: currentColor;
   --color-subagent-red: #fda4af;
   --color-subagent-orange: #fdba74;
   --color-subagent-green: #6ee7b7;
@@ -362,21 +506,28 @@ html.theme-warm {
   --color-subagent-pink: #f9a8d4;
 
   /* 状态基底色：时间线灯 / 状态点等 SVG 直用（Zai 灯级原值） */
-  --color-ok: #46bf72;
+  --color-ok: #67d887;
   --color-warn: #ff8a30;
+  --color-skill-reference-rose: #ffc0d7;
+  --color-skill-reference-pink: #f699d2;
+  --color-skill-reference-lilac: #d3acff;
   --color-danger: var(--color-diff-removed);
-  --color-info: #4099ff;
+  --color-info: #80beff;
+  /* 用量条共用的柔和填充，文字在未填充与已填充区域都保持对比。 */
+  --color-usage-meter-track: #363636;
+  --color-usage-meter-fill: #315779;
+  --color-usage-meter-ink: #cbd3db;
+  --color-usage-meter-warn: color-mix(in srgb, var(--color-warn-ink) 22%, var(--color-usage-meter-track));
+  --color-usage-meter-danger: color-mix(in srgb, var(--color-danger-ink) 22%, var(--color-usage-meter-track));
 
-  /* 常规描边（ZCode --color-border zai-dark styles.css:695
-     rgba(255,255,255,0.1)）：菜单描边/分隔线用 border——暗色下 line
-     #2e2e2e 叠 #2b2b2b 卡片近不可见，border 按白 10% 合成可辨 */
-  --color-border: rgb(255 255 255 / 0.1);
+  /* 菜单与工作区的结构分隔线。 */
+  --color-border: #484848;
   /* 危险实底（ZCode --color-destructive = var(--color-red-600)，
      styles.css:282——仓库未重定义 red-600，落到 Tailwind v4 默认红
-     oklch(57.7% 0.245 27.325)，比 --color-danger 的 #ff5c5c 深一档）。
+     oklch(57.7% 0.245 27.325)，比状态红深一档）。
      这里写字面值而非 var 引用：默认调色板的 --color-red-600 只有被
      工具类直接用到才会产出，var 链会悬空。两主题同值（ZCode 未随主题
-     重定义）。注意 --color-danger（#ff5c5c）仍是 Zai 红族的状态灯色，
+     重定义）。注意 --color-danger 仍是红族状态灯色，
      不与 destructive 实底混用 */
   --color-destructive: oklch(57.7% 0.245 27.325);
   /* 危险实底上的文字（ZCode --color-destructive-foreground zai-dark
@@ -431,6 +582,16 @@ html.theme-warm {
 
   --color-line: #e3e3e3; /* 常规描边（黑 10% 叠加等效） */
   --color-line-strong: #d3d3d3; /* 强描边 / hover（黑 15%） */
+  --color-control-line: #e3e3e3;
+  --color-dialog-line: #d3d3d3;
+  --color-focus-ring: #737373;
+  --color-chart-line: #bad9ff;
+  --color-annotation-underline: #ca8a04;
+  --usage-heatmap-empty: color-mix(in oklab, currentColor 4%, transparent);
+  --usage-heatmap-1: color-mix(in oklab, #0b7fff 18%, var(--color-surface));
+  --usage-heatmap-2: color-mix(in oklab, #0b7fff 36%, var(--color-surface));
+  --usage-heatmap-3: color-mix(in oklab, #0b7fff 58%, var(--color-surface));
+  --usage-heatmap-4: color-mix(in oklab, #0066dd 82%, var(--color-surface));
 
   --color-selected: rgb(
     13 13 13 / 0.05
@@ -450,6 +611,7 @@ html.theme-warm {
   /* 查找高亮（zai-light styles.css:529-530） */
   --color-find-highlight: #fff4eb;
   --color-find-highlight-active: #ffb26b;
+  --color-find-highlight-active-ink: #262626;
 
   /* tooltip（zai-light styles.css:641-644） */
   --color-tooltip: #f0f0f0;
@@ -518,7 +680,7 @@ html.theme-warm {
   --color-ok-line: #b7e0c2;
 
   --color-warn-bg: #f6e9da;
-  --color-warn-ink: #914e00;
+  --color-warn-ink: #e25507;
   --color-warn-line: #f0c8a8;
 
   --color-danger-bg: #f6e4e4;
@@ -533,6 +695,8 @@ html.theme-warm {
   --color-accent-ink-strong: #0b7fff;
 
   --color-subagent-yellow: #b45309;
+  --color-session-star: #FFCD24;
+  --color-session-star-outline: #9C6500;
   --color-subagent-red: #be123c;
   --color-subagent-orange: #c2410c;
   --color-subagent-green: #047857;
@@ -544,8 +708,14 @@ html.theme-warm {
   /* 状态基底色（浅底上取 Zai light 的深色值） */
   --color-ok: #1e8a3e;
   --color-warn: #e07b00;
+  --color-skill-reference-rose: #aa3265;
+  --color-skill-reference-pink: #a83a86;
+  --color-skill-reference-lilac: #7546a5;
   --color-danger: var(--color-diff-removed);
   --color-info: #0b7fff;
+  --color-usage-meter-track: #f1f2f3;
+  --color-usage-meter-fill: #a8caff;
+  --color-usage-meter-ink: #4d535c;
 
   /* 与暗色块同名 token 的浅色值（出处见暗色块注释） */
   --color-border: rgb(13 13 13 / 0.1); /* ZCode zai-light styles.css:531 */
@@ -791,15 +961,27 @@ html.theme-warm body::before {
 @keyframes modal-in {
   from {
     opacity: 0;
-    transform: scale(0.98);
   }
   to {
     opacity: 1;
-    transform: scale(1);
   }
 }
 .modal-in {
-  animation: modal-in 160ms ease-out;
+  animation: modal-in var(--modal-enter-timing, 160ms ease-out) backwards;
+}
+.modal-in:is([data-modal-layer="settings"], [data-modal-layer="form"]) {
+  --modal-enter-timing: 220ms cubic-bezier(0.2, 0.75, 0.25, 1);
+}
+.modal-in:is([data-modal-layer="settings"], [data-modal-layer="form"]) > .modal-panel {
+  animation: modal-panel-in var(--modal-enter-timing) backwards;
+}
+@keyframes modal-panel-in {
+  from {
+    transform: translateY(6px) scale(0.99);
+  }
+  to {
+    transform: none;
+  }
 }
 
 /** 运行中站灯的光晕（时间线「在动」的能量感）。 */
@@ -810,7 +992,7 @@ html.theme-warm body::before {
 /** 输入卡悬停/聚焦（ZCode 壳 ChatPromptEditor.tsx:410 hover:border-input-border-hover
     focus-within:!border-input-border-focused；zai 主题两者皆 = border-hover 15%，
     styles.css:550-551/:714-715；扁平：只变描边，不发蓝光、不加投影）。
-    line-strong #3d3d3d/#d3d3d3 即白/黑 15% 等效实色，单条规则双主题通用。 */
+    line-strong 随主题变化，滚动条沿用共享边界色。 */
 .composer-card {
   transition:
     border-color 160ms ease,
@@ -823,39 +1005,18 @@ html.theme-warm body::before {
   border-color: var(--color-line-strong);
 }
 
-/** 弹层入场（对齐 ZCode Popover/Select duration-100 fade+zoom-95+
-    slide-in-from-bottom-2，select.tsx:106/popover.tsx:30）。 */
-@keyframes composer-pop-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-.composer-pop {
-  animation: composer-pop-in 100ms ease-out;
-}
-/* StatusChipMenu 面板用 inline translateY(-100%) 定位（StatusChipMenu.tsx:136），
-   入场帧把该位移烘进关键帧；无 forwards，动画结束回落 inline 值，无跳变 */
-@keyframes composer-pop-up-in {
-  from {
-    opacity: 0;
-    transform: translateY(calc(-100% + 8px)) scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(-100%) scale(1);
-  }
-}
-.composer-pop-up {
-  animation: composer-pop-up-in 100ms ease-out;
+/* Shared entrance for composer menus and listboxes. Individual transforms
+   keep the animation independent of the panel's positioning transform. */
+@keyframes selection-popup-in {
+  from { opacity: 0; translate: 0 8px; scale: 0.95; }
+  to { opacity: 1; translate: 0 0; scale: 1; }
 }
 
-/* 隐藏滚动条但保留滚动能力（ZCode !scrollbar-hide，AnimatedSidePanePanel.tsx:1061
-   右栏 tab 滚动视口用） */
+.selection-popup {
+  animation: selection-popup-in 100ms ease-out;
+}
+
+/* 隐藏滚动条但保留滚动能力。无层级选择器覆盖上方的全局滚动条样式。 */
 .scrollbar-hide {
   scrollbar-width: none;
 }
@@ -864,7 +1025,7 @@ html.theme-warm body::before {
 }
 
 /* 右键/下拉菜单入场（ZCode context-menu.tsx:28：duration-100 + fade-in-0 +
-   zoom-in-95 + slide-in-from-*-2=8px；实参与既有 composer-pop-in 一致）：
+   zoom-in-95 + slide-in-from-*-2=8px；实参与既有 selection-popup-in 一致）：
    side=bottom 自触发点下方弹出（自上而下 8px 滑入），翻转后 side=top 反向。 */
 @keyframes context-menu-in-bottom {
   from {
@@ -922,8 +1083,8 @@ html.theme-warm body::before {
   .chip-in,
   .toast-in,
   .modal-in,
-  .composer-pop,
-  .composer-pop-up,
+  .modal-in:is([data-modal-layer="settings"], [data-modal-layer="form"]) > .modal-panel,
+  .selection-popup,
   .context-menu-in-bottom,
   .context-menu-in-top,
   .context-menu-out {
@@ -1002,7 +1163,7 @@ html.theme-warm .draft-greeting-hero {
   position: relative;
   z-index: 10;
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-ui-base);
   font-weight: 500;
   letter-spacing: 0.08em;
   color: var(--color-ink-subtle);
@@ -1017,7 +1178,7 @@ html.theme-warm .draft-greeting-hero {
   margin: 0;
   font-weight: 500;
   color: var(--color-ink);
-  font-size: var(--draft-greeting-font-size, 30px);
+  font-size: var(--draft-greeting-font-size, var(--text-ui-settings-title-lg));
   line-height: 1.2;
 }
 .draft-greeting-measure {
@@ -1025,7 +1186,7 @@ html.theme-warm .draft-greeting-hero {
   visibility: hidden;
   pointer-events: none;
   white-space: nowrap;
-  font-size: 30px;
+  font-size: var(--text-ui-settings-title-lg);
   line-height: 1.2;
 }
 
@@ -1068,3 +1229,37 @@ html.theme-warm .draft-greeting-hero {
     animation: none;
   }
 }
+
+/* Tree expansion remains interruptible and respects reduced motion. */
+.tree-branch { display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows 180ms ease, opacity 140ms ease, visibility 0s linear 180ms; }
+.tree-branch[data-open="true"] { grid-template-rows: 1fr; opacity: 1; visibility: visible; transition: grid-template-rows 180ms ease, opacity 140ms ease; }
+.tree-branch-content { min-height: 0; overflow: hidden; }
+.tree-chevron { transition: transform 160ms ease; }
+.tree-row-enter { animation: tree-row-enter 140ms ease-out; }
+@keyframes tree-row-enter { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .tree-branch[data-open], .tree-chevron { transition: none; }
+  .tree-row-enter { animation: none; }
+}
+
+/* Disabled controls remain distinguishable without losing their label and outline. */
+html:not(.theme-warm) :is(button, input, select, textarea):disabled { opacity: 0.7; }
+
+/* Some local controls use structural borders; keep their interactive edge visible in dark mode. */
+html:not(.theme-warm) :is(button, input, textarea, select, [role="combobox"])[class~="border-line"]:not(:focus-visible) { border-color: var(--color-control-line); }
+
+/* GitHub dark section headings need enough contrast on the code background. */
+html:not(.theme-warm) .hljs-section { color: #80beff; }
+
+:root {
+  --color-annotation-underline: #f5c64b;
+  --usage-heatmap-empty: rgb(255 255 255 / 0.08);
+  --usage-heatmap-1: #4d83bd;
+  --usage-heatmap-2: #4a9de2;
+  --usage-heatmap-3: #78b9f5;
+  --usage-heatmap-4: #b6dbff;
+}
+
+/* Keep text readable on solid danger actions in dark mode. */
+html:not(.theme-warm) .contrast-danger-solid { background-color: #dc2626; }
+html:not(.theme-warm) .contrast-danger-solid:hover:not(:disabled) { background-color: #b91c1c; }

@@ -29,14 +29,10 @@ export function QuestionDock() {
   const valid = (index: number) => {
     const q = active.questions[index],
       values = [...(draft.selections[index] ?? [])];
-    return (
-      !!q &&
-      values.length > 0 &&
-      (q.multiSelect || values.length === 1) &&
-      values.every((value) =>
-        q.options.some((option) => option.label === value),
-      )
-    );
+    if (!q) return false;
+    if (values.length === 0) return Boolean(draft.notes[index]?.trim());
+    return (q.multiSelect || values.length === 1) &&
+      values.every((value) => q.options.some((option) => option.label === value));
   };
   const send = () => {
     if (!valid(page) || active.stale) return;
@@ -132,8 +128,8 @@ export function QuestionDock() {
             />
             <input
               type="text"
-              aria-label={`问题 ${page + 1} 备注`}
-              placeholder="补充说明（可选）"
+              aria-label={`问题 ${page + 1} 自定义回答或补充说明`}
+              placeholder="输入自定义回答或补充说明"
               value={draft.notes[page] ?? ""}
               onChange={(event) =>
                 write({ notes: { ...draft.notes, [page]: event.target.value } })

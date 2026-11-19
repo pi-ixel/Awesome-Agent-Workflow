@@ -22,6 +22,8 @@ export function createConfigurationScope(
   fields?: ReadonlySet<string>,
 ): ConfigurationScope {
   let disposed = false;
+  let pending: ConfigurationRecord | undefined;
+  let failure: string | undefined;
   const listeners = new Set<(value: ConfigurationRecord) => void>();
   function ensureActive() {
     if (disposed) throw new Error(`配置作用域已释放：${key}`);
@@ -33,7 +35,11 @@ export function createConfigurationScope(
         )
       : record;
   }
-  return {
+  const scope: ConfigurationScope = {
+    saveFailure: {
+      message: () => failure,
+      retry: () => { if (pending) scope.update(pending); },
+    },
     read() {
       ensureActive();
       const record = readConfigurationRecord(storage, key);
@@ -49,8 +55,17 @@ export function createConfigurationScope(
       } catch {
         // 损坏的旧文档仍可由有效设置恢复。
       }
-      const next = { ...previous, ...patch };
-      storage.setItem(key, JSON.stringify(next));
+      const combined = { ...pending, ...patch };
+      const next = { ...previous, ...combined };
+      try {
+        storage.setItem(key, JSON.stringify(next));
+      } catch (error) {
+        pending = combined;
+        failure = String(error);
+        throw error;
+      }
+      pending = undefined;
+      failure = undefined;
       const snapshot = select(next);
       for (const listener of [...listeners]) listener(snapshot);
     },
@@ -63,7 +78,10 @@ export function createConfigurationScope(
     },
     dispose() {
       disposed = true;
+      pending = undefined;
+      failure = undefined;
       listeners.clear();
     },
   };
+  return scope;
 }

@@ -15,7 +15,7 @@ const invoke = (command: string, args: Record<string, unknown> = {}) =>
     `window.__TAURI__.core.invoke(${JSON.stringify(command)},${JSON.stringify(args)})`,
   );
 const fixture = fileURLToPath(
-  new URL("../tests/browser/fixtures/index.html", import.meta.url),
+  new URL("../tests/plugins/browser/fixtures/index.html", import.meta.url),
 );
 const server = createServer((_request, response) => {
   response.setHeader("Content-Type", "text/html; charset=utf-8");

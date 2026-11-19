@@ -75,10 +75,6 @@ export type AgentParticipantLifecycle =
 export interface AcpDialect {
   readonly normalizeConfigOptions?: (raw: unknown) => unknown;
   readonly requireConfigurationConfirmation?: boolean;
-  readonly normalizeServerRequest?: (
-    method: string,
-    params: Readonly<Record<string, unknown>>,
-  ) => Readonly<Record<string, unknown>>;
   readonly enhanceEvent?: (event: AcpSessionEvent) => AcpSessionEvent;
   /** Extra normalized events derived by an enhancement; raw tool evidence is retained. */
   readonly deriveEvents?: (
@@ -110,6 +106,8 @@ export interface AcpDialect {
 }
 
 export interface AcpSessionOptions {
+  readonly agentId?: string;
+  readonly supportsCustomAnswers?: () => boolean;
   /** Cancellation escalates to the connection owner; this channel never terminates a process. */
   readonly onCancellationTimeout?: () => Promise<unknown>;
   readonly cancellationGraceMs?: number;
@@ -126,6 +124,10 @@ export interface AcpSessionOptions {
   readonly dialect?: AcpDialect;
   /** 客户端标识（initialize 握手用）。 */
   readonly clientInfo?: { readonly name: string; readonly version?: string };
+  /**
+   * 会话创建/恢复时下发给 agent 的 MCP server 清单（ADR 024 §7 改动 1）。
+   * 缺省 []，与远端现状逐字节一致；结果通道 MCP 挂载的使能项。
+   */
   readonly mcpServers?: readonly McpServer[];
   readonly onSessionReady?: (sessionId: string) => void | Promise<void>;
   readonly onCapabilitiesReady?: (
@@ -145,9 +147,19 @@ export interface AcpSessionOptions {
 
 export type ChannelSessionOptions = AcpSessionOptions & {
   readonly background?: boolean;
+  readonly project?: { readonly id: string; readonly path: string };
 };
 
 type SessionRequestOptions = { readonly timeoutMs?: number };
+
+/**
+ * session/new 与 session/load 的选项：可按调用覆盖 MCP 清单（缺省用构造时的
+ * AcpSessionOptions.mcpServers）。供握手后才能决定 MCP 清单的调用方使用——
+ * 如按 Agent 声明的 mcpCapabilities 选择传输（ADR 024 §9-3）。
+ */
+export type SessionSetupOptions = SessionRequestOptions & {
+  readonly mcpServers?: readonly McpServer[];
+};
 
 /** One normalized ACP session. The runtime owns the underlying channel. */
 export interface AcpSessionPort {
@@ -162,12 +174,12 @@ export interface AcpSessionPort {
   initialize(options?: SessionRequestOptions): Promise<InitializeResult>;
   newSession(
     cwd: string,
-    options?: SessionRequestOptions,
+    options?: SessionSetupOptions,
   ): Promise<NewSessionResult>;
   loadSession(
     sessionId: string,
     cwd: string,
-    options?: SessionRequestOptions,
+    options?: SessionSetupOptions,
   ): Promise<LoadSessionResult>;
   listSessions(
     cwd?: string,
@@ -175,7 +187,7 @@ export interface AcpSessionPort {
   ): Promise<ListSessionsResult>;
   prompt(
     text: string | readonly ContentBlock[],
-    options?: SessionRequestOptions,
+    options?: SessionRequestOptions & { readonly beforeDispatch?: () => void },
   ): Promise<PromptResult>;
   cancel(): void;
   setMode(modeId: string, options?: SessionRequestOptions): Promise<void>;
@@ -195,6 +207,8 @@ export interface AcpProtocolRestoreOptions {
   readonly configuration: readonly SessionConfigOption[];
   readonly isCurrent: () => boolean;
   readonly onReplay: (event: AcpSessionEvent) => void;
+  /** 恢复时下发的附加 MCP 工具（缺省用会话构造时的清单）。 */
+  readonly mcpServers?: readonly McpServer[];
 }
 
 export interface AcpProtocolSessionOptions
@@ -205,6 +219,10 @@ export interface AcpProtocolSessionOptions
     >,
     AgentDialectHooks {}
 
+export type AcpConnectionPreparationEvent =
+  | { readonly kind: "starting" | "handshake" | "ready" }
+  | { readonly kind: "failed"; readonly error: string };
+
 /** ACP 会话与连接资源。项目层通过此端口协调 Agent 切换及会话投影。 */
 export interface AcpProtocolResources {
   readonly selection:
@@ -214,11 +232,20 @@ export interface AcpProtocolResources {
     agentKey: string,
     toolPaths: object,
   ): Promise<void>;
-  prepareSwitch(adapter: AgentAdapter, toolPaths: object): Promise<number>;
+  prepareSwitch(
+    adapter: AgentAdapter,
+    toolPaths: object,
+    onConnection?: (event: AcpConnectionPreparationEvent) => void,
+  ): Promise<number>;
   commitSwitch(revision: number): Promise<void>;
   abortSwitch(revision: number): Promise<void>;
   setSelection(agentKey: string, agentId: string): void;
   open(agentKey: string, options?: AcpProtocolSessionOptions): AcpSessionPort;
+  openBackground?(
+    adapter: AgentAdapter,
+    toolPaths: object,
+    options: AcpProtocolSessionOptions,
+  ): Promise<AcpSessionPort>;
   readProjectHistory(
     session: AcpSessionPort,
     workspacePath: string,

@@ -6,33 +6,77 @@
  * 会话尚未建立（activeSessionId 为 null）时挂在工作区的 `__new__` 档位上，
  * 新会话首条消息发出前换会话也不丢草稿。
  *
- * 草稿是小字符串，直写不做防抖；localStorage 不可用（隐私模式 / 配额满）
- * 时静默降级为不持久化，输入功能不受影响。
+ * 草稿直写，不做防抖。桌面端的写入状态由宿主存储统一报告。
  */
+import { projectStorage } from "../lifecycle/persistence.ts";
 export {
   NEW_SESSION_DRAFT_SCOPE,
   draftScopeKey,
   legacyNewDraftScopeKey,
 } from "./scope.ts";
 
-/** 读取某 scope 的草稿（无记录 / 不可读返回空串）。 */
-export function readDraft(key: string): string {
+const deletedDrafts = new Set<string>();
+
+export function removeSessionDraft(key: string): void {
+  projectStorage.removeItem?.(key);
+  deletedDrafts.add(key);
+}
+
+const RECOVERED_DRAFT = "\0aaw-recovered-draft.v1\n";
+type RecoveryStatus = "pending" | "unknown" | "quiet";
+type DraftRecovery = { id: string; status: RecoveryStatus | "consumed" };
+type DraftRecord = { text: string; recoveries: readonly DraftRecovery[] };
+
+function readRecord(key: string): DraftRecord {
   try {
-    return window.localStorage.getItem(key) ?? "";
+    const raw = projectStorage.getItem(key) ?? "";
+    if (raw.startsWith(RECOVERED_DRAFT)) {
+      const parsed = JSON.parse(raw.slice(RECOVERED_DRAFT.length)) as DraftRecord;
+      if (typeof parsed.text === "string" && Array.isArray(parsed.recoveries))
+        return parsed;
+    }
+    return { text: raw, recoveries: [] };
   } catch {
-    return "";
+    return { text: "", recoveries: [] };
   }
 }
 
-/** 写入草稿（空串删除键，不留无用条目）。 */
-export function writeDraft(key: string, text: string): void {
+/** 读取某 scope 的草稿（无记录 / 不可读返回空串）。 */
+export function readDraft(key: string): string {
+  return readRecord(key).text;
+}
+
+/** 写入草稿，同时保留已经自动追加过的消息 ID。 */
+export function writeDraft(key: string, text: string): boolean {
+  return writeRecord(key, { text, recoveries: readRecord(key).recoveries });
+}
+
+function writeRecord(key: string, record: DraftRecord): boolean {
+  if (deletedDrafts.has(key)) return false;
   try {
-    if (text.length === 0) {
-      window.localStorage.removeItem(key);
+    if (record.recoveries.length) {
+      projectStorage.setItem(key, RECOVERED_DRAFT + JSON.stringify(record));
+    } else if (record.text.length === 0) {
+      projectStorage.removeItem?.(key);
     } else {
-      window.localStorage.setItem(key, text);
+      projectStorage.setItem(key, record.text);
     }
+    return true;
   } catch {
-    // localStorage 不可用：退化为不持久化
+    return false;
   }
+}
+
+export function clearDraft(key: string): void {
+  writeRecord(key, { text: "", recoveries: [] });
+}
+
+export function clearSentDraft(key: string): void {
+  const recoveries = readRecord(key).recoveries.map(({ id }) => ({ id, status: "consumed" as const }));
+  writeRecord(key, { text: "", recoveries });
+}
+
+/** IDs already merged into a draft by older clients. */
+export function readDraftRecoveries(key: string): readonly DraftRecovery[] {
+  return readRecord(key).recoveries;
 }

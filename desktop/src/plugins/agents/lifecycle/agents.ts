@@ -98,12 +98,56 @@ export class DesktopAgents implements AgentsService {
       buildLaunch: this.buildLaunch.bind(this),
       openTransport: this.openTransport.bind(this),
       readArchive: this.readArchive.bind(this),
+      deleteSession: this.deleteSession.bind(this),
+      canDeleteSession: this.canDeleteSession.bind(this),
+      readHistoryEvidence: this.readHistoryEvidence.bind(this),
       scan: this.scan.bind(this),
       registerProbeSessions: this.registerProbeSessions.bind(this),
       testConnection: this.testConnection.bind(this),
       runProtocolCheck: this.runProtocolCheck.bind(this),
       shutdown: this.shutdown.bind(this),
     };
+  }
+
+  canDeleteSession(agentKey: string): boolean {
+    try {
+      const identity: unknown = JSON.parse(agentKey);
+      return (
+        Array.isArray(identity) &&
+        typeof identity[0] === "string" &&
+        !!this.resolve(identity[0])?.deleteSession &&
+        !!this.archives.deleteAgentSession
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  async deleteSession(
+    agentKey: string,
+    workspacePath: string,
+    sessionId: string,
+  ): Promise<void> {
+    const identity: unknown = JSON.parse(agentKey);
+    if (!Array.isArray(identity) || typeof identity[0] !== "string")
+      throw new Error("此 Agent 不支持彻底删除会话");
+    const launch = identity[1] as AgentLaunch | undefined;
+    const adapter = this.resolve(identity[0]);
+    if (
+      !launch ||
+      !Array.isArray(launch.command) ||
+      launch.command.length === 0 ||
+      !launch.command.every((part) => typeof part === "string") ||
+      !launch.extraEnv ||
+      typeof launch.extraEnv !== "object" ||
+      !adapter?.deleteSession
+    )
+      throw new Error("无法核验会话所属的 Agent 启动配置");
+    await adapter.deleteSession(
+      { ...this.archives, ...this.commands },
+      { ...launch, cwd: workspacePath },
+      sessionId,
+    );
   }
 
   initialize(): Promise<void> {
@@ -113,8 +157,8 @@ export class DesktopAgents implements AgentsService {
   get selectedId(): string {
     return this.configuration.getState().activeAgentId;
   }
-  selectionKey(toolPaths: object): string {
-    return agentSelectionKey(this.preferences.store.getState(), toolPaths, this.adapters);
+  selectionKey(toolPaths: object, agentId?: string): string {
+    return agentSelectionKey(this.preferences.store.getState(), toolPaths, this.adapters, agentId);
   }
   subscribeLaunchConfiguration(listener: () => void): () => void {
     let previous = this.preferences.store.getState();
@@ -155,11 +199,11 @@ export class DesktopAgents implements AgentsService {
     this.lifecycle.signal.throwIfAborted();
     this.preferences.store.getState().setActiveAgentId(id);
   }
-  addCustomAgent(name: string, commandText: string): string | null {
-    return this.preferences.store.getState().addCustomAgent(name, commandText);
+  addCustomAgent(name: string, commandText: string, supportsCustomAnswers?: boolean): string | null {
+    return this.preferences.store.getState().addCustomAgent(name, commandText, supportsCustomAnswers);
   }
-  updateCustomAgent(id: string, name: string, commandText: string): string | null {
-    return this.preferences.store.getState().updateCustomAgent(id, name, commandText);
+  updateCustomAgent(id: string, name: string, commandText: string, supportsCustomAnswers?: boolean): string | null {
+    return this.preferences.store.getState().updateCustomAgent(id, name, commandText, supportsCustomAnswers);
   }
   removeCustomAgent(id: string): void {
     this.preferences.store.getState().removeCustomAgent(id);
@@ -198,6 +242,12 @@ export class DesktopAgents implements AgentsService {
     });
   }
 
+  async readHistoryEvidence(adapter: AgentAdapter, sessionId: string, cwd: string) {
+    this.lifecycle.signal.throwIfAborted();
+    const evidence = await adapter.readHistoryEvidence?.(this.archives, sessionId, cwd);
+    this.lifecycle.signal.throwIfAborted();
+    return evidence ?? null;
+  }
   async readArchive(adapter: AgentAdapter, sessionId: string, workspacePath: string) {
     const { signal } = this.lifecycle;
     signal.throwIfAborted();

@@ -8,6 +8,7 @@ export interface WorkbenchAppearancePreferences {
   readonly theme: "dark" | "warm";
   readonly language: Language;
   readonly uiFontSize: number;
+  readonly fileTreePosition: "left" | "right";
 }
 
 export interface WorkbenchAppearance {
@@ -16,6 +17,7 @@ export interface WorkbenchAppearance {
   setTheme(theme: WorkbenchAppearancePreferences["theme"]): void;
   setLanguage(language: Language): void;
   setUiFontSize(px: number): void;
+  setFileTreePosition(position: WorkbenchAppearancePreferences["fileTreePosition"]): void;
   reset(): void;
 }
 
@@ -23,7 +25,7 @@ export type ExitReason = "window" | "update";
 
 export interface ExitParticipant {
   readonly id: string;
-  isBusy?(reason: ExitReason): boolean;
+  describeWork?(reason: ExitReason): string | null;
   check?(): boolean | Promise<boolean>;
   prepare?(reason: ExitReason, force: boolean): void | Promise<void>;
 }
@@ -43,6 +45,7 @@ export type ExitRequest =
 
 export interface WorkbenchExit {
   registerExit(participant: ExitParticipant): () => void;
+  getExitWork(reason: ExitReason): readonly string[];
   hasExitWork(reason: ExitReason): boolean;
   requestExit(request: ExitRequest): Promise<boolean>;
 }
@@ -115,7 +118,6 @@ export interface StartupWait {
 
 export interface SidebarFooterProps {
   readonly badge?: {
-    readonly label: string;
     readonly tooltip: string;
     readonly avatar: string;
   };
@@ -170,8 +172,19 @@ export interface WorkbenchContributions {
   };
   collapsedHeaderActions: { id: string; View: ComponentType<ProjectViewProps> };
   exitDetails: { id: string; View: ComponentType };
-  sidebar: { id: string; label: string; View: ComponentType };
+  sidebar: {
+    id: string;
+    label: string;
+    panelLabel?: string;
+    default?: boolean;
+    order?: number;
+    keepMounted?: boolean;
+    WorkArea?: ComponentType<{ readonly project: string | null }>;
+    Icon: ComponentType<{ className?: string }>;
+    View: ComponentType<{ readonly project: string | null }>;
+  };
   accessGates: { id: string; View: ComponentType<WorkspaceGateProps> };
+  activityRailActions: { id: string; View: ComponentType };
   sidebarFooters: {
     id: string;
     View: ComponentType<{ Footer: ComponentType<SidebarFooterProps> }>;
@@ -186,7 +199,7 @@ export interface WorkbenchContributions {
     launcher?: PanelLauncher;
     present?(tab: PanelTab): PanelTabPresentation | undefined;
   };
-  overlays: { id: string; scope: "workspace" | "window"; View: ComponentType };
+  overlays: { id: string; scope: "sidebar" | "workspace" | "window"; View: ComponentType };
   headerIndicators: { id: string; View: ComponentType<{ readonly compact: boolean }> };
   helpItems: {
     id: string;
@@ -204,7 +217,9 @@ export interface WorkbenchContributions {
     order?: number;
     label: string;
     Icon: (props: { className?: string }) => ReactNode;
-    View: ComponentType;
+    HeaderAction?: ComponentType;
+    View: ComponentType<{ readonly active: boolean }>;
+    group?: "basic" | "agent" | "data";
     layoutClass?: string;
   };
   settingsReset: { id: string; label: string; reset(): void };

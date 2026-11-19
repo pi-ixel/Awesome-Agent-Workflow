@@ -3,6 +3,7 @@ import type { ProjectService } from "../../service.ts";
 import { withProjectPreferences } from "../preferencesView.tsx";
 import type { ReadonlySnapshot } from "../../../../shared/state/readonlySnapshot.ts";
 import type { GitReviewNavigation } from "../../../git/types.ts";
+import type { ProjectExtension } from "../extension.ts";
 import { useRegisteredSnapshot } from "../../../../shared/state/useRegisteredSnapshot.ts";
 import { emptyProjectSidebar, type ProjectSidebarState } from "../sidebarState.ts";
 import type { ProjectViewNavigation } from "./workbenchNavigation.ts";
@@ -13,6 +14,8 @@ export interface ProjectViewBinding {
   readonly sidebar: ReadonlySnapshot<ProjectSidebarState>;
   readonly navigation?: ProjectViewNavigation;
   readonly gitReview?: ReadonlySnapshot<Partial<GitReviewNavigation>>;
+  /** 插件给项目界面的扩展（未装配时为空 store）。 */
+  readonly extension?: ReadonlySnapshot<{ readonly view?: ProjectExtension }>;
   readonly isActive: () => boolean;
 }
 
@@ -32,6 +35,11 @@ export function useProjectSidebarValue<T>(select: (state: ProjectSidebarState) =
 
 export function useProjectNavigation() {
   return useProjectView()?.navigation;
+}
+
+/** 插件给项目界面的扩展；未装配时 undefined。 */
+export function useProjectExtension() {
+  return useProjectView()?.extension;
 }
 
 export function useProjectPage() {

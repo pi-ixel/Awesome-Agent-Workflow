@@ -1,4 +1,8 @@
 import type { Context } from "cordis";
+import { SkillLibrary } from "./SkillLibrary.tsx";
+import { createStore, useStore } from "zustand";
+import { PuzzleIcon, SkillIcon, TrashIcon } from "../../../shared/ui/icons.tsx";
+import { knownWorkspacePaths } from "../../project/service.ts";
 import type { SkillsSettingsView } from "../types.ts";
 import SkillsInstallerSection from "./SkillsInstallerSection.tsx";
 import { SkillsSourceSettings } from "./SkillsSourceSettings.tsx";
@@ -17,9 +21,84 @@ export function apply(ctx: Context): void {
   );
   const view: SkillsSettingsView = {
     Source: () => (
-      <SkillsSourceSettings source={skills.source} onChange={(directory) => skills.setSourceDirectory(directory)} />
+      <SkillsSourceSettings
+        source={skills.source}
+        onChange={(directory) => skills.setSourceDirectory(directory)}
+      />
     ),
     Installer: () => <SkillsInstallerSection skills={skills} />,
   };
   ctx.provide("skillsUi", view);
+  ctx.inject(["project", "agents", "host"], (ctx) => {
+    const { project, agents, host } = ctx;
+    const navigation = createStore(() => ({ trash: false }));
+    function Sidebar() {
+      const { trash } = useStore(navigation);
+      return (
+        <nav aria-label="插件管理" className="space-y-1 p-3">
+          {[
+            { label: "技能", Icon: SkillIcon, recycle: false },
+            { label: "回收站", Icon: TrashIcon, recycle: true },
+          ].map(({ label, Icon, recycle }) => (
+            <button
+              key={label}
+              aria-current={trash === recycle ? "page" : undefined}
+              onClick={() => navigation.setState({ trash: recycle })}
+              className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm ${trash === recycle ? "bg-selected font-semibold text-ink" : "text-ink-mute hover:bg-hover hover:text-ink"}`}
+            >
+              <Icon className="ui-icon-16" />
+              {label}
+            </button>
+          ))}
+        </nav>
+      );
+    }
+    const knownProjects = () =>
+      knownWorkspacePaths(project.projects.workspace.getState());
+    ctx.effect(() =>
+      workbench.register("sidebar", {
+        id: "plugin-management",
+        label: "插件管理",
+        order: 30,
+        Icon: PuzzleIcon,
+        View: Sidebar,
+        WorkArea: function SkillsWorkArea() {
+          const { trash } = useStore(navigation);
+          const configuration = useStore(agents.configuration);
+          const adapter = agents.resolve(configuration.activeAgentId);
+          if (!adapter?.skillLibrary) {
+            return (
+              <section
+                aria-label="技能管理"
+                className="p-6 text-sm text-ink-mute"
+              >
+                {adapter?.displayName ?? configuration.activeAgentId}{" "}
+                暂未提供技能管理。
+              </section>
+            );
+          }
+          return (
+            <SkillLibrary
+              trash={trash}
+              library={host.skills.library}
+              key={configuration.activeAgentId}
+              provider={adapter.skillLibrary}
+              knownProjects={knownProjects}
+              packages={adapter.skillPackages?.(
+                host.commands,
+                agents.buildLaunch(
+                  adapter,
+                  project.projects.workspace.getState().toolPaths,
+                  null,
+                ).command[0] ?? adapter.id,
+              )}
+              storage={host.storage}
+              pick={host.dialogs.pickDirectory}
+              reveal={(p, action) => host.files.openInFileManager(p, action)}
+            />
+          );
+        },
+      }),
+    );
+  });
 }

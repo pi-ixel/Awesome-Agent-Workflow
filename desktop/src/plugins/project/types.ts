@@ -1,5 +1,24 @@
+import type { AcpConnectionPreparationEvent } from "../acpRuntime/types.ts";
+
+/** Observable switch boundaries; listeners never control the switch. */
+export type AgentSwitchProgressEvent =
+  | {
+      readonly type: "stage";
+      readonly stage:
+        | "queued" | "current" | "target" | "openQueue"
+        | "commit" | "dispose" | "select" | "rollback";
+    }
+  | { readonly type: "connection"; readonly event: AcpConnectionPreparationEvent }
+  | { readonly type: "stopRequested"; readonly count: number }
+  | { readonly type: "failure"; readonly error: string };
+
+export type AgentSwitchProgressListener = (
+  event: AgentSwitchProgressEvent,
+) => void;
+
 export type ApprovalMode = "ask" | "auto-allow";
 export type ChatWidth = "standard" | "wide" | "full";
+export type MessageStreamMode = "process" | "conclusion";
 export type StatusCardMode = "auto" | "panel" | "mini";
 
 export interface SessionStatusViewState {
@@ -7,15 +26,18 @@ export interface SessionStatusViewState {
 }
 
 export interface ProjectPreferenceValues {
+  readonly interactionByAgent: Readonly<Record<string, { readonly mode: "queue" | "steer" }>>;
   readonly approvalMode: ApprovalMode;
   readonly autoAnswerQuestions: boolean;
   readonly chatWidth: ChatWidth;
   readonly messageStreamShowTodos: boolean;
+  readonly messageStreamMode: MessageStreamMode;
   readonly sessionAutoArchiveEnabled: boolean;
   readonly sessionAutoArchiveOlderThanDays: number;
 }
 
 export interface ProjectPreferences {
+  setAgentInteraction(agentId: string, value: "queue" | "steer"): void;
   getState: () => ProjectPreferenceValues;
   subscribe: (
     listener: (
@@ -27,6 +49,7 @@ export interface ProjectPreferences {
   setAutoAnswerQuestions(enabled: boolean): void;
   setChatWidth(width: ChatWidth): void;
   setMessageStreamShowTodos(enabled: boolean): void;
+  setMessageStreamMode(mode: MessageStreamMode): void;
   setSessionAutoArchive(enabled: boolean, olderThanDays?: number): void;
   reset(): void;
 }
@@ -52,6 +75,9 @@ export type SessionSelection =
 export type SessionDeliveryResult = { ok: true } | { ok: false; reason: string };
 
 export interface ProjectRuntimeDebugEntry {
+  readonly agentKey?: string;
+  readonly queueSaveError?: string | null;
+  readonly cacheSaveError?: string | null;
   readonly sessionId: string | null;
   readonly workspacePath: string;
   readonly isActive: boolean;
@@ -88,8 +114,6 @@ export type {
 } from "./sessions/indexTypes.ts";
 export type { SessionTarget } from "./sessions/types.ts";
 export type {
-  HealthCheckItem,
-  WorkspaceHealthCheckOptions,
   WorkspaceSnapshot,
   WorkspaceToolPaths,
   WorkspaceView,

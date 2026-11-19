@@ -1,0 +1,56 @@
+[data-status-mode] {
+  --status-mini-visible: 1;
+  --status-panel-visible: 0;
+}
+
+[data-status-mode="panel"] {
+  --status-mini-visible: 0;
+  --status-panel-visible: 1;
+}
+
+.session-status-mini,
+.session-status-panel {
+  transform-origin: top right;
+}
+
+.session-status-mini {
+  opacity: var(--status-mini-visible);
+  scale: calc(0.94 + 0.06 * var(--status-mini-visible));
+}
+
+.session-status-panel {
+  opacity: var(--status-panel-visible);
+  scale: calc(0.94 + 0.06 * var(--status-panel-visible));
+}
+
+[data-status-mode="panel"] .session-status-mini,
+[data-status-mode="mini"] .session-status-panel,
+[data-status-mode="auto"] .session-status-panel {
+  visibility: hidden;
+}
+
+[data-status-mode="auto"] .session-status-mini,
+[data-status-mode="mini"] .session-status-mini,
+[data-status-mode="panel"] .session-status-panel {
+  pointer-events: auto;
+}
+
+@container conversation (min-width: 1280px) {
+  [data-status-mode="auto"] .session-status-mini {
+    --status-mini-visible: 0;
+    pointer-events: none;
+    visibility: hidden;
+  }
+
+  [data-status-mode="auto"] .session-status-panel {
+    --status-panel-visible: 1;
+    pointer-events: auto;
+    visibility: visible;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-layout-moving="true"] :is(.session-status-mini, .session-status-panel) {
+    transition: opacity 180ms ease-out, scale 180ms ease-out, visibility 180ms;
+  }
+}

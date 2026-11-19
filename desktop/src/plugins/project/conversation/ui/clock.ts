@@ -1,21 +1,3 @@
-/**
- * 会话条目的时间展示工具：时长（工具卡 / 思考块的耗时）与时钟（hover
- * 时间戳）。从 ThoughtBlock 的私有实现提炼共享——格式保持一致，避免
- * 同屏出现两种「1m05s」。
- */
-
-/** 毫秒 → 人读时长（<1s 保留一位小数，其余取整；≥1s<1m 为 `Ns`，之上 `Nm Ns`）。 */
-export function formatDuration(ms: number): string {
-  if (ms < 1000) {
-    return `${(ms / 1000).toFixed(1)}s`;
-  }
-  if (ms < 60_000) {
-    return `${Math.round(ms / 1000)}s`;
-  }
-  const minutes = Math.floor(ms / 60_000);
-  return `${minutes}m${Math.round((ms % 60_000) / 1000)}s`;
-}
-
 /** 回合头「已工作」行的长耗时格式（对齐 ZCode）：`X 小时 Y 分` / `X 分 Y 秒` / `X 秒`。 */
 export function formatWorkDuration(ms: number): string {
   const totalSeconds = Math.max(0, Math.round(ms / 1000));

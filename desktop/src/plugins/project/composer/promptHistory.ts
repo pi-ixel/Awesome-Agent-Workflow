@@ -1,7 +1,7 @@
 import type { HostStorage } from "../../host/types.ts";
 import type { PromptHistory } from "./types.ts";
 
-const MAX_ENTRIES = 100;
+export const MAX_ENTRIES = 100;
 const STORAGE_PREFIX = "aaw-desktop/prompt-history/";
 
 function storageKeyOf(
@@ -31,6 +31,18 @@ export function createPromptHistory(
   }
 
   return {
+    removeSession(path, id, agentKey) {
+      for (const key of [
+        storageKeyOf(path, id, agentKey),
+        storageKeyOf(path, id),
+      ]) {
+        storage.removeItem?.(key);
+        if (scopeKey === key) {
+          scopeKey = null;
+          entries.length = 0;
+        }
+      }
+    },
     setScope(workspacePath, sessionId = "__new__", agentKey) {
       if (!active) return;
       const key =

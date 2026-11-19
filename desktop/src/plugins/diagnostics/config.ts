@@ -7,6 +7,7 @@ export function createDiagnosticsLogSink() {
 
 export interface DiagnosticsCapture {
   readonly snapshot: () => object;
+  readonly probeConnection?: (id: string) => Promise<unknown>;
   /** Shared by successive installs of the main-window capture. */
   readonly cursor: { sequence: number };
 }

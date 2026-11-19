@@ -1,3 +1,12 @@
+import { sessionArchiveKey } from "../sessions/sessionArchiveStore.ts";
+import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
+import { DangerButton } from "../../../shared/ui/controls.tsx";
+import {
+  deletionKey,
+  type DeleteSessionTarget,
+  type SessionDeletion,
+} from "../sessions/sessionDeletion.ts";
+import { TreeBranch, treeChevronClass } from "../../../shared/ui/TreeMotion.tsx";
 import { useMemo, useState } from "react";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { emptyCatalog } from "../sessions/catalog.ts";
@@ -7,9 +16,14 @@ import {
   focusVisibleRing,
 } from "../../../shared/ui/controls.tsx";
 import { ChevronDownIcon, FolderGlyph } from "../../../shared/ui/icons.tsx";
+import { PageHeader } from "../../../shared/ui/PageHeader.tsx";
 import { basenameOf } from "../../../shared/workspaceText.ts";
 import { useProject } from "./bindings/projectView.tsx";
 import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
+
+const noDeletions: { entries: Readonly<Record<string, SessionDeletion>> } = {
+  entries: {},
+};
 
 export function ArchiveManagementSection() {
   const projectService = useProject();
@@ -21,6 +35,19 @@ export function ArchiveManagementSection() {
     projectService?.sessions.archive,
     (state) => state,
   );
+  const deletions = useRegisteredSnapshot(
+    projectService?.sessions.deletions,
+    (state) => state ?? noDeletions,
+  );
+  const [confirmDelete, setConfirmDelete] = useState<
+    (DeleteSessionTarget & { title: string }) | null
+  >(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState("");
+  const canDelete =
+    !!agentKey &&
+    projectService?.sessions.canDeleteArchivedSession?.(agentKey) &&
+    !!projectService?.sessions.deleteArchivedSession;
   const archived = archive?.archivedSessions;
   const metadata = archive?.metadata;
   const [search, setSearch] = useState("");
@@ -29,7 +56,18 @@ export function ArchiveManagementSection() {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const rows = useMemo(
     () =>
-      [...(archived ?? [])].flatMap((key) => {
+      [...new Set([
+          ...(archived ?? []),
+          ...Object.values(deletions.entries)
+            .filter((entry) => entry.phase !== "done")
+            .map((entry) =>
+              sessionArchiveKey(
+                entry.workspacePath,
+                entry.sessionId,
+                entry.agentKey,
+              ),
+            ),
+        ])].flatMap((key) => {
         const parts = key.split("\0");
         if (
           (parts[2] ?? "") !==
@@ -51,7 +89,7 @@ export function ArchiveManagementSection() {
         const timestamp = updatedAt ? Date.parse(updatedAt) : NaN;
         return [{ key, projectKey, path, sessionId, title, timestamp }];
       }),
-    [archived, metadata, catalog, agentKey],
+    [archived, metadata, catalog, agentKey, deletions],
   );
   const projects = [
     ...new Map(rows.map((r) => [r.projectKey, r.path])).entries(),
@@ -87,7 +125,48 @@ export function ArchiveManagementSection() {
     .filter((group) => group.entries.length);
   return (
     <section aria-label={`已归档会话（${rows.length}）`} className="space-y-4">
-      <h2 className="text-ui-lg font-medium text-ink">已归档的会话</h2>
+      {deleteError && (
+        <p role="alert" className="text-ui-base text-danger-ink">
+          {deleteError}
+        </p>
+      )}
+      {confirmDelete && (
+        <ConfirmationDialog
+          label="彻底删除会话"
+          title="彻底删除此会话？"
+          confirmLabel="彻底删除"
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            const { agentKey, workspacePath, sessionId } = confirmDelete;
+            const target = { agentKey, workspacePath, sessionId };
+            setConfirmDelete(null);
+            setDeleting(deletionKey(target));
+            setDeleteError("");
+            void projectService?.sessions
+              .deleteArchivedSession?.(target)
+              .catch((error: unknown) =>
+                setDeleteError(
+                  error instanceof Error ? error.message : String(error),
+                ),
+              )
+              .finally(() => setDeleting(null));
+          }}
+        >
+          <p className="break-all">
+            {confirmDelete.title} · {confirmDelete.workspacePath}
+          </p>
+          <p>
+            将删除此 Agent 会话及附属数据，同时清理 AAW
+            保存的会话历史、图片、草稿和归档记录。历史用量统计保留。此操作无法撤销。
+          </p>
+        </ConfirmationDialog>
+      )}
+      <PageHeader
+        size="section"
+        title="已归档的会话"
+        count={rows.length}
+        description="归档只从侧栏隐藏；在这里可以按项目找回来。"
+      />
       <div className="flex flex-wrap items-center gap-2">
         <input
           type="search"
@@ -95,14 +174,14 @@ export function ArchiveManagementSection() {
           placeholder="搜索已归档会话"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="min-w-40 flex-1 rounded-xl border border-line-strong bg-surface px-3 py-2 text-ui-base text-ink outline-none focus:border-ink-faint"
+          className="min-h-10 min-w-40 flex-1 rounded-xl border border-line-strong bg-surface px-3 text-ui-base text-ink outline-none focus:border-ink-faint"
         />
         <span className="text-ui-base text-ink-mute">排序方式</span>
         <Listbox
           label="归档排序方式"
           value={sort}
           onChange={setSort}
-          className="min-h-9 px-3 text-ui-base"
+          className="min-h-10 px-3 text-ui-base"
           options={[
             { value: "newest", label: "更新时间（新到旧）" },
             { value: "oldest", label: "更新时间（旧到新）" },
@@ -113,7 +192,7 @@ export function ArchiveManagementSection() {
           label="归档项目筛选"
           value={project}
           onChange={setProject}
-          className="min-h-9 max-w-64 px-3 text-ui-base"
+          className="min-h-10 max-w-64 px-3 text-ui-base"
           options={[
             { value: "", label: "所有项目" },
             ...projects.map(([value, path]) => ({
@@ -138,7 +217,7 @@ export function ArchiveManagementSection() {
                 type="button"
                 aria-label={`归档项目 ${group.path}`}
                 aria-expanded={open}
-                title={group.path}
+                data-hint={group.path}
                 className={`flex w-full items-center gap-2 py-2 text-left text-ui-base text-ink ${focusVisibleRing}`}
                 onClick={() =>
                   setCollapsed((previous) => {
@@ -151,7 +230,7 @@ export function ArchiveManagementSection() {
               >
                 <FolderGlyph
                   isExpanded={open}
-                  className="size-4 shrink-0 text-ink-mute"
+                  className="ui-icon-16 shrink-0 text-ink-mute"
                 />
                 <span className="min-w-0 flex-1 truncate">
                   {basenameOf(group.path)}
@@ -160,60 +239,98 @@ export function ArchiveManagementSection() {
                   {group.entries.length} 个会话
                 </span>
                 <ChevronDownIcon
-                  className={`size-4 shrink-0 text-ink-mute transition-transform ${open ? "" : "-rotate-90"}`}
+                  className={`ui-icon-16 shrink-0 text-ink-mute ${treeChevronClass} ${open ? "" : "-rotate-90"}`}
                 />
               </button>
-              {open && (
+              <TreeBranch open={open}>
                 <ul className="divide-y divide-line rounded-xl border border-line bg-selected px-4">
-                  {group.entries.map((row) => (
-                    <li
-                      key={row.key}
-                      className="flex min-w-0 items-center gap-3 py-3"
-                    >
-                      <div className="min-w-0 flex-1">
+                  {group.entries.map((row) => {
+                    const target = {
+                      workspacePath: row.path,
+                      sessionId: row.sessionId,
+                      agentKey: agentKey ?? "",
+                    };
+                    const deletion = deletions.entries[deletionKey(target)];
+                    const pending = deleting === deletionKey(target);
+                    return (
+                      <li
+                        key={row.key}
+                        className="flex min-w-0 items-center gap-3 py-3"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <button
+                            type="button"
+                            className={`block max-w-full truncate text-left text-ui-base text-ink hover:underline ${focusVisibleRing}`}
+                            disabled={!!deletion || pending}
+                            data-hint={row.title}
+                            onClick={() => {
+                              void projectService?.sessions.openSessionFromEntry(
+                                row.path,
+                                row.sessionId,
+                              );
+                            }}
+                          >
+                            {row.title}
+                          </button>
+                          <p className="mt-1 text-ui-caption text-ink-mute">
+                            {Number.isFinite(row.timestamp) ? (
+                              <time
+                                dateTime={new Date(row.timestamp).toISOString()}
+                              >
+                                {new Date(row.timestamp).toLocaleString()}
+                              </time>
+                            ) : (
+                              "更新时间未知"
+                            )}
+                          </p>
+                        </div>
+                        {deletion?.error && (
+                          <span
+                            role="status"
+                            className="text-ui-sm text-danger-ink"
+                          >
+                            {deletion.phase === "local"
+                              ? "历史已删除，本地清理未完成。"
+                              : "删除未完成。"}
+                            {deletion.error}
+                          </span>
+                        )}
+                        {canDelete && (
+                          <DangerButton
+                            aria-label={`彻底删除 ${row.title}`}
+                            disabled={deleting !== null}
+                            className="shrink-0 px-2 py-1 text-ui-base"
+                            onClick={() =>
+                              setConfirmDelete({ ...target, title: row.title })
+                            }
+                          >
+                            {pending
+                              ? "正在删除…"
+                              : deletion
+                                ? "重试删除"
+                                : "彻底删除"}
+                          </DangerButton>
+                        )}
                         <button
                           type="button"
-                          className={`block max-w-full truncate text-left text-ui-base text-ink hover:underline ${focusVisibleRing}`}
-                          title={row.title}
-                          onClick={() => {
-                            void projectService?.sessions.openSessionFromEntry(
+                          disabled={!!deletion || pending}
+                          aria-label={`取消归档 ${row.title}`}
+                          className={`${btnSecondary} shrink-0 px-2 py-1 text-ui-base`}
+                          onClick={() =>
+                            projectService?.sessions.unarchiveSession(
                               row.path,
                               row.sessionId,
-                            );
-                          }}
+                              agentKey,
+                            )
+                          }
                         >
-                          {row.title}
+                          取消归档
                         </button>
-                        <p className="mt-1 text-ui-caption text-ink-mute">
-                          {Number.isFinite(row.timestamp) ? (
-                            <time
-                              dateTime={new Date(row.timestamp).toISOString()}
-                            >
-                              {new Date(row.timestamp).toLocaleString()}
-                            </time>
-                          ) : (
-                            "更新时间未知"
-                          )}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        aria-label={`取消归档 ${row.title}`}
-                        className={`${btnSecondary} shrink-0 px-2 py-1 text-ui-base`}
-                        onClick={() =>
-                          projectService?.sessions.unarchiveSession(
-                            row.path,
-                            row.sessionId,
-                            agentKey,
-                          )
-                        }
-                      >
-                        取消归档
-                      </button>
-                    </li>
-                  ))}
+                      </li>
+                    );
+                  })}
                 </ul>
-              )}
+              </TreeBranch>
             </div>
           );
         })

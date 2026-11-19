@@ -26,7 +26,7 @@ import { emptyApproval } from "../conversation/viewState.ts";
  * });
  * ```
  *
- * 约定（docs/conventions.md §2）：
+ * 约定（docs/engineering/conventions.md §2）：
  * - 工具私有字段由 adapter 翻译；rawInput 摘要、待办标题在
  *   本层定型，组件只渲染成品；
  * - 全部交互写 `approval` 日志通道（core 环形缓冲，诊断页可查）；
@@ -142,10 +142,9 @@ export const createApprovalStore = (logger = createLogger("approval")) =>
 
 /**
  * 组装 `_chrys/request_input` 的 answers：
- * 每问恰好一条、值 trim 后非空且去重、单选至多一值——
- * 校验规则对齐 chrys ask_user.py 的 validate_ask_user_answers，
+ * 每问恰好一条、值 trim 后非空且去重、单选至多一值。
+ * 没有选项时把输入文本作为答案，有选项时作为补充说明。
  * 违规返回 null（调用方按 cancelled 回传）。
- * 界面只提供 label 选项，故不做「值必须在候选内」的越界检查。
  */
 export function buildAnswers(
   questions: readonly AgentQuestion[],
@@ -172,17 +171,16 @@ export function buildAnswers(
       seen.add(value);
       values.push(value);
     }
-    if (values.length === 0) {
-      return null;
-    }
     if (!question.multiSelect && values.length > 1) {
       return null;
     }
-    // note 随规范选项一起回传（协议 AgentAnswer.note；空/缺省不带）
     const note = notes?.[index]?.trim();
-    answers.push(
-      note !== undefined && note.length > 0 ? { values, note } : { values },
-    );
+    if (values.length === 0) {
+      if (!note) return null;
+      answers.push({ values: [note] });
+    } else {
+      answers.push(note ? { values, note } : { values });
+    }
   }
   return answers;
 }

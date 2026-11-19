@@ -1,0 +1,35 @@
+{
+  "description": "Result channel transport rule (ADR 024 §9-3). Shared by the engine (session_host.rs tests) and the Desktop host (tests/plugins/workflow/resultChannel.test.ts): an agent declaring mcpCapabilities.http gets the HTTP element, every other agent gets the stdio element. Both sides must produce exactly `expected`.",
+  "offer": {
+    "name": "aaw-workflow-result",
+    "stdio": {
+      "command": "C:\\aaw\\workflow_service.exe",
+      "args": ["--result-mcp", "127.0.0.1:50123"],
+      "env": [{ "name": "AAW_RESULT_TOKEN", "value": "secret-token" }]
+    },
+    "http": {
+      "url": "http://127.0.0.1:50123/mcp",
+      "headers": [{ "name": "Authorization", "value": "Bearer secret-token" }]
+    }
+  },
+  "cases": [
+    {
+      "agentSupportsHttp": true,
+      "expected": {
+        "type": "http",
+        "name": "aaw-workflow-result",
+        "url": "http://127.0.0.1:50123/mcp",
+        "headers": [{ "name": "Authorization", "value": "Bearer secret-token" }]
+      }
+    },
+    {
+      "agentSupportsHttp": false,
+      "expected": {
+        "name": "aaw-workflow-result",
+        "command": "C:\\aaw\\workflow_service.exe",
+        "args": ["--result-mcp", "127.0.0.1:50123"],
+        "env": [{ "name": "AAW_RESULT_TOKEN", "value": "secret-token" }]
+      }
+    }
+  ]
+}

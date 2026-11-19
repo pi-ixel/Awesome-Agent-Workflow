@@ -9,4 +9,4 @@
 | `interactions/` | 审批、问答、表单和待办 |
 | `ui/`、`workbenchViews.tsx` | 项目树、项目总览、会话入口及工作台注册 |
 
-组件用选择器订阅状态，产品命令通过 `ProjectService` 访问。协议资源和产品投影的迁移进度见[迁移记录](../../../../docs/cordis-plugin-migration.md)。
+组件用选择器订阅状态，产品命令通过 `ProjectService` 访问。协议资源和产品投影的迁移进度见[迁移记录](../../../../docs/history/cordis-plugin-migration.md)。

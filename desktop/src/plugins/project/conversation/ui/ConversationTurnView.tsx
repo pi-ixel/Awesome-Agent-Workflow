@@ -1,3 +1,4 @@
+import { TurnUsageBadge } from "./TurnUsageBadge.tsx";
 import type { SessionItem } from "../types.ts";
 import {
   memo,
@@ -51,9 +52,11 @@ function turnWorkDurationMs(
 
 function WorkGroup({
   unit,
+  shimmer,
   renderItem,
 }: {
   readonly unit: Extract<TurnUnit, { kind: "work" }>;
+  readonly shimmer: boolean;
   readonly renderItem: (item: SessionItem) => ReactNode;
 }) {
   const [open, setOpen] = useExpansionState(unit.id);
@@ -64,6 +67,7 @@ function WorkGroup({
       unit={unit}
       expanded={open}
       onToggle={toggle}
+      shimmer={shimmer}
       renderItem={renderItem}
     />
   );
@@ -71,22 +75,36 @@ function WorkGroup({
 
 function ConversationTurnViewBase({
   turn,
+  collapseHistory = false,
+  animateHistory = false,
+  revealHistory = false,
+  workGroupShimmerPaused = false,
   renderItem,
 }: {
   readonly turn: ConversationTurn;
+  readonly collapseHistory?: boolean;
+  readonly animateHistory?: boolean;
+  readonly revealHistory?: boolean;
+  readonly workGroupShimmerPaused?: boolean;
   readonly renderItem: (item: SessionItem) => ReactNode;
 }) {
-  // A lifecycle transition resets only the outer history. Inner tool choices
-  // remain in the session-scoped expansion store even when history unmounts.
-  const [choice, setChoice] = useState({ forced: turn.forceOpen, open: false });
-  if (choice.forced !== turn.forceOpen) {
-    setChoice({ forced: turn.forceOpen, open: false });
-  }
-  const open =
-    turn.forceOpen || (choice.forced === turn.forceOpen && choice.open);
   const units = useMemo(() => groupTurnWork(turn.history), [turn.history]);
-  // 折叠区内的中间助手文本不带动作行（复制/时间只属于轮次最终回答，
-  // 对齐 ZCode：中途 prose 无操作行）。
+  const usage =
+    turn.tokenCounts === undefined ? turn.user?.turnUsage : turn.tokenCounts;
+  const [historyExpanded, setHistoryExpanded] = useExpansionState(
+    `turn-history-${turn.id}`,
+  );
+  const canCollapse = collapseHistory && turn.canCollapseHistory && units.length > 0;
+  const historyVisible = !canCollapse || historyExpanded || revealHistory;
+  const latestWorkGroup = useMemo(
+    () =>
+      units.reduce<TurnUnit | undefined>(
+        (latest, unit) => (unit.kind === "work" ? unit : latest),
+        undefined,
+      ),
+    [units],
+  );
+  // 复制和时间只属于轮次最终回答。
   const renderWorkItem = (item: SessionItem): ReactNode =>
     item.kind === "assistant" ? (
       <AssistantMessage item={item} showActions={false} />
@@ -101,70 +119,89 @@ function ConversationTurnViewBase({
     return () => clearInterval(timer);
   }, [turn.running]);
   const workMs = turnWorkDurationMs(turn, now);
+  const status = turn.stopped
+    ? "已停止"
+    : workMs !== null
+      ? `${turn.running ? "工作中" : "已工作"} ${formatWorkDuration(workMs)}`
+      : turn.running
+        ? "工作中"
+        : "已处理";
+  const statusClass = "border-b border-line/50 pb-2 text-ui-base text-ink-soft";
+  const history = (units.length > 0 || turn.running) && (
+    <div className="space-y-4 pt-4">
+      {units.map((unit) =>
+        unit.kind === "item" ? (
+          <div key={unit.id}>{renderWorkItem(unit.item)}</div>
+        ) : (
+          <WorkGroup
+            key={unit.id}
+            unit={unit}
+            shimmer={
+              turn.running &&
+              !workGroupShimmerPaused &&
+              unit === latestWorkGroup
+            }
+            renderItem={renderItem}
+          />
+        ),
+      )}
+      {turn.running && (
+        <div
+          role="status"
+          aria-label="工作中"
+          className="flex size-4 animate-spin items-center justify-center"
+        >
+          <LoaderIcon className="ui-icon-16 shrink-0 text-ink-mute" />
+        </div>
+      )}
+    </div>
+  );
   return (
     <div className="group/assistant-turn space-y-5">
       {turn.user && (
         <div data-query-id={turn.user.id}>{renderItem(turn.user)}</div>
       )}
-      {(units.length > 0 || turn.running) && (
+      {(units.length > 0 || turn.running || turn.stopped) && (
         <div>
-          {/* 对齐 ZCode AssistantHistoryStatus：无 hover 变色，仅 focus-visible；
-              文案与实时计秒逻辑保留（规则 3）。运行中即使还没有任何工作条目
-              也渲染头+spinner——空窗期没有活动迹象会让人以为模型卡死 */}
-          <button
-            type="button"
-            aria-expanded={open}
-            disabled={turn.forceOpen}
-            onClick={() => setChoice({ forced: turn.forceOpen, open: !open })}
-            className="group/history flex w-full items-center gap-2 border-b border-line/50 pb-2 text-left text-ui-base text-ink-soft focus-visible:ring-2 focus-visible:ring-[var(--color-accent-ink)] focus-visible:outline-none"
-          >
-            <span>
-              {/* 词表对齐 ZCode chat.history.*：运行中「工作中 {duration}」、
-                  有时长终态「已工作 {duration}」、无时长终态「已处理」 */}
-              {workMs !== null
-                ? turn.running
-                  ? `工作中 ${formatWorkDuration(workMs)}`
-                  : `已工作 ${formatWorkDuration(workMs)}`
-                : turn.running
-                  ? "工作中"
-                  : "已处理"}
-            </span>
-            {!turn.forceOpen && (
-              /* 常显 chevron，旋转表达开合（ZCode 同款） */
+          {canCollapse ? (
+            <button
+              type="button"
+              aria-expanded={historyVisible}
+              disabled={revealHistory}
+              onClick={() => setHistoryExpanded(!historyVisible)}
+              className={`${statusClass} flex w-full items-center gap-2 text-left`}
+            >
+              {status}
               <ChevronRightIcon
-                className={`size-4 shrink-0 text-ink-mute opacity-70 transition-transform ${open ? "rotate-90" : "rotate-0"}`}
+                className={`ui-icon-16 shrink-0 transition-transform ${historyVisible ? "rotate-90" : ""}`}
               />
-            )}
-          </button>
-          {open && (
-            <div className="space-y-4 pt-4">
-              {units.map((unit) =>
-                unit.kind === "item" ? (
-                  <div key={unit.id}>{renderWorkItem(unit.item)}</div>
-                ) : (
-                  <WorkGroup
-                    key={unit.id}
-                    unit={unit}
-                    renderItem={renderWorkItem}
-                  />
-                ),
-              )}
-              {/* ZCode 工作块尾部的常驻 spinner：标记「还有内容在路上」。
-                  旋转容器而非 SVG 本体（ChatLoading 同款，动画走合成层） */}
-              {turn.running && (
-                <div
-                  role="status"
-                  aria-label="工作中"
-                  className="flex size-4 animate-spin items-center justify-center"
-                >
-                  <LoaderIcon className="size-4 shrink-0 text-ink-mute" />
-                </div>
-              )}
+            </button>
+          ) : (
+            <div className={statusClass}>{status}</div>
+          )}
+          {animateHistory ? (
+            <div
+              inert={!historyVisible}
+              aria-hidden={!historyVisible}
+              className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none ${
+                historyVisible ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0"
+              }`}
+            >
+              <div className="min-h-0 overflow-hidden">{history}</div>
             </div>
+          ) : (
+            historyVisible && history
           )}
         </div>
       )}
-      {turn.answer && renderItem(turn.answer)}
+      {turn.answer && (!turn.running && usage !== undefined
+        ? <AssistantMessage item={turn.answer} usage={usage} />
+        : renderItem(turn.answer))}
+      {!turn.answer && !turn.running && usage !== undefined && (
+        <div className="opacity-0 transition-opacity focus-within:opacity-100 group-hover/assistant-turn:opacity-100 [@media(hover:none)]:opacity-100">
+          <TurnUsageBadge usage={usage} />
+        </div>
+      )}
     </div>
   );
 }

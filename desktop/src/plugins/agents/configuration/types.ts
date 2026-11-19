@@ -25,6 +25,7 @@ export interface CustomAgentEntry {
   readonly name: string;
   /** 完整 argv（含程序与子命令，如 ["opencode", "acp"]）。 */
   readonly command: readonly string[];
+  readonly supportsCustomAnswers?: boolean;
 }
 
 /** 本机扫描命中的原生 ACP CLI（不持久化，每次扫描现算）。 */
@@ -51,11 +52,12 @@ export interface AgentConfigurationState
   /** 切换新会话使用的 agent；非法 id 忽略并记日志。 */
   setActiveAgentId: (agentId: string) => void;
   /** 添加自定义 agent（名称 + 命令行）；校验失败返回错误文案，成功返回 null。 */
-  addCustomAgent: (name: string, commandText: string) => string | null;
+  addCustomAgent: (name: string, commandText: string, supportsCustomAnswers?: boolean) => string | null;
   updateCustomAgent: (
     id: string,
     name: string,
     commandText: string,
+    supportsCustomAnswers?: boolean,
   ) => string | null;
   removeCustomAgent: (agentId: string) => void;
   resetToDefaults: () => void;

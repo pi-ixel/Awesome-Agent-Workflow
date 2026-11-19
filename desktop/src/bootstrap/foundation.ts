@@ -3,15 +3,18 @@ import type { HostOptions } from "../plugins/host/types.ts";
 import * as hostPlugin from "../plugins/host/index.ts";
 import * as configurationPlugin from "../plugins/configuration/index.ts";
 import * as diagnosticsPlugin from "../plugins/diagnostics/index.ts";
-import { createDiagnosticsLogSink } from "../plugins/diagnostics/config.ts";
+import { createDiagnosticsLogSink } from "../plugins/diagnostics/service.ts";
+import { loadNativeConfiguration } from "../plugins/host/service.ts";
 
 /** 主窗口与独立诊断窗口共享基础插件，各自持有根上下文。 */
 export async function installDesktopFoundation(
   ctx: Context,
   hostOptions?: HostOptions,
   diagnosticsSnapshot?: () => object,
+  probeConnection?: (id: string) => Promise<unknown>,
 ) {
   const logSink = createDiagnosticsLogSink();
+  await loadNativeConfiguration();
   await ctx.plugin(hostPlugin, { ...hostOptions, createLogger: logSink.createLogger });
   await ctx.plugin(configurationPlugin);
   await ctx.plugin(
@@ -20,6 +23,7 @@ export async function installDesktopFoundation(
       logSink,
       capture: diagnosticsSnapshot && {
         snapshot: diagnosticsSnapshot,
+        probeConnection,
         cursor: { sequence: 0 },
       },
     },

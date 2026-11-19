@@ -22,6 +22,9 @@ type ProjectFixture = {
   [Key in keyof ProjectService]?: ProjectService[Key] extends object
     ? Partial<ProjectService[Key]>
     : ProjectService[Key];
+} & {
+  /** 插件给项目界面的扩展（ReadonlySnapshot，绑进 ProjectViewBinding）。 */
+  extension?: ProjectViewBinding["extension"];
 };
 
 export function createTestProjectWorkbench(project: ProjectFixture) {
@@ -68,6 +71,8 @@ export function createTestProjectWorkbench(project: ProjectFixture) {
       sidebar: sidebar.snapshot,
       project: registeredProject,
       navigation: navigation.commands,
+      // 扩展可由用例注入（注入后树上才有扩展的按钮）。
+      extension: service.extension,
       isActive: isCurrent,
     };
     current.setState(binding, true);

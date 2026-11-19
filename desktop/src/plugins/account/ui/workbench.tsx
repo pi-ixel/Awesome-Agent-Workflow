@@ -30,14 +30,13 @@ export function apply(ctx: Context): void {
         return (
           <Footer
             badge={{
-              label: user.name,
               tooltip: `${user.name} · 工号 ${user.employeeId}`,
               avatar: user.name.slice(0, 1),
             }}
             menuEntries={[{
               id: "logout",
               label: "退出登录",
-              icon: <LogOutIcon className="h-4 w-4" />,
+              icon: <LogOutIcon className="ui-icon-16" />,
               onSelect: account.logout,
             }]}
           />

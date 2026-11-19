@@ -1,13 +1,31 @@
+import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
+import {
+  createSessionTools,
+  type SessionToolProvider,
+} from "./sessionTools.ts";
+import {
+  deletionKey,
+  sessionAgentId,
+  sameSessionAgent,
+  type DeleteSessionTarget,
+} from "./sessionDeletion.ts";
+import { sessionArchiveKey } from "./sessionArchiveStore.ts";
 import { projectConversationPageId } from "../workspace/pageIds.ts";
 import type { WorkbenchUiState } from "../../workbench/types.ts";
 import type { AcpSessionPort } from "../../acpRuntime/types.ts";
 import { withDeadline } from "../../../shared/asyncDeadline.ts";
 import type {
   OpenSessionOptions,
+  PluginSessionOptions,
+  SessionTurnEvent,
   OpenSessionResult,
   SessionTarget,
 } from "./types.ts";
-import type { ApprovalMode, ProjectRuntimeDebugEntry } from "../types.ts";
+import type {
+  ApprovalMode,
+  ProjectPreferences,
+  ProjectRuntimeDebugEntry,
+} from "../types.ts";
 import type {
   AcpProtocolResources,
   AcpProtocolSessionOptions,
@@ -15,6 +33,7 @@ import type {
 import {
   RecoveryCleanupError,
   type SessionRuntime,
+  type SessionRuntimeResources,
 } from "../conversation/SessionRuntime.ts";
 import { ProjectFactory } from "../workspace/ProjectFactory.ts";
 import { SessionFactory } from "../conversation/SessionFactory.ts";
@@ -31,6 +50,13 @@ import { createSessionStore } from "../conversation/sessionStore.ts";
 import { createApprovalStore } from "../interactions/approvalStore.ts";
 import { createRuntimeStatusStore } from "../conversation/runtimeStatusStore.ts";
 import { sessionActivityKey } from "./sessionActivityStore.ts";
+import { setManualTitle } from "./sessionTitles.ts";
+import type { ProjectSessions } from "../service.ts";
+import type {
+  AgentSwitchProgressEvent,
+  AgentSwitchProgressListener,
+} from "../types.ts";
+type ProjectSessionsPort = ProjectSessions;
 /**
  * 主窗口会话装配：项目视图通过 ACP 运行时使用共享连接。
  * 物理资源由注入的 acpConnection 服务及其连接池分配和回收。
@@ -65,6 +91,8 @@ import type { HostService } from "../../host/service.ts";
 import type { createMessageImageHistory } from "../conversation/messageImageHistory.ts";
 import type { AnnotationDraftService } from "../composer/annotationTypes.ts";
 import { attachSessionViews } from "../conversation/projection.ts";
+import { attachContextUsage } from "../conversation/contextUsageProjection.ts";
+import { deleteContextUsage } from "../conversation/contextUsageStorage.ts";
 import {
   completeSessionIdentity,
   prepareDraftPromotion,
@@ -89,6 +117,10 @@ export interface ProjectSessionDependencies {
   readonly getAgents: () => AgentsService;
   readonly getBrowser: () => HostService["browser"];
   readonly getApprovalMode: () => ApprovalMode;
+  readonly interactionPreferences?: Pick<
+    ProjectPreferences,
+    "getState" | "subscribe"
+  >;
   readonly loggerFactory?: LoggerFactory;
   readonly navigation: {
     getState(): Pick<WorkbenchUiState, "viewId" | "contextPath" | "openView">;
@@ -116,6 +148,7 @@ export function createSessionCoordinator({
   getAgents,
   getBrowser,
   getApprovalMode,
+  interactionPreferences,
   navigation,
   loggerFactory = createLogger,
 }: ProjectSessionDependencies) {
@@ -130,10 +163,43 @@ export function createSessionCoordinator({
   let activeRuntime: SessionRuntime | null = null;
   let focusRevision = 0;
   const projectFactory = new ProjectFactory<SessionRuntime>();
+  const sessionTools = createSessionTools(logger);
+  /** 会话的附加工具：打开它的插件给的在前，登记方给的在后；同名只留第一个。 */
+  const toolsFor = async (
+    runtime: SessionRuntime,
+    sessionId: string | null,
+  ) => {
+    const tools = [
+      ...(runtime.openTools?.(runtime.session.agentInfo) ?? []),
+      ...(await sessionTools.resolve({
+        workspacePath: runtime.workspacePath,
+        agentKey: runtime.agentKey,
+        sessionId,
+        agent: runtime.session.agentInfo,
+      })),
+    ];
+    return tools.filter(
+      (tool, index) =>
+        tools.findIndex((other) => other.name === tool.name) === index,
+    );
+  };
+  /** 会话原始事件的订阅方（按会话）。 */
+  const eventWatchers = new Map<
+    string,
+    Set<(event: AcpSessionEvent) => void>
+  >();
+  /** 会话轮次事件的订阅方（按会话）。 */
+  const turnWatchers = new Map<
+    string,
+    Set<(event: SessionTurnEvent) => void>
+  >();
   const sessionFactory = new SessionFactory(
     (...args) => getAgents().readArchive(...args),
     messageImages,
     loggerFactory,
+    (...args) =>
+      getAgents().readHistoryEvidence?.(...args) ?? Promise.resolve(null),
+    toolsFor,
   );
   const projectClosures = new Map<string, Promise<void>>();
   let loadingSession: {
@@ -161,7 +227,22 @@ export function createSessionCoordinator({
     forms.setActiveOwner(approvals);
     foreground.select(store, approvals, status);
   }
+  /** 用户接管预加载会话：提升排队请求及后续请求，不改变连接总并发上限。 */
+  function promoteUserRuntime(runtime: SessionRuntime): void {
+    // 恢复中的旧租约不能再参与调度。
+    const state = runtime.store.getState();
+    if (
+      runtime.disposed ||
+      runtime.recovering ||
+      state.connectionFailure ||
+      state.agentCrashed
+    )
+      return;
+    const protocol = getProtocol();
+    if (protocol.has(runtime.session)) protocol.promote(runtime.session);
+  }
   function focusRuntime(runtime: SessionRuntime): void {
+    promoteUserRuntime(runtime);
     if (runtime.store.getState().connectionFailure && !runtime.recovering)
       scheduleRecovery(runtime);
     focusRevision += 1;
@@ -226,6 +307,8 @@ export function createSessionCoordinator({
         document.visibilityState !== "hidden";
       activity.getState().update({
         agentKey: runtime.agentKey,
+        externallyManaged:
+          runtime.pluginOpened === true || runtime.scheduled === true,
         project: runtime.workspacePath,
         sessionId: id,
         status,
@@ -238,7 +321,58 @@ export function createSessionCoordinator({
             old?.unread === true),
       });
     };
-    const stopState = runtime.store.subscribe(update),
+    const stopState = runtime.store.subscribe((state, previous) => {
+        if (state.isAgentRunning !== previous.isAgentRunning) {
+          const sessionId = runtime.session.sessionId ?? state.activeSessionId;
+          const watchers = sessionId
+            ? turnWatchers.get(
+                sessionActivityKey(
+                  runtime.workspacePath,
+                  sessionId,
+                  runtime.agentKey,
+                ),
+              )
+            : undefined;
+          const event: SessionTurnEvent = state.isAgentRunning
+            ? { type: "started" }
+            : {
+                type: "ended",
+                outcome:
+                  state.turnState === "completed"
+                    ? "completed"
+                    : state.turnState === "cancelled"
+                      ? "cancelled"
+                      : "failed",
+                stopReason: state.lastStopReason,
+                error: state.lastError ?? state.turnError?.message ?? null,
+              };
+          for (const watcher of [...(watchers ?? [])]) {
+            try {
+              watcher(event);
+            } catch (error) {
+              logger.warn("轮次事件订阅方出错", {
+                sessionId,
+                reason: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+        }
+        if (
+          state.turnState === "cancelled" &&
+          previous.turnState !== "cancelled"
+        ) {
+          const sessionId = runtime.session.sessionId ?? state.activeSessionId;
+          if (sessionId) {
+            forms.dismissSession(runtime.approval, sessionId);
+            const approval = runtime.approval.getState();
+            for (const item of approval.pending) {
+              if (item.kind === "questions" && item.sessionId === sessionId)
+                approval.cancelQuestions(item.id);
+            }
+          }
+        }
+        update();
+      }),
       stopApproval = runtime.approval.subscribe(update),
       stopForms = forms.store.subscribe(update);
     update();
@@ -282,11 +416,25 @@ export function createSessionCoordinator({
     return getProtocol().recover(session);
   }
 
-  function switchRuntimeAgent(agentId: string): Promise<void> {
+  function switchRuntimeAgent(
+    agentId: string,
+    onProgress?: AgentSwitchProgressListener,
+  ): Promise<void> {
     if (closing) return Promise.reject(new Error("应用正在退出"));
     const request = ++agentSwitchRevision;
+    const report = (event: AgentSwitchProgressEvent) => {
+      if (request !== agentSwitchRevision) return;
+      try {
+        onProgress?.(event);
+      } catch {
+        /* Progress is observational. */
+      }
+    };
+    report({ type: "stage", stage: "queued" });
     switchingAgent = true;
-    for (const runtime of projectFactory.sessions())
+    for (const runtime of [...projectFactory.sessions()].filter(
+      (entry) => !entry.scheduled,
+    ))
       runtime.store.setState({
         operationsBlocked: true,
         isConnecting: true,
@@ -295,13 +443,13 @@ export function createSessionCoordinator({
     // Confirmation supersedes preparation. A commit already in progress finishes atomically;
     // the newest request follows it without reopening business operations in between.
     const task = agentSwitchQueue
-      .then(() => performAgentSwitch(agentId, request))
+      .then(() => performAgentSwitch(agentId, request, report))
       .finally(() => {
         if (request !== agentSwitchRevision) return;
         switchingAgent = false;
         if (closing) return;
         for (const runtime of projectFactory.sessions())
-          if (!runtime.disposed)
+          if (!runtime.disposed && !runtime.scheduled)
             runtime.store.setState({
               operationsBlocked: false,
               isConnecting: false,
@@ -323,6 +471,7 @@ export function createSessionCoordinator({
   async function performAgentSwitch(
     agentId: string,
     request: number,
+    report: AgentSwitchProgressListener,
   ): Promise<void> {
     const protocol = getProtocol();
     if (closing) throw new Error("应用正在退出");
@@ -336,7 +485,11 @@ export function createSessionCoordinator({
       protocol.selection?.agentKey === selectedAgentKey()
     )
       return;
-    const old = [...projectFactory.sessions()];
+    // 确认制闸（Agent 设置页）保证切换前已停掉工作流运行；运行时一律
+    // 走这里收口，节点会话视图随池切换一同清理（目录条目保留）。
+    const old = [...projectFactory.sessions()].filter(
+      (runtime) => !runtime.scheduled,
+    );
     for (const runtime of old)
       runtime.store.setState({
         operationsBlocked: true,
@@ -346,34 +499,47 @@ export function createSessionCoordinator({
     let revision: number | undefined;
     try {
       if (!protocol.selection) {
+        report({ type: "stage", stage: "current" });
         const current = currentAdapter();
         if (!current) throw new Error("未找到当前 Agent");
         await prepareProtocol(current, selectedAgentKey());
       }
+      report({ type: "stage", stage: "target" });
       revision = await protocol.prepareSwitch(
         target,
         workspaceStore.getState().toolPaths,
+        (event) => report({ type: "connection", event }),
       );
       if (closing) throw new Error("应用正在退出");
+      report({ type: "stage", stage: "openQueue" });
       await openQueue.catch(() => {});
       if (request !== agentSwitchRevision)
         throw new Error("切换已被后续确认替代");
       for (const runtime of projectFactory.sessions())
-        if (!old.includes(runtime)) old.push(runtime);
+        if (!runtime.scheduled && !old.includes(runtime)) old.push(runtime);
       for (const runtime of old) {
         runtime.store.getState().requestCancel();
         runtime.store.getState().suspendForRecovery();
         runtime.recovering = true;
       }
+      report({ type: "stopRequested", count: old.length });
       projectFactory.invalidatePreparations(() => false);
+      report({ type: "stage", stage: "commit" });
       await protocol.commitSwitch(revision);
+      report({ type: "stage", stage: "dispose" });
       await Promise.all(old.map(disposeRuntime));
+      report({ type: "stage", stage: "select" });
       agents.select(agentId);
       protocol.setSelection(selectedAgentKey(), agentId);
       projectFactory.invalidateWarmups(() => false);
       unfocusRealRuntime();
       activateCatalog();
     } catch (error) {
+      report({
+        type: "failure",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      if (revision !== undefined) report({ type: "stage", stage: "rollback" });
       if (revision !== undefined) await protocol.abortSwitch(revision);
       for (const runtime of old)
         if (request === agentSwitchRevision && !closing && !runtime.disposed) {
@@ -406,9 +572,23 @@ export function createSessionCoordinator({
     });
   }
 
+  function runtimeDeleting(runtime: SessionRuntime): boolean {
+    const sessionId =
+      runtime.session.sessionId ?? runtime.store.getState().activeSessionId;
+    return (
+      sessionId !== null &&
+      indexes.deletions.blocked({
+        workspacePath: runtime.workspacePath,
+        agentKey: runtime.agentKey,
+        sessionId,
+      })
+    );
+  }
+
   /** Let completed prompt callbacks settle before snapshotting an interrupted turn. */
   function scheduleRecovery(runtime: SessionRuntime): void {
     if (
+      runtimeDeleting(runtime) ||
       retired ||
       closing ||
       runtime.recoveryScheduled ||
@@ -421,6 +601,7 @@ export function createSessionCoordinator({
       recoveryTimers.delete(timer);
       runtime.recoveryScheduled = false;
       if (
+        !runtimeDeleting(runtime) &&
         !closing &&
         !retired &&
         !runtime.disposed &&
@@ -438,12 +619,31 @@ export function createSessionCoordinator({
     runtime: SessionRuntime,
     immediate: boolean,
   ): Promise<void> {
+    if (runtimeDeleting(runtime))
+      return Promise.reject(new Error("此会话正在删除或已删除"));
     return runtime.recover({
       immediate,
       isClosing: () => retired || closing || switchingAgent,
       release: releaseSessionResources,
       recoverConnection: recoverSessionResources,
-      restore: (session, options) => getProtocol().restore(session, options),
+      restore: async (session, options) => {
+        const tools = [
+          ...(runtime.openTools?.(session.agentInfo) ?? []),
+          ...(await sessionTools.resolve({
+            workspacePath: runtime.workspacePath,
+            agentKey: runtime.agentKey,
+            sessionId: options.sessionId,
+            agent: session.agentInfo,
+          })),
+        ];
+        return getProtocol().restore(session, {
+          ...options,
+          mcpServers: tools.filter(
+            (tool, index) =>
+              tools.findIndex((other) => other.name === tool.name) === index,
+          ),
+        });
+      },
       prepare: (retained, isCurrent) =>
         prepareRuntime(
           retained.workspacePath,
@@ -456,7 +656,19 @@ export function createSessionCoordinator({
   }
 
   function attachProjectSessionViews(runtime: SessionRuntime): () => void {
-    return attachSessionViews(
+    const supportsSteer = runtime.adapter.supportsSteer === true;
+    const detachContext = attachContextUsage(
+      runtime.session,
+      runtime.store,
+      runtime.status,
+      {
+        workspace: runtime.workspacePath,
+        agent: runtime.adapter.id,
+        canWrite: () => !runtime.disposed && !runtime.recovering,
+      },
+      usageLogger,
+    );
+    const detachViews = attachSessionViews(
       runtime.session,
       runtime.store,
       runtime.approval,
@@ -464,10 +676,59 @@ export function createSessionCoordinator({
       (event) => {
         if (activeRuntime === runtime)
           foreground.activity.publish(runtime.workspacePath, event);
+        const sessionId = runtime.session.sessionId;
+        const watchers = sessionId
+          ? eventWatchers.get(
+              sessionActivityKey(
+                runtime.workspacePath,
+                sessionId,
+                runtime.agentKey,
+              ),
+            )
+          : undefined;
+        for (const watcher of [...(watchers ?? [])]) {
+          try {
+            watcher(event);
+          } catch (error) {
+            logger.warn("会话事件订阅方出错", {
+              sessionId,
+              reason: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
       },
       forms.store,
       sessionLogger,
+      runtime.adapter.promptUsageBasis,
+      runtime.adapter.sessionUsageCachePrefix
+        ? {
+            scope: runtime.workspacePath,
+            prefix: runtime.adapter.sessionUsageCachePrefix,
+          }
+        : undefined,
+      runtime.adapter.turnUsageBasis,
+      runtime.usageScope(),
+      runtime.adapter.imageOnlyPromptFallback,
+      supportsSteer,
+      runtime.adapter.id,
     );
+    const detach = () => {
+      detachContext();
+      detachViews();
+    };
+    if (!supportsSteer || !interactionPreferences) return detach;
+    const syncInteraction = () => {
+      const mode =
+        interactionPreferences.getState().interactionByAgent[runtime.adapter.id]
+          ?.mode;
+      runtime.store.getState().setDirectSteering(mode === "steer");
+    };
+    syncInteraction();
+    const unsubscribe = interactionPreferences.subscribe(syncInteraction);
+    return () => {
+      unsubscribe();
+      detach();
+    };
   }
 
   function recoverSessionRuntime(target: SessionTarget): Promise<void> {
@@ -553,6 +814,9 @@ export function createSessionCoordinator({
       return {
         sessionId: runtime.session.sessionId ?? state.activeSessionId,
         workspacePath: runtime.workspacePath,
+        agentKey: state.agentKey,
+        queueSaveError: state.queueSaveError,
+        cacheSaveError: state.cacheSaveError,
         isActive: runtime === activeRuntime,
         listOnly: runtime.listOnly,
         isAgentRunning: state.isAgentRunning,
@@ -651,7 +915,7 @@ export function createSessionCoordinator({
       );
     void openRealWorkspace(path, {
       forceNew: true,
-      draft: true,
+      createFromDraft: true,
       shouldFocus: draft.isCurrent,
     })
       .then((opened) => {
@@ -674,6 +938,8 @@ export function createSessionCoordinator({
     sessionId: string,
     agentKey = selectedAgentKey(),
   ): boolean {
+    if (indexes.deletions.blocked({ workspacePath, agentKey, sessionId }))
+      return false;
     if (
       loadingSession &&
       loadingSession.runtime?.agentKey === agentKey &&
@@ -682,6 +948,7 @@ export function createSessionCoordinator({
     ) {
       focusRevision += 1;
       activeRuntime = loadingSession.runtime;
+      promoteUserRuntime(loadingSession.runtime);
       loadingSession.store.getState().beginOpenSession(sessionId);
       selectForeground(
         loadingSession.store,
@@ -793,11 +1060,22 @@ export function createSessionCoordinator({
        * 返回 sessionId=null 且不视为失败。
        */
       readonly draft?: boolean;
+      readonly createFromDraft?: boolean;
     } = {},
   ): Promise<{ sessionId: string | null } | null> {
     const forceNew = options.forceNew === true;
     const draft = options.draft === true;
+    const createFromDraft = options.createFromDraft === true;
     const preferredSessionId = options.sessionId ?? null;
+    if (
+      preferredSessionId &&
+      indexes.deletions.blocked({
+        workspacePath,
+        agentKey: selectedAgentKey(),
+        sessionId: preferredSessionId,
+      })
+    )
+      throw new Error("此会话正在删除或已删除");
     const agentKey = activateCatalog();
     const sameProject = (runtime: SessionRuntime) =>
       runtime.agentKey === agentKey &&
@@ -815,6 +1093,7 @@ export function createSessionCoordinator({
           runtime.store.getState().activeSessionId === null,
       ) ?? null;
     if (draftRuntime !== null) {
+      if (!options.background) promoteUserRuntime(draftRuntime);
       if (options.shouldFocus?.() !== false) focusRuntime(draftRuntime);
       return { sessionId: null };
     }
@@ -829,6 +1108,7 @@ export function createSessionCoordinator({
         )
       : undefined;
     if (existing) {
+      if (!options.background) promoteUserRuntime(existing);
       if (options.shouldFocus?.() !== false) focusRuntime(existing);
       return { sessionId: existing.session.sessionId };
     }
@@ -878,7 +1158,7 @@ export function createSessionCoordinator({
       reportFailure("Agent 连接已断开，请重试");
       return null;
     }
-    if (!options.background) getProtocol().promote(candidate.session);
+    if (!options.background) promoteUserRuntime(candidate);
     const openingKey = preferredSessionId
       ? JSON.stringify([agentKey, pathKey(workspacePath), preferredSessionId])
       : undefined;
@@ -908,7 +1188,7 @@ export function createSessionCoordinator({
       viewStore.getState().beginOpenSession(loading.sessionId);
     }
     viewStore.getState().setConnecting(true);
-    if (mayFocus()) focusRuntime(candidate);
+    if (!createFromDraft && mayFocus()) focusRuntime(candidate);
     try {
       let restoredId: string | null = null;
       let restoredHistoric = false;
@@ -919,13 +1199,25 @@ export function createSessionCoordinator({
         // 快照先行：目标会话的本地快照立刻上屏（进程冷启动、归档读取与
         // 回放期间内容可见，连接横幅不再空转）；回放随后以权威历史无缝替换。
         // 写目标先指向目标会话，回落新建时由后面的编排重置为新会话。
-        viewStore
+        const target = viewStore
           .getState()
           .setSessionLogTarget(`${pathKey(workspacePath)}#${targetId}`);
-        viewStore
-          .getState()
-          .restoreSessionLog(`${pathKey(workspacePath)}#${targetId}`);
         try {
+          if (target) await target;
+          const restore = candidate.adapter.readHistoryEvidence
+            ? sessionFactory.restorePreview(candidate, targetId)
+            : viewStore
+                .getState()
+                .restoreSessionLog(`${pathKey(workspacePath)}#${targetId}`);
+          if (restore) await restore;
+          if (
+            indexes.deletions.blocked({
+              workspacePath,
+              agentKey,
+              sessionId: targetId,
+            })
+          )
+            throw new Error("此会话正在删除或已删除");
           await sessionFactory.load(candidate, targetId);
           restoredId = targetId;
           restoredHistoric = true;
@@ -948,6 +1240,10 @@ export function createSessionCoordinator({
         // 运行时保持 prompt 同步派发（取消竞态与测试都依赖同步性）。
         workspaceStore.getState().dismissConnectError(workspacePath);
         viewStore.getState().setAgentCrashed(null);
+        if (viewStore.getState().supportsSteer)
+          await viewStore
+            .getState()
+            .setSessionLogTarget(null, pathKey(workspacePath));
         prepareDraftPromotion(
           candidate,
           annotationDrafts,
@@ -973,7 +1269,12 @@ export function createSessionCoordinator({
         restoredId = created.sessionId;
       }
 
-      completeSessionIdentity(candidate, restoredId, {
+      if (createFromDraft && !mayFocus()) {
+        await disposeRuntime(candidate);
+        return null;
+      }
+      const binding = completeSessionIdentity(candidate, restoredId, {
+        annotationDrafts: createFromDraft ? annotationDrafts : undefined,
         restored: restoredHistoric,
         publish: () =>
           backfillSessionList(
@@ -984,6 +1285,8 @@ export function createSessionCoordinator({
             sameProject,
           ),
       });
+      if (binding) await binding;
+      if (createFromDraft) focusRuntime(candidate);
 
       // 恢复了历史会话：内容区自动切到该项目的会话视图（重启后直接回到
       // 上次对话）；全新 newSession 不切，保持项目总览——是否进会话由
@@ -1043,6 +1346,170 @@ export function createSessionCoordinator({
     return getAgents().resolve();
   }
 
+  /**
+   * 插件打开（新建或恢复）一个普通会话（ADR 037，project.sessions.openPluginSession）。
+   * 与用户打开会话走同一套准备连接、建立会话、登记侧栏的流程；不抢前台，
+   * 不写项目的连接失败横幅，失败原样交还调用方。
+   */
+  async function openPluginSessionRuntime(
+    options: PluginSessionOptions,
+  ): Promise<SessionTarget> {
+    const { workspacePath } = options;
+    const agentKey = selectedAgentKey();
+    const current = () =>
+      !retired &&
+      !closing &&
+      !switchingAgent &&
+      !projectClosures.has(pathKey(workspacePath)) &&
+      agentKey === selectedAgentKey();
+    if (!current()) throw new Error("会话管理当前不可用");
+    const resumeId = options.resumeSessionId ?? null;
+    if (resumeId) {
+      if (
+        indexes.deletions.blocked({
+          workspacePath,
+          agentKey,
+          sessionId: resumeId,
+        })
+      )
+        throw new Error("此会话正在删除或已删除");
+      const existing = findSessionRuntime(workspacePath, agentKey, resumeId);
+      if (existing) {
+        // 用户那边正在恢复这个会话的历史（如刷新后自动打开）：等恢复完再交给插件，
+        // 免得插件发的消息插进回放中途，让恢复放弃补回消息的显示方式等本地信息。
+        await sessionFactory.settled(existing);
+        return { workspacePath, agentKey, sessionId: resumeId };
+      }
+    }
+    const runtime = await prepareRuntime(
+      workspacePath,
+      agentKey,
+      current,
+      undefined,
+      undefined,
+      { cwd: options.cwd, openTools: options.tools },
+    );
+    if (!runtime) {
+      const status =
+        catalogStore.getState().statusByPath[pathKey(workspacePath)];
+      throw new Error(
+        status?.state === "error" ? status.message : "无法建立 Agent 连接",
+      );
+    }
+    try {
+      if (!current()) throw new Error("会话管理当前不可用");
+      runtime.listOnly = false;
+      runtime.pluginOpened = true;
+      projectFactory.addSession(runtime);
+      let sessionId: string;
+      if (resumeId) {
+        if (runtime.session.agentInfo?.agentCapabilities.loadSession !== true)
+          throw new Error("Agent 不支持恢复原会话");
+        const scope = `${pathKey(workspacePath)}#${resumeId}`;
+        const target = runtime.store.getState().setSessionLogTarget(scope);
+        if (target) await target;
+        const restore = runtime.adapter.readHistoryEvidence
+          ? sessionFactory.restorePreview(runtime, resumeId)
+          : runtime.store.getState().restoreSessionLog(scope);
+        if (restore) await restore;
+        await sessionFactory.load(runtime, resumeId);
+        sessionId = resumeId;
+      } else {
+        sessionId = (await sessionFactory.ensureCreated(runtime)).sessionId;
+        if (options.model) await chooseModel(runtime.session, options.model);
+      }
+      const binding = completeSessionIdentity(runtime, sessionId, {
+        restored: resumeId !== null,
+        publish: () =>
+          backfillSessionList(
+            runtime.store,
+            runtime.listed,
+            sessionId,
+            runtime,
+            (other) =>
+              other.agentKey === agentKey &&
+              pathKey(other.workspacePath) === pathKey(workspacePath),
+          ),
+      });
+      if (binding) await binding;
+      const title = options.title?.trim();
+      if (title) {
+        const save = setManualTitle(sessionId, title, agentKey);
+        if (save) await save;
+        runtime.store.getState().refreshSessionTitle(sessionId);
+      }
+      logger.info("插件打开了会话", {
+        workspacePath,
+        sessionId,
+        restored: resumeId !== null,
+      });
+      return { workspacePath, agentKey, sessionId };
+    } catch (error) {
+      await disposeRuntime(runtime).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** 订阅一个会话的轮次事件（会话断线重连、重新打开后照常收到）。 */
+  function watchSessionTurns(
+    target: SessionTarget,
+    listener: (event: SessionTurnEvent) => void,
+  ): () => void {
+    if (!target.sessionId) return () => {};
+    const key = sessionActivityKey(
+      target.workspacePath,
+      target.sessionId,
+      target.agentKey,
+    );
+    const set = turnWatchers.get(key) ?? new Set();
+    set.add(listener);
+    turnWatchers.set(key, set);
+    return () => {
+      set.delete(listener);
+      if (set.size === 0 && turnWatchers.get(key) === set)
+        turnWatchers.delete(key);
+    };
+  }
+
+  /** 订阅一个会话的原始事件（Agent 的消息、工具调用、计划等）。 */
+  function watchSessionEvents(
+    target: SessionTarget,
+    listener: (event: AcpSessionEvent) => void,
+  ): () => void {
+    if (!target.sessionId) return () => {};
+    const key = sessionActivityKey(
+      target.workspacePath,
+      target.sessionId,
+      target.agentKey,
+    );
+    const set = eventWatchers.get(key) ?? new Set();
+    set.add(listener);
+    eventWatchers.set(key, set);
+    return () => {
+      set.delete(listener);
+      if (set.size === 0 && eventWatchers.get(key) === set)
+        eventWatchers.delete(key);
+    };
+  }
+
+  /** 新会话选用指定模型；Agent 没有这个模型时如实失败。 */
+  async function chooseModel(
+    port: AcpSessionPort,
+    model: string,
+  ): Promise<void> {
+    const config = modelConfig(port);
+    if (config?.options.some((item) => item.value === model)) {
+      if (config.currentValue !== model)
+        await port.setConfigOption(config.id, model);
+      return;
+    }
+    if (port.models?.availableModels.some((item) => item.modelId === model)) {
+      if (port.models.currentModelId !== model) await port.setModel(model);
+      return;
+    }
+    throw new Error(`Agent 没有这个模型：${model}`);
+  }
+
   function selectedAgentKey(): string {
     return getAgents().selectionKey(workspaceStore.getState().toolPaths);
   }
@@ -1069,11 +1536,11 @@ export function createSessionCoordinator({
     agentKey: string,
     sessionId: string,
     title: string,
-  ): void {
-    directory.renameCatalogEntry(agentKey, sessionId, title, () => {
+  ): void | Promise<void> {
+    return directory.renameCatalogEntry(agentKey, sessionId, title, () => {
       for (const runtime of projectFactory.sessions()) {
         if (runtime.agentKey === agentKey)
-          runtime.store.getState().renameSession(sessionId, title);
+          runtime.store.getState().refreshSessionTitle(sessionId);
       }
     });
   }
@@ -1108,6 +1575,7 @@ export function createSessionCoordinator({
       if (!valid()) return null;
       session = protocol.open(agentKey, {
         background: true,
+        project: { id: pathKey(workspacePath), path: workspacePath },
         onQuestion: () => Promise.resolve(null),
         onPermissionRequest: () => Promise.resolve({ outcome: "cancelled" }),
         onElicitation: (form, signal, method) =>
@@ -1190,8 +1658,10 @@ export function createSessionCoordinator({
     agentKey: string,
     isCurrent: () => boolean,
     retained?: SessionRuntime,
+    backgroundAdapter?: AgentAdapter,
+    plugin?: Pick<SessionRuntimeResources, "cwd" | "openTools">,
   ): Promise<SessionRuntime | null> {
-    const adapter = retained?.adapter ?? currentAdapter();
+    const adapter = retained?.adapter ?? backgroundAdapter ?? currentAdapter();
     if (!adapter) {
       setListStatus(workspacePath, agentKey, {
         state: "error",
@@ -1209,7 +1679,7 @@ export function createSessionCoordinator({
     const viewStore =
         retained?.store ??
         createSessionStore(
-          selectedAgentKey(),
+          agentKey,
           annotationDrafts,
           messageImages,
           sessionLogger,
@@ -1222,7 +1692,9 @@ export function createSessionCoordinator({
       });
     let candidate: SessionRuntime | null = null;
     try {
-      const protocol = await prepareProtocol(adapter, agentKey);
+      const protocol = backgroundAdapter
+        ? getProtocol()
+        : await prepareProtocol(adapter, agentKey);
       if (retained && !isCurrent()) return null;
       const browser = getBrowser();
       const browserEndpoint = browser.isAvailable()
@@ -1298,7 +1770,9 @@ export function createSessionCoordinator({
           const runtimeKnown = status.lastSessionId === sessionId;
           const hasBrowserTools =
             runtimeKnown &&
-            status.runtime.toolNames.some((name) => name.startsWith("browser_"));
+            status.runtime.toolNames.some((name) =>
+              name.startsWith("browser_"),
+            );
           if (
             !enabled ||
             mcpStatus !== "active" ||
@@ -1316,7 +1790,9 @@ export function createSessionCoordinator({
             const space = await browser.snapshot(sessionId);
             const tab = space.tabs.at(-1);
             if (!tab) return [];
-            const url = browserObservationUrl(tab.committedUrl ?? "about:blank");
+            const url = browserObservationUrl(
+              tab.committedUrl ?? "about:blank",
+            );
             return [
               {
                 type: "text" as const,
@@ -1327,6 +1803,7 @@ export function createSessionCoordinator({
             return [{ type: "text" as const, text: "当前页面上下文不可用" }];
           }
         },
+        project: { id: pathKey(workspacePath), path: workspacePath },
         onElicitation: (form, signal, scopeMethod) => {
           if (!acceptsRequests()) return Promise.resolve({ action: "cancel" });
           viewStore.getState().sealStreamingItems();
@@ -1338,7 +1815,7 @@ export function createSessionCoordinator({
             scopeMethod,
             {
               workspacePath,
-              sessionId: form.sessionId ?? session.sessionId,
+              sessionId: form.sessionId ?? candidate?.session.sessionId ?? null,
               activate: () => {
                 const target = retained ?? candidate;
                 if (target && !target.disposed) {
@@ -1398,12 +1875,22 @@ export function createSessionCoordinator({
           });
         },
       };
-      const session = protocol.open(agentKey, {
-        ...sessionOptions,
-        background: !retained,
-      });
+      const session = backgroundAdapter
+        ? await protocol.openBackground?.(
+            adapter,
+            workspaceStore.getState().toolPaths,
+            sessionOptions,
+          )
+        : protocol.open(agentKey, { ...sessionOptions, background: !retained });
+      if (!session) throw new Error("后台 Agent 通道不可用");
       candidate = sessionFactory.create({
         workspacePath,
+        ...((retained?.cwd ?? plugin?.cwd)
+          ? { cwd: retained?.cwd ?? plugin?.cwd }
+          : {}),
+        ...((retained?.openTools ?? plugin?.openTools)
+          ? { openTools: retained?.openTools ?? plugin?.openTools }
+          : {}),
         adapter,
         launch,
         agentKey,
@@ -1416,6 +1903,7 @@ export function createSessionCoordinator({
         detachViews: () => {},
         disposeActivity: () => {},
         listOnly: true,
+        scheduled: backgroundAdapter !== undefined,
       });
       if (retained?.recoveryControl)
         retained.recoveryControl.replacement = session;
@@ -1433,6 +1921,7 @@ export function createSessionCoordinator({
           state.connectionFailure !== previous.connectionFailure &&
           !runtime.disposed &&
           !runtime.recovering &&
+          !runtime.scheduled &&
           !runtime.listOnly &&
           (getProtocol().has(runtime.session) ||
             activeRuntime === runtime ||
@@ -1457,7 +1946,7 @@ export function createSessionCoordinator({
         stopCatalog();
       };
 
-      if (isCurrent()) {
+      if (!backgroundAdapter && isCurrent()) {
         runtime.listed = [
           ...projectFactory.open(workspacePath).history(agentKey),
         ];
@@ -1490,6 +1979,7 @@ export function createSessionCoordinator({
           }
         } else await disposeRuntime(candidate);
       }
+      if (backgroundAdapter) throw error;
       if (isCurrent())
         setListStatus(workspacePath, agentKey, {
           state: "error",
@@ -1707,6 +2197,15 @@ export function createSessionCoordinator({
       projectClosures.has(pathKey(workspacePath))
     )
       return Promise.resolve(null);
+    if (
+      options.sessionId &&
+      indexes.deletions.blocked({
+        workspacePath,
+        agentKey: selectedAgentKey(),
+        sessionId: options.sessionId,
+      })
+    )
+      return Promise.reject(new Error("此会话正在删除或已删除"));
     if (options.listOnly)
       return preloadSessionList(workspacePath).then(() => null);
     const historyKey =
@@ -1719,7 +2218,7 @@ export function createSessionCoordinator({
         : undefined;
     if (historyKey && !options.background) {
       const pending = openingRuntimes.get(historyKey);
-      if (pending) getProtocol().promote(pending.session);
+      if (pending) promoteUserRuntime(pending);
     }
     const takeover =
       !!historyKey && !options.background && backgroundOpening.has(historyKey);
@@ -1746,7 +2245,6 @@ export function createSessionCoordinator({
             options.sessionId,
           );
           if (runtime) {
-            getProtocol().promote(runtime.session);
             focusRuntime(runtime);
           }
         }
@@ -1839,6 +2337,152 @@ export function createSessionCoordinator({
     );
   }
 
+  function deleteArchivedSession(
+    target: DeleteSessionTarget,
+    cleanup: () => Promise<void>,
+  ): Promise<void> {
+    return indexes.deletions.run(target, async () => {
+      const previous =
+        indexes.deletions.store.getState().entries[deletionKey(target)];
+      if (previous?.phase === "done") return;
+      if (retired || closing) throw new Error("会话服务正在关闭");
+      const archivedKey = sessionArchiveKey(
+        target.workspacePath,
+        target.sessionId,
+        target.agentKey,
+      );
+      if (
+        !indexes.archive.getState().archivedSessions.has(archivedKey) &&
+        !previous
+      )
+        throw new Error("只支持删除已归档会话");
+      if (
+        !getAgents().canDeleteSession?.(target.agentKey) ||
+        !getAgents().deleteSession
+      )
+        throw new Error("此 Agent 或宿主不支持彻底删除会话");
+      if (
+        directory.isExternal(target) ||
+        indexes.groups.snapshot
+          .getState()
+          .byPath[pathKey(target.workspacePath)]?.some((group) =>
+            group.members.some(
+              (member) => member.sessionId === target.sessionId,
+            ),
+          )
+      )
+        throw new Error("此会话仍由定时任务或工作流拥有，请先在对应任务中处理");
+      const matching = [...projectFactory.sessions()].filter(
+        (runtime) =>
+          pathKey(runtime.workspacePath) === pathKey(target.workspacePath) &&
+          (runtime.session.sessionId ??
+            runtime.store.getState().activeSessionId) === target.sessionId &&
+          runtime.adapter.id === sessionAgentId(target.agentKey),
+      );
+      if (
+        matching.some((runtime) => {
+          const state = runtime.store.getState();
+          return (
+            runtime.recovering ||
+            (!state.agentCrashed &&
+              (state.isConnecting || state.isAgentRunning)) ||
+            state.queuedPrompts.length ||
+            runtime.approval.getState().pending.some((item) => !item.stale) ||
+            forms.store
+              .getState()
+              .pending.some(
+                (form) => form.owner === runtime.approval && !form.stale,
+              )
+          );
+        })
+      )
+        throw new Error("会话仍有运行任务、恢复过程或待处理消息，请处理后重试");
+      if (
+        loadingSession?.sessionId === target.sessionId &&
+        pathKey(loadingSession.workspacePath) === pathKey(target.workspacePath)
+      )
+        throw new Error("会话正在打开，请稍后重试");
+      let phase = previous?.phase ?? "prepared";
+      const previousFlags = matching.map((runtime) => ({
+        runtime,
+        operationsBlocked: runtime.store.getState().operationsBlocked,
+        queuePaused: runtime.store.getState().queuePaused,
+      }));
+      for (const runtime of matching)
+        runtime.store.setState({ operationsBlocked: true, queuePaused: true });
+      try {
+        await indexes.deletions.save({ ...target, phase });
+      } catch (error) {
+        for (const { runtime, ...flags } of previousFlags)
+          runtime.store.setState(flags);
+        throw error;
+      }
+      try {
+        await openQueue;
+        for (const runtime of [...projectFactory.sessions()].filter(
+          (runtime) =>
+            runtime.adapter.id === sessionAgentId(target.agentKey) &&
+            pathKey(runtime.workspacePath) === pathKey(target.workspacePath) &&
+            (runtime.session.sessionId ??
+              runtime.store.getState().activeSessionId) === target.sessionId,
+        ))
+          await closeSessionRuntime(
+            runtime.workspacePath,
+            runtime.agentKey,
+            target.sessionId,
+          );
+        if (phase !== "local") {
+          phase = "source";
+          await indexes.deletions.save({ ...target, phase });
+          await getAgents().deleteSession!(
+            target.agentKey,
+            target.workspacePath,
+            target.sessionId,
+          );
+          phase = "local";
+          await indexes.deletions.save({ ...target, phase });
+        }
+        await cleanup();
+        const agent = sessionAgentId(target.agentKey);
+        if (agent !== null)
+          await deleteContextUsage({
+            workspace: target.workspacePath,
+            agent,
+            session: target.sessionId,
+          });
+        // 清理全部缓存副本；后续发布的列表由持久化删除记录过滤。
+        directory.excludeSessions([target]);
+        for (const runtime of projectFactory.sessions()) {
+          if (
+            runtime.adapter.id === sessionAgentId(target.agentKey) &&
+            pathKey(runtime.workspacePath) === pathKey(target.workspacePath)
+          )
+            runtime.listed = runtime.listed.filter(
+              (item) => item.sessionId !== target.sessionId,
+            );
+          const byPath = runtime.store.getState().sessionsByPath;
+          runtime.store.setState({
+            sessionsByPath: Object.fromEntries(
+              Object.entries(byPath).map(([path, entries]) => [
+                path,
+                sameSessionAgent(runtime.agentKey, target.agentKey) &&
+                pathKey(path) === pathKey(target.workspacePath)
+                  ? entries.filter((item) => item.id !== target.sessionId)
+                  : entries,
+              ]),
+            ),
+          });
+        }
+        await indexes.forgetArchived(target);
+        await indexes.deletions.save({ ...target, phase: "done" });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await indexes.deletions.save({ ...target, phase, error: message });
+        throw error;
+      }
+    });
+  }
+
   function closeSessionRuntime(
     workspacePath: string,
     agentKey: string,
@@ -1848,6 +2492,201 @@ export function createSessionCoordinator({
     if (!runtime) return Promise.resolve();
     if (runtime === activeRuntime) unfocusRealRuntime();
     return disposeRuntime(runtime);
+  }
+
+  function boundBackgroundAgent(workspacePath: string, agentId: string) {
+    const workspace = workspaceStore.getState();
+    const agents = getAgents();
+    const adapter = agents.resolve(agentId);
+    if (
+      retired ||
+      closing ||
+      !adapter ||
+      !knownWorkspacePaths(workspace).some(
+        (path) => pathKey(path) === pathKey(workspacePath),
+      )
+    )
+      throw new Error("任务绑定的项目或 Agent 不可用");
+    return {
+      adapter,
+      workspace,
+      agentKey: agents.selectionKey(workspace.toolPaths, agentId),
+    };
+  }
+
+  const modelConfig = (port: AcpSessionPort) =>
+    port.configOptions.find((option) => option.category === "model");
+  const effortConfig = (port: AcpSessionPort) =>
+    port.configOptions.find(
+      (option) =>
+        option.category === "thought_level" ||
+        option.category === "reasoning_effort" ||
+        option.id === "reasoning_effort",
+    );
+
+  const pendingBackgroundOptions = new Map<
+    string,
+    Promise<{
+      models: { value: string; label: string }[];
+      efforts: { value: string; label: string }[];
+    }>
+  >();
+
+  async function backgroundPromptOptions(
+    workspacePath: string,
+    agentId: string,
+  ) {
+    const { agentKey } = boundBackgroundAgent(workspacePath, agentId);
+    const key = JSON.stringify([pathKey(workspacePath), agentKey]);
+    const existing = pendingBackgroundOptions.get(key);
+    if (existing) return existing;
+    const pending = readBackgroundPromptOptions(workspacePath, agentId).finally(
+      () => pendingBackgroundOptions.delete(key),
+    );
+    pendingBackgroundOptions.set(key, pending);
+    return pending;
+  }
+
+  async function readBackgroundPromptOptions(
+    workspacePath: string,
+    agentId: string,
+  ) {
+    const { adapter, workspace } = boundBackgroundAgent(workspacePath, agentId);
+    const protocol = getProtocol();
+    const session = await protocol.openBackground?.(
+      adapter,
+      workspace.toolPaths,
+      { background: true },
+    );
+    if (!session) throw new Error("后台 Agent 通道不可用");
+    try {
+      await session.initialize({ timeoutMs: 30_000 });
+      await session.newSession(workspacePath, { timeoutMs: 30_000 });
+      const models =
+        modelConfig(session)?.options.map(({ value, name }) => ({
+          value,
+          label: name,
+        })) ??
+        session.models?.availableModels.map(({ modelId, name }) => ({
+          value: modelId,
+          label: name,
+        })) ??
+        [];
+      const efforts =
+        effortConfig(session)?.options.map(({ value, name }) => ({
+          value,
+          label: name,
+        })) ?? [];
+      return { models, efforts };
+    } finally {
+      await releaseSessionResources(session);
+    }
+  }
+
+  async function runBackgroundPrompt(
+    request: Parameters<ProjectSessionsPort["runBackgroundPrompt"]>[0],
+    observe: Parameters<ProjectSessionsPort["runBackgroundPrompt"]>[1],
+  ): Promise<void> {
+    const { workspacePath } = request;
+    const current = () =>
+      !retired && !closing && !projectClosures.has(pathKey(workspacePath));
+    const { adapter, agentKey } = boundBackgroundAgent(
+      workspacePath,
+      request.agentId,
+    );
+    const runtime = await prepareRuntime(
+      workspacePath,
+      agentKey,
+      current,
+      undefined,
+      adapter,
+    );
+    if (!runtime) throw new Error("后台 Agent 连接失败");
+    if (!current()) {
+      await disposeRuntime(runtime);
+      throw new Error("任务项目已关闭");
+    }
+    runtime.listOnly = false;
+    projectFactory.addSession(runtime);
+    const state = () => runtime.store.getState();
+    let unsubscribe = () => {};
+    try {
+      const { sessionId } = await sessionFactory.ensureCreated(runtime);
+      runtime.bindDraft(() => Promise.resolve());
+      const session = { workspacePath, sessionId, agentKey };
+      directory.excludeSessions([session]);
+      await observe(session, false);
+      await completeSessionIdentity(runtime, sessionId, {
+        publish: () =>
+          backfillSessionList(
+            runtime.store,
+            projectFactory.open(workspacePath).history(agentKey),
+            sessionId,
+            runtime,
+            (other) =>
+              other.agentKey === agentKey &&
+              pathKey(other.workspacePath) === pathKey(workspacePath),
+          ),
+      });
+      await setManualTitle(sessionId, request.title, agentKey);
+      state().refreshSessionTitle(sessionId);
+      const port = runtime.session;
+      for (const [isModel, config, value] of [
+        [true, modelConfig(port), request.model],
+        [false, effortConfig(port), request.effort],
+      ] as const) {
+        if (!value) continue;
+        if (config?.options.some((item) => item.value === value)) {
+          if (config.currentValue !== value)
+            await port.setConfigOption(config.id, value);
+        } else if (
+          isModel &&
+          port.models?.availableModels.some((item) => item.modelId === value)
+        ) {
+          if (port.models.currentModelId !== value) await port.setModel(value);
+        } else throw new Error("绑定的模型或强度已不可用");
+      }
+      await new Promise<void>((resolve, reject) => {
+        let waiting = false;
+        unsubscribe = runtime.store.subscribe((next) => {
+          if (next.connectionFailure || next.agentCrashed || runtime.disposed) {
+            reject(
+              new Error(
+                next.connectionFailure ??
+                  next.agentCrashed?.reason ??
+                  "会话已中断",
+              ),
+            );
+            return;
+          }
+          if (next.isAwaitingUser !== waiting) {
+            waiting = next.isAwaitingUser;
+            void observe(session, waiting).catch(reject);
+          }
+          if (next.isAgentRunning) return;
+          if (next.turnState === "completed") {
+            if (next.lastStopReason === "end_turn") resolve();
+            else
+              reject(
+                new Error(
+                  `Agent 提前结束本次任务（${next.lastStopReason ?? "未知原因"}）`,
+                ),
+              );
+          } else if (
+            next.turnState === "cancelled" ||
+            next.turnState === "failed" ||
+            next.turnState === "unknown"
+          )
+            reject(new Error(next.lastError ?? "Agent 未完成本次任务"));
+        });
+        if (!current() || !state().sendPrompt(request.text))
+          reject(new Error("无法发送任务指令"));
+      });
+      await state().flushSessionLog();
+    } finally {
+      unsubscribe();
+      if (runtime !== activeRuntime) await disposeRuntime(runtime);
+    }
   }
 
   function dispose(options?: { force?: boolean }): Promise<void> {
@@ -1872,9 +2711,19 @@ export function createSessionCoordinator({
     switchRealSession,
     closeRealRuntime,
     openRealWorkspace,
+    runBackgroundPrompt,
+    backgroundPromptOptions,
     closeProjectRuntime,
     findSessionRuntime,
     closeSessionRuntime,
+    deleteArchivedSession,
+    canDeleteArchivedSession: (agentKey: string) =>
+      getAgents().canDeleteSession?.(agentKey) ?? false,
+    registerSessionTools: (provider: SessionToolProvider) =>
+      sessionTools.register(provider),
+    openPluginSessionRuntime,
+    watchSessionTurns,
+    watchSessionEvents,
     projectFactory,
     dispose,
   };

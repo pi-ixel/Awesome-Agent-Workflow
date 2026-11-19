@@ -1,29 +1,45 @@
-import type { AssistantMessageItem, ThoughtItem, ToolCallItem, SystemNoticeLevel, SystemNoticeItem, SessionItem, ConversationViewState } from "./types.ts";
+import type { MessageDisplay } from "../../../shared/messageDisplay.ts";
+import type {
+  AssistantMessageItem,
+  ThoughtItem,
+  ToolCallItem,
+  SystemNoticeLevel,
+  SystemNoticeItem,
+  SessionItem,
+  ConversationViewState,
+} from "./types.ts";
 import type { AcpSessionPort } from "../../acpRuntime/types.ts";
 import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
 import type { SessionSummary } from "../sessions/indexTypes.ts";
 export type { SessionSummary } from "../sessions/indexTypes.ts";
 import { createSessionActions } from "./actions.ts";
 import type { createMessageImageHistory } from "./messageImageHistory.ts";
-import { readPromptQueue, writePromptQueue } from "./queuePersistence.ts";
+import { readPersistedPromptQueue, readPromptQueue, writePromptQueue } from "./queuePersistence.ts";
+import { nativeSnapshots, sessionLogKey } from "./snapshotStorage.ts";
+import { collectPerformance, addPerformance, currentTurnItems, parsePerformanceTotals, type PerformanceTotals, beginPerformance, parsePerformance, performanceTool, performanceWait, type TurnPerformance } from "./sessionPerformance.ts";
+import { parseTurnUsage, type TurnUsage } from "./turnUsage.ts";
+import type { UsageScope, UsageStart } from "../usage/service.ts";
+import { rememberUsageModels } from "../usage/service.ts";
 import { queuedText } from "./queuedPrompt.ts";
+import {
+  readPromptSkillReferences,
+  type PromptSkillReference,
+} from "../composer/skillReferences.ts";
+import type { QueuedPrompt } from "./types.ts";
 import { supportsImagePrompt } from "../../../contracts/acp/content.ts";
 import type { ContentBlock } from "../../../contracts/acp/protocol.ts";
 import { nonTextContent } from "../../../contracts/acp/content.ts";
 import { parseToolLocations } from "../../../contracts/acp/toolLocations.ts";
 import { parseEditPayload } from "./editPayload.ts";
 import { parseSubagentPresentation } from "./subagentPresentation.ts";
-import {
-  configModels,
-  configModes,
-} from "../../acpRuntime/service.ts";
+import { configModels, configModes } from "../../acpRuntime/service.ts";
 import type { AnnotationDraftService } from "../composer/annotationTypes.ts";
 import { emptySession } from "./viewState.ts";
 /**
  * 会话视图 store：把 src/runtime/acpBase/protocol 的类型化事件流（AcpSessionEvent）折叠为
  * 可渲染的会话条目（用户 / 助手 / 思考 / 工具调用 / 系统提示）。
  *
- * 数据流（对照 docs/architecture.md）：
+ * 迁移前的数据流参见 docs/history/architecture.md。
  * - 上行：AcpSessionPort.onEvent → handleEvent（本 store 的唯一事件入口）；
  * - 下行：sendPrompt 经绑定的 SessionBinding 发起 session/prompt，
  *   requestCancel 发 session/cancel 通知；
@@ -82,6 +98,9 @@ function applyNativeTitleToList(
 
 /** 一轮 prompt 的结局（响应或失败）。 */
 export interface TurnOutcome {
+  readonly quietFailure?: true;
+  readonly outputTokens?: number;
+  readonly usage?: TurnUsage;
   readonly stopReason: StopReason | null;
   readonly errorMessage?: string;
 }
@@ -97,8 +116,13 @@ export interface SessionMetaPatch {
 
 /** 下行通道：prompt / cancel 的协议调用面（由 attachSession 或调用方注入）。 */
 export interface SessionBinding {
-  prompt(text: string): Promise<PromptResult>;
-  promptBlocks?(blocks: readonly ContentBlock[]): Promise<PromptResult>;
+  readonly steerAgentId?: string;
+  readonly supportsSteer?: boolean;
+  readonly imageOnlyPromptFallback?: boolean;
+  readonly promptUsageBasis?: "prompt-total";
+  readonly usageScope?: UsageScope;
+  prompt(text: string, beforeDispatch?: () => void): Promise<PromptResult>;
+  promptBlocks?(blocks: readonly ContentBlock[], beforeDispatch?: () => void): Promise<PromptResult>;
   readonly supportsImages?: boolean;
   cancel(): void;
   /** 可选能力：列出可用模型（会话建立时的 SessionModelState）。 */
@@ -255,7 +279,16 @@ export function toolResultSummary(rawOutput: unknown): string {
 /** 无进度只提醒等待，不终止请求，也不释放轮次锁。 */
 export const TURN_IDLE_NOTICE_MS = 90_000;
 
+/** 发送消息的附加选项。 */
+export interface SendOptions {
+  /** 插件替用户发的消息：会话里怎么显示（见 shared/messageDisplay.ts）。 */
+  readonly display?: MessageDisplay;
+  readonly skillReferences?: readonly PromptSkillReference[];
+}
+
 export interface SessionStoreState extends ConversationViewState {
+  readonly firstPromptPending?: boolean;
+  readonly cacheSaveError?: string | null;
   readonly queueStorageScope?: string | null;
   readonly suspendForRecovery: () => void;
   readonly finishRecovery: () => void;
@@ -327,21 +360,37 @@ export interface SessionStoreState extends ConversationViewState {
   /** 切换会话模型（session/set_model；乐观更新，失败回滚并提示）。 */
   readonly switchModel: (modelId: string) => void;
   /** 发送一轮用户消息（无绑定时如实提示，不伪造轮次）。 */
+  readonly steerPrompt: (
+    text: string,
+    attachments?: readonly ContentBlock[],
+    options?: SendOptions,
+  ) => boolean;
+  readonly stopSteering: () => void;
   readonly sendPrompt: (
     text: string,
     attachments?: readonly ContentBlock[],
+    options?: SendOptions,
   ) => boolean;
   /** 运行中把消息加入队列（空闲时的防御路径直接发送）。 */
   readonly enqueuePrompt: (
     text: string,
     attachments?: readonly ContentBlock[],
+    options?: SendOptions,
   ) => boolean;
   /** 放行挂起的队列：立即发下一条并恢复正常自动出队。 */
+  readonly retryQueueSave: () => void;
   readonly resumeQueue: () => void;
+  readonly setDirectSteering: (enabled: boolean) => void;
   /** 清空队列并解除挂起。 */
   readonly clearQueue: () => void;
   /** 删除指定下标的排队消息（队列空了顺便解除挂起）。 */
   readonly removeQueuedPrompt: (index: number) => void;
+  readonly removeQueuedPromptById: (id: string) => boolean;
+  readonly moveQueuedPrompt: (
+    id: string,
+    targetId: string,
+    position: "before" | "after",
+  ) => boolean;
   /** 请求取消当前轮（session/cancel）。 */
   readonly requestCancel: () => void;
   /**
@@ -356,16 +405,15 @@ export interface SessionStoreState extends ConversationViewState {
    * 灌回某工作区的本地消息快照（无快照为 no-op，不清空现有条目）。
    * 由组装层在打开工作区后调用。
    */
-  readonly restoreSessionLog: (workspacePath: string) => void;
+  readonly restoreSessionLog: (workspacePath: string) => void | Promise<void>;
   /**
    * 设定消息快照的持久化目标工作区（null 停止持久化）。切换目标前先把
    * 旧目标的当前条目落盘；随后 endTurn 即时、handleEvent 节流地写入。
    */
-  readonly setSessionLogTarget: (workspacePath: string | null) => void;
+  readonly setSessionLogTarget: (workspacePath: string | null, draftPath?: string) => void | Promise<void>;
   /** 立即把当前条目流落盘到目标工作区的快照（无目标时 no-op）。 */
-  readonly flushSessionLog: () => void;
+  readonly flushSessionLog: () => void | Promise<void>;
 }
-
 
 // ---------------------------------------------------------------------------
 // 会话消息历史的本地持久化（每个工作区一份条目快照）
@@ -379,9 +427,8 @@ export interface SessionStoreState extends ConversationViewState {
 // ---------------------------------------------------------------------------
 
 /** 快照存储 key 前缀。 */
-const SESSION_LOG_PREFIX = "aaw-desktop/session-log/";
 /** 快照条目上限（保留最新 N 条）。 */
-const SESSION_LOG_ITEM_LIMIT = 200;
+export const SESSION_LOG_ITEM_LIMIT = 200;
 /** 增量事件的节流落盘间隔（ms）。 */
 const SESSION_LOG_THROTTLE_MS = 2000;
 
@@ -395,14 +442,12 @@ export const CHUNK_COALESCE_MS = 120;
 
 /** 快照持久化形状（带版本号，形状变更时升版本）。 */
 interface SessionLogPayload {
+  readonly performanceTotals?: PerformanceTotals;
   readonly version: 1;
   readonly savedAt: string;
   readonly items: readonly SessionItem[];
 }
 
-function sessionLogKey(workspacePath: string): string {
-  return `${SESSION_LOG_PREFIX}${encodeURIComponent(workspacePath)}`;
-}
 
 /** 条目快照：封口流式标记并截断到上限（保留最新）。
  *  system 条目（错误 / 警告 / 取消提示）是当次动作的即时反馈，
@@ -426,7 +471,13 @@ function writeSessionLog(
   workspacePath: string,
   items: readonly SessionItem[],
   logger: Logger,
-): void {
+  performanceTotals?: PerformanceTotals,
+): string | null | Promise<string | null> {
+  function failed(error: unknown): string {
+    const reason = error instanceof Error ? error.message : String(error);
+    logger.warn("会话消息快照写入失败", { workspacePath, reason });
+    return reason;
+  }
   try {
     // 条数上限：超限只持久化最近的条目（消息流窗口化本来就只渲染尾部，
     // 更早的以 chrys 侧会话历史为权威来源）
@@ -443,6 +494,7 @@ function writeSessionLog(
     }
     const payload: SessionLogPayload = {
       version: 1,
+      performanceTotals,
       savedAt: new Date().toISOString(),
       items: snapshotItems(persisted).map((item) =>
         item.kind === "user" && item.attachments?.length
@@ -450,16 +502,24 @@ function writeSessionLog(
           : item,
       ),
     };
-    window.localStorage.setItem(
-      sessionLogKey(workspacePath),
-      JSON.stringify(payload),
-    );
+    const value = JSON.stringify(payload);
+    if (nativeSnapshots.available()) {
+      return nativeSnapshots.write(workspacePath, value).then(() => null, failed);
+    }
+    window.localStorage.setItem(sessionLogKey(workspacePath), value);
+    return null;
   } catch (error) {
-    logger.warn("会话消息快照写入失败", {
-      workspacePath,
-      reason: error instanceof Error ? error.message : String(error),
-    });
+    return failed(error);
   }
+}
+
+/** 插件消息的显示方式（ADR 037）：随快照保存，恢复时原样带回。 */
+function parseDisplay(raw: unknown): MessageDisplay | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const { source, visible, foldLabel } = raw as Record<string, unknown>;
+  return typeof source === "string" && typeof visible === "string" && typeof foldLabel === "string"
+    ? { source, visible, foldLabel }
+    : undefined;
 }
 
 /** 快照恢复用的工具类型白名单（与 runtime/acpBase/protocol/types 的联合类型一致）。 */
@@ -525,17 +585,28 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
   }
   const text = typeof record["text"] === "string" ? record["text"] : "";
   switch (record["kind"]) {
-    case "user":
+    case "user": {
+      const skillReferences = readPromptSkillReferences(
+        record.skillReferences,
+        text,
+      );
       return {
         kind: "user",
         id,
         text,
+        ...(skillReferences ? { skillReferences } : {}),
+        ...(record.stopped === true ? { stopped: true as const } : {}),
+        ...(record.steer === true ? { steer: true as const } : {}),
+        ...(parseDisplay(record.display) ? { display: parseDisplay(record.display) } : {}),
+        ...(parsePerformance(record.performance) ? { performance: parsePerformance(record.performance) } : {}),
+        ...(record.turnUsage && (record.turnUsage as Record<string, unknown>).basis === "prompt-total" ? { turnUsage: parseTurnUsage(record.turnUsage) } : {}),
         ...(Array.isArray(record.attachments)
           ? { attachments: record.attachments }
           : {}),
         createdAt:
           typeof record["createdAt"] === "string" ? record["createdAt"] : "",
       };
+    }
     case "assistant":
       return {
         kind: "assistant",
@@ -641,6 +712,9 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
           : {}),
       };
     }
+    case "compaction":
+      return typeof record["sourceId"] === "string" && record["sourceId"].length <= 256
+        ? { kind: "compaction", id, sourceId: record["sourceId"] } : null;
     case "system":
       // 历史版本的快照曾把即时反馈（错误/警告/取消）一并存入——
       // 恢复时一律丢弃，避免过期报错随会话反复出现
@@ -651,9 +725,19 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
 }
 
 /** 读取某工作区的消息快照（无快照或数据损坏返回空数组）。 */
-function readSessionLog(workspacePath: string, logger: Logger): SessionItem[] {
+export function readSessionLog(workspacePath: string, logger: Logger, onTotals?: (totals: PerformanceTotals | undefined) => void): SessionItem[] {
   try {
-    const raw = window.localStorage.getItem(sessionLogKey(workspacePath));
+    return parseSessionLog(window.localStorage.getItem(sessionLogKey(workspacePath)), onTotals);
+  } catch (error) {
+    logger.warn("会话消息快照读取失败，按无历史处理", {
+      workspacePath,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+}
+
+function parseSessionLog(raw: string | null, onTotals?: (totals: PerformanceTotals | undefined) => void): SessionItem[] {
     if (raw === null) {
       return [];
     }
@@ -665,6 +749,7 @@ function readSessionLog(workspacePath: string, logger: Logger): SessionItem[] {
     if (record["version"] !== 1 || !Array.isArray(record["items"])) {
       return [];
     }
+    onTotals?.(parsePerformanceTotals(record.performanceTotals));
     const items: SessionItem[] = [];
     for (const entry of record["items"]) {
       const item = sanitizeRestoredItem(entry);
@@ -673,13 +758,19 @@ function readSessionLog(workspacePath: string, logger: Logger): SessionItem[] {
       }
     }
     return items.slice(-SESSION_LOG_ITEM_LIMIT);
-  } catch (error) {
-    logger.warn("会话消息快照读取失败，按无历史处理", {
-      workspacePath,
-      reason: error instanceof Error ? error.message : String(error),
-    });
-    return [];
+}
+
+export async function readPersistedSessionLog(scope: string, logger: Logger, onTotals?: (totals: PerformanceTotals | undefined) => void): Promise<SessionItem[]> {
+  if (nativeSnapshots.available()) {
+    try {
+      const legacy = localStorage.getItem(sessionLogKey(scope));
+      if (legacy !== null) await nativeSnapshots.write(scope, legacy, true);
+      return parseSessionLog(await nativeSnapshots.read(scope), onTotals);
+    } catch (error) {
+      logger.warn("本机会话快照读取失败", { scope, reason: String(error) });
+    }
   }
+  return readSessionLog(scope, logger, onTotals);
 }
 
 /**
@@ -712,9 +803,12 @@ export const createSessionStore = (
 ) => {
   const storeId = crypto.randomUUID();
   let itemSequence = 0;
-  const nextItemId = (prefix: string) => `${prefix}-${storeId}-${++itemSequence}`;
+  const nextItemId = (prefix: string) =>
+    `${prefix}-${storeId}-${++itemSequence}`;
   const settleAnnotation = (text: string, failed: boolean) =>
     annotationDrafts?.settle(text, failed);
+  let queueWrites = Promise.resolve();
+  let retryQueueRead: (() => Promise<void>) | undefined;
   const store = create<SessionStoreState>((set, get) => {
     // 流式条目的落笔位置：非响应式内部状态，仅归约逻辑使用
     let openAssistantId: string | null = null;
@@ -725,10 +819,16 @@ export const createSessionStore = (
     let activeBinding: SessionBinding | null = null;
     // 旧 Promise 只能收尾它所属的轮次；清空、换绑、恢复均使其失效。
     let turnGeneration = 0;
+    // 只有协议事件发起的轮次由事件收尾。sendPrompt 发起的轮次必须等
+    // 完整响应处理 usage/统计/错误后收尾，不能被提前到达的事件截断。
+    let eventDrivenTurnGeneration: number | null = null;
     let interruptedPrompt: {
       text: string;
       attachments?: readonly ContentBlock[];
+      skillReferences?: readonly PromptSkillReference[];
       replayed: boolean;
+      imageFallbackText?: string;
+      statistics?: UsageStart;
     } | null = null;
     let replaying = false;
     let cancelledByUser = false;
@@ -744,10 +844,12 @@ export const createSessionStore = (
     };
     // 消息快照的持久化目标（null = 不持久化）与节流定时器
     let logTargetPath: string | null = null;
+    let queueTargetPath: string | null = null;
     let logFlushTimer: ReturnType<typeof setTimeout> | null = null;
     // 上次已落盘的条目引用：条目数组引用未变则跳过序列化（长会话全量
     // JSON.stringify 单次几 MB，未变更的重复落盘是纯浪费）
     let lastWrittenItems: readonly SessionItem[] | null = null;
+    let snapshotWrite = Promise.resolve();
 
     /** 立即落盘当前条目流（并取消挂起的节流定时器）。 */
     const flushSessionLogNow = (): void => {
@@ -757,7 +859,7 @@ export const createSessionStore = (
         clearTimeout(logFlushTimer);
         logFlushTimer = null;
       }
-      if (logTargetPath === null) {
+      if (logTargetPath === null || historyReplaySessionId !== null) {
         return;
       }
       const items = get().items;
@@ -769,8 +871,22 @@ export const createSessionStore = (
           logger.warn("消息图片保存失败", { reason: String(error) });
           get().pushNotice("warn", "消息图片保存失败，重新加载后可能无法显示");
         });
-      writeSessionLog(logTargetPath, items, logger);
+      const target = logTargetPath;
+      const base = get().performanceTotals;
+      const totals = base ? (get().isAgentRunning ? addPerformance(base, collectPerformance(currentTurnItems(items), false, Date.now())) : base) : collectPerformance(items, false, Date.now());
+      const finish = (cacheSaveError: string | null) => {
+        if (target !== logTargetPath) return;
+        if ((get().cacheSaveError ?? null) !== cacheSaveError) set({ cacheSaveError });
+        if (cacheSaveError && lastWrittenItems === items) lastWrittenItems = null;
+      };
       lastWrittenItems = items;
+      if (nativeSnapshots.available()) {
+        snapshotWrite = snapshotWrite.then(async () => {
+          finish(await writeSessionLog(target, items, logger, totals));
+        });
+      } else {
+        finish(writeSessionLog(target, items, logger, totals) as string | null);
+      }
     };
 
     /** 增量事件的节流落盘（2s 内合并为一次写入）。 */
@@ -959,53 +1075,35 @@ export const createSessionStore = (
       return { category: "generic", message };
     }
 
-    /** 取消结案卡：统计本轮已完成的写类操作，给出回退指引（闭环交代）。 */
-    function buildCancelledRecap(
-      turnItems: readonly SessionItem[],
-    ): SystemNoticeItem {
-      const done = turnItems.filter(
-        (item): item is Extract<SessionItem, { kind: "tool" }> =>
-          item.kind === "tool" &&
-          item.status === "completed" &&
-          (item.toolKind === "edit" ||
-            item.toolKind === "delete" ||
-            item.toolKind === "move" ||
-            item.toolKind === "execute"),
-      );
-      if (done.length === 0) {
-        return {
-          kind: "system",
-          id: nextItemId("system"),
-          level: "warn",
-          text: "本轮已取消，agent 未执行任何修改操作。",
-        };
+    const updatePerformance = (update: (value: TurnPerformance) => TurnPerformance): void => {
+      if (!get().isAgentRunning || historyReplaySessionId !== null) return;
+      const items = get().items;
+      for (let i = items.length - 1; i >= 0; i--) {
+        const item = items[i]!;
+        if (item.kind !== "user") continue;
+        if (item.performance && item.performance.endedAt === null) {
+          const performance = update(item.performance);
+          if (performance !== item.performance) {
+            const next = [...items];
+            next[i] = { ...item, performance };
+            set({ items: next });
+            scheduleSessionLogFlush();
+          }
+        }
+        break;
       }
-      const titles = done
-        .slice(0, 5)
-        .map((item) => " · " + item.title)
-        .join("\n");
-      return {
-        kind: "system",
-        id: nextItemId("system"),
-        level: "warn",
-        text:
-          "本轮已取消。期间 agent 完成了 " +
-          String(done.length) +
-          " 项操作：\n" +
-          titles +
-          "\n如需回退，可让 agent 撤销这些改动，或查看项目 git diff。",
-      };
-    }
-
-    /** 本轮起点（beginTurn 时的条目数）：结案卡按此取本轮条目。 */
-    let turnStartLength = 0;
+    };
 
     /** 落笔用户消息并标记轮次开始（轮次生命周期的真实领域入口）。 */
-    const beginTurn = (text: string): void => {
+    const beginTurn = (text: string, options?: SendOptions): void => {
+      if (!get().performanceTotals)
+        set({
+          performanceTotals: collectPerformance(get().items, false, Date.now()),
+        });
       historyReplaySessionId = null;
+      set({ historyPreview: undefined });
       turnGeneration += 1;
       set({ pendingModelId: null, pendingModeId: null });
-      turnStartLength = get().items.length;
       const closed = sealedItems();
       set({
         items: [
@@ -1014,7 +1112,12 @@ export const createSessionStore = (
             kind: "user",
             id: nextItemId("user"),
             text,
+            performance: beginPerformance(Date.now()),
             createdAt: new Date().toISOString(),
+            ...(options?.display ? { display: options.display } : {}),
+            ...(options?.skillReferences?.length
+              ? { skillReferences: options.skillReferences }
+              : {}),
           },
         ],
         isAgentRunning: true,
@@ -1028,11 +1131,14 @@ export const createSessionStore = (
 
     /** 轮次收尾（prompt 响应 / 取消 / 失败共用）：封口、记录结局。 */
     const endTurn = (outcome: TurnOutcome): void => {
+      const wasRunning = get().isAgentRunning;
+      updatePerformance((value) => ({ ...value, endedAt: Date.now(), outputTokens: outcome.outputTokens }));
+      if (wasRunning) set({ performanceTotals: addPerformance(get().performanceTotals ?? collectPerformance([], false, 0), collectPerformance(currentTurnItems(get().items), false, Date.now())) });
       turnGeneration += 1;
       set({ pendingModelId: null, pendingModeId: null });
       stopIdleTimer();
       const additions: SystemNoticeItem[] = [];
-      if (outcome.errorMessage !== undefined) {
+      if (outcome.errorMessage !== undefined && !outcome.quietFailure) {
         additions.push({
           kind: "system",
           id: nextItemId("system"),
@@ -1042,22 +1148,36 @@ export const createSessionStore = (
         set({ turnError: classifyTurnError(outcome.errorMessage) });
       } else if (
         outcome.stopReason !== null &&
-        outcome.stopReason !== "end_turn"
+        outcome.stopReason !== "end_turn" &&
+        outcome.stopReason !== "cancelled"
       ) {
         additions.push({
           kind: "system",
           id: nextItemId("system"),
-          level: outcome.stopReason === "cancelled" ? "warn" : "info",
+          level: "info",
           text: stopReasonNotices[outcome.stopReason],
         });
         set({ turnError: null });
-        if (outcome.stopReason === "cancelled") {
-          additions.push(
-            buildCancelledRecap(get().items.slice(turnStartLength)),
-          );
-        }
+
       }
       const closed = sealedItems();
+      if (outcome.usage) {
+        for (let i = closed.length - 1; i >= 0; i--) {
+          const item = closed[i]!;
+          if (item.kind === "user") {
+            closed[i] = { ...item, turnUsage: outcome.usage };
+            break;
+          }
+        }
+      }
+      if (outcome.errorMessage === undefined && outcome.stopReason === "cancelled") {
+        let userIndex = closed.length - 1;
+        while (userIndex >= 0 && closed[userIndex]?.kind !== "user") userIndex--;
+        if (userIndex >= 0) {
+          const item = closed[userIndex]!;
+          if (item.kind === "user") closed[userIndex] = { ...item, stopped: true };
+        }
+      }
       set({
         items: additions.length > 0 ? [...closed, ...additions] : closed,
         isAgentRunning: false,
@@ -1070,7 +1190,7 @@ export const createSessionStore = (
         isWaitingForActivity: false,
         isAwaitingUser: false,
         turnError:
-          outcome.errorMessage === undefined
+          outcome.errorMessage === undefined || outcome.quietFailure
             ? null
             : classifyTurnError(outcome.errorMessage),
         lastStopReason: outcome.stopReason,
@@ -1268,74 +1388,95 @@ export const createSessionStore = (
       });
     };
 
-    const actions = createSessionActions({
-      settleAnnotation,
-      get,
-      set,
-      beginTurn,
-      endTurn,
-      noteActivity,
-      pushSystemItem,
-      sealedItems,
-      get activeBinding() {
-        return activeBinding;
+    const actions = createSessionActions(
+      {
+        settleAnnotation,
+        persistSteer: async () => {
+          if (!get().queueStorageScope) throw new Error("会话队列尚未就绪");
+          persistQueue();
+          await queueWrites;
+          if (get().queueSaveError) throw new Error(get().queueSaveError!);
+        },
+        get,
+        set,
+        beginTurn,
+        endTurn,
+        noteActivity,
+        pushSystemItem,
+        sealedItems,
+        get activeBinding() {
+          return activeBinding;
+        },
+        set activeBinding(value) {
+          activeBinding = value;
+        },
+        get turnGeneration() {
+          return turnGeneration;
+        },
+        set turnGeneration(value) {
+          turnGeneration = value;
+        },
+        get interruptedPrompt() {
+          return interruptedPrompt;
+        },
+        set interruptedPrompt(value) {
+          interruptedPrompt = value;
+        },
+        get replaying() {
+          return replaying;
+        },
+        set replaying(value) {
+          replaying = value;
+        },
+        get cancelledByUser() {
+          return cancelledByUser;
+        },
+        set cancelledByUser(value) {
+          cancelledByUser = value;
+        },
+        get queueWasPaused() {
+          return queueWasPaused;
+        },
+        set queueWasPaused(value) {
+          queueWasPaused = value;
+        },
       },
-      set activeBinding(value) {
-        activeBinding = value;
-      },
-      get turnGeneration() {
-        return turnGeneration;
-      },
-      set turnGeneration(value) {
-        turnGeneration = value;
-      },
-      get interruptedPrompt() {
-        return interruptedPrompt;
-      },
-      set interruptedPrompt(value) {
-        interruptedPrompt = value;
-      },
-      get replaying() {
-        return replaying;
-      },
-      set replaying(value) {
-        replaying = value;
-      },
-      get cancelledByUser() {
-        return cancelledByUser;
-      },
-      set cancelledByUser(value) {
-        cancelledByUser = value;
-      },
-      get queueWasPaused() {
-        return queueWasPaused;
-      },
-      set queueWasPaused(value) {
-        queueWasPaused = value;
-      },
-    }, logger);
+      logger,
+    );
 
     return {
       ...emptySession,
       agentKey,
-      suspendForRecovery: actions.suspendForRecovery,
+      suspendForRecovery: () => {
+        const preview = get().historyPreview;
+        if (preview) {
+          dropPendingChunks();
+          get().restoreItems(preview.items, true);
+          set({ performanceTotals: preview.performanceTotals });
+        }
+        actions.suspendForRecovery();
+      },
       finishRecovery: actions.finishRecovery,
 
       bindSession: (binding) => {
         if (binding !== activeBinding) {
+          actions.resetSteering();
+          updatePerformance((value) => ({ ...value, interrupted: true }));
           turnGeneration += 1;
           set({ pendingModelId: null, pendingModeId: null });
           if (get().isAgentRunning) set({ turnState: "unknown" });
         }
         activeBinding = binding;
         set({ pendingModelId: null, pendingModeId: null });
-        set({ supportsImages: binding?.supportsImages === true });
+        set({ supportsImages: binding?.supportsImages === true, supportsSteer: binding?.supportsSteer === true, steerAgentId: binding?.steerAgentId });
         set({ isBound: binding !== null });
       },
 
       setAwaitingUser: (waiting) => {
+        if (waiting) actions.interruptSteeringForApproval();
         const next = waiting && get().isAgentRunning;
         if (get().isAwaitingUser === next) return;
+        updatePerformance((value) => performanceWait(value, next, Date.now()));
         set({ isAwaitingUser: next });
         noteActivity();
       },
@@ -1350,7 +1491,12 @@ export const createSessionStore = (
       },
 
       renameSession: (sessionId, title) => {
-        setManualTitle(sessionId, title, agentKey);
+        const save = setManualTitle(sessionId, title, agentKey);
+        if (save) return save.then(() => get().refreshSessionTitle(sessionId));
+        get().refreshSessionTitle(sessionId);
+      },
+
+      refreshSessionTitle: (sessionId) => {
         const manual = manualTitleOf(sessionId, agentKey);
         // 展示标题重算：手动 > 原生（无原生名时清除手动则保持原值）
         const retitle = (entry: SessionSummary): SessionSummary =>
@@ -1419,11 +1565,26 @@ export const createSessionStore = (
       },
 
       setHistoryReplaySession: (sessionId) => {
+        const wasReplaying = historyReplaySessionId !== null;
         historyReplaySessionId = sessionId;
         openReplayUser = null;
+        if (wasReplaying && sessionId === null && get().items.length > 0)
+          scheduleSessionLogFlush();
       },
 
       handleEvent: (event) => {
+        if (!historyReplaySessionId && (
+          ((event.type === "agent_message_chunk" || event.type === "agent_thought_chunk") && !!event.text.trim()) ||
+          event.type === "tool_call"
+        )) {
+          actions.firstPromptProgress(event.sessionId);
+        }
+        if ((event.type === "agent_message_chunk" || event.type === "agent_thought_chunk") && event.text.trim()) {
+          updatePerformance((value) => value.firstResponseAt === null ? { ...value, firstResponseAt: Date.now() } : value);
+        }
+        if (event.type === "tool_call" || event.type === "tool_call_update") {
+          updatePerformance((value) => performanceTool(value, event.toolCallId, event.status, Date.now()));
+        }
         if (event.type !== "user_message_chunk") {
           openReplayUser = null;
         }
@@ -1482,6 +1643,21 @@ export const createSessionStore = (
             scheduleSessionLogFlush();
             return;
           case "user_message_chunk": {
+            if (event.display) {
+              const items = get().items;
+              const lastUser = [...items].reverse().find((item) => item.kind === "user");
+              if (lastUser?.kind === "user" && lastUser.text === event.text && items[items.length - 1] === lastUser) return;
+              const closed = sealedItems();
+              set({
+                items: [
+                  ...closed,
+                  { kind: "user", id: nextItemId("user"), text: event.text, createdAt: new Date().toISOString(), display: event.display },
+                ],
+              });
+              openReplayUser = null;
+              scheduleSessionLogFlush();
+              return;
+            }
             // 实时回显由 beginTurn 落笔，避免重复；历史回放则必须恢复原文。
             if (
               historyReplaySessionId === null ||
@@ -1511,6 +1687,8 @@ export const createSessionStore = (
                 ],
               });
             } else {
+              // 插件刚发过同一段消息：这是 Agent 的回显，不再记一遍。
+              if (last?.kind === "user" && last.display && last.text === event.text) return;
               // 上游会缓冲流式分片：切到用户消息前必须先提交上一条回复。
               const closed = sealedItems();
               const id = nextItemId("user");
@@ -1637,11 +1815,43 @@ export const createSessionStore = (
             scheduleSessionLogFlush();
             return;
           case "agent_warning":
+            if (event.code?.startsWith("cancel-force")) actions.stopSteering();
             pushSystemItem(
               "warn",
               `${event.origin ?? "Agent"} 警告：${event.message}`,
             );
             scheduleSessionLogFlush();
+            return;
+          case "turn_started":
+            // 本地轮次开始（协议层真实 pendingPrompts 状态）：任何驱动方
+            // 一视同仁。已运行（sendPrompt 先到的双路径）幂等跳过；不落笔
+            // 用户消息——调度文本由 agent 的 user_message_chunk 正常推送。
+            // 与 beginTurn 的轮次标记同一语义（turnGeneration 递增、清待定
+            // 配置），但不清 historyReplaySessionId：收养会话的历史回放标记
+            // 必须常驻（调度方落笔的 user_message_chunk 要进消息流）。
+            if (!get().isAgentRunning) {
+              turnGeneration += 1;
+              eventDrivenTurnGeneration = turnGeneration;
+              set({ pendingModelId: null, pendingModeId: null });
+              set({
+                isAgentRunning: true,
+                turnState: "running",
+                isAwaitingUser: false,
+                turnError: null,
+                lastStopReason: null,
+              });
+              noteActivity();
+            }
+            return;
+          case "turn_ended":
+            // 外部驱动的轮次由事件收尾；普通用户轮次由 prompt 响应收尾。
+            // generation 校验也避免已解绑/恢复的旧轮次结束当前轮次。
+            if (get().isAgentRunning && eventDrivenTurnGeneration === turnGeneration) {
+              endTurn({
+                stopReason: event.stopReason,
+                ...(event.stopReason === null ? { errorMessage: "本轮请求失败：连接中断或响应缺失" } : {}),
+              });
+            }
             return;
           default:
             // usage / 扩展通知：聊天流不消费，诊断页（logStore）可见
@@ -1695,6 +1905,7 @@ export const createSessionStore = (
       setAgentCrashed: (reason) => {
         set({ agentCrashed: reason === null ? null : { reason } });
         if (reason !== null) {
+          actions.resetSteering();
           activeBinding = null;
           set({ isBound: false });
           if (get().isAgentRunning)
@@ -1781,6 +1992,8 @@ export const createSessionStore = (
       },
 
       sendPrompt: actions.sendPrompt,
+      steerPrompt: actions.steerPrompt,
+      stopSteering: actions.stopSteering,
 
       setSessionModes: (modes, currentModeId) => {
         set({
@@ -1801,21 +2014,28 @@ export const createSessionStore = (
 
       setSessionModels: (models, currentModelId) => {
         set({ availableModels: models, currentModelId });
+        if (activeBinding?.usageScope) rememberUsageModels(activeBinding.usageScope, models);
       },
 
       switchModel: actions.switchModel,
 
       enqueuePrompt: actions.enqueuePrompt,
 
+      retryQueueSave: () => { if (retryQueueRead) void retryQueueRead(); else persistQueue(); },
       resumeQueue: actions.resumeQueue,
+      setDirectSteering: actions.setDirectSteering,
 
       clearQueue: actions.clearQueue,
 
       removeQueuedPrompt: actions.removeQueuedPrompt,
+      removeQueuedPromptById: actions.removeQueuedPromptById,
+      moveQueuedPrompt: actions.moveQueuedPrompt,
 
       requestCancel: actions.requestCancel,
 
       clear: () => {
+        actions.resetSteering();
+        set({ performanceTotals: undefined, historyPreview: undefined });
         interruptedPrompt = null;
         cancelledByUser = false;
         queueWasPaused = false;
@@ -1839,6 +2059,7 @@ export const createSessionStore = (
           items: [],
           queuedPrompts: [],
           queuePaused: false,
+          firstPromptPending: false,
           isAgentRunning: false,
           turnState: "idle",
           isWaitingForActivity: false,
@@ -1851,6 +2072,8 @@ export const createSessionStore = (
       },
 
       restoreItems: (items, preserveQueue = false) => {
+        actions.resetSteering();
+        set({ performanceTotals: undefined, historyPreview: undefined });
         interruptedPrompt = null;
         cancelledByUser = false;
         queueWasPaused = false;
@@ -1882,65 +2105,128 @@ export const createSessionStore = (
           workspacePath = JSON.stringify([agentKey, workspacePath]);
         // 会话条目即将整体替换：旧会话的未提交流式缓冲一并丢弃
         dropPendingChunks();
-        const restored = readSessionLog(workspacePath, logger);
-        if (restored.length === 0) {
-          return;
+        let totals: PerformanceTotals | undefined;
+        const onTotals = (value: PerformanceTotals | undefined) => { totals = value; };
+        const restore = (restored: SessionItem[]) => {
+          if (!restored.length) return;
+          get().restoreItems(restored, true);
+          set({ performanceTotals: totals });
+          logger.info("已灌回本地消息快照", { workspacePath, count: restored.length });
+        };
+        if (nativeSnapshots.available()) {
+          const scope = workspacePath;
+          const currentItems = get().items;
+          return snapshotWrite.then(() => readPersistedSessionLog(scope, logger, onTotals)).then((restored) => {
+              if (logTargetPath === scope && get().items === currentItems) restore(restored);
+            });
         }
-        get().restoreItems(restored, true);
-        logger.info("已灌回本地消息快照", {
-          workspacePath,
-          count: restored.length,
-        });
+        restore(readSessionLog(workspacePath, logger, onTotals));
       },
 
-      setSessionLogTarget: (workspacePath) => {
+      setSessionLogTarget: (workspacePath, draftPath) => {
         if (workspacePath !== null && agentKey !== undefined)
           workspacePath = JSON.stringify([agentKey, workspacePath]);
-        if (workspacePath === logTargetPath) {
-          return;
-        }
+        const scope = workspacePath ?? (draftPath === undefined
+          ? null
+          : JSON.stringify([agentKey, draftPath, "draft"]));
+        if (workspacePath === logTargetPath && scope === queueTargetPath) return;
         // 切换前以旧目标收口落盘（flushSessionLogNow 读的是旧目标）
         flushSessionLogNow();
         const previousTarget = logTargetPath;
+        const previousQueueTarget = queueTargetPath;
+        queueTargetPath = scope;
         logTargetPath = workspacePath;
-        const restoredQueue =
-          workspacePath === null ? [] : readPromptQueue(workspacePath);
-        set({
-          queueStorageScope: workspacePath,
-          ...(workspacePath !== null
-            ? {
-                queuedPrompts: restoredQueue.length
-                  ? restoredQueue
-                  : previousTarget === null
-                    ? get().queuedPrompts
-                    : [],
-                queuePaused: restoredQueue.length > 0 || get().queuePaused,
-              }
-            : {}),
-        });
-        // 新目标的首写不受「引用未变跳过」约束（旧键的落盘记录不代表新键）
         lastWrittenItems = null;
+        retryQueueRead = undefined;
+        const mergeQueue = (restored: readonly QueuedPrompt[]) => {
+          const incoming = previousTarget === null ? get().queuedPrompts : [];
+          const ids = new Set(incoming.flatMap((item) => typeof item === "string" ? [] : [item.id]));
+          set({
+            queueStorageScope: scope,
+            queueSaveError: null,
+            queuedPrompts: [...restored.filter((item) => typeof item === "string" || !ids.has(item.id)), ...incoming],
+            queuePaused: restored.length > 0 || get().queuePaused,
+          });
+          if (!incoming.length || !scope) return;
+          persistQueue();
+          if (previousTarget !== null || !previousQueueTarget) return;
+          return queueWrites.then(async () => {
+            if (queueTargetPath === scope && !get().queueSaveError) {
+              try {
+                await writePromptQueue(previousQueueTarget, []);
+              } catch (error) {
+                logger.warn("清理已迁移的新会话草稿失败", { reason: String(error) });
+              }
+            }
+          });
+        };
+        if (scope !== null && nativeSnapshots.available()) {
+          set({ queueStorageScope: null, queueSaveError: null,
+            ...(previousTarget === null ? {} : { queuedPrompts: [], queuePaused: false }) });
+          const load = async () => {
+            try {
+              await queueWrites;
+              const restored = await readPersistedPromptQueue(scope);
+              if (queueTargetPath !== scope) return;
+              retryQueueRead = undefined;
+              await mergeQueue(restored);
+            } catch (error) {
+              if (queueTargetPath !== scope) return;
+              set({ queueSaveError: "待发送队列读取失败：" + String(error) });
+            }
+          };
+          retryQueueRead = load;
+          return load();
+        }
+        if (scope !== null) return mergeQueue(readPromptQueue(scope));
+        set({ queueStorageScope: null });
       },
 
       flushSessionLog: () => {
         flushSessionLogNow();
+        if (nativeSnapshots.available()) return Promise.all([snapshotWrite, queueWrites]).then(() => {});
       },
     };
   });
+  function persistQueue() {
+    const { queueStorageScope, queuedPrompts, queueSaveError } =
+      store.getState();
+    if (!queueStorageScope) return;
+    const finish = (error: string | null) => {
+      if (store.getState().queueStorageScope === queueStorageScope && (error || queueSaveError))
+        store.setState({ queueSaveError: error });
+    };
+    const message = (error: unknown) => "待发送消息未保存，关闭后可能丢失：" + String(error);
+    if (nativeSnapshots.available()) {
+      queueWrites = queueWrites.then(async () => {
+        try {
+          await writePromptQueue(queueStorageScope, queuedPrompts);
+          finish(null);
+        } catch (error) {
+          finish(message(error));
+        }
+      });
+    } else {
+      try {
+        void writePromptQueue(queueStorageScope, queuedPrompts);
+        finish(null);
+      } catch (error) {
+        finish(message(error));
+      }
+    }
+  }
   store.subscribe((state, previous) => {
+    if (state.recovery.state !== previous.recovery.state &&
+      (state.recovery.state === "failed" || state.recovery.state === "stopped")) state.stopSteering();
+    if (state.steerPhase && (state.operationsBlocked || state.isConnecting || state.isAwaitingUser ||
+      (state.steerPhase !== "preparing" && (state.activeSessionId !== previous.activeSessionId || state.queueStorageScope !== previous.queueStorageScope)))) state.stopSteering();
     if (
       !state.queueStorageScope ||
       state.queueStorageScope !== previous.queueStorageScope ||
       state.queuedPrompts === previous.queuedPrompts
     )
       return;
-    try {
-      writePromptQueue(state.queueStorageScope, state.queuedPrompts);
-    } catch {
-      store.setState({
-        lastError: "排队消息保存失败，重启后可能丢失，请检查可用存储空间",
-      });
-    }
+    persistQueue();
   });
   return store;
 };
@@ -1961,13 +2247,25 @@ export function attachSession(
   acp: AcpSessionPort,
   store: StoreApi<SessionStoreState>,
   logger = createLogger("session"),
+  promptUsageBasis?: "prompt-total",
+  usageScope?: UsageScope,
+  imageOnlyPromptFallback?: boolean,
+  supportsSteer = false,
+  steerAgentId?: string,
 ): () => void {
   const unsubscribe = acp.onEvent((event) => {
     store.getState().handleEvent(event);
   });
   store.getState().bindSession({
-    prompt: (text) => acp.prompt(text),
-    promptBlocks: (blocks) => acp.prompt(blocks),
+    supportsSteer,
+    steerAgentId,
+    promptUsageBasis,
+    usageScope,
+    imageOnlyPromptFallback,
+    prompt: (text, beforeDispatch) =>
+      beforeDispatch ? acp.prompt(text, { beforeDispatch }) : acp.prompt(text),
+    promptBlocks: (blocks, beforeDispatch) =>
+      beforeDispatch ? acp.prompt(blocks, { beforeDispatch }) : acp.prompt(blocks),
     supportsImages: supportsImagePrompt(acp.agentInfo?.agentCapabilities),
     cancel: () => acp.cancel(),
     listModels: () => Promise.resolve(acp.models?.availableModels ?? []),

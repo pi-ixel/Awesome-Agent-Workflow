@@ -14,6 +14,7 @@ import {
   SquareIcon,
   XIcon,
 } from "../../../shared/ui/icons.tsx";
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import type { HostService } from "../../host/service.ts";
 import type {
   BrowserCleanupPreview,
@@ -807,10 +808,10 @@ function BrowserPanelSession({
       }}
     >
       <div className="flex min-h-10 min-w-0 flex-nowrap items-center gap-0.5 border-b border-line px-1">
-        <button
+        <IconButton
           type="button"
           aria-label="后退"
-          title={
+          data-hint={
             userCanControl ? "后退" : "Agent 正在操作，点击“我来接管”后可操作"
           }
           disabled={!userCanControl || !activeTab || navigation.index <= 0}
@@ -826,12 +827,12 @@ function BrowserPanelSession({
             );
           }}
         >
-          <ArrowLeftIcon className="size-4" />
-        </button>
-        <button
+          <ArrowLeftIcon className="ui-icon-16" />
+        </IconButton>
+        <IconButton
           type="button"
           aria-label="前进"
-          title={
+          data-hint={
             userCanControl ? "前进" : "Agent 正在操作，点击“我来接管”后可操作"
           }
           disabled={
@@ -851,12 +852,12 @@ function BrowserPanelSession({
             );
           }}
         >
-          <ArrowRightIcon className="size-4" />
-        </button>
-        <button
+          <ArrowRightIcon className="ui-icon-16" />
+        </IconButton>
+        <IconButton
           type="button"
           aria-label="刷新"
-          title={
+          data-hint={
             userCanControl ? "刷新" : "Agent 正在操作，点击“我来接管”后可操作"
           }
           disabled={!userCanControl || !activeTab}
@@ -869,8 +870,8 @@ function BrowserPanelSession({
               .catch((cause) => setError(String(cause)))
           }
         >
-          <RefreshIcon className="size-4" />
-        </button>
+          <RefreshIcon className="ui-icon-16" />
+        </IconButton>
         <form
           className="min-w-16 flex-1"
           onSubmit={(event) => {
@@ -886,17 +887,17 @@ function BrowserPanelSession({
             placeholder={
               userCanControl ? "输入 HTTP/HTTPS 地址" : "Agent 正在操作"
             }
-            className="h-7 w-full rounded-full border border-line bg-surface px-3 text-xs outline-none focus:border-accent disabled:opacity-50"
+            className="min-h-7 w-full rounded-full border border-line bg-surface px-3 text-xs outline-none focus:border-focus-ring disabled:opacity-50"
           />
         </form>
-        <span className="w-8 shrink-0 text-center text-[10px] text-ink-muted">
+        <span className="w-8 shrink-0 text-center text-2xs text-ink-muted">
           {Math.round(navigation.pageZoom * 100)}%
         </span>
-        <button
+        <IconButton
           type="button"
           aria-label={picking ? "取消拾取" : "拾取元素"}
           aria-pressed={picking}
-          title={
+          data-hint={
             !userCanControl
               ? "Agent 正在操作，点击“我来接管”后可拾取"
               : picking
@@ -904,7 +905,7 @@ function BrowserPanelSession({
                 : "拾取元素"
           }
           disabled={!userCanControl || !activeTab}
-          className={`press rounded shrink-0 p-1 transition-colors hover:bg-hover hover:text-ink disabled:opacity-40 ${picking ? "bg-selected text-brand" : ""}`}
+          className={`rounded shrink-0 p-1 transition-colors hover:bg-hover hover:text-ink disabled:opacity-40 ${picking ? "bg-selected text-brand" : ""}`}
           onClick={() => {
             if (!userCanControl || !activeTab) return;
             if (picking) {
@@ -926,24 +927,24 @@ function BrowserPanelSession({
             }
           }}
         >
-          <MousePointer2Icon className="size-4" />
-        </button>
-        <button
+          <MousePointer2Icon className="ui-icon-16" />
+        </IconButton>
+        <IconButton
           type="button"
           aria-label="保存证据"
-          title="保存证据"
+          data-hint="保存证据"
           disabled={!activeTab}
-          className="press rounded shrink-0 p-1 transition-colors hover:bg-hover hover:text-ink disabled:opacity-40"
+          className="rounded shrink-0 p-1 transition-colors hover:bg-hover hover:text-ink disabled:opacity-40"
           onClick={() => void saveEvidence()}
         >
-          <CameraIcon className="size-4" />
-        </button>
-        <button
+          <CameraIcon className="ui-icon-16" />
+        </IconButton>
+        <IconButton
           type="button"
           aria-label="停止 Agent 浏览器操作"
-          title="停止 Agent 浏览器操作"
+          data-hint="停止 Agent 浏览器操作"
           disabled={!activeTab}
-          className="press rounded shrink-0 p-1 text-danger-ink transition-colors hover:bg-hover disabled:opacity-40"
+          className="rounded shrink-0 p-1 text-danger-ink transition-colors hover:bg-hover disabled:opacity-40"
           onClick={() =>
             void host
               .cancelRequests(sessionId)
@@ -954,22 +955,22 @@ function BrowserPanelSession({
               .catch((cause) => setError(String(cause)))
           }
         >
-          <SquareIcon className="size-4" />
-        </button>
-        <button
+          <SquareIcon className="ui-icon-16" />
+        </IconButton>
+        <IconButton
           type="button"
           aria-label="浏览器数据管理"
           aria-expanded={dataOpen}
-          title={dataOpen ? "关闭数据管理" : "浏览器数据管理"}
-          className="press rounded shrink-0 p-1 transition-colors hover:bg-hover hover:text-ink"
+          data-hint={dataOpen ? "关闭数据管理" : "浏览器数据管理"}
+          className="rounded shrink-0 p-1 transition-colors hover:bg-hover hover:text-ink"
           onClick={() => setDataOpen((current) => !current)}
         >
-          <DatabaseIcon className="size-4" />
-        </button>
-        <button
+          <DatabaseIcon className="ui-icon-16" />
+        </IconButton>
+        <IconButton
           type="button"
           aria-label="新建标签页"
-          title={
+          data-hint={
             userCanControl
               ? "新建标签页"
               : "Agent 正在操作，点击“我来接管”后可新建"
@@ -978,47 +979,42 @@ function BrowserPanelSession({
           className="rounded shrink-0 p-1 hover:bg-hover disabled:opacity-40"
           onClick={() => void createTab()}
         >
-          <PlusIcon className="size-4" />
-        </button>
+          <PlusIcon className="ui-icon-16" />
+        </IconButton>
       </div>
       {space && space.tabs.length > 0 && (
         <div className="flex min-h-8 items-center gap-1 overflow-x-auto border-b border-line px-2">
           {space.tabs
             .filter((tab) => tab.lifecycle !== "closed")
             .map((tab) => (
-              <button
-                type="button"
+              <div
                 key={tab.tabId}
-                className={`flex min-w-24 max-w-48 items-center gap-1 rounded px-2 py-1 text-left text-xs ${tab.tabId === activeTabId ? "bg-selected" : "hover:bg-hover"}`}
-                onClick={() => {
-                  setActiveTabId(tab.tabId);
-                  setDraft(tab.committedUrl ?? "");
-                }}
+                className={`flex min-w-24 max-w-48 items-center gap-1 rounded pr-1 text-xs ${tab.tabId === activeTabId ? "bg-selected" : "hover:bg-hover"}`}
               >
-                <span className="min-w-0 flex-1 truncate">
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 truncate rounded px-2 py-1 text-left"
+                  onClick={() => {
+                    setActiveTabId(tab.tabId);
+                    setDraft(tab.committedUrl ?? "");
+                  }}
+                >
                   {tab.committedUrl || "空白页"}
-                </span>
-                <span
-                  role="button"
+                </button>
+                <IconButton
                   aria-label={`关闭标签 ${tab.tabId}`}
-                  aria-disabled={!userCanControl}
-                  tabIndex={userCanControl ? 0 : -1}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (!userCanControl) return;
+                  disabled={!userCanControl}
+                  className="rounded p-1 text-ink-mute hover:bg-hover"
+                  onClick={() => {
                     void host
                       .closeTab(sessionId, tab.tabId)
                       .then(refresh)
                       .catch((cause) => setError(String(cause)));
                   }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ")
-                      event.currentTarget.click();
-                  }}
                 >
-                  <XIcon className="size-3" />
-                </span>
-              </button>
+                  <XIcon className="ui-icon-12" />
+                </IconButton>
+              </div>
             ))}
         </div>
       )}
@@ -1081,7 +1077,7 @@ function BrowserPanelSession({
         </div>
       )}
       {evidenceUrl && (
-        <div className=" right-4 top-20 z-20 max-w-[80%] rounded-lg border border-line bg-base p-2 shadow-xl">
+        <div className=" right-4 top-20 z-20 max-w-[80%] rounded-lg border border-line bg-base p-2 shadow-floating">
           <div className="mb-2 flex justify-end gap-2">
             <button
               type="button"
@@ -1102,7 +1098,7 @@ function BrowserPanelSession({
         <div
           role="dialog"
           aria-label="浏览器数据管理"
-          className=" inset-x-6 top-16 z-20 max-h-[70vh] overflow-y-auto rounded-lg border border-line bg-base p-4 shadow-xl"
+          className=" inset-x-6 top-16 z-20 max-h-[70vh] overflow-y-auto rounded-lg border border-line bg-base p-4 shadow-floating"
         >
           <div className="sticky top-0 z-10 flex items-start justify-between gap-3 bg-base pb-2">
             <div>
@@ -1394,7 +1390,7 @@ function BrowserPanelSession({
       {downloads.length > 0 && (
         <section
           aria-label="下载列表"
-          className=" inset-x-4 top-20 z-20 rounded-lg border border-line bg-base p-3 text-xs shadow-xl"
+          className=" inset-x-4 top-20 z-20 rounded-lg border border-line bg-base p-3 text-xs shadow-floating"
         >
           <h2 className="font-medium">下载</h2>
           <div className="mt-2 max-h-40 space-y-2 overflow-auto">
@@ -1448,7 +1444,7 @@ function BrowserPanelSession({
           key={dialog.dialogId}
           role="dialog"
           aria-label="页面对话框"
-          className=" inset-x-4 bottom-10 z-30 rounded-lg border border-line bg-base p-4 shadow-xl"
+          className=" inset-x-4 bottom-10 z-30 rounded-lg border border-line bg-base p-4 shadow-floating"
         >
           <h2 className="text-sm font-medium">页面{dialog.dialogType}对话框</h2>
           <p className="mt-1 text-xs text-ink-muted">
@@ -1491,7 +1487,7 @@ function BrowserPanelSession({
             )}
             <button
               type="button"
-              className="rounded bg-accent px-3 py-1 text-xs text-accent-ink"
+              className="rounded bg-ink px-3 py-1 text-xs text-foreground-inverse"
               onClick={() => {
                 void host
                   .decideDialog(
@@ -1523,7 +1519,7 @@ function BrowserPanelSession({
             key={approval.approvalId}
             role="dialog"
             aria-label="浏览器高风险操作审批"
-            className=" inset-x-4 bottom-10 z-20 rounded-lg border border-line bg-base p-4 shadow-xl"
+            className=" inset-x-4 bottom-10 z-20 rounded-lg border border-line bg-base p-4 shadow-floating"
           >
             <h2 className="text-sm font-medium">
               {approval.action === "control"
@@ -1559,7 +1555,7 @@ function BrowserPanelSession({
               </button>
               <button
                 type="button"
-                className="rounded bg-accent px-3 py-1 text-xs text-accent-ink"
+                className="rounded bg-ink px-3 py-1 text-xs text-foreground-inverse"
                 onClick={() => {
                   void host
                     .decideApproval(approval.approvalId, true)
@@ -1578,7 +1574,7 @@ function BrowserPanelSession({
             </div>
           </div>
         ))}
-      <footer className="flex min-h-6 items-center justify-between border-t border-line px-3 text-[10px] text-ink-muted">
+      <footer className="flex min-h-6 items-center justify-between border-t border-line px-3 text-2xs text-ink-muted">
         <span>
           {agentActive
             ? "Agent 正在操作"

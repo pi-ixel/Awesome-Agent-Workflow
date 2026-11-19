@@ -495,13 +495,6 @@ export function createCodeAgentDialect(): AcpDialect {
     },
     requireConfigurationConfirmation: true,
     normalizeConfigOptions,
-    normalizeServerRequest: (method, params) =>
-      method === "elicitation/create" &&
-      params.mode === undefined &&
-      asRecord(params.requestedSchema) &&
-      !("url" in params)
-        ? { ...params, mode: "form" }
-        : params,
     enhanceEvent: enhance,
     translateNotification: childNotification,
   };

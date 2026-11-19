@@ -1,3 +1,5 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { DangerButton } from "../../../shared/ui/controls.tsx";
 import type { MarkdownEditorApi } from "./MarkdownSourceEditor.tsx";
 import { createPortal } from "react-dom";
 import { useContext, useEffect, useMemo, useState, useSyncExternalStore, type RefObject } from "react";
@@ -429,7 +431,7 @@ export function FileAnnotations({
   }
   return (
     <>
-      <style>{`::highlight(${highlightName}) { background: #facc1538; text-decoration: underline #ca8a04; }`}</style>
+      <style>{`::highlight(${highlightName}) { background: #facc1538; text-decoration: underline var(--color-annotation-underline); }`}</style>
       {notice && (
         <div
           role="status"
@@ -437,13 +439,13 @@ export function FileAnnotations({
           data-file-find-ignore
         >
           {notice}
-          <button
+          <IconButton iconSize="compact"
             type="button"
             aria-label="关闭批注提示"
             onClick={() => setNotice("")}
           >
             ×
-          </button>
+          </IconButton>
         </div>
       )}
       {editor &&
@@ -488,19 +490,19 @@ export function FileAnnotations({
                       save();
                     }
                   }}
-                  className="min-h-20 w-full resize-y rounded-lg border border-line bg-base p-2"
+                  className="min-h-20 w-full resize-y rounded-lg border border-control-line bg-base p-2"
                 />
                 <div className="mt-2 flex justify-end gap-2">
                   {annotations.some((a) => a.id === editor.annotation.id) && (
-                    <button
+                    <DangerButton
                       type="button"
-                      className="mr-auto rounded border border-danger-line bg-danger-bg px-2 py-1 text-danger-ink hover:brightness-95"
+                      className="mr-auto px-2 py-1"
                       onClick={() => {
                         if (editor.owner.remove(editor.target, editor.annotation.id)) setEditor(null);
                       }}
                     >
                       删除
-                    </button>
+                    </DangerButton>
                   )}
                   <button
                     type="button"

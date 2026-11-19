@@ -10,11 +10,11 @@
  * 字号，需要更小就往 2xs 并，不再造新档。
  *
  * 按钮三级体系（叠加尺寸类使用，如 `px-3 py-1.5 text-sm`）：
- * - primary：accent 实底，只给真正的主操作（发送 / 提交回答 / 新建会话），
+ * - primary：主题正文色实底，只给真正的主操作（发送 / 提交回答 / 新建会话），
  *   禁用态半透明后与可用态依旧可辨；
  * - secondary：描边植面，常规操作（选择目录 / 刷新 / 测试连接）；
  * - ghost：纯文字植面，弱操作与取消（上一步 / 取消）；
- * - danger：红色描边，危险动作（拒绝审批 / 停止运行）。
+ * - danger：浅红底色，危险动作（拒绝审批 / 停止运行）。
  * 全站按钮一律从这里取植面，避免同级操作出现多种植面。
  *
  * 徽标统一走 `Badge tone`：从前有三套配方（描边 / 实底 / 描边+半透底）
@@ -30,21 +30,30 @@
 
 /**
  * 键盘焦点指示环（focus-visible 体系）：可交互元素的统一键盘焦点样式。
- * 只在键盘聚焦（focus-visible）时显示 accent 细环并隐藏默认 outline，
+ * 只在键盘聚焦（focus-visible）时显示中性细环并隐藏默认 outline，
  * 鼠标点击不出现（保留浏览器默认 focus 语义的工具类出口）。
  */
-import { useEffect, useRef, useState } from "react";
+import { UiIcon } from "./UiIcon.tsx";
+import { forwardRef, useEffect, useRef, useState, type ComponentPropsWithoutRef } from "react";
 
+import { useAnchoredPopover } from "./controls/useAnchoredPopover.ts";
 import { ChevronDownIcon } from "./icons.tsx";
 
 export const focusVisibleRing =
-  "focus-visible:ring-2 focus-visible:ring-sky-500/60 focus-visible:outline-none";
+  "focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:outline-none";
 
 /** 各级按钮的公共底样式（尺寸由调用处叠加）。 */
 const btnBase = `press rounded-md font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${focusVisibleRing}`;
 
-/** 主操作：accent 实底（两主题下均可读，不随语义 token 切换）。 */
-export const btnPrimary = `${btnBase} bg-sky-600 text-white hover:bg-sky-500`;
+/**
+ * 按钮尺寸（高度 + 内边距 + 不换行）：同组按钮同高用的那一档。
+ * 从前 InlineConfirm 和工作流面板各写了一份同样的类串，改一处漏一处。
+ */
+export const btnSize =
+  "inline-flex h-7 shrink-0 items-center justify-center gap-1 px-2.5 text-ui-sm whitespace-nowrap";
+
+/** 主操作：主题正文色实底，文字使用对应的反色。 */
+export const btnPrimary = `${btnBase} bg-ink text-foreground-inverse hover:bg-ink/90`;
 
 /** 常规操作：描边植面。 */
 export const btnSecondary = `${btnBase} border border-line-strong bg-surface text-ink hover:border-ink-faint hover:bg-raised`;
@@ -52,8 +61,14 @@ export const btnSecondary = `${btnBase} border border-line-strong bg-surface tex
 /** 弱操作 / 取消：纯文字植面。 */
 export const btnGhost = `${btnBase} text-ink-mute hover:bg-raised/70 hover:text-ink`;
 
-/** 危险操作：红色描边植面。 */
-export const btnDanger = `${btnBase} border border-danger-line bg-danger-bg/40 text-danger-ink hover:bg-danger-bg/70`;
+/** 危险操作：浅红底色。 */
+const btnDanger = `${btnBase} bg-danger-bg text-danger-ink hover:bg-danger-bg/70`;
+
+export const DangerButton = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<"button">>(
+  function DangerButton({ className = "", type = "button", ...props }, ref) {
+    return <button {...props} ref={ref} type={type} className={`${btnDanger} ${className}`} />;
+  },
+);
 
 /** 分段导航（tab）激活 / 非激活态：中性 selected 植面（Zai 同款，无色相）。 */
 export const tabActiveClass = "bg-(--color-selected) font-medium text-ink";
@@ -121,7 +136,7 @@ export function RadioDot({
   return (
     <span
       aria-hidden={true}
-      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-sky-500/60 peer-focus-visible:outline-none ${
+      className={`flex ui-icon-16 shrink-0 items-center justify-center rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring peer-focus-visible:outline-none ${
         checked
           ? appearance === "neutral"
             ? "border-ink bg-surface"
@@ -130,7 +145,7 @@ export function RadioDot({
       }`}
     >
       <span
-        className={`h-2 w-2 rounded-full transition-colors ${
+        className={`ui-icon-8 rounded-full transition-colors ${
           checked
             ? appearance === "neutral"
               ? "bg-ink"
@@ -147,21 +162,21 @@ export function CheckSquare({ checked }: { readonly checked: boolean }) {
   return (
     <span
       aria-hidden={true}
-      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-sky-500/60 peer-focus-visible:outline-none ${
+      className={`flex ui-icon-16 shrink-0 items-center justify-center rounded border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring peer-focus-visible:outline-none ${
         checked ? "border-sky-500 bg-sky-500/15" : "border-line-strong bg-base"
       }`}
     >
-      <svg
+      <UiIcon
         viewBox="0 0 12 12"
         fill="none"
         stroke="currentColor"
         strokeWidth={2}
         strokeLinecap="round"
         strokeLinejoin="round"
-        className={`h-3 w-3 ${checked ? "text-sky-400" : "text-transparent"}`}
+        className={`ui-icon-12 ${checked ? "text-sky-400" : "text-transparent"}`}
       >
         <path d="M2.5 6.5 5 9l4.5-6" />
-      </svg>
+      </UiIcon>
     </span>
   );
 }
@@ -169,6 +184,7 @@ export function CheckSquare({ checked }: { readonly checked: boolean }) {
 export interface ToggleSwitchProps {
   readonly appearance?: "accent" | "neutral";
   readonly checked: boolean;
+  readonly disabled?: boolean;
   readonly onChange: (next: boolean) => void;
   /** 可访问名称（原生 input 的 aria-label）。 */
   readonly label: string;
@@ -177,18 +193,20 @@ export interface ToggleSwitchProps {
 /** 自绘开关（滑块式）：原生 checkbox 视觉隐藏，仅承担语义与键盘。 */
 export function ToggleSwitch({
   checked,
+  disabled = false,
   onChange,
   label,
   appearance = "accent",
 }: ToggleSwitchProps) {
   const neutral = appearance === "neutral";
   return (
-    <label className="flex cursor-pointer items-center gap-1.5">
+    <label className={`flex items-center gap-1.5 ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}>
       <input
         type="checkbox"
         role="switch"
         aria-label={label}
         checked={checked}
+        disabled={disabled}
         onChange={(event) => {
           onChange(event.target.checked);
         }}
@@ -196,7 +214,7 @@ export function ToggleSwitch({
       />
       <span
         aria-hidden={true}
-        className={`relative shrink-0 rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-sky-500/60 ${neutral ? "h-[18px] w-8" : "h-3.5 w-7"} ${
+        className={`relative shrink-0 rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring ${neutral ? "h-[calc(18*var(--ui-icon-unit))] w-[calc(32*var(--ui-icon-unit))]" : "h-[calc(14*var(--ui-icon-unit))] w-[calc(28*var(--ui-icon-unit))]"} ${
           neutral
             ? checked
               ? "border-ink bg-ink"
@@ -209,8 +227,8 @@ export function ToggleSwitch({
         <span
           className={`absolute top-1/2 -translate-y-1/2 rounded-full transition-all ${
             neutral
-              ? `size-4 bg-base ${checked ? "left-3.5" : "left-0"}`
-              : `h-2.5 w-2.5 ${checked ? "left-3.5 bg-white" : "left-[3px] bg-ink-mute"}`
+              ? `ui-icon-16 bg-base ${checked ? "left-[calc(14*var(--ui-icon-unit))]" : "left-0"}`
+              : `ui-icon-10 ${checked ? "left-[calc(14*var(--ui-icon-unit))] bg-white" : "left-[calc(3*var(--ui-icon-unit))] bg-ink-mute"}`
           }`}
         />
       </span>
@@ -257,7 +275,7 @@ export function Badge({
 }: BadgeProps) {
   return (
     <span
-      title={title}
+      data-hint={title}
       className={`inline-flex shrink-0 items-center gap-1 rounded border text-2xs whitespace-nowrap ${badgeToneClass[tone]} ${
         compact ? "px-1 py-0.5" : "px-1.5 py-0.5"
       }`}
@@ -269,7 +287,7 @@ export function Badge({
 
 /** 徽标里的状态圆点（颜色随父级 currentColor，与徽标同色系）。 */
 export function BadgeDot({
-  className = "h-1.5 w-1.5",
+  className = "ui-icon-6",
 }: {
   readonly className?: string;
 }) {
@@ -281,6 +299,46 @@ export function BadgeDot({
   );
 }
 
+/**
+ * 独立状态圆点（不在徽标里）：语气 → 颜色，与 Badge 同一套语义 token。
+ *
+ * 用在列表行、卡片底部这类「只有一个点在说状态」的地方——整列都是同色
+ * 徽标时颜色就不是信号了，收成一个点。列表、树、统计里手写的
+ * `h-1.5 w-1.5 rounded-full bg-danger` 之类的圆点都应该换到这里。
+ */
+const dotToneClass: Readonly<Record<BadgeTone, string>> = {
+  neutral: "bg-line-strong",
+  ok: "bg-ok-ink",
+  warn: "bg-warn-ink",
+  danger: "bg-danger-ink",
+  info: "bg-info-ink",
+};
+
+export function StatusDot({
+  tone = "neutral",
+  pulse = false,
+  label,
+  hint,
+  className = "ui-icon-6",
+}: {
+  readonly tone?: BadgeTone;
+  /** 进行中：呼吸闪烁（尊重减少动效设置）。 */
+  readonly pulse?: boolean;
+  /** 可访问名称；纯装饰（旁边已有状态文字）时省略。 */
+  readonly label?: string;
+  /** 悬停提示（窗口级 HintTooltip），一般与 label 同文。 */
+  readonly hint?: string;
+  readonly className?: string;
+}) {
+  const animation =
+    pulse && tone === "info" ? " animate-pulse motion-reduce:animate-none" : "";
+  const classes = `inline-block shrink-0 rounded-full ${dotToneClass[tone]} ${className}${animation}`;
+  if (label === undefined) {
+    return <span aria-hidden={true} data-hint={hint} className={classes} />;
+  }
+  return <span role="img" aria-label={label} data-hint={hint} className={classes} />;
+}
+
 // ---------------------------------------------------------------------------
 // 下拉选择（Listbox）：自绘，不用原生 <select>
 // ---------------------------------------------------------------------------
@@ -288,9 +346,13 @@ export function BadgeDot({
 export interface ListboxOption {
   readonly value: string;
   readonly label: string;
+  readonly group?: string;
 }
 
 export interface ListboxProps {
+  readonly appearance?: "default" | "quiet";
+  readonly triggerLabel?: string;
+  readonly showSelectionMark?: boolean;
   /** 可访问名称（触发按钮的 aria-label）。 */
   readonly label: string;
   readonly value: string | null;
@@ -318,6 +380,9 @@ export interface ListboxProps {
  * 点面板外部关闭。焦点始终留在触发按钮上（面板不抢焦点），关闭后回归。
  */
 export function Listbox({
+  appearance = "default",
+  triggerLabel,
+  showSelectionMark = false,
   label,
   value,
   options,
@@ -330,10 +395,19 @@ export function Listbox({
   const [isOpen, setIsOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLUListElement | null>(null);
+  useAnchoredPopover(isOpen, containerRef, listRef);
 
   const selectedIndex = options.findIndex((option) => option.value === value);
   const selectedLabel =
     selectedIndex === -1 ? null : (options[selectedIndex]?.label ?? null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const list = listRef.current;
+    const selected = list?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (list && selected) list.scrollTop = Math.max(0, selected.offsetTop - (list.clientHeight - selected.offsetHeight) / 2);
+  }, [isOpen, selectedIndex]);
 
   // 点面板外部关闭（与顶栏待办下拉同一收口模式）
   useEffect(() => {
@@ -427,21 +501,26 @@ export function Listbox({
           }
         }}
         onKeyDown={handleKeyDown}
-        className={`inline-flex items-center justify-between gap-2 rounded-md border border-line-strong bg-base px-2.5 text-left text-ink transition-colors hover:border-ink-faint disabled:cursor-not-allowed disabled:opacity-40 ${focusVisibleRing} ${className} ${
+        className={`inline-flex items-center justify-between gap-2 rounded-md px-2.5 text-left text-ink transition-colors ${appearance === "quiet" ? "border border-transparent bg-transparent hover:bg-surface-hover" : "border border-line-strong bg-surface hover:border-ink-faint"} disabled:cursor-not-allowed disabled:opacity-40 ${focusVisibleRing} ${className} ${
           fullWidth ? "w-full" : "min-w-24"
         }`}
       >
-        <span className="truncate">{selectedLabel ?? placeholder}</span>
-        <ChevronDownIcon className="h-3 w-3 text-ink-faint" />
+        <span className="truncate">{triggerLabel ?? selectedLabel ?? placeholder}</span>
+        <ChevronDownIcon className="ui-icon-12 text-ink-faint" />
       </button>
       {isOpen ? (
         <ul
+          ref={listRef}
+          popover={typeof HTMLElement.prototype.showPopover === "function" ? "manual" : undefined}
           role="listbox"
           aria-label={label}
-          className="absolute top-full left-0 z-40 mt-1 max-h-64 min-w-full overflow-y-auto rounded-md border border-line-strong bg-surface py-1 shadow-elev-2"
+          className={`absolute top-full z-40 mt-1 max-h-64 min-w-full overflow-y-auto border border-line-strong bg-surface py-1 shadow-floating selection-popup ${showSelectionMark ? "right-0 min-w-40 rounded-xl p-1" : "left-0 rounded-md"}`}
         >
           {options.map((option, index) => (
-            <li key={option.value}>
+            <li key={option.value} role={option.group ? "group" : undefined} aria-label={option.group}>
+              {option.group && options[index - 1]?.group !== option.group && (
+                <span aria-hidden="true" className="block px-2.5 py-1 text-xs text-ink-mute">{option.group}</span>
+              )}
               <button
                 type="button"
                 role="option"
@@ -452,11 +531,12 @@ export function Listbox({
                 onClick={() => {
                   commit(index);
                 }}
-                className={`flex w-full items-center gap-1.5 px-2.5 py-1 text-left text-xs whitespace-nowrap transition-colors ${
+                className={`flex w-full items-center gap-1.5 px-2.5 text-left text-xs whitespace-nowrap transition-colors ${showSelectionMark ? "min-h-8 rounded-lg py-1.5 tabular-nums" : "py-1"} ${
                   index === activeIndex ? rowSelectedClass : "text-ink-soft"
                 }`}
               >
                 {option.label}
+                {showSelectionMark && option.value === value && <span aria-hidden="true" className="ml-auto">✓</span>}
               </button>
             </li>
           ))}
@@ -468,7 +548,7 @@ export function Listbox({
 
 /** 旋转圆环加载指示（尺寸随字号，颜色随 currentColor）。 */
 export function Spinner({
-  className = "h-3.5 w-3.5",
+  className = "ui-icon-14",
 }: {
   readonly className?: string;
 }) {

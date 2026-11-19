@@ -10,7 +10,7 @@
  * 呈现手动身份输入窗口。自验通道（不出现在 UI）：对接前需临时验证链路
  * 时，向 localStorage 写入 `aaw-desktop.auth.sso-dev-endpoint.v1`（网关
  * 端点）与 `aaw-desktop.auth.sso-dev-login-url.v1`（登录页）即可，见
- * docs/auth-login/README.md。
+ * docs/features/auth-login/README.md。
  */
 
 /**

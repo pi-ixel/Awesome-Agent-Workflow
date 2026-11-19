@@ -3,17 +3,43 @@ import type { ProjectPreferences, ProjectPreferenceValues } from "../types.ts";
 import { createLogger, type Logger } from "../../../shared/logging/logger.ts";
 import { defaultProjectPreferences, normalizeArchiveDays } from "../config.ts";
 
+function readInteractions(
+  raw: unknown,
+): ProjectPreferenceValues["interactionByAgent"] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const entries: [
+    string,
+    { mode: "queue" | "steer" },
+  ][] = [];
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!value || typeof value !== "object") continue;
+    const item = value as Record<string, unknown>;
+    entries.push([
+      id,
+      {
+        mode: item.mode === "steer" ? "steer" : "queue",
+      },
+    ]);
+  }
+  return Object.fromEntries(entries);
+}
 
-function restore(scope: ConfigurationScope, logger: Logger): ProjectPreferenceValues {
+function restore(
+  scope: ConfigurationScope,
+  logger: Logger,
+): ProjectPreferenceValues {
   try {
     const saved = scope.read();
     if (!saved) return defaultProjectPreferences;
     const width = saved.chatWidth;
     return {
+      interactionByAgent: readInteractions(saved.interactionByAgent),
       approvalMode: saved.approvalMode === "auto-allow" ? "auto-allow" : "ask",
       autoAnswerQuestions: saved.autoAnswerQuestions === true,
       chatWidth: width === "wide" || width === "full" ? width : "standard",
       messageStreamShowTodos: saved.messageStreamShowTodos === true,
+      messageStreamMode:
+        saved.messageStreamMode === "conclusion" ? "conclusion" : "process",
       sessionAutoArchiveEnabled: saved.sessionAutoArchiveEnabled === true,
       sessionAutoArchiveOlderThanDays: normalizeArchiveDays(
         saved.sessionAutoArchiveOlderThanDays,
@@ -25,26 +51,40 @@ function restore(scope: ConfigurationScope, logger: Logger): ProjectPreferenceVa
   }
 }
 
-export function createProjectPreferences(scope: ConfigurationScope, logger = createLogger("settings")) {
+export function createProjectPreferences(
+  scope: ConfigurationScope,
+  logger = createLogger("settings"),
+) {
   type Listener = Parameters<ProjectPreferences["subscribe"]>[0];
   const listeners = new Set<Listener>();
   let state = restore(scope, logger);
   let disposed = false;
 
-  function update(patch: Partial<ProjectPreferenceValues>): void {
+  function update(
+    patch: Partial<ProjectPreferenceValues>,
+    strict = false,
+  ): void {
     if (disposed) return;
     const previous = state;
     const next = { ...state, ...patch };
-    state = next;
     try {
       scope.update(patch);
     } catch (error) {
+      if (strict) throw error;
       logger.warn("写入项目偏好失败", { error: String(error) });
     }
+    state = next;
     for (const listener of listeners) listener(next, previous);
   }
 
   return {
+    setAgentInteraction: (agentId, mode) =>
+      update({
+        interactionByAgent: {
+          ...state.interactionByAgent,
+          [agentId]: { mode },
+        },
+      }),
     getState: () => state,
     subscribe(listener) {
       if (!disposed) listeners.add(listener);
@@ -56,6 +96,7 @@ export function createProjectPreferences(scope: ConfigurationScope, logger = cre
     setChatWidth: (chatWidth) => update({ chatWidth }),
     setMessageStreamShowTodos: (messageStreamShowTodos) =>
       update({ messageStreamShowTodos }),
+    setMessageStreamMode: (messageStreamMode) => update({ messageStreamMode }),
     setSessionAutoArchive: (
       sessionAutoArchiveEnabled,
       olderThanDays?: number,
@@ -70,6 +111,7 @@ export function createProjectPreferences(scope: ConfigurationScope, logger = cre
           : {}),
       }),
     reset: () => update(defaultProjectPreferences),
+    resetStorage: () => update(defaultProjectPreferences, true),
     dispose() {
       disposed = true;
       const previous = state;
@@ -77,5 +119,5 @@ export function createProjectPreferences(scope: ConfigurationScope, logger = cre
       for (const listener of listeners) listener(state, previous);
       listeners.clear();
     },
-  } satisfies ProjectPreferences & { dispose(): void };
+  } satisfies ProjectPreferences & { dispose(): void; resetStorage(): void };
 }

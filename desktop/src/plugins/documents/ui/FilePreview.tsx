@@ -1,3 +1,7 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
+import { Breadcrumb } from "../../../shared/ui/Breadcrumb.tsx";
+import { btnGhost } from "../../../shared/ui/controls.tsx";
 import type { FilePreview as Preview } from "../../host/types.ts";
 import { describeUnknownError } from "../../../shared/errors.ts";
 import {
@@ -16,7 +20,7 @@ import { FileDocumentTools } from "./FileDocumentTools.tsx";
  *   编辑器打开按钮；面包屑横向滚动、左右渐隐 mask 按滚动位置切换、首次打开
  *   自动滚到最右露出文件名；独占形态头部内联，文件树内联形态经 headerPortalTo
  *   把同一头部 portal 到面板级全宽行（ZCode FileManagerPane headerContainer）；
- * - Markdown/SVG 双视图通过标题栏单图标切换；Markdown 源码可编辑并手动保存。
+ * - Markdown/SVG 在标题栏切换预览和源码，窄面板把选项收进更多菜单。
  * - 更多菜单：「自动换行」（仅纯代码或 md/svg 源码模式出现）、
  *   复制绝对/相对路径；
  * - 内容路由：图片居中、SVG 双模式、markdown 双模式（本地图片回源）、
@@ -31,13 +35,11 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
-  useRef,
   useState,
-  type CSSProperties,
 } from "react";
 import { createPortal } from "react-dom";
 import hljs from "highlight.js/lib/common";
-import { ChevronRightIcon, CopyIcon, EllipsisIcon } from "../../../shared/ui/icons.tsx";
+import { CopyIcon, EllipsisIcon } from "../../../shared/ui/icons.tsx";
 import { ContextMenu, type ContextMenuEntry } from "../../../shared/ui/ContextMenu.tsx";
 import { MermaidBlock } from "../../../shared/ui/markdown/MermaidBlock.tsx";
 import { FileMarkdownPreview } from "./FileMarkdownPreview.tsx";
@@ -53,36 +55,16 @@ import {
 } from "../../../shared/panelPaths.ts";
 import { FileDisplayIcon } from "../../../shared/ui/file-icons/fileDisplay.tsx";
 import { resolveIconName } from "../../../shared/ui/file-icons/fileDisplayHelpers.ts";
-import { EyeIcon, FileCode2Icon } from "../../../shared/ui/file-icons/icons.tsx";
+import { FileCode2Icon } from "../../../shared/ui/file-icons/icons.tsx";
+import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import { copyTextToClipboard } from "./file-tree/helpers.ts";
 import { useMenuController } from "./file-tree/menuController.ts";
 
-type BreadcrumbMaskState = "none" | "left" | "right" | "both";
-
-const BREADCRUMB_MASK_STYLE: Record<BreadcrumbMaskState, CSSProperties> = {
-  none: {},
-  left: {
-    WebkitMaskImage:
-      "linear-gradient(to right, transparent 0, black 16px, black 100%)",
-    maskImage:
-      "linear-gradient(to right, transparent 0, black 16px, black 100%)",
-  },
-  right: {
-    WebkitMaskImage:
-      "linear-gradient(to right, black 0, black calc(100% - 16px), transparent 100%)",
-    maskImage:
-      "linear-gradient(to right, black 0, black calc(100% - 16px), transparent 100%)",
-  },
-  both: {
-    WebkitMaskImage:
-      "linear-gradient(to right, transparent 0, black 16px, black calc(100% - 16px), transparent 100%)",
-    maskImage:
-      "linear-gradient(to right, transparent 0, black 16px, black calc(100% - 16px), transparent 100%)",
-  },
-};
-
-/** 面包屑横向滚动条整体隐藏（本任务不能改全局样式表，就近注入）。 */
-const BREADCRUMB_SCROLLBAR_STYLE = `.file-preview-breadcrumb{scrollbar-width:none}.file-preview-breadcrumb::-webkit-scrollbar{display:none}`;
+const fileViewOptions = [
+  { value: "preview", label: "预览" },
+  { value: "code", label: "源码" },
+] as const;
+const MIN_FILE_VIEW_HEADER_WIDTH = 360;
 
 /** 错误消息里的绝对路径脱敏成文件名（ZCode getPreviewPaneSafeErrorMessage）。 */
 function getSafeErrorMessage(message: string, sourcePath: string): string {
@@ -365,7 +347,7 @@ function PreviewBody({
           ))}
           {rawLines.length > visible && (
             <button
-              className="p-3 text-sm text-accent-ink"
+              className={`${btnGhost} p-3 text-sm`}
               onClick={() => setVisible((old) => old + 1000)}
             >
               继续显示（共 {rawLines.length} 行）
@@ -464,10 +446,6 @@ export function FilePreview({
   // their horizontal layout until the user explicitly enables wrapping.
   const [wrapOverride, setWrapOverride] = useState<boolean | null>(null);
   const wrap = wrapOverride ?? /\.(md|markdown)$/i.test(path);
-  const breadcrumbViewportRef = useRef<HTMLDivElement | null>(null);
-  const breadcrumbContentRef = useRef<HTMLDivElement | null>(null);
-  const [breadcrumbMaskState, setBreadcrumbMaskState] =
-    useState<BreadcrumbMaskState>("none");
   const { menu, open: openMenu, dismiss: dismissMenu } = useMenuController();
 
   useEffect(() => {
@@ -578,58 +556,27 @@ export function FilePreview({
   }, [documents, markdown, path, scope]);
   // 「自动换行」只在存在可换行文本时出现：纯代码，或 md/svg 的源码模式。
   const canToggleWrap = pureCode || ((markdown || svg) && mode === "code");
+  const canSwitchView = markdown || svg;
+  const [headerRow, setHeaderRow] = useState<HTMLDivElement | null>(null);
+  const [compactHeader, setCompactHeader] = useState(false);
+  useLayoutEffect(() => {
+    if (!headerRow || !canSwitchView) return;
+    const measure = () => {
+      const width = headerRow.clientWidth;
+      if (width > 0) setCompactHeader(width < MIN_FILE_VIEW_HEADER_WIDTH);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(headerRow);
+    return () => observer.disconnect();
+  }, [headerRow, canSwitchView]);
   // 路径始终存在 → 复制项常在，更多按钮常驻（ZCode hasMoreMenu || source.path）。
 
   const breadcrumb = useMemo(
     () => buildBreadcrumb(path, project),
     [path, project],
   );
-
-  useLayoutEffect(() => {
-    const viewport = breadcrumbViewportRef.current;
-    if (!viewport) return;
-    // 长路径首次打开时用户最关心末尾文件名：内容变更后只初始化滚到最右，
-    // 后续用户手动滚动不再强行回弹。
-    const frameId = requestAnimationFrame(() => {
-      viewport.scrollLeft = Math.max(
-        0,
-        viewport.scrollWidth - viewport.clientWidth,
-      );
-    });
-    return () => cancelAnimationFrame(frameId);
-  }, [breadcrumb]);
-
-  useLayoutEffect(() => {
-    const viewport = breadcrumbViewportRef.current;
-    const content = breadcrumbContentRef.current;
-    if (!viewport || !content) {
-      setBreadcrumbMaskState("none");
-      return;
-    }
-    const updateMaskState = () => {
-      const maxScrollLeft = viewport.scrollWidth - viewport.clientWidth;
-      if (maxScrollLeft <= 1) {
-        setBreadcrumbMaskState("none");
-        return;
-      }
-      const hasHiddenLeft = viewport.scrollLeft > 1;
-      const hasHiddenRight = viewport.scrollLeft < maxScrollLeft - 1;
-      setBreadcrumbMaskState(
-        hasHiddenLeft && hasHiddenRight
-          ? "both"
-          : hasHiddenLeft
-            ? "left"
-            : hasHiddenRight
-              ? "right"
-              : "none",
-      );
-    };
-    updateMaskState();
-    viewport.addEventListener("scroll", updateMaskState, { passive: true });
-    return () => {
-      viewport.removeEventListener("scroll", updateMaskState);
-    };
-  }, [breadcrumb]);
 
   const copyPath = useCallback(async (text: string): Promise<void> => {
     const ok = await copyTextToClipboard(text);
@@ -648,34 +595,45 @@ export function FilePreview({
 
   const menuEntries = useMemo<ContextMenuEntry[]>(() => {
     const entries: ContextMenuEntry[] = [];
+    if (canSwitchView && compactHeader) {
+      for (const option of fileViewOptions) {
+        entries.push({
+          id: `file-view-${option.value}`,
+          label: option.label,
+          radio: true,
+          selected: mode === option.value,
+          onSelect: () => setMode(option.value),
+        });
+      }
+    }
     if (canToggleWrap) {
       if (entries.length > 0) entries.push({ type: "separator" });
       entries.push({
         id: "wrap-lines",
         label: "自动换行",
-        icon: <FileCode2Icon className="size-4" />,
+        icon: <FileCode2Icon className="ui-icon-16" />,
         radio: true,
         selected: wrap,
         onSelect: () => setWrapOverride(!wrap),
       });
     }
+    if (entries.length > 0) entries.push({ type: "separator" });
     entries.push(
-      { type: "separator" },
       {
         id: "copy-absolute-path",
         label: "复制绝对路径",
-        icon: <CopyIcon className="size-4" />,
+        icon: <CopyIcon className="ui-icon-16" />,
         onSelect: () => void copyPath(path),
       },
       {
         id: "copy-relative-path",
         label: "复制相对路径",
-        icon: <CopyIcon className="size-4" />,
+        icon: <CopyIcon className="ui-icon-16" />,
         onSelect: () => void copyPath(relativePath),
       },
     );
     return entries;
-  }, [canToggleWrap, copyPath, path, relativePath, wrap]);
+  }, [canSwitchView, canToggleWrap, compactHeader, copyPath, mode, path, relativePath, wrap]);
 
   // 头部内片段（面包屑视口 + 动作钮）：独占形态包 h-10 壳内联；portal 形态
   // 只传片段，壳（h-10/border-b/bg）由宿主头部行提供，避免双层壳。
@@ -688,79 +646,58 @@ export function FilePreview({
       }
     : currentResult.data;
   const headerInner = (
-    <div className="contents" data-file-search-scope={scope}>
-      <div
-        ref={breadcrumbViewportRef}
-        className="file-preview-breadcrumb min-w-0 flex-1 overflow-x-auto"
-        style={BREADCRUMB_MASK_STYLE[breadcrumbMaskState]}
-      >
-        <div
-          ref={breadcrumbContentRef}
-          className="flex min-w-max items-center gap-0.5 px-3 text-sm text-ink-subtle"
-        >
-          {breadcrumb.rootLabel ? (
-            onNavigate ? (
-              <button
-                type="button"
-                className="shrink-0 cursor-pointer rounded text-ink-subtle transition-colors hover:text-ink"
-                onClick={() => onNavigate(breadcrumb.rootPath)}
-              >
-                {breadcrumb.rootLabel}
-              </button>
-            ) : (
-              <span className="shrink-0 text-ink-subtle">
-                {breadcrumb.rootLabel}
-              </span>
-            )
-          ) : null}
-          {breadcrumb.rootLabel ? (
-            <ChevronRightIcon className="size-3.5 shrink-0 text-ink-subtlest" />
-          ) : null}
-          {breadcrumb.parentSegments.map((segment, index) => (
-            <span key={`${segment.path}-${index}`} className="contents">
-              {onNavigate ? (
-                <button
-                  type="button"
-                  className="shrink-0 cursor-pointer rounded transition-colors hover:text-ink"
-                  onClick={() => onNavigate(segment.path)}
-                >
-                  {segment.label}
-                </button>
-              ) : (
-                <span className="shrink-0">{segment.label}</span>
-              )}
-              <ChevronRightIcon className="size-3.5 shrink-0 text-ink-subtlest" />
-            </span>
-          ))}
-          <span className="inline-flex min-w-0 items-center gap-1 text-ink">
-            <FileDisplayIcon
-              name={breadcrumb.file.iconName}
-              size={14}
-              className="shrink-0"
-            />
-            <span className="truncate">{breadcrumb.file.label}</span>
-          </span>
-        </div>
-      </div>
+    <div
+      ref={setHeaderRow}
+      className="flex min-w-0 flex-1 items-center"
+      data-file-search-scope={scope}
+    >
+      <Breadcrumb
+        scroll
+        label="文件路径"
+        className="min-w-0 flex-1 px-3 text-sm"
+        items={[
+          ...(breadcrumb.rootLabel
+            ? [{ key: breadcrumb.rootPath, label: breadcrumb.rootLabel, onSelect: onNavigate ? () => onNavigate(breadcrumb.rootPath) : undefined }]
+            : []),
+          ...breadcrumb.parentSegments.map((segment) => ({
+            key: segment.path,
+            label: segment.label,
+            onSelect: onNavigate ? () => onNavigate(segment.path) : undefined,
+          })),
+          {
+            key: path,
+            label: breadcrumb.file.label,
+            icon: <FileDisplayIcon name={breadcrumb.file.iconName} className="shrink-0" />,
+          },
+        ]}
+      />
       <div className="flex shrink-0 items-center gap-2 pr-1.5">
+        {canSwitchView && !compactHeader && (
+          <SegmentedControl
+            groupLabel="文件视图"
+            value={mode}
+            options={fileViewOptions}
+            onChange={setMode}
+          />
+        )}
         {dirty ? (
-          <span className="text-ui-xs text-warn-ink" title="修改尚未写入磁盘">
+          <span className="text-ui-xs text-warn-ink" data-hint="修改尚未写入磁盘">
             未保存
           </span>
         ) : null}
         {markdown ? (
-          <button
+          <IconButton
             type="button"
             aria-label="保存 Markdown"
-            title="保存（Ctrl+S）"
+            data-hint="保存（Ctrl+S）"
             disabled={!dirty || document?.saving}
-            className="flex size-7 items-center justify-center rounded-lg text-ink-subtle hover:bg-surface-hover disabled:opacity-40"
+            className="flex items-center justify-center rounded-lg text-ink-subtle hover:bg-surface-hover disabled:opacity-40"
             onClick={() => {
               void documents.editor.save(path);
             }}
           >
-            <svg
-              className="size-3.5"
+            <UiIcon
+              className="ui-icon-14"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -768,39 +705,16 @@ export function FilePreview({
             >
               <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z" />
               <path d="M17 21v-8H7v8M7 3v5h8" />
-            </svg>
-          </button>
-        ) : null}
-        {markdown || svg ? (
-          <button
-            type="button"
-            aria-label={mode === "preview" ? "切换到源码" : "切换到预览"}
-            title={
-              mode === "preview"
-                ? markdown
-                  ? "切换到源码编辑"
-                  : "切换到源码"
-                : "切换到预览"
-            }
-            className="flex size-7 items-center justify-center rounded-lg text-ink-subtle hover:bg-surface-hover hover:text-ink"
-            onClick={() =>
-              setMode((current) => (current === "preview" ? "code" : "preview"))
-            }
-          >
-            {mode === "preview" ? (
-              <FileCode2Icon className="size-3.5" />
-            ) : (
-              <EyeIcon className="size-3.5" />
-            )}
-          </button>
+            </UiIcon>
+          </IconButton>
         ) : null}
         <div ref={setToolbar} className="flex items-center gap-1" />
-        <button
+        <IconButton
           type="button"
           aria-label="更多"
-          title="更多"
+          data-hint="更多"
           aria-haspopup="menu"
-          className="flex size-7 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+          className="flex items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
           onClick={(event) => {
             const rect = event.currentTarget.getBoundingClientRect();
             openMenu("preview-more", "更多", menuEntries, {
@@ -811,8 +725,8 @@ export function FilePreview({
             });
           }}
         >
-          <EllipsisIcon className="size-3.5" />
-        </button>
+          <EllipsisIcon className="ui-icon-14" />
+        </IconButton>
       </div>
     </div>
   );
@@ -836,7 +750,6 @@ export function FilePreview({
       }}
       className="flex h-full flex-col overflow-hidden bg-base"
     >
-      <style>{BREADCRUMB_SCROLLBAR_STYLE}</style>
       {headerPortalTo ? createPortal(headerInner, headerPortalTo) : header}
       {markdown && document ? <MarkdownConflictActions documents={documents} path={path} /> : null}
       {safeError && !document ? (

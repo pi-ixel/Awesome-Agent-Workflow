@@ -1,11 +1,27 @@
-import { useProject, useProjectPageValue } from "../../ui/bindings/projectView.tsx";
+import {
+  useProject,
+  useProjectPageValue,
+} from "../../ui/bindings/projectView.tsx";
 import { useStore } from "zustand";
 import type { ProjectService } from "../../service.ts";
-import { fieldOptions, validateForm, type FormViewItem } from "../form.ts";
+import {
+  customAnswerDraftKey,
+  customAnswerFieldDraftKey,
+  fieldOptions,
+  validateForm,
+} from "../../../acpRuntime/service.ts";
+import type { FormViewItem } from "../form.ts";
 import { type FormValue } from "../../../../contracts/acp/elicitation.ts";
 import { useProjectPreferences } from "../../ui/preferencesView.tsx";
 import { Listbox, btnSecondary } from "../../../../shared/ui/controls.tsx";
 import { QuestionChoices, QuestionPanel } from "./QuestionPanel.tsx";
+
+function questionText(text: string | undefined): string | undefined {
+  const trimmed = text?.trim();
+  return trimmed && !/^(field|answer questions\??)$/i.test(trimmed)
+    ? trimmed
+    : undefined;
+}
 
 function FormCard({
   item,
@@ -23,6 +39,22 @@ function FormCard({
   const current = fields[page];
   const key = current?.[0],
     field = current?.[1];
+  const schema = item.form.requestedSchema;
+  const fieldDescription = questionText(field?.description);
+  const schemaDescription = questionText(schema.description);
+  const message = questionText(item.form.message);
+  const title =
+    questionText(field?.title) ??
+    fieldDescription ??
+    questionText(schema.title) ??
+    schemaDescription ??
+    message ??
+    "确认信息";
+  const description = [
+    ...new Set([message, fieldDescription ?? schemaDescription]),
+  ]
+    .filter((text) => text && text !== title)
+    .join("\n");
   const value = key ? item.values[key] : undefined;
   const required = !!key && !!item.form.requestedSchema.required?.includes(key);
   const { errors } = validateForm(item.form, item.values);
@@ -35,6 +67,16 @@ function FormCard({
       : field
         ? fieldOptions(field)
         : null;
+  const customAnswer =
+    !!key &&
+    (item.form.customAnswerField === key ||
+      item.form.customAnswerFields?.includes(key) === true) &&
+    (field?.type === "string" || field?.type === "array") &&
+    !!options?.length;
+  const draftKey =
+    key && item.form.customAnswerFields?.includes(key)
+      ? customAnswerFieldDraftKey(key)
+      : customAnswerDraftKey;
   const change = (next: FormValue) => {
     if (key) edit(item.id, { ...item.values, [key]: next });
   };
@@ -57,7 +99,7 @@ function FormCard({
     const latest = project.interactions.forms
       .getState()
       .pending.find((entry) => entry.id === item.id);
-    if (!latest || latest.stale) return;
+    if (!latest || latest.stale || latest.submitting) return;
     if (page < fields.length - 1) {
       progress(item.id, { page: page + 1 });
       return;
@@ -68,25 +110,20 @@ function FormCard({
       progress(item.id, { page: firstInvalid });
       return;
     }
-    if (!Object.keys(invalid).length) project.interactions.answerForm(item.id, "accept");
+    if (!Object.keys(invalid).length)
+      project.interactions.answerForm(item.id, "accept");
   };
   return (
     <QuestionPanel
       key={item.id}
       id={item.id}
       label="问题"
-      title={
-        field?.title ?? key ?? item.form.requestedSchema.title ?? "确认信息"
-      }
-      description={[
-        item.form.message,
-        field?.description ?? item.form.requestedSchema.description,
-      ]
-        .filter(Boolean)
-        .join("\n")}
+      title={title}
+      description={description}
       page={page}
       count={Math.max(1, fields.length)}
       stale={item.stale}
+      submitting={item.submitting}
       interacted={item.interacted}
       onInteract={() => {
         if (!item.interacted) progress(item.id, { interacted: true });
@@ -121,33 +158,67 @@ function FormCard({
       {field && key && (
         <>
           {options ? (
-            <QuestionChoices
-              multi={field.type === "array"}
-              options={options}
-              selected={
-                Array.isArray(value)
-                  ? value
-                  : value === undefined
-                    ? []
-                    : [String(value)]
-              }
-              onToggle={(selected) => {
-                if (field.type === "array")
-                  change(
-                    Array.isArray(value) && value.includes(selected)
-                      ? value.filter((v) => v !== selected)
-                      : [...(Array.isArray(value) ? value : []), selected],
-                  );
-                else
-                  change(
-                    field.type === "boolean" ? selected === "true" : selected,
-                  );
-              }}
-            />
+            <>
+              <QuestionChoices
+                multi={field.type === "array"}
+                options={options}
+                selected={
+                  Array.isArray(value)
+                    ? value
+                    : value === undefined
+                      ? []
+                      : [String(value)]
+                }
+                onToggle={(selected) => {
+                  if (field.type === "array")
+                    change(
+                      Array.isArray(value) && value.includes(selected)
+                        ? value.filter((v) => v !== selected)
+                        : [...(Array.isArray(value) ? value : []), selected],
+                    );
+                  else {
+                    if (item.form.customAnswerFields?.includes(key))
+                      edit(item.id, {
+                        ...item.values,
+                        [key]: selected,
+                        [draftKey]: "",
+                      });
+                    else
+                      change(
+                        field.type === "boolean" ? selected === "true" : selected,
+                      );
+                  }
+                }}
+              />
+              {customAnswer && (
+                <input
+                  type="text"
+                  aria-label="自定义回答或补充说明"
+                  placeholder="输入自定义回答或补充说明"
+                  value={
+                    typeof item.values[draftKey] === "string"
+                      ? item.values[draftKey]
+                      : ""
+                  }
+                  onChange={(event) =>
+                    edit(item.id, {
+                      ...item.values,
+                      [draftKey]: event.target.value,
+                      ...(field.type === "string" &&
+                      item.form.customAnswerFields?.includes(key) &&
+                      event.target.value.trim()
+                        ? { [key]: "" }
+                        : {}),
+                    })
+                  }
+                  className="w-full rounded-lg border border-control-line bg-base px-3 py-2 text-ui-base placeholder:text-ink-faint"
+                />
+              )}
+            </>
           ) : ["string", "number", "integer"].includes(field.type) ? (
             <input
               key={key}
-              aria-label={field.title ?? key}
+              aria-label={title}
               type={field.type === "string" ? "text" : "number"}
               step={field.type === "integer" ? "1" : "any"}
               value={
@@ -162,7 +233,7 @@ function FormCard({
           ) : (
             <p className="text-warn-ink">暂不支持此字段类型</p>
           )}
-          {errors[key] && (
+          {item.interacted && errors[key] && (
             <p className="text-ui-caption text-warn-ink">{errors[key]}</p>
           )}
         </>
@@ -192,7 +263,19 @@ function FormQueue({
           value={item.id}
           options={items.map((entry) => ({
             value: entry.id,
-            label: `${entry.label} · ${entry.form.message}`,
+            label: [
+              entry.label,
+              questionText(entry.form.message) ??
+                Object.values(entry.form.requestedSchema.properties)
+                  .map(
+                    (field) =>
+                      questionText(field.title) ??
+                      questionText(field.description),
+                  )
+                  .find(Boolean),
+            ]
+              .filter(Boolean)
+              .join(" · "),
           }))}
           onChange={project.interactions.selectForm}
         />
@@ -213,9 +296,7 @@ function ElicitationDockView({ project }: { project: ProjectService }) {
   return (
     <FormQueue
       project={project}
-      items={pending.filter(
-        (item) => item.isForeground && !!item.sessionId,
-      )}
+      items={pending.filter((item) => item.isForeground && !!item.sessionId)}
     />
   );
 }
@@ -228,7 +309,9 @@ export function ElicitationModal() {
 
 function ElicitationModalView({ project }: { project: ProjectService }) {
   const pending = useStore(project.interactions.forms, (s) => s.pending);
-  const foregroundVisible = useProjectPageValue((s) => !s.overlayOpen && s.conversationPage);
+  const foregroundVisible = useProjectPageValue(
+    (s) => !s.overlayOpen && s.conversationPage,
+  );
   const unscoped = pending.filter((item) => !item.sessionId);
   const background = pending.filter(
     (item) =>
@@ -245,7 +328,7 @@ function ElicitationModalView({ project }: { project: ProjectService }) {
       {background.map((item) => (
         <div
           key={item.id}
-          className="flex items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-ui-base text-ink shadow-lg"
+          className="flex items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-ui-base text-ink shadow-floating"
         >
           <span className="min-w-0 flex-1 truncate">
             {item.label} 有问题待回答

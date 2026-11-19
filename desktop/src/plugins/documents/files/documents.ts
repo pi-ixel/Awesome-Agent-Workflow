@@ -65,7 +65,7 @@ export function createDocuments(
         setAnnotation(null);
     },
     stat: (path) => read(() => files.stat(path)),
-    openInFileManager: (path, mode) => read(() => files.openInFileManager(path, mode)),
+    openInFileManager: (path, action) => read(() => files.openInFileManager(path, action)),
     assetUrl: (path) => disposed ? undefined : files.assetUrl(path),
     async directory(path, isCurrent = () => true) {
       assertOpen();

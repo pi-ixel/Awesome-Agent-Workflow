@@ -7,9 +7,14 @@ export function registerTerminalExit(
 ): () => void {
   return workbench.registerExit({
     id: "terminal",
-    isBusy: (reason) =>
-      reason === "update" &&
-      terminal.tabs.getState().tabs.some((tab) => tab.status === "running"),
+    describeWork: (reason) => {
+      if (reason !== "update") return null;
+      // The PTY manager tracks native exits even while the tab view is detached.
+      const open = terminal.tabs.getState().tabs.filter(
+        (tab) => tab.handle !== null && terminal.find(tab.handle) !== null,
+      ).length;
+      return open > 0 ? `有 ${open} 个终端仍打开，更新时会关闭。` : null;
+    },
     prepare: () => terminal.closeTabs(),
   });
 }

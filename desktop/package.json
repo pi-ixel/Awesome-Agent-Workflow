@@ -1,7 +1,7 @@
 {
   "name": "aaw-desktop",
   "private": true,
-  "version": "0.1.21",
+  "version": "0.1.51",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,6 +13,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
+    "test:visual": "playwright test",
     "tauri": "tauri",
     "acp:smoke": "tsx scripts/acp-smoke.ts",
     "test:browser:blackbox": "tsx scripts/browserMcpBlackbox.ts",
@@ -27,10 +28,13 @@
     "test:browser:agent": "tsx scripts/browserAgentCdp.ts",
     "test:browser:agent-direct": "tsx scripts/browserAgentDirect.ts",
     "test:browser:element-acp": "tsx scripts/browserElementAcp.ts",
-    "test:browser:coverage": "tsx scripts/browserCoverage.ts"
+    "test:browser:coverage": "tsx scripts/browserCoverage.ts",
+    "workflow:build": "node scripts/build-workflow-service.mjs",
+    "workflow:build:debug": "node scripts/build-workflow-service.mjs --debug"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^2.0.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@codemirror/commands": "^6.11.1",
     "@codemirror/lang-markdown": "^6.5.2",
     "@codemirror/language": "^6.13.1",
@@ -67,6 +71,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.65.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "^2",
     "@testing-library/jest-dom": "^7.0.1",
@@ -76,6 +81,7 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^6.0.2",
+    "esbuild": "0.28.2",
     "eslint": "^10.13.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.7",

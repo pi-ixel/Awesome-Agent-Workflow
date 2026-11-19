@@ -10,7 +10,7 @@ import {
   type DecorationSet,
   type ViewUpdate,
 } from "@codemirror/view";
-import { openSearchPanel } from "@codemirror/search";
+import { markdownFindExtension, markdownFindView, type MarkdownFind } from "./markdownFind.ts";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import { pathKey } from "../../../shared/panelPaths.ts";
@@ -18,7 +18,7 @@ import { useStore } from "zustand";
 import type { DocumentEditor } from "../types.ts";
 export interface MarkdownEditorApi {
   reveal: (line: number) => void;
-  search: () => void;
+  find: MarkdownFind;
   selection: () => {
     from: number;
     to: number;
@@ -27,6 +27,26 @@ export interface MarkdownEditorApi {
   } | null;
   select: (from: number, to: number) => void;
   range: (from: number, to: number) => Range | null;
+}
+
+/** CodeMirror creates its own fold and search hints outside React. */
+function connectEditorHints(root: HTMLElement) {
+  const translate = () => {
+    for (const element of root.querySelectorAll<HTMLElement>("[title]")) {
+      const label = element.getAttribute("title");
+      if (label) element.dataset.hint = label;
+      element.removeAttribute("title");
+    }
+  };
+  translate();
+  const observer = new MutationObserver(translate);
+  observer.observe(root, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ["title"],
+  });
+  return () => observer.disconnect();
 }
 const lineNumbers = ViewPlugin.fromClass(
   class {
@@ -91,7 +111,7 @@ const editorTheme = EditorView.theme({
   ".cm-foldGutter": { width: "20px" },
   ".cm-foldGutter .cm-gutterElement": { textAlign: "center" },
   // Opacity keeps the fold target and its width stable while the pointer moves.
-  ".cm-foldGutter span[title]": {
+  ".cm-foldGutter span[data-hint]": {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
@@ -104,7 +124,7 @@ const editorTheme = EditorView.theme({
     color: "var(--color-ink-subtle)",
     opacity: "0",
   },
-  ".cm-foldGutter span[title]::before": {
+  ".cm-foldGutter span[data-hint]::before": {
     content: '""',
     width: "4px",
     height: "4px",
@@ -112,17 +132,17 @@ const editorTheme = EditorView.theme({
     borderBottom: "1.5px solid currentColor",
     transform: "translateY(-1px) rotate(45deg)",
   },
-  '.cm-gutters:hover .cm-foldGutter span[title], .cm-foldGutter span[title="展开此处"]':
+  '.cm-gutters:hover .cm-foldGutter span[data-hint], .cm-foldGutter span[data-hint="展开此处"]':
     { opacity: "1" },
-  '.cm-foldGutter span[title="展开此处"]::before': {
+  '.cm-foldGutter span[data-hint="展开此处"]::before': {
     transform: "translateX(-1px) rotate(-45deg)",
   },
-  ".cm-foldGutter span[title]:hover": {
+  ".cm-foldGutter span[data-hint]:hover": {
     color: "var(--color-ink)",
     backgroundColor: "var(--color-selected)",
   },
   "@media (hover: none)": {
-    ".cm-foldGutter span[title]": { opacity: "1" },
+    ".cm-foldGutter span[data-hint]": { opacity: "1" },
   },
   ".cm-cursor": { borderLeftColor: "var(--color-ink)" },
   ".cm-activeLine": {
@@ -139,6 +159,9 @@ const editorTheme = EditorView.theme({
     color: "var(--color-ink)",
     backgroundColor: "var(--color-surface)",
     borderColor: "var(--color-line)",
+  },
+  ".cm-panels:has(> .aaw-markdown-find-anchor:only-child)": {
+    display: "none",
   },
   ".cm-textfield": {
     color: "var(--color-ink)",
@@ -192,6 +215,7 @@ export function MarkdownSourceEditor({
         doc: editor.state.getState().documents[pathKey(path)]?.text ?? "",
         extensions: [
           basicSetup,
+          markdownFindExtension,
           EditorState.phrases.of({
             Find: "查找",
             Replace: "替换",
@@ -234,7 +258,9 @@ export function MarkdownSourceEditor({
       }),
     });
     viewRef.current = view;
+    const disconnectHints = connectEditorHints(view.dom);
     onReady({
+      find: view.plugin(markdownFindView)!,
       selection: () => {
         const selected = view.state.selection.main;
         return selected.empty
@@ -281,12 +307,9 @@ export function MarkdownSourceEditor({
         });
         view.focus();
       },
-      search: () => {
-        view.focus();
-        openSearchPanel(view);
-      },
     });
     return () => {
+      disconnectHints();
       onReady(null);
       viewRef.current = null;
       view.destroy();

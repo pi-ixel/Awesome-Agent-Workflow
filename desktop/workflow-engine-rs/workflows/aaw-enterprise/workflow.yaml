@@ -1,0 +1,44 @@
+# AAW 完整开发（预置工作流）。格式说明见 docs/workflow-format.md。
+format: aaw-workflow/1
+id: aaw-enterprise
+name: AAW 完整开发
+version: 1.0.0
+description: 多人协作的完整流程：项目基线 → SR 需求与设计 → 门禁 → 划分 AR → 逐 AR 澄清、模块设计、门禁 → 逐任务实现、评审、扫描 → 整体交付。
+root: main
+
+entries:
+  - id: sr
+    label: 从 SR 需求开始
+    description: 从原始需求出发，先做 SR 级的需求与设计，再按 AR 拆分推进。
+    start: sr_init
+    inputs:
+      requirement:
+        label: 原始需求
+        required: true
+        placeholder: 粘贴原始需求，或写明需求文档的位置
+  - id: ar
+    label: 从单个 AR 开始
+    description: 已有 SR 设计，直接针对一个 AR 澄清、设计并开发。
+    start: ar_init
+    inputs:
+      requirement:
+        label: AR 内容
+        required: true
+        placeholder: 写明 AR 编号、范围与相关设计文档的位置
+
+stages:
+  - {id: design, label: 需求与设计}
+  - {id: task, label: 任务}
+  - {id: review, label: 评审与处置}
+  - {id: delivery, label: 交付}
+
+# 初始变量：整改次数等计数器，供去向条件判断是否到达上限。
+vars:
+  srRepairs: 0
+  moduleRepairs: 0
+  designRepairs: 0
+  gateRepairs: 0
+  scanRepairs: 0
+  reviewRepairs: 0
+  forceRecheckA: false
+  forceRecheckB: false

@@ -1,0 +1,38 @@
+.update-button {
+  background-color: var(--color-ok);
+  background-image: linear-gradient(
+    110deg,
+    transparent 35%,
+    rgb(190 238 255 / 0.48) 50%,
+    transparent 65%
+  );
+  background-size: 300% 100%;
+  animation:
+    update-button-flow 3s linear infinite,
+    update-button-breathe 2s ease-in-out infinite;
+}
+
+@keyframes update-button-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(46 179 99 / 0);
+  }
+  50% {
+    box-shadow: 0 0 10px 3px rgb(46 179 99 / 0.45);
+  }
+}
+
+@keyframes update-button-flow {
+  from {
+    background-position: 0% 50%;
+  }
+  to {
+    background-position: 150% 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .update-button {
+    animation: none;
+  }
+}

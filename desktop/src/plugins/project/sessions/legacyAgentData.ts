@@ -1,5 +1,6 @@
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { parseSessionPinKey, sessionPinKey } from "./sessionPin.ts";
+import { managedProjectStorage, projectStorage } from "../lifecycle/persistence.ts";
 export interface LegacyAgentData {
   readonly key: string;
   readonly kind: "标题" | "草稿" | "输入历史" | "消息快照" | "归档" | "置顶";
@@ -13,9 +14,19 @@ const workspaceKey = prefix + "workspace/v1";
 const claimKey = (key: string) =>
   prefix + "legacy-owner/" + encodeURIComponent(key);
 
+function legacyKeys() {
+  return [...new Set([...Object.keys(localStorage), ...(managedProjectStorage()?.conversationKeys() ?? [])])];
+}
+export const legacyAgentStorage = {
+  get length() { return legacyKeys().length; },
+  key(index: number) { return legacyKeys()[index] ?? null; },
+  getItem: (key: string) => projectStorage.getItem(key),
+  setItem: (key: string, value: string) => projectStorage.setItem(key, value),
+};
+
 /** Legacy records contain no trustworthy agent owner. Never guess ownership. */
 export function listLegacyAgentData(
-  storage: Storage = localStorage,
+  storage: Pick<Storage, "length" | "key" | "getItem"> = legacyAgentStorage,
 ): LegacyAgentData[] {
   const result: LegacyAgentData[] = [];
   for (let index = 0; index < storage.length; index++) {
@@ -94,7 +105,7 @@ export function listLegacyAgentData(
 export function migrateLegacyAgentData(
   record: LegacyAgentData,
   agentKey: string,
-  storage: Storage = localStorage,
+  storage: Pick<Storage, "getItem" | "setItem"> = legacyAgentStorage,
   targetSessionId?: string,
 ): void {
   if (!agentKey) throw new Error("请先选择 Agent");

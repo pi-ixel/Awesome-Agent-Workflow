@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { readWorkbenchUi, useWorkbenchLayout } from "./bindings/layoutView.ts";
 /**
  * 侧栏开关钮（共享组件，两处挂载）：
@@ -12,33 +13,27 @@ import { readWorkbenchUi, useWorkbenchLayout } from "./bindings/layoutView.ts";
  * 展开时显 PanelLeftClose。开合动作走 workbenchUiStore 的既有 toggle
  * （持久化键不变），组件不持有布局状态。
  */
-import { PanelLeftCloseIcon, PanelLeftOpenIcon } from "../../../shared/ui/icons.tsx";
-import logo from "../../../shared/assets/aaw-logo.png";
+import {
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
+} from "../../../shared/ui/icons.tsx";
 
 export function SidebarToggle({ collapsed }: { readonly collapsed: boolean }) {
   const workbenchLayout = useWorkbenchLayout();
   const Icon = collapsed ? PanelLeftOpenIcon : PanelLeftCloseIcon;
   return (
-    <>
-      <img
-        src={logo}
-        alt=""
-        aria-hidden="true"
-        draggable={false}
-        className="size-6 shrink-0 object-contain"
-      />
-      <button
-        type="button"
-        aria-label="展开/收起侧边栏"
-        title="展开/收起侧边栏"
-        onClick={() => {
-          readWorkbenchUi(workbenchLayout).toggleSidebarCollapsed();
-        }}
-        className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink"
-      >
-        <Icon className="h-4 w-4" />
-      </button>
-    </>
+    <IconButton
+      type="button"
+      placement="top"
+      aria-label="展开/收起侧边栏"
+      data-hint="展开/收起侧边栏"
+      onClick={() => {
+        readWorkbenchUi(workbenchLayout).toggleSidebarCollapsed();
+      }}
+      className={`flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink ${collapsed ? "" : "order-2 ml-1"}`}
+    >
+      <Icon className="ui-icon-16" />
+    </IconButton>
   );
 }
 

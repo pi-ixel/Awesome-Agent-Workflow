@@ -1,4 +1,7 @@
-import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
+import type { AgentSwitchGuard, AgentSwitchWork } from "../service.ts";
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { DangerButton } from "../../../shared/ui/controls.tsx";
+import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import { PencilIcon } from "../../../shared/ui/icons.tsx";
 import { settingsInputClass } from "../../../shared/ui/SettingsPageParts";
 /**
@@ -30,6 +33,7 @@ import {
   focusVisibleRing,
   RadioDot,
   Spinner,
+  ToggleSwitch,
 } from "../../../shared/ui/controls";
 
 /** 路径 / 命令类输入（与设置页共用视觉）。 */
@@ -77,11 +81,17 @@ interface AgentRow {
   readonly removable: boolean;
 }
 
+
 /** 会话 Agent 列表卡：切换 + 自检 + 自定义管理 + 本机扫描。 */
 interface AgentsSettingsProps {
   readonly agents: AgentsService;
   readonly workspace: ProjectService["projects"]["workspace"];
-  readonly switchAgent: (agentId: string) => Promise<void>;
+  readonly switchAgent: (
+    agentId: string,
+    onRetrySuccess?: () => void,
+  ) => Promise<void>;
+  /** 切换前要先停下进行中工作的插件给的闸（未装配时没有）。 */
+  readonly switchGuard?: AgentSwitchGuard;
 }
 
 interface AgentSettingsViewProps extends Omit<
@@ -95,6 +105,7 @@ interface AgentSettingsViewProps extends Omit<
 function AgentListCard({
   agents: service,
   switchAgent,
+  switchGuard,
   workspacePath,
   toolPaths,
 }: AgentSettingsViewProps) {
@@ -107,10 +118,14 @@ function AgentListCard({
   const [removeAfterSwitch, setRemoveAfterSwitch] = useState<string | null>(
     null,
   );
+  // 切换闸：弹窗打开时才查（引擎真相，含其他项目）；查询失败按无运行处理，
+  // 不因探查故障堵死切换。
+  const [activeWork, setActiveWork] = useState<readonly AgentSwitchWork[] | null>(null);
   const [switchError, setSwitchError] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState("");
   const [commandDraft, setCommandDraft] = useState("");
   const [argsDraft, setArgsDraft] = useState("");
+  const [supportsCustomAnswers, setSupportsCustomAnswers] = useState(false);
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
@@ -189,8 +204,8 @@ function AgentListCard({
     const commandText = program ? `"${program}" ${args}` : "";
     const error =
       editingId === null
-        ? service.addCustomAgent(nameDraft, commandText)
-        : service.updateCustomAgent(editingId, nameDraft, commandText);
+        ? service.addCustomAgent(nameDraft, commandText, supportsCustomAnswers)
+        : service.updateCustomAgent(editingId, nameDraft, commandText, supportsCustomAnswers);
     setAddError(error);
     if (error === null) {
       if (editingId !== null) {
@@ -203,6 +218,7 @@ function AgentListCard({
       setNameDraft("");
       setCommandDraft("");
       setArgsDraft("");
+      setSupportsCustomAnswers(false);
       setEditingId(null);
     }
   };
@@ -259,65 +275,63 @@ function AgentListCard({
         </p>
       ) : null}
       {switchTarget ? (
-        <ModalShell
+        <ConfirmationDialog
           label="切换 Agent 确认"
-          onDismiss={() => {
+          title={`切换到 ${switchTarget.name}？`}
+          confirmLabel="确认切换"
+          onCancel={() => {
             setSwitchTarget(null);
+            setRemoveAfterSwitch(null);
+          }}
+          onConfirm={() => {
+            const request = ++switchRequest.current;
+            const removeId = removeAfterSwitch;
+            const target = switchTarget.key;
+            setSwitchBusy(true);
+            setSwitchError(null);
+            setSwitchTarget(null);
+            setRemoveAfterSwitch(null);
+            setActiveWork(null);
+            void (async () => {
+              // 确认制闸（B 组用例）：确认时**重查**进行中的工作再停——
+              // 弹窗展示的清单只是提示，弹窗开着期间新起的工作也要停掉。
+              if (switchGuard) {
+                const work = await switchGuard.activeWork().catch(() => []);
+                if (work.length > 0) await switchGuard.stopAll(work);
+              }
+              // 传给 switchAgent 的回调只服务失败后的「重试」；成功路径的
+              // 删除在下面的 then 里做。
+              await (removeId
+                ? switchAgent(target, () => service.removeCustomAgent(removeId))
+                : switchAgent(target));
+            })()
+              .then(() => {
+                if (request !== switchRequest.current) return;
+                if (removeId) service.removeCustomAgent(removeId);
+              })
+              .catch((error: unknown) => {
+                if (request === switchRequest.current)
+                  setSwitchError(
+                    error instanceof Error ? error.message : String(error),
+                  );
+              })
+              .finally(() => {
+                if (request === switchRequest.current) setSwitchBusy(false);
+              });
           }}
         >
-          <div className="flex flex-col gap-4 p-5">
-            <p>切换到 {switchTarget.name}？</p>
-            <p className="text-sm text-ink-soft">
-              当前任务将停止，消息队列将暂停。已保存的历史会话会保留，未完成消息不会自动重发。
+          <p>
+            当前任务将停止，消息队列将暂停。已保存的历史会话会保留，未完成消息不会自动重发。
+          </p>
+          {switchGuard && activeWork !== null && activeWork.length > 0 ? (
+            <p>{switchGuard.describe(activeWork)}</p>
+          ) : null}
+          {switchError ? (
+            <p role="alert" className="text-danger-ink">
+              {switchError}
             </p>
-            {switchError ? (
-              <p role="alert" className="text-sm text-danger-ink">
-                {switchError}
-              </p>
-            ) : null}
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                className={btnSecondary}
-                onClick={() => setSwitchTarget(null)}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className={btnSecondary}
-                onClick={() => {
-                  const request = ++switchRequest.current;
-                  const removeId = removeAfterSwitch;
-                  const target = switchTarget.key;
-                  setSwitchBusy(true);
-                  setSwitchError(null);
-                  setSwitchTarget(null);
-                  setRemoveAfterSwitch(null);
-                  void switchAgent(target)
-                    .then(() => {
-                      if (request !== switchRequest.current) return;
-                      if (removeId) service.removeCustomAgent(removeId);
-                    })
-                    .catch((error: unknown) => {
-                      if (request === switchRequest.current)
-                        setSwitchError(
-                          error instanceof Error
-                            ? error.message
-                            : String(error),
-                        );
-                    })
-                    .finally(() => {
-                      if (request === switchRequest.current)
-                        setSwitchBusy(false);
-                    });
-                }}
-              >
-                确认切换
-              </button>
-            </div>
-          </div>
-        </ModalShell>
+          ) : null}
+        </ConfirmationDialog>
       ) : null}
       {rows.map((row) => {
         const configuration = service.executableConfiguration(row.key);
@@ -337,6 +351,12 @@ function AgentListCard({
                 setRemoveAfterSwitch(null);
                 setSwitchError(null);
                 setSwitchTarget(row);
+                setActiveWork(null);
+                if (switchGuard)
+                  void switchGuard
+                    .activeWork()
+                    .then(setActiveWork)
+                    .catch(() => setActiveWork([]));
               }}
               className={`flex min-h-9 min-w-0 flex-1 basis-44 flex-wrap items-center gap-2.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-raised/60 ${focusVisibleRing}`}
             >
@@ -350,7 +370,7 @@ function AgentListCard({
             <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
               {isProbingThis ? (
                 <span className="flex shrink-0 items-center gap-1.5 text-xs text-ink-faint">
-                  <Spinner className="h-3 w-3" />
+                  <Spinner className="ui-icon-12" />
                   {step ?? "进行中"}
                 </span>
               ) : probeResult !== undefined ? (
@@ -396,7 +416,7 @@ function AgentListCard({
                   testingId !== null ||
                   workspacePath === null
                 }
-                title="两轮真实对话（轮 1 轻量回复；轮 2 列目录 + 跑命令，触发思考/工具/计划/审批）——消耗两次模型调用"
+                data-hint="两轮真实对话（轮 1 轻量回复；轮 2 列目录 + 跑命令，触发思考/工具/计划/审批）——消耗两次模型调用"
                 onClick={() => {
                   if (workspacePath !== null)
                     probeAgent(
@@ -412,27 +432,27 @@ function AgentListCard({
                 深度探查
               </button>
               {!row.removable && (
-                <button
+                <IconButton iconSize="dialog"
                   type="button"
                   aria-label={`编辑 ${row.name}`}
-                  title="编辑"
+                  data-hint="编辑"
                   aria-expanded={expandedAgent === row.key}
-                  className={`${btnSecondary} flex size-9 shrink-0 items-center justify-center`}
+                  className={`${btnSecondary} flex shrink-0 items-center justify-center`}
                   onClick={() =>
                     setExpandedAgent((current) =>
                       current === row.key ? null : row.key,
                     )
                   }
                 >
-                  <PencilIcon className="size-4" />
-                </button>
+                  <PencilIcon className="ui-icon-16" />
+                </IconButton>
               )}
               {row.removable ? (
                 <>
-                  <button
+                  <IconButton iconSize="dialog"
                     type="button"
                     aria-label={`编辑 ${row.name}`}
-                    title="编辑"
+                    data-hint="编辑"
                     disabled={testingId === row.key}
                     onClick={() => {
                       const entry = settings.agents.find((item) => item.id === row.key);
@@ -440,6 +460,7 @@ function AgentListCard({
                       setEditingId(entry.id);
                       setNameDraft(entry.name);
                       setCommandDraft(entry.command[0] ?? "");
+                      setSupportsCustomAnswers(entry.supportsCustomAnswers === true);
                       setArgsDraft(
                         entry.command
                           .slice(1)
@@ -448,11 +469,11 @@ function AgentListCard({
                       );
                       setAddError(null);
                     }}
-                    className={`${btnSecondary} flex size-9 shrink-0 items-center justify-center`}
+                    className={`${btnSecondary} flex shrink-0 items-center justify-center`}
                   >
-                    <PencilIcon className="size-4" />
-                  </button>
-                  <button
+                    <PencilIcon className="ui-icon-16" />
+                  </IconButton>
+                  <DangerButton
                     type="button"
                     disabled={testingId === row.key}
                     onClick={() => {
@@ -466,10 +487,10 @@ function AgentListCard({
                         );
                       } else service.removeCustomAgent(row.key);
                     }}
-                    className="shrink-0 rounded-md px-2 py-1.5 text-sm text-danger-ink transition-colors hover:bg-danger-bg/60"
+                    className="shrink-0 px-2 py-1.5 text-sm"
                   >
                     删除
-                  </button>
+                  </DangerButton>
                 </>
               ) : null}
             </div>
@@ -518,7 +539,7 @@ function AgentListCard({
                   <div className="flex min-w-0 items-center gap-2 @min-[560px]/settings:col-span-3">
                     <p
                       role="status"
-                      title={configuration.detectedPath}
+                      data-hint={configuration.detectedPath}
                       className="min-w-0 flex-1 truncate text-ui-caption text-ink-mute"
                     >
                       检测到：{configuration.detectedPath}
@@ -632,7 +653,7 @@ function AgentListCard({
           onKeyDown={(event) => {
             if (event.key === "Enter") submitAdd();
           }}
-          className={`${textInputClass} h-8 flex-1`}
+          className={`${textInputClass} min-h-8 flex-1`}
         />
         <button
           type="button"
@@ -649,6 +670,7 @@ function AgentListCard({
               setNameDraft("");
               setCommandDraft("");
               setArgsDraft("");
+              setSupportsCustomAnswers(false);
               setAddError(null);
             }}
             className={`${btnSecondary} min-h-8 justify-self-start px-2.5 py-1 text-sm`}
@@ -673,9 +695,23 @@ function AgentListCard({
             placeholder="启动参数（如 acp）"
             value={argsDraft}
             onChange={(event) => setArgsDraft(event.currentTarget.value)}
-            className={`${textInputClass} h-8 flex-1`}
+            className={`${textInputClass} min-h-8 flex-1`}
           />
         </label>
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm text-ink">支持自定义回答</p>
+            <p className="text-ui-caption text-ink-mute">
+              适用于能接收自由文本答案的 Agent。
+            </p>
+          </div>
+          <ToggleSwitch
+            appearance="neutral"
+            label="支持自定义回答"
+            checked={supportsCustomAnswers}
+            onChange={setSupportsCustomAnswers}
+          />
+        </div>
       </details>
       {addError !== null ? (
         <p role="alert" className="px-0 pb-3 text-xs text-danger-ink">
@@ -779,7 +815,7 @@ function ProtocolReportCard({
                 );
             }}
             className={`${btnSecondary} ml-auto shrink-0 min-h-8 px-2.5 py-1 text-sm`}
-            title="对刚自检的 agent 发两轮真实对话（轮 1 轻量回复；轮 2 列目录 + 跑命令，触发思考/工具/计划/审批）——消耗两次模型调用"
+            data-hint="对刚自检的 agent 发两轮真实对话（轮 1 轻量回复；轮 2 列目录 + 跑命令，触发思考/工具/计划/审批）——消耗两次模型调用"
           >
             {phase === "probing" && probingAgentId === result.agentId
               ? (step ?? "深度探查中") + "…"

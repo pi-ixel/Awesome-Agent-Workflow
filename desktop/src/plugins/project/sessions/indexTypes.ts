@@ -20,6 +20,8 @@ export interface SessionCatalogState {
 
 export interface SessionActivity {
   readonly agentKey?: string;
+  /** 插件或定时任务打开的会话：提醒由它们负责，避免把一轮当作整件事完成。 */
+  readonly externallyManaged?: boolean;
   readonly project: string;
   readonly sessionId: string;
   readonly status:

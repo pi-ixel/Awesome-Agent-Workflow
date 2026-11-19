@@ -2,14 +2,26 @@
 mod acp_process;
 pub mod browser;
 mod commands;
+mod skill_library;
+mod codeagent_history;
+mod codeagent_delete;
+mod codeagent_credit;
 mod desktop_update;
 mod diagnostics;
 pub mod installer_ui;
+pub mod notification_links;
 mod panel_files;
 mod panel_git;
 mod panel_git_runtime;
+mod resource_monitor;
+mod session_snapshots;
 mod sso_login;
+mod storage_location;
+mod storage_preferences;
 mod terminal_pty;
+mod tray;
+mod usage_statistics;
+mod workflow_service;
 
 use tauri::{Emitter, Manager};
 
@@ -19,11 +31,23 @@ pub fn run() {
     tauri::Builder::default()
         .manage(panel_files::PanelWatchers::default())
         .manage(browser::host::BrowserHost::default())
+        .manage(codeagent_credit::CreditQuota::default())
+        .manage(workflow_service::WorkflowHost::default())
         .manage(desktop_update::Updates::new(&context.package_info().name))
+        .manage(notification_links::NotificationRoutes::default())
+        .manage(tray::TrayPreference::default())
+        .manage(tray::SchedulerLease::default())
         .setup(|app| {
+            storage_location::initialize(app.handle()).map_err(std::io::Error::other)?;
             if let Err(error) = diagnostics::start(app.handle()) {
                 eprintln!("日志服务启动失败: {error}");
             }
+            notification_links::start(app.handle())?;
+            if let Err(error) = tray::install(app.handle()) {
+                eprintln!("系统托盘初始化失败: {error}");
+            }
+            tray::start_task_clock(app.handle().clone());
+            resource_monitor::start();
             desktop_update::start(app.handle().clone());
             Ok(())
         })
@@ -96,6 +120,18 @@ pub fn run() {
             browser::mcp::browser_mcp_bind,
             browser::mcp::browser_mcp_capabilities,
             browser::mcp::browser_mcp_revoke,
+            codeagent_history::agent_history_evidence,
+            codeagent_delete::agent_delete_session,
+            codeagent_credit::codeagent_credit_quota,
+            codeagent_credit::codeagent_token_quota,
+            usage_statistics::usage_initialize,
+            usage_statistics::usage_record,
+            usage_statistics::usage_context_read,
+            usage_statistics::usage_context_write,
+            usage_statistics::usage_context_delete,
+            usage_statistics::usage_model_names,
+            usage_statistics::usage_query,
+            usage_statistics::usage_storage_bytes,
             diagnostics::diagnostics_open,
             diagnostics::diagnostics_append,
             diagnostics::diagnostics_acp_append,
@@ -103,8 +139,27 @@ pub fn run() {
             diagnostics::diagnostics_flush,
             diagnostics::diagnostics_query,
             diagnostics::diagnostics_status,
+            diagnostics::diagnostics_storage_list,
+            diagnostics::diagnostics_storage_remove,
             diagnostics::diagnostics_snapshot,
+            diagnostics::diagnostics_probe_request,
+            diagnostics::diagnostics_probe_take,
+            resource_monitor::diagnostics_resources,
             diagnostics::diagnostics_export,
+            storage_preferences::storage_thresholds_read,
+            storage_location::storage_location_read,
+            storage_location::storage_location_schedule,
+            storage_preferences::storage_thresholds_write,
+            storage_preferences::storage_update_usage,
+            storage_preferences::storage_titles_load,
+            storage_preferences::storage_title_write,
+            storage_preferences::storage_configuration_load,
+            storage_preferences::storage_configuration_write,
+            session_snapshots::session_data_read,
+            session_snapshots::session_data_write,
+            session_snapshots::session_data_delete,
+            session_snapshots::session_data_list,
+            session_snapshots::session_data_remove,
             desktop_update::update_status,
             desktop_update::update_check,
             desktop_update::update_download,
@@ -113,7 +168,10 @@ pub fn run() {
             desktop_update::update_cancel,
             desktop_update::update_install,
             desktop_update::update_open_folder,
+            desktop_update::update_cache_list,
+            desktop_update::update_cache_remove,
             panel_files::panel_stat,
+            panel_files::panel_open_file_manager,
             panel_files::panel_directory,
             panel_files::panel_preview,
             panel_files::panel_save_markdown,
@@ -125,6 +183,9 @@ pub fn run() {
             commands::path_exists,
             commands::list_dir_names,
             commands::copy_dir,
+            skill_library::skill_library_list,
+            skill_library::skill_library_candidates,
+            skill_library::skill_library_change,
             commands::read_text_file,
             commands::write_text_file,
             commands::user_data_dir,
@@ -132,6 +193,12 @@ pub fn run() {
             commands::list_workspace_files,
             // 关闭守卫：前端裁决后经它真正销毁窗口（跳过 CloseRequested）
             commands::force_close,
+            tray::set_close_to_tray,
+            tray::claim_scheduled_tasks,
+            // 系统通知：Windows 上点击打开 aaw:// 链接，可按标记替换和删除（ADR 034）
+            notification_links::notification_show,
+            notification_links::notification_remove,
+            notification_links::notification_routes_take,
             // ACP agent 长连接子进程（acp_process.rs，事件经 app.emit 广播）
             acp_process::acp_spawn,
             acp_process::acp_stdin_write,
@@ -149,7 +216,14 @@ pub fn run() {
             terminal_pty::pty_write,
             terminal_pty::pty_resize,
             terminal_pty::pty_kill,
-            terminal_pty::pty_release
+            terminal_pty::pty_release,
+            // 工作流引擎服务（workflow_service.rs：跨 WebView 重载存活的
+            // 独立 sidecar；NDJSON 协议 + 宿主回调帧应答，ADR 023/024）
+            workflow_service::workflow_service_start,
+            workflow_service::workflow_service_running,
+            workflow_service::workflow_service_write,
+            workflow_service::workflow_service_host_frame_response,
+            workflow_service::workflow_service_shutdown
         ])
         .on_window_event(|window, event| {
             // 关闭守卫的 Rust 半边：CloseRequested 一律拦下转交前端——
@@ -164,27 +238,37 @@ pub fn run() {
                     {
                         let _ = diagnostics.destroy();
                     }
-                    if let Some(sso) = window
-                        .app_handle()
-                        .get_webview_window(sso_login::SSO_LOGIN_WINDOW_LABEL)
-                    {
-                        let _ = sso.destroy();
+                    for (label, sso) in window.app_handle().webview_windows() {
+                        if label.starts_with(sso_login::SSO_LOGIN_WINDOW_PREFIX) {
+                            let _ = sso.destroy();
+                        }
                     }
                 }
                 browser::host::retire_page(window.app_handle(), window.label());
+                if let Some(attempt_id) = window
+                    .label()
+                    .strip_prefix(sso_login::SSO_LOGIN_WINDOW_PREFIX)
+                {
+                    let _ = window.app_handle().emit_to("main", "aaw://sso-closed", attempt_id);
+                }
                 acp_process::retire_page(window.label().to_owned());
                 terminal_pty::retire_page(window.label().to_owned());
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // 诊断窗与 SSO 登录窗直接放行：无 agent 资源需要收口，
-                // 用户关登录窗即「放弃认证」，由前端轮询发现并静默取消
+                // 用户关登录窗即「放弃认证」，窗口销毁事件会通知前端。
                 if window.label() == "diagnostics"
-                    || window.label() == sso_login::SSO_LOGIN_WINDOW_LABEL
+                    || window.label().starts_with(sso_login::SSO_LOGIN_WINDOW_PREFIX)
                 {
                     return;
                 }
                 if window.state::<desktop_update::Updates>().installing() {
                     api.prevent_close();
+                    return;
+                }
+                if window.label() == "main" && window.state::<tray::TrayPreference>().hide_on_close() {
+                    api.prevent_close();
+                    let _ = window.hide();
                     return;
                 }
                 let _ = window.app_handle().emit("aaw://close-requested", ());

@@ -1,5 +1,10 @@
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { XIcon } from "../../../../shared/ui/icons.tsx";
+import {
+  XIcon,
+  ChevronRightIcon,
+  ArrowUpIcon,
+} from "../../../../shared/ui/icons.tsx";
 
 /** Shared presentation only: protocol adapters retain validation and response semantics. */
 export function QuestionPanel({
@@ -11,6 +16,7 @@ export function QuestionPanel({
   count,
   valid,
   stale,
+  submitting,
   canSkip,
   interacted,
   onInteract,
@@ -29,6 +35,7 @@ export function QuestionPanel({
   count: number;
   valid: boolean;
   stale?: boolean;
+  submitting?: boolean;
   canSkip: boolean;
   interacted: boolean;
   onInteract: () => void;
@@ -44,7 +51,7 @@ export function QuestionPanel({
   useEffect(() => {
     latestAuto.current = onAuto;
   }, [onAuto]);
-  const auto = !!onAuto && !interacted && !stale;
+  const auto = !!onAuto && !interacted && !stale && !submitting;
   useEffect(() => {
     if (!auto) return;
     const until = Date.now() + 60_000;
@@ -66,10 +73,25 @@ export function QuestionPanel({
       onPointerDownCapture={onInteract}
       onFocusCapture={onInteract}
       onKeyDown={(event) => {
-        if (event.key === "Escape") {
+        if (event.key === "Escape" && !submitting) {
           event.preventDefault();
           event.stopPropagation();
           onClose();
+        } else if (
+          event.key === "Enter" &&
+          !event.nativeEvent.isComposing &&
+          event.nativeEvent.keyCode !== 229 &&
+          !event.shiftKey &&
+          !event.ctrlKey &&
+          !event.altKey &&
+          !event.metaKey &&
+          ((event.target instanceof HTMLInputElement &&
+            ["text", "number"].includes(event.target.type)) ||
+            event.target instanceof HTMLTextAreaElement)
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (valid && !stale && !submitting && !event.repeat) onSend();
         }
       }}
     >
@@ -82,19 +104,25 @@ export function QuestionPanel({
         {auto && (
           <span data-auto-answer-countdown="">{seconds}s 后自动应答</span>
         )}
-        <button
+        <IconButton iconSize="compact"
           type="button"
+          disabled={submitting}
           aria-label={stale ? "丢弃草稿" : "关闭整组提问"}
-          className="rounded p-1 hover:bg-hover"
+          className="rounded hover:bg-hover"
           onClick={onClose}
         >
-          <XIcon className="size-4" />
-        </button>
+          <XIcon className="ui-icon-16" />
+        </IconButton>
       </header>
       <div className="max-h-72 overflow-y-auto px-4 py-2">
         {stale && (
           <p role="status" className="mb-2 text-ui-caption text-warn-ink">
             请求已失效，答案草稿已保留，等待重新连接后绑定。
+          </p>
+        )}
+        {submitting && (
+          <p role="status" className="mb-2 text-ui-caption text-ink-mute">
+            正在发送回答…
           </p>
         )}
         <h3 className="mb-2 whitespace-pre-wrap font-medium">{title}</h3>
@@ -103,38 +131,45 @@ export function QuestionPanel({
             {description}
           </p>
         )}
-        <fieldset disabled={stale} className="min-w-0 space-y-2">
+        <fieldset disabled={stale || submitting} className="min-w-0 space-y-2">
           {children}
         </fieldset>
       </div>
       <footer className="flex items-center gap-2 px-4 pb-3">
         {page > 0 && (
-          <button
+          <IconButton
             type="button"
-            className="rounded-full px-2 py-1 text-ui-caption text-ink-mute hover:bg-hover"
+            className="rounded-full bg-ink text-ui-caption font-medium text-(color:--color-base) disabled:opacity-40 hover:bg-ink/85"
+            disabled={submitting}
+            aria-label="上一题"
             onClick={onBack}
           >
-            上一题
-          </button>
+            <ChevronRightIcon className="ui-icon-16 rotate-180" />
+          </IconButton>
         )}
         <span className="flex-1" />
         <button
           type="button"
-          disabled={!canSkip || stale}
-          title={!canSkip ? "此题为必填，不能跳过" : "跳过当前题"}
-          className="rounded-full border border-line px-3 py-1 text-ui-caption disabled:opacity-40 hover:bg-hover"
+          disabled={!canSkip || stale || submitting}
+          data-hint={!canSkip ? "此题为必填，不能跳过" : "跳过当前题"}
+          className="rounded-full border border-control-line px-3 py-1 text-ui-caption disabled:opacity-40 hover:bg-hover"
           onClick={onSkip}
         >
           跳过
         </button>
-        <button
+        <IconButton
           type="button"
-          disabled={!valid || stale}
-          className="rounded-full bg-ink px-3 py-1 text-ui-caption font-medium text-base disabled:opacity-40 hover:bg-ink/85"
+          disabled={!valid || stale || submitting}
+          aria-label={page < count - 1 ? "下一题" : "发送"}
+          className="rounded-full bg-ink text-ui-caption font-medium text-(color:--color-base) disabled:opacity-40 hover:bg-ink/85"
           onClick={onSend}
         >
-          发送
-        </button>
+          {page < count - 1 ? (
+            <ChevronRightIcon className="ui-icon-16" />
+          ) : (
+            <ArrowUpIcon className="ui-icon-16" />
+          )}
+        </IconButton>
       </footer>
     </section>
   );
@@ -164,7 +199,7 @@ export function QuestionChoices({
         >
           <span
             aria-hidden="true"
-            className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded border border-line bg-raised text-ui-caption text-ink-mute"
+            className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded border border-control-line bg-raised text-ui-caption text-ink-mute"
           >
             {selected.includes(option.value) ? "✓" : index + 1}
           </span>

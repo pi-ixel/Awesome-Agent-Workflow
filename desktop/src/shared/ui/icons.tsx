@@ -4,13 +4,14 @@
  * - 一套几何：viewBox 24、stroke 1.8、round cap/join——粗细一致是「图标
  *   体系」的前提，此前散落的 ▾ ▸ ✕ ★ ☆ ＋ 等 Unicode 字符在不同字体下
  *   粗细重心各异，正是界面显廉价的头号来源；
- * - 尺寸经 className 控制（h-3 / h-3.5 / h-4），与文字基线对齐由使用方
+ * - 尺寸经共享字号和 ui-icon-N 控制（N 为默认字号时的像素值），与文字基线对齐由使用方
  *   的 flex items-center 承担；
  * - 纯装饰图标一律 aria-hidden（语义在按钮的 aria-label / title 上）。
  */
-import type { SVGProps } from "react";
+import { UiIcon, type IconProps } from "./UiIcon.tsx";
+import { useId } from "react";
 
-export type IconProps = Omit<SVGProps<SVGSVGElement>, "aria-hidden">;
+export type { IconProps } from "./UiIcon.tsx";
 
 /** ZCode's SubAgent summary uses lucide's Bot geometry. */
 export function BotIcon(props: IconProps) {
@@ -25,18 +26,17 @@ export function BotIcon(props: IconProps) {
 
 function Svg({ children, ...rest }: IconProps) {
   return (
-    <svg
+    <UiIcon
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
       strokeWidth={1.8}
       strokeLinecap="round"
       strokeLinejoin="round"
-      aria-hidden={true}
       {...rest}
     >
       {children}
-    </svg>
+    </UiIcon>
   );
 }
 
@@ -246,6 +246,18 @@ export function Maximize2Icon(props: IconProps) {
   );
 }
 
+/** 缩放到整张图放得下（Lucide scan：四角内折，与 maximize-2 的「出去」相反）。 */
+export function FitIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+      <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+      <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+      <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+    </Svg>
+  );
+}
+
 /** 双下折 chevron（标签总览切换器，ZCode SidePaneTabOverview.tsx:152）。 */
 export function ChevronsDownIcon(props: IconProps) {
   return (
@@ -342,20 +354,19 @@ export function ShieldCheckIcon(props: IconProps) {
 /** 文件夹图标：与项目树一致的双态 Lucide 线性图形（收起合口 / 展开开口）。 */
 export function FolderGlyph({
   isExpanded,
-  className = "h-3.5 w-3.5 shrink-0 text-ink-mute",
+  className = "ui-icon-14 shrink-0 text-ink-mute",
 }: {
   readonly isExpanded: boolean;
   className?: string;
 }) {
   return (
-    <svg
+    <UiIcon
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
       strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
-      aria-hidden={true}
       className={className}
     >
       {isExpanded ? (
@@ -363,7 +374,7 @@ export function FolderGlyph({
       ) : (
         <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
       )}
-    </svg>
+    </UiIcon>
   );
 }
 
@@ -490,6 +501,38 @@ export function GlobeIcon(props: IconProps) {
 }
 
 /** 通用工具（Lucide wrench）。ZCode fallback 工具行同款。 */
+export function PuzzleIcon(props: IconProps) {
+  return (
+    <Svg strokeWidth={1.65} {...props}>
+      <path d="M4 5h5a3 3 0 1 1 6 0h5v5a3 3 0 1 0 0 6v4h-6a3 3 0 1 0-6 0H4z" />
+    </Svg>
+  );
+}
+
+export function TrashIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" />
+    </Svg>
+  );
+}
+
+export function SkillIcon(props: IconProps) {
+  const gradientId = useId();
+  return (
+    <Svg stroke={`url(#${gradientId})`} {...props}>
+      <defs>
+        <linearGradient id={gradientId} x1="0%" y1="100%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="var(--color-skill-reference-rose)" />
+          <stop offset="48%" stopColor="var(--color-skill-reference-pink)" />
+          <stop offset="100%" stopColor="var(--color-skill-reference-lilac)" />
+        </linearGradient>
+      </defs>
+      <path d="m5 7 7-4 7 4v10l-7 4-7-4zM5 7l7 4 7-4M5 12l7 4 7-4M12 11v10" />
+    </Svg>
+  );
+}
+
 export function WrenchIcon(props: IconProps) {
   return (
     <Svg {...props}>
@@ -641,6 +684,14 @@ export function ActivityIcon(props: IconProps) {
   return (
     <Svg strokeWidth={2} {...props}>
       <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" />
+    </Svg>
+  );
+}
+
+export function BarChart3Icon(props: IconProps) {
+  return (
+    <Svg strokeWidth={2} {...props}>
+      <path d="M3 3v16a2 2 0 0 0 2 2h16M8 17v-3m5 3V9m5 8V5" />
     </Svg>
   );
 }

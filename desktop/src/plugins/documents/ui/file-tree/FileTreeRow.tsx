@@ -1,9 +1,10 @@
+import { treeChevronClass, treeRowEnterClass } from "../../../../shared/ui/TreeMotion.tsx";
 /**
  * 文件树单行渲染（对齐 ZCode WorkspaceFileTreeRowView.tsx:210-333；token
  * 换算：foreground→ink、subtlest→ink-subtlest，text-ui-base 两边同名同源
  * --ui-font-size，不换算）：
  *
- * - 行高 28px（h-7 py-1）、text-ui-base、rounded-lg、默认透明 border（选中 =
+ * - 行高 28px（h-7）、text-ui-base、rounded-lg、默认透明 border（选中 =
  *   灰 pill 底；悬停 = surface-hover；省略 border 会让行高/对齐差 1px）；
  * - 左缩进 = depth*12px + 8px（CSS 变量驱动），depth>0 画层级引导线；
  * - 目录无文件夹图标，只有 size-3 ChevronRight（展开 rotate-90）；
@@ -46,6 +47,7 @@ export interface FileTreeRowHandlers {
 
 export function FileTreeRow({
   layout = "absolute",
+  animateEnter = false,
   row,
   style,
   selected,
@@ -56,6 +58,7 @@ export function FileTreeRow({
   handlers,
 }: {
   readonly layout?: "absolute" | "static";
+  readonly animateEnter?: boolean;
   readonly row: FileTreeRow;
   /** 绝对布局传虚拟定位（height+translateY）；吸顶等静态布局传 {}。 */
   readonly style?: CSSProperties;
@@ -109,13 +112,14 @@ export function FileTreeRow({
       aria-expanded={isDirectory ? row.expanded : undefined}
       tabIndex={0}
       draggable={!isDeleted}
-      title={relativePath}
+      data-hint={relativePath}
       className={[
         // ZCode 原规格（WorkspaceFileTreeRowView :225-232）：行盒 28px
-        //（h-7 py-1）、字号 text-ui-base（14px，随 --ui-font-size 可调档缩放）、
+        //（h-7）、字号 text-ui-base（14px，随 --ui-font-size 可调档缩放）、
         // 图标 size-4 / chevron size-3；选中态 = 灰色圆角 pill 底（border 恒
         // 透明，无描边）。
-        "relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded-lg border pr-2 py-1 text-left text-ui-base text-ink outline-none transition-[background-color,border-color,box-shadow]",
+        animateEnter ? treeRowEnterClass : "",
+        "relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded-lg border pr-2 text-left text-ui-base leading-tight text-ink outline-none transition-[background-color,border-color,box-shadow]",
         isDeleted ? "cursor-default" : "cursor-pointer",
         "pl-[calc(var(--workspace-file-tree-depth)*0.75rem+0.5rem)]",
         selected
@@ -169,10 +173,10 @@ export function FileTreeRow({
         />
       ) : null}
       {isDirectory ? (
-        <span className="flex size-4 shrink-0 items-center justify-center text-ink-subtle">
+        <span className="flex ui-icon-16 shrink-0 items-center justify-center text-ink-subtle">
           <ChevronRightIcon
             aria-hidden="true"
-            className={`size-3 text-ink-subtlest transition-transform ${
+            className={`ui-icon-12 text-ink-subtlest ${treeChevronClass} ${
               row.expanded ? "rotate-90" : ""
             }`}
           />
@@ -180,7 +184,7 @@ export function FileTreeRow({
       ) : null}
       <span className="flex min-w-0 flex-1 items-center gap-1.5">
         {fileIconName ? (
-          <FileDisplayIcon name={fileIconName} className="size-4 shrink-0" />
+          <FileDisplayIcon name={fileIconName} className="ui-icon-16 shrink-0" />
         ) : null}
         <FileTreeRowName
           name={row.name}
@@ -190,7 +194,7 @@ export function FileTreeRow({
       </span>
       {indicator !== null && statusLabel !== null ? (
         <span
-          title={statusLabel}
+          data-hint={statusLabel}
           aria-label={statusLabel}
           // ZCode 同位同色：行尾状态标记（U/M/A/D/R，无定宽列，font-bold）。
           className={`ml-auto inline-flex shrink-0 items-center justify-center font-mono text-ui-base font-bold leading-none ${indicatorClass ?? ""}`}
@@ -200,21 +204,21 @@ export function FileTreeRow({
       ) : null}
       {showDirectoryDots ? (
         <span
-          title={directoryGitStatuses
+          data-hint={directoryGitStatuses
             .map((status) => GIT_STATUS_LABELS[status])
             .join(", ")}
           aria-label="●"
           className="ml-1 flex shrink-0 items-center"
         >
           <span
-            className={`size-1.5 rounded-full ${firstDescendantStatus ? getGitStatusDotClass(firstDescendantStatus) : ""}`}
+            className={`ui-icon-6 rounded-full ${firstDescendantStatus ? getGitStatusDotClass(firstDescendantStatus) : ""}`}
           />
         </span>
       ) : null}
       {row.loading ? (
-        <LoaderCircleIcon className="ml-2 size-3 shrink-0 animate-spin text-ink-subtlest" />
+        <LoaderCircleIcon className="ml-2 ui-icon-12 shrink-0 animate-spin text-ink-subtlest" />
       ) : row.error ? (
-        <AlertCircleIcon className="ml-2 size-3 shrink-0 text-warn" />
+        <AlertCircleIcon className="ml-2 ui-icon-12 shrink-0 text-warn" />
       ) : null}
     </div>
   );

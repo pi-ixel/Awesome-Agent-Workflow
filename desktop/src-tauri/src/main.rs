@@ -6,5 +6,8 @@ fn main() {
         desktop_lib::installer_ui::run();
         return;
     }
+    let Some(_launch) = desktop_lib::notification_links::prepare_launch() else {
+        return;
+    };
     desktop_lib::run()
 }

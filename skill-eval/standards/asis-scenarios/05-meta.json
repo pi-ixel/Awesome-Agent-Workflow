@@ -1,0 +1,26 @@
+{
+  "suite_id": "035496bc-d7ff-4349-a906-519c936a0c5a",
+  "name": "ASIS-场景矩阵-OpsCopilot会话树",
+  "project_path": "D:\\dev\\workspace-ai\\eval-pr187\\opscopilot",
+  "reference_skill_path": "D:\\dev\\workspace-ai\\Awesome-Agent-Workflow\\skills\\module-asis-analysis",
+  "catalog_version": 1,
+  "skill_type": "workflow",
+  "dimensions": [
+    {
+      "id": "correctness",
+      "name": "功能正确性",
+      "method": "code"
+    }
+  ],
+  "cases": [
+    "s1-baseline",
+    "s2-pure-new",
+    "s3-wrong-module",
+    "s4-doc-drift",
+    "s5-missing-architecture",
+    "s6-tobe-leak"
+  ],
+  "baseline_experiment_id": "1361b58e-5664-45d0-b850-fe9f7b012bf1",
+  "baseline_assessment_id": "3c328ab7-7f13-46e4-b3b1-6734680da73b",
+  "baseline_score": 100.0
+}

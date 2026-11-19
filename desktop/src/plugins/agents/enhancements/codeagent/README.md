@@ -16,6 +16,8 @@
 - 子进度按连接实例、会话和 taskId 隔离，通过明确的父 toolCallId 关联。父卡未到时暂存，历史 rawOutput.agentId 可恢复缺失关联；没有明确证据就不猜父任务。
 - 展开父卡可看文字、思考与工具输入输出，失败工具明确标记。重复/乱序进度合并；父工具终态不被子进度改回运行态；完整历史参数与最终结果用于补齐空的实时 rawInput。
 - 子进度缓存有界（最多 1024 个任务、每任务 500 次更新、总签名约 4M 字符）；超限保留最近展示数据并提示可到诊断查原文，不伪造 token 统计。
+- 上下文占用使用标准 `usage_update` 的 `used/size`。会话用量使用最新 prompt 响应的累计快照，直接显示输入、输出、缓存读取和总用量，缓存命中率为 `cachedReadTokens/totalTokens`。本轮输入、输出、缓存读取和含缓存总量分别用相邻两轮快照做差。消息角标和卡片顶部共用本轮总量，角标显示缩写，卡片显示精确值。确认是新会话首轮时使用零基线，基线缺失或计数回退时显示“未知”。原始快照随用户轮次保存，历史重放只在轮次匹配明确时恢复。
+- 使用统计按同一轮次基线取 `totalTokens` 差值，包含缓存用量。只保存过输入和输出的旧记录保留轮数，总用量记为未知。
 - 仅为已知 `model` / `mode` select 配置补充缺失的 category/name；其他配置继续按标准解析。
 - 模型和模式只能选择 Agent 公布的条目，优先 set_config_option；仅在 -32601 时回退旧 set_model/set_mode。要求响应中的配置或相应通知确认目标值，空响应不算成功。响应后默认最多等 2 秒确认，断线/换会话取消等待，旧响应不能污染新会话。
 - 输入区模型显示“正在确认模型”，新增通用“会话模式选择”，只展示 Agent 提供的模式；会话模式与客户端审批默认方式独立，不自动启用 bypass。
@@ -33,15 +35,15 @@
 
 新增通用契约是 `AcpDialect.deriveEvents` 与 `refreshSessionInfoAfterPrompt`；通用 ACP、store、UI 不解释 TodoWrite 或 CodeAgent 私有字段。locations 属于标准协议，不依赖增强模块。
 
-验证：`tests/agents/codeagent.test.ts` 使用本地真实 ACP 连接和协议对端，验证路径隔离、启动 argv、图片发送、列表/历史回放、取消超时和正常取消。通用依赖守卫和禁载增强链路同时覆盖 CodeAgent。
+验证：`tests/plugins/agents/enhancements/codeagent/codeagent.test.ts` 使用本地真实 ACP 连接和协议对端，验证路径隔离、启动 argv、图片发送、列表/历史回放、取消超时和正常取消。通用依赖守卫和禁载增强链路同时覆盖 CodeAgent。
 
 本轮运行环境未在 PATH 找到真实 CodeAgent，因此 issue #270 中取消失败的版本行为尚未实机复现。没有调用真实模型；真实安装的握手、登录状态和取消行为需要单独验收。
 
-阶段 2 本地回归见 `tests/agents/codeagentDialect.test.tsx`：同 wire 有/无方言、并发/孤儿子任务、历史与快照回读、模型/模式确认及 UI、旧会话响应、表单降级。没有调用真实模型；实际版本行为由用户实机验收。
+阶段 2 本地回归见 `tests/plugins/agents/enhancements/codeagent/codeagentDialect.test.tsx`：同 wire 有/无方言、并发/孤儿子任务、历史与快照回读、模型/模式确认及 UI、旧会话响应、表单降级。没有调用真实模型；实际版本行为由用户实机验收。
 
-阶段 3 的本地协议对端与 UI 回归见 `tests/agents/codeagentPhase3.test.tsx`。本地对端验证的是客户端处理逻辑，不代表真实 CodeAgent 已通过实机验收。手动检查：触发 TodoWrite 并检查计划（参数不全时重载历史）、悬停上下文用量、展开 Read/Edit/Glob 的文件位置并跳转、首轮回复后观察自动标题及手动标题保护。
+阶段 3 的本地协议对端与 UI 回归见 `tests/plugins/agents/enhancements/codeagent/codeagentPhase3.test.tsx`。本地对端验证的是客户端处理逻辑，不代表真实 CodeAgent 已通过实机验收。手动检查：触发 TodoWrite 并检查计划（参数不全时重载历史）、悬停上下文用量、展开 Read/Edit/Glob 的文件位置并跳转、首轮回复后观察自动标题及手动标题保护。
 
-启动路径回归见 `tests/agents/codeagentExecutable.test.ts`、`tests/ui/agentTransport.test.ts`、`tests/ui/realRuntime.test.ts`、`tests/ui/SettingsPage.test.tsx`：覆盖 Windows 首项 sh shim、同目录入口归一化、带空格路径、失效配置、Linux 无扩展名程序、扫描期间编辑、默认 PATH 不持久化，以及各个启动入口。
+启动路径回归见 `tests/plugins/agents/enhancements/codeagent/codeagentExecutable.test.ts`、`tests/integration/agentTransport.test.ts`、`tests/integration/realRuntime.test.ts`、`tests/plugins/agents/SettingsPage.test.tsx`：覆盖 Windows 首项 sh shim、同目录入口归一化、带空格路径、失效配置、Linux 无扩展名程序、扫描期间编辑、默认 PATH 不持久化，以及各个启动入口。
 
 ## 工具输入展示
 

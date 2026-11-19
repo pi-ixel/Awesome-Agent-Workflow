@@ -3,15 +3,17 @@ import {
   SettingRow,
   settingsInputClass,
 } from "../../../shared/ui/SettingsPageParts.tsx";
-import { ToggleSwitch, btnSecondary } from "../../../shared/ui/controls.tsx";
-import { useState } from "react";
+import { ToggleSwitch, DangerButton, btnPrimary, btnSecondary } from "../../../shared/ui/controls.tsx";
+import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
 import { ArrowDownToLineIcon } from "../../../shared/ui/icons.tsx";
 import { ReleaseNotes, UpdateReleaseNotes } from "./UpdateReleaseNotes.tsx";
+import { ReleaseHistory } from "./ReleaseHistory.tsx";
 import logo from "../../../shared/assets/aaw-logo.png";
 import type { UpdatesService } from "../service.ts";
 import type { UpdateExit } from "../types.ts";
+import "./updateButton.css";
 
 export function UpdateButton({
   updates,
@@ -27,14 +29,14 @@ export function UpdateButton({
       <button
         type="button"
         aria-label="更新 Desktop"
-        className="inline-flex h-[26px] min-w-[30px] shrink-0 items-center justify-center rounded-full bg-ok px-2.5 text-[13px] font-medium leading-none text-foreground-inverse transition-colors hover:bg-ok/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ok"
+        className="update-button inline-flex min-h-[26px] min-w-[30px] shrink-0 items-center justify-center rounded-full px-2.5 text-ui-caption font-medium leading-none text-foreground-inverse transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ok"
         onClick={() => updates.setDialog(true)}
       >
         <ArrowDownToLineIcon
           className={
             compact
-              ? "size-3 shrink-0"
-              : "size-3 shrink-0 @min-[216px]/sidebar-header:hidden"
+              ? "ui-icon-12 shrink-0"
+              : "ui-icon-12 shrink-0 @min-[216px]/sidebar-header:hidden"
           }
         />
         {!compact && (
@@ -80,6 +82,7 @@ export function UpdateSettings({
               <p role="status">正在读取更新状态…</p>
             )}
           </div>
+          <ReleaseHistory openExternal={updates.openExternal} />
         </SettingCard>
       </section>
     );
@@ -279,6 +282,7 @@ export function UpdateSettings({
             </button>
           ) : null}
         </div>
+        <ReleaseHistory currentVersion={snapshot.currentVersion} openExternal={updates.openExternal} />
       </SettingCard>
     </section>
   );
@@ -295,16 +299,28 @@ export function UpdateController({
   const snapshot = useStore(updates.state, (s) => s.snapshot);
   const [installing, setInstalling] = useState(false);
   const [error, setError] = useState("");
-  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [exitWork, setExitWork] = useState<readonly string[]>([]);
+  const confirmBusy = exitWork.length > 0;
+  useEffect(() => {
+    if (!open || !confirmBusy || installing) return;
+    const timer = setInterval(() => {
+      const current = workbench.getExitWork("update");
+      setExitWork((previous) =>
+        previous.length === current.length && previous.every((work, i) => work === current[i])
+          ? previous
+          : current,
+      );
+    }, 500);
+    return () => clearInterval(timer);
+  }, [open, confirmBusy, installing, workbench]);
   if (!open || !snapshot?.ready) return null;
   const ready = snapshot.ready;
   const dismiss = () => {
     if (installing) return;
-    setConfirmBusy(false);
+    setExitWork([]);
     setError("");
     updates.setDialog(false);
   };
-  const busy = () => workbench.hasExitWork("update");
   const install = async () => {
     if (!snapshot.installed) {
       try {
@@ -316,24 +332,28 @@ export function UpdateController({
       }
       return;
     }
-    if (busy() && !confirmBusy) {
-      setConfirmBusy(true);
+    const currentWork = workbench.getExitWork("update");
+    const force = currentWork.length > 0;
+    if (currentWork.some((work) => !exitWork.includes(work))) {
+      setExitWork(currentWork);
       return;
     }
+    setExitWork(currentWork);
     setInstalling(true);
     setError("");
     try {
-      const result = await updates.install(ready.version, confirmBusy, workbench);
+      const result = await updates.install(ready.version, force, workbench);
       if (result !== "installed") {
         setInstalling(false);
-        setConfirmBusy(result === "busy");
+        setExitWork(result === "busy" ? workbench.getExitWork("update") : []);
       }
     } catch (e) {
       setError(String(e));
       setInstalling(false);
-      setConfirmBusy(false);
+      setExitWork([]);
     }
   };
+  const ConfirmButton = confirmBusy ? DangerButton : "button";
   return (
     <ModalShell label="Desktop 更新" onDismiss={dismiss}>
       <section className="p-6">
@@ -346,7 +366,7 @@ export function UpdateController({
           <div>
             <h2
               id="desktop-update-title"
-              className="text-lg leading-6 font-semibold"
+              className="text-ui-xl leading-snug font-semibold"
             >
               Desktop 更新
             </h2>
@@ -362,9 +382,9 @@ export function UpdateController({
           <p className="mb-4 text-sm">便携版请下载新版后手动替换。</p>
         ) : null}
         {confirmBusy ? (
-          <p className="mb-4 text-sm text-warn-ink">
-            有会话、审批或终端正在运行。继续将停止任务并更新，当前运行中的任务会中断。
-          </p>
+          <div className="mb-4 space-y-1 text-ui-sm text-warn-ink" role="status">
+            {exitWork.map((work) => <p key={work}>{work}</p>)}
+          </div>
         ) : null}
         {error ? (
           <p role="alert" className="mb-3 text-sm text-danger-ink">
@@ -382,23 +402,19 @@ export function UpdateController({
             打开安装包位置
           </button>
         ) : null}
-        <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
+        <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
           <button
             type="button"
             disabled={installing}
-            className="inline-flex min-h-9 min-w-20 items-center justify-center rounded-lg border border-line-strong bg-surface px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={() => {
-              setConfirmBusy(false);
-              setError("");
-              updates.setDialog(false);
-            }}
+            className={`${btnSecondary} px-3 py-1.5 text-sm whitespace-nowrap`}
+            onClick={dismiss}
           >
             稍后
           </button>
-          <button
+          <ConfirmButton
             type="button"
             disabled={installing}
-            className="inline-flex min-h-9 items-center justify-center rounded-lg bg-brand px-4 py-2 text-sm font-medium text-foreground-inverse transition-opacity hover:opacity-85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-50"
+            className={`${confirmBusy ? "" : btnPrimary} px-3 py-1.5 text-sm whitespace-nowrap`}
             onClick={() => {
               void install().catch((e: unknown) => setError(String(e)));
             }}
@@ -408,9 +424,9 @@ export function UpdateController({
               : !snapshot.installed
                 ? "打开下载页面"
                 : confirmBusy
-                  ? "停止任务并更新"
+                  ? "确认更新"
                   : "重启更新"}
-          </button>
+          </ConfirmButton>
         </div>
       </section>
     </ModalShell>

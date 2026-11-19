@@ -1,3 +1,4 @@
+import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
 import {
   useCallback,
   useEffect,
@@ -182,7 +183,7 @@ export function ConversationNavigator({
                 aria-describedby={
                   previewId === item.id ? "query-navigation-preview" : undefined
                 }
-                className="absolute left-0 top-0 flex h-2.5 w-9 items-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info"
+                className="absolute left-0 top-0 flex min-h-2.5 w-9 items-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                 style={{ transform: `translateY(${row.start}px)` }}
                 onPointerEnter={(event) =>
                   open(item.id, row.index, event.currentTarget, 120)
@@ -206,25 +207,25 @@ export function ConversationNavigator({
           })}
         </div>
       </div>
-      {selected &&
-        createPortal(
-          <div
+      {createPortal(
+          <HintSurface
+            open={selected !== undefined}
+            unfoldFrom="left"
             ref={popupRef}
             id="query-navigation-preview"
-            role="tooltip"
             aria-label="提问与回复预览"
-            className="fixed z-50 space-y-2 rounded-xl border border-line-strong bg-surface p-3 text-xs leading-5 text-ink shadow-xl"
+            className="fixed z-50 space-y-2 p-3 text-xs leading-5"
             style={position}
             onPointerEnter={() => clearTimeout(timer.current)}
             onPointerLeave={scheduleClose}
           >
             <p className="line-clamp-2 whitespace-pre-line break-words font-medium">
-              {selected.question}
+              {selected?.question}
             </p>
             <p className="line-clamp-3 whitespace-pre-line break-words text-ink-soft">
-              {selected.answer}
+              {selected?.answer}
             </p>
-          </div>,
+          </HintSurface>,
           document.body,
         )}
     </nav>

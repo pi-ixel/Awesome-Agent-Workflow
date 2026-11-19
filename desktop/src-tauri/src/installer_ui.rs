@@ -237,24 +237,43 @@ async fn installer_pick_directory(
             return Err("当前不能修改安装位置".into());
         }
     }
-    let mut directory = valid_destination(&current)?;
-    while !directory.is_dir() && directory.pop() {}
     tauri::async_runtime::spawn_blocking(move || {
-        app.dialog()
+        let current = PathBuf::from(current);
+        let mut picker = app
+            .dialog()
             .file()
             .set_title("选择 AAW Desktop 安装位置")
-            .set_parent(&window)
-            .set_directory(directory)
+            .set_parent(&window);
+        if let Some(directory) = current
+            .ancestors()
+            .find(|directory| directory.is_absolute() && directory.is_dir())
+        {
+            picker = picker.set_directory(directory);
+        }
+        picker
             .blocking_pick_folder()
             .map(|path| {
-                path.into_path()
-                    .map(|p| p.to_string_lossy().into_owned())
-                    .map_err(|e| e.to_string())
+                let path = path.into_path().map_err(|e| e.to_string())?;
+                let destination = path.to_string_lossy().into_owned();
+                valid_destination(&destination)?;
+                Ok(destination)
             })
             .transpose()
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn installer_return_to_options(state: tauri::State<'_, Installer>) -> Result<(), String> {
+    let mut snapshot = state.status.lock().unwrap();
+    if snapshot.update || snapshot.busy || snapshot.phase != "failure" {
+        return Err("当前不能修改安装选项".into());
+    }
+    snapshot.phase = "ready".into();
+    snapshot.stage = "prepare".into();
+    snapshot.error.clear();
+    Ok(())
 }
 
 #[tauri::command]
@@ -342,6 +361,7 @@ pub fn run() {
             installer_logs,
             installer_close,
             installer_pick_directory,
+            installer_return_to_options,
             installer_window
         ])
         .setup(|app| {

@@ -91,19 +91,30 @@ export interface InitializeResult {
 // session/new | load | list
 // ---------------------------------------------------------------------------
 
-/** ACP 会话创建/恢复时提交的 MCP 配置。 */
-export interface McpServerStdio {
-  readonly type: "stdio";
-  readonly command: string;
-  readonly args?: readonly string[];
-  readonly env?: Readonly<Record<string, string>>;
+/** 名值对（ACP EnvVariable / HttpHeader 同形）。 */
+export interface McpNameValue {
+  readonly name: string;
+  readonly value: string;
 }
 
+/**
+ * ACP 会话中提供的 stdio MCP server 配置（规范基线传输，所有 Agent 必须
+ * 支持）。线格式与 ACP schema 逐字段一致：**没有 type 判别字段**，args 与
+ * env 必填，env 是名值对列表（不是对象）。
+ */
+export interface McpServerStdio {
+  readonly name: string;
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly env: readonly McpNameValue[];
+}
+
+/** ACP HTTP MCP 服务及其请求头。 */
 export interface McpServerHttp {
   readonly type: "http";
   readonly name: string;
   readonly url: string;
-  readonly headers?: readonly { readonly name: string; readonly value: string }[];
+  readonly headers: readonly McpNameValue[];
 }
 
 export type McpServer = McpServerStdio | McpServerHttp;
@@ -200,6 +211,7 @@ export interface PromptUsage {
 }
 
 export interface PromptResult {
+  readonly modelId?: string;
   readonly stopReason: StopReason;
   readonly usage?: PromptUsage | null;
   readonly userMessageId?: string | null;

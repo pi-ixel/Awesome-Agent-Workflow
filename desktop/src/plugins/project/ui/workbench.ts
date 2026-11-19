@@ -1,11 +1,12 @@
 import type { Context } from "cordis";
 import { createElement } from "react";
 import { createStore } from "zustand";
+import { MessageCircleIcon } from "../../../shared/ui/icons.tsx";
 import type { SkillsService } from "../../skills/service.ts";
 import type { SkillsSettingsView } from "../../skills/types.ts";
 import type { GitService } from "../../git/service.ts";
 import type { GitReviewNavigation } from "../../git/types.ts";
-import type { WorkflowView } from "../../workflow/types.ts";
+import type { ProjectExtension } from "./extension.ts";
 import type { DocumentNavigation } from "../../documents/service.ts";
 import {
   createProjectSidebar,
@@ -15,6 +16,7 @@ import {
 } from "./workbenchViews.tsx";
 import { NewSessionHeaderAction, projectHeaders } from "./projectHeaders.tsx";
 import { createProjectSettings } from "./settings.tsx";
+import { createUsageSettingsEntry } from "../usage/settingsEntry.ts";
 import { createLegacyAgentDataView } from "./LegacyAgentDataSection.tsx";
 import { captureProjectStartup } from "./startup.ts";
 import { registerProjectExit } from "../lifecycle/lifecycle.ts";
@@ -35,19 +37,19 @@ export function apply(ctx: Context): void {
     open?: GitReviewNavigation["open"];
   }>(() => ({}));
   const skills = createStore<{
-    readonly readSource?: () => string;
     readonly candidates?: SkillsService["candidates"];
+    readonly resolveSlashSkills?: SkillsService["resolveSlashSkills"];
   }>(() => ({}));
-  const readSkillSource = () => skills.getState().readSource?.() ?? "";
   const documentView = createStore<{
     view?: ConversationDocumentView;
     openFileTree?: DocumentNavigation["openFileTree"];
   }>(() => ({}));
+  /** 插件给项目界面的扩展（project:extension 绑定）；会话页、侧栏与总览共用。 */
+  const extension = createStore<{ view?: ProjectExtension }>(() => ({}));
   let active = true;
   const isCurrent = () => active && project.isActive();
   const navigation = createProjectViewNavigation(workbench, project, {
     isCurrent,
-    readSkillSource,
     openFileTree: (path) => documentView.getState().openFileTree?.(path),
   });
   const projectView = {
@@ -55,6 +57,7 @@ export function apply(ctx: Context): void {
     sidebar: sidebar.snapshot,
     navigation: navigation.commands,
     gitReview,
+    extension,
     isActive: isCurrent,
   };
   ctx.effect(() => () => {
@@ -81,8 +84,9 @@ export function apply(ctx: Context): void {
       const provider = scoped.skills;
       scoped.effect(() => {
         skills.setState({
-          readSource: provider.source.getSnapshot,
-          candidates: (names, invocations) => provider.candidates(names, invocations),
+          candidates: (names, invocations) =>
+            provider.candidates(names, invocations),
+          resolveSlashSkills: provider.resolveSlashSkills,
         });
         return () => skills.setState({}, true);
       });
@@ -111,17 +115,16 @@ export function apply(ctx: Context): void {
     });
     return () => binding.dispose();
   }, "project:skills-settings");
-  const workflowUi = createStore<{ view?: WorkflowView }>(() => ({}));
   ctx.effect(() => {
-    const binding = ctx.inject(["workflowUi"], function projectWorkflowView(scoped) {
-      const view = scoped.workflowUi;
+    const binding = ctx.inject(["projectExtension"], function projectExtensionView(scoped) {
+      const view = scoped.projectExtension;
       scoped.effect(() => {
-        workflowUi.setState({ view });
-        return () => workflowUi.setState({ view: undefined });
+        extension.setState({ view });
+        return () => extension.setState({ view: undefined });
       });
     });
     return () => binding.dispose();
-  }, "project:workflow-view");
+  }, "project:extension");
   ctx.effect(() => {
     const binding = ctx.inject(["documents", "documentsUi"], function projectDocumentView(scoped) {
       const { documents, documentsUi } = scoped;
@@ -161,7 +164,11 @@ export function apply(ctx: Context): void {
   ctx.effect(() =>
     workbench.register("sidebar", {
       id: "project-tree",
-      label: "项目树",
+      label: "会话",
+      panelLabel: "项目树",
+      default: true,
+      keepMounted: true,
+      Icon: MessageCircleIcon,
       View: Sidebar,
     }),
   );
@@ -186,10 +193,9 @@ export function apply(ctx: Context): void {
     }),
   );
   for (const page of createProjectPages({
-    readSkillSource,
     skills,
     gitReview,
-    workflowUi,
+    extension,
     documentView,
     watchActivity: project.projects.subscribeWorkspaceActivity,
     openDiagnostics: () => {
@@ -215,7 +221,12 @@ export function apply(ctx: Context): void {
     }),
   );
   const LegacyAgentData = createLegacyAgentDataView(agents, project.projects);
-  for (const settings of createProjectSettings(LegacyAgentData, skillsSettings))
+  if (ctx.host.storage.managed?.available()) ctx.effect(() =>
+    workbench.register("settings", createUsageSettingsEntry(
+      agents.listBuiltins().filter((agent) => agent.promptUsage),
+    )),
+  );
+  for (const settings of createProjectSettings(LegacyAgentData, skillsSettings, agents))
     ctx.effect(() =>
       workbench.register("settings", {
         ...settings,

@@ -137,6 +137,20 @@ export class NodeStdioTransport implements AcpTransport {
     }
   }
 
+  async writeLineConfirmed(line: string): Promise<void> {
+    if (this.closed) throw new AcpWriteError("ACP 进程 stdin 已关闭，无法写入");
+    await new Promise<void>((resolve, reject) => {
+      try {
+        this.child.stdin.write(`${line}\n`, (error?: Error | null) => {
+          if (error) reject(new AcpWriteError(`ACP stdin 写入失败：${describeError(error)}`, error));
+          else resolve();
+        });
+      } catch (error) {
+        reject(new AcpWriteError(`ACP stdin 写入失败：${describeError(error)}`, error));
+      }
+    });
+  }
+
   /**
    * 只关闭 stdin（发 EOF）、不等待退出——对端自退时 onExit 照常派发。
    * 供「关闭与超时升级强杀由调用方编排」的场景（dev bridge 的
@@ -287,6 +301,15 @@ export class NodeStdioTransport implements AcpTransport {
       this.closed = true;
       return { code: null, signal: null };
     }
+    // close 监听必须先于强杀动作注册：await taskkill/SIGTERM 期间对端
+    // 可能恰好自然退出，事件在我们让出事件循环时就派发完了——注册晚了
+    // 会错过 close，白等满强杀宽限才靠二次兜底读终态（实测稳定命中）。
+    // 存活检查到这里之间没有 await，不存在事件插队的窗口。
+    const exited = new Promise<TransportExit>((resolve) => {
+      child.once("close", (code, signal) => {
+        resolve({ code: code ?? null, signal: signal ?? null });
+      });
+    });
     if (process.platform === "win32") {
       await runTaskkill(pid);
     } else {
@@ -296,11 +319,6 @@ export class NodeStdioTransport implements AcpTransport {
         // 已退出：忽略
       }
     }
-    const exited = new Promise<TransportExit>((resolve) => {
-      child.once("close", (code, signal) => {
-        resolve({ code: code ?? null, signal: signal ?? null });
-      });
-    });
     const winner = await Promise.race([
       exited,
       delay(KILL_GRACE_MS).then(() => "timeout" as const),

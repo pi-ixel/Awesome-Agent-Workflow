@@ -1,3 +1,10 @@
+import type { MessageDisplay } from "../../../shared/messageDisplay.ts";
+import type { PromptSkillReference } from "../composer/skillReferences.ts";
+import type {
+  TurnPerformance,
+  PerformanceTotals,
+} from "./sessionPerformance.ts";
+import type { TurnUsage } from "./turnUsage.ts";
 import type {
   ContentBlock,
   ModelInfo,
@@ -14,18 +21,37 @@ import type { ToolLocation } from "../../../contracts/acp/toolLocations.ts";
 
 export type QueuedPrompt =
   | string
-  | { readonly text: string; readonly attachments: readonly ContentBlock[] };
+  | {
+      readonly id?: string;
+      readonly text: string;
+      readonly attachments: readonly ContentBlock[];
+      readonly skillReferences?: readonly PromptSkillReference[];
+      /** 引导请求的持久化投递状态；未知状态必须由用户确认，不能自动重发。 */
+      readonly steerDelivery?: "pending" | "unknown";
+      readonly steerOriginal?: true;
+      readonly steerQuiet?: true;
+      readonly steerPaused?: true;
+    };
 
 // ---------------------------------------------------------------------------
 // 会话条目
 // ---------------------------------------------------------------------------
 
 export interface UserMessageItem {
+  readonly steer?: true;
+  /** Exact synthetic wire text, retained only for unambiguous image replay matching. */
+  readonly imageFallbackText?: string;
+  readonly performance?: TurnPerformance;
+  readonly turnUsage?: TurnUsage;
   readonly attachments?: readonly unknown[];
   readonly kind: "user";
+  readonly stopped?: true;
   readonly id: string;
   readonly text: string;
   readonly createdAt: string;
+  /** 插件替用户发的消息怎么显示（不是用户自己打的字）。 */
+  readonly display?: MessageDisplay;
+  readonly skillReferences?: readonly PromptSkillReference[];
 }
 
 /** 助手消息：text 为累计的 Markdown 源文本。 */
@@ -101,7 +127,15 @@ export interface PlanItem {
   readonly sourceSessionId?: string;
 }
 
+/** A verified historical compaction, never a user turn or transient notice. */
+export interface CompactionItem {
+  readonly kind: "compaction";
+  readonly id: string;
+  readonly sourceId: string;
+}
+
 export type SessionItem =
+  | CompactionItem
   | UserMessageItem
   | AssistantMessageItem
   | ThoughtItem
@@ -123,6 +157,16 @@ export type TurnState =
   | "failed";
 
 export interface ConversationValues {
+  readonly supportsSteer?: boolean;
+  readonly directSteering?: boolean;
+  readonly activeSteerIds?: readonly string[];
+  readonly steerAgentId?: string;
+  readonly steerPhase?: "preparing" | "saving" | "awaiting-agent" | "cancelling" | "waiting";
+  readonly steerEditableId?: string;
+  /** Keep the last verified preview visible while a historical replay is validated. */
+  readonly historyPreview?: { readonly items: readonly SessionItem[]; readonly performanceTotals?: PerformanceTotals };
+  readonly performanceTotals?: PerformanceTotals;
+  readonly hasCumulativePromptUsage?: boolean;
   readonly agentKey?: string;
   readonly supportsImages?: boolean;
   readonly recovery: {
@@ -145,6 +189,7 @@ export interface ConversationValues {
    */
   readonly queuedPrompts: readonly QueuedPrompt[];
   /** 点击停止或取消/出错后挂起；true 时等待用户 resumeQueue。 */
+  readonly queueSaveError?: string | null;
   readonly queuePaused: boolean;
   /** 最近一轮的 stopReason（请求失败时为 null）。 */
   readonly lastStopReason: StopReason | null;
@@ -197,7 +242,8 @@ export interface ConversationViewState extends ConversationValues {
    * 手动重命名会话（本机覆盖层，不回写 agent）：空字符串 / 全空白 =
    * 清除手动名，恢复跟随 ACP 原生名。
    */
-  readonly renameSession: (sessionId: string, title: string) => void;
+  readonly renameSession: (sessionId: string, title: string) => void | Promise<void>;
+  readonly refreshSessionTitle: (sessionId: string) => void;
   /** 清除轮次错误卡（重试成功 / 用户关闭卡）。 */
   readonly clearTurnError: () => void;
   /** 打开（聚焦）一个会话：切换中间区为会话视图。 */

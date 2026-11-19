@@ -1,20 +1,30 @@
+import { pathKey } from "../../../shared/panelPaths.ts";
+import { sameSessionAgent, createSessionDeletions } from "./sessionDeletion.ts";
+import { createSessionGroups } from "./sessionGroups.ts";
 import type { HostStorage } from "../../host/types.ts";
 import { createSnapshotView } from "../../../shared/state/readonlySnapshot.ts";
 import { createSessionCatalog } from "./catalog.ts";
 import { createSessionActivityStore } from "./sessionActivityStore.ts";
+import type { DeleteSessionTarget } from "./sessionDeletion.ts";
 import { createSessionArchiveStore } from "./sessionArchiveStore.ts";
 import type { Logger } from "../../../shared/logging/logger.ts";
 
 export function createProjectSessionIndexes(storage: HostStorage, logger?: Logger) {
   const scope = new AbortController();
-  const catalog = createSessionCatalog(scope.signal);
+  const deletions = createSessionDeletions(storage);
+  const catalog = createSessionCatalog(scope.signal, deletions.blocked);
+  const deletionView = createSnapshotView(deletions.store, (state) => state);
   const activity = createSessionActivityStore(scope.signal);
   const archive = createSessionArchiveStore(
     storage,
     catalog.store.getState,
     scope.signal,
     logger,
+    (path, id, agentKey) =>
+      !!agentKey &&
+      deletions.blocked({ workspacePath: path, sessionId: id, agentKey }),
   );
+  const groups = createSessionGroups();
   const catalogView = createSnapshotView(catalog.store, (state) => state);
   const activityView = createSnapshotView(activity, ({ entries }) => ({ entries }));
   const archiveView = createSnapshotView(archive, ({ notice, archivedSessions, metadata }) => ({
@@ -24,11 +34,62 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
   }));
   return {
     catalog,
+    deletions,
+    deletionView: deletionView.snapshot,
     activity,
     archive,
     catalogView: catalogView.snapshot,
     activityView: activityView.snapshot,
     archiveView: archiveView.snapshot,
+    groups,
+    async forgetArchived(target: DeleteSessionTarget): Promise<void> {
+      const state = archive.getState();
+      const archivedSessions = new Set(state.archivedSessions);
+      const metadata = { ...state.metadata };
+      for (const key of [...archivedSessions]) {
+        const [path, id, encoded] = key.split("\0");
+        if (path !== pathKey(target.workspacePath) || id !== target.sessionId)
+          continue;
+        if (encoded) {
+          let owner: string;
+          try {
+            owner = decodeURIComponent(encoded);
+          } catch {
+            continue;
+          }
+          if (!sameSessionAgent(owner, target.agentKey)) continue;
+        }
+        archivedSessions.delete(key);
+        delete metadata[key];
+      }
+      storage.setItem(
+        "aaw-desktop/archived-sessions.v1",
+        JSON.stringify([...archivedSessions]),
+      );
+      storage.setItem(
+        "aaw-desktop/archived-session-metadata.v1",
+        JSON.stringify(metadata),
+      );
+      await storage.managed?.flush?.();
+      const error = storage.managed?.configurationError?.();
+      if (error) throw new Error(error);
+      if (
+        archive.getState().archivedSessions !== state.archivedSessions ||
+        archive.getState().metadata !== state.metadata
+      )
+        return this.forgetArchived(target);
+      const notice = state.notice;
+      archive.setState({
+        archivedSessions,
+        metadata,
+        notice:
+          notice &&
+          pathKey(notice.workspacePath) === pathKey(target.workspacePath) &&
+          notice.sessionId === target.sessionId
+            ? null
+            : notice,
+      });
+    },
     dispose() {
       if (scope.signal.aborted) return;
       scope.abort();
@@ -39,6 +100,8 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
         archivedSessions: new Set(),
         metadata: {},
       });
+      groups.dispose();
+      deletionView.dispose();
       catalogView.dispose();
       activityView.dispose();
       archiveView.dispose();

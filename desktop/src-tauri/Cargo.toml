@@ -1,6 +1,6 @@
 [package]
 name = "desktop"
-version = "0.1.21"
+version = "0.1.51"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2024"
@@ -18,13 +18,18 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset", "unstable"] }
+tauri = { version = "2", features = ["protocol-asset", "tray-icon", "unstable"] }
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2.8.0"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
+tempfile = "3"
+uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+chrono-tz = "0.10"
+rusqlite = { version = "0.37", features = ["bundled"] }
 # rt 供 #[tokio::test]（进程语义的自动化测试，commands.rs / acp_process.rs）；
 # net 供 auth_sso.rs 的回环 HTTP 测试
 tokio = { version = "1", features = ["process", "time", "fs", "io-util", "macros", "rt", "net"] }
@@ -49,10 +54,16 @@ opt-level = 3
 panic = "abort"
 strip = true
 
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+rustix = { version = "1", features = ["fs"] }
+
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
 webview2-com = "0.39.1"
 windows-core = "0.62.2"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+# 系统通知（notification_links.rs）：点击打开链接、按标记替换与删除
+windows = { version = "0.62", features = ["Data_Xml_Dom", "UI_Notifications"] }
 
 # Windows 使用 Schannel 和系统证书库，包含用户/企业安装的受信任证书。
 [target.'cfg(windows)'.dependencies.reqwest]
@@ -65,3 +76,6 @@ features = ["native-tls"]
 version = "0.12"
 default-features = false
 features = ["rustls-tls"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }

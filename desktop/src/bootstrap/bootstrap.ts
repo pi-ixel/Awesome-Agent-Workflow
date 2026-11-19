@@ -1,9 +1,11 @@
 import { Context } from "cordis";
+import { settingsStorageCategory } from "../plugins/diagnostics/service.ts";
 import { installDesktopFoundation } from "./foundation.ts";
 import type { AcpProcessHost, HostOptions } from "../plugins/host/types.ts";
 import * as acpConnectionPlugin from "../plugins/acpConnection/index.ts";
 import * as acpRuntimePlugin from "../plugins/acpRuntime/index.ts";
 import * as projectPlugin from "../plugins/project/index.ts";
+import { flushNativeConfiguration } from "../plugins/host/service.ts";
 import type { ProjectService } from "../plugins/project/service.ts";
 import type { AgentsService } from "../plugins/agents/service.ts";
 import type { WorkbenchService } from "../plugins/workbench/service.ts";
@@ -17,6 +19,7 @@ import * as skillsPlugin from "../plugins/skills/index.ts";
 import * as accountPlugin from "../plugins/account/index.ts";
 import * as updatesPlugin from "../plugins/updates/index.ts";
 import * as browserPlugin from "../plugins/browser/index.ts";
+import * as scheduledTasksPlugin from "../plugins/scheduledTasks/index.ts";
 import { desktopPanelLayouts } from "./panelLayouts.ts";
 
 export type DesktopSessionOperations = NonNullable<
@@ -44,10 +47,25 @@ export function createDesktopRuntime(
       const foundation = await installDesktopFoundation(
         context,
         { acpProcess: processHost, createBackend: options.createHostBackend },
-        diagnosticsSnapshot,
+        diagnosticsSnapshot &&
+          (() => ({
+            ...diagnosticsSnapshot(),
+            connections: context.acpConnection?.diagnostics() ?? [],
+          })),
+        async (id) => context.acpConnection?.probe(id),
       );
       await context.plugin(workbenchPlugin, {
         createLogger: foundation.diagnostics.createLogger,
+        registerAppearanceStorage: (scope, reset) =>
+          foundation.diagnostics.registerStorage(
+            settingsStorageCategory(
+              "workbench.appearance",
+              "界面外观设置",
+              () => scope.read(),
+              reset,
+              scope.saveFailure,
+            ),
+          ),
         appearanceRoot: options.appearanceRoot,
         suppressNativeContextMenu: options.suppressNativeContextMenu,
         panelLayoutCompatibility: desktopPanelLayouts,
@@ -72,6 +90,8 @@ export function createDesktopRuntime(
       await context.plugin(updatesPlugin);
       await context.plugin(browserPlugin);
       await contribute?.(context);
+      await context.plugin(scheduledTasksPlugin);
+      context.project.sessions.resumePendingDeletions?.();
       return {
         ...foundation,
         acpConnection: context.acpConnection,
@@ -121,6 +141,7 @@ export function createDesktopRuntime(
       } catch (error) {
         errors.push(error);
       }
+      await flushNativeConfiguration();
       try {
         await context.fiber.dispose();
       } catch (error) {

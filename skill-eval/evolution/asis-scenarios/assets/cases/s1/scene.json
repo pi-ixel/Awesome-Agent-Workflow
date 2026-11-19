@@ -1,0 +1,7 @@
+{
+  "id": "s1-baseline",
+  "sr": "SR-OPS-A",
+  "module_dir": "pkg-sessionmanager",
+  "expect": "declared",
+  "allow_missing_artifact": false
+}

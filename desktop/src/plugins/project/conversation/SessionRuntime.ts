@@ -1,4 +1,6 @@
+import type { McpServer } from "../../../contracts/acp/protocol.ts";
 import type { AcpSessionPort } from "../../acpRuntime/types.ts";
+import { rememberUsageModels, type UsageScope } from "../usage/service.ts";
 import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
 import { withDeadline } from "../../../shared/asyncDeadline.ts";
 import { createLogger } from "../../../shared/logging/logger.ts";
@@ -12,6 +14,10 @@ import type { createRuntimeStatusStore } from "./runtimeStatusStore.ts";
 
 export interface SessionRuntimeResources {
   readonly workspacePath: string;
+  /** Agent 的工作目录（插件打开时可与项目目录不同）；缺省为项目目录。 */
+  readonly cwd?: string;
+  /** 插件这次打开时额外装的 MCP 工具。 */
+  readonly openTools?: (agent: AcpSessionPort["agentInfo"]) => readonly McpServer[];
   readonly agentKey: string;
   listed: readonly SessionInfo[];
   disposed: boolean;
@@ -33,6 +39,9 @@ export interface SessionRuntimeResources {
   disposeActivity: () => void;
   /** 预热标记：只连接 + 回填列表，未载入任何会话；被会话点击就地消费。 */
   listOnly: boolean;
+  scheduled?: boolean;
+  /** 插件打开的会话（ADR 037）：轮次完成的提醒由打开它的插件负责。 */
+  pluginOpened?: boolean;
 }
 
 export class RecoveryCleanupError extends Error {}
@@ -52,6 +61,8 @@ interface SessionRecoveryOptions {
 
 export class SessionRuntime {
   declare workspacePath: SessionRuntimeResources["workspacePath"];
+  declare cwd: SessionRuntimeResources["cwd"];
+  declare openTools: SessionRuntimeResources["openTools"];
   declare agentKey: SessionRuntimeResources["agentKey"];
   declare listed: SessionRuntimeResources["listed"];
   declare disposed: SessionRuntimeResources["disposed"];
@@ -67,23 +78,47 @@ export class SessionRuntime {
   declare status: SessionRuntimeResources["status"];
   declare disposeActivity: SessionRuntimeResources["disposeActivity"];
   declare listOnly: SessionRuntimeResources["listOnly"];
+  declare scheduled: SessionRuntimeResources["scheduled"];
+  declare pluginOpened: SessionRuntimeResources["pluginOpened"];
   private closeTask?: Promise<void>;
   constructor(resources: SessionRuntimeResources, private readonly logger = createLogger("session")) {
     Object.assign(this, resources);
   }
+  usageScope(): UsageScope | undefined {
+    const agent = this.adapter.id;
+    if (!this.adapter.promptUsage) return;
+    return {
+      agent,
+      agentKey: this.agentKey,
+      workspace: this.workspacePath,
+      accounting: this.adapter.promptUsage.accounting,
+      sessionId: () => this.session.sessionId,
+      selectedModel: () => this.session.models?.currentModelId ?? undefined,
+    };
+  }
   bindDraft(ensureSession: () => Promise<void>): void {
     const session = this.session;
     this.store.getState().bindSession({
-      prompt: (text) => session.prompt(text),
-      promptBlocks: (blocks) => session.prompt(blocks),
+      steerAgentId: this.adapter.id,
+      supportsSteer: this.adapter.supportsSteer === true,
+      promptUsageBasis: this.adapter.promptUsageBasis ?? this.adapter.turnUsageBasis,
+      imageOnlyPromptFallback: this.adapter.imageOnlyPromptFallback,
+      usageScope: this.usageScope(),
+      prompt: (text, beforeDispatch) => beforeDispatch ? session.prompt(text, { beforeDispatch }) : session.prompt(text),
+      promptBlocks: (blocks, beforeDispatch) => beforeDispatch ? session.prompt(blocks, { beforeDispatch }) : session.prompt(blocks),
       supportsImages: supportsImagePrompt(session.agentInfo?.agentCapabilities),
       cancel: () => session.cancel(),
       listModels: () => Promise.resolve(session.models?.availableModels ?? []),
       setModel: (id) => session.setModel(id),
       setMode: (id) => session.setMode(id),
-      ensureSession,
+      ensureSession: async () => {
+        await ensureSession();
+        const scope = this.usageScope();
+        if (scope && session.models) rememberUsageModels(scope, session.models.availableModels);
+      },
     });
   }
+
   close(options: {
     release: (session: AcpSessionPort, force?: boolean) => Promise<void>;
     onClosing?: () => void;
@@ -123,6 +158,7 @@ export class SessionRuntime {
         );
       await attempt(() => this.detachViews());
       await attempt(() => this.store.getState().setSessionLogTarget(null));
+      await attempt(() => this.store.getState().flushSessionLog());
       await attempt(() => this.store.getState().clear());
       if (errors.length)
         throw new AggregateError(errors, "Session cleanup failed");
@@ -270,7 +306,7 @@ export class SessionRuntime {
             const replayState: AcpSessionEvent[] = [];
             await options.restore(replacement.session, {
               sessionId,
-              workspacePath: this.workspacePath,
+              workspacePath: this.cwd ?? this.workspacePath,
               modelId: desiredModel,
               modeId: desiredMode,
               configuration: desiredConfig,

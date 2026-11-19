@@ -1,8 +1,17 @@
 import type { AnnotationDraftService } from "./annotationTypes.ts";
+import { projectStorage } from "../lifecycle/persistence.ts";
 import { readDraft, writeDraft } from "./draftStore.ts";
 import type { ImageDrafts } from "./types.ts";
 
 const marker = (scope: string) => `${scope}/project-draft-migration-v1`;
+
+export function rememberDraftImageSource(scope: string, from: string): void {
+  try {
+    projectStorage.setItem(marker(scope), from);
+  } catch {
+    // Keep attachments in their original scope when storage is unavailable.
+  }
+}
 
 /** 仅迁移当前草稿的旧档位；持久化来源，图片异步加载或重启后仍能继续。 */
 export function prepareProjectDraft(
@@ -12,10 +21,10 @@ export function prepareProjectDraft(
 ): void {
   if (!drafts.isActive()) return;
   try {
-    const saved = localStorage.getItem(marker(scope));
+    const saved = projectStorage.getItem(marker(scope));
     if (saved === "done") return;
     const from = saved ?? legacyScope;
-    if (!saved) localStorage.setItem(marker(scope), from);
+    if (!saved) projectStorage.setItem(marker(scope), from);
     const previous = readDraft(from);
     if (!readDraft(scope) && previous) writeDraft(scope, previous);
     if (!previous || readDraft(scope)) writeDraft(from, "");
@@ -30,7 +39,7 @@ export function projectDraftImageMigration(
   images: ImageDrafts,
 ): { from: string; images: ImageDrafts } | null {
   try {
-    const from = localStorage.getItem(marker(scope));
+    const from = projectStorage.getItem(marker(scope));
     if (!from || from === "done") return null;
     const next = {
       ...images,
@@ -61,7 +70,7 @@ export function finishProjectDraftMigration(
   )
     return;
   try {
-    localStorage.setItem(marker(scope), "done");
+    projectStorage.setItem(marker(scope), "done");
   } catch {
     return;
   }

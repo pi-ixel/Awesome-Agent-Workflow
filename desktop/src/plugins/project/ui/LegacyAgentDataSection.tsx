@@ -4,8 +4,10 @@ import type { AgentsService } from "../../agents/service.ts";
 import type { ProjectWorkspace } from "../service.ts";
 import {
   listLegacyAgentData,
+  legacyAgentStorage,
   migrateLegacyAgentData,
 } from "../sessions/legacyAgentData.ts";
+import { loadSessionTitles, sessionTitleMigrationFailure } from "../sessions/sessionTitles.ts";
 
 export function createLegacyAgentDataView(
   agents: Pick<AgentsService, "configuration" | "resolve" | "selectionKey">,
@@ -78,14 +80,17 @@ export function LegacyAgentDataSection({
             <button
               type="button"
               disabled={!agentKey}
-              onClick={() => {
+              onClick={() => void (async () => {
                 try {
                   migrateLegacyAgentData(
                     record,
                     agentKey!,
-                    localStorage,
+                    legacyAgentStorage,
                     targetSessionId,
                   );
+                  await loadSessionTitles();
+                  const migrationFailure = sessionTitleMigrationFailure();
+                  if (migrationFailure) throw new Error(migrationFailure);
                   if (record.kind === "置顶")
                     reloadWorkspacePreferences?.();
                   setRecords(listLegacyAgentData());
@@ -95,7 +100,7 @@ export function LegacyAgentDataSection({
                     error instanceof Error ? error.message : String(error),
                   );
                 }
-              }}
+              })()}
             >
               将此记录恢复到 {agentName ?? "所选 Agent"}
             </button>

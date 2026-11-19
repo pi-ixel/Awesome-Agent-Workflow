@@ -1,13 +1,23 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
+import { CollapsibleTreePane, TreeBranch, treeChevronClass } from "../../../shared/ui/TreeMotion.tsx";
 import type { DocumentsService } from "../service.ts";
+import { webviewStorage } from "../../host/service.ts";
 import type { MarkdownEditorApi } from "./MarkdownSourceEditor.tsx";
 import { FileAnnotations } from "./FileAnnotations.tsx";
 import { createPortal } from "react-dom";
-import { SearchIcon, ChevronRightIcon, ChevronDownIcon } from "../../../shared/ui/icons.tsx";
+import { SearchIcon, ChevronRightIcon, EllipsisIcon } from "../../../shared/ui/icons.tsx";
+import { FindBar, findActionClass, findFieldClass } from "../../../shared/ui/controls/FindBar.tsx";
+import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
+import { useMenuController } from "./file-tree/menuController.ts";
+import type { MarkdownFindOption } from "./markdownFind.ts";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
@@ -16,15 +26,22 @@ import { fileHeadings, fileTextRanges } from "./fileDocumentIndex.ts";
 
 const OUTLINE_WIDTH_KEY = "aaw:document-outline-width";
 const DEFAULT_OUTLINE_WIDTH = 208;
+const noFindSubscription = () => () => {};
+const noFindSnapshot = () => null;
+const markdownFindOptions: readonly { key: MarkdownFindOption; label: string }[] = [
+  { key: "caseSensitive", label: "区分大小写" },
+  { key: "regexp", label: "正则表达式" },
+  { key: "wholeWord", label: "全词匹配" },
+];
 // The percentage resolves against the split row; the width follows outer pane
 // resizing without observer-backed React state or inherited CSS variables.
 function outlineWidthStyle(width: number) {
-  const max = "max(100px, min(560px, 60%, calc(100% - 200px)))";
+  const max = "max(100px, min(560px, 60cqw, calc(100cqw - 200px)))";
   return `clamp(min(144px, ${max}), ${width}px, ${max})`;
 }
 function readOutlineWidth() {
   try {
-    const stored = Number(localStorage.getItem(OUTLINE_WIDTH_KEY));
+    const stored = Number(webviewStorage.getItem(OUTLINE_WIDTH_KEY));
     if (Number.isFinite(stored) && stored >= 100 && stored <= 560)
       return stored;
   } catch {
@@ -59,15 +76,18 @@ export function FileDocumentTools({
   children: ReactNode;
 }) {
   const [outline, setOutline] = useState(false);
+  const [outlineMounted, setOutlineMounted] = useState(false);
+  if (outline && !outlineMounted) setOutlineMounted(true);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [replaceOpen, setReplaceOpen] = useState(false);
   const [index, setIndex] = useState(0);
   const [ranges, setRanges] = useState<Range[]>([]);
   const [section, setSection] = useState(0);
   const [preferredWidth, setPreferredWidth] = useState(readOutlineWidth);
   const [resizingOutline, setResizingOutline] = useState(false);
   const splitRow = useRef<HTMLDivElement>(null);
-  const outlineColumn = useRef<HTMLElement>(null);
+  const outlineColumn = useRef<HTMLDivElement>(null);
   const outlineSeparator = useRef<HTMLDivElement>(null);
   const resizeFrame = useFrameTask();
   const outlineDrag = useRef<{
@@ -94,7 +114,7 @@ export function FileDocumentTools({
   };
   const persistOutlineWidth = (width: number) => {
     try {
-      localStorage.setItem(OUTLINE_WIDTH_KEY, String(width));
+      webviewStorage.setItem(OUTLINE_WIDTH_KEY, String(width));
     } catch {
       // A disabled preference store must not prevent resizing.
     }
@@ -127,24 +147,36 @@ export function FileDocumentTools({
   }, [outline]);
   const content = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
+  const searchButton = useRef<HTMLButtonElement>(null);
+  const { menu, open: openMenu, dismiss: dismissMenu } = useMenuController();
+  const editorFind = editor?.find;
+  const editorMatches = useSyncExternalStore(
+    editorFind?.subscribe ?? noFindSubscription,
+    editorFind?.getSnapshot ?? noFindSnapshot,
+  );
   const headings = useMemo(
     () => (markdown ? fileHeadings(text) : []),
     [text, markdown],
   );
-  const tree = useMemo(() => {
+  const { tree, roots } = useMemo(() => {
     const stack: number[] = [];
-    return headings.map((heading, i) => {
+    const roots: number[] = [];
+    const children = headings.map((): number[] => []);
+    const tree = headings.map((heading, i) => {
       while (stack.length && headings[stack.at(-1)!]!.level >= heading.level)
         stack.pop();
       const ancestors = [...stack];
+      const parent = stack.at(-1);
+      (parent === undefined ? roots : children[parent]!).push(i);
       stack.push(i);
       return {
         ...heading,
         ancestors,
         depth: ancestors.length,
-        branch: (headings[i + 1]?.level ?? 0) > heading.level,
+        children: children[i]!,
       };
     });
+    return { tree, roots };
   }, [headings]);
   const [expanded, setExpanded] = useState<ReadonlySet<number> | null>(null);
   const isExpanded = (i: number) =>
@@ -158,36 +190,64 @@ export function FileDocumentTools({
       else next.add(i);
       return next;
     });
+  const branches = tree.flatMap((node, index) => node.children.length ? [index] : []);
+  const allExpanded = branches.length > 0 && branches.every(isExpanded);
+  const toggleAllLabel = allExpanded ? "全部折叠" : "全部展开";
   const iconButton =
     "flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink";
   const name = `file-find-${scope.replace(/[^a-z0-9]/gi, "")}`;
   useEffect(() => documents.fileFind.register(scope), [documents, scope]);
+  const openFind = useCallback(() => {
+    if (!open) {
+      const selected = editorFind?.selectedText();
+      if (selected) setQuery(selected);
+      if (!editorFind) reveal(Number.MAX_SAFE_INTEGER);
+      setOpen(true);
+    }
+    input.current?.focus({ preventScroll: true });
+    input.current?.select();
+  }, [editorFind, open, reveal]);
+  const closeFind = useCallback(() => {
+    setOpen(false);
+    if (editorFind) editorFind.focus();
+    else searchButton.current?.focus();
+  }, [editorFind]);
+  const move = useCallback((direction: number) => {
+    if (editorFind) editorFind.move(direction);
+    else setIndex((i) =>
+      ranges.length ? (i + direction + ranges.length) % ranges.length : 0,
+    );
+  }, [editorFind, ranges.length]);
   useEffect(() => {
     const handle = (event: KeyboardEvent) => {
       if (documents.fileFind.owner(event) !== scope) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
         event.preventDefault();
         event.stopImmediatePropagation();
-        if (editor) {
-          editor.search();
-          return;
-        }
-        reveal(Number.MAX_SAFE_INTEGER);
-        setOpen(true);
-        input.current?.focus();
-        input.current?.select();
-      } else if (open && !editor && event.key === "Escape") {
+        openFind();
+      } else if (open && event.key === "Escape" && !menu && !event.isComposing) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        setOpen(false);
+        closeFind();
+      } else if ((event.key === "F3" || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "g")) &&
+        (open || editorFind)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (open || editorMatches?.query.valid) move(event.shiftKey ? -1 : 1);
+        else openFind();
       }
     };
     window.addEventListener("keydown", handle, true);
     return () => window.removeEventListener("keydown", handle, true);
-  }, [documents, scope, open, reveal, editor]);
+  }, [documents, scope, open, openFind, closeFind, editorFind, editorMatches?.query.valid, menu, move]);
   useEffect(() => {
-    if (open) input.current?.focus();
-  }, [open]);
+    if (open) input.current?.focus({ preventScroll: true });
+  }, [open, source]);
+  useEffect(() => {
+    if (open) editorFind?.show(query);
+    else editorFind?.close();
+  }, [editorFind, open, query]);
+  useEffect(() => () => editorFind?.close(), [editorFind]);
   useEffect(() => {
     const root = content.current;
     if (!root || !open || editor) return;
@@ -214,7 +274,7 @@ export function FileDocumentTools({
   useEffect(() => {
     const registry = CSS.highlights;
     if (!registry || typeof Highlight === "undefined") return;
-    if (open) {
+    if (open && !editorFind) {
       registry.set(name, new Highlight(...ranges));
       registry.set(
         `${name}-active`,
@@ -225,13 +285,13 @@ export function FileDocumentTools({
       registry.delete(name);
       registry.delete(`${name}-active`);
     };
-  }, [ranges, index, name, open]);
+  }, [ranges, index, name, open, editorFind]);
   useEffect(() => {
-    if (open)
+    if (open && !editorFind)
       ranges[index]?.startContainer.parentElement?.scrollIntoView?.({
         block: "center",
       });
-  }, [ranges, index, open]);
+  }, [ranges, index, open, editorFind]);
   useEffect(() => {
     const root = content.current;
     if (!root || !outline) return;
@@ -277,10 +337,53 @@ export function FileDocumentTools({
       setSection(i);
     });
   }
-  const move = (direction: number) =>
-    setIndex((i) =>
-      ranges.length ? (i + direction + ranges.length) % ranges.length : 0,
+  function renderBranch(i: number) {
+    const heading = tree[i]!;
+    const expanded = isExpanded(i);
+    const active = section === i ||
+      (tree[section]?.ancestors.includes(i) && !expanded);
+    const hasChildren = heading.children.length > 0;
+    const branchId = `outline-${scope}-${i}`;
+    return (
+      <div key={`${heading.line}-${i}`}>
+        <div
+          className={`flex items-center rounded ${active ? "bg-selected text-ink" : "text-ink-soft hover:bg-surface-hover"}`}
+          style={{ paddingLeft: `${heading.depth * 10}px` }}
+        >
+          {hasChildren ? (
+            <IconButton iconSize="compact"
+              type="button"
+              className="flex shrink-0 items-center justify-center rounded hover:bg-hover"
+              aria-label={`${expanded ? "折叠" : "展开"} ${heading.title}`}
+              aria-expanded={expanded}
+              aria-controls={branchId}
+              onClick={() => toggle(i)}
+            >
+              <ChevronRightIcon className={`ui-icon-12 ${treeChevronClass} ${expanded ? "rotate-90" : ""}`} />
+            </IconButton>
+          ) : (
+            <span className="w-5 shrink-0" />
+          )}
+          <button
+            type="button"
+            data-hint={heading.title}
+            aria-current={section === i ? "location" : undefined}
+            className={`min-w-0 flex-1 truncate py-1.5 pr-2 text-left ${heading.level === 1 ? "text-ui-base font-semibold" : heading.level === 2 ? "text-ui-caption font-medium" : "text-ui-sm font-normal"}`}
+            onClick={() => jump(i)}
+          >
+            {heading.title}
+          </button>
+        </div>
+        {hasChildren && (
+          <TreeBranch id={branchId} open={expanded}>
+            {heading.children.map(renderBranch)}
+          </TreeBranch>
+        )}
+      </div>
     );
+  }
+  const matchCount = editorFind ? editorMatches?.matchCount ?? 0 : ranges.length;
+  const activeIndex = editorFind ? editorMatches?.activeIndex ?? -1 : ranges.length ? index : -1;
   return (
     <div
       className="flex min-h-0 flex-1 flex-col"
@@ -291,16 +394,16 @@ export function FileDocumentTools({
         ? createPortal(
             <>
               {markdown && (
-                <button
+                <IconButton
                   type="button"
                   aria-label="大纲"
-                  title="大纲"
+                  data-hint="大纲"
                   aria-expanded={outline}
                   className={`${iconButton} ${outline ? "bg-selected text-ink" : ""}`}
                   onClick={() => setOutline((v) => !v)}
                 >
-                  <svg
-                    className="size-3.5"
+                  <UiIcon
+                    className="ui-icon-14"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -308,26 +411,19 @@ export function FileDocumentTools({
                     strokeLinecap="round"
                   >
                     <path d="M4 5h16M8 12h12M8 19h12M4 10v9" />
-                  </svg>
-                </button>
+                  </UiIcon>
+                </IconButton>
               )}
-              <button
+              <IconButton
+                ref={searchButton}
                 type="button"
                 aria-label="搜索文件"
-                title="搜索文件（Ctrl+F）"
+                data-hint="搜索文件（Ctrl+F）"
                 className={`${iconButton} ${open ? "bg-selected text-ink" : ""}`}
-                onClick={() => {
-                  if (editor) {
-                    editor.search();
-                    return;
-                  }
-                  reveal(Number.MAX_SAFE_INTEGER);
-                  setOpen(true);
-                  input.current?.focus();
-                }}
+                onClick={openFind}
               >
-                <SearchIcon className="size-3.5" />
-              </button>
+                <SearchIcon className="ui-icon-14" />
+              </IconButton>
             </>,
             toolbar,
           )
@@ -345,74 +441,33 @@ export function FileDocumentTools({
           sourceEditor={editor}
         />
       )}
-      {open && !editor && (
-        <div
-          role="search"
-          aria-label={`搜索文件：${path}`}
-          className="flex flex-wrap items-center gap-2 border-b border-line p-2 text-xs"
-        >
-          <span className="max-w-40 truncate" title={path}>
-            {path.split(/[\\/]/).at(-1)}
-          </span>
-          <input
-            ref={input}
-            aria-label="搜索当前文件"
-            placeholder="搜索当前文件"
-            value={query}
-            className="min-w-20 flex-1 bg-surface px-2 py-1"
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                move(e.shiftKey ? -1 : 1);
-              }
-            }}
-          />
-          <span aria-live="polite">
-            {ranges.length ? index + 1 : 0}/{ranges.length}
-          </span>
-          <button
-            aria-label="上一个匹配"
-            disabled={!ranges.length}
-            onClick={() => move(-1)}
-          >
-            ↑
-          </button>
-          <button
-            aria-label="下一个匹配"
-            disabled={!ranges.length}
-            onClick={() => move(1)}
-          >
-            ↓
-          </button>
-          <button aria-label="关闭文件搜索" onClick={() => setOpen(false)}>
-            ×
-          </button>
-        </div>
-      )}
       <div
         ref={splitRow}
-        className={`flex min-h-0 min-w-0 flex-1 ${resizingOutline ? "select-none" : ""}`}
+        className={`@container flex min-h-0 min-w-0 flex-1 ${resizingOutline ? "select-none" : ""}`}
       >
-        {outline && (
-          <nav
-            ref={outlineColumn}
+        <CollapsibleTreePane
+          paneRef={outlineColumn}
+          open={outline}
+          width={outlineWidthStyle(preferredWidth)}
+          resizing={resizingOutline}
+          scope={scope}
+        >
+          {outlineMounted && <nav
             aria-label="文件大纲"
-            className="flex min-w-0 shrink-0 flex-col"
-            style={{ width: outlineWidthStyle(preferredWidth) }}
+            className="flex min-h-0 min-w-0 flex-1 flex-col"
           >
             <div className="flex h-9 shrink-0 items-center justify-between border-b border-line px-2">
               <span className="text-xs font-medium text-ink-soft">大纲</span>
-              <div className="flex items-center">
-                <button
+              {branches.length > 0 && (
+                <IconButton
                   type="button"
-                  aria-label="全部展开"
-                  title="全部展开"
+                  aria-label={toggleAllLabel}
+                  data-hint={toggleAllLabel}
                   className={iconButton}
-                  onClick={() => setExpanded(new Set(tree.map((_, i) => i)))}
+                  onClick={() => setExpanded(new Set(allExpanded ? [] : branches))}
                 >
-                  <svg
-                    className="size-3.5"
+                  <UiIcon
+                    className="ui-icon-14"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -420,78 +475,19 @@ export function FileDocumentTools({
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   >
-                    <path d="m8 7 4-4 4 4M8 17l4 4 4-4M5 12h14" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  aria-label="全部折叠"
-                  title="全部折叠"
-                  className={iconButton}
-                  onClick={() => setExpanded(new Set())}
-                >
-                  <svg
-                    className="size-3.5"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="m8 3 4 4 4-4M8 21l4-4 4 4M5 12h14" />
-                  </svg>
-                </button>
-              </div>
+                    <path d={allExpanded ? "m8 3 4 4 4-4M8 21l4-4 4 4M5 12h14" : "m8 7 4-4 4 4M8 17l4 4 4-4M5 12h14"} />
+                  </UiIcon>
+                </IconButton>
+              )}
             </div>
             <div className="min-h-0 flex-1 overflow-auto p-1.5">
               {!headings.length && (
                 <p className="p-2 text-xs text-ink-soft">暂无章节</p>
               )}
-              {tree.map((h, i) => {
-                if (h.ancestors.some((parent) => !isExpanded(parent)))
-                  return null;
-                const active =
-                  section === i ||
-                  (tree[section]?.ancestors.includes(i) && !isExpanded(i));
-                return (
-                  <div
-                    key={`${h.line}-${i}`}
-                    className={`flex items-center rounded ${active ? "bg-selected text-ink" : "text-ink-soft hover:bg-surface-hover"}`}
-                    style={{ paddingLeft: `${h.depth * 10}px` }}
-                  >
-                    {h.branch ? (
-                      <button
-                        type="button"
-                        className="flex size-5 shrink-0 items-center justify-center rounded hover:bg-hover"
-                        aria-label={`${isExpanded(i) ? "折叠" : "展开"} ${h.title}`}
-                        aria-expanded={isExpanded(i)}
-                        onClick={() => toggle(i)}
-                      >
-                        {isExpanded(i) ? (
-                          <ChevronDownIcon className="size-3" />
-                        ) : (
-                          <ChevronRightIcon className="size-3" />
-                        )}
-                      </button>
-                    ) : (
-                      <span className="w-5 shrink-0" />
-                    )}
-                    <button
-                      type="button"
-                      title={h.title}
-                      aria-current={section === i ? "location" : undefined}
-                      className={`min-w-0 flex-1 truncate py-1.5 pr-2 text-left ${h.level === 1 ? "text-[14px] font-semibold" : h.level === 2 ? "text-[13px] font-medium" : "text-[12px] font-normal"}`}
-                      onClick={() => jump(i)}
-                    >
-                      {h.title}
-                    </button>
-                  </div>
-                );
-              })}
+              {roots.map(renderBranch)}
             </div>
-          </nav>
-        )}
+          </nav>}
+        </CollapsibleTreePane>
         {outline && (
           <div
             ref={outlineSeparator}
@@ -502,7 +498,7 @@ export function FileDocumentTools({
             aria-valuemax={560}
             aria-valuenow={preferredWidth}
             tabIndex={0}
-            title="拖拽调整大纲宽度，双击恢复默认"
+            data-hint="拖拽调整大纲宽度，双击恢复默认"
             className={`group relative w-px shrink-0 touch-none bg-line outline-none before:absolute before:inset-y-0 before:-left-1 before:w-[9px] before:cursor-col-resize before:content-[''] after:pointer-events-none after:absolute after:inset-y-2 after:-left-px after:w-0.5 after:rounded-full after:bg-ink-subtlest/50 after:opacity-0 hover:after:opacity-100 focus-visible:after:opacity-100 ${resizingOutline ? "cursor-col-resize after:opacity-100" : ""}`}
             onPointerDown={(event) => {
               if (event.button !== 0) return;
@@ -571,10 +567,91 @@ export function FileDocumentTools({
             }}
           />
         )}
-        <div ref={content} className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {children}
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          <div ref={content} className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {children}
+          </div>
+          {open && (
+            <FindBar
+              label="文件查找"
+              placeholder="搜索当前文件"
+              query={query}
+              matchCount={matchCount}
+              activeIndex={activeIndex}
+              onQueryChange={setQuery}
+              onPrevious={() => move(-1)}
+              onNext={() => move(1)}
+              onClose={closeFind}
+              inputRef={input}
+              enterNavigates
+              actions={editorFind && editorMatches && (
+                <div className="flex shrink-0 items-center gap-0.5 border-l border-line pl-1.5">
+                  <button
+                    type="button"
+                    aria-expanded={replaceOpen}
+                    className={`${findActionClass} px-1.5 text-ui-caption`}
+                    onClick={() => setReplaceOpen((expanded) => !expanded)}
+                  >
+                    替换
+                  </button>
+                  <IconButton iconSize="compact"
+                    type="button"
+                    aria-label="更多查找选项"
+                    data-hint="更多查找选项"
+                    aria-haspopup="menu"
+                    aria-expanded={!!menu && !menu.closing}
+                    className={findActionClass}
+                    onClick={(event) => {
+                      const bounds = event.currentTarget.getBoundingClientRect();
+                      openMenu("markdown-find", "更多查找选项", [
+                        ...markdownFindOptions.map(({ key, label }) => ({
+                          id: key,
+                          label,
+                          checked: editorMatches.query[key],
+                          onSelect: () => editorFind.setQuery({ [key]: !editorMatches.query[key] }),
+                        })),
+                        { type: "separator" },
+                        { id: "select-matches", label: "选中全部匹配", disabled: !matchCount, onSelect: editorFind.selectAll },
+                      ], { x: bounds.right, y: bounds.bottom, side: "bottom", align: "end" });
+                    }}
+                  >
+                    <EllipsisIcon className="ui-icon-14" />
+                  </IconButton>
+                </div>
+              )}
+            >
+              {editorFind && editorMatches && replaceOpen && (
+                <div className="flex min-h-9 items-center gap-1.5 border-t border-line px-2">
+                  <input
+                    aria-label="替换为"
+                    placeholder="替换为"
+                    className={findFieldClass}
+                    value={editorMatches.query.replace}
+                    onChange={(event) => editorFind.setQuery({ replace: event.target.value })}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" || event.nativeEvent.isComposing || !matchCount) return;
+                      event.preventDefault();
+                      editorFind.replace(false);
+                    }}
+                  />
+                  <button type="button" disabled={!matchCount} className={`${findActionClass} px-1.5 text-ui-caption`}
+                    onClick={() => editorFind.replace(false)}>
+                    替换当前
+                  </button>
+                  <button type="button" disabled={!matchCount} className={`${findActionClass} px-1.5 text-ui-caption`}
+                    onClick={() => editorFind.replace(true)}>
+                    全部替换
+                  </button>
+                </div>
+              )}
+            </FindBar>
+          )}
         </div>
       </div>
+      {open && editorFind && menu && (
+        <ContextMenu entries={menu.entries} placement={menu.placement} label={menu.label}
+          closing={menu.closing} onDismiss={dismissMenu} />
+      )}
     </div>
   );
 }

@@ -11,11 +11,11 @@ const prompt =
 
 async function startNewSession(): Promise<void> {
   await evaluate(
-    `document.querySelector("button[aria-label='新建会话']")?.click()`,
+    `(()=>{if(!document.querySelector("div[aria-label='新建会话面板']"))document.querySelector("button[aria-label='新建会话']")?.click();})()`,
   );
   await sleep(300);
   const clicked = await evaluate(
-    `(()=>{const panel=document.querySelector("div[aria-label='新建会话面板']");const project=panel?.querySelector("button[title]");if(!project)return false;project.click();return true;})()`,
+    `(()=>{const panel=document.querySelector("div[aria-label='新建会话面板']");const project=panel?.querySelector("[aria-label='选择项目开始新会话'] button");if(!project)return false;project.click();return true;})()`,
   );
   assert.equal(clicked, true);
   await sleep(4000);

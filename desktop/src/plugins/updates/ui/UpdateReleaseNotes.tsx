@@ -19,7 +19,7 @@ export function ReleaseNotes({
           {date.replace(/^(\d+)-(\d+)-(\d+)$/, "$1年$2月$3日")}
         </time>
       ) : null}
-      <div className="max-h-72 overflow-y-auto overscroll-contain border-t border-line pt-3 [overflow-wrap:anywhere] [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm">
+      <div className="max-h-72 overflow-y-auto overscroll-contain border-t border-line pt-3 [overflow-wrap:anywhere] [&_h1]:text-ui-lg [&_h2]:text-sm [&_h3]:text-sm">
         <MarkdownView
           text={release.notes.trim() || "新版本已准备就绪，暂无详细更新说明。"}
           onOpenExternal={openExternal}
@@ -130,7 +130,7 @@ export function UpdateReleaseNotes({
             onFocus={clearTimer}
             onBlur={blur}
             onClick={(event) => event.stopPropagation()}
-            className="fixed z-[60] flex w-96 max-w-[calc(100vw-32px)] flex-col overflow-y-auto rounded-xl border border-line-strong bg-surface p-4 text-ink shadow-elev-3"
+            className="fixed z-[60] flex w-96 max-w-[calc(100vw-32px)] flex-col overflow-y-auto rounded-xl border border-line-strong bg-surface p-4 text-ink shadow-floating"
             style={{
               ...position,
               maxHeight: `calc(100vh - ${position.top + 16}px)`,

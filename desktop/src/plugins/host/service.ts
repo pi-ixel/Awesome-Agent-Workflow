@@ -4,6 +4,8 @@ import type {
   AcpTransport,
   AcpTransportLaunchOptions,
   AccountHost,
+  CodeAgentCreditResult,
+  CodeAgentTokenResult,
   DesktopWindowHost,
   DiagnosticsHost,
   DocumentFileHost,
@@ -20,6 +22,7 @@ import type {
   PtyNativeHost,
   SkillFiles,
   UpdatesHost,
+  WorkflowEngineHost,
 } from "./types.ts";
 
 import type {} from "cordis";
@@ -53,6 +56,12 @@ export interface HostService {
   readonly process: ProcessRunner;
   readonly skills: SkillFiles;
   readonly account: AccountHost;
+  readCodeAgentCredit(): Promise<CodeAgentCreditResult>;
+  readCodeAgentTokenQuota(modelId?: string): Promise<CodeAgentTokenResult>;
   readonly updates: UpdatesHost;
+  readonly workflowEngine: WorkflowEngineHost;
 }
 export { AcpWriteError } from "./process/transportErrors.ts";
+export { openWindowRequests } from "./storage/windowRequests.ts";
+export { desktopManagedStorage, flushNativeConfiguration, loadNativeConfiguration, nativeConfigurationStatus,
+  nativeConversationTextStatus, webviewStorage } from "./storage/storage.ts";

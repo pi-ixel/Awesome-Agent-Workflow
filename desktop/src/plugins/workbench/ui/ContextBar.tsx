@@ -1,10 +1,11 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { useWorkbenchUiValue, useRightPanelValue, readRightPanel, useWorkbenchLayout } from "./bindings/layoutView.ts";
 import { emptyPanel } from "../layout/rightPanelStore.ts";
 import { useContext } from "react";
 import { useWorkbenchEntries, WorkbenchContext } from "./bindings/react.ts";
 import { useWorkbenchBasePage } from "./bindings/pages.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
-import { useHintTooltip } from "../../../shared/ui/controls/HintTooltip.tsx";
+import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
 import { useHeaderMenu } from "../../../shared/ui/useHeaderMenu.ts";
 import { CircleHelpIcon, PanelRightCloseIcon, PanelRightOpenIcon } from "../../../shared/ui/icons.tsx";
@@ -14,7 +15,7 @@ import { HeaderIndicators } from "./HeaderIndicators.tsx";
 import { WindowControls } from "./WindowControls.tsx";
 
 const BAR_BUTTON_CLASS =
-  "flex size-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink";
+  "flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink";
 
 function HelpMenuButton() {
   const items = useWorkbenchEntries("helpItems");
@@ -23,7 +24,7 @@ function HelpMenuButton() {
 
 function HelpMenu({ items }: { readonly items: WorkbenchSnapshot["helpItems"] }) {
   const workbench = useContext(WorkbenchContext);
-  const hint = useHintTooltip("帮助");
+  const hint = hintTooltipProps("帮助");
   const { menu, open, dismiss } = useHeaderMenu();
   // closing 态（退场动画中）视作已关：aria-expanded 翻 false，触发器
   // 再点即重开（open 已清挂起的退场计时器）
@@ -31,14 +32,14 @@ function HelpMenu({ items }: { readonly items: WorkbenchSnapshot["helpItems"] })
   const entries = items.map((item) => ({
     id: item.id,
     label: item.label,
-    icon: item.Icon && <item.Icon className="h-4 w-4" />,
+    icon: item.Icon && <item.Icon className="ui-icon-16" />,
     onSelect: () => {
       if (workbench?.getSnapshot().helpItems.includes(item)) item.run();
     },
   }));
   return (
     <>
-      <button
+      <IconButton
         type="button"
         data-testid="help-menu-button"
         aria-label="帮助"
@@ -65,8 +66,8 @@ function HelpMenu({ items }: { readonly items: WorkbenchSnapshot["helpItems"] })
         }}
         className={BAR_BUTTON_CLASS}
       >
-        <CircleHelpIcon className="h-4 w-4" />
-      </button>
+        <CircleHelpIcon className="ui-icon-16" />
+      </IconButton>
       {isOpen && menu !== null && (
         <ContextMenu
           entries={entries}
@@ -82,11 +83,11 @@ function HelpMenu({ items }: { readonly items: WorkbenchSnapshot["helpItems"] })
 
 function DockToggle({ id, launcher }: { id: string; launcher: WorkbenchLauncher }) {
   const { label, Icon } = launcher;
-  const hint = useHintTooltip(label);
+  const hint = hintTooltipProps(label);
   const open = useWorkbenchUiValue((state) => state.openDock === id);
   const toggle = useWorkbenchUiValue((state) => state.toggleDock);
   return (
-    <button
+    <IconButton
       type="button"
       data-testid={`${id}-toggle`}
       aria-label={label}
@@ -95,8 +96,8 @@ function DockToggle({ id, launcher }: { id: string; launcher: WorkbenchLauncher 
       {...hint}
       className={`${BAR_BUTTON_CLASS}${open ? " bg-selected" : ""}`}
     >
-      <Icon className="h-4 w-4" />
-    </button>
+      <Icon className="ui-icon-16" />
+    </IconButton>
   );
 }
 
@@ -105,7 +106,7 @@ function DockToggle({ id, launcher }: { id: string; launcher: WorkbenchLauncher 
  *  ✕ 收起钮），挂载条件与原 PanelButtons 相同（overlay===null 且已选项目）。 */
 function SidePaneToggle({ project }: { readonly project: string }) {
   const workbenchLayout = useWorkbenchLayout();
-  const hint = useHintTooltip("展开侧工具栏 / 收起侧工具栏");
+  const hint = hintTooltipProps("展开侧工具栏 / 收起侧工具栏");
   const panel = useRightPanelValue(
     (state) => state.projects[pathKey(project)] ?? emptyPanel,
   );
@@ -122,7 +123,7 @@ function SidePaneToggle({ project }: { readonly project: string }) {
     }
   };
   return (
-    <button
+    <IconButton
       type="button"
       data-testid="side-pane-toggle"
       aria-label="展开/收起侧工具栏"
@@ -131,8 +132,8 @@ function SidePaneToggle({ project }: { readonly project: string }) {
       {...hint}
       className={BAR_BUTTON_CLASS}
     >
-      <Icon className="h-4 w-4" />
-    </button>
+      <Icon className="ui-icon-16" />
+    </IconButton>
   );
 }
 
@@ -143,11 +144,13 @@ function SidePaneToggle({ project }: { readonly project: string }) {
  */
 export function ContextBar() {
   const basePage = useWorkbenchBasePage();
-  const overlay = useWorkbenchUiValue((state) => state.overlay);
+  const overlay = useWorkbenchUiValue((state) => state.overlay === "settings" ? null : state.overlay);
   const sidebarCollapsed = useWorkbenchUiValue(
     (state) => state.sidebarCollapsed,
   );
   const contextPath = useWorkbenchUiValue((state) => state.contextPath);
+  const sidebarId = useWorkbenchUiValue((state) => state.sidebarId);
+  const sidebarPage = useWorkbenchEntries("sidebar").find((entry) => entry.id === sidebarId && entry.WorkArea);
   const header = useWorkbenchEntries("headers").find(({ id }) => id === basePage?.id);
   const collapsedActions = useWorkbenchEntries("collapsedHeaderActions");
   const docks = useWorkbenchEntries("docks");
@@ -158,7 +161,7 @@ export function ContextBar() {
     <header
       data-testid="workspace-header"
       aria-label="上下文条"
-      className={`@container/workspace-header relative flex w-full shrink-0 bg-base ${overlay === "settings" ? "rounded-t-xl" : "border-b border-border/50"}`}
+      className="@container/workspace-header relative flex w-full shrink-0 bg-base border-b border-border/50"
     >
       <div
         className="flex h-12 min-w-0 flex-1 items-center justify-between gap-2 overflow-hidden p-2"
@@ -171,27 +174,29 @@ export function ContextBar() {
             {sidebarCollapsed && (
               <>
                 <SidebarToggle collapsed={true} />
-                {collapsedActions.map(({ id, View }) => (
+                {!sidebarPage && collapsedActions.map(({ id, View }) => (
                   <View key={id} project={contextPath} />
                 ))}
                 <HeaderIndicators compact />
               </>
             )}
-            {Title && contextPath !== null && <Title project={contextPath} />}
+            {sidebarPage
+              ? <span className="truncate text-ui-base font-semibold">{sidebarPage.label}</span>
+              : Title && contextPath !== null && <Title project={contextPath} />}
           </div>
         )}
         <div className="flex shrink-0 items-center gap-0.5">
           <HelpMenuButton />
-          {overlay === null && docks.map(({ id, launcher }) =>
+          {overlay === null && !sidebarPage && docks.map(({ id, launcher }) =>
             launcher && <DockToggle key={id} id={id} launcher={launcher} />,
           )}
-          {overlay === null && contextPath !== null && (
+          {overlay === null && !sidebarPage && contextPath !== null && (
             <SidePaneToggle project={contextPath} />
           )}
           <WindowControls />
         </div>
       </div>
-      {overlay === null && Banner && contextPath !== null && (
+      {overlay === null && !sidebarPage && Banner && contextPath !== null && (
         <Banner project={contextPath} />
       )}
     </header>

@@ -27,6 +27,10 @@ export function createChrysAgentAdapter(loggerFactory?: LoggerFactory): AgentAda
   return {
     maxConcurrentRequests: 5,
     id: "chrys",
+    skillLibrary: "icode",
+    slashSkillSource: "session",
+    turnUsageBasis: "prompt-total",
+    sessionUsageCachePrefix: "aaw-desktop/icode-usage/",
     settingsDefaults: icodeSettingsDefaults,
     migrateSettings: migrateICodeSettings,
     initializeConfiguration: initializeICodeConfiguration,
@@ -47,6 +51,7 @@ export function createChrysAgentAdapter(loggerFactory?: LoggerFactory): AgentAda
       };
     },
     displayName: "iCode",
+    promptUsage: { accounting: "turn" },
     buildLaunch(context) {
       const program = context.executablePath?.trim() || "icode";
       return {

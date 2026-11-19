@@ -36,6 +36,7 @@ const empty: WorkbenchSnapshot = {
   exitDetails: [],
   sidebar: [],
   accessGates: [],
+  activityRailActions: [],
   sidebarFooters: [],
   startup: [],
   about: [],
@@ -147,6 +148,7 @@ export class DesktopWorkbench implements WorkbenchService {
       subscribe: this.subscribe,
       register: this.register.bind(this),
       registerExit: this.registerExit.bind(this),
+      getExitWork: this.getExitWork.bind(this),
       hasExitWork: this.hasExitWork.bind(this),
       requestExit: this.requestExit.bind(this),
     };
@@ -259,6 +261,9 @@ export class DesktopWorkbench implements WorkbenchService {
 
   registerExit(participant: ExitParticipant): () => void {
     return this.exit.registerExit(participant);
+  }
+  getExitWork(reason: ExitReason): readonly string[] {
+    return this.exit.getExitWork(reason);
   }
   hasExitWork(reason: ExitReason): boolean {
     return this.exit.hasExitWork(reason);

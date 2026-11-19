@@ -1,3 +1,4 @@
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import type { PanelTab } from "../../layout/types.ts";
 import type { PanelTabPresentation } from "../../types.ts";
 import {
@@ -45,11 +46,11 @@ import {
 
 /** 完整视图对话 tab（ZCode ConversationTab.tsx:17-38 类串，token 换 desktop）。 */
 const CONVERSATION_TAB_CLASS =
-  "group relative inline-flex h-7 max-w-60 shrink-0 items-center justify-start gap-1.5 overflow-hidden whitespace-nowrap rounded-lg border px-1.5 pr-2 text-ui-base font-medium transition-colors outline-none cursor-default border-transparent bg-transparent text-ink-subtle hover:text-ink hover:bg-hover data-active:bg-selected data-active:text-ink focus-visible:ring-[3px] focus-visible:ring-info/50";
+  "group relative inline-flex h-7 max-w-60 shrink-0 items-center justify-start gap-1.5 overflow-hidden whitespace-nowrap rounded-lg border px-1.5 pr-2 text-ui-base font-medium transition-colors outline-none cursor-default border-transparent bg-transparent text-ink-subtle hover:text-ink hover:bg-hover data-active:bg-selected data-active:text-ink focus-visible:ring-[3px] focus-visible:ring-focus-ring";
 
 /** tab 触发器根类串（ZCode SidePaneTabTrigger.tsx:144-155，token 换 desktop）。 */
 const TAB_TRIGGER_CLASS =
-  "group relative inline-flex h-7 min-w-15 max-w-39 flex-[1_1_9.75rem] items-center justify-start gap-1 overflow-hidden whitespace-nowrap rounded-lg border px-1.5 pr-2 text-ui-base font-medium transition-colors outline-none cursor-default border-transparent bg-transparent text-ink-subtle hover:text-ink hover:bg-hover data-active:bg-selected data-active:text-ink focus-visible:ring-[3px] focus-visible:ring-info/50";
+  "group relative inline-flex h-7 min-w-15 max-w-39 flex-[1_1_9.75rem] items-center justify-start gap-1 overflow-hidden whitespace-nowrap rounded-lg border px-1.5 pr-2 text-ui-base font-medium transition-colors outline-none cursor-default border-transparent bg-transparent text-ink-subtle hover:text-ink hover:bg-hover data-active:bg-selected data-active:text-ink focus-visible:ring-[3px] focus-visible:ring-focus-ring";
 
 /** tab 标题行：向 × 区域 8px 渐隐防重叠（ZCode :240-247 原文）。 */
 const TAB_CONTENT_CLASS =
@@ -57,7 +58,7 @@ const TAB_CONTENT_CLASS =
 
 /** ×关闭钮（ZCode :164-184；基色 text-ink 对齐 ghost text-foreground 100%）。 */
 const TAB_CLOSE_CLASS =
-  "absolute right-1 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-ink transition-opacity hover:bg-hover hover:text-ink";
+  "absolute right-1 top-1/2 flex -translate-y-1/2 items-center justify-center rounded-md text-ink transition-opacity hover:bg-hover hover:text-ink";
 
 const EMPTY_MASK_EDGES = { left: false, right: false } as const;
 
@@ -137,7 +138,7 @@ function PanelTabTrigger({
         tabIndex={0}
         data-side-pane-tab-id={tab.id}
         data-active={active ? "" : undefined}
-        title={tooltip ?? title}
+        data-hint={tooltip ?? title}
         className={`${TAB_TRIGGER_CLASS}${
           isDragged ? " relative z-50 bg-selected! shadow-lg will-change-transform" : ""
         }${
@@ -175,8 +176,8 @@ function PanelTabTrigger({
         <span
           className={`${TAB_CONTENT_CLASS} ${
             active
-              ? "[--tab-fade-offset:1.25rem]"
-              : "[--tab-fade-offset:0px] group-hover:[--tab-fade-offset:1.25rem] group-focus-within:[--tab-fade-offset:1.25rem]"
+              ? "[--tab-fade-offset:1.5rem]"
+              : "[--tab-fade-offset:0px] group-hover:[--tab-fade-offset:1.5rem] group-focus-within:[--tab-fade-offset:1.5rem]"
           }`}
         >
           <span className="flex size-4 shrink-0 items-center justify-center">
@@ -189,14 +190,14 @@ function PanelTabTrigger({
             </span>
           )}
         </span>
-        <button
+        <IconButton iconSize="compact"
           type="button"
           aria-label={`关闭 ${title}`}
           className={`${TAB_CLOSE_CLASS}${
-            active
-              ? ""
-              : " pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
-          }`}
+ active
+ ? ""
+ : " pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+ }`}
           onPointerDown={(event) => {
             event.stopPropagation();
           }}
@@ -206,8 +207,8 @@ function PanelTabTrigger({
             close();
           }}
         >
-          <XIcon className="size-3" />
-        </button>
+          <XIcon className="ui-icon-12" />
+        </IconButton>
       </div>
       {menu && (
         <ContextMenu
@@ -494,7 +495,7 @@ export function PanelTabStrip({
     [applyTabDrag, project, workbenchLayout],
   );
   const plusButton = (
-    <button
+    <IconButton
       type="button"
       aria-label="新增标签"
       data-side-pane-add-trigger=""
@@ -505,8 +506,8 @@ export function PanelTabStrip({
         store.openNewTab(project);
       }}
     >
-      <PlusIcon className="size-4" />
-    </button>
+      <PlusIcon className="ui-icon-16" />
+    </IconButton>
   );
   const maskClass = overflowing
     ? maskEdges.left && maskEdges.right
@@ -544,7 +545,7 @@ export function PanelTabStrip({
               type="button"
               data-testid="full-view-conversation-tab"
               data-active={fullView.surface === "conversation" ? "" : undefined}
-              title="对话"
+              data-hint="对话"
               className={CONVERSATION_TAB_CLASS}
               onClick={() => {
                 const store = readRightPanel(workbenchLayout);
@@ -553,7 +554,7 @@ export function PanelTabStrip({
                 else store.fullViewOpen(project, "conversation");
               }}
             >
-              <MessageCircleIcon className="size-4 shrink-0" />
+              <MessageCircleIcon className="ui-icon-16 shrink-0" />
               <span className="min-w-0 truncate">对话</span>
             </button>
           </div>
@@ -616,7 +617,7 @@ export function PanelTabStrip({
             important 压过 ghost 的 hover:bg-hover）） */}
         <div className="ml-auto flex h-full shrink-0 items-center gap-1 px-2">
           {overflowing && plusButton}
-          <button
+          <IconButton
             type="button"
             data-testid="full-view-toggle"
             aria-label={fullView ? "退出完整视图" : "进入完整视图"}
@@ -630,19 +631,19 @@ export function PanelTabStrip({
             }}
           >
             {fullView ? (
-              <Minimize2Icon className="size-4" />
+              <Minimize2Icon className="ui-icon-16" />
             ) : (
-              <Maximize2Icon className="size-4" />
+              <Maximize2Icon className="ui-icon-16" />
             )}
-          </button>
-          <button
+          </IconButton>
+          <IconButton
             type="button"
             aria-label="关闭右栏"
             className={`${GHOST_ICON_MD} bg-selected!`}
             onClick={() => readRightPanel(workbenchLayout).collapse(project)}
           >
-            <PanelRightCloseIcon className="size-4" />
-          </button>
+            <PanelRightCloseIcon className="ui-icon-16" />
+          </IconButton>
         </div>
       </div>
     </div>

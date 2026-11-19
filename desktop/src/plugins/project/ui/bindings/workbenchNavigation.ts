@@ -11,7 +11,6 @@ export function createProjectViewNavigation(
   project: Pick<ProjectService, "projects" | "sessions" | "isActive">,
   options: {
     readonly isCurrent: () => boolean;
-    readonly readSkillSource?: () => string;
     readonly openFileTree: (path: string) => void;
   },
 ) {
@@ -30,7 +29,7 @@ export function createProjectViewNavigation(
   return {
     commands: {
       page: page.snapshot,
-      addProject: () => addProjectViaDialog(project, layout, options.readSkillSource, isActive),
+      addProject: () => addProjectViaDialog(project, layout, isActive),
       showOverview,
       showConversation: (path: string) => {
         if (isActive()) project.sessions.showConversation(path);

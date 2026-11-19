@@ -7,7 +7,7 @@ type BrowserMcpStatus = Awaited<
   ReturnType<HostService["browser"]["mcpStatus"]>
 >;
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
-import { btnDanger, btnSecondary } from "../../../shared/ui/controls.tsx";
+import { btnSecondary, DangerButton } from "../../../shared/ui/controls.tsx";
 
 export interface BrowserToolRecoveryProps {
   readonly host: HostService["browser"];
@@ -96,8 +96,7 @@ function BrowserToolRecoverySession({
   const needsRecovery =
     enabled === true &&
     (mcpStatus === "revoked" ||
-      (runtimeKnown &&
-        (!hasBrowserTools || mcpStatus === "not_bound")));
+      (runtimeKnown && (!hasBrowserTools || mcpStatus === "not_bound")));
 
   return (
     <>
@@ -167,7 +166,7 @@ function BrowserToolRecoverySession({
               }}
             >
               <div className="p-5">
-                <h2 className="text-lg font-semibold text-ink">
+                <h2 className="text-ui-lg font-semibold text-ink">
                   重连并恢复浏览器工具？
                 </h2>
                 <p className="my-4 rounded-lg border border-danger-line bg-danger-bg p-3 text-sm leading-relaxed text-danger-ink">
@@ -176,15 +175,14 @@ function BrowserToolRecoverySession({
                 <div className="flex justify-end gap-2">
                   <button
                     type="button"
-                    className={`${btnSecondary} h-9 px-4 text-sm`}
+                    className={`${btnSecondary} min-h-9 px-4 text-sm`}
                     disabled={recovering}
                     onClick={() => setConfirming(false)}
                   >
                     取消
                   </button>
-                  <button
-                    type="button"
-                    className={`${btnDanger} h-9 px-4 text-sm`}
+                  <DangerButton
+                    className="min-h-9 px-4 text-sm"
                     disabled={recovering}
                     onClick={() => {
                       setRecovering(true);
@@ -197,7 +195,7 @@ function BrowserToolRecoverySession({
                     }}
                   >
                     {recovering ? "正在重连" : "确认重连"}
-                  </button>
+                  </DangerButton>
                 </div>
               </div>
             </ModalShell>,

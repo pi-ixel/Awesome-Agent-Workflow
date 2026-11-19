@@ -1,12 +1,26 @@
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import type { SessionItem } from "../types.ts";
 import type { SkillsService } from "../../../skills/service.ts";
 import type { GitService } from "../../../git/service.ts";
 import type { GitReviewNavigation } from "../../../git/types.ts";
-import type { WorkflowView } from "../../../workflow/types.ts";
-import { useSessionValue, useApprovalValue, useConversation } from "../../ui/bindings/conversationView.ts";
+import type { ProjectExtension, ProjectSlashEntry } from "../../ui/extension.ts";
+import { useRightPanelSliding } from "../../../workbench/service.ts";
+import {
+  useSessionValue,
+  useApprovalValue,
+  useConversation,
+} from "../../ui/bindings/conversationView.ts";
 import { useProjectComposer } from "../../ui/bindings/composerView.ts";
-import { useWorkspaceCommands, useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
-import { useProjectNavigation, useProjectPage, useProjectPageValue, useProjectView } from "../../ui/bindings/projectView.tsx";
+import {
+  useWorkspaceCommands,
+  useWorkspaceValue,
+} from "../../ui/bindings/workspaceView.ts";
+import {
+  useProjectNavigation,
+  useProjectPage,
+  useProjectPageValue,
+  useProjectView,
+} from "../../ui/bindings/projectView.tsx";
 import type { ConversationDocumentView } from "./documentView.ts";
 import { useRegisteredSnapshot } from "../../../../shared/state/useRegisteredSnapshot.ts";
 import type { ProjectService, ProjectWorkspace } from "../../service.ts";
@@ -16,7 +30,7 @@ import { ElicitationDock } from "../../interactions/ui/ElicitationModal.tsx";
 import { ArchiveNotice } from "../../ui/ArchiveNotice.tsx";
 import { ReconnectButton } from "./ReconnectButton.tsx";
 import { useConnectionIntro } from "./useConnectionIntro.ts";
-import { ConversationFindBar } from "./ConversationFindBar.tsx";
+import { FindBar } from "../../../../shared/ui/controls/FindBar.tsx";
 import {
   buildConversationFindIndex,
   normalizeConversationFindQuery,
@@ -130,6 +144,15 @@ const SessionItemView = memo(function SessionItemView({
       return <ToolCallCard item={item} />;
     case "plan":
       return <PlanCard item={item} />;
+    case "compaction":
+      return (
+        <div role="note" data-item-kind="compaction" data-item-id={item.id}
+          className="flex items-center justify-center gap-2 text-xs text-ink-faint">
+          <span className="h-px w-6 bg-line" />
+          上下文已压缩
+          <span className="h-px w-6 bg-line" />
+        </div>
+      );
     case "system":
       return <SystemNotice item={item} />;
   }
@@ -161,44 +184,36 @@ function greetingOfHour(hour: number): string {
   return "晚上好";
 }
 
-/** 空会话草稿态问候字号钳制（ZCode ConversationDraftEmptyState 20-30px）。 */
+/** 空会话问候在窄列收缩至 20px，宽列使用共享标题字号。 */
 const DRAFT_GREETING_MIN_FONT_SIZE_PX = 20;
-const DRAFT_GREETING_MAX_FONT_SIZE_PX = 30;
 
 function resolveDraftGreetingFontSizePx(
   availableWidthPx: number,
   naturalTextWidthPx: number,
-): number {
+  naturalFontSizePx: number,
+): number | undefined {
   if (
     !Number.isFinite(availableWidthPx) ||
     !Number.isFinite(naturalTextWidthPx) ||
     availableWidthPx <= 0 ||
     naturalTextWidthPx <= 0 ||
+    !Number.isFinite(naturalFontSizePx) ||
     availableWidthPx >= naturalTextWidthPx
   ) {
-    return DRAFT_GREETING_MAX_FONT_SIZE_PX;
+    return undefined;
   }
   return Math.max(
     DRAFT_GREETING_MIN_FONT_SIZE_PX,
-    Math.min(
-      DRAFT_GREETING_MAX_FONT_SIZE_PX,
-      Math.floor(
-        DRAFT_GREETING_MAX_FONT_SIZE_PX *
-          (availableWidthPx / naturalTextWidthPx),
-      ),
-    ),
+    Math.floor(naturalFontSizePx * (availableWidthPx / naturalTextWidthPx)),
   );
 }
 
 /** 空会话的 hero（ZCode ConversationDraftEmptyState 式空态）：大 logo 水印
- * 垫底（底部渐隐）、品牌名独立行、时段问候大字（20-30px 按容器宽度自适应，
- * 30px 原始文案实测宽 vs 容器可用宽）。
+ * 垫底（底部渐隐）、品牌名独立行、时段问候按共享标题字号和容器宽度自适应。
  * 入口 chips 不在这里——它们跟随输入区渲染（见 DraftPromptChips）。 */
 function EmptyPrompts() {
   const greeting = `${greetingOfHour(new Date().getHours())}，今天想推进什么？`;
-  const [greetingFontSizePx, setGreetingFontSizePx] = useState(
-    DRAFT_GREETING_MAX_FONT_SIZE_PX,
-  );
+  const [greetingFontSizePx, setGreetingFontSizePx] = useState<number>();
   const greetingContainerRef = useRef<HTMLHeadingElement | null>(null);
   const greetingMeasureRef = useRef<HTMLSpanElement | null>(null);
 
@@ -220,10 +235,14 @@ function EmptyPrompts() {
         container.getBoundingClientRect().width - horizontalPaddingPx,
       );
       const naturalTextWidthPx = measurement.getBoundingClientRect().width;
+      const naturalFontSizePx = Number.parseFloat(
+        getComputedStyle(measurement).fontSize,
+      );
       setGreetingFontSizePx((current) => {
         const next = resolveDraftGreetingFontSizePx(
           availableWidthPx,
           naturalTextWidthPx,
+          naturalFontSizePx,
         );
         return current === next ? current : next;
       });
@@ -267,9 +286,11 @@ function EmptyPrompts() {
         ref={greetingContainerRef}
         className="draft-greeting-title"
         style={
-          {
-            "--draft-greeting-font-size": `${greetingFontSizePx}px`,
-          } as CSSProperties
+          greetingFontSizePx === undefined
+            ? undefined
+            : ({
+                "--draft-greeting-font-size": `${greetingFontSizePx}px`,
+              } as CSSProperties)
         }
       >
         <span
@@ -285,40 +306,27 @@ function EmptyPrompts() {
   );
 }
 
+const NO_EXTENSION_ENTRIES: readonly ProjectSlashEntry[] = [];
+
 /** 空态常用入口 chips：渲染在居中输入区下方（ZCode 式空态的呈现顺序：
- * 问候 → 输入框 → chips）。点击预填输入框，过目可改，再自己发送。 */
+ * 问候 → 输入框 → chips）。文字类 chip 预填输入框，过目可改，再自己发送；
+ * 扩展给的快捷动作直接执行（如工作流：有进行中的运行时去看它，否则去启动）。 */
 function DraftPromptChips({
-  currentSr,
+  quickAction,
   widthClass,
 }: {
-  readonly currentSr: string | null;
+  readonly quickAction: { readonly label: string; readonly run: () => void } | null;
   readonly widthClass: string;
 }) {
   const composer = useProjectComposer();
-  const prompts =
-    currentSr !== null
-      ? [
-          {
-            label: `汇报 ${currentSr} 进度`,
-            text: `请汇报 ${currentSr} 工作流的当前进度与下一步安排。`,
-          },
-          { label: "介绍这个项目", text: "请介绍当前项目的结构与主要功能。" },
-          {
-            label: "梳理可继续的事项",
-            text: "请根据当前项目状态，梳理可以继续推进的事项。",
-          },
-        ]
-      : [
-          {
-            label: "启动一条工作流",
-            text: "请从 sr 入口新建一条 AAW 工作流，先与我确认需求。",
-          },
-          { label: "介绍这个项目", text: "请介绍当前项目的结构与主要功能。" },
-          {
-            label: "梳理可继续的事项",
-            text: "请根据当前项目状态，梳理可以继续推进的事项。",
-          },
-        ];
+  const prompts: readonly { label: string; text?: string; run?: () => void }[] = [
+    ...(quickAction ? [{ label: quickAction.label, run: quickAction.run }] : []),
+    { label: "介绍这个项目", text: "请介绍当前项目的结构与主要功能。" },
+    {
+      label: "梳理可继续的事项",
+      text: "请根据当前项目状态，梳理可以继续推进的事项。",
+    },
+  ];
   return (
     <div
       className={`mx-auto flex w-full flex-wrap items-center justify-center gap-2 ${widthClass}`}
@@ -329,7 +337,8 @@ function DraftPromptChips({
           type="button"
           style={{ animationDelay: `${index * 60}ms` }}
           onClick={() => {
-            composer?.prefill(prompt.text);
+            if (prompt.run) prompt.run();
+            else if (prompt.text) composer?.prefill(prompt.text);
           }}
           className="chip-in lift press rounded-full border border-line-strong bg-surface px-3.5 py-1.5 text-xs text-ink-mute shadow-elev-1 hover:border-ink-faint hover:text-ink"
         >
@@ -340,24 +349,35 @@ function DraftPromptChips({
   );
 }
 
+function readVisibleMessageAnchor(scroll: HTMLElement) {
+  const top = scroll.getBoundingClientRect().top;
+  for (const item of scroll.querySelectorAll<HTMLElement>("[data-item-id]")) {
+    const rect = item.getBoundingClientRect();
+    if (rect.bottom > top && rect.height > 0) return { item, offset: top - rect.top };
+  }
+  return null;
+}
+
 export function SessionView({
   fileCandidates,
   ownsFindShortcut,
   skillCandidates,
+  resolveSlashSkills,
   queryGit,
   openGitReview,
   watchActivity,
-  workflow,
+  extension,
   openDiagnostics,
   openArchiveSettings,
 }: {
   readonly fileCandidates?: ConversationDocumentView["fileCandidates"];
   readonly ownsFindShortcut?: ConversationDocumentView["ownsFindShortcut"];
   readonly skillCandidates?: SkillsService["candidates"];
+  readonly resolveSlashSkills?: SkillsService["resolveSlashSkills"];
   readonly queryGit?: GitService["query"];
   readonly openGitReview?: GitReviewNavigation["open"];
   readonly watchActivity?: ProjectWorkspace["subscribeWorkspaceActivity"];
-  readonly workflow?: WorkflowView;
+  readonly extension?: ProjectExtension;
   readonly openDiagnostics?: () => void;
   readonly openArchiveSettings?: () => void;
 }) {
@@ -365,27 +385,39 @@ export function SessionView({
   const page = useProjectPage();
   const projectView = useProjectView();
   const project = projectView?.project;
-  const WorkflowTimeline = workflow?.timeline.View;
-  const { sendPrompt, enqueuePrompt, requestCancel, retryLastPrompt, clearTurnError } =
-    useSessionCommands();
+  const rightPanelSliding = useRightPanelSliding();
+  const ExtensionSessionBanner = extension?.SessionBanner;
+  const {
+    sendPrompt,
+    enqueuePrompt,
+    steerPrompt,
+    requestCancel,
+    retryLastPrompt,
+    clearTurnError,
+  } = useSessionCommands();
   const foreground = useConversation();
   const composer = useProjectComposer();
   const foregroundSession = foreground?.session;
   const foregroundApproval = foreground?.approval;
-  const items = useSessionValue((state) => state.items);
+  const items = useSessionValue((state) => state.historyPreview?.items ?? state.items);
   const isAgentRunning = useSessionValue((state) => state.isAgentRunning);
   const turnState = useSessionValue((state) => state.turnState);
+  const isAwaitingUser = useSessionValue((state) => state.isAwaitingUser);
   const {
     preferences,
-    values: { messageStreamShowTodos: showPlans, chatWidth },
+    values: { messageStreamShowTodos: showPlans, messageStreamMode, chatWidth },
   } = useProjectPreferences();
   const activeSessionId = useSessionValue((state) => state.activeSessionId);
   const agentKey = useSessionValue((state) => state.agentKey);
+  const hasCumulativePromptUsage = useSessionValue(
+    (state) => state.hasCumulativePromptUsage,
+  );
   const openingSessionId = useSessionValue((state) => state.openingSessionId);
   // 挂起计数：有挂起的审批/提问时不再展示「会话为空」空态，
   // 否则与「会话中」标签及弹出的审批模态自相矛盾（04-approval 评审项）。
   const pendingCount = useApprovalValue((state) => state.pending.length);
   const isConnecting = useSessionValue((state) => state.isConnecting);
+  const pendingModelId = useSessionValue((state) => state.pendingModelId);
   const isDraftPreparing = useSessionValue((state) => state.isDraftPreparing);
   const draftError = useSessionValue((state) => state.lastError);
   const recovery = useSessionValue((state) => state.recovery);
@@ -396,7 +428,18 @@ export function SessionView({
   // 项目已关闭（activePath 落空）时的空态改为「重新打开项目」入口
   const openWorkspace = useWorkspaceCommands()?.openWorkspace;
   const contextPath = useProjectPageValue((state) => state.contextPath);
-  const currentSr = useRegisteredSnapshot(workflow?.status, (state) => state?.currentSr ?? null);
+  const extensionAction = useRegisteredSnapshot(
+    extension?.quickAction,
+    (state) => state ?? null,
+  );
+  const extensionEntries = useRegisteredSnapshot(
+    extension?.slashEntries,
+    (state) => state ?? NO_EXTENSION_ENTRIES,
+  );
+  const quickAction =
+    extensionAction && contextPath
+      ? { label: extensionAction.label, run: () => extensionAction.run(contextPath) }
+      : null;
   // ZCode 式空态居中：无消息且无挂起审批/提问时，问候与输入区作为一组
   // 垂直居中；首条消息落地（items.length > 0）即回落贴底布局——composer
   // 始终在 footer 槽位同一位置渲染，只改外层容器类，不重挂。
@@ -458,11 +501,15 @@ export function SessionView({
     const count = findIndex.matchCount;
     const nextIndex = (findActiveIndex + direction + count) % count;
     setFindActiveIndex(nextIndex);
-    const match = findIndex.matches[nextIndex];
-    if (match && scrollRef.current) {
-      scrollFindMatchIntoView(scrollRef.current, match.itemId);
-    }
   }
+
+  // 折叠的过程会在激活命中后展开，等 DOM 更新再定位。
+  const findActiveItemId = findActiveMatch?.itemId;
+  useEffect(() => {
+    if (findOpen && findActiveItemId && scrollRef.current) {
+      scrollFindMatchIntoView(scrollRef.current, findActiveItemId);
+    }
+  }, [findOpen, findActiveItemId, findActiveIndex, messageStreamMode]);
 
   // Ctrl/Cmd+F 全局打开查找；Esc 关闭（capture 相位先于回合取消的 Esc
   // 处理器，查找开着时 Esc 归查找）
@@ -511,7 +558,7 @@ export function SessionView({
     return () => {
       clearFindHighlights();
     };
-  }, [findOpen, findQuery, findActiveIndex, findIndex, findMatchedItemIds]);
+  }, [findOpen, findQuery, findActiveIndex, findIndex, findMatchedItemIds, messageStreamMode]);
   const footerRef = useRef<HTMLDivElement | null>(null);
   // 消息流的原生滚动条占位也同步给底部，标准/宽/全宽均沿同一边界居中。
   useLayoutEffect(() => {
@@ -556,6 +603,12 @@ export function SessionView({
   // 前插锚：补载 / 渐进挂载批之前的「scrollHeight - scrollTop」，渲染后按它
   // 平移 scrollTop（前插不顶飞视口；跟随中值为 0 → 即贴底）。
   const prependAnchorRef = useRef<number | null>(null);
+  const panelScrollRef = useRef<{
+    viewport: HTMLElement;
+    width: number;
+    scope: string;
+    anchor: ReturnType<typeof readVisibleMessageAnchor>;
+  } | null>(null);
   // 最近一次已账目的可见布局：折叠思考/工具的分片也更新 items 但不改可见
   // 高度——布局未变时不重复写 scrollTop，不打断贴底阈值内的阅读位置。
   const lastAnchorLayoutRef = useRef<{
@@ -608,15 +661,8 @@ export function SessionView({
   );
   const [buildTurns] = useState(createConversationTurns);
   const visibleTurns = useMemo(
-    () =>
-      buildTurns(
-        items,
-        visibleCount,
-        isAgentRunning,
-        turnState,
-        showPlans,
-      ),
-    [buildTurns, items, visibleCount, isAgentRunning, turnState, showPlans],
+    () => buildTurns(items, visibleCount, isAgentRunning, turnState, showPlans, hasCumulativePromptUsage),
+    [buildTurns, items, visibleCount, isAgentRunning, turnState, showPlans, hasCumulativePromptUsage],
   );
 
   // 渐进上屏追赶循环：每帧多挂一批回合，直到窗口内全部就绪。流式新回合
@@ -655,7 +701,7 @@ export function SessionView({
     [queryBuilder, items, isAgentRunning],
   );
   // 只让内部内容列留位，主滚动视口始终延伸到悬浮卡右边。
-  const columnInsetClass = `pr-[var(--session-card-inset,0px)] ${queries.length >= 2 ? "@min-[864px]/conversation:pl-7" : ""}`;
+  const queryRailInset = queries.length >= 2 ? "@min-[864px]/conversation:pl-7" : "";
   const syncActiveQuery = useCallback((): void => {
     const scroll = scrollRef.current;
     if (!scroll) return;
@@ -754,7 +800,7 @@ export function SessionView({
       if ((foregroundApproval?.getState().pending.length ?? 0) > 0) {
         return;
       }
-      if (page?.getState().overlayOpen || workflow?.timeline.isExpanded()) {
+      if (page?.getState().overlayOpen) {
         return;
       }
       event.preventDefault();
@@ -764,7 +810,7 @@ export function SessionView({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isAgentRunning, requestCancel, foregroundApproval, page, workflow]);
+  }, [isAgentRunning, requestCancel, foregroundApproval, page]);
 
   // 内容变化统一锚定（ZCode ConversationTimeline 同款）：条目追加、补载
   // 前插、渐进挂载批都汇到这里——
@@ -862,6 +908,36 @@ export function SessionView({
     return () => observer.disconnect();
   }, [markLayoutScrollGuard, markProgrammaticScroll]);
 
+  // The right panel holds the old chat width until the slide ends. Anchor the
+  // single width change before paint, using the current follow/reading state.
+  useLayoutEffect(() => {
+    const viewport = scrollRef.current;
+    if (!viewport) return;
+    if (rightPanelSliding) {
+      panelScrollRef.current = {
+        viewport, scope, width: viewport.clientWidth,
+        anchor: followingRef.current ? null : readVisibleMessageAnchor(viewport),
+      };
+      return;
+    }
+    const previous = panelScrollRef.current;
+    panelScrollRef.current = null;
+    if (!previous || previous.scope !== scope || previous.viewport !== viewport ||
+      previous.width === viewport.clientWidth) return;
+    markLayoutScrollGuard();
+    const anchor = previous.anchor;
+    if (followingRef.current) {
+      markProgrammaticScroll();
+      viewport.scrollTop = viewport.scrollHeight;
+    } else if (anchor && viewport.contains(anchor.item)) {
+      const rect = anchor.item.getBoundingClientRect();
+      markProgrammaticScroll();
+      viewport.scrollTop += rect.top - viewport.getBoundingClientRect().top +
+        Math.min(anchor.offset, Math.max(0, rect.height - 1));
+    }
+    lastObservedScrollTopRef.current = viewport.scrollTop;
+  }, [rightPanelSliding, scope, markLayoutScrollGuard, markProgrammaticScroll]);
+
   // 滚动区为两侧滚动条槽预留空间；停靠区同步实际槽宽，统一内容列基准。
   useLayoutEffect(() => {
     const scroll = scrollRef.current;
@@ -916,6 +992,10 @@ export function SessionView({
         },
       }),
     );
+    const panelScroll = panelScrollRef.current;
+    if (panelScroll?.viewport === element) {
+      panelScroll.anchor = followingRef.current ? null : readVisibleMessageAnchor(element);
+    }
     if (
       prependAnchorRef.current === null &&
       shouldLoadOlder(element.scrollTop, items.length - visibleCount)
@@ -942,18 +1022,22 @@ export function SessionView({
     commitFollowing(true);
   };
 
-  const runRecoveryCommand = (run: (service: ProjectService) => Promise<unknown>) => {
+  const runRecoveryCommand = (
+    run: (service: ProjectService) => Promise<unknown>,
+  ) => {
     if (!projectView?.isActive() || !foregroundSession) return;
     const { activeSessionId, agentKey } = foregroundSession.getState();
-    void Promise.resolve().then(() => {
-      if (projectView.isActive()) return run(projectView.project);
-    }).catch((error: unknown) => {
-      if (projectView.isActive())
-        projectView.project.conversation.reportCommandFailure(
-          { workspacePath: activePath, sessionId: activeSessionId, agentKey },
-          String(error),
-        );
-    });
+    void Promise.resolve()
+      .then(() => {
+        if (projectView.isActive()) return run(projectView.project);
+      })
+      .catch((error: unknown) => {
+        if (projectView.isActive())
+          projectView.project.conversation.reportCommandFailure(
+            { workspacePath: activePath, sessionId: activeSessionId, agentKey },
+            String(error),
+          );
+      });
   };
 
   return (
@@ -964,10 +1048,12 @@ export function SessionView({
       >
         <ArchiveNotice openSettings={openArchiveSettings} />
         <ScopedErrorBoundary
-          scope="流程时间线"
-          resetKey={contextPath ?? "none"}
+          scope="工作流节点信息"
+          resetKey={`${contextPath ?? "none"}:${activeSessionId ?? ""}`}
         >
-          {WorkflowTimeline && <WorkflowTimeline />}
+          {ExtensionSessionBanner && contextPath && activeSessionId && (
+            <ExtensionSessionBanner project={contextPath} sessionId={activeSessionId} />
+          )}
         </ScopedErrorBoundary>
         {isDraftPreparing ? (
           <div
@@ -976,7 +1062,7 @@ export function SessionView({
           >
             <span className={draftError ? "text-danger-ink" : ""}>
               {draftError ??
-                "正在连接 agent，可先编辑草稿，连接就绪后即可发送。"}
+                "正在准备会话，可先编辑草稿，就绪后即可选择模型并发送。"}
             </span>
             {draftError && contextPath ? (
               <button
@@ -1013,15 +1099,18 @@ export function SessionView({
             {recovery.state === "reconnecting" ? (
               <button
                 type="button"
-                className={`${btnSecondary} h-8 px-3 text-sm`}
+                className={`${btnSecondary} min-h-8 px-3 text-sm`}
                 onClick={() => {
-                  const { activeSessionId, agentKey } = foregroundSession?.getState() ?? {};
+                  const { activeSessionId, agentKey } =
+                    foregroundSession?.getState() ?? {};
                   if (activePath && activeSessionId && agentKey)
-                    runRecoveryCommand((service) => service.sessions.stopRecovery({
-                      workspacePath: activePath,
-                      sessionId: activeSessionId,
-                      agentKey,
-                    }));
+                    runRecoveryCommand((service) =>
+                      service.sessions.stopRecovery({
+                        workspacePath: activePath,
+                        sessionId: activeSessionId,
+                        agentKey,
+                      }),
+                    );
                 }}
               >
                 停止重试
@@ -1029,9 +1118,10 @@ export function SessionView({
             ) : (
               <button
                 type="button"
-                className={`${btnSecondary} h-8 px-3 text-sm`}
+                className={`${btnSecondary} min-h-8 px-3 text-sm`}
                 onClick={() => {
-                  if (activePath) void project?.sessions.startNewSession(activePath);
+                  if (activePath)
+                    void project?.sessions.startNewSession(activePath);
                 }}
               >
                 新建会话继续
@@ -1051,11 +1141,14 @@ export function SessionView({
               type="button"
               onClick={() => {
                 if (activePath !== null) {
-                  const sessionId = foregroundSession?.getState().activeSessionId;
-                  runRecoveryCommand((service) => service.sessions.openSession(activePath, {
-                    sessionId: sessionId ?? undefined,
-                    listOnly: sessionId == null,
-                  }));
+                  const sessionId =
+                    foregroundSession?.getState().activeSessionId;
+                  runRecoveryCommand((service) =>
+                    service.sessions.openSession(activePath, {
+                      sessionId: sessionId ?? undefined,
+                      listOnly: sessionId == null,
+                    }),
+                  );
                 }
               }}
               className={
@@ -1082,7 +1175,7 @@ export function SessionView({
           queryGit={queryGit}
           openGitReview={openGitReview}
           watchActivity={watchActivity}
-          workflow={workflow}
+          extension={extension}
           project={contextPath}
           enabled={
             !!activeSessionId &&
@@ -1102,18 +1195,18 @@ export function SessionView({
               }
               className={isCenteredEmpty ? "mb-auto shrink-0" : "shrink-0"}
             >
-              <div className={columnInsetClass}>
+              <div className={queryRailInset}>
                 <div className="relative">
                   {!isFollowing && items.length > 0 ? (
-                    <button
+                    <IconButton
                       type="button"
                       onClick={backToBottom}
                       aria-label="回到底部"
-                      title="回到底部"
-                      className="absolute bottom-full left-1/2 z-30 mb-2 flex h-7 w-7 -translate-x-1/2 items-center justify-center rounded-full border border-line-strong bg-surface text-ink shadow-sm transition-colors hover:bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info"
+                      data-hint="回到底部"
+                      className="absolute bottom-full left-1/2 z-30 mb-2 flex -translate-x-1/2 items-center justify-center rounded-full border border-line-strong bg-surface text-ink shadow-sm transition-colors hover:bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                     >
-                      <ArrowDownIcon className="h-4 w-4" />
-                    </button>
+                      <ArrowDownIcon className="ui-icon-16" />
+                    </IconButton>
                   ) : null}
                   {turnError !== null && !isAgentRunning ? (
                     <div className="px-5">
@@ -1130,7 +1223,7 @@ export function SessionView({
                         </span>
                         <span
                           className="min-w-0 flex-1 truncate text-xs text-ink-mute"
-                          title={turnError.message}
+                          data-hint={turnError.message}
                         >
                           {turnError.message}
                         </span>
@@ -1147,7 +1240,9 @@ export function SessionView({
                           type="button"
                           className="rounded-md border border-line-strong px-2.5 py-1 text-xs font-medium text-ink hover:bg-raised"
                           onClick={() => {
-                            const last = [...(foregroundSession?.getState().items ?? [])]
+                            const last = [
+                              ...(foregroundSession?.getState().items ?? []),
+                            ]
                               .reverse()
                               .find((item) => item.kind === "user");
                             if (last?.kind === "user")
@@ -1169,14 +1264,14 @@ export function SessionView({
                             打开设置
                           </button>
                         ) : null}
-                        <button
+                        <IconButton iconSize="compact"
                           type="button"
                           aria-label="关闭错误提示"
                           onClick={clearTurnError}
-                          className="rounded p-1.5 text-ink-faint hover:text-ink"
+                          className="rounded text-ink-faint hover:text-ink"
                         >
-                          <XIcon className="h-3 w-3" />
-                        </button>
+                          <XIcon className="ui-icon-12" />
+                        </IconButton>
                       </div>
                     </div>
                   ) : null}
@@ -1190,26 +1285,33 @@ export function SessionView({
                       {/* 结构化问答：不弹窗、不遮会话——回答所需上下文就在上方 */}
                       <QuestionDock />
                       <ElicitationDock />
-                      {/* 排队消息：运行中「稍后发送」，取消/出错后挂起等放行 */}
-                      <QueueDock />
                     </SessionDock>
                     <ChatInput
+                      queue={<QueueDock />}
                       fileCandidates={fileCandidates}
                       skillCandidates={skillCandidates}
-                      workflowEntries={workflow?.entries}
+                      resolveSlashSkills={resolveSlashSkills}
+                      skillWorkspace={contextPath ?? activePath}
+                      extensionEntries={extensionEntries}
+                      extensionGroup={extension?.slashGroup}
                       openDiagnostics={openDiagnostics}
                       isAgentRunning={isAgentRunning}
                       disabled={isConnecting && !isDraftPreparing}
-                      sendDisabled={isDraftPreparing || isConnecting}
+                      sendDisabled={
+                        isDraftPreparing ||
+                        isConnecting ||
+                        pendingModelId !== null
+                      }
                       onSend={sendPrompt}
                       onEnqueue={enqueuePrompt}
+                      onSteer={steerPrompt}
                       onCancel={requestCancel}
                     />
                   </div>
                   {showDraftChips ? (
                     <div className="mt-3 px-4">
                       <DraftPromptChips
-                        currentSr={currentSr}
+                        quickAction={quickAction}
                         widthClass={widthClass}
                       />
                     </div>
@@ -1221,13 +1323,13 @@ export function SessionView({
           topLeft={
             <>
               {/* 宽度切换：钉在会话区左上角（外层定位容器），三档循环（标准 / 宽 / 全宽），档位持久化 */}
-              <button
+              <IconButton iconSize="compact"
                 type="button"
                 aria-label={`内容宽度：${
                   chatWidthOptions.find((option) => option.value === chatWidth)
                     ?.label ?? "标准"
                 }`}
-                title={`内容宽度：${
+                data-hint={`内容宽度：${
                   chatWidthOptions.find((option) => option.value === chatWidth)
                     ?.label ?? "标准"
                 }（点击切换为${
@@ -1237,20 +1339,22 @@ export function SessionView({
                 onClick={() => {
                   preferences?.setChatWidth(nextWidth);
                 }}
-                className="absolute left-3 top-2 z-10 rounded-md border border-line bg-surface/80 p-1 text-ink-faint backdrop-blur transition-colors hover:border-ink-faint hover:text-ink-soft"
+                className="absolute left-3 top-2 z-10 rounded-md border border-line bg-surface/80 text-ink-faint backdrop-blur transition-colors hover:border-ink-faint hover:text-ink-soft"
               >
                 {chatWidth === "wide" ? (
-                  <WidthWideIcon className="h-3.5 w-3.5" />
+                  <WidthWideIcon className="ui-icon-14" />
                 ) : chatWidth === "full" ? (
-                  <WidthFullIcon className="h-3.5 w-3.5" />
+                  <WidthFullIcon className="ui-icon-14" />
                 ) : (
-                  <WidthStandardIcon className="h-3.5 w-3.5" />
+                  <WidthStandardIcon className="ui-icon-14" />
                 )}
-              </button>
+              </IconButton>
               {/* 会话查找浮层（Ctrl/Cmd+F）：浮在消息流顶部居中（ZCode
                TaskFindDialog chat 放置同位）；查找状态在本组件持有 */}
               {findOpen ? (
-                <ConversationFindBar
+                <FindBar
+                  label="查找"
+                  placeholder="搜索消息..."
                   query={findQuery}
                   matchCount={findIndex.matchCount}
                   activeIndex={resolveConversationFindActiveIndex(
@@ -1357,7 +1461,7 @@ export function SessionView({
           >
             <div
               ref={messageColumnRef}
-              className={`@container/conversation min-h-full [overflow-anchor:none] ${columnInsetClass} ${showConnectionIntro ? "grid place-items-center" : ""}`}
+              className={`@container/conversation min-h-full [overflow-anchor:none] ${queryRailInset} ${showConnectionIntro ? "grid place-items-center" : ""}`}
             >
               <ScopedErrorBoundary
                 scope="消息流"
@@ -1411,6 +1515,17 @@ export function SessionView({
                         <li key={turn.id}>
                           <ConversationTurnView
                             turn={turn}
+                            collapseHistory={messageStreamMode === "conclusion"}
+                            revealHistory={
+                              messageStreamMode === "conclusion" &&
+                              findOpen &&
+                              findActiveMatch !== null &&
+                              turn.history.some((item) => item.id === findActiveMatch.itemId)
+                            }
+                            workGroupShimmerPaused={
+                              turn.running &&
+                              (turnState !== "running" || isAwaitingUser)
+                            }
                             renderItem={renderSessionItem}
                           />
                         </li>

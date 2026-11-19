@@ -1,3 +1,5 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { useEffect } from "react";
 import { ArchiveIcon, XIcon } from "../../../shared/ui/icons.tsx";
 import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
 
@@ -6,17 +8,26 @@ import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapsh
 export function ArchiveNotice({ openSettings }: { readonly openSettings?: () => void }) {
   const project = useProject();
   const archive = useRegisteredSnapshot(project?.sessions.archive, (state) => state);
-  if (!project || !archive?.notice) return null;
-  const { notice } = archive;
+  const notice = archive?.notice;
+  useEffect(() => {
+    if (!project || !notice) return;
+    const timer = setTimeout(() => {
+      // A newer notice must get its own full display time.
+      if (project.sessions.archive.getState().notice === notice)
+        project.sessions.dismissArchiveNotice();
+    }, 15_000);
+    return () => clearTimeout(timer);
+  }, [project, notice]);
+  if (!project || !notice) return null;
   const { dismissArchiveNotice: dismiss, unarchiveSession: unarchive } =
     project.sessions;
   return (
     <aside
       role="status"
       aria-label="归档提示"
-      className="toast-in absolute left-1/2 top-4 z-40 flex max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink shadow-elev-2"
+      className="toast-in absolute left-1/2 top-4 z-40 flex max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink shadow-floating"
     >
-      <ArchiveIcon className="size-4 shrink-0 text-ink-mute" />
+      <ArchiveIcon className="ui-icon-16 shrink-0 text-ink-mute" />
       <span>已归档的聊天</span>
       <button
         type="button"
@@ -30,21 +41,21 @@ export function ArchiveNotice({ openSettings }: { readonly openSettings?: () => 
       </button>
       <button
         type="button"
-        className={`rounded-full bg-ink px-2 py-0.5 font-medium text-base hover:bg-ink/85 ${focusVisibleRing}`}
+        className={`rounded-full bg-ink px-2 py-0.5 font-medium text-(color:--color-base) hover:bg-ink/85 ${focusVisibleRing}`}
         onClick={() =>
           unarchive(notice.workspacePath, notice.sessionId, notice.agentKey)
         }
       >
         撤销
       </button>
-      <button
+      <IconButton iconSize="compact"
         type="button"
         aria-label="关闭归档提示"
-        className={`rounded p-1 text-ink-mute hover:bg-hover ${focusVisibleRing}`}
+        className={`rounded text-ink-mute hover:bg-hover ${focusVisibleRing}`}
         onClick={dismiss}
       >
-        <XIcon className="size-3" />
-      </button>
+        <XIcon className="ui-icon-12" />
+      </IconButton>
     </aside>
   );
 }

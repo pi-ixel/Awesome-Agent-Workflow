@@ -1,9 +1,11 @@
+import { IconButton } from "../IconButton.tsx";
 /**
  * Markdown 图片(移植自 ZCode components/ai-elements/markdown-image.tsx,
  * 按 desktop 裁剪:无 artifact 引用通道;本地文件经 Tauri asset 协议加载;
  * 加载/失败占位卡、点击全屏预览(0.5–3x 缩放 / 拖拽平移 / 画廊翻页 / 下载)、
  * 连续图片合组画廊)。
  */
+import { UiIcon } from "../UiIcon.tsx";
 import {
   Children,
   isValidElement,
@@ -110,39 +112,37 @@ export function MarkdownImageParagraph({
 function ImagePlaceholderIcon({ failed }: { readonly failed: boolean }) {
   if (failed) {
     return (
-      <svg
+      <UiIcon
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
         strokeWidth={1.8}
         strokeLinecap="round"
         strokeLinejoin="round"
-        aria-hidden={true}
-        className="size-6"
+        className="ui-icon-24"
       >
         <path d="M18 6 6 18" />
         <path d="m6 6 12 12" />
         <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
         <circle cx="9" cy="9" r="2" />
         <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
-      </svg>
+      </UiIcon>
     );
   }
   return (
-    <svg
+    <UiIcon
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
       strokeWidth={1.8}
       strokeLinecap="round"
       strokeLinejoin="round"
-      aria-hidden={true}
-      className="size-6"
+      className="ui-icon-24"
     >
       <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
       <circle cx="9" cy="9" r="2" />
       <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
-    </svg>
+    </UiIcon>
   );
 }
 
@@ -153,15 +153,14 @@ function PreviewGlyphIcon({
   readonly kind: "left" | "right" | "plus" | "minus";
 }) {
   return (
-    <svg
+    <UiIcon
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
       strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
-      aria-hidden={true}
-      className="size-5"
+      className="ui-icon-20"
     >
       {kind === "left" ? <path d="m15 18-6-6 6-6" /> : null}
       {kind === "right" ? <path d="m9 18 6-6-6-6" /> : null}
@@ -172,7 +171,7 @@ function PreviewGlyphIcon({
         </>
       ) : null}
       {kind === "minus" ? <path d="M5 12h14" /> : null}
-    </svg>
+    </UiIcon>
   );
 }
 
@@ -678,28 +677,28 @@ export function ImagePreviewDialog({
     >
       {hasMultiple ? (
         <>
-          <button
+          <IconButton iconSize="large"
             type="button"
             aria-label="上一张"
-            className="absolute left-4 top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-black/50 text-white hover:bg-white/10"
+            className="absolute left-4 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-black/50 text-white hover:bg-white/10"
             onClick={(event) => {
               event.stopPropagation();
               navigate(-1);
             }}
           >
             <PreviewGlyphIcon kind="left" />
-          </button>
-          <button
+          </IconButton>
+          <IconButton iconSize="large"
             type="button"
             aria-label="下一张"
-            className="absolute right-4 top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-black/50 text-white hover:bg-white/10"
+            className="absolute right-4 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-black/50 text-white hover:bg-white/10"
             onClick={(event) => {
               event.stopPropagation();
               navigate(1);
             }}
           >
             <PreviewGlyphIcon kind="right" />
-          </button>
+          </IconButton>
         </>
       ) : null}
       <div
@@ -729,31 +728,31 @@ export function ImagePreviewDialog({
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center gap-1 rounded-full border border-white/20 bg-black/40 px-1 py-0.5">
-          <button
+          <IconButton
             type="button"
             aria-label="缩小"
-            className="flex size-7 items-center justify-center rounded-full text-white hover:bg-white/10 disabled:cursor-default disabled:opacity-40"
+            className="flex items-center justify-center rounded-full text-white hover:bg-white/10 disabled:cursor-default disabled:opacity-40"
             disabled={previewScale <= 0.5}
             onClick={() => {
               changePreviewScale(-0.5);
             }}
           >
             <PreviewGlyphIcon kind="minus" />
-          </button>
+          </IconButton>
           <span className="min-w-12 text-center text-xs text-white">
             {Math.round(previewScale * 100)}%
           </span>
-          <button
+          <IconButton
             type="button"
             aria-label="放大"
-            className="flex size-7 items-center justify-center rounded-full text-white hover:bg-white/10 disabled:cursor-default disabled:opacity-40"
+            className="flex items-center justify-center rounded-full text-white hover:bg-white/10 disabled:cursor-default disabled:opacity-40"
             disabled={previewScale >= 3}
             onClick={() => {
               changePreviewScale(0.5);
             }}
           >
             <PreviewGlyphIcon kind="plus" />
-          </button>
+          </IconButton>
         </div>
         <button
           type="button"
@@ -866,7 +865,7 @@ export function MarkdownImage({
         className={`flex min-h-32 w-full items-center justify-center rounded-xl border border-line bg-surface px-3 py-2 text-center text-sm text-ink-mute md:h-44 md:w-56 md:shrink-0 ${className ?? ""}`}
         data-markdown-local-image="error"
         role="img"
-        title={localAbsolute ?? resolvedSrc}
+        data-hint={localAbsolute ?? resolvedSrc}
       >
         <ImagePlaceholderIcon failed={true} />
       </div>
@@ -884,7 +883,7 @@ export function MarkdownImage({
         className={`flex min-h-32 w-full items-center justify-center rounded-xl border border-line bg-surface px-3 py-2 text-center text-sm text-ink-mute md:h-44 md:w-56 md:shrink-0 ${className ?? ""}`}
         data-markdown-image-state="error"
         role="img"
-        title={localAbsolute ?? resolvedSrc}
+        data-hint={localAbsolute ?? resolvedSrc}
       >
         <ImagePlaceholderIcon failed={true} />
       </div>
@@ -930,7 +929,7 @@ export function MarkdownImage({
           effectiveImageStatus === "loading"
             ? // 加载期定成方形占位且不可点开(cursor-default),画廊父级的
               // 响应式尺寸被 ! 压过,与 ZCode 加载态一致
-              "!h-44 !w-44 !max-w-full cursor-default"
+              "!min-h-44 !w-44 !max-w-full cursor-default"
             : "max-w-1/2 cursor-zoom-in"
         } ${className ?? ""}`}
         data-markdown-image-trigger=""

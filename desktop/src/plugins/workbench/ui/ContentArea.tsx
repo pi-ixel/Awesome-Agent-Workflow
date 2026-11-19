@@ -18,43 +18,49 @@ function ContentArea() {
   const openDock = useWorkbenchUiValue((state) => state.openDock);
   const closeDock = useWorkbenchUiValue((state) => state.closeDock);
   const pages = useWorkbenchEntries("pages");
+  const sidebarId = useWorkbenchUiValue((state) => state.sidebarId);
+  const WorkArea = useWorkbenchEntries("sidebar").find((entry) => entry.id === sidebarId)?.WorkArea;
   const docks = useWorkbenchEntries("docks");
   const Page = basePage?.View;
   const Overlay = pages.find((entry) => entry.id === overlay)?.View;
+  const workspaceVisible = overlay === null || overlay === "settings";
   const page = Page ? <Page project={contextPath} /> : null;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-base">
+      <ContextBar />
       <div
-        className={
-          overlay === "settings"
-            ? "absolute left-64 right-1 top-1 z-10 max-[880px]:left-52"
-            : undefined
-        }
+        hidden={!workspaceVisible || WorkArea !== undefined}
+        className="min-h-0 flex-1 overflow-hidden"
       >
-        <ContextBar />
-      </div>
-      <div hidden={overlay !== null} className="min-h-0 flex-1 overflow-hidden">
-        <PanelWorkspace project={contextPath} enabled={overlay === null}>
+        <PanelWorkspace project={contextPath} enabled={workspaceVisible && WorkArea === undefined}>
           {basePage?.fullView ? (
             <FullViewHost project={contextPath}>{page}</FullViewHost>
-          ) : page}
+          ) : (
+            page
+          )}
         </PanelWorkspace>
       </div>
+      {WorkArea && workspaceVisible && (
+        <div className="min-h-0 flex-1 overflow-auto"><WorkArea project={contextPath} /></div>
+      )}
       {/* 底部面板常驻挂载，插件根据 visible 控制展示。 */}
       {docks.map(({ id, View }) => (
         <View
           key={id}
           project={contextPath}
-          visible={overlay === null && openDock === id}
+          visible={workspaceVisible && WorkArea === undefined && openDock === id}
           close={() => closeDock(id)}
         />
       ))}
-      {Overlay && (
-        <div className="min-h-0 flex-1 overflow-hidden">
+      {Overlay &&
+        (overlay === "settings" ? (
           <Overlay project={contextPath} />
-        </div>
-      )}
+        ) : (
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <Overlay project={contextPath} />
+          </div>
+        ))}
     </div>
   );
 }

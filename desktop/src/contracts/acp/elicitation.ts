@@ -10,7 +10,7 @@ export interface FormField {
   description?: string;
   default?: FormValue | null;
   enum?: string[] | null;
-  oneOf?: { const: string; title?: string }[] | null;
+  oneOf?: { const: string; title?: string; description?: string }[] | null;
   items?: {
     enum?: string[];
     anyOf?: { const: string; title?: string }[];
@@ -26,6 +26,9 @@ export interface FormField {
   maxItems?: number | null;
 }
 export interface ElicitationForm {
+  /** Set only by Acp Runtime, never trusted from the wire. */
+  customAnswerField?: string;
+  customAnswerFields?: readonly string[];
   message: string;
   sessionId?: string;
   requestId?: string | number;

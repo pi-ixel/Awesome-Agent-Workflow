@@ -3,10 +3,12 @@ import type { ProjectPreferenceValues } from "./types.ts";
 export const projectSidebarViewKey = "aaw-desktop/sidebar/view";
 
 export const defaultProjectPreferences: ProjectPreferenceValues = {
+  interactionByAgent: {},
   approvalMode: "ask",
   autoAnswerQuestions: false,
   chatWidth: "standard",
   messageStreamShowTodos: false,
+  messageStreamMode: "process",
   sessionAutoArchiveEnabled: false,
   sessionAutoArchiveOlderThanDays: 30,
 };

@@ -149,3 +149,14 @@ export function decodeAnnotationMessage(raw: string): AnnotationMessage | null {
     return null;
   }
 }
+
+export function mergePromptText(first: string, second: string): string | null {
+  const original = decodeAnnotationMessage(first);
+  const supplement = decodeAnnotationMessage(second);
+  const annotations = [...(original?.annotations ?? []), ...(supplement?.annotations ?? [])];
+  if (annotationLimitError(annotations)) return null;
+  return encodeAnnotationMessage(
+    [original?.text ?? first, supplement?.text ?? second].filter(Boolean).join("\n\n"),
+    annotations,
+  );
+}

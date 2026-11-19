@@ -3,10 +3,8 @@ import { vi } from "vitest";
 import type { ProjectService } from "../../src/plugins/project/service.ts";
 import type { WorkspaceSnapshot, WorkspaceView } from "../../src/plugins/project/types.ts";
 import type { WorkspaceStoreState } from "../../src/plugins/project/workspace/types.ts";
-import { createHostProcessRunner } from "../../src/plugins/host/process/processRunner.ts";
 import { webviewStorage } from "../../src/plugins/host/storage/storage.ts";
 import { createWorkspaceStore, workspaceCommands } from "../../src/plugins/project/workspace/workspaceStore.ts";
-import { runWorkspaceHealthChecks } from "../../src/plugins/workflow/health/healthChecks.ts";
 import { readTestLayout } from "./layout.ts";
 
 const workspaceOwners = vi.hoisted(
@@ -27,10 +25,8 @@ vi.mock(import("../../src/plugins/project/workspace/workspaceStore.ts"), async (
 export function createTestWorkspace() {
   const workspace = createWorkspaceStore(
     webviewStorage,
-    createHostProcessRunner(),
     (resume, path) => readTestLayout().navigationGuard.guard(resume, path),
   );
-  workspace.registerHealthCheck(runWorkspaceHealthChecks);
   return workspace.store;
 }
 

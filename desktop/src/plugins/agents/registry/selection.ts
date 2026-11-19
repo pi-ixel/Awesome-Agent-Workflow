@@ -35,10 +35,11 @@ export function agentSelectionKey(
   state: AgentSelection,
   toolPaths: object,
   adapters = agentAdapters,
+  agentId = state.activeAgentId,
 ): string {
-  const adapter = resolveConfiguredAgent(state, state.activeAgentId, adapters);
+  const adapter = resolveConfiguredAgent(state, agentId, adapters);
   return JSON.stringify([
-    state.activeAgentId,
+    agentId,
     adapter ? buildAgentLaunch(adapter, state, toolPaths, null) : undefined,
   ]);
 }

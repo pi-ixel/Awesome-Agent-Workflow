@@ -1,51 +1,163 @@
-/**
- * 模态外壳：遮罩 + 居中卡片 + Esc 关闭。
- *
- * 供模态层（审批弹窗、结构化问答）复用；审批弹窗（ApprovalModal）自带
- * 遮罩实现保持不动，本外壳服务于问答表单等新弹窗。
- */
-import { useEffect, type ReactNode } from "react";
+/** Shared modal layout, keyboard ownership and focus management. */
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
+
+const ModalDepth = createContext(0);
+const activeModals = new Map<symbol, number>();
+const backgroundLocks = new Map<HTMLElement, number>();
+const focusableSelector =
+  'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
+const panelSizes = {
+  default: "max-h-[85vh] max-w-lg overflow-y-auto rounded-xl",
+  settings:
+    "flex h-[min(800px,calc(100dvh-32px))] max-w-[960px] min-h-0 flex-col overflow-hidden rounded-3xl",
+  form: "flex max-h-[calc(100dvh-32px)] max-w-2xl min-h-0 flex-col overflow-hidden rounded-3xl",
+  preview:
+    "flex h-[min(1000px,87dvh)] max-w-[1200px] min-h-0 flex-col overflow-hidden rounded-3xl",
+} as const;
 
 interface ModalShellProps {
-  /** 无障碍名称（role=dialog 的 aria-label）。 */
   readonly label: string;
-  /** Esc / 点击遮罩时的回调（通常为取消动作）。 */
+  readonly role?: "dialog" | "alertdialog";
+  readonly descriptionId?: string;
+  readonly layer?: "default" | "foreground";
+  readonly size?: keyof typeof panelSizes;
+  readonly dismissOnBackdrop?: boolean;
   readonly onDismiss: () => void;
   readonly children: ReactNode;
 }
 
-export function ModalShell({ label, onDismiss, children }: ModalShellProps) {
+export function ModalShell({
+  label,
+  role = "dialog",
+  descriptionId,
+  layer = "default",
+  size = "default",
+  dismissOnBackdrop = true,
+  onDismiss,
+  children,
+}: ModalShellProps) {
+  const depth = useContext(ModalDepth);
+  const priority = Math.max(depth, layer === "foreground" ? 100 : 50);
+  const card = useRef<HTMLDivElement>(null);
+  const opener = useRef(
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  );
+  const dismiss = useRef(onDismiss);
   useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent): void {
+    dismiss.current = onDismiss;
+  }, [onDismiss]);
+  useEffect(() => {
+    const id = Symbol();
+    activeModals.set(id, priority);
+    const previous = opener.current;
+    const isTop = () =>
+      [...activeModals.entries()].sort((a, b) => a[1] - b[1]).at(-1)?.[0] ===
+      id;
+    const controls = () =>
+      [
+        ...(card.current?.querySelectorAll<HTMLElement>(focusableSelector) ??
+          []),
+      ].filter(
+        (element) =>
+          !element.closest('[hidden], [inert], [aria-hidden="true"]'),
+      );
+    const focusFirst = () => (controls()[0] ?? card.current)?.focus();
+    if (isTop() && !card.current?.contains(document.activeElement))
+      focusFirst();
+    function handleKeyDown(event: KeyboardEvent) {
+      if (!isTop() || event.defaultPrevented) return;
       if (event.key === "Escape") {
-        // preventDefault 标记 Esc 已被模态消费（SessionView 的全局停止让位）
         event.preventDefault();
-        onDismiss();
+        dismiss.current();
+      } else if (event.key === "Tab") {
+        const items = controls();
+        const first = items[0];
+        const last = items.at(-1);
+        if (!first) {
+          event.preventDefault();
+          card.current?.focus();
+        } else if (
+          event.shiftKey &&
+          (document.activeElement === first ||
+            !card.current?.contains(document.activeElement))
+        ) {
+          event.preventDefault();
+          last?.focus();
+        } else if (
+          !event.shiftKey &&
+          (document.activeElement === last ||
+            !card.current?.contains(document.activeElement))
+        ) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    }
+    // Portal siblings are the application surface; nested modal portals remain interactive.
+    const inertElements: HTMLElement[] = [];
+    if (depth === 0) {
+      for (const child of document.body.children) {
+        if (
+          child instanceof HTMLElement &&
+          !child.hasAttribute("data-modal-layer") &&
+          !child.querySelector("[data-modal-layer]") &&
+          (!child.inert || backgroundLocks.has(child))
+        ) {
+          backgroundLocks.set(child, (backgroundLocks.get(child) ?? 0) + 1);
+          child.inert = true;
+          inertElements.push(child);
+        }
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => {
+      activeModals.delete(id);
       window.removeEventListener("keydown", handleKeyDown);
+      for (const element of inertElements) {
+        const remaining = (backgroundLocks.get(element) ?? 1) - 1;
+        if (remaining > 0) backgroundLocks.set(element, remaining);
+        else {
+          backgroundLocks.delete(element);
+          element.inert = false;
+        }
+      }
+      if (previous?.isConnected && !previous.closest("[inert]"))
+        previous.focus();
     };
-  }, [onDismiss]);
+  }, [depth, priority]);
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-      onClick={onDismiss}
-    >
+  return createPortal(
+    <ModalDepth.Provider value={priority + 1}>
       <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={label}
-        className="modal-in max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border border-line-strong bg-surface shadow-elev-3"
-        onClick={(event) => {
-          // 卡片内交互不冒泡成关闭
-          event.stopPropagation();
-        }}
+        data-modal-layer={size}
+        className={`modal-in fixed inset-0 flex items-center justify-center p-4 ${size !== "default" ? "bg-black/25" : "bg-black/60"}`}
+        style={{ zIndex: priority }}
+        onClick={dismissOnBackdrop ? onDismiss : undefined}
       >
-        {children}
+        <div
+          ref={card}
+          tabIndex={-1}
+          role={role}
+          aria-modal="true"
+          aria-label={label}
+          aria-describedby={descriptionId}
+          className={`modal-panel w-full border border-dialog-line bg-surface text-ink shadow-floating outline-none ${panelSizes[size]}`}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {children}
+        </div>
       </div>
-    </div>
+    </ModalDepth.Provider>,
+    document.body,
   );
 }

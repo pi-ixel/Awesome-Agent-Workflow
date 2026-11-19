@@ -1,0 +1,110 @@
+import { act, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it } from "vitest";
+import { WorkbenchContext } from "../../../src/plugins/workbench/ui/bindings/react.ts";
+import SettingsPage from "../../../src/plugins/workbench/ui/SettingsPage";
+import { createTestDesktopRuntime } from "../../helpers/desktopRuntime.ts";
+import {
+  renderSettingsPage,
+  settingsWorkbench,
+  setupSettingsRuntime,
+} from "../../helpers/settingsPageFixture.tsx";
+
+it("设置页随 Cordis 注册项加入和移除动态更新", async () => {
+  const runtime = createTestDesktopRuntime({
+    attachPreloading: () => () => {},
+    close: () => Promise.resolve(),
+  });
+  const { workbench } = await runtime.ready;
+  const { unmount } = render(
+    <WorkbenchContext.Provider value={workbench}>
+      <SettingsPage />
+    </WorkbenchContext.Provider>,
+  );
+  try {
+    expect(screen.queryByRole("tab", { name: "外观" })).not.toBeInTheDocument();
+    let release!: () => void;
+    act(() => {
+      release = workbench.register("settings", {
+        id: "custom",
+        label: "扩展设置",
+        Icon: () => null,
+        View: () => <p>扩展内容</p>,
+      });
+    });
+    await userEvent.click(screen.getByRole("tab", { name: "扩展设置" }));
+    expect(
+      screen.getByRole("tabpanel", { name: "扩展设置" }),
+    ).toHaveTextContent("扩展内容");
+    act(release);
+    expect(
+      screen.queryByRole("tab", { name: "扩展设置" }),
+    ).not.toBeInTheDocument();
+    act(() => {
+      release = workbench.register("settings", {
+        id: "usage-statistics",
+        label: "使用统计",
+        Icon: () => null,
+        HeaderAction: () => <button type="button">统计筛选</button>,
+        View: () => null,
+      });
+    });
+    expect(within(screen.getByRole("group", { name: "数据与统计" }))
+      .getByRole("tab", { name: "使用统计" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "使用统计" }));
+    expect(screen.getByRole("heading", { name: "使用统计" }).parentElement)
+      .toContainElement(screen.getByRole("button", { name: "统计筛选" }));
+    act(release);
+  } finally {
+    unmount();
+    await runtime.shutdown();
+  }
+});
+
+describe("SettingsPage（侧边 Tab 版）", () => {
+  beforeEach(({ onTestFinished }) => setupSettingsRuntime(onTestFinished));
+
+  it("定位到外观中的文件树位置并可立即修改", async () => {
+    settingsWorkbench.navigation.getState().openFileTreeSettings();
+    await renderSettingsPage();
+    expect(screen.getByRole("tab", { name: "外观" })).toHaveAttribute("aria-selected", "true");
+    const position = within(screen.getByRole("group", { name: "文件树位置" }));
+    expect(position.getByRole("button", { name: "右侧" })).toHaveFocus();
+    const left = position.getByRole("button", { name: "左侧" });
+    await userEvent.click(left);
+    expect(left).toHaveAttribute("aria-pressed", "true");
+    expect(settingsWorkbench.appearance.getSnapshot().fileTreePosition).toBe("left");
+  });
+
+  it("语言仅一项可选时呈静态值，不渲染单选项选单（English 预留未下发）", async () => {
+    await renderSettingsPage();
+    expect(screen.getByText("界面语言")).toBeInTheDocument();
+    expect(screen.getByText("中文")).toBeInTheDocument();
+    expect(settingsWorkbench.appearance.getSnapshot().language).toBe("zh-CN");
+    // 伪控件检查：不出现只有一个方向可选的分组按钮
+    expect(
+      screen.queryByRole("group", { name: "界面语言" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("外观分片：切换主题写入 store 并持久化，分段按钮呈按下态", async () => {
+    await renderSettingsPage();
+    const warm = screen.getByRole("button", { name: "暖白" });
+    const dark = screen.getByRole("button", { name: "暗夜" });
+    // 默认暗夜：暗夜呈按下态
+    expect(dark).toHaveAttribute("aria-pressed", "true");
+    expect(warm).toHaveAttribute("aria-pressed", "false");
+
+    await userEvent.click(warm);
+    expect(settingsWorkbench.appearance.getSnapshot().theme).toBe("warm");
+    expect(window.localStorage.getItem("aaw-desktop.settings.v1")).toContain(
+      '"warm"',
+    );
+    expect(warm).toHaveAttribute("aria-pressed", "true");
+    expect(dark).toHaveAttribute("aria-pressed", "false");
+
+    await userEvent.click(dark);
+    expect(settingsWorkbench.appearance.getSnapshot().theme).toBe("dark");
+    expect(dark).toHaveAttribute("aria-pressed", "true");
+  });
+});

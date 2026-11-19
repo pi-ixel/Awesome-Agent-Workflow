@@ -1,6 +1,14 @@
+import { responseWriteObserver } from "../../../contracts/acp/responseWrite.ts";
 import { createStore } from "zustand";
-import { formDefaults, validateForm, type FormViewState, type PendingForm, type ProjectFormState } from "./form.ts";
-import { type ElicitationForm, type FormResponse } from "../../../contracts/acp/elicitation.ts";
+import {
+  formDefaults,
+  validateForm,
+} from "../../acpRuntime/service.ts";
+import type { FormViewState, PendingForm, ProjectFormState } from "./form.ts";
+import {
+  type ElicitationForm,
+  type FormResponse,
+} from "../../../contracts/acp/elicitation.ts";
 import { createSnapshotView } from "../../../shared/state/readonlySnapshot.ts";
 import { createLogger } from "../../../shared/logging/logger.ts";
 
@@ -12,7 +20,6 @@ interface ElicitationState extends ProjectFormState {
   readonly pending: readonly FormEntry[];
   answer(id: string, action: FormResponse["action"]): void;
 }
-
 
 /** One queue per Project Fiber, including connection requests without a session. */
 export function createElicitationQueue(logger = createLogger("acp")) {
@@ -43,11 +50,44 @@ export function createElicitationQueue(logger = createLogger("acp")) {
     },
     answer: (id, action) => {
       const item = get().pending.find((item) => item.id === id);
-      if (!item || (item.stale && action !== "cancel")) return;
+      if (!item || item.submitting || (item.stale && action !== "cancel"))
+        return;
+      if (item.stale) {
+        set(({ pending, activeId }) => ({
+          pending: pending.filter((entry) => entry.id !== id),
+          activeId: activeId === id ? null : activeId,
+        }));
+        return;
+      }
       const result = validateForm(item.form, item.values);
       if (action === "accept" && Object.keys(result.errors).length) return;
       const resolve = resolvers.get(id);
+      if (!resolve) return;
       resolvers.delete(id);
+      if (action === "accept" && (item.form.customAnswerField || item.form.customAnswerFields?.length)) {
+        set({
+          pending: get().pending.map((entry) =>
+            entry.id === id ? { ...entry, submitting: true } : entry,
+          ),
+        });
+        const response: FormResponse = { action, content: result.content };
+        Object.defineProperty(response, responseWriteObserver, {
+          value: (written: boolean) => {
+            if (disposed) return;
+            set({
+              pending: written
+                ? get().pending.filter((entry) => entry.id !== id)
+                : get().pending.map((entry) =>
+                    entry.id === id
+                      ? { ...entry, submitting: false, stale: true }
+                      : entry,
+                  ),
+            });
+          },
+        });
+        resolve(response);
+        return;
+      }
       set({ pending: get().pending.filter((item) => item.id !== id) });
       logger.info("ACP 表单已处理", {
         action,
@@ -142,6 +182,7 @@ export function createElicitationQueue(logger = createLogger("acp")) {
       form: item.form,
       values: item.values,
       stale: item.stale,
+      submitting: item.submitting,
       page: item.page,
       interacted: item.interacted,
       isForeground: item.owner === state.activeOwner,
@@ -156,9 +197,32 @@ export function createElicitationQueue(logger = createLogger("acp")) {
     progressForm: progress,
     editForm: edit,
     activateForm: (id: string) => {
-      store.getState().pending.find((entry) => entry.id === id)?.context?.activate();
+      store
+        .getState()
+        .pending.find((entry) => entry.id === id)
+        ?.context?.activate();
     },
     offer,
+    dismissSession(owner: object, sessionId: string) {
+      if (disposed) return;
+      const { pending, activeId } = store.getState();
+      const dismissed = pending.filter(
+        (item) =>
+          item.owner === owner &&
+          (item.context?.sessionId ?? item.form.sessionId) === sessionId,
+      );
+      if (dismissed.length === 0) return;
+      const ids = new Set(dismissed.map((item) => item.id));
+      for (const id of ids) {
+        const resolve = resolvers.get(id);
+        resolvers.delete(id);
+        resolve?.({ action: "cancel" });
+      }
+      store.setState({
+        pending: pending.filter((item) => !ids.has(item.id)),
+        activeId: activeId && ids.has(activeId) ? null : activeId,
+      });
+    },
     setActiveOwner(activeOwner: object | null) {
       if (!disposed) store.setState({ activeOwner });
     },

@@ -71,11 +71,11 @@ export function NewTabPane({ project }: { readonly project: string }) {
                 key={`${entry.source}:${entry.id}`}
                 type="button"
                 data-new-tab-item={entry.id}
-                className="flex w-full min-w-0 items-center gap-3 rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/50"
+                className="flex w-full min-w-0 items-center gap-3 rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                 onClick={entry.onOpen}
               >
                 <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-surface">
-                  <entry.Icon className="size-6 text-ink-subtle" />
+                  <entry.Icon className="ui-icon-24 text-ink-subtle" />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-ui-base font-semibold text-ink">
@@ -83,7 +83,7 @@ export function NewTabPane({ project }: { readonly project: string }) {
                   </span>
                   <span
                     className="mt-0.5 block truncate text-ui-sm text-ink-subtle"
-                    title={entry.description}
+                    data-hint={entry.description}
                   >
                     {entry.description}
                   </span>

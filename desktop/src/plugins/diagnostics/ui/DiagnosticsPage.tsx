@@ -2,7 +2,8 @@
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import type { DesktopDiagnostics, DiagnosticsTab } from "../lifecycle/diagnostics.ts";
-import { tabActiveClass, tabInactiveClass } from "../../../shared/ui/controls";
+import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
+import { PageHeader } from "../../../shared/ui/PageHeader.tsx";
 import LogView from "./LogView";
 import { PerfHud } from "./PerfHud.tsx";
 import type { ProjectRuntimeDebugEntry } from "../../project/types.ts";
@@ -32,34 +33,20 @@ function DiagnosticsPage({
 
   return (
     <section aria-label="诊断" className="space-y-4">
-      <header>
-        <h2 className="text-lg font-medium text-ink">诊断</h2>
-        <p className="mt-1 text-sm text-ink-faint">
-          运行日志的环形缓冲快照（2000 条，写满覆盖最旧）。
-        </p>
-      </header>
-      <div
-        role="tablist"
-        aria-label="诊断视图"
-        className="flex w-fit gap-1 rounded-lg border border-line bg-surface p-1"
-      >
-        {tabs.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === item.id}
-            onClick={() => diagnostics.selectTab(item.id)}
-            className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-              tab === item.id ? tabActiveClass : tabInactiveClass
-            }`}
-          >
-            {item.count === null
-              ? item.label
-              : `${item.label}（${item.count}）`}
-          </button>
-        ))}
-      </div>
+      <PageHeader
+        title="诊断"
+        description="运行日志的环形缓冲快照（2000 条，写满覆盖最旧）。"
+      />
+      <SegmentedControl
+        tabs
+        groupLabel="诊断视图"
+        value={tab}
+        onChange={(next) => diagnostics.selectTab(next)}
+        options={tabs.map(({ id, label, count }) => ({
+          value: id,
+          label: count === null ? label : `${label}（${count}）`,
+        }))}
+      />
       {tab === "logs" ? (
         <LogView
           logs={diagnostics.logs}

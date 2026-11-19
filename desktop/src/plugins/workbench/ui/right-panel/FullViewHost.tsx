@@ -1,4 +1,8 @@
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import type { PanelFullView } from "../../layout/types.ts";
+import { useLayoutMotion } from "../../../../shared/ui/controls/useLayoutMotion.ts";
+import "./FullViewHost.css";
+import { PageVisibility } from "../../../../shared/ui/PageVisibility.ts";
 import { useRightPanelValue, readRightPanel, useWorkbenchLayout } from "../bindings/layoutView.ts";
 /**
  * 完整视图宿主（ZCode side-pane-full-view/ConversationHost.tsx:412-608 移植）。
@@ -187,7 +191,8 @@ export function FullViewHost({
   const slotElement = useRightPanelSlot();
   return (
     <FullViewHostFrame
-      mode={mode}
+      project={project}
+      targetMode={mode}
       floating={fullView?.floating ?? "collapsed"}
       anchor={fullView?.anchor ?? DEFAULT_FLOATING_ANCHOR}
       slotElement={slotElement}
@@ -206,15 +211,17 @@ export function FullViewHost({
 }
 
 function FullViewHostFrame({
-  mode,
-  floating,
-  anchor,
+  project,
+  targetMode,
+  floating: targetFloating,
+  anchor: targetAnchor,
   slotElement,
   onFloatingChange,
   onAnchorChange,
   children,
 }: {
-  readonly mode: "normal" | "conversation" | "floating";
+  readonly project: string | null;
+  readonly targetMode: "normal" | "conversation" | "floating";
   readonly floating: PanelFullView["floating"];
   readonly anchor: PanelFullView["anchor"];
   readonly slotElement: HTMLElement | null;
@@ -222,6 +229,26 @@ function FullViewHostFrame({
   readonly onAnchorChange: (anchor: PanelFullView["anchor"]) => void;
   readonly children: ReactNode;
 }) {
+  const moving = useLayoutMotion(targetMode, { scope: project });
+  const [presented, setPresented] = useState({
+    mode: targetMode, floating: targetFloating, anchor: targetAnchor,
+  });
+  const crossfade = moving && targetMode !== "conversation" && presented.mode !== "conversation";
+  const leaving = crossfade && presented.mode !== targetMode;
+  const mode = leaving ? presented.mode : targetMode;
+  const floating = leaving ? presented.floating : targetFloating;
+  const anchor = leaving ? presented.anchor : targetAnchor;
+  if (!leaving && (presented.mode !== mode || presented.floating !== floating || presented.anchor !== anchor)) {
+    setPresented({ mode, floating, anchor });
+  }
+  useEffect(() => {
+    if (!leaving) return;
+    // Keep the same chat mounted while its presentation moves to the other surface.
+    const timer = window.setTimeout(() => setPresented({
+      mode: targetMode, floating: targetFloating, anchor: targetAnchor,
+    }), 70);
+    return () => window.clearTimeout(timer);
+  }, [leaving, targetMode, targetFloating, targetAnchor]);
   const rectLogger = useLogger("full-view-debug");
   const hostRef = useRef<HTMLDivElement | null>(null);
   const isFloating = mode === "floating";
@@ -493,6 +520,7 @@ function FullViewHostFrame({
     <div
       ref={hostRef}
       data-testid="full-view-host"
+      data-full-view-motion={crossfade ? (leaving ? "leaving" : "arriving") : undefined}
       data-side-pane-full-view-host={mode}
       data-floating={isFloating ? floating : undefined}
       data-header-visible={headerVisible ? "true" : "false"}
@@ -501,10 +529,10 @@ function FullViewHostFrame({
       onBlurCapture={isFloating ? handleBlurCapture : undefined}
       className={
         mode === "normal"
-          ? "relative h-full w-full"
+          ? "relative h-full w-full overflow-clip"
           : mode === "conversation"
             ? "fixed z-40 flex flex-col"
-            : "fixed z-40 transition-[left,top,width,height] duration-150 ease-out data-[dragging=true]:transition-none"
+            : "pointer-events-auto fixed z-40 motion-safe:transition-[left,top,width,height] duration-150 ease-out data-[dragging=true]:transition-none"
       }
     >
       {isFloating && !isMinimized ? (
@@ -512,7 +540,7 @@ function FullViewHostFrame({
         <div
           data-testid="full-view-drawer"
           data-open={headerVisible ? "true" : "false"}
-          className={`absolute inset-x-0 top-0 h-[var(--side-pane-full-view-drawer-height)] overflow-hidden rounded-2xl border border-border bg-base shadow-lg transition-[height,opacity] duration-150 ease-out ${
+          className={`absolute inset-x-0 top-0 h-[var(--side-pane-full-view-drawer-height)] overflow-hidden rounded-2xl border border-border bg-base shadow-floating transition-[height,opacity] duration-150 ease-out ${
             headerVisible ? "opacity-100" : "pointer-events-none opacity-0"
           }`}
         >
@@ -524,7 +552,7 @@ function FullViewHostFrame({
               // 不挂点击行为，只阻止 mousedown 抢走输入框焦点（:478-480 同款）。
               onMouseDown={(event) => event.preventDefault()}
             >
-              <button
+              <IconButton iconSize="compact"
                 type="button"
                 data-testid="full-view-minimize"
                 aria-label="最小化编辑器"
@@ -533,25 +561,25 @@ function FullViewHostFrame({
               >
                 {/* ZCode MinusIcon（ConversationHost:490）——desktop 既有
                     MinimizeIcon（icons.tsx:184）即 lucide minus 同字形，直接复用 */}
-                <MinimizeIcon className="size-4" />
-              </button>
-              <button
+                <MinimizeIcon className="ui-icon-16" />
+              </IconButton>
+              <IconButton iconSize="compact"
                 type="button"
                 data-testid="full-view-expand"
                 aria-label={expandLabel}
                 aria-expanded={isExpanded}
-                title={expandLabel}
+                data-hint={expandLabel}
                 className={GHOST_ICON_SM}
                 onClick={handleToggleExpanded}
               >
-                <ExpandIcon className="size-4" />
-              </button>
+                <ExpandIcon className="ui-icon-16" />
+              </IconButton>
               <div className="min-w-0 flex-1" />
-              <button
+              <IconButton iconSize="compact"
                 type="button"
                 data-testid="full-view-handle"
                 aria-label="拖动以移动"
-                title="拖动以移动"
+                data-hint="拖动以移动"
                 className={`${GHOST_ICON_SM} cursor-grab touch-none`}
                 onPointerDown={beginDrag}
                 onPointerMove={moveDrag}
@@ -559,18 +587,18 @@ function FullViewHostFrame({
                 onPointerUp={(event) => endDrag(event, () => {})}
                 onPointerCancel={cancelDrag}
               >
-                <GripVerticalIcon className="size-4" />
-              </button>
+                <GripVerticalIcon className="ui-icon-16" />
+              </IconButton>
             </div>
           ) : null}
         </div>
       ) : null}
       {isMinimized ? (
-        <button
+        <IconButton iconSize="floating"
           type="button"
           data-testid="full-view-bubble"
           aria-label="展开编辑器"
-          className="absolute inset-0 z-10 flex cursor-grab touch-none items-center justify-center rounded-full border border-border bg-base shadow-lg hover:bg-hover"
+          className="absolute inset-0 z-10 flex cursor-grab touch-none items-center justify-center rounded-full border border-border bg-base shadow-floating hover:bg-hover"
           onPointerDown={beginDrag}
           onPointerMove={moveDrag}
           onPointerUp={(event) => endDrag(event, handleRestore)}
@@ -582,8 +610,8 @@ function FullViewHostFrame({
             }
           }}
         >
-          <MessageCircleIcon className="size-4 text-ink-subtle" />
-        </button>
+          <MessageCircleIcon className="ui-icon-16 text-ink-subtle" />
+        </IconButton>
       ) : null}
       <div
         data-side-pane-full-view-clip=""
@@ -595,7 +623,7 @@ function FullViewHostFrame({
           (isFloating
             ? " absolute z-10 h-[var(--side-pane-full-view-clip-height)] overflow-hidden"
             : "") +
-          (isFloating && !isExpanded ? " inset-x-0 bottom-0 rounded-2xl shadow-lg" : "") +
+          (isFloating && !isExpanded ? " inset-x-0 bottom-0 rounded-2xl shadow-floating" : "") +
           (isExpanded ? " inset-x-px bottom-px rounded-b-2xl" : "") +
           // 最小化时输入层不可见，但保持浮窗宽度排版，不随 48px 的按钮重排。
           (isMinimized ? " invisible w-[var(--side-pane-full-view-frame-width)]" : "")
@@ -610,7 +638,9 @@ function FullViewHostFrame({
               : "")
           }
         >
-          {children}
+          <PageVisibility.Provider value={!isMinimized}>
+            {children}
+          </PageVisibility.Provider>
         </div>
       </div>
     </div>

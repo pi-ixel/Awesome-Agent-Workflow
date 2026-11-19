@@ -1,3 +1,14 @@
+/** Complete, bounded source evidence. No conversation text crosses this port. */
+export interface HistoryEvidence {
+  readonly version: string;
+  readonly users: readonly {
+    readonly digest: string;
+    readonly bytes: number;
+    readonly compact: boolean;
+    readonly sourceId: string;
+  }[];
+}
+
 import type { LogEntry } from "../../shared/logging/types.ts";
 import type { LoggerFactory } from "../../shared/logging/logger.ts";
 
@@ -68,6 +79,13 @@ export interface HostRuntime {
   readonly kind: "tauri" | "demo";
   /** 用户主目录；旧宿主可不提供，自动探测跳过用户级安装目录。 */
   homeDir?(): Promise<string>;
+  readAgentHistoryEvidence?(agentId: string, sessionId: string, cwd: string): Promise<HistoryEvidence | null>;
+  deleteAgentSession?(
+    agentId: string,
+    program: string,
+    sessionId: string,
+    cwd: string,
+  ): Promise<void>;
   /** 执行外部命令并等待退出（含超时保护）。失败以非零 code / stderr 表达。 */
   runCommand(program: string, args: readonly string[]): Promise<CommandResult>;
   /** 路径是否存在（文件或目录）。 */
@@ -86,15 +104,16 @@ export interface HostRuntime {
    * 打开（或唤起）SSO 登录窗口：首次调用创建 **隐藏** 窗口（给持久
    * cookie 的静默探测留窗口期），再次调用即唤起显示。语义见 sso_login.rs。
    */
-  ssoOpenLogin(loginUrl: string): Promise<void>;
+  ssoOpenLogin(loginUrl: string, attemptId: string): Promise<void>;
   /**
    * 轮询一次登录状态：读 WebView cookie → 有则以 `Cookie` 头调网关带回
    * 响应原文（非 2xx 也原文返回）；`fetched: null` = cookie 未落地；
    * `windowClosed: true` = 用户关闭了登录窗口。响应格式由 SSO 契约定义。
    */
-  ssoPollLogin(endpoint: string): Promise<SsoLoginPollWire>;
+  ssoPollLogin(endpoint: string, attemptId: string): Promise<SsoLoginPollWire>;
+  listenForSsoClose(receive: (attemptId: string) => void): Promise<() => void>;
   /** 关闭 SSO 登录窗口（取消 / 成功 / 失败的统一收尾；无窗口为空操作）。 */
-  ssoCloseLogin(): Promise<void>;
+  ssoCloseLogin(attemptId: string): Promise<void>;
 }
 
 export type HostCommands = Pick<HostRuntime, "runCommand" | "pathExists">;
@@ -102,7 +121,10 @@ export type HostCommands = Pick<HostRuntime, "runCommand" | "pathExists">;
 export type HostAgentCommands = HostCommands &
   Pick<HostRuntime, "homeDir" | "userDataDir">;
 
-export type HostArchiveFiles = Pick<HostRuntime, "readTextFile" | "userDataDir">;
+export type HostArchiveFiles = Pick<HostRuntime,
+  | "readTextFile" | "userDataDir" | "readAgentHistoryEvidence"
+  | "deleteAgentSession"
+>;
 
 export interface AcpProcessLaunch {
   readonly program: string;
@@ -146,6 +168,9 @@ export interface DesktopWindowHost extends WindowHost {
   readonly chrome?: WindowChromeHost;
   isFocused(): Promise<boolean>;
   showAndFocus(): Promise<void>;
+  setCloseToTray?(enabled: boolean): Promise<void>;
+  claimScheduledTasks?(): Promise<boolean>;
+  listenForScheduledTasksTick?(tick: () => void): Promise<() => void>;
 }
 
 export interface WindowChromeHost {
@@ -158,6 +183,8 @@ export interface WindowChromeHost {
 
 export interface HostDialogs {
   pickDirectory(this: void, title: string): Promise<string | null>;
+  /** 选择若干文件；取消或不可用时返回空数组。 */
+  pickFiles(this: void, title: string): Promise<readonly string[]>;
   saveFile(this: void, options: {
     defaultPath: string;
     filters: { name: string; extensions: string[] }[];
@@ -182,28 +209,65 @@ export interface HostNotification {
   readonly id: number;
   readonly title: string;
   readonly body: string;
+  /** 点击时作为跳转信息原样传回；Windows 上编码进通知链接。 */
   readonly extra: Readonly<Record<string, string>>;
+  /** 同一件事用同一标记：新通知替换旧的，处理完可按标记删除（Windows）。 */
+  readonly tag?: string;
 }
 
 export interface HostNotifications {
   isAvailable(): boolean;
+  /** 点击通知时回调，包括从系统通知中心点击（Windows 经 aaw:// 链接转交）。 */
   listen(receive: (action: HostNotificationAction) => void): Promise<() => Promise<void>>;
   ensurePermission(): Promise<boolean>;
   send(notification: HostNotification): Promise<void>;
+  /** 删除通知中心里这个标记的通知；不支持的平台什么也不做。 */
+  remove(tag: string): Promise<void>;
 }
 
 export interface HostStorage {
+  readonly managed?: HostManagedStorage;
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
   removeItem?(key: string): void;
 }
 
+export interface HostManagedStorage {
+  available(): boolean;
+  request<T>(command:
+      | "session_data_read" | "session_data_write" | "session_data_list"
+      | "session_data_delete"
+      |
+    "session_data_remove" | "storage_titles_load" | "storage_title_write" |
+    "storage_thresholds_read" | "storage_thresholds_write" |
+    "storage_location_read" | "storage_location_schedule" |
+    "usage_initialize" | "usage_record" | "usage_query" | "usage_storage_bytes" | "usage_model_names" |
+    "usage_context_read" | "usage_context_write" | "usage_context_delete",
+    args?: Record<string, unknown>): Promise<T>;
+  load(): Promise<void>;
+  flush(): Promise<void>;
+  migrated(key: string): boolean;
+  isManagedKey(key: string): boolean;
+  conversationKeys(): string[];
+  configurationBytes(): number | undefined;
+  configurationError(): string;
+  conversationError(): string;
+}
+
 export type ExitDiagnostics = (entry?: LogEntry) => Promise<void>;
 
 export type DiagnosticsCommand =
+  | "storage_update_usage"
+  | "update_cache_list"
+  | "update_cache_remove"
   | "diagnostics_open"
   | "diagnostics_status"
   | "diagnostics_snapshot"
+  | "diagnostics_storage_list"
+  | "diagnostics_storage_remove"
+  | "diagnostics_probe_request"
+  | "diagnostics_probe_take"
+  | "diagnostics_resources"
   | "diagnostics_append"
   | "diagnostics_acp_append"
   | "diagnostics_flush"
@@ -222,10 +286,68 @@ export interface DiagnosticsHost {
 
 export type AccountHost = Pick<
   HostRuntime,
-  "ssoOpenLogin" | "ssoPollLogin" | "ssoCloseLogin"
+  "ssoOpenLogin" | "ssoPollLogin" | "listenForSsoClose" | "ssoCloseLogin"
 >;
 
+import type { NativeSkillLibrary } from "./filesystem/skillLibrary.ts";
+export type { NativeSkillLibrary, SkillProvider, SkillCatalog, SkillQuery, SkillAction, NativeSkill } from "./filesystem/skillLibrary.ts";
 export type SkillFiles = Pick<
   HostRuntime,
   "userDataDir" | "listDirNames" | "pathExists" | "copyDir" | "writeTextFile"
->;
+> & { readonly library?: NativeSkillLibrary };
+
+/**
+ * 工作流引擎（workflow_service，ADR 024 §6 修正 1）的 IPC 面：workflow
+ * 插件不直接 import @tauri-apps，Tauri 边界归 host——命令与事件按白名单
+ * 放行（workflow_service_* / aaw://workflow-service*），白名单外报错。
+ */
+export interface WorkflowEngineHost {
+  invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
+  listen<T>(
+    event: string,
+    handler: (event: { payload: T }) => void,
+  ): Promise<() => void>;
+}
+
+export interface CodeAgentCreditRow {
+  readonly kind: "CPM" | "CPD_Peak" | "CPD_Valley";
+  readonly used: number;
+  readonly total: number;
+  readonly resetAt: string | null;
+  readonly message: string | null;
+}
+
+export type CodeAgentCreditResult =
+  | {
+      readonly status: "ready" | "stale";
+      readonly snapshot: {
+        readonly rows: readonly CodeAgentCreditRow[];
+        readonly fetchedAt: number;
+      };
+    }
+  | { readonly status: "signInRequired" | "unavailable" | "unsupported" };
+
+export interface CodeAgentTokenRow extends Omit<CodeAgentCreditRow, "kind"> {
+  readonly kind: "TPM" | "TPH" | "TPD";
+}
+
+export type CodeAgentTokenResult =
+  | {
+      readonly status: "ready" | "stale";
+      readonly snapshot: {
+        readonly models: readonly {
+          readonly value: string;
+          readonly label: string;
+        }[];
+        readonly modelId: string | null;
+        readonly rows: readonly CodeAgentTokenRow[];
+        readonly fetchedAt: number;
+      };
+    }
+  | {
+      readonly status: "signInRequired" | "unavailable" | "unsupported";
+      readonly models?: readonly {
+        readonly value: string;
+        readonly label: string;
+      }[];
+    };

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { describeUnknownError } from "../../errors.ts";
 import { CheckIcon, RefreshIcon, XIcon } from "../icons.tsx";
+import { IconButton } from "../IconButton.tsx";
 
 /** Manual feedback only. Background invalidations never drive this animation. */
 export function RefreshButton({
@@ -8,7 +9,7 @@ export function RefreshButton({
   label = "刷新",
   disabled = false,
   className = "rounded p-1 text-ink-faint transition-colors hover:bg-raised hover:text-ink",
-  iconClassName = "size-3.5",
+  iconClassName = "ui-icon-14",
   showLabel = false,
 }: {
   onRefresh: () => Promise<unknown>;
@@ -63,13 +64,14 @@ export function RefreshButton({
         : phase === "error"
           ? `刷新失败：${error}`
           : label;
+  const Button = showLabel ? "button" : IconButton;
   return (
     <>
-      <button
+      <Button
         type="button"
         aria-label={label}
         aria-busy={phase === "busy"}
-        title={feedback}
+        data-hint={feedback}
         disabled={disabled || phase === "busy"}
         className={className}
         onClick={() => void run()}
@@ -84,7 +86,7 @@ export function RefreshButton({
           />
         )}
         {showLabel && <span>{phase === "idle" ? label : feedback}</span>}
-      </button>
+      </Button>
       <span
         className="sr-only"
         aria-live="polite"
