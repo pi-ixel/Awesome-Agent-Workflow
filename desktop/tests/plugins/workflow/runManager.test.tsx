@@ -19,9 +19,11 @@ function openAllRuns() {
   return fake;
 }
 
+/** 右侧标签页的首页就是运行管理；落在某次运行上时，从面包屑回来。 */
 async function openRunManager(): Promise<HTMLElement> {
-  fireEvent.click(await screen.findByRole("tab", { name: "运行管理" }));
-  return screen.getByRole("region", { name: "运行管理" });
+  const crumb = screen.queryByRole("button", { name: "运行管理" });
+  if (crumb) fireEvent.click(crumb);
+  return screen.findByRole("region", { name: "运行管理" });
 }
 
 it("matches the title, workflow name and requirement", () => {

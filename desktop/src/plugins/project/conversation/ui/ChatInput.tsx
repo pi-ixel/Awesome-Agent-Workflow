@@ -1158,14 +1158,16 @@ export function ChatInput({
                     {/* label 上限 40% + 截断、描述 14px（ZCode
                         slashCommandPanelSections.tsx:34/:39） */}
                     <span className="flex max-w-[40%] shrink-0 items-center gap-1.5 text-ui-base font-medium">
-                      {item.skillReference && (
+                      {item.skillReference ? (
                         <SkillIcon className="ui-icon-16 shrink-0" />
-                      )}
+                      ) : item.Icon ? (
+                        <item.Icon className="ui-icon-16 shrink-0" />
+                      ) : null}
                       <span
                         className="truncate"
                         data-hint={item.skillReference?.path}
                       >
-                        {item.skillReference ? item.label : `/${item.label}`}
+                        {item.skillReference || item.Icon ? item.label : `/${item.label}`}
                       </span>
                     </span>
                     <span className="min-w-0 flex-1 truncate text-ui-base text-ink-subtlest">

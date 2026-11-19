@@ -1,90 +1,74 @@
+/**
+ * 左侧「工作流」功能区的侧栏（ADR 038）：用 AI 新建，以及预置 / 我的两个分类。
+ * 点分类，中间显示这个分类的工作流库。运行不在这里，归右侧的 AAW 标签页。
+ */
 import { useEffect, useState } from "react";
-import { pathKey } from "../../../shared/panelPaths.ts";
-import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
-import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
-import { errorLine } from "../status/errorText.ts";
-import { statusLabel } from "../status/snapshot.ts";
-import type { WorkflowService, WorkflowSummary } from "../types.ts";
-type SidebarTab = "presets" | "mine" | "runs";
+import { useStore } from "zustand";
+import { focusVisibleRing, rowSelectedClass } from "../../../shared/ui/controls.tsx";
+import { SidebarCreateButton } from "../../../shared/ui/SidebarCreateButton.tsx";
+import { SidebarItemTitle } from "../../../shared/ui/SidebarItemTitle.tsx";
+import { SparklesIcon } from "../../../shared/ui/icons.tsx";
+import type { WorkflowDraft, WorkflowService, WorkflowSummary } from "../types.ts";
+import type { LibraryTab, TemplateNavigation } from "./templateNavigation.ts";
 
-const tabs = [
-  { value: "presets", label: "预置" },
-  { value: "mine", label: "我的" },
-  { value: "runs", label: "运行" },
-] satisfies readonly { value: SidebarTab; label: string }[];
-const row = `flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-left text-ui-sm text-ink hover:bg-hover ${focusVisibleRing}`;
+const row = `flex min-h-8 w-full items-center gap-2 rounded-lg px-2 text-left hover:bg-hover ${focusVisibleRing}`;
 
-export function WorkflowSidebar({ project, service, onOpenWorkflow, onOpenRun }: {
-  readonly project: string;
+export function WorkflowSidebar({ service, navigation, canCompose }: {
   readonly service: WorkflowService;
-  readonly onOpenWorkflow: (id: string) => void;
-  readonly onOpenRun: (id: string) => void;
+  readonly navigation: TemplateNavigation;
+  /** 能不能用 AI 新建（没有编辑会话能力时不给入口）。 */
+  readonly canCompose: boolean;
 }) {
-  const [tab, setTab] = useState<SidebarTab>("presets");
+  const { tab, route } = useStore(navigation);
   const [items, setItems] = useState<readonly WorkflowSummary[] | null>(null);
-  const [error, setError] = useState("");
-  const projectKey = pathKey(project);
-  const readRuns = () =>
-    pathKey(service.sessionLinks().workspace ?? "") === projectKey ? service.runs() : [];
-  const [runs, setRuns] = useState(readRuns);
+  const [drafts, setDrafts] = useState<readonly WorkflowDraft[]>([]);
 
   useEffect(() => {
     let live = true;
     let generation = 0;
-    const load = async () => {
+    const load = () => {
       const request = ++generation;
-      try {
-        const result = await service.workflows();
-        if (!live || request !== generation) return;
-        setItems(result);
-        setError("");
-      } catch (cause) {
-        if (live && request === generation) setError(errorLine(cause));
-      }
+      service.workflows().then((list) => { if (live && request === generation) setItems(list); }).catch(() => {});
+      if (canCompose) service.drafts().then((list) => { if (live && request === generation) setDrafts(list); }).catch(() => {});
     };
-    const unsubscribe = service.subscribe((event) => {
-      if (event.type === "library-changed") void load();
-      if (event.type === "runs-changed")
-        setRuns(pathKey(service.sessionLinks().workspace ?? "") === projectKey ? service.runs() : []);
-    });
-    void load();
+    const unsubscribe = service.subscribe((event) => { if (event.type === "library-changed") load(); });
+    load();
     return () => {
       live = false;
       unsubscribe();
     };
-  }, [projectKey, service]);
+  }, [service, canCompose, route]);
 
-  const workflows = items?.filter((item) => item.origin === (tab === "presets" ? "preset" : "user"));
-  const message = tab === "runs"
-    ? (runs.length === 0 ? "当前项目还没有运行记录" : null)
-    : (error || (workflows === undefined ? "正在读取…" : workflows.length === 0 ? "没有工作流" : null));
+  const mine = items?.filter((item) => item.origin === "user") ?? [];
+  const counts: Record<LibraryTab, number | null> = {
+    presets: items ? items.length - mine.length : null,
+    // 新建的草稿（或原工作流已不在）在「我的」里单独成卡，一起计数。
+    mine: items ? mine.length + drafts.filter((draft) => !draft.base || !mine.some((item) => item.id === draft.base)).length : null,
+  };
+  const categories: readonly { readonly value: LibraryTab; readonly label: string }[] = [
+    { value: "presets", label: "预置" },
+    { value: "mine", label: "我的" },
+  ];
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col gap-2 px-2 py-2" aria-label="工作流列表">
-      <div className="flex min-h-9 shrink-0 items-center">
-        <SegmentedControl<SidebarTab> groupLabel="工作流列表类别" value={tab} onChange={setTab} options={tabs} />
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {message && <p className="m-2 text-ui-sm text-ink-mute">{message}</p>}
-        <ul>
-          {tab === "runs"
-            ? runs.map((run) => (
-                <li key={run.runId}>
-                  <button type="button" className={row} onClick={() => onOpenRun(run.runId)}>
-                    <span className="min-w-0 flex-1 truncate">{run.title || run.name || run.runId}</span>
-                    <span className="shrink-0 text-ui-xs text-ink-mute">{statusLabel(run)}</span>
-                  </button>
-                </li>
-              ))
-            : workflows?.map((workflow) => (
-                <li key={workflow.id}>
-                  <button type="button" className={row} onClick={() => onOpenWorkflow(workflow.id)}>
-                    <span className="min-w-0 flex-1 truncate">{workflow.meta?.name ?? workflow.id}</span>
-                  </button>
-                </li>
-              ))}
-        </ul>
-      </div>
+    <section className="flex min-h-0 flex-1 flex-col gap-2 px-2 py-2" aria-label="工作流分类">
+      {canCompose && <SidebarCreateButton label="用 AI 新建" Icon={SparklesIcon} onClick={() => navigation.setState({ compose: { kind: "new" } })} />}
+      <ul className="min-h-0 overflow-y-auto">
+        {categories.map(({ value, label }) => {
+          const selected = tab === value;
+          return <li key={value}>
+            <button
+              type="button"
+              className={`${row} ${selected ? rowSelectedClass : ""}`}
+              aria-current={selected || undefined}
+              onClick={() => navigation.setState({ tab: value, route: { kind: "library" } })}
+            >
+              <SidebarItemTitle>{label}</SidebarItemTitle>
+              {counts[value] !== null && <span className="shrink-0 text-ui-sm text-ink-mute">{counts[value]}</span>}
+            </button>
+          </li>;
+        })}
+      </ul>
     </section>
   );
 }

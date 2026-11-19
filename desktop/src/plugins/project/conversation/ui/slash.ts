@@ -34,6 +34,8 @@ export interface SlashItem {
   readonly insertText?: string;
   readonly skillReference?: SkillReference;
   readonly searchAlias?: string;
+  /** 扩展条目自带的图标。 */
+  readonly Icon?: ProjectSlashEntry["Icon"];
 }
 
 /** 检测光标前是否处在行首 slash 触发段；返回查询串（可空）或 null。 */

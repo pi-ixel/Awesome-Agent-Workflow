@@ -1,11 +1,16 @@
 /**
  * workflow 插件的 workbench 挂载。
  *
- * - panelId "aaw"：launcher（新标签页入口）+ View（AAW 面板）；
+ * 入口分工（ADR 038）：模板在左侧「工作流」功能区，运行在右侧 AAW 标签页，
+ * 发起只在会话里。
+ *
+ * - 侧栏 "workflow"：左侧导航的功能区——侧栏选分类，中间（WorkArea）是工作流
+ *   库、详情与 AI 草稿；
+ * - panelId "aaw"：launcher（新标签页入口）+ View（AAW 面板：运行管理、运行、
+ *   发起页）；
  * - `projectExtension` 服务（ADR 037）：项目界面的通用扩展位——会话输入框的
- *   工作流斜杠命令、空会话的工作流入口、会话状态卡与项目总览里的运行、节点
- *   会话顶部的回指条、项目树上的工作流按钮；`workflowUi` 只供插件内部用
- *   （通知打开运行）；
+ *   工作流斜杠命令、空会话的工作流入口、会话状态卡里的运行、节点会话顶部的
+ *   回指条、项目树上的工作流按钮；`workflowUi` 只供插件内部用（通知打开运行）；
  * - 工作区作用域：订阅 workbench 导航的 contextPath，把当前项目路径经
  *   `service.bindWorkspace` 绑定为引擎请求作用域（list/snapshot 的 cwd）；
  * - 侧栏会话分组：一次运行的节点会话收进一组（ADR 027）；
@@ -37,12 +42,15 @@ import type { WorkflowDraftEditor, WorkflowFileTransfer,
 import { WorkflowPanel } from "./WorkflowPanel.tsx";
 import { SplitStorageContext } from "./SplitPane.tsx";
 import { WorkflowSidebar } from "./WorkflowSidebar.tsx";
-import { TextLink } from "../../../shared/ui/TextLink.tsx";
-import { WorkflowOverview } from "./WorkflowOverview.tsx";
+import { WorkflowWorkspace } from "./WorkflowWorkspace.tsx";
+import { createTemplateNavigation } from "./templateNavigation.ts";
 import { WorkflowSessionBanner } from "./WorkflowSessionBanner.tsx";
 import { AWAITING_CONFIRM_CHIP, AWAITING_INPUT_CHIP, runSessionGroups } from "./sessionGroups.ts";
 
 const panelId = "aaw";
+const sidebarId = "workflow";
+/** 发起后等第一个节点会话出现的时限：超过就不再自动打开。 */
+const FOLLOW_START_MS = 120_000;
 
 /** 进行中与等你确认的运行 → 会话区 / 总览用的简报（等你处理的排前面）。 */
 export function runBriefs(runs: readonly RunSessionLinks[]): WorkflowRunBrief[] {
@@ -86,6 +94,7 @@ export function entryCommands(
       id: `workflow:${workflow.id}:${entry.id}`,
       label: meta.entries.length > 1 ? `${meta.name}：${entry.label}` : meta.name,
       description: entry.description || meta.description || "启动这个工作流",
+      Icon: WorkflowIcon,
       run: () => launch({ workflowId: workflow.id, entry: entry.id }),
     }));
   });
@@ -152,13 +161,44 @@ export function createWorkflowWorkbench(
     show(projectPath, () => workflow.requestPanel({ kind: "launch", launch: request }));
   }
 
+  // ------------------------------------------------------------ 功能区（模板）
+  const templates = createTemplateNavigation();
+  /** 运行页「查看工作流」、发起页「查看工作流」→ 左侧功能区里的这个工作流。 */
+  function openWorkflow(id: string): void {
+    if (!active()) return;
+    templates.setState({ route: { kind: "workflow", id }, compose: null });
+    workbench.navigation.getState().openSidebar(sidebarId);
+  }
+
+  // 刚发起的运行：第一个节点会话出现时打开到中间（右侧已经是这次运行）。
+  const following = new Map<string, { readonly project: string; readonly until: number }>();
+  function followStarted(projectPath: string, runId: string): void {
+    following.set(runId, { project: projectPath, until: Date.now() + FOLLOW_START_MS });
+    openFollowed();
+  }
+  function openFollowed(): void {
+    if (following.size === 0) return;
+    const { workspace, runs } = workflow.sessionLinks();
+    const now = Date.now();
+    for (const [runId, target] of following) {
+      if (target.until < now) { following.delete(runId); continue; }
+      if (workspace === null || pathKey(workspace) !== pathKey(target.project)) continue;
+      const first = runs.find((run) => run.runId === runId)?.links[0]?.sessionId;
+      if (!first) continue;
+      following.delete(runId);
+      openNodeSession(first, target.project);
+    }
+  }
+
   // ------------------------------------------------------------ workflowUi
   const status = createStore<WorkflowProjectStatus>(() => ({ workspacePath: null, runs: [] }));
   const entries = createStore<readonly WorkflowEntryCommand[]>(() => []);
   // 项目界面的通用扩展位用的同一份状态（ADR 037）。
   const activities = createStore<ProjectActivities>(() => ({ workspacePath: null, items: [] }));
-  const quickAction = createStore<ProjectQuickAction | null>(() => ({ label: "启动工作流", run: (path) => openLaunch(path) }));
+  // 空会话的快捷动作只给进行中的运行；发起走「/」菜单（ADR 038）。
+  const quickAction = createStore<ProjectQuickAction | null>(() => null);
   const publishStatus = () => {
+    openFollowed();
     const { workspace, runs } = workflow.sessionLinks();
     const briefs = runBriefs(runs);
     status.setState({ workspacePath: workspace, runs: briefs }, true);
@@ -178,7 +218,7 @@ export function createWorkflowWorkbench(
     quickAction.setState(
       lead
         ? { label: lead.waiting ? "回复进行中的工作流" : "查看进行中的工作流", run: (path) => openRun(path, lead.runId) }
-        : { label: "启动工作流", run: (path) => openLaunch(path) },
+        : null,
       true,
     );
   };
@@ -200,15 +240,6 @@ export function createWorkflowWorkbench(
     entries,
     openLaunch,
     openRun,
-    Overview: function Overview({ project: projectPath }) {
-      return <WorkflowOverview
-        service={workflow}
-        project={projectPath}
-        onOpenRun={(runId) => openRun(projectPath, runId)}
-        onLaunch={() => openLaunch(projectPath)}
-        onBrowse={() => openLaunch(projectPath, {})}
-      />;
-    },
     SessionBanner: function SessionBanner({ project: projectPath, sessionId }) {
       return <WorkflowSessionBanner
         service={workflow}
@@ -219,31 +250,19 @@ export function createWorkflowWorkbench(
     },
   };
 
+  // 工作流是应用级的：功能区不要求先选项目（ADR 038）。
   const sidebar: WorkbenchContributions["sidebar"] = {
-    id: "workflow",
+    id: sidebarId,
     label: "工作流",
     order: 10,
     Icon: WorkflowIcon,
-    View: function WorkflowSidebarView({ project: projectPath }) {
-      if (projectPath === null) {
-        return (
-          <div className="flex items-start gap-2 px-4 py-2 text-ui-sm text-ink-mute">
-            <span>请先选择项目</span>
-            <TextLink onClick={() => workbench.navigation.getState().openSidebar(null)}>选择项目</TextLink>
-          </div>
-        );
-      }
-      return (
-        <WorkflowSidebar
-          key={pathKey(projectPath)}
-          project={projectPath}
-          service={workflow}
-          onOpenWorkflow={(workflowId) =>
-            show(projectPath, () => workflow.requestPanel({ kind: "detail", workflowId }))
-          }
-          onOpenRun={(runId) => openRun(projectPath, runId)}
-        />
-      );
+    View: function WorkflowSidebarView() {
+      return <WorkflowSidebar service={workflow} navigation={templates} canCompose={editor !== undefined} />;
+    },
+    WorkArea: function WorkflowWorkArea() {
+      return <SplitStorageContext.Provider value={layoutStorage ?? null}>
+        <WorkflowWorkspace service={workflow} navigation={templates} transfer={transfer} editor={editor} />
+      </SplitStorageContext.Provider>;
     },
   };
 
@@ -252,7 +271,7 @@ export function createWorkflowWorkbench(
     keepMounted: true,
     launcher: {
       label: "AAW 工作流",
-      description: "工作流库、发起与查看运行",
+      description: "查看与管理工作流运行",
       searchHint: "aaw workflow",
       Icon: WorkflowIcon,
       open: (projectPath) => show(projectPath),
@@ -271,10 +290,10 @@ export function createWorkflowWorkbench(
               runId,
             )}
             pickFiles={pickFiles}
-            transfer={transfer}
-            editor={editor}
             onOpenSession={openNodeSession}
             onOpenFile={(path) => openResultFile(projectPath, path)}
+            onOpenWorkflow={openWorkflow}
+            onRunStarted={(runId) => followStarted(projectPath, runId)}
           />
           </SplitStorageContext.Provider>
         </section>
@@ -288,9 +307,8 @@ export function createWorkflowWorkbench(
     slashGroup: "工作流入口",
     slashEntries: entries,
     quickAction,
-    // 打开右侧 AAW 面板并落在工作流库（与总览区块的「工作流库」按钮同一条链路）。
-    treeAction: { label: "工作流", hint: "打开工作流", Icon: WorkflowIcon, run: (path) => openLaunch(path, {}) },
-    Overview: view.Overview,
+    // 打开右侧 AAW 标签页：这个项目的运行。
+    treeAction: { label: "工作流", hint: "查看工作流运行", Icon: WorkflowIcon, run: (path) => show(path) },
     SessionBanner: view.SessionBanner,
   };
   return {
@@ -299,6 +317,7 @@ export function createWorkflowWorkbench(
     view,
     extension,
     openRun,
+    openWorkflow,
     openNodeSession,
     publishStatus,
     loadEntries,

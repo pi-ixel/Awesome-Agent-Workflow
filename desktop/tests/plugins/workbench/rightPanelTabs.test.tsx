@@ -446,7 +446,7 @@ describe("新标签页起始页", () => {
       </PanelWorkspace>,
       { wrapper: fixture.Wrapper },
     );
-    expect(item("aaw")).toHaveTextContent("工作流库、发起与查看运行");
+    expect(item("aaw")).toHaveTextContent("查看与管理工作流运行");
     fireEvent.click(item("aaw")!);
     expect(screen.getByLabelText("AAW 面板")).toBeInTheDocument();
     expect(getByHint(document.body, "AAW 工作流")).toBeInTheDocument();

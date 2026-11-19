@@ -36,6 +36,8 @@ export interface ProjectSlashEntry {
   readonly id: string;
   readonly label: string;
   readonly description: string;
+  /** 条目前的图标（同技能行的位置）；给了图标时不再在名称前加「/」。 */
+  readonly Icon?: ComponentType<{ readonly className?: string }>;
   run(this: void): void;
 }
 
@@ -63,8 +65,8 @@ export interface ProjectExtension {
   readonly slashEntries: ReadonlySnapshot<readonly ProjectSlashEntry[]>;
   readonly quickAction: ReadonlySnapshot<ProjectQuickAction | null>;
   readonly treeAction: ProjectTreeAction;
-  /** 项目总览里的区块。 */
-  readonly Overview: ComponentType<{ readonly project: string }>;
+  /** 项目总览里的区块（可不提供）。 */
+  readonly Overview?: ComponentType<{ readonly project: string }>;
   /** 会话顶部的横幅（不是插件自己的会话时不渲染）。 */
   readonly SessionBanner: ComponentType<{ readonly project: string; readonly sessionId: string }>;
 }

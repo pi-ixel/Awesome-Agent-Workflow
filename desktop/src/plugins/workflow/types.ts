@@ -451,7 +451,7 @@ export interface WorkflowDraftCheck {
 
 /** AI 编辑的会话（ADR 036）：由工作台创建，工作目录指向草稿。 */
 export interface WorkflowDraftEditor {
-  /** 开编辑会话、打开它，并发出第一条消息。 */
+  /** 开编辑会话（不抢前台）并发出第一条消息。 */
   start(draft: WorkflowDraft, title: string, firstMessage: { readonly text: string; readonly display: MessageDisplay }): Promise<void>;
   /** 打开这份草稿已有的编辑会话；没有（例如界面重载过）时返回 false。 */
   show(draftId: string): Promise<boolean>;
@@ -519,7 +519,6 @@ export interface RunManagerFilters {
 }
 
 export type WorkflowPanelRequest =
-  | { readonly kind: "detail"; readonly workflowId: string }
   | { readonly kind: "launch"; readonly launch: WorkflowLaunchRequest }
   | { readonly kind: "run"; readonly project: string; readonly runId: string; readonly returnFilters: RunManagerFilters };
 
@@ -614,6 +613,7 @@ export interface WorkflowEntryCommand {
   readonly id: string;
   readonly label: string;
   readonly description: string;
+  readonly Icon?: ComponentType<{ readonly className?: string }>;
   run(this: void): void;
 }
 
@@ -644,8 +644,6 @@ export interface WorkflowView {
   readonly openLaunch: (project: string, request?: WorkflowLaunchRequest) => void;
   /** 打开 AAW 面板并切到某次运行。 */
   readonly openRun: (project: string, runId: string) => void;
-  /** 项目总览里的工作流区块。 */
-  readonly Overview: ComponentType<{ readonly project: string }>;
   /** 节点会话顶部的回指条（不是节点会话时不渲染）。 */
   readonly SessionBanner: ComponentType<{ readonly project: string; readonly sessionId: string }>;
 }

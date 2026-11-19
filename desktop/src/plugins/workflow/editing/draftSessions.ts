@@ -63,7 +63,7 @@ export function createDraftEditor(deps: {
       if (!sessionId) throw new Error("ACP_SESSION_ID_MISSING");
       const target = { ...opened, sessionId };
       sessions.set(draft.draftId, { target, tools });
-      await deps.project.sessions.openSessionFromEntry(workspacePath, sessionId, target.agentKey);
+      // 不抢前台：用户留在功能区的草稿页看改动，需要时再从草稿页打开会话（ADR 038）。
       deps.project.conversation.send(target, firstMessage.text, undefined, { display: firstMessage.display });
     },
 

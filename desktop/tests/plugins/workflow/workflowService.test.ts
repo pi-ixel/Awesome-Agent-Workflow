@@ -114,7 +114,7 @@ describe("createWorkflowService", () => {
     });
     h.service.bindWorkspace("D:/first");
     h.service.focusRun("old");
-    h.service.requestPanel({ kind: "detail", workflowId: "old-workflow" });
+    h.service.requestPanel({ kind: "launch", launch: { workflowId: "old-workflow" } });
     const pendingOldRefresh = h.service.refresh();
     h.service.bindWorkspace("D:/second");
     await h.service.refresh();

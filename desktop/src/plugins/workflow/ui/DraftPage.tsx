@@ -1,8 +1,9 @@
 /**
- * AI 编辑工作流的草稿页（ADR 036）。
+ * AI 编辑工作流的草稿页（ADR 036；在左侧「工作流」功能区里，ADR 038）。
  *
- * - 没有编辑会话时：写下想怎么改，开一个工作目录指向草稿的会话；
- * - 有会话时：打开会话，或把编译报错转给 AI；
+ * - 没有编辑会话时：写下想怎么改，开一个工作目录指向草稿的会话（不抢前台，
+ *   留在本页看改动）；
+ * - 有会话时：需要补充要求或看 AI 的说明时打开会话，或把编译报错转给 AI；
  * - 每隔几秒重新编译草稿：报错（文件、行号、原因）、改了哪些文件与逐行差异、改动前后的流程图；
  * - 保存前编译必须通过；放弃要再确认一次。
  */
@@ -107,15 +108,13 @@ export function DraftPage({ service, editor, draftId, onSaved, onDiscarded }: {
           })} onCancel={() => setConfirmDiscard(false)} />
           : <button type="button" className={secondaryButton} onClick={() => setConfirmDiscard(true)}>放弃</button>}
       </div>
-      <p className="workflow-detail-desc">{hasSession
-        ? "在中间的编辑会话里告诉 AI 要怎么改；这里随时显示编译结果和改动，看过、编译通过后再保存。"
-        : "AI 改的是一份草稿，原工作流不受影响。看过改动、编译通过后再保存。"}</p>
+      <p className="workflow-detail-desc">AI 改的是一份草稿，原工作流不受影响。这里随时显示编译结果和改动，看过、编译通过后再保存。</p>
     </header>
 
     {error !== "" && <Callout tone="danger" className="workflow-callout" title={error} onDismiss={() => setError("")} />}
 
     {editor && (hasSession
-      ? <p className="workflow-muted workflow-draft-hint">在中间的编辑会话里继续和 AI 说要怎么改。<TextLink onClick={() => void act(async () => { await editor.show(draftId); })}>回到编辑会话</TextLink></p>
+      ? <p className="workflow-muted workflow-draft-hint">AI 在编辑会话里按你的要求修改。要补充要求或看它的说明：<TextLink onClick={() => void act(async () => { await editor.show(draftId); })}>打开编辑会话</TextLink></p>
       : <div className="workflow-draft-session" role="group" aria-label="继续编辑">
         <label>{check.changes.length > 0 ? "编辑会话已经结束（例如界面重载过）。告诉 AI 接着怎么改：" : "告诉 AI 你想怎么改："}
           <textarea className={settingsTextareaClass} rows={3} value={request} onChange={(e) => setRequest(e.target.value)} placeholder={base === null ? "例如：做一个先写设计、再评审、最后实现的流程" : "例如：在设计评审之后加一个人工确认"} />

@@ -15,6 +15,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -25,6 +26,7 @@ import type { ReadonlySnapshot } from "../../../../src/shared/state/readonlySnap
 import type { FileCandidates } from "../../../../src/plugins/project/conversation/ui/documentView.ts";
 import type { SkillCatalog } from "../../../../src/plugins/host/types.ts";
 import type { SkillsService } from "../../../../src/plugins/skills/service.ts";
+import type { ProjectSlashEntry } from "../../../../src/plugins/project/ui/extension.ts";
 import { slashSkillCatalog } from "../../../../src/plugins/skills/sources/slashSkillCatalog.ts";
 import {
   createTestSkills,
@@ -59,6 +61,8 @@ function setup(
     fileCandidates?: ReadonlySnapshot<FileCandidates | undefined>;
     resolveSlashSkills?: SkillsService["resolveSlashSkills"];
     skillWorkspace?: string | null;
+    extensionEntries?: readonly ProjectSlashEntry[];
+    extensionGroup?: string;
   } = {},
 ) {
   const onSend = vi.fn();
@@ -89,6 +93,8 @@ function setup(
         resolveSlashSkills={options.resolveSlashSkills}
         skillWorkspace={options.skillWorkspace}
         openDiagnostics={options.openDiagnostics}
+        extensionEntries={options.extensionEntries}
+        extensionGroup={options.extensionGroup}
         isAgentRunning={options.isAgentRunning ?? false}
         onSend={onSend}
         onEnqueue={onEnqueue}
@@ -565,6 +571,25 @@ describe("ChatInput slash 命令面板", () => {
     // action 执行后 /token 从草稿移除
     expect(textarea).toHaveValue("");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("扩展条目带图标时和技能行一样显示图标、名称前不加 /", async () => {
+    function MarkIcon({ className }: { readonly className?: string }) {
+      return <svg data-testid="extension-icon" className={className} />;
+    }
+    setup({
+      extensionGroup: "工作流入口",
+      extensionEntries: [
+        { id: "wf", label: "AAW 轻量开发", description: "启动这个工作流", Icon: MarkIcon, run: vi.fn() },
+        { id: "plain", label: "plain-entry", description: "没有图标", run: vi.fn() },
+      ],
+    });
+    await userEvent.type(getTextarea(), "/");
+    const panel = await screen.findByRole("listbox", { name: "命令面板" });
+    const withIcon = within(panel).getByRole("option", { name: /AAW 轻量开发/ });
+    expect(within(withIcon).getByTestId("extension-icon")).toBeInTheDocument();
+    expect(withIcon).not.toHaveTextContent("/AAW 轻量开发");
+    expect(within(panel).getByRole("option", { name: /plain-entry/ })).toHaveTextContent("/plain-entry");
   });
 
   it("行中 / 不触发；顿号行首归一触发", async () => {

@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { entryCommands, runBriefs } from "../../../src/plugins/workflow/ui/workbench.tsx";
+import { WorkflowIcon } from "../../../src/shared/ui/icons.tsx";
 import { WorkflowSessionBanner } from "../../../src/plugins/workflow/ui/WorkflowSessionBanner.tsx";
 import type { RunSessionLinks } from "../../../src/plugins/workflow/types.ts";
 import { fakeWorkflowService, workflowSummary } from "./helpers.ts";
@@ -44,6 +45,8 @@ it("turns every workflow entry into a slash command that opens its launch form",
   const broken = { id: "broken", origin: "user" as const, meta: null, diagnostics: [] };
   const commands = entryCommands([workflowSummary(), twoEntries, broken], launch);
   expect(commands.map((command) => command.label)).toEqual(["AAW 轻量开发", "AAW 完整开发：从 SR 需求开始", "AAW 完整开发：从单个 AR 开始"]);
+  // 「/」菜单里和技能一样带图标。
+  expect(commands.every((command) => command.Icon === WorkflowIcon)).toBe(true);
   commands[2]!.run();
   expect(launch).toHaveBeenCalledWith({ workflowId: "aaw-enterprise", entry: "ar" });
 });

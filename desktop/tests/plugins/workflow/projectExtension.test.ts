@@ -21,10 +21,13 @@ it("把进行中的运行交给状态浮层，快捷动作按有没有在等你�
   const idle = workbenchWith([]);
   idle.publishStatus();
   expect(idle.extension.activities.getState()).toEqual({ workspacePath: "D:/p", items: [] });
-  expect(idle.extension.quickAction.getState()?.label).toBe("启动工作流");
+  // 没有进行中的运行时空会话不放工作流按钮：发起走「/」菜单（ADR 038）。
+  expect(idle.extension.quickAction.getState()).toBeNull();
   expect(idle.extension.activityTitle).toBe("AAW 工作流");
   expect(idle.extension.slashGroup).toBe("工作流入口");
-  expect(idle.extension.treeAction).toMatchObject({ label: "工作流", hint: "打开工作流" });
+  expect(idle.extension.treeAction).toMatchObject({ label: "工作流", hint: "查看工作流运行" });
+  // 项目总览不再放工作流区块（ADR 038）。
+  expect(idle.extension.Overview).toBeUndefined();
 
   const waiting = workbenchWith([
     run({ links: [{ sessionId: "s1", actorSiteId: "a", actorOrdinal: 1, actorName: "实现", nodes: [{ siteId: "impl", ordinal: 1, kind: "ask", status: "running", label: "实现与测试", awaitingInput: true }] }] as never }),
