@@ -173,8 +173,6 @@ pub struct RuntimeConfig {
     pub python: String,
     /// 按角色指定的 Agent 启动命令（ADR 036）；没指定的角色用 `command`。
     pub role_commands: std::collections::BTreeMap<String, Vec<String>>,
-    /// 按角色指定的模型（ADR 036），宿主建会话后经 ACP `session/set_model` 设置。
-    pub role_models: std::collections::BTreeMap<String, String>,
 }
 
 impl RuntimeConfig {
@@ -190,9 +188,6 @@ impl RuntimeConfig {
         // 按角色的设置也影响执行；没有时不进指纹，与不分角色的运行保持一致。
         if !self.role_commands.is_empty() {
             value["roleCommands"] = json!(self.role_commands);
-        }
-        if !self.role_models.is_empty() {
-            value["roleModels"] = json!(self.role_models);
         }
         format!("{:x}", Sha256::digest(value.to_string().as_bytes()))
     }
@@ -441,7 +436,7 @@ impl<H: Host> Runtime<H> {
                     action: action.clone(),
                     cwd: self.config.cwd.clone(),
                     command: self.config.command_for(&action.actor).to_vec(),
-                    model: self.config.role_models.get(&action.actor).cloned(),
+                    model: None,
                     profile: self.config.profile.clone(),
                     mcp_servers: servers,
                     result_channel: Some(result_channel),
@@ -849,7 +844,6 @@ mod role_config_tests {
             mcp_servers: json!([]),
             python: "python".into(),
             role_commands: Default::default(),
-            role_models: Default::default(),
         }
     }
 
@@ -862,9 +856,6 @@ mod role_config_tests {
         assert_eq!(roles.command_for("设计"), ["design-agent".to_owned()]);
         assert_eq!(roles.command_for("评审"), ["default-agent".to_owned()]);
         assert_ne!(plain.execution_hash("r"), roles.execution_hash("r"));
-        let mut models = roles.clone();
-        models.role_models.insert("设计".into(), "fast".into());
-        assert_ne!(roles.execution_hash("r"), models.execution_hash("r"));
         assert_eq!(plain.execution_hash("r"), config().execution_hash("r"), "没有按角色的设置时指纹不变");
     }
 }

@@ -7,8 +7,9 @@
  * - 双击热区恢复默认宽度；
  * - 拖拽期间给 body 加 user-select:none，避免划选沿途文字。
  *
- * 本组件只负责「一条竖向分隔线」的交互，不感知布局结构；左右栏各挂
- * 一个，方向相反（左栏往右拖增宽，右栏往左拖增宽）。
+ * 本组件只负责「一条分隔线」的交互，不感知布局结构；左右栏各挂
+ * 一个，方向相反（左栏往右拖增宽，右栏往左拖增宽）。axis="y" 时是横向
+ * 分隔线，调的是上下分屏里一块的高度（start=往上拖增高，即下面那块）。
  */
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { useFrameTask } from "./useFrameTask.ts";
@@ -27,6 +28,8 @@ export interface ColumnResizerProps {
   readonly growDirection: "end" | "start";
   /** 无障碍名称（role=separator 的 aria-label）。 */
   readonly label: string;
+  /** x：竖线调宽（默认）；y：横线调高。 */
+  readonly axis?: "x" | "y";
 }
 
 /** 一次拖拽会话的现场（起点指针位置 / 起始宽度 / 最新宽度）。 */
@@ -45,7 +48,9 @@ export function ColumnResizer({
   maxPx,
   growDirection,
   label,
+  axis = "x",
 }: ColumnResizerProps) {
+  const vertical = axis === "y";
   // 拖拽中高亮 + 决定全局指针监听是否挂载
   const [isDragging, setIsDragging] = useState(false);
   // 拖拽会话现场用 ref 持有：pointermove 高频触发，不走 state 重渲染
@@ -72,7 +77,7 @@ export function ColumnResizer({
         maxPx,
       );
       dragSessionRef.current = {
-        startX: event.clientX,
+        startX: vertical ? event.clientY : event.clientX,
         startWidth,
         lastWidth: startWidth,
       };
@@ -81,7 +86,7 @@ export function ColumnResizer({
       document.body.style.setProperty("user-select", "none");
       event.preventDefault();
     },
-    [readWidth, minPx, maxPx],
+    [readWidth, minPx, maxPx, vertical],
   );
 
   // 拖拽中的全局指针监听：指针移出热区后仍持续跟手，收口即持久化
@@ -94,10 +99,11 @@ export function ColumnResizer({
       if (session === null) {
         return;
       }
+      const position = vertical ? event.clientY : event.clientX;
       const delta =
         growDirection === "end"
-          ? event.clientX - session.startX
-          : session.startX - event.clientX;
+          ? position - session.startX
+          : session.startX - position;
       const next = clampWidth(session.startWidth + delta, minPx, maxPx);
       session.lastWidth = next;
       resizeFrame.schedule(() => previewWidth(next));
@@ -133,22 +139,24 @@ export function ColumnResizer({
     onCommitWidth,
     previewWidth,
     resizeFrame,
+    vertical,
   ]);
 
   return (
     <div
       role="separator"
-      aria-orientation="vertical"
+      aria-orientation={vertical ? "horizontal" : "vertical"}
       aria-label={label}
       tabIndex={0}
       aria-valuemin={minPx}
       aria-valuemax={maxPx}
       onKeyDown={(event) => {
-        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))
+        const keys = vertical ? ["ArrowUp", "ArrowDown", "Home", "End"] : ["ArrowLeft", "ArrowRight", "Home", "End"];
+        if (!keys.includes(event.key))
           return;
         event.preventDefault();
         const delta =
-          (event.key === "ArrowRight" ? 16 : -16) *
+          (event.key === (vertical ? "ArrowDown" : "ArrowRight") ? 16 : -16) *
           (growDirection === "end" ? 1 : -1);
         const next =
           event.key === "Home"
@@ -168,7 +176,7 @@ export function ColumnResizer({
         previewWidth(defaultWidthPx);
         onCommitWidth?.(defaultWidthPx);
       }}
-      className="group relative flex h-full w-1 shrink-0 cursor-ew-resize touch-none items-stretch bg-transparent outline-none"
+      className={`group relative flex shrink-0 touch-none items-stretch bg-transparent outline-none ${vertical ? "h-1 w-full cursor-ns-resize" : "h-full w-1 cursor-ew-resize"}`}
     >
       {/* 指示条(ZCode separator after 形态,WorkspaceShellLayout.tsx:2313-2335):
           2px 圆头短棒、上下内缩(inset-y-2)、foreground-subtlest/50 灰,
@@ -177,9 +185,11 @@ export function ColumnResizer({
           不存在错位。 */}
       <span
         aria-hidden={true}
-        className={`pointer-events-none absolute inset-y-2 w-0.5 rounded-full bg-ink-subtlest/50 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 ${
+        className={`pointer-events-none absolute rounded-full bg-ink-subtlest/50 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 ${
           isDragging ? "opacity-100" : ""
-        } ${growDirection === "end" ? "left-0" : "right-0"}`}
+        } ${vertical
+          ? `inset-x-2 h-0.5 ${growDirection === "end" ? "top-0" : "bottom-0"}`
+          : `inset-y-2 w-0.5 ${growDirection === "end" ? "left-0" : "right-0"}`}`}
       />
     </div>
   );

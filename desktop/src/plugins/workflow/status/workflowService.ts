@@ -51,16 +51,12 @@ export interface WorkflowServiceDeps {
     debug(message: string, context?: Record<string, unknown>): void;
     warn(message: string, context?: Record<string, unknown>): void;
   };
-  /** 节点 Agent 启动信封（start / resume 的 command/mcpServers）；按角色指定时带上各角色的命令与模型（ADR 036）。 */
+  /** 节点 Agent 启动信封（start / resume 的 command/mcpServers）。 */
   readonly agentLaunch: (runId?: string, workflowId?: string) => {
     readonly command: readonly string[];
     readonly mcpServers: unknown;
     readonly agentId?: string;
-    readonly roleCommands?: Readonly<Record<string, readonly string[]>>;
-    readonly roleModels?: Readonly<Record<string, string>>;
   };
-  /** 运行启动后记下这次用的按角色设置，续跑时沿用（ADR 036）。 */
-  readonly onRunStarted?: (runId: string, workflowId: string) => void;
   /** 节点进度（ACP plan，ADR 035）；不给时不记录。 */
   readonly plans?: NodePlans;
 }
@@ -180,14 +176,6 @@ function parsePreflight(value: unknown): WorkflowPreflightReport | null {
 /**
  * 创建引擎线 WorkflowService（插件 apply 调用一次；测试各造各的）。
  */
-/** 按角色的命令与模型（ADR 036）：新运行只有模型；旧运行续跑沿用启动时
- * 记下的按角色命令（引擎执行指纹要求信封一致）。没有时不传。 */
-function roleInputs(launch: { readonly roleCommands?: Readonly<Record<string, readonly string[]>>; readonly roleModels?: Readonly<Record<string, string>> }): Record<string, unknown> {
-  return {
-    ...(launch.roleCommands && Object.keys(launch.roleCommands).length > 0 ? { roleCommands: launch.roleCommands } : {}),
-    ...(launch.roleModels && Object.keys(launch.roleModels).length > 0 ? { roleModels: launch.roleModels } : {}),
-  };
-}
 
 export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflowService {
   const { client, logger } = deps;
@@ -405,7 +393,6 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       ...(title ? { title } : {}),
       ...(request.autoConfirm ? { autoConfirm: true } : {}),
       command: [...launch.command],
-      ...roleInputs(launch),
       ...(launch.agentId ? { agentId: launch.agentId } : {}),
       mcpServers: Array.isArray(launch.mcpServers) ? launch.mcpServers : [],
     };
@@ -549,7 +536,6 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       });
       const runId = typeof result?.runId === "string" ? result.runId : "";
       if (runId === "") throw new Error("WORKFLOW_RUN_ID_MISSING");
-      deps.onRunStarted?.(runId, request.workflowId);
       scheduleList();
       scheduleRun(runId);
       return { runId };
@@ -563,7 +549,6 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
         cwd,
         runId,
         command: [...launch.command],
-        ...roleInputs(launch),
         mcpServers: Array.isArray(launch.mcpServers) ? launch.mcpServers : [],
       });
       scheduleRun(runId);

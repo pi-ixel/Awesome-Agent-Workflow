@@ -20,7 +20,6 @@
  *   workbench 的退出参与者（HostExitGate 只有 isExiting/begin，无法登记
  *   参与者；terminal 插件同型），经 ctx.inject 挂到 workbench Fiber。
  */
-import { readRunExecutors, readWorkflowExecutors, writeRunExecutors } from "./status/executors.ts";
 import type { Context } from "cordis";
 import { WorkflowClient, type WorkflowPlatform } from "./engine/client.ts";
 import { createTrackerTransport } from "./sessionHost/trackerRelay.ts";
@@ -74,8 +73,8 @@ export function apply(ctx: Context): void {
   void client.rebuildActiveRunsFromHost().catch(() => {});
 
   // 节点 Agent 启动信封：当前选中 agent 的启动命令（单 Agent 原则：新运行
-  // 的全部节点用同一个 Agent，角色只允许指定模型）。
-  function agentLaunch(runId?: string, workflowId?: string) {
+  // 的全部节点用同一个 Agent，模型用 Agent 的默认模型）。
+  function agentLaunch() {
     const adapter = agents.resolve();
     if (adapter === null) {
       throw new Error("未找到所选 ACP Agent，请先检查 Agent 配置。");
@@ -85,27 +84,7 @@ export function apply(ctx: Context): void {
     if (Object.keys(launch.extraEnv).length > 0) {
       throw new Error("当前工作流服务尚不支持此 Agent 的额外环境变量配置。");
     }
-    // 续跑沿用启动时记下的按角色设置，新运行用工作流当前的设置。旧运行
-    // （多 Agent 时代）续跑必须原样重建按角色命令——引擎执行指纹
-    // （RUNTIME_CONFIGURATION_CHANGED）要求信封与启动时一致；新运行不留
-    // 按角色 Agent，节点会话一律开在当前选中的 Agent 上。
-    const legacyRoles = runId !== undefined;
-    const plan = runId ? readRunExecutors(host.storage, runId) : workflowId ? readWorkflowExecutors(host.storage, workflowId) : {};
-    const roleCommands: Record<string, readonly string[]> = {};
-    const roleModels: Record<string, string> = {};
-    for (const [role, executor] of Object.entries(plan)) {
-      if (legacyRoles && executor.agentId && executor.agentId !== adapter.id) {
-        const roleAdapter = agents.resolve(executor.agentId);
-        if (roleAdapter === null) throw new Error(`「${role}」使用的 Agent 不可用，请检查 Agent 配置后继续。`);
-        const roleLaunch = agents.buildLaunch(roleAdapter, state.toolPaths, state.activePath);
-        if (Object.keys(roleLaunch.extraEnv).length > 0) {
-          throw new Error(`「${role}」使用的 Agent 需要额外的环境变量，工作流服务尚不支持。`);
-        }
-        roleCommands[role] = roleLaunch.command;
-      }
-      if (executor.model) roleModels[role] = executor.model;
-    }
-    return { command: launch.command, mcpServers: [], agentId: adapter.id, roleCommands, roleModels };
+    return { command: launch.command, mcpServers: [], agentId: adapter.id };
   }
 
   const { service, project: projectEvent, dispose } = createWorkflowService({
@@ -113,7 +92,6 @@ export function apply(ctx: Context): void {
     logger,
     agentLaunch,
     plans: createNodePlans(host.storage),
-    onRunStarted: (runId, workflowId) => writeRunExecutors(host.storage, runId, readWorkflowExecutors(host.storage, workflowId)),
   });
 
   // 节点会话就是普通会话（ADR 037）：宿主经 project 的会话能力打开、发任务说明、订阅轮次。

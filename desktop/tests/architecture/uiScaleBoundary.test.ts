@@ -6,7 +6,6 @@ import { expect, it } from "vitest";
 const rawSvg = new Map([
   ["shared/ui/UiIcon.tsx", "ui-icon"],
   ["shared/ui/BrandLoading.tsx", "startup-pen"],
-  ["plugins/workflow/ui/WorkflowHierarchy.tsx", "workflow-graph-edges"],
   ["plugins/diagnostics/ui/ResourceReport.tsx", "0 0 600 160"],
   ["plugins/diagnostics/ui/perf/MemoryChart.tsx", "0 0 ${WIDTH} ${HEIGHT}"],
 ]);

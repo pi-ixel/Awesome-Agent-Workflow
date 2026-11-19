@@ -6,14 +6,13 @@
  * - 每隔几秒重新编译草稿：报错（文件、行号、原因）、改了哪些文件与逐行差异、改动前后的流程图；
  * - 保存前编译必须通过；放弃要再确认一次。
  */
-import { useEffect, useRef, useState } from "react";
-import { GraphCanvas } from "./GraphCanvas.tsx";
+import { useEffect, useState } from "react";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import type { WorkflowCatalog, WorkflowDraftCheck, WorkflowDraftEditor, WorkflowService } from "../types.ts";
 import { describeDiagnostic } from "../status/library.ts";
 import { errorLine } from "../status/errorText.ts";
 import { draftPrompt } from "../editing/draftSessions.ts";
-import { WorkflowHierarchy } from "./WorkflowHierarchy.tsx";
+import { FlowStages } from "./FlowStages.tsx";
 import { diffLines, withContext } from "./textDiff.ts";
 import { Badge, Listbox } from "../../../shared/ui/controls.tsx";
 import { primaryButton, secondaryButton } from "./buttons.ts";
@@ -178,7 +177,6 @@ export function DraftPage({ service, editor, draftId, onSaved, onDiscarded }: {
 }
 
 function GraphPane({ title, catalog, empty }: { title: string; catalog: WorkflowCatalog | null; empty: string }) {
-  const viewport = useRef<HTMLDivElement | null>(null);
   const graph = catalog?.structure && catalog.entry ? catalog : null;
   const entry = graph?.entry ?? "";
   const structure = graph?.structure;
@@ -187,9 +185,7 @@ function GraphPane({ title, catalog, empty }: { title: string; catalog: Workflow
       <h4>{title}</h4>
     </div>
     {graph && structure && entry !== ""
-      ? <GraphCanvas label={`${title}的流程图`} className="preview" viewportRef={viewport} fitKey={`draft:${title}:${graph.id}:${graph.revision}`}>
-        {(context) => <WorkflowHierarchy entry={entry} structure={structure} nodes={graph.nodes} stages={graph.stages} snapshot={null} selected="" bandWidth={context.bandWidth} onSelect={() => {}} />}
-      </GraphCanvas>
+      ? <FlowStages key={`${graph.id}:${graph.revision}`} label={`${title}的流程图`} entry={entry} structure={structure} nodes={graph.nodes} stages={graph.stages} snapshot={null} />
       : <p className="workflow-muted">{empty}</p>}
   </section>;
 }

@@ -339,6 +339,9 @@ struct RouteSrc {
     /// `must` 或 `ask`：走这条去向前停下等用户确认。
     #[serde(default)]
     confirm: Option<String>,
+    /// 给审查的人看：一句话说明什么情况下走这条（只用于界面呈现）。
+    #[serde(default)]
+    explain: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -387,6 +390,12 @@ struct NodeSrc {
     /// 结果字段的显示名（ADR 035）：`字段: 名称`，固定取值写 `字段.取值: 文字`。只用于界面呈现。
     #[serde(default)]
     labels: BTreeMap<String, String>,
+    /// 给审查的人看：一句话说明这一步为什么存在（只用于界面呈现）。
+    #[serde(default)]
+    why: Option<String>,
+    /// 给审查的人看：一句话说明这一步最后交出什么（只用于界面呈现）。
+    #[serde(default)]
+    delivers: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -866,9 +875,30 @@ pub fn compile(files: &BTreeMap<String, String>) -> Result<Compiled, Vec<Diagnos
                 .map(|(k, v)| (k.clone(), lower_value(lower_text, report, file, &field("scope"), v)))
                 .collect();
             check_labels(report, file, &field("labels"), &src.labels, src.result.as_ref());
+            let why = src.why.as_deref().map(str::trim).filter(|w| !w.is_empty());
+            if why.is_none() && kind != "flow" {
+                report.warn(file, &field("why"), "写一句 why：这一步为什么存在（审查工作流的人在节点详情里看到它）");
+            }
+            let delivers = src.delivers.as_deref().map(str::trim).filter(|d| !d.is_empty());
+            if delivers.is_none() && kind != "flow" {
+                report.warn(file, &field("delivers"), "写一句 delivers：这一步最后交出什么，如「一份设计文档：方案、改动范围和验收方式」（审查工作流的人在节点详情里看到它）");
+            }
             let mut ui = json!({"label": label, "steps": src.does});
             if !src.labels.is_empty() {
                 ui["labels"] = json!(src.labels.iter().map(|(k, v)| (k.clone(), v.trim().to_owned())).collect::<BTreeMap<_, _>>());
+            }
+            // 审查用的呈现（只读）：目的、交付物、要求原文、引用的规范。
+            if let Some(why) = why {
+                ui["purpose"] = json!(why);
+            }
+            if kind == "agent" && !src.prompt.trim().is_empty() {
+                ui["prompt"] = json!(src.prompt.trim());
+            }
+            if !src.knowledge.is_empty() {
+                ui["knowledge"] = json!(src.knowledge);
+            }
+            if let Some(delivers) = delivers {
+                ui["delivers"] = json!(delivers);
             }
             nodes.insert(
                 id.to_owned(),
@@ -991,7 +1021,11 @@ pub fn compile(files: &BTreeMap<String, String>) -> Result<Compiled, Vec<Diagnos
                         report.error(file, &path, "去向 $blocked 不需要确认");
                     }
                 }
-                routes.push(Route { when, set, next: route.to.clone(), label: route.label.clone(), reason: route.reason.clone(), confirm: route.confirm.clone() });
+                let explain = route.explain.as_deref().map(str::trim).filter(|e| !e.is_empty()).map(str::to_owned);
+                if explain.is_none() && step.next.len() > 1 {
+                    report.warn(file, &path, "有分支的步骤，每条去向（包括兜底）都写一句 explain：什么情况下走这条，如「计划不完整」（审查工作流的人在节点详情里看到它）");
+                }
+                routes.push(Route { when, set, next: route.to.clone(), label: route.label.clone(), reason: route.reason.clone(), confirm: route.confirm.clone(), explain });
             }
             if step.next.is_empty() {
                 report.error(file, &here(&[Seg::Key("next".into())]), "每个步骤至少要有一个去向");
@@ -1224,7 +1258,7 @@ mod tests {
     fn compiles_a_minimal_workflow() {
         let compiled = compile(&files(&[
             ("workflow.yaml", MANIFEST_OK),
-            ("flows/main.yaml", "label: 主流程\nentry: ask\nsteps:\n  ask:\n    agent:\n      label: 确认\n      prompt: 确认需求\n      result:\n        status: [ready]\n        note?: string\n    next:\n      - to: $complete\n        when: ask.status == \"ready\"\n      - to: $blocked\n"),
+            ("flows/main.yaml", "label: 主流程\nentry: ask\nsteps:\n  ask:\n    agent:\n      label: 确认\n      why: 先把需求说清楚\n      delivers: 确认过的需求\n      prompt: 确认需求\n      result:\n        status: [ready]\n        note?: string\n    next:\n      - to: $complete\n        explain: 需求已确认\n        when: ask.status == \"ready\"\n      - to: $blocked\n        explain: 需求没能确认\n"),
         ]))
         .unwrap();
         let node = &compiled.definition.nodes["ask"];
@@ -1233,6 +1267,31 @@ mod tests {
         assert_eq!(compiled.definition.phases["ask"].routes[0].when, Some(json!({"eq":[{"path":"/latest/ask/status"},"ready"]})));
         assert_eq!(compiled.meta.entries[0].inputs[0].name, "requirement");
         assert!(compiled.warnings.is_empty(), "{:?}", compiled.warnings);
+    }
+
+    /// 审查用的呈现（why / delivers / explain / 要求原文）进节点目录；没写 why、带条件的去向没写 explain 时提醒。
+    #[test]
+    fn review_fields_reach_the_catalog_and_missing_ones_are_flagged() {
+        let flow = "label: 主流程\nentry: ask\nsteps:\n  ask:\n    agent:\n      label: 确认\n      why: 先把需求说清楚\n      delivers: 一份实施计划和任务列表\n      prompt: 确认需求\n      knowledge: [a.md]\n      result:\n        decision: [pass, revise]\n        plan: string\n        tasks:\n          list:\n            id: string\n            goal?: string\n        evidence: string\n      labels:\n        plan: 实施计划\n        tasks: 任务列表\n        decision: 结论\n        decision.revise: 需要修正\n    next:\n      - to: $complete\n        explain: 结论是通过\n        confirm: must\n        when: ask.decision == \"pass\"\n      - to: $blocked\n        explain: 结论不是通过\n";
+        let compiled = compile(&files(&[("workflow.yaml", MANIFEST_OK), ("flows/main.yaml", flow), ("knowledge/a.md", "规范")])).unwrap();
+        assert!(compiled.warnings.is_empty(), "{:?}", compiled.warnings);
+        let ui = &compiled.definition.nodes["ask"].ui;
+        assert_eq!(ui["purpose"], "先把需求说清楚");
+        assert_eq!(ui["prompt"], "确认需求");
+        assert_eq!(ui["knowledge"], json!(["a.md"]));
+        assert_eq!(ui["delivers"], "一份实施计划和任务列表");
+        let catalog = compiled.definition.catalog();
+        let flows = catalog["structure"]["flows"].as_object().unwrap();
+        let route = &flows.values().next().unwrap()["phases"][0]["routes"][0];
+        assert_eq!(route["explain"], "结论是通过");
+        assert_eq!(route["confirm"], "must");
+
+        let bare = flow.replace("      why: 先把需求说清楚\n", "").replace("      delivers: 一份实施计划和任务列表\n", "").replace("        explain: 结论是通过\n", "");
+        let compiled = compile(&files(&[("workflow.yaml", MANIFEST_OK), ("flows/main.yaml", &bare), ("knowledge/a.md", "规范")])).unwrap();
+        let rendered: Vec<String> = compiled.warnings.iter().map(|w| w.message.clone()).collect();
+        assert!(rendered.iter().any(|m| m.contains("why")), "{rendered:?}");
+        assert!(rendered.iter().any(|m| m.contains("explain")), "{rendered:?}");
+        assert!(rendered.iter().any(|m| m.contains("delivers")), "{rendered:?}");
     }
 
     #[test]

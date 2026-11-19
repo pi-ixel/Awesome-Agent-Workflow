@@ -8,12 +8,14 @@ steps:
     run: [reviewer_a, reviewer_b]
     next:
       - to: resolution
+        explain: 任一评审员有发现
         label: 发现问题
         when: |-
           (reviewer_a.decision == "findings" || reviewer_b.decision == "findings")
           && nonempty(reviewer_a.report)
           && nonempty(reviewer_b.report)
       - to: $return
+        explain: 两位评审员都没有发现
         label: 无发现
         when: |-
           reviewer_a.decision == "pass"
@@ -24,11 +26,14 @@ steps:
           resolution: '{status: "ready", evidence: "两路评审均无发现", needA: false, needB: false}'
           scanRepairs: 0
       - to: $blocked
+        explain: 评审报告不全
 
   resolution:
     stage: review
     agent:
       label: 发现处置
+      why: 处理两位评审员的发现，并决定要不要请原评审员复核。
+      delivers: 处理后的代码和验证结果，以及要不要请原评审员复核
       role: 发现处置与重验
       prompt: 依据两份独立报告及已有的最新定向复核报告处置发现，重跑受影响验证；如需原 Reviewer 复核，明确 needA/needB。不得忽略尚未通过的定向复核发现。files 列出这一步新增或修改的文件（相对项目目录的路径）。
       knowledge: [host-tools.md, finding-resolution.md]
@@ -47,6 +52,7 @@ steps:
         needB: 需要评审 B 复核
     next:
       - to: recheck_a
+        explain: 处置完成，需要评审员 A 复核
         label: A 复核
         when: |-
           resolution.status == "ready"
@@ -56,6 +62,7 @@ steps:
           resolution: resolution
           scanRepairs: 0
       - to: recheck_b
+        explain: 处置完成，需要评审员 B 复核
         label: B 复核
         when: |-
           resolution.status == "ready"
@@ -65,17 +72,21 @@ steps:
           resolution: resolution
           scanRepairs: 0
       - to: $return
+        explain: 处置完成，不需要复核
         label: 无需复核
         when: resolution.status == "ready" && nonempty(resolution.evidence)
         set:
           resolution: resolution
           scanRepairs: 0
       - to: $blocked
+        explain: 没能完成处置
 
   recheck_a:
     stage: review
     agent:
       label: 评审员 A 复核
+      why: 由提出问题的评审员确认整改到位。
+      delivers: 一份复核报告：之前提的问题是否已经改好
       role: Reviewer A
       prompt: 只读定向复核你先前发现的整改，提供结论和证据。
       knowledge: [host-tools.md, semantic-review-a.md]
@@ -90,6 +101,7 @@ steps:
         decision.findings: 仍有发现
     next:
       - to: recheck_b
+        explain: 复核通过，但还需要评审员 B 复核
         when: |-
           recheck_a.decision == "pass"
           && nonempty(recheck_a.report)
@@ -97,10 +109,12 @@ steps:
         set:
           forceRecheckA: false
       - to: $return
+        explain: 复核通过
         when: recheck_a.decision == "pass" && nonempty(recheck_a.report)
         set:
           forceRecheckA: false
       - to: resolution
+        explain: 仍有发现（最多自动处置 2 轮）
         label: A 复核仍有发现
         when: |-
           recheck_a.decision == "findings"
@@ -110,14 +124,18 @@ steps:
           reviewRepairs: vars.reviewRepairs + 1
           forceRecheckA: true
       - to: $blocked
+        explain: 自动处置 2 轮后仍有发现
         when: recheck_a.decision == "findings" && nonempty(recheck_a.report)
         reason: 复核仍有发现，已达到自动处置次数上限；请处理报告后在原复核会话继续。
       - to: $blocked
+        explain: 复核报告不全
 
   recheck_b:
     stage: review
     agent:
       label: 评审员 B 复核
+      why: 由提出问题的评审员确认整改到位。
+      delivers: 一份复核报告：之前提的问题是否已经改好
       role: Reviewer B
       prompt: 只读定向复核你先前发现的整改，提供结论和证据。
       knowledge: [host-tools.md, semantic-review-b.md]
@@ -132,10 +150,12 @@ steps:
         decision.findings: 仍有发现
     next:
       - to: $return
+        explain: 复核通过
         when: recheck_b.decision == "pass" && nonempty(recheck_b.report)
         set:
           forceRecheckB: false
       - to: resolution
+        explain: 仍有发现（最多自动处置 2 轮）
         label: B 复核仍有发现
         when: |-
           recheck_b.decision == "findings"
@@ -145,15 +165,19 @@ steps:
           reviewRepairs: vars.reviewRepairs + 1
           forceRecheckB: true
       - to: $blocked
+        explain: 自动处置 2 轮后仍有发现
         when: recheck_b.decision == "findings" && nonempty(recheck_b.report)
         reason: 复核仍有发现，已达到自动处置次数上限；请处理报告后在原复核会话继续。
       - to: $blocked
+        explain: 复核报告不全
 
 # 并行步骤里的节点（被 run 引用）。
 nodes:
 
   reviewer_a:
     label: 评审员 A
+    why: 从正确性和边界的角度独立评审本次改动。
+    delivers: 一份评审报告：正确性和边界方面的问题
     prompt: 只读独立评审当前任务的正确性及边界，提供报告与证据。
     knowledge: [host-tools.md, semantic-review-a.md]
     does:
@@ -165,6 +189,8 @@ nodes:
 
   reviewer_b:
     label: 评审员 B
+    why: 从可维护性和一致性的角度独立评审本次改动。
+    delivers: 一份评审报告：可维护性和一致性方面的问题
     prompt: 只读独立评审当前任务的可维护性及一致性，提供报告与证据。
     knowledge: [host-tools.md, semantic-review-b.md]
     does:

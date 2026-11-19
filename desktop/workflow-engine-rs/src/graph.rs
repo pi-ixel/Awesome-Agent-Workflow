@@ -199,6 +199,9 @@ pub struct Route {
     /// 走这条去向前要用户确认：`must` 每次都停，`ask` 在运行开了自动放行时直接通过（ADR 031）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confirm: Option<String>,
+    /// 给审查的人看的一句话条件（只用于界面呈现，不参与调度）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub explain: Option<String>,
 }
 /// 停在确认关卡上的去向。批准后由该实例下一次调度执行。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -326,7 +329,7 @@ impl Definition {
             let flow_id = self.phase_flow(phase);
             let metadata = self.flows.get(&flow_id);
             let flow = flows.entry(flow_id.clone()).or_insert_with(|| json!({"id":flow_id,"label":metadata.map(|f|f.label.as_str()).unwrap_or(&self.name),"entry":metadata.map(|f|f.entry.as_str()).unwrap_or(&self.entry),"phases":[]}));
-            flow["phases"].as_array_mut().expect("array").push(json!({"id":id,"stage":phase.stage,"run":phase.run,"edges":phase.edges,"call":phase.call,"callEntry":phase.call_entry,"foreach":phase.foreach,"routes":phase.routes.iter().enumerate().map(|(i,r)|json!({"next":r.next,"label":r.label,"conditional":r.when.is_some(),"fallback":i>0 && r.when.is_none()})).collect::<Vec<_>>() }));
+            flow["phases"].as_array_mut().expect("array").push(json!({"id":id,"stage":phase.stage,"run":phase.run,"edges":phase.edges,"call":phase.call,"callEntry":phase.call_entry,"foreach":phase.foreach,"routes":phase.routes.iter().enumerate().map(|(i,r)|json!({"next":r.next,"label":r.label,"conditional":r.when.is_some(),"fallback":i>0 && r.when.is_none(),"explain":r.explain,"confirm":r.confirm,"reason":r.reason})).collect::<Vec<_>>() }));
         }
         let root_flow = self
             .phases

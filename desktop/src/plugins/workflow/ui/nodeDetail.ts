@@ -231,7 +231,7 @@ export function entryConditions(
   // 同一环节内的先后连线：在前一个动作之后执行。
   for (const edge of phase?.edges ?? []) {
     if (edge.to !== site) continue;
-    conditions.push(`「${labelOf(edge.from)}」之后${edge.label ? ` · ${edge.label}` : ""}`);
+    conditions.push(`「${labelOf(edge.from)}」之后${edge.label ? `（${edge.label}）` : ""}`);
   }
   if (conditions.length === 0) {
     for (const flow of flows) {
@@ -241,10 +241,57 @@ export function entryConditions(
       for (const from of flow.phases) {
         for (const route of from.routes) {
           if (route.next !== owner) continue;
-          conditions.push(`「${source(from.id)}」之后${route.label ? ` · ${route.label}` : ""}`);
+          const why = route.explain || route.label;
+          conditions.push(`「${source(from.id)}」之后${why ? `（${why}）` : ""}`);
         }
       }
     }
   }
   return [...new Set(conditions)];
+}
+
+/** 节点完成后的一条去向（审查用）：什么情况下（作者写的条件），会发生什么（按去向生成的一句话）。 */
+export interface NodeOutcome {
+  /** 条件：定义里的 explain；没写时用连线标签；只有一条去向时为空。 */
+  readonly when?: string;
+  /** 会发生什么，如「接着进入「设计」」「先停下等你确认，确认后流程完成」「流程停下，等你查看并处理」。 */
+  readonly result: string;
+  readonly stops?: boolean;
+  readonly confirm?: "must" | "ask";
+  /** 要确认时，确认后去的地方（「开始「任务开发」前会停下等你确认」）。 */
+  readonly target?: string;
+}
+
+/** 节点完成后会怎样：同一环节内有后续动作时是那个动作，否则是环节的去向（按定义顺序）。 */
+export function nodeOutcomes(
+  structure: HierarchyStructure,
+  site: string,
+  phaseId: string | undefined,
+  labelOf: (site: string) => string,
+): NodeOutcome[] {
+  const flows = Object.values(structure.flows);
+  const phases = flows.flatMap((flow) => flow.phases);
+  const owner = phaseId ?? phases.find((phase) => phase.run.includes(site))?.id;
+  const phase = owner ? phases.find((p) => p.id === owner) : undefined;
+  if (!phase) return [];
+  const inner = (phase.edges ?? []).filter((edge) => edge.from === site);
+  if (inner.length > 0) return inner.map((edge) => ({ ...(edge.label ? { when: edge.label } : {}), result: `接着做「${labelOf(edge.to)}」` }));
+  const single = phase.routes.length === 1;
+  const flowName = flows.find((flow) => flow.phases.includes(phase))?.label;
+  return phase.routes.map((route) => {
+    const to = phases.find((p) => p.id === route.next);
+    const target = to ? (to.run.length > 0 ? to.run.map(labelOf).join("、") : to.call ? structure.flows[to.call]?.label ?? to.call : to.id) : undefined;
+    const next = route.next === "$complete" ? "流程完成"
+      : route.next === "$return" ? (flowName ? `「${flowName}」到此结束` : "这部分到此结束")
+      : route.next === "$blocked" ? "流程停下，等你查看并处理"
+      : to?.call ? `开始「${target}」${to.foreach ? "，逐项进行" : ""}` : `接着进入「${target}」`;
+    const result = route.confirm ? `先停下等你确认${route.confirm === "ask" ? "（启动时可设为自动放行）" : ""}，确认后${next}` : next;
+    const when = route.explain || route.label || undefined;
+    return {
+      ...(when && !single ? { when } : {}),
+      result,
+      ...(route.next === "$blocked" ? { stops: true } : {}),
+      ...(route.confirm ? { confirm: route.confirm, target: route.next === "$complete" ? "完成" : target ? `「${target}」` : undefined } : {}),
+    };
+  });
 }

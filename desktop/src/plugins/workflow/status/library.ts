@@ -120,6 +120,7 @@ export function parseDraft(value: unknown): WorkflowDraft | null {
     dir: text(item.dir),
     createdAt: typeof item.createdAt === "number" ? item.createdAt : 0,
     ...(text(item.name) ? { name: text(item.name) } : {}),
+    ...(text(item.description) ? { description: text(item.description) } : {}),
     changes: typeof item.changes === "number" ? item.changes : 0,
     ok: item.ok === true,
     ...(record(item.mcpServer) ? { mcpServer: item.mcpServer } : {}),

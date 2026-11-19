@@ -27,6 +27,7 @@ export function draftPrompt(kind: "edit" | "new" | "continue", request: string):
     "- 每次改完文件都调用 check_workflow 工具检查；没通过就按它给出的文件、行号和原因修正，再检查，直到通过；",
     "- 不需要运行工作流本身；",
     "- 结果字段写上 labels，让界面能读懂；会产出文件的节点写 cleanup；对外影响撤不回的节点写 irreversible；",
+    "- label、does、why、delivers、去向的 label 和 explain 是写给人看的：用户在应用里审查这个工作流打算怎么运行时，流程图和节点详情显示的就是它们，读的人不了解工作流内部（字段、表达式、节点 id、内部用语）。每个节点都写 why（为什么有这一步）和 delivers（最后交出什么），有分支的步骤每条去向都写 explain（什么情况下走这条）；",
     "- 改完后用几句话向用户说明这个工作流现在会怎么做（按步骤说，用用户能懂的话），以及这次改了什么、为什么；不要出现文件名、字段名和节点 id。用户会在应用里看改动前后的流程图，确认后才保存。",
   ].join("\n");
   return pluginMessage({

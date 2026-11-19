@@ -1,7 +1,6 @@
-import { lazy, Suspense, useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import type { NativeSkill, SkillCatalog } from "../../host/types.ts";
 import { pathName } from "../../../shared/panelPaths.ts";
-import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import { DangerButton } from "../../../shared/ui/controls.tsx";
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
 import { useHeaderMenu } from "../../../shared/ui/useHeaderMenu.ts";
@@ -18,9 +17,7 @@ import {
   XIcon,
 } from "../../../shared/ui/icons.tsx";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
-const MarkdownView = lazy(async () => ({
-  default: (await import("../../../shared/ui/MarkdownView.tsx")).MarkdownView,
-}));
+import { DocumentPreview } from "../../../shared/ui/DocumentPreview.tsx";
 
 export function SkillGroup({
   project,
@@ -294,7 +291,6 @@ export function SkillDetail({
       (other) => other.path !== skill.path && other.realPath === skill.realPath,
     );
   const isInline = skill.kind === "inline";
-  const [mode, setMode] = useState<"body" | "source">("body");
   const project = source?.project ? pathName(source.project) : "全局技能";
   const kind = isInline
     ? "配置定义"
@@ -304,12 +300,6 @@ export function SkillDetail({
         ? "符号链接"
         : "目录技能";
   const documentName = isInline ? "配置定义" : "SKILL.md";
-  // 只移除文档开头带有完整边界的 YAML 文件头，原文视图始终使用扫描到的内容。
-  const body = skill.preview.replace(
-    /^\uFEFF?---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/,
-    "",
-  );
-  const raw = isInline || mode === "source";
   return (
     <ModalShell size="preview" label="技能详情" onDismiss={onClose}>
       <header className="flex shrink-0 items-center justify-between border-b border-line px-5 py-2.5">
@@ -340,50 +330,12 @@ export function SkillDetail({
         )}
       </div>
       <div className="flex min-h-0 flex-1 flex-col-reverse border-t border-line sm:grid sm:grid-cols-[minmax(0,1fr)_clamp(13rem,23%,18rem)]">
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-5 py-2 sm:px-7">
-            <h4 className="flex items-center gap-2 font-mono text-xs text-ink-mute">
-              <FileIcon className="ui-icon-14" />
-              {documentName}
-            </h4>
-            {!isInline && skill.preview && (
-              <SegmentedControl
-                groupLabel="文档显示方式"
-                value={mode}
-                options={[
-                  { value: "body", label: "正文" },
-                  { value: "source", label: "原文" },
-                ]}
-                onChange={setMode}
-              />
-            )}
-          </div>
-          <div
-            key={mode}
-            role="region"
-            aria-label={documentName + (mode === "source" ? " 原文" : " 正文")}
-            tabIndex={0}
-            className="min-h-0 flex-1 overflow-auto overscroll-contain px-5 py-5 sm:px-8"
-          >
-            <div className="mx-auto max-w-[800px]">
-              {!skill.preview ? (
-                <p className="text-xs text-ink-mute">暂无可预览的内容</p>
-              ) : raw ? (
-                <pre className="whitespace-pre-wrap break-all font-mono text-xs leading-relaxed">
-                  {skill.preview}
-                </pre>
-              ) : body.trim() ? (
-                <Suspense fallback={<p role="status">正在加载预览…</p>}>
-                  <MarkdownView text={body} />
-                </Suspense>
-              ) : (
-                <p className="text-xs text-ink-mute">
-                  此文件仅包含技能元数据，可切换到原文查看。
-                </p>
-              )}
-            </div>
-          </div>
-        </section>
+        <DocumentPreview
+          name={documentName}
+          text={skill.preview}
+          rawOnly={isInline}
+          emptyBody={<p className="text-xs text-ink-mute">此文件仅包含技能元数据，可切换到原文查看。</p>}
+        />
         <aside
           aria-label="技能信息"
           className="flex min-h-0 min-w-0 flex-col gap-2 border-b border-line bg-base px-4 py-3 sm:gap-3 sm:border-b-0 sm:border-l sm:px-5 sm:py-4"

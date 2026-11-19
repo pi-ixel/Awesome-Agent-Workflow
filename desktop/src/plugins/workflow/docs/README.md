@@ -18,7 +18,7 @@
   `projectExtension` 给会话区、状态浮层、项目总览与项目树的入口和状态，`agentSwitchGuard`
   在切换 Agent 前停下进行中的运行；`workflowUi` 只供插件内部用），并向侧栏发布会话分组（ADR 027）。面板外壳 `WorkflowPanel.tsx` 分三层：
   `WorkflowLibrary.tsx` 工作流库、`WorkflowDetailView.tsx` 工作流（流程图 / 源码 / 运行 /
-  `WorkflowLauncher.tsx` 启动表单）、`RunView.tsx` 一次运行（画布 `WorkflowHierarchy.tsx`
-  与节点检视器 `NodeDetail.tsx`）。`WorkflowOverview.tsx` 项目总览区块，
+  `WorkflowLauncher.tsx` 启动表单）、`RunView.tsx` 一次运行（流程图 `FlowStages.tsx`，数据整理在
+  `flowModel.ts`、变形动画在 `flowMotion.ts`；节点检视器 `NodeDetail.tsx`）。`WorkflowOverview.tsx` 项目总览区块，
   `WorkflowSessionBanner.tsx` 节点会话回指条，`sessionGroups.ts` 运行 → 侧栏分组。
 - `health/`：工作区健康检查（工作流服务、工作流库、节点 Agent）；`config.ts` 面板布局兼容。

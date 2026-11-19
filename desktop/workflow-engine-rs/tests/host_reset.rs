@@ -142,7 +142,6 @@ fn run_with(host: ReloadingHost) -> (Stage, std::path::PathBuf) {
         mcp_servers: json!([]),
         python: "python".into(),
         role_commands: Default::default(),
-        role_models: Default::default(),
     };
     let mut journal = Journal::open(&db_path).unwrap();
     journal
@@ -198,7 +197,6 @@ fn a_host_reset_reattaches_the_same_session_and_finishes_the_node() {
         mcp_servers: json!([]),
         python: "python".into(),
         role_commands: Default::default(),
-        role_models: Default::default(),
     };
     let mut journal = Journal::open(&db_path).unwrap();
     journal

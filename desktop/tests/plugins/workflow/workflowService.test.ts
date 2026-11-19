@@ -317,24 +317,6 @@ describe("createWorkflowService", () => {
     expect(h.requests.at(-1)).toEqual({ method: "workflow-trust", params: { id: "shared" } });
     h.dispose();
   });
-  it("passes per-role Agents and models at start and resume, and records them for the run", async () => {
-    const started: Array<[string, string]> = [];
-    const h = harness();
-    h.agentLaunch.mockImplementation(() => ({ command: ["icode", "acp"], mcpServers: [], roleCommands: { 设计: ["other", "acp"] }, roleModels: { 设计: "fast" } }) as never);
-    const service = createWorkflowService({
-      client: { request: (method: string, params: Record<string, unknown>) => { h.requests.push({ method, params }); return Promise.resolve(method === "start" ? { runId: "run-9" } : null); }, subscribe: () => () => {}, hasActiveRuns: () => false, hasActiveRunsFromHost: () => Promise.resolve(false) } as never,
-      logger: h.logger, agentLaunch: h.agentLaunch,
-      onRunStarted: (runId, workflowId) => started.push([runId, workflowId]),
-    }).service;
-    service.bindWorkspace("D:/project");
-    await service.start({ workflowId: "aaw-dev", entry: "dev", inputs: {} });
-    expect(h.agentLaunch).toHaveBeenCalledWith(undefined, "aaw-dev");
-    expect(h.requests.find((r) => r.method === "start")?.params.input).toMatchObject({ roleCommands: { 设计: ["other", "acp"] }, roleModels: { 设计: "fast" } });
-    expect(started).toEqual([["run-9", "aaw-dev"]]);
-    await service.resume("run-9");
-    expect(h.requests.find((r) => r.method === "resume")?.params).toMatchObject({ roleCommands: { 设计: ["other", "acp"] }, roleModels: { 设计: "fast" } });
-    h.dispose();
-  });
   it("keeps the latest ACP plan of each node round", () => {
     const values = new Map<string, string>();
     const plans = createNodePlans({ getItem: (key) => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); } });

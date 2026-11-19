@@ -7,6 +7,8 @@ steps:
     stage: design
     agent:
       label: 项目基线
+      why: 先摸清项目已有的架构、约束和基线，避免设计脱离现状。
+      delivers: 一份项目基线说明：已有的架构、约束和本次需求
       prompt: 核对项目已有架构、约束和本次需求；基线存在时优先复用，缺失影响设计时与用户确认并记录。
       knowledge: [host-tools.md, sr-design-method.md]
       does:
@@ -20,6 +22,7 @@ steps:
         reference: SR 需求文档
     next:
       - to: sr_design
+        explain: 基线已确认，并留下了说明和证据
         when: |-
           sr_init.status == "ready"
           && nonempty(sr_init.reference)
@@ -27,12 +30,15 @@ steps:
         set:
           projectBaseline: sr_init
       - to: $blocked
+        explain: 基线没能确认清楚
         reason: 必要工作未完成或需要用户决定，请查看节点结果。
 
   sr_design:
     stage: design
     agent:
       label: SR 需求与设计
+      why: 把整体需求落成完整的方案、契约和验收标准。
+      delivers: 一份整体设计：需求、方案、接口约定和验收标准
       prompt: 澄清需求并形成完整整体设计，保留来源与必要证据。在 files 中列出这一步新建的文档路径。
       knowledge: [host-tools.md, sr-design-method.md]
       does:
@@ -50,6 +56,7 @@ steps:
       cleanup: [sr_design.files]
     next:
       - to: sr_gate
+        explain: 交出了整体设计和证据
         when: |-
           sr_design.status == "ready"
           && nonempty(sr_design.reference)
@@ -58,12 +65,15 @@ steps:
           design: sr_design
           srDesign: sr_design
       - to: $blocked
+        explain: 没能完成整体设计
         reason: 必要工作未完成或需要用户决定，请查看节点结果。
 
   sr_gate:
     stage: design
     agent:
       label: SR 设计门禁
+      why: 拆分之前，独立确认整体设计站得住。
+      delivers: 一份门禁报告：整体设计能否进入拆分，以及发现的问题
       prompt: 独立检查整体设计。
       knowledge: [host-tools.md, sr-gate-method.md]
       does:
@@ -81,6 +91,7 @@ steps:
         decision.revise: 需要修正
     next:
       - to: sr_repair
+        explain: 发现的问题都能安全修正（最多自动修正 2 轮）
         label: 可修正
         when: |-
           sr_gate.decision == "revise"
@@ -91,17 +102,22 @@ steps:
           srRepairs: vars.srRepairs + 1
           gateReview: sr_gate
       - to: ar_split
+        explain: 门禁通过
         label: 通过
         when: sr_gate.decision == "pass" && nonempty(sr_gate.report)
         set:
           gateReview: sr_gate
       - to: $blocked
+        explain: 有不能自动修正的问题，或修正 2 轮后仍未通过
         reason: 门禁未通过、证据不足或已达到整改上限；请查看报告并处理。
 
   sr_repair:
     stage: design
     agent:
-      label: SR 需求与设计
+      label: SR 设计整改
+      why: 按门禁报告整改整体设计，需要你取舍时会停下来问你。
+      delivers: 整改后的整体设计
+      role: SR 需求与设计
       prompt: 依据最新整体设计门禁报告，在既有授权内整改；需要用户取舍时在当前会话提问并等待答复，之后继续。
       knowledge: [host-tools.md, sr-design-method.md, repair-policy.md]
       does:
@@ -117,6 +133,7 @@ steps:
       cleanup: [sr_repair.files]
     next:
       - to: sr_recheck
+        explain: 交出了整改后的设计和证据
         when: |-
           sr_repair.status == "ready"
           && nonempty(sr_repair.reference)
@@ -125,12 +142,16 @@ steps:
           design: sr_repair
           srDesign: sr_repair
       - to: $blocked
+        explain: 没能完成整改
         reason: 必要工作未完成或需要用户决定，请查看节点结果。
 
   sr_recheck:
     stage: design
     agent:
-      label: SR 设计门禁
+      label: SR 门禁复核
+      why: 确认整体设计的问题都已解决。
+      delivers: 一份复核报告：整改后能否进入拆分，以及仍存在的问题
+      role: SR 设计门禁
       prompt: 根据最新设计独立重审全部未解决问题。
       knowledge: [host-tools.md, sr-gate-method.md]
       does:
@@ -147,6 +168,7 @@ steps:
         decision.revise: 需要修正
     next:
       - to: sr_repair
+        explain: 发现的问题都能安全修正（最多自动修正 2 轮）
         label: 可修正
         when: |-
           sr_recheck.decision == "revise"
@@ -157,17 +179,21 @@ steps:
           srRepairs: vars.srRepairs + 1
           gateReview: sr_recheck
       - to: ar_split
+        explain: 复核通过
         label: 通过
         when: sr_recheck.decision == "pass" && nonempty(sr_recheck.report)
         set:
           gateReview: sr_recheck
       - to: $blocked
+        explain: 有不能自动修正的问题，或修正 2 轮后仍未通过
         reason: 门禁未通过、证据不足或已达到整改上限；请查看报告并处理。
 
   ar_split:
     stage: design
     agent:
       label: AR 范围划分
+      why: 决定把需求拆成几个 AR 分别推进，还是整体推进，由你确认。
+      delivers: AR 的划分结果：拆成哪几个 AR，或者整体推进
       prompt: 结合 SR 设计和用户意见决定拆分或整体进入；必须明确记录用户确认。
       knowledge: [host-tools.md, ar-scope-method.md]
       does:
@@ -190,6 +216,7 @@ steps:
         confirmed: 用户已确认
     next:
       - to: sr_ar_call
+        explain: 你确认要拆成多个 AR
         label: 逐 AR
         when: |-
           ar_split.status == "ready"
@@ -202,6 +229,7 @@ steps:
           ars: ar_split.ars
           currentAr: ar_split.ars[0]
       - to: sr_ar_whole_call
+        explain: 你确认不拆分、整体推进
         label: 整体进入
         when: |-
           ar_split.status == "ready"
@@ -212,12 +240,15 @@ steps:
           ars: '[{id: "ALL", title: "整体范围"}]'
           currentAr: '{id: "ALL", title: "整体范围"}'
       - to: $blocked
+        explain: 范围还没确认
         reason: 必要工作未完成或需要用户决定，请查看节点结果。
 
   ar_init:
     stage: design
     agent:
       label: AR 入口确认
+      why: 直接从一个 AR 开始时，先确认它的内容和范围。
+      delivers: 确认过的这个 AR 的内容和范围
       prompt: 确认用户提供的 AR 内容、范围与可用架构，输出包含该 AR 的单项 ars 列表并确认。
       knowledge: [host-tools.md, ar-scope-method.md]
       does:
@@ -240,6 +271,7 @@ steps:
         confirmed: 用户已确认
     next:
       - to: ar_direct_call
+        explain: 你确认了这个 AR 的范围
         when: |-
           ar_init.status == "ready"
           && ar_init.confirmed == true
@@ -250,12 +282,15 @@ steps:
           ars: ar_init.ars
           currentAr: ar_init.ars[0]
       - to: $blocked
+        explain: 范围还没确认
         reason: 必要工作未完成或需要用户决定，请查看节点结果。
 
   overall_delivery:
     stage: delivery
     agent:
       label: 整体结果交付
+      why: 汇总所有模块和任务的实际完成情况、验证和遗留风险。
+      delivers: 一份整体交付说明：各模块和任务的完成情况、验证和遗留风险
       prompt: 汇总本次 SR 或 AR 范围内各模块和任务的实际完成情况、验证证据及未解决风险；有未知或阻断时如实报告。
       knowledge: [host-tools.md, dev-completion.md]
       does:
@@ -270,6 +305,7 @@ steps:
     next:
       # 交付前请你确认；启动时选了自动放行则直接完成。
       - to: $complete
+        explain: 交付说明和证据齐全
         label: 确认交付
         confirm: ask
         when: |-
@@ -277,6 +313,7 @@ steps:
           && nonempty(overall_delivery.reference)
           && nonempty(overall_delivery.evidence)
       - to: $blocked
+        explain: 交付说明或证据不全
         reason: 整体交付尚未完成，请查看交付结果。
 
   sr_ar_call:
@@ -289,8 +326,10 @@ steps:
       AR: item.id
     next:
       - to: overall_delivery
+        explain: 每个 AR 都交出了模块结果
         when: every(sr_ar_call, nonempty(item.output.modules))
       - to: $blocked
+        explain: 有 AR 没能交出结果
         reason: 子流程没有交付完整结果
 
   sr_ar_whole_call:

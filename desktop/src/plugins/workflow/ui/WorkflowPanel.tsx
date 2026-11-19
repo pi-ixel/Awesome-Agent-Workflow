@@ -13,8 +13,8 @@ import { DraftPage } from "./DraftPage.tsx";
 import { RunManager } from "./RunManager.tsx";
 import { describeError, serviceExitText, type ErrorText } from "../status/errorText.ts";
 import { useEffect, useRef, useState } from "react";
-import type { WorkflowDraft, WorkflowExecutors, WorkflowDraftEditor, WorkflowFileTransfer, RunManagerFilters, RunSummary, WorkflowLaunchRequest, WorkflowPanelRequest, WorkflowService } from "../types.ts";
-import { AiEditSheet } from "./AiEditSheet.tsx";
+import type { WorkflowDraft, WorkflowDraftEditor, WorkflowFileTransfer, RunManagerFilters, RunSummary, WorkflowLaunchRequest, WorkflowPanelRequest, WorkflowService } from "../types.ts";
+import { AiComposeDialog } from "./AiComposeDialog.tsx";
 import { draftPrompt } from "../editing/draftSessions.ts";
 import { errorLine } from "../status/errorText.ts";
 import { WorkflowLibrary, type LibraryTab } from "./WorkflowLibrary.tsx";
@@ -28,7 +28,7 @@ import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.t
 import { DEFAULT_RUN_FILTERS } from "./runSearch.ts";
 import { attentionOf } from "./runList.ts";
 
-type WorkflowRoute = { readonly kind: "workflow"; readonly id: string; readonly launch: { readonly entry?: string } | null; readonly initialTab?: "runs" };
+type WorkflowRoute = { readonly kind: "workflow"; readonly id: string; readonly launch: { readonly entry?: string } | null };
 type RunsRoute = { readonly kind: "runs"; readonly filters?: RunManagerFilters };
 type Route =
   | { readonly kind: "library"; readonly hint?: string }
@@ -36,6 +36,8 @@ type Route =
   | { readonly kind: "run"; readonly runId: string; readonly back?: WorkflowRoute | RunsRoute }
   | RunsRoute
   | { readonly kind: "draft"; readonly draftId: string };
+/** 让 AI 新建 / 修改：弹窗里先说要求。 */
+type ComposeTarget = { readonly kind: "new" } | { readonly kind: "edit"; readonly id: string; readonly name: string; readonly preset: boolean };
 
 function routeOfLaunch({ workflowId, entry }: WorkflowLaunchRequest): Route {
   return workflowId
@@ -63,7 +65,7 @@ function landingRoute(runs: readonly RunSummary[]): Route {
   return latest && latest.status !== "completed" ? { kind: "run", runId: latest.runId } : { kind: "library" };
 }
 
-export function WorkflowPanel({ service, project, pickFiles, transfer, editor, executors, onOpenSession, onOpenProjectRun, onOpenFile, onWiden, onFullView }: {
+export function WorkflowPanel({ service, project, pickFiles, transfer, editor, onOpenSession, onOpenProjectRun, onOpenFile }: {
   service: WorkflowService;
   /** 面板所属项目（跨项目总览用来区分当前项目）。 */
   project?: string;
@@ -75,15 +77,11 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
   transfer?: WorkflowFileTransfer;
   /** AI 编辑工作流的会话（ADR 036）。 */
   editor?: WorkflowDraftEditor;
-  /** 按角色指定 Agent 和模型（ADR 036）。 */
-  executors?: WorkflowExecutors;
   /** 节点会话 → 中央 SessionView（project.sessions.openSessionFromEntry）。 */
   onOpenSession?: (sessionId: string) => void;
   /** 结果里的文件路径 → 工作台打开文件。 */
   onOpenFile?: (path: string) => void;
   /** 窄屏提示的两个出口（工作台右栏拉宽 / 进入完整视图）。 */
-  onWiden?: () => void;
-  onFullView?: () => void;
 }) {
   const [route, setRoute] = useState<Route>(() => initialRoute(service, project));
   // 库页的页签存在这里（不随 WorkflowLibrary 卸载丢失）：进详情再返回还在原页签。
@@ -95,7 +93,7 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
   const [names, setNames] = useState<Readonly<Record<string, string>>>({});
   // AI 编辑（ADR 036）：未保存的草稿，以及正在填写的要求（先说要求，再建草稿）。
   const [drafts, setDrafts] = useState<readonly WorkflowDraft[]>([]);
-  const [aiRequest, setAiRequest] = useState<{ readonly kind: "new" } | { readonly kind: "edit"; readonly id: string; readonly name: string; readonly preset: boolean } | null>(null);
+  const [aiRequest, setAiRequest] = useState<ComposeTarget | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState("");
   // 用户自己点过导航后，刷新回来的列表不再改去处。
@@ -178,8 +176,8 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
     setAiError("");
     setAiRequest({ kind: "new" });
   };
-  const submitAiRequest = async (text: string) => {
-    if (!aiRequest || !editor) return;
+  const submitAiRequest = async (aiRequest: ComposeTarget, text: string) => {
+    if (!editor) return;
     setAiBusy(true);
     setAiError("");
     try {
@@ -207,7 +205,7 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
 
   const openWorkflow = (id: string, launch: { entry?: string } | null = null) => go({ kind: "workflow", id, launch });
   const openWorkflowRun = (id: string, runId: string) =>
-    go({ kind: "run", runId, back: { kind: "workflow", id, launch: null, initialTab: "runs" } });
+    go({ kind: "run", runId, back: { kind: "workflow", id, launch: null } });
   const back = route.kind === "run" ? route.back ?? { kind: "runs" as const } : { kind: "library" as const };
   const backLabel = back.kind === "workflow" ? names[back.id] ?? back.id : back.kind === "runs" ? "运行管理" : "工作流库";
   const crumbs = [
@@ -236,18 +234,13 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
         setError(null);
         void refreshAndLand();
       }}>重试</button>}>{error.hint}</Callout>}
-    {aiRequest && <AiEditSheet
+    {aiRequest && <AiComposeDialog
       key={aiRequest.kind === "edit" ? aiRequest.id : "new"}
-      title={aiRequest.kind === "new" ? "让 AI 新建工作流" : `让 AI 修改「${aiRequest.name}」`}
-      intro={aiRequest.kind === "new"
-        ? "说说这个工作流要做什么。AI 会在一份草稿里写出来，编辑会话在中间打开，之后在会话里继续说；你看过结果再决定保存。"
-        : aiRequest.preset
-          ? "预置工作流不能直接改：会先复制一份「我的」，AI 改的是副本的草稿。之后在中间的会话里继续说；你看过改动再决定保存。"
-          : "说说要怎么改。AI 改的是一份草稿，原工作流不受影响；编辑会话在中间打开，之后在会话里继续说，你看过改动再决定保存。"}
-      placeholder={aiRequest.kind === "new" ? "例如：先写设计、再评审，评审通过后由我确认，再开始实现" : "例如：在设计评审之后加一个人工确认"}
+      title={aiRequest.kind === "new" ? "用 AI 新建工作流" : `用 AI 修改「${aiRequest.name}」`}
+      placeholder={aiRequest.kind === "new" ? "描述你想要的工作流，例如：先写设计、再评审，评审通过后由我确认，再开始实现" : "描述要怎么改，例如：在设计评审之后加一个人工确认"}
       busy={aiBusy}
       error={aiError}
-      onSubmit={(text) => void submitAiRequest(text)}
+      onSubmit={(text) => void submitAiRequest(aiRequest, text)}
       onCancel={() => setAiRequest(null)}
     />}
     {route.kind === "library" && <div className="workflow-scroll">
@@ -288,19 +281,15 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
         key={route.id}
         service={service}
         id={route.id}
-        runs={runs}
         launch={route.launch}
-        initialTab={route.initialTab}
         pickFiles={pickFiles}
         transfer={transfer}
-        executors={executors}
         draft={draftOf(route.id)}
         onAiEdit={editor ? (preset) => requestEdit(route.id, preset) : undefined}
         onOpenDraft={(draftId) => go({ kind: "draft", draftId })}
         onLaunch={(entry) => openWorkflow(route.id, { entry })}
         onCloseLaunch={() => openWorkflow(route.id)}
         onStarted={(runId) => openWorkflowRun(route.id, runId)}
-        onOpenRun={(runId) => openWorkflowRun(route.id, runId)}
         onCopied={(id) => {
           setLibraryVersion((v) => v + 1);
           openWorkflow(id);
@@ -318,8 +307,6 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
       onLaunch={(request) => go(routeOfLaunch(request))}
       onOpenSession={onOpenSession}
       onOpenFile={onOpenFile}
-      onWiden={onWiden}
-      onFullView={onFullView}
     />}
   </section>;
 }

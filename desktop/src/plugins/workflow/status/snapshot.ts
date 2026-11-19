@@ -96,6 +96,10 @@ function parseCatalogNode(value: unknown): WorkflowCatalogNode | null {
     steps: asArray(node.steps).filter((step): step is string => typeof step === "string"),
     ...labelsOf(node.labels),
     ...(asString(node.role) ? { role: asString(node.role) as string } : {}),
+    ...(asString(node.purpose) ? { purpose: asString(node.purpose) as string } : {}),
+    ...(asString(node.prompt) ? { prompt: asString(node.prompt) as string } : {}),
+    ...(Array.isArray(node.knowledge) ? { knowledge: node.knowledge.filter((k): k is string => typeof k === "string") } : {}),
+    ...(asString(node.delivers) ? { delivers: asString(node.delivers) as string } : {}),
   };
 }
 
@@ -149,6 +153,9 @@ export function parseCatalog(value: unknown): WorkflowCatalog | null {
                 label: asString(parsedRoute.label),
                 conditional: parsedRoute.conditional === true,
                 fallback: parsedRoute.fallback === true ? true : undefined,
+                ...(asString(parsedRoute.explain) ? { explain: asString(parsedRoute.explain) as string } : {}),
+                ...(parsedRoute.confirm === "must" || parsedRoute.confirm === "ask" ? { confirm: parsedRoute.confirm } : {}),
+                ...(asString(parsedRoute.reason) ? { reason: asString(parsedRoute.reason) as string } : {}),
               }];
             }),
             sourcePhaseId: asString(parsed.sourcePhaseId) ?? undefined,

@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest";
 import { WorkflowPanel } from "../../../src/plugins/workflow/ui/WorkflowPanel.tsx";
 import type { CanvasSnapshot, RunSummary, WorkflowCatalog } from "../../../src/plugins/workflow/types.ts";
-import { fakeWorkflowService, runSummary } from "./helpers.ts";
+import { fakeWorkflowService, runSummary, findStep } from "./helpers.ts";
 
 /**
  * 移植自 commit 24877d9 的 tests/ui/workflowPanel.test.tsx：以可编程的
@@ -40,7 +40,7 @@ it("renders persisted node state and opens the node's adopted session in the cen
   ));
   const opened: string[] = [];
   render(<WorkflowPanel service={fake.service} onOpenSession={(sessionId) => opened.push(sessionId)} />);
-  expect(await screen.findByRole("button", { name: "需求确认，运行中" })).toBeInTheDocument();
+  expect(await findStep("需求确认，运行中")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "CodeCheck，未触发" })).toBeInTheDocument();
   // 节点详情：头部「打开会话」直达本轮会话（走中央 SessionView；节点会话
   // 已收养进标准会话体系，面板内不再有只读会话流）。
@@ -62,7 +62,7 @@ it("says so when an executed Agent round has no linked session, and never for Py
     { siteId: "ask#1", phaseId: "first", kind: "ask", ordinal: 1, status: "running", actorSiteId: "", actorOrdinal: 0, callPath: [], scope: {}, result: null, candidates: [] },
   ]));
   render(<WorkflowPanel service={fake.service} />);
-  fireEvent.click(await screen.findByRole("button", { name: "需求确认，运行中" }));
+  fireEvent.click(await findStep("需求确认，运行中"));
   expect(await screen.findByText("这一轮没有关联会话。")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "打开本轮会话" })).not.toBeInTheDocument();
   // Python 节点不谈会话，不假装有 Agent 会话
@@ -77,7 +77,7 @@ it("does not show an abandoned running action as active", async () => {
     { siteId: "ask#1", phaseId: "first", kind: "ask", ordinal: 1, status: "running", actorSiteId: "", actorOrdinal: 0, callPath: [], scope: {}, result: null, candidates: [] },
   ] as CanvasSnapshot["nodes"] });
   render(<WorkflowPanel service={fake.service} />);
-  expect(await screen.findByRole("button", { name: "需求确认，已中断" })).toBeInTheDocument();
+  expect(await findStep("需求确认，已中断")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "检查并解除占用" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "停止" })).not.toBeInTheDocument();
 });
@@ -90,7 +90,7 @@ it("lets the user look at a submitted result and adopt it from 处置", async ()
     { siteId: "ask#1", phaseId: "first", kind: "ask", ordinal: 1, status: "running", actorSiteId: "", actorOrdinal: 0, callPath: [], scope: {}, result: null, candidates: [{ id: "c1", state: "submitted", result: candidate, createdAt: 1 }] },
   ] as CanvasSnapshot["nodes"] });
   render(<WorkflowPanel service={fake.service} />);
-  fireEvent.click(await screen.findByRole("button", { name: "需求确认，已中断" }));
+  fireEvent.click(await findStep("需求确认，已中断"));
   expect(screen.getByText(/Agent 已提交的结果 1 · 流程尚未接受/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "处置…" }));
   expect(screen.getByRole("button", { name: "采用已提交的结果" })).toHaveAttribute("aria-pressed", "true");
@@ -110,7 +110,7 @@ it("offers 处置 on a failed script instead of marking it complete", async () =
     { siteId: "world-read#1", phaseId: "second", kind: "world-run", ordinal: 1, status: "failed", actorSiteId: "", actorOrdinal: 0, callPath: [], scope: {}, result: { exitCode: 1, stdout: "", stderr: "failed" }, candidates: [], checkpoint: 1 },
   ] });
   render(<WorkflowPanel service={fake.service} />);
-  fireEvent.click(await screen.findByRole("button", { name: "CodeCheck，失败" }));
+  fireEvent.click(await findStep("CodeCheck，失败"));
   expect(screen.getByRole("button", { name: "处置…" })).toBeEnabled();
   // 结果待处置时不给「继续运行」：要先处置。
   expect(screen.queryByRole("button", { name: "继续运行" })).toBeNull();
@@ -124,7 +124,7 @@ it("shows a business-blocked result as blocked rather than completed", async () 
     { siteId: "ask#1", phaseId: "first", kind: "ask", ordinal: 1, status: "completed", actorSiteId: "", actorOrdinal: 0, callPath: [], scope: {}, result: { status: "blocked", evidence: "missing information" }, candidates: [] },
   ] });
   render(<WorkflowPanel service={fake.service} />);
-  expect(await screen.findByRole("button", { name: "需求确认，已阻塞" })).toBeInTheDocument();
+  expect(await findStep("需求确认，已阻塞")).toBeInTheDocument();
   expect(screen.getByText("已阻塞 · 需求确认")).toBeInTheDocument();
 });
 
@@ -165,7 +165,7 @@ it("marks findings as handled once the run has settled, and pending while active
     fake.setRuns([theRun]);
     fake.setSnapshot(theRun.runId, { runId: theRun.runId, run: theRun, catalog: flow, execution: null, active, hasLease: active, retries: [], nodes: [findings], actors: [] });
     render(<WorkflowPanel service={fake.service} />);
-    expect(await screen.findByRole("button", { name: expected })).toBeInTheDocument();
+    expect(await findStep(expected)).toBeInTheDocument();
     cleanup();
   };
   // 落定后：同一节点不再标「需处理」（D8）——先渲染落定态再渲染进行中，
@@ -191,7 +191,7 @@ it("reloads the graph after a failed service startup", async () => {
   fake.setSnapshot("run-1", linkedSnapshot([
     { siteId: "ask#1", phaseId: "first", kind: "ask", ordinal: 1, status: "completed", actorSiteId: "", actorOrdinal: 0, callPath: [], scope: {}, result: null, candidates: [] },
   ]));
-  expect(await screen.findByRole("button", { name: "需求确认，已完成" })).toBeInTheDocument();
+  expect(await findStep("需求确认，已完成")).toBeInTheDocument();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
 
@@ -211,7 +211,7 @@ it("renders the selected run's captured definition instead of the current templa
     { siteId: "custom-agent", phaseId: "custom-phase", kind: "ask", ordinal: 1, status: "running", actorSiteId: "", actorOrdinal: 0, callPath: [], scope: {}, result: null, candidates: [] },
   ] });
   render(<WorkflowPanel service={fake.service} />);
-  expect(await screen.findByRole("button", { name: "自定义节点，运行中" })).toBeInTheDocument();
+  expect(await findStep("自定义节点，运行中")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "需求确认，未触发" })).not.toBeInTheDocument();
   expect(screen.getAllByText("自定义流程").length).toBeGreaterThan(0);
 });

@@ -10,7 +10,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { WorkflowEvent } from "../../../src/plugins/workflow/engine/protocol.ts";
 import { createWorkflowService } from "../../../src/plugins/workflow/status/workflowService.ts";
 import { WorkflowPanel } from "../../../src/plugins/workflow/ui/WorkflowPanel.tsx";
-import { runSummary } from "./helpers.ts";
+import { runSummary, findStep } from "./helpers.ts";
 
 afterEach(() => cleanup());
 
@@ -54,7 +54,8 @@ it("面板在导航重绑后仍随引擎事件刷新到节点二", async () => {
   });
   let unbind = service.bindWorkspace("D:/project");
   render(<WorkflowPanel service={service} />);
-  const phase = (name: string) => screen.getAllByLabelText(name, { exact: true })[0]!.textContent ?? "";
+  const phase = (name: string) => screen.getAllByRole("button", { name: new RegExp(`^${name}，`) })[0]!.getAttribute("aria-label") ?? "";
+  await findStep(/^需求确认，/);
   await vi.waitFor(() => expect(phase("需求确认")).toContain("运行中"));
   expect(phase("设计")).toContain("未触发");
 

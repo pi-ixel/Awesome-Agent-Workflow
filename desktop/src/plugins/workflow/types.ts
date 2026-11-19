@@ -20,7 +20,6 @@ import type {
   WorkflowServiceHandle,
   HostRequestFrame,
 } from "./engine/protocol.ts";
-import type { ExecutorPlan } from "./status/executors.ts";
 
 // ---------------------------------------------------------------------------
 // 引擎线 wire 类型（SessionRequirement 等集中在此，engine/ 两处共用）
@@ -82,8 +81,16 @@ export interface WorkflowCatalogNode {
   readonly steps: readonly string[];
   /** 结果字段的显示名（工作流定义的 `labels`，ADR 035）：`字段` 或 `字段.取值` → 文字。 */
   readonly labels?: Readonly<Record<string, string>>;
-  /** Agent 节点的角色（ADR 036）：同一角色的节点共用一个会话，可按角色指定 Agent 和模型。 */
+  /** Agent 节点的角色（ADR 036）：同一角色的节点共用一个会话。 */
   readonly role?: string;
+  /** 审查用：一句话说明这一步为什么存在（定义的 `why`）。 */
+  readonly purpose?: string;
+  /** 审查用：Agent 节点的要求原文（定义的 `prompt`）。 */
+  readonly prompt?: string;
+  /** 审查用：引用的规范文件（定义的 `knowledge`）。 */
+  readonly knowledge?: readonly string[];
+  /** 审查用：一句话说明最后交出什么（定义的 `delivers`）。 */
+  readonly delivers?: string;
 }
 
 /** 呈现阶段（ADR 025 §2）：画布分带的单位与顺序，只用于呈现。 */
@@ -103,12 +110,18 @@ export interface WorkflowCatalog {
   readonly nodes: readonly WorkflowCatalogNode[];
 }
 
-/** 子流程结构（WorkflowHierarchy 的 structure 入参形状）。 */
+/** 子流程结构（流程图 FlowStages 的 structure 入参形状）。 */
 export interface HierarchyFlowRoute {
   readonly next: string;
   readonly label?: string | null;
   readonly conditional: boolean;
   readonly fallback?: boolean;
+  /** 审查用：一句话说明什么情况下走这条（定义的 `explain`）。 */
+  readonly explain?: string;
+  /** 走这条前要用户确认：must 每次都停，ask 可在启动时设为自动放行。 */
+  readonly confirm?: "must" | "ask";
+  /** 走到阻塞时告诉用户的原因（定义的 `reason`）。 */
+  readonly reason?: string;
 }
 
 export interface HierarchyFlowPhase {
@@ -408,6 +421,8 @@ export interface WorkflowDraft {
   readonly createdAt: number;
   /** 草稿里工作流的名称；新建还没起名时为空。 */
   readonly name?: string;
+  /** 草稿里工作流的说明；没改过起步模板或编译不过时为空。 */
+  readonly description?: string;
   /** 改了几个文件。 */
   readonly changes: number;
   /** 能否编译通过。 */
@@ -445,15 +460,6 @@ export interface WorkflowDraftEditor {
   send(draftId: string, text: string): boolean;
   /** 保存或放弃后结束编辑会话。 */
   end(draftId: string): Promise<void>;
-}
-
-/** 按角色指定模型的本机设置（ADR 036；单 Agent 原则下角色不再指定
- * Agent）：由工作台提供。 */
-export interface WorkflowExecutors {
-  /** 不按角色指定时用的 Agent 名称（当前选中的）。 */
-  defaultName(): string;
-  read(workflowId: string): ExecutorPlan;
-  write(workflowId: string, plan: ExecutorPlan): void;
 }
 
 /** 工作流文件的存取（ADR 036）：由工作台用系统对话框实现。 */

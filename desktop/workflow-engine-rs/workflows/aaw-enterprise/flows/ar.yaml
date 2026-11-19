@@ -10,6 +10,8 @@ steps:
     stage: design
     agent:
       label: AR 澄清
+      why: 把这个 AR 的需求、代码事实和需要你决定的事澄清清楚。
+      delivers: 这个 AR 澄清后的需求、代码事实和你的决定
       prompt: 依据当前 AR 范围澄清需求、代码事实及用户决策，需取得明确确认。
       knowledge: [host-tools.md, ar-scope-method.md]
       does:
@@ -26,18 +28,22 @@ steps:
         confirmed: 用户已确认
     next:
       - to: module_boundary
+        explain: 澄清完成并经你确认
         when: |-
           ar_clarify.status == "ready" && nonempty(ar_clarify.reference) && nonempty(ar_clarify.evidence)
           && ar_clarify.confirmed == true
         set:
           arClarification: ar_clarify
       - to: $blocked
+        explain: 还没澄清清楚，或你还没确认
         reason: 必要工作未完成或需要用户决定，请查看节点结果。
 
   module_boundary:
     stage: design
     agent:
       label: 模块边界与分组
+      why: 划清模块边界和交互，按模块分组推进。
+      delivers: 模块边界设计和确认过的模块分组
       prompt: 设计当前 AR 的模块边界、交互与分组；确认后输出非空 groups 列表。
       knowledge: [host-tools.md, module-boundary-method.md]
       does:
@@ -59,6 +65,7 @@ steps:
         confirmed: 用户已确认
     next:
       - to: module_call
+        explain: 你确认了模块分组
         when: |-
           module_boundary.status == "ready" && nonempty(module_boundary.reference) && nonempty(module_boundary.evidence)
           && module_boundary.confirmed == true
@@ -74,6 +81,7 @@ steps:
           tests: null
           plan: null
       - to: $blocked
+        explain: 模块分组还没确认
         reason: 必要工作未完成或需要用户决定，请查看节点结果。
 
   module_call:
@@ -86,6 +94,8 @@ steps:
       模块组: item.id
     next:
       - to: $return
+        explain: 每个模块组都交付完成
         when: every(module_call, item.output.final.status == "ready" && nonempty(item.output.final.reference) && nonempty(item.output.final.evidence))
       - to: $blocked
+        explain: 有模块组没能交付完成
         reason: 子流程没有交付完整结果

@@ -228,20 +228,12 @@ impl Service {
                 role_commands.insert(role.clone(), argv);
             }
         }
-        let mut role_models = BTreeMap::new();
-        if let Some(raw) = input.get("roleModels").filter(|v| !v.is_null()) {
-            for (role, value) in raw.as_object().ok_or("INVALID_ARGUMENT")? {
-                let model = value.as_str().map(str::trim).filter(|m| !m.is_empty()).ok_or("INVALID_ARGUMENT")?;
-                role_models.insert(role.clone(), model.to_owned());
-            }
-        }
         Ok(RuntimeConfig {
             cwd,
             command,
             profile,
             mcp_servers,
             role_commands,
-            role_models,
             python: input
                 .get("python")
                 .and_then(Value::as_str)

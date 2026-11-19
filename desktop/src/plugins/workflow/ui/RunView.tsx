@@ -41,23 +41,21 @@ import {
   statusLabel,
   type NodeState,
 } from "../status/snapshot.ts";
-import {
-  StatusWord,
-  WorkflowHierarchy,
-} from "./WorkflowHierarchy.tsx";
+import { StatusWord } from "./StatusWord.tsx";
+import { FlowStages, type FlowReveal } from "./FlowStages.tsx";
 import { durationPhrase, formatDuration, formatStart, useNow } from "./time.ts";
 import { nodeTiming, runActiveMs, runWaitedMs } from "../status/timing.ts";
 import { kindBadge } from "./nodeText.ts";
 import { NodeDetail } from "./NodeDetail.tsx";
 import { DisposePanel } from "./DisposePanel.tsx";
-import { GraphCanvas } from "./GraphCanvas.tsx";
+import { SplitPane, SPLIT_WIDE } from "./SplitPane.tsx";
 import { MoreMenu } from "./MoreMenu.tsx";
 import { disposeActions } from "./dispose.ts";
 import { describeResult, entryConditions } from "./nodeDetail.ts";
 import "./workflowPanel.css";
-import { dangerSize, ghostButton, iconButton, primaryButton, secondaryButton } from "./buttons.ts";
+import { dangerSize, iconButton, primaryButton, secondaryButton } from "./buttons.ts";
 import { Badge, DangerButton } from "../../../shared/ui/controls.tsx";
-import { ChevronRightIcon, XIcon } from "../../../shared/ui/icons.tsx";
+import { XIcon } from "../../../shared/ui/icons.tsx";
 import { Callout } from "../../../shared/ui/Callout.tsx";
 import { InlineConfirm } from "../../../shared/ui/InlineConfirm.tsx";
 import { TextLink } from "../../../shared/ui/TextLink.tsx";
@@ -66,7 +64,6 @@ import { Disclosure } from "../../../shared/ui/Disclosure.tsx";
 type ActorRecord = CanvasSnapshot["actors"][number];
 type InspectorPage = "detail" | "dispose";
 /** 面板够宽时检视器放右侧（原型阈值）。 */
-const WIDE_PANEL = 700;
 
 /** 节点详情候选结果（引擎 result_candidates 的宽容形状）。 */
 interface ResultCandidate {
@@ -86,7 +83,7 @@ function candidateOf(value: unknown): ResultCandidate | null {
   };
 }
 
-export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, onWiden, onFullView }: {
+export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile }: {
   service: WorkflowService;
   runId: string;
   /** 「再次运行」：回到启动表单，预选这次运行的工作流与起点。 */
@@ -95,9 +92,6 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
   onOpenSession?: (sessionId: string) => void;
   /** 结果里的文件路径 → 工作台打开文件。 */
   onOpenFile?: (path: string) => void;
-  /** 窄屏提示的两个出口（工作台右栏拉宽 / 进入完整视图）。 */
-  onWiden?: () => void;
-  onFullView?: () => void;
 }) {
   const [catalog, setCatalog] = useState<WorkflowCatalog | null>(null);
   const [selected, setSelected] = useState("");
@@ -108,7 +102,6 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<InspectorPage | undefined>();
   const [confirmStop, setConfirmStop] = useState(false);
-  const [follow, setFollow] = useState(true);
   // 运行总结（ADR 035）：和画布二选一显示。
   const [showSummary, setShowSummary] = useState(false);
   const [showRequirement, setShowRequirement] = useState(false);
@@ -118,10 +111,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
   const [, setPlanVersion] = useState(0);
   const [panelWidth, setPanelWidth] = useState(0);
   const panelRef = useRef<HTMLElement | null>(null);
-  const [currentHidden, setCurrentHidden] = useState(false);
-  const [flashSite, setFlashSite] = useState<string | undefined>();
-  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const viewport = useRef<HTMLDivElement | null>(null);
+  const [reveal, setReveal] = useState<FlowReveal | undefined>();
   const store = useMemo(() => (runId === "" ? undefined : service.snapshot(runId)), [service, runId]);
   const snapshot = useRegisteredSnapshot(store, (value) => value ?? null);
 
@@ -173,10 +163,6 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
   // 渲染期派生，快照暂缺目录时保留上一份。
   if (snapshot?.catalog && snapshot.catalog !== catalog) setCatalog(snapshot.catalog);
 
-  useEffect(() => () => {
-    if (flashTimer.current) clearTimeout(flashTimer.current);
-  }, []);
-
   // 检视器位置随面板宽度：够宽放右侧，否则放下方。
   useEffect(() => {
     const element = panelRef.current;
@@ -206,7 +192,6 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
 
   const byId = useMemo(() => new Map(catalog?.nodes.map((node) => [node.id, node]) ?? []), [catalog]);
   const runningRecord = snapshot?.active ? snapshot.nodes.find((item) => item.status === "running") : undefined;
-  const runningId = runningRecord?.siteId;
   const mismatch = !!snapshot?.run?.args && !!catalog && snapshot.run.args.workflowRevision !== catalog.revision;
   const selectedRecords = snapshot?.nodes.filter((item) =>
     item.siteId === selected &&
@@ -243,23 +228,8 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
   const conditions = node && !record && catalog?.structure
     ? entryConditions(catalog.structure, node.id, selectedPhase, (site) => byId.get(site)?.label ?? site)
     : [];
-  const wide = panelWidth >= WIDE_PANEL;
+  const wide = panelWidth >= SPLIT_WIDE;
 
-  // 跟随：当前节点变化时把它滚进视口；离开视口时浮出「回到当前节点」。
-  useEffect(() => {
-    const element = viewport.current;
-    if (!element || !runningId) {
-      setCurrentHidden(false);
-      return;
-    }
-    const card = element.querySelector<HTMLElement>("[data-current='true']");
-    if (!card) return;
-    if (follow) card.scrollIntoView?.({ block: "center", behavior: "smooth" });
-    if (typeof IntersectionObserver !== "function") return;
-    const observer = new IntersectionObserver(([entry]) => setCurrentHidden(!entry?.isIntersecting), { root: element, threshold: 0.4 });
-    observer.observe(card);
-    return () => observer.disconnect();
-  }, [runningId, follow, snapshot]);
 
   async function run(cause: () => Promise<unknown>): Promise<void> {
     setError(null);
@@ -301,7 +271,6 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
     setSelected(site);
     setSelectedCallPath(path);
     setSelectedPhase(phase);
-    if (site) setFollow(false);
   }
 
   /** 打开某条记录的详情（确认关卡的「查看」）：画布定位到它。 */
@@ -310,7 +279,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
     setSelectedOrdinal(target.ordinal);
     setTab("detail");
     setShowSummary(false);
-    flashNode(target.siteId);
+    flashNode(target);
   }
 
   /** 打开某条记录的处置页（横幅的「去处理」「退回…」）。 */
@@ -318,17 +287,12 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
     select(target.siteId, [...target.callPath], target.phaseId ?? undefined);
     setSelectedOrdinal(target.ordinal);
     setTab("dispose");
-    flashNode(target.siteId);
+    flashNode(target);
   }
 
-  /** 跳转定位：把卡片滚进视口，外圈闪一下再淡掉（只在跳转时，普通点击不闪）。 */
-  function flashNode(siteId: string): void {
-    const card = [...(viewport.current?.querySelectorAll<HTMLElement>(".workflow-card[data-site]") ?? [])]
-      .find((element) => element.dataset.site === siteId);
-    card?.scrollIntoView?.({ block: "center", behavior: "smooth" });
-    setFlashSite(siteId);
-    if (flashTimer.current) clearTimeout(flashTimer.current);
-    flashTimer.current = setTimeout(() => setFlashSite(undefined), 1500);
+  /** 跳转定位：流程图展开到这个节点，卡片外圈闪一下（只在跳转时，普通点击不闪）。 */
+  function flashNode(target: CanvasNodeSnapshot): void {
+    setReveal({ site: target.siteId, phaseId: target.phaseId ?? undefined, token: Date.now() });
   }
 
   // ------------------------------------------------------------ 派生呈现
@@ -376,13 +340,6 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
     route: gate.label,
     more: gates.length - 1,
   };
-  // 新停到一个确认关卡：画布回到跟随，带你到要确认的那一步（在子流程里也会回到它那一层）。
-  const gateKey = gate ? gate.instance.join("/") : "";
-  const [seenGate, setSeenGate] = useState("");
-  if (gateKey !== seenGate) {
-    setSeenGate(gateKey);
-    if (gateKey) setFollow(true);
-  }
   const banner = bannerOf({ error, snapshot, blockedReason, mismatch, stuckRecord, awaiting, gating });
   const summary = snapshot?.run ?? service.runs().find((item) => item.runId === runId) ?? null;
   const runName = summary?.name || catalog?.name || "工作流";
@@ -474,53 +431,12 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
           setSelectedOrdinal(step.ordinal);
         }}
       />
-    </div> : <div className={`workflow-workspace ${wide ? "is-wide" : "is-stacked"}`}>
-    {mismatch ? <div className="workflow-empty">这次运行使用了其他流程版本，当前画布不能可靠映射其节点。</div> : <GraphCanvas
-      label="流程画布"
-      viewportRef={viewport}
-      // 换一次运行就重新做一次「适应」：新的一次运行内容高度不一样。
-      fitKey={`run:${runId}:${catalog?.id ?? ""}`}
-      tools={snapshot?.active && <button type="button" onClick={() => setFollow(!follow)} aria-pressed={follow} data-hint={follow ? "画布跟随正在运行的节点；点选节点后自动停止跟随" : "点击恢复跟随正在运行的节点"}>{follow ? "跟随中" : "跟随"}</button>}
-      before={(context) => context.narrow && <div className="workflow-narrow-hint">
-        <span>面板较窄，画布保持最小宽度可横向滚动</span>
-        {onWiden && <button type="button" className={secondaryButton} onClick={onWiden}>拉宽</button>}
-        {onFullView && <button type="button" className={secondaryButton} onClick={onFullView}>完整视图</button>}
-      </div>}
-      empty={catalog?.structure && catalog.entry ? undefined : <div className="workflow-empty">{snapshot === null || snapshot.run === null ? "正在读取运行…" : "这次运行的定义里没有可显示的流程结构。"}</div>}
-      floating={currentHidden && runningId && <button type="button" className={`${secondaryButton} workflow-jump-current`} onClick={() => {
-        viewport.current?.querySelector<HTMLElement>("[data-current='true']")?.scrollIntoView?.({ block: "center", behavior: "smooth" });
-        setFollow(true);
-        flashNode(runningId);
-      }}>回到当前节点 · {currentLabel}</button>}
-    >
-      {(context) => catalog?.structure && catalog.entry && <WorkflowHierarchy
-        key={runId || catalog.id}
-        rootLabel={runName}
-        entry={catalog.entry}
-        structure={catalog.structure}
-        nodes={catalog.nodes}
-        stages={catalog.stages}
-        snapshot={snapshot}
-        selected={selected}
-        selectedPhase={selectedPhase}
-        runningSite={follow ? runningId ?? gateRecord?.siteId : undefined}
-        flashSite={flashSite}
-        bandWidth={context.bandWidth}
-        now={clock}
-        planOf={(item) => service.nodePlan(runId, item.siteId, item.ordinal)}
-        sessionFor={(item) => sessionOf(item, snapshot?.actors ?? [])}
-        onOpenSession={onOpenSession}
-        onSelect={select}
-      />}
-    </GraphCanvas>}
-
-    {node && <aside className="workflow-inspector" aria-label="节点详情">
-      {!wide && <button type="button" className={`${ghostButton} workflow-inspector-back`} onClick={() => { setSelected(""); clearSelection(); }}><ChevronRightIcon className="ui-icon-14 rotate-180" />返回流程图</button>}
+    </div> : <SplitPane wide={wide} aside={node && <aside className="workflow-inspector" aria-label="节点详情">
       <div className="workflow-inspector-head">
         <b data-hint={node.label}>{node.label}</b>
         {node.kind !== "agent" && <Badge>{kindBadge(node.kind)}</Badge>}
         <StatusWord state={state.state} waiting={state.awaiting} />
-        {wide && <IconButton iconSize="compact" type="button" className={iconButton} onClick={() => { setSelected(""); clearSelection(); }} aria-label="关闭节点详情"><XIcon className="ui-icon-14" /></IconButton>}
+        {<IconButton iconSize="compact" type="button" className={iconButton} onClick={() => { setSelected(""); clearSelection(); }} aria-label="关闭节点详情"><XIcon className="ui-icon-14" /></IconButton>}
       </div>
       {(selectedRecords.length > 1 || (recordSession && onOpenSession)) && <div className="workflow-inspector-actions">
         {recordSession && onOpenSession && <button type="button" className={secondaryButton} aria-label="打开本轮会话" onClick={() => onOpenSession(recordSession)}>打开会话</button>}
@@ -565,8 +481,29 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
               : <button type="button" className={secondaryButton} onClick={() => setTab("dispose")}>处置…</button>)}
           </NodeDetail>}
       </div>
-    </aside>}
-    </div>}
+</aside>}>
+    {mismatch ? <div className="workflow-empty">这次运行使用了其他流程版本，当前画布不能可靠映射其节点。</div>
+      : catalog?.structure && catalog.entry ? <FlowStages
+        key={runId || catalog.id}
+        label="流程画布"
+        rootLabel={runName}
+        entry={catalog.entry}
+        structure={catalog.structure}
+        nodes={catalog.nodes}
+        stages={catalog.stages}
+        snapshot={snapshot}
+        selected={selected}
+        selectedPhase={selectedPhase}
+        reveal={reveal}
+        now={clock}
+        planOf={(item) => service.nodePlan(runId, item.siteId, item.ordinal)}
+        sessionFor={(item) => sessionOf(item, snapshot?.actors ?? [])}
+        onOpenSession={onOpenSession}
+        onSelect={select}
+      />
+      : <div className="workflow-empty">{snapshot === null || snapshot.run === null ? "正在读取运行…" : "这次运行的定义里没有可显示的流程结构。"}</div>}
+
+    </SplitPane>}
   </section>;
 }
 

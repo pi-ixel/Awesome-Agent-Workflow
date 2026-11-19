@@ -7,12 +7,14 @@ import { errorLine } from "../status/errorText.ts";
 import { useEffect, useState } from "react";
 import type { WorkflowDraft, WorkflowFileTransfer, WorkflowImportPreview, WorkflowService, WorkflowSummary } from "../types.ts";
 import { describeDiagnostic } from "../status/library.ts";
-import { formatAgo, useNow } from "./time.ts";
 import { ghostButton, primaryButton, secondaryButton } from "./buttons.ts";
 import { Badge } from "../../../shared/ui/controls.tsx";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import { Callout } from "../../../shared/ui/Callout.tsx";
-import { InlineConfirm } from "../../../shared/ui/InlineConfirm.tsx";
+import { ConfirmIconAction } from "../../../shared/ui/ConfirmIconAction.tsx";
+import { ImportIcon, SparklesIcon, TrashIcon, TriangleAlertIcon } from "../../../shared/ui/icons.tsx";
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
 import { EmptyState } from "../../../shared/ui/EmptyState.tsx";
 
 export type LibraryTab = "presets" | "mine";
@@ -42,7 +44,8 @@ export function WorkflowLibrary({ service, version, hint, transfer, drafts, tab:
   const [importing, setImporting] = useState<{ text: string; preview: WorkflowImportPreview } | null>(null);
   const [importError, setImportError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [discarding, setDiscarding] = useState("");
+  /** 正在确认的删除：`draft:<id>` 或 `workflow:<id>`，同一时间只有一个。 */
+  const [confirming, setConfirming] = useState("");
   const [ownTab, setOwnTab] = useState<LibraryTab>("presets");
   const tab = controlledTab ?? ownTab;
   const setTab = (next: LibraryTab) => {
@@ -88,7 +91,8 @@ export function WorkflowLibrary({ service, version, hint, transfer, drafts, tab:
 
   const presets = items?.filter((item) => item.origin === "preset") ?? [];
   const mine = items?.filter((item) => item.origin === "user") ?? [];
-  const now = useNow();
+  // 新建的草稿（或原工作流已不在）单独成卡；修改已有工作流的草稿标在原卡片上。
+  const standalone = drafts?.filter((draft) => !draft.base || !mine.some((item) => item.id === draft.base)) ?? [];
 
   return <div className="workflow-library">
     {hint && <Callout tone="info" role="status" title={hint} />}
@@ -104,12 +108,12 @@ export function WorkflowLibrary({ service, version, hint, transfer, drafts, tab:
         onChange={setTab}
         options={[
           { value: "presets", label: `预置 ${presets.length}` },
-          { value: "mine", label: `我的 ${mine.length}`, dot: (drafts?.length ?? 0) > 0 },
+          { value: "mine", label: `我的 ${mine.length + standalone.length}` },
         ]}
       />
       <div className="workflow-library-actions">
-        {transfer && <button type="button" className={secondaryButton} onClick={() => void pickImport()}>导入…</button>}
-        {onNewWithAi && <button type="button" className={secondaryButton} onClick={onNewWithAi}>用 AI 新建</button>}
+        {transfer && <IconButton className={`${secondaryButton} workflow-icon-only`} aria-label="导入" data-hint="导入" onClick={() => void pickImport()}><ImportIcon className="ui-icon-16" /></IconButton>}
+        {onNewWithAi && <IconButton className={`${primaryButton} workflow-icon-only`} aria-label="用 AI 新建" data-hint="用 AI 新建" onClick={onNewWithAi}><SparklesIcon className="ui-icon-16" /></IconButton>}
       </div>
     </div>
 
@@ -122,50 +126,86 @@ export function WorkflowLibrary({ service, version, hint, transfer, drafts, tab:
     </section>}
 
     {tab === "mine" && <section aria-label="我的工作流" className="workflow-tab-panel">
-      {drafts && drafts.length > 0 && <ul className="workflow-draft-list" aria-label="未保存的草稿">
-        {drafts.map((draft) => {
-          const base = draft.base ? items?.find((item) => item.id === draft.base)?.meta?.name ?? draft.base : null;
-          const state = draft.changes === 0 ? "还没有改动" : `改了 ${draft.changes} 个文件 · ${draft.ok ? "编译通过，可以保存" : "编译还没通过"}`;
-          return <li key={draft.draftId}>
-            <button type="button" className="workflow-draft-open" onClick={() => onOpenDraft?.(draft.draftId)}>
-              <b>{base ? `修改「${base}」` : `新建「${draft.name ?? "未命名"}」`}</b>
-              <small>{state} · {formatAgo(draft.createdAt, now)}开始</small>
-            </button>
-            {discarding === draft.draftId
-              ? <InlineConfirm className="workflow-row-confirm" label="确认放弃" message="放弃后改动全部丢掉。" confirmLabel="放弃" onConfirm={() => void onDiscardDraft?.(draft.draftId).finally(() => setDiscarding(""))} onCancel={() => setDiscarding("")} />
-              : onDiscardDraft && <button type="button" className={ghostButton} onClick={() => setDiscarding(draft.draftId)}>放弃</button>}
-          </li>;
-        })}
-      </ul>}
-      {items !== null && mine.length === 0 && <EmptyState title="还没有自己的工作流" description="打开一个预置工作流点「复制为我的」，或者点上面的「用 AI 新建」。" />}
+      {items !== null && mine.length === 0 && standalone.length === 0 && <EmptyState title="还没有自己的工作流" description="打开一个预置工作流点「复制为我的」，或者点上面的「用 AI 新建」。" />}
       <div className="workflow-cards">
-        {mine.map((item) => <WorkflowCard key={item.id} item={item} drafted={drafts?.some((draft) => draft.base === item.id)} onOpen={onOpenWorkflow} onLaunch={onLaunch} />)}
+        {standalone.map((draft) => <DraftCard key={draft.draftId} draft={draft}
+          confirming={confirming === `draft:${draft.draftId}`}
+          setConfirming={(value) => setConfirming(value ? `draft:${draft.draftId}` : "")}
+          onOpen={() => onOpenDraft?.(draft.draftId)}
+          onDiscard={onDiscardDraft && (() => void onDiscardDraft(draft.draftId))} />)}
+        {mine.map((item) => <WorkflowCard key={item.id} item={item} draft={drafts?.find((draft) => draft.base === item.id)} onOpen={onOpenWorkflow} onLaunch={onLaunch}
+          confirming={confirming === `workflow:${item.id}`}
+          setConfirming={(value) => setConfirming(value ? `workflow:${item.id}` : "")}
+          onDelete={() => void service.deleteWorkflow(item.id).catch((cause: unknown) => setImportError(`删除失败：${errorLine(cause)}`))} />)}
       </div>
     </section>}
 
   </div>;
 }
 
-function WorkflowCard({ item, drafted, onOpen, onLaunch }: {
+/** 卡片标题行：草稿标记在最前，AI 写出错误时名称后加警告图标。 */
+function CardName({ name, draft }: { name: string; draft?: WorkflowDraft }) {
+  return <span className="workflow-card-name">
+    {draft && <Badge>草稿</Badge>}
+    <b>{name}</b>
+    {draft && draft.changes > 0 && !draft.ok && <span className="workflow-card-alert" role="img" aria-label="有错误" {...hintTooltipProps("有错误")}><TriangleAlertIcon className="ui-icon-16" /></span>}
+  </span>;
+}
+
+/** 卡片右上角、悬停才出现的删除（同归档会话：点一下变「确认」）；草稿和工作流卡片同一个位置。 */
+function CardDelete({ label, confirming, setConfirming, onConfirm }: {
+  label: string;
+  confirming: boolean;
+  setConfirming: (value: boolean) => void;
+  onConfirm: () => void;
+}) {
+  return <ConfirmIconAction label={label} icon={<TrashIcon className="ui-icon-16" />}
+    confirming={confirming} setConfirming={setConfirming} onConfirm={onConfirm}
+    className="workflow-card-delete"
+    revealClassName="opacity-0 group-hover/card:opacity-100 group-focus-within/card:opacity-100 [@media(hover:none)]:opacity-100" />;
+}
+
+/** 未保存的草稿卡片：点卡片进草稿页；垃圾桶放弃（同归档会话：点一下再确认）。 */
+function DraftCard({ draft, confirming, setConfirming, onOpen, onDiscard }: {
+  draft: WorkflowDraft;
+  confirming: boolean;
+  setConfirming: (value: boolean) => void;
+  onOpen: () => void;
+  onDiscard?: () => void;
+}) {
+  const name = draft.name ?? draft.base ?? "未命名";
+  return <article className={`workflow-card-item group/card${onDiscard ? " deletable" : ""}`}>
+    <button type="button" className="workflow-card-main" onClick={onOpen} aria-label={`打开草稿 ${name}`}>
+      <CardName name={name} draft={draft} />
+      {draft.description && <span className="workflow-card-desc" data-hint={draft.description}>{draft.description}</span>}
+    </button>
+    {onDiscard && <CardDelete label="放弃草稿" confirming={confirming} setConfirming={setConfirming} onConfirm={onDiscard} />}
+  </article>;
+}
+
+function WorkflowCard({ item, draft, onOpen, onLaunch, confirming = false, setConfirming, onDelete }: {
   item: WorkflowSummary;
-  /** 有未保存的 AI 修改（ADR 036）。 */
-  drafted?: boolean;
+  /** 这个工作流未保存的 AI 修改（ADR 036）。 */
+  draft?: WorkflowDraft;
   onOpen: (id: string) => void;
   onLaunch: (id: string) => void;
+  /** 删除（只给「我的」工作流）。 */
+  confirming?: boolean;
+  setConfirming?: (value: boolean) => void;
+  onDelete?: () => void;
 }) {
   const meta = item.meta;
   const firstError = item.diagnostics.find((d) => d.severity === "error");
   const description = meta ? meta.description || "没有说明。" : "";
-  return <article className={`workflow-card-item${meta ? "" : " broken"}`}>
+  const deletable = Boolean(onDelete && setConfirming);
+  return <article className={`workflow-card-item group/card${meta ? "" : " broken"}${deletable ? " deletable" : ""}`}>
     <button type="button" className="workflow-card-main" onClick={() => onOpen(item.id)} aria-label={`查看工作流 ${meta?.name ?? item.id}`}>
-      <span className="workflow-card-name">
-        <b>{meta?.name ?? item.id}</b>
-        {drafted && <Badge tone="warn">有未保存的修改</Badge>}
-      </span>
+      <CardName name={meta?.name ?? item.id} draft={draft} />
       {meta
         ? <span className="workflow-card-desc" data-hint={description}>{description}</span>
         : <span className="workflow-card-desc attention">源码有错误，暂时不能运行{firstError ? `：${describeDiagnostic(firstError)}` : ""}</span>}
     </button>
+    {onDelete && setConfirming && <CardDelete label="删除工作流" confirming={confirming} setConfirming={setConfirming} onConfirm={onDelete} />}
     {meta && <div className="workflow-template-actions">
       <button type="button" className={secondaryButton} onClick={() => onLaunch(item.id)}>运行</button>
     </div>}

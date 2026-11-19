@@ -1,4 +1,5 @@
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { ConfirmIconAction } from "../../../shared/ui/ConfirmIconAction.tsx";
 import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
 import { TreeBranch, treeChevronClass } from "../../../shared/ui/TreeMotion.tsx";
 import { useSessionValue } from "./bindings/conversationView.ts";
@@ -1143,11 +1144,13 @@ function SessionGroupNode({
           )}
         </button>
         {group.archive ? (
-          <GroupArchiveAction
+          <ConfirmIconAction
             label={group.archiveLabel ?? "归档"}
+            icon={<ArchiveIcon className="ui-icon-16" />}
             confirming={confirmArchive}
             setConfirming={setConfirmArchive}
-            onArchive={group.archive}
+            onConfirm={group.archive}
+            revealClassName="opacity-0 group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100"
           />
         ) : null}
       </div>
@@ -1182,75 +1185,6 @@ function SessionGroupNode({
         </ul>
       </TreeBranch>
     </li>
-  );
-}
-
-/** 分组行的归档按钮：点一下变成「确认」，点外面或按 Esc 取消（同会话行的归档）。 */
-function GroupArchiveAction({
-  label,
-  confirming,
-  setConfirming,
-  onArchive,
-}: {
-  readonly label: string;
-  readonly confirming: boolean;
-  readonly setConfirming: (value: boolean) => void;
-  readonly onArchive: () => void;
-}) {
-  const container = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!confirming) return;
-    const outside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !container.current?.contains(event.target)) setConfirming(false);
-    };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        setConfirming(false);
-      }
-    };
-    document.addEventListener("pointerdown", outside);
-    document.addEventListener("keydown", escape, true);
-    return () => {
-      document.removeEventListener("pointerdown", outside);
-      document.removeEventListener("keydown", escape, true);
-    };
-  }, [confirming, setConfirming]);
-  const hintProps = hintTooltipProps(label);
-  return (
-    <div
-      ref={container}
-      className={`flex shrink-0 items-center transition-opacity ${confirming ? "opacity-100" : "opacity-0 group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100"}`}
-    >
-      {confirming ? (
-        <button
-          type="button"
-          aria-label={`确认${label}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            setConfirming(false);
-            onArchive();
-          }}
-          className="contrast-danger-solid rounded-md bg-red-500 px-2 py-0.5 text-sm font-medium text-white transition-colors hover:bg-red-600"
-        >
-          确认
-        </button>
-      ) : (
-        <IconButton iconSize="compact"
-          type="button"
-          aria-label={label}
-          {...hintProps}
-          onClick={(event) => {
-            event.stopPropagation();
-            setConfirming(true);
-          }}
-          className="rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
-        >
-          <ArchiveIcon className="ui-icon-16" />
-        </IconButton>
-      )}
-    </div>
   );
 }
 
