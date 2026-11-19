@@ -73,7 +73,6 @@ interface Actions {
   open: (skill: NativeSkill) => void;
   remove: (skill: NativeSkill) => void;
   busy: boolean;
-  hasPackageManager: boolean;
 }
 function ActionsRow({
   skill,
@@ -102,13 +101,7 @@ function ActionsRow({
       });
     }
   }
-  const isPackage = skill.kind === "package";
   const openLabel = skill.kind === "inline" ? "定位配置" : "打开目录";
-  const removeLabel = isPackage ? "卸载所属插件包" : "移入回收站";
-  const unavailable = isPackage && !actions.hasPackageManager;
-  const removeHint = unavailable
-    ? "当前 Agent 未提供插件包管理接口"
-    : removeLabel;
   const glyphSize = "ui-icon-16";
   const openIcon = <FolderGlyph className={glyphSize} isExpanded={false} />;
   const copyIcon = <CopyIcon className={glyphSize} />;
@@ -119,10 +112,10 @@ function ActionsRow({
     return (
       <div className="flex shrink-0 items-center gap-0.5 pr-2 text-ink-mute">
         <IconButton
-          aria-label={removeLabel}
-          data-hint={removeHint}
+          aria-label="移入回收站"
+          data-hint="移入回收站"
           className={iconButton + " hover:bg-danger-bg hover:text-danger-ink"}
-          disabled={actions.busy || unavailable}
+          disabled={actions.busy}
           onClick={() => actions.remove(skill)}
         >
           {removeIcon}
@@ -195,12 +188,11 @@ function ActionsRow({
       </button>
       <DangerButton
         className={button}
-        data-hint={unavailable ? removeHint : undefined}
-        disabled={actions.busy || unavailable}
+        disabled={actions.busy}
         onClick={() => actions.remove(skill)}
       >
         {removeIcon}
-        {removeLabel}
+        移入回收站
       </DangerButton>
     </div>
   );
@@ -217,13 +209,11 @@ export function SelectableSkillCard({
   name,
   description,
   selected,
-  disabled,
   onToggle,
 }: {
   name: string;
   description: string;
   selected: boolean;
-  disabled?: boolean;
   onToggle: () => void;
 }) {
   return (
@@ -231,12 +221,9 @@ export function SelectableSkillCard({
       type="button"
       aria-label={`选择 ${name}`}
       aria-pressed={selected}
-      disabled={disabled}
-      data-hint={
-        disabled ? "插件包需单独管理" : description?.trim() || undefined
-      }
+      data-hint={description?.trim() || undefined}
       onClick={onToggle}
-      className="flex min-h-[50px] min-w-0 items-center gap-2 overflow-hidden rounded-2xl border border-line bg-surface px-3.5 text-left transition-colors hover:border-line-strong focus-visible:outline-offset-2 aria-pressed:border-ink aria-pressed:bg-selected aria-pressed:ring-1 aria-pressed:ring-inset aria-pressed:ring-ink disabled:opacity-50"
+      className="flex min-h-[50px] min-w-0 items-center gap-2 overflow-hidden rounded-2xl border border-line bg-surface px-3.5 text-left transition-colors hover:border-line-strong focus-visible:outline-offset-2 aria-pressed:border-ink aria-pressed:bg-selected aria-pressed:ring-1 aria-pressed:ring-inset aria-pressed:ring-ink"
     >
       <SkillCardIcon />
       <span className="min-w-0 flex-1 truncate text-ui-base font-semibold">
@@ -438,11 +425,6 @@ export function SkillDetail({
           </dl>
           {shared && (
             <p className="text-xs text-ink-mute">其他来源也引用这个目录。</p>
-          )}
-          {skill.kind === "package" && (
-            <p className="text-xs text-ink-mute">
-              卸载或重装会影响整个插件包。
-            </p>
           )}
           {message && (
             <p

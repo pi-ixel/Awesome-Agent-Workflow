@@ -88,6 +88,46 @@ fn home_and_project_remain_separate_and_conflicts_skip() {
     assert!(catalog::list(&loc, &q).unwrap().trash.is_empty());
 }
 #[test]
+fn recycles_only_the_selected_skill_in_a_codeagent_package() {
+    let (_tmp, loc, q) = setup(Provider::CodeAgent);
+    let package = loc.home.join(".cac/plugins/cache/local/tools/1.0");
+    let selected = package.join("skills/selected");
+    let sibling = package.join("skills/sibling");
+    skill(&selected, "selected");
+    skill(&sibling, "sibling");
+    let manifest = package.join("plugin.json");
+    fs::write(&manifest, "{}").unwrap();
+    let library = catalog::list(&loc, &q).unwrap();
+    let item = library.entries.iter().find(|e| e.path == selected).unwrap();
+    assert_eq!(item.kind, Kind::Package);
+
+    assert!(delete(&loc, &q, item).contains("已移入"));
+    assert!(!selected.exists());
+    assert!(sibling.join("SKILL.md").is_file());
+    assert!(manifest.is_file());
+    let trash = catalog::list(&loc, &q).unwrap().trash;
+    assert_eq!(trash[0].description, item.description);
+    let restore = action(json!({"type":"restore","ids":[trash[0].id]}));
+    assert!(apply(&loc, &q, restore).unwrap()[0].contains("已恢复"));
+    assert!(selected.join("SKILL.md").is_file());
+
+    let restored = catalog::list(&loc, &q).unwrap();
+    let item = restored
+        .entries
+        .iter()
+        .find(|e| e.path == selected)
+        .unwrap();
+    assert!(delete(&loc, &q, item).contains("已移入"));
+    let trash = catalog::list(&loc, &q).unwrap().trash;
+    let purge = action(json!({"type":"purge","ids":[trash[0].id]}));
+    assert!(apply(&loc, &q, purge).unwrap()[0].contains("已永久删除"));
+    assert!(!selected.exists());
+    assert!(sibling.join("SKILL.md").is_file());
+    assert!(manifest.is_file());
+    assert!(catalog::list(&loc, &q).unwrap().trash.is_empty());
+}
+
+#[test]
 fn inline_delete_restore_preserves_independent_profile_changes() {
     let (_tmp, loc, q) = setup(Provider::ICode);
     let path = loc.chrys.join("agents/Code.yaml");

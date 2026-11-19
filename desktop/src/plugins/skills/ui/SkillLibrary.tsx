@@ -23,7 +23,6 @@ import {
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import { SkillPackageActions } from "./SkillPackageActions.tsx";
-import { uninstallSkillPackage } from "./skillPackageReceipts.ts";
 import {
   SelectableSkillCard,
   SkillCard,
@@ -31,7 +30,7 @@ import {
   SkillGroup,
 } from "./SkillCards.tsx";
 import { projectGroups, skillKey } from "./skillGroups.ts";
-import type { SkillPackage, SkillPackageManager } from "../types.ts";
+import type { SkillPackageManager } from "../types.ts";
 
 const buttonSize =
   " inline-flex min-h-9 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-xs";
@@ -47,9 +46,7 @@ type Props = {
   trash?: boolean;
 };
 type Pending =
-  | { type: "delete"; items: NativeSkill[] }
-  | { type: "purge"; ids: string[] }
-  | { type: "uninstall"; pkg: SkillPackage; manager: SkillPackageManager };
+  { type: "delete"; items: NativeSkill[] } | { type: "purge"; ids: string[] };
 function Check({
   label,
   checked,
@@ -176,9 +173,7 @@ function LibraryPage(
         .toLowerCase()
         .includes(search.trim().toLowerCase()),
     ) ?? [];
-  const selectedSkills = visible.filter(
-    (e) => e.kind !== "package" && selected.includes(skillKey(e)),
-  );
+  const selectedSkills = visible.filter((e) => selected.includes(skillKey(e)));
   const toggle = (id: string) =>
     select((keys) =>
       keys.includes(id) ? keys.filter((k) => k !== id) : [...keys, id],
@@ -228,7 +223,6 @@ function LibraryPage(
     });
   const actions = {
     busy,
-    hasPackageManager: !!manager,
     open: (skill: NativeSkill) =>
       void props
         .reveal(
@@ -236,37 +230,14 @@ function LibraryPage(
           skill.kind === "inline" ? "reveal" : "open-directory",
         )
         .catch((e: unknown) => report([String(e)])),
-    remove: (skill: NativeSkill) => {
-      if (skill.kind !== "package")
-        setPending({ type: "delete", items: [skill] });
-      else if (manager)
-        void perform(async () =>
-          setPending({
-            type: "uninstall",
-            manager,
-            pkg: await manager.inspect(skill.path),
-          }),
-        );
-    },
+    remove: (skill: NativeSkill) =>
+      setPending({ type: "delete", items: [skill] }),
   };
   function confirm() {
     if (!pending || busy) return;
     setPending(null);
     setDetail(null);
-    if (pending.type === "uninstall") {
-      void perform(async () => {
-        try {
-          await uninstallSkillPackage(
-            pending.manager,
-            props.storage,
-            pending.pkg,
-          );
-          report([`已卸载 ${pending.pkg.id}`]);
-        } finally {
-          rescan();
-        }
-      });
-    } else if (pending.type === "purge") void change(pending);
+    if (pending.type === "purge") void change(pending);
     else
       void change({
         type: "delete",
@@ -353,11 +324,7 @@ function LibraryPage(
                   disabled={!count}
                   onClick={() =>
                     select(
-                      trash
-                        ? recycled.map((e) => e.id)
-                        : visible
-                            .filter((e) => e.kind !== "package")
-                            .map(skillKey),
+                      trash ? recycled.map((e) => e.id) : visible.map(skillKey),
                     )
                   }
                 >
@@ -486,7 +453,6 @@ function LibraryPage(
                           key={skillKey(skill)}
                           name={skill.name}
                           description={skill.description}
-                          disabled={skill.kind === "package"}
                           selected={selected.includes(skillKey(skill))}
                           onToggle={() => toggle(skillKey(skill))}
                         />
@@ -521,23 +487,11 @@ function LibraryPage(
       )}
       {pending && (
         <ConfirmationDialog
-          label={
-            pending.type === "uninstall" ? "确认卸载插件包" : "确认技能操作"
-          }
+          label="确认技能操作"
           title={
-            pending.type === "uninstall"
-              ? "卸载整个插件包"
-              : pending.type === "purge"
-                ? "永久删除回收条目"
-                : "将技能移入回收站？"
+            pending.type === "purge" ? "永久删除回收条目" : "将技能移入回收站？"
           }
-          confirmLabel={
-            pending.type === "uninstall"
-              ? "卸载插件包"
-              : pending.type === "purge"
-                ? "永久删除"
-                : "移入回收站"
-          }
+          confirmLabel={pending.type === "purge" ? "永久删除" : "移入回收站"}
           onCancel={() => setPending(null)}
           onConfirm={confirm}
         >
@@ -560,17 +514,8 @@ function LibraryPage(
                 </li>
               ))}
             </ul>
-          ) : pending.type === "purge" ? (
-            <p>永久删除所选的 {pending.ids.length} 个条目后将无法恢复。</p>
           ) : (
-            <>
-              <p>
-                {pending.pkg.id}{" "}
-                的全部技能及其他插件能力都将被移除。可以从回收站通过 CodeAgent
-                重新安装，版本取决于原生插件源。
-              </p>
-              <p className="break-all">{pending.pkg.path}</p>
-            </>
+            <p>永久删除所选的 {pending.ids.length} 个条目后将无法恢复。</p>
           )}
         </ConfirmationDialog>
       )}

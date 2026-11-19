@@ -213,10 +213,7 @@ pub(super) fn apply(loc: &Locations, query: &Query, action: Action) -> Result<Ve
 }
 
 fn remove(loc: &Locations, query: &Query, entry: &Entry) -> Result<String> {
-    if entry.kind == Kind::Package {
-        return Err(error("请通过所属插件包卸载，包内其他能力也会一并移除"));
-    }
-    if entry.kind == Kind::Directory {
+    if entry.kind != Kind::Inline {
         let root = Source {
             path: entry.source.clone(),
             label: String::new(),
@@ -320,7 +317,7 @@ fn restore_or_purge(
             .all(|c| matches!(c, std::path::Component::Normal(_)))
         || depth > 2
         || (record.kind == Kind::Inline && depth != 0)
-        || record.kind == Kind::Package
+        || (record.kind == Kind::Package && depth != 1)
     {
         return Err(error("请切换到原配置或添加原项目，重新核对回收条目的来源"));
     }
