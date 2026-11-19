@@ -12,7 +12,7 @@ const MarkdownView = lazy(async () => ({
 
 /** 去掉文档开头带有完整边界的 YAML 文件头。 */
 export function stripFrontMatter(text: string): string {
-  return text.replace(/^﻿?---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/, "");
+  return text.replace(/^\uFEFF?---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/, "");
 }
 
 export function DocumentPreview({
