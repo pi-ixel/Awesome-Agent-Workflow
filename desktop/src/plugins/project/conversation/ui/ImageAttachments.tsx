@@ -27,12 +27,12 @@ export function ImageAttachments({
       {items.length > 0 && (
         <div className="flex flex-wrap gap-2 px-3 pt-3">
           {items.map((item, index) => (
-            <div key={index} className="group/image relative">
+            <div key={index} className="group/image relative size-16 shrink-0">
               <button
                 type="button"
                 aria-label={`预览 ${item.alt}`}
                 onClick={() => setPreview(index)}
-                className="min-w-16 min-h-16 overflow-hidden rounded-xl border border-line bg-raised hover:border-ink-faint"
+                className="block size-full overflow-hidden rounded-xl border border-line bg-raised hover:border-ink-faint"
               >
                 <img
                   src={item.src}
