@@ -24,6 +24,8 @@ export interface NativeSkill {
   isLink: boolean;
   kind: SourceKind;
   status: string;
+  statusLabel?: string | null;
+  skillFilePath?: string | null;
   usageCount: number | null;
 }
 export interface RecycledSkill {

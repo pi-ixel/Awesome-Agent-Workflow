@@ -199,12 +199,18 @@ export interface ProjectConversation {
     attachments?: readonly ContentBlock[],
     options?: SendOptions,
   ): boolean;
-  steer(target: SessionTarget, text: string, attachments?: readonly ContentBlock[]): boolean;
+  steer(
+    target: SessionTarget,
+    text: string,
+    attachments?: readonly ContentBlock[],
+    options?: SendOptions,
+  ): boolean;
   stopSteering(target: SessionTarget): void;
   enqueue(
     target: SessionTarget,
     text: string,
     attachments?: readonly ContentBlock[],
+    options?: SendOptions,
   ): boolean;
   clearQueue(target: SessionTarget): void;
   removeQueuedPrompt(target: SessionTarget, index: number): void;

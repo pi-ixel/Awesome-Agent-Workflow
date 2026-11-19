@@ -79,7 +79,11 @@ export interface AgentAdapter {
   ) => string | undefined;
   readonly skillInstallation?: SkillInstallation;
   readonly skillLibrary?: SkillProvider;
-  readonly skillPackages?: (host: HostCommands, executable:string) => SkillPackageManager;
+  readonly slashSkillSource?: "catalog" | "session";
+  readonly skillPackages?: (
+    host: HostCommands,
+    executable: string,
+  ) => SkillPackageManager;
   /** 稳定标识（日志与设置引用）。 */
   readonly id: string;
   /** 展示名（界面与日志）。 */

@@ -1,14 +1,21 @@
-import type { MessageDisplay } from "../../../shared/messageDisplay.ts";
 import { createSteering } from "./steering.ts";
 import { beginPerformance } from "./sessionPerformance.ts";
 import { parseTurnUsage, sessionUsageDelta, type TurnUsage } from "./turnUsage.ts";
 import { recordUsage, type UsageStart } from "../usage/service.ts";
-import { mergePromptText } from "../composer/annotationMessage.ts";
+import {
+  decodeAnnotationMessage,
+  mergePromptText,
+} from "../composer/annotationMessage.ts";
+import {
+  appendPromptSkillReferences,
+  type PromptSkillReference,
+} from "../composer/skillReferences.ts";
 import type { QueuedPrompt, SessionItem } from "./types.ts";
 import type { StoreApi } from "zustand";
 import type {
   SessionBinding,
   SessionStoreState,
+  SendOptions,
   TurnOutcome,
 } from "./sessionStore.ts";
 import type {
@@ -26,6 +33,7 @@ import {
   isSteerOutboxEntry,
   queuedText,
   queuedAttachments,
+  queuedSkillOptions,
 } from "./queuedPrompt.ts";
 import { createLogger } from "../../../shared/logging/logger.ts";
 
@@ -39,6 +47,7 @@ interface SessionActionContext {
   interruptedPrompt: {
     text: string;
     attachments?: readonly ContentBlock[];
+    skillReferences?: readonly PromptSkillReference[];
     replayed: boolean;
     imageFallbackText?: string;
     statistics?: UsageStart;
@@ -46,7 +55,7 @@ interface SessionActionContext {
   replaying: boolean;
   cancelledByUser: boolean;
   queueWasPaused: boolean;
-  beginTurn(this: void, text: string, display?: MessageDisplay): void;
+  beginTurn(this: void, text: string, options?: SendOptions): void;
   endTurn(this: void, outcome: TurnOutcome): void;
   noteActivity(this: void): void;
   pushSystemItem(
@@ -108,11 +117,13 @@ export function createSessionActions(
     readonly parts: readonly string[];
     readonly text: string;
     readonly attachments: readonly ContentBlock[];
+    readonly skillReferences?: readonly PromptSkillReference[];
   };
   type FirstPrompt = {
     readonly binding: SessionBinding;
     readonly text: string;
     readonly attachments: readonly ContentBlock[];
+    readonly skillReferences?: readonly PromptSkillReference[];
     readonly paused: boolean;
     generation?: number;
     sessionId?: string;
@@ -190,7 +201,13 @@ export function createSessionActions(
       queuedPrompts: queue.filter((_, position) => position !== index),
       queuePaused: false,
     });
-    if (!get().sendPrompt(queuedText(next), queuedAttachments(next))) {
+    if (
+      !get().sendPrompt(
+        queuedText(next),
+        queuedAttachments(next),
+        queuedSkillOptions(next),
+      )
+    ) {
       set((state) => ({
         queuedPrompts: [...state.queuedPrompts.slice(0, index), next, ...state.queuedPrompts.slice(index)],
         queuePaused: true,
@@ -201,9 +218,9 @@ export function createSessionActions(
   let modelChangeGeneration = 0;
   let modeChangeGeneration = 0;
   return {
-    steerPrompt: (text, attachments = []) => {
+    steerPrompt: (text, attachments = [], options) => {
       const first = firstPrompt;
-      if (!first) return steering.steer(text, attachments);
+      if (!first) return steering.steer(text, attachments, options);
       const state = get();
       const binding = context.activeBinding;
       if (
@@ -219,24 +236,40 @@ export function createSessionActions(
       const previous = first.held;
       const merged = mergePromptText(previous?.text ?? "", part);
       if (merged === null) return false;
+      const previousBody =
+        decodeAnnotationMessage(previous?.text ?? "")?.text ??
+        previous?.text ??
+        "";
+      const skillReferences = appendPromptSkillReferences(
+        previous?.skillReferences,
+        options?.skillReferences,
+        previousBody && part ? previousBody.length + 2 : previousBody.length,
+      );
       const held: HeldSteer = {
         id: previous?.id ?? crypto.randomUUID(),
         originalId: previous?.originalId ?? crypto.randomUUID(),
         text: merged,
         parts: [...(previous?.parts ?? []), part],
         attachments: [...(previous?.attachments ?? []), ...attachments],
+        skillReferences,
       };
       first.held = held;
       const entry: QueuedPrompt = {
         id: held.id,
         text: held.text,
         attachments: held.attachments,
+        ...(held.skillReferences
+          ? { skillReferences: held.skillReferences }
+          : {}),
         steerDelivery: "pending",
       };
       const original: QueuedPrompt = {
         id: held.originalId,
         text: first.text,
         attachments: first.attachments,
+        ...(first.skillReferences
+          ? { skillReferences: first.skillReferences }
+          : {}),
         steerDelivery: first.scheduled ? "unknown" : "pending",
         ...(first.scheduled ? { steerOriginal: true } : {}),
       };
@@ -449,6 +482,7 @@ export function createSessionActions(
         context.interruptedPrompt = {
           text: trimmed,
           attachments,
+          skillReferences: options.skillReferences,
           imageFallbackText,
           replayed: false,
           statistics,
@@ -456,10 +490,23 @@ export function createSessionActions(
         context.cancelledByUser = false;
       }
       const delivery = steering.captureDelivery();
-      const first: FirstPrompt | undefined = !delivery && !context.replaying &&
-        binding.supportsSteer && binding.ensureSession && !get().activeSessionId
-        ? { binding, text: trimmed, attachments, stopped: false, scheduled: false, attempted: false, paused: get().queuePaused }
-        : undefined;
+      const first: FirstPrompt | undefined =
+        !delivery &&
+        !context.replaying &&
+        binding.supportsSteer &&
+        binding.ensureSession &&
+        !get().activeSessionId
+          ? {
+              binding,
+              text: trimmed,
+              attachments,
+              skillReferences: options.skillReferences,
+              stopped: false,
+              scheduled: false,
+              attempted: false,
+              paused: get().queuePaused,
+            }
+          : undefined;
       firstPrompt = first;
       const previousItems = get().items;
       const usageScope = binding.usageScope;
@@ -481,8 +528,15 @@ export function createSessionActions(
         if (!usage || usageScope?.accounting !== "turn-delta") return usage;
         return sessionUsageDelta(usage, previousUsage) ?? undefined;
       };
-      beginTurn(trimmed, options.display);
-      if (delivery) set({ items: get().items.map((item, i, items) => i === items.length - 1 && item.kind === "user" ? { ...item, steer: true } : item) });
+      beginTurn(trimmed, options);
+      if (delivery)
+        set({
+          items: get().items.map((item, i, items) =>
+            i === items.length - 1 && item.kind === "user"
+              ? { ...item, steer: true }
+              : item,
+          ),
+        });
       if (attachments.length)
         set((state) => ({
           items: state.items.map((item, index) =>
@@ -595,14 +649,14 @@ export function createSessionActions(
       }
       return true;
     },
-    enqueuePrompt: (text, attachments = []) => {
+    enqueuePrompt: (text, attachments = [], options) => {
       const trimmed = text.trim();
       if (get().directSteering || (trimmed.length === 0 && attachments.length === 0)) {
         return false;
       }
       if (!get().isAgentRunning && !steering.active) {
         // 空闲态不该走到这（UI 只在运行中入队）：按直接发送兜底
-        return get().sendPrompt(trimmed, attachments);
+        return get().sendPrompt(trimmed, attachments, options);
       }
       if (
         attachments.length &&
@@ -613,7 +667,13 @@ export function createSessionActions(
       set({
         queuedPrompts: [
           ...get().queuedPrompts,
-          identifyQueuedPrompt({ text: trimmed, attachments }),
+          identifyQueuedPrompt({
+            text: trimmed,
+            attachments,
+            ...(options?.skillReferences?.length
+              ? { skillReferences: options.skillReferences }
+              : {}),
+          }),
         ],
       });
       logger.info("消息已加入队列", { depth: get().queuedPrompts.length });
@@ -745,6 +805,9 @@ export function createSessionActions(
         get().sendPrompt(
           lastUser.text,
           lastUser.attachments as readonly ContentBlock[] | undefined,
+          lastUser.skillReferences
+            ? { skillReferences: lastUser.skillReferences }
+            : undefined,
         );
       }
     },

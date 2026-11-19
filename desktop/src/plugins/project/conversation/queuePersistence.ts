@@ -1,6 +1,7 @@
 import type { QueuedPrompt } from "./types.ts";
 import { identifyQueuedPrompt } from "./queuedPrompt.ts";
 import { nativePromptQueue } from "./snapshotStorage.ts";
+import { readPromptSkillReferences } from "../composer/skillReferences.ts";
 export const queuePrefix = "aaw-desktop/prompt-queue.v1/";
 export function readPromptQueue(scope: string): readonly QueuedPrompt[] {
   try {
@@ -49,8 +50,19 @@ function parsePromptQueue(raw: string | null): readonly QueuedPrompt[] {
     );
     const ids = new Set<string>();
     return valid.map((entry) => {
-      const identified = identifyQueuedPrompt(entry);
+      let identified = identifyQueuedPrompt(entry);
       if (typeof identified === "string") return identified;
+      if ("skillReferences" in identified) {
+        const { skillReferences, ...rest } = identified;
+        const references = readPromptSkillReferences(
+          skillReferences,
+          identified.text,
+        );
+        identified = {
+          ...rest,
+          ...(references ? { skillReferences: references } : {}),
+        };
+      }
       if (ids.has(identified.id!)) {
         const replacement = { ...identified, id: crypto.randomUUID() };
         ids.add(replacement.id);

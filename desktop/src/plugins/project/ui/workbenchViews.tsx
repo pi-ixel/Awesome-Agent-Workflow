@@ -45,7 +45,9 @@ export function createProjectPages({
   openArchiveSettings,
   openExternal,
 }: {
-  readonly skills: ReadonlySnapshot<{ readonly candidates?: SkillsService["candidates"] }>;
+  readonly skills: ReadonlySnapshot<
+    Pick<Partial<SkillsService>, "candidates" | "resolveSlashSkills">
+  >;
   readonly gitReview: ReadonlySnapshot<{
     readonly query?: GitService["query"];
     readonly open?: GitReviewNavigation["open"];
@@ -67,7 +69,7 @@ export function createProjectPages({
     );
   }
   function SessionPage() {
-    const candidates = useStore(skills, (state) => state.candidates);
+    const { candidates, resolveSlashSkills } = useStore(skills);
     const git = useStore(gitReview);
     const projectExtension = useStore(extension, (state) => state.view);
     const documents = useStore(documentView, (state) => state.view);
@@ -83,6 +85,7 @@ export function createProjectPages({
           fileCandidates={documents?.fileCandidates}
           ownsFindShortcut={documents?.ownsFindShortcut}
           skillCandidates={candidates}
+          resolveSlashSkills={resolveSlashSkills}
           queryGit={git.query}
           openGitReview={git.open}
           watchActivity={watchActivity}

@@ -508,6 +508,9 @@ html.theme-warm {
   /* 状态基底色：时间线灯 / 状态点等 SVG 直用（Zai 灯级原值） */
   --color-ok: #67d887;
   --color-warn: #ff8a30;
+  --color-skill-reference-rose: #ffc0d7;
+  --color-skill-reference-pink: #f699d2;
+  --color-skill-reference-lilac: #d3acff;
   --color-danger: var(--color-diff-removed);
   --color-info: #80beff;
   /* 用量条共用的柔和填充，文字在未填充与已填充区域都保持对比。 */
@@ -705,6 +708,9 @@ html.theme-warm {
   /* 状态基底色（浅底上取 Zai light 的深色值） */
   --color-ok: #1e8a3e;
   --color-warn: #e07b00;
+  --color-skill-reference-rose: #aa3265;
+  --color-skill-reference-pink: #a83a86;
+  --color-skill-reference-lilac: #7546a5;
   --color-danger: var(--color-diff-removed);
   --color-info: #0b7fff;
   --color-usage-meter-track: #f1f2f3;

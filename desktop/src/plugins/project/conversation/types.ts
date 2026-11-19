@@ -1,5 +1,9 @@
 import type { MessageDisplay } from "../../../shared/messageDisplay.ts";
-import type { TurnPerformance, PerformanceTotals } from "./sessionPerformance.ts";
+import type { PromptSkillReference } from "../composer/skillReferences.ts";
+import type {
+  TurnPerformance,
+  PerformanceTotals,
+} from "./sessionPerformance.ts";
 import type { TurnUsage } from "./turnUsage.ts";
 import type {
   ContentBlock,
@@ -21,6 +25,7 @@ export type QueuedPrompt =
       readonly id?: string;
       readonly text: string;
       readonly attachments: readonly ContentBlock[];
+      readonly skillReferences?: readonly PromptSkillReference[];
       /** 引导请求的持久化投递状态；未知状态必须由用户确认，不能自动重发。 */
       readonly steerDelivery?: "pending" | "unknown";
       readonly steerOriginal?: true;
@@ -46,6 +51,7 @@ export interface UserMessageItem {
   readonly createdAt: string;
   /** 插件替用户发的消息怎么显示（不是用户自己打的字）。 */
   readonly display?: MessageDisplay;
+  readonly skillReferences?: readonly PromptSkillReference[];
 }
 
 /** 助手消息：text 为累计的 Markdown 源文本。 */

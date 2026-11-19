@@ -9,6 +9,7 @@
  * - 纯装饰图标一律 aria-hidden（语义在按钮的 aria-label / title 上）。
  */
 import { UiIcon, type IconProps } from "./UiIcon.tsx";
+import { useId } from "react";
 
 export type { IconProps } from "./UiIcon.tsx";
 
@@ -526,8 +527,16 @@ export function TrashIcon(props: IconProps) {
 }
 
 export function SkillIcon(props: IconProps) {
+  const gradientId = useId();
   return (
-    <Svg {...props}>
+    <Svg stroke={`url(#${gradientId})`} {...props}>
+      <defs>
+        <linearGradient id={gradientId} x1="0%" y1="100%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="var(--color-skill-reference-rose)" />
+          <stop offset="48%" stopColor="var(--color-skill-reference-pink)" />
+          <stop offset="100%" stopColor="var(--color-skill-reference-lilac)" />
+        </linearGradient>
+      </defs>
       <path d="m5 7 7-4 7 4v10l-7 4-7-4zM5 7l7 4 7-4M5 12l7 4 7-4M12 11v10" />
     </Svg>
   );

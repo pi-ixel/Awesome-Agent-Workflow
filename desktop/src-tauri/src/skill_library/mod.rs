@@ -89,6 +89,8 @@ pub struct Entry {
     is_link: bool,
     kind: Kind,
     status: String,
+    status_label: Option<String>,
+    skill_file_path: Option<PathBuf>,
     usage_count: Option<u64>,
 }
 

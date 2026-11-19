@@ -25,6 +25,8 @@ pub(super) fn inline_entry(path: &Path, value: &Value) -> Result<Entry> {
         is_link: false,
         kind: Kind::Inline,
         status: "配置内定义".into(),
+        status_label: None,
+        skill_file_path: None,
         usage_count: None,
     })
 }

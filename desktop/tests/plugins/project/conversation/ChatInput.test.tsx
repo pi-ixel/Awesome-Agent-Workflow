@@ -23,6 +23,9 @@ import type { PropsWithChildren } from "react";
 import { createStore } from "zustand";
 import type { ReadonlySnapshot } from "../../../../src/shared/state/readonlySnapshot.ts";
 import type { FileCandidates } from "../../../../src/plugins/project/conversation/ui/documentView.ts";
+import type { SkillCatalog } from "../../../../src/plugins/host/types.ts";
+import type { SkillsService } from "../../../../src/plugins/skills/service.ts";
+import { slashSkillCatalog } from "../../../../src/plugins/skills/sources/slashSkillCatalog.ts";
 import {
   createTestSkills,
   skillsWorkbenchFixture,
@@ -54,6 +57,8 @@ function setup(
     openDiagnostics?: () => void;
     documentsWorkbench?: ReturnType<typeof createTestProjectWorkbench>;
     fileCandidates?: ReadonlySnapshot<FileCandidates | undefined>;
+    resolveSlashSkills?: SkillsService["resolveSlashSkills"];
+    skillWorkspace?: string | null;
   } = {},
 ) {
   const onSend = vi.fn();
@@ -81,6 +86,8 @@ function setup(
       <ChatInput
         fileCandidates={fileCandidates}
         skillCandidates={skillCandidates}
+        resolveSlashSkills={options.resolveSlashSkills}
+        skillWorkspace={options.skillWorkspace}
         openDiagnostics={options.openDiagnostics}
         isAgentRunning={options.isAgentRunning ?? false}
         onSend={onSend}
@@ -588,7 +595,8 @@ describe("ChatInput slash 命令面板", () => {
     }
   });
 
-  it("skill 项过滤命中并插入提示文本（insert 类）", async () => {
+  it("iCode 的技能候选保留会话来源，选中后显示引用并发送斜杠命令", async () => {
+    useSessionStore.setState({ agentKey: JSON.stringify(["chrys"]) });
     useRuntimeStatusStore.setState({
       runtime: {
         ...useRuntimeStatusStore.getState().runtime,
@@ -598,15 +606,181 @@ describe("ChatInput slash 命令面板", () => {
         },
       },
     });
-    setup({ skills: skillWorkbench, openDiagnostics });
+    const listDescriptions = vi.fn(() =>
+      Promise.resolve({
+        descriptions: new Map([
+          ["aaw-workflow", "从需求澄清开始，按阶段执行工作流"],
+          ["local-only", "没有被本次会话上报"],
+        ]),
+      }),
+    );
+    const resolveSlashSkills = vi.fn(() => ({ listDescriptions }));
+    const { onSend } = setup({
+      skills: skillWorkbench,
+      openDiagnostics,
+      resolveSlashSkills,
+      skillWorkspace: "D:/demo",
+    });
     const textarea = getTextarea();
     await userEvent.type(textarea, "/aaw");
     const panel = await screen.findByRole("listbox", { name: "命令面板" });
     expect(panel).toHaveTextContent("Skills");
     expect(panel).toHaveTextContent("aaw-workflow");
+    expect(
+      await screen.findByText("从需求澄清开始，按阶段执行工作流"),
+    ).toBeInTheDocument();
+    expect(panel).not.toHaveTextContent("关联技能");
+    expect(listDescriptions).toHaveBeenCalledWith("D:/demo");
     // 选中 skill 项：面板首项此时应为 skill（aaw 无静态命令命中）
     await userEvent.type(textarea, "{Enter}");
-    expect(textarea.value).toContain("请使用 skill「aaw-workflow」");
+    const reference = screen.getByText("aaw-workflow", {
+      exact: true,
+    }).parentElement;
+    expect(reference?.querySelector("svg")).toBeInTheDocument();
+    expect(reference?.querySelector("button")).toBeNull();
+    expect(reference?.querySelector(".bg-clip-text")).toBeInTheDocument();
+    expect(textarea.value).toBe("");
+    expect(resolveSlashSkills).toHaveBeenCalledWith("chrys");
+    await userEvent.type(textarea, "{Backspace}");
+    expect(
+      screen.queryByText("aaw-workflow", { exact: true }),
+    ).not.toBeInTheDocument();
+    await userEvent.type(textarea, "/aaw{Enter}");
+    await userEvent.type(textarea, "{Enter}");
+    expect(onSend).toHaveBeenCalledWith("/aaw-workflow", undefined, {
+      skillReferences: [
+        { name: "aaw-workflow", command: "aaw-workflow", offset: 0 },
+      ],
+    });
+  });
+
+  it("CodeAgent 按本地文件列出技能，关联后显示图标并发送原生命令", async () => {
+    const project = "D:/demo";
+    const source = "D:/home/.cac/skills";
+    const projectSource = project + "/.cac/skills";
+    const otherSource = "D:/other/.cac/skills";
+    const global = {
+      name: "review",
+      path: source + "/review",
+      realPath: source + "/review",
+      source,
+      description: "全局检查",
+      preview: "",
+      kind: "directory" as const,
+      revision: "r",
+      isLink: false,
+      status: "正常",
+      usageCount: null,
+    };
+    const catalog: SkillCatalog = {
+      profile: null,
+      profiles: [],
+      trash: [],
+      warnings: [],
+      sources: [source, projectSource, otherSource].map((path) => ({
+        path,
+        label: ".cac",
+        kind: "directory",
+        enabled: true,
+        canImport: true,
+        project:
+          path === source
+            ? null
+            : path === projectSource
+              ? project
+              : "D:/other",
+      })),
+      entries: [
+        global,
+        {
+          ...global,
+          path: projectSource + "/project-review",
+          realPath: projectSource + "/project-review",
+          source: projectSource,
+          description: "项目检查",
+        },
+        {
+          ...global,
+          name: "alias",
+          path: projectSource + "/alias",
+          source: projectSource,
+        },
+        {
+          ...global,
+          name: "broken",
+          path: source + "/broken",
+          status: "YAML 格式错误",
+        },
+        {
+          ...global,
+          name: "other",
+          path: otherSource + "/other",
+          source: otherSource,
+        },
+      ],
+    };
+    const list = vi.fn((path: string | null) =>
+      Promise.resolve(slashSkillCatalog(catalog, path)),
+    );
+    useWorkspaceStore.setState({ activePath: project });
+    useSessionStore.setState({ agentKey: JSON.stringify(["codeagent"]) });
+    useRuntimeStatusStore.setState({
+      availableCommands: [
+        "REVIEW",
+        "project-review",
+        "alias",
+        "broken",
+        "review-all",
+      ].map((name) => ({
+        name,
+        description: null,
+        inputHint: null,
+      })),
+    });
+    const { onSend } = setup({
+      resolveSlashSkills: () => ({ listCatalog: list }),
+    });
+    await userEvent.type(getTextarea(), "/rev");
+    await screen.findByRole("option", { name: /项目检查/ });
+    expect(screen.getByText("全局技能")).toBeInTheDocument();
+    expect(screen.getByText("当前项目技能")).toBeInTheDocument();
+    expect(screen.getAllByRole("option")).toHaveLength(3);
+    expect(screen.getByText("/review-all")).toBeInTheDocument();
+    await userEvent.clear(getTextarea());
+    await userEvent.type(getTextarea(), "/");
+    await screen.findByText("项目检查");
+    expect(
+      screen.queryByText(/broken|\/alias|\/project-review/),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("other")).not.toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByRole("option", { name: /项目检查/ }));
+    const reference = screen.getByText("review", { exact: true }).parentElement;
+    expect(reference?.querySelector("svg")).toBeInTheDocument();
+    expect(getTextarea()).toHaveValue("");
+
+    await userEvent.type(
+      getTextarea(),
+      "检查这次改动{Shift>}{Enter}{/Shift}核对结果{Enter}",
+    );
+    expect(onSend).toHaveBeenCalledWith(
+      "/REVIEW 检查这次改动\n核对结果",
+      undefined,
+      {
+        skillReferences: [
+          {
+            name: "review",
+            command: "REVIEW",
+            path: projectSource + "/project-review/SKILL.md",
+            offset: 0,
+          },
+        ],
+      },
+    );
+    expect(
+      screen.queryByText("review", { exact: true }),
+    ).not.toBeInTheDocument();
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(list).toHaveBeenLastCalledWith(project);
   });
 
   it("@ 多源：skill 名与文件同面板分组出现", async () => {

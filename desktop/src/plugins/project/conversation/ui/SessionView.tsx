@@ -362,6 +362,7 @@ export function SessionView({
   fileCandidates,
   ownsFindShortcut,
   skillCandidates,
+  resolveSlashSkills,
   queryGit,
   openGitReview,
   watchActivity,
@@ -372,6 +373,7 @@ export function SessionView({
   readonly fileCandidates?: ConversationDocumentView["fileCandidates"];
   readonly ownsFindShortcut?: ConversationDocumentView["ownsFindShortcut"];
   readonly skillCandidates?: SkillsService["candidates"];
+  readonly resolveSlashSkills?: SkillsService["resolveSlashSkills"];
   readonly queryGit?: GitService["query"];
   readonly openGitReview?: GitReviewNavigation["open"];
   readonly watchActivity?: ProjectWorkspace["subscribeWorkspaceActivity"];
@@ -1288,6 +1290,8 @@ export function SessionView({
                       queue={<QueueDock />}
                       fileCandidates={fileCandidates}
                       skillCandidates={skillCandidates}
+                      resolveSlashSkills={resolveSlashSkills}
+                      skillWorkspace={contextPath ?? activePath}
                       extensionEntries={extensionEntries}
                       extensionGroup={extension?.slashGroup}
                       openDiagnostics={openDiagnostics}

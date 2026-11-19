@@ -14,7 +14,20 @@ import { useProjectComposer } from "../../ui/bindings/composerView.ts";
 import { useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
 import { useRegisteredSnapshot } from "../../../../shared/state/useRegisteredSnapshot.ts";
 import { useSessionCommands } from "./useSessionCommands.ts";
-import type { SkillsService } from "../../../skills/service.ts";
+import type {
+  SlashSkillCatalog,
+  SlashSkillDescriptions,
+  SkillsService,
+} from "../../../skills/service.ts";
+import { sessionAgentId } from "../../sessions/sessionDeletion.ts";
+import {
+  promptWithEditableSkills,
+  readSkillReferences,
+  skillPrompt,
+  skillReferenceKey,
+  withSkillReferences,
+} from "../../composer/skillReferences.ts";
+import type { SendOptions } from "../sessionStore.ts";
 import type { ProjectSlashEntry } from "../../ui/extension.ts";
 import { ImageAttachments } from "./ImageAttachments.tsx";
 import { readImageFiles, imageLimitError } from "./imageFiles.ts";
@@ -26,6 +39,7 @@ import {
   encodeAnnotationMessage,
 } from "../../composer/annotationMessage.ts";
 import { AnnotationSummary } from "./AnnotationSummary.tsx";
+import { SkillReferenceTokens } from "./SkillReferenceTokens.tsx";
 /**
  * 输入区（悬浮形态）：不贴边贴底的圆角卡片——外层 `0 16px 16px` 留白，
  * 内部 max-w-4xl 居中，surface 植面 + 圆角 16 + 投影。
@@ -50,6 +64,7 @@ import { AnnotationSummary } from "./AnnotationSummary.tsx";
  */
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -63,7 +78,11 @@ import { chatWidthClassOf } from "./chatWidth.ts";
 import { MenuItemRow, StatusChipMenu } from "./StatusChipMenu.tsx";
 import type { FileCandidates } from "./documentView.ts";
 import { InputStatusRight } from "./InputStatusBar.tsx";
-import { HandIcon, ShieldAlertIcon } from "../../../../shared/ui/icons.tsx";
+import {
+  HandIcon,
+  ShieldAlertIcon,
+  SkillIcon,
+} from "../../../../shared/ui/icons.tsx";
 import {
   detectMentionTrigger,
   filterMentionOptions,
@@ -168,6 +187,8 @@ export interface ChatInputProps {
   readonly queue?: ReactNode;
   readonly fileCandidates?: FileCandidates;
   readonly skillCandidates?: SkillsService["candidates"];
+  readonly resolveSlashSkills?: SkillsService["resolveSlashSkills"];
+  readonly skillWorkspace?: string | null;
   /** 扩展给「/」菜单的条目与这组的标题。 */
   readonly extensionEntries?: readonly ProjectSlashEntry[];
   readonly extensionGroup?: string;
@@ -179,15 +200,18 @@ export interface ChatInputProps {
   readonly onSend: (
     text: string,
     attachments?: readonly ContentBlock[],
+    options?: SendOptions,
   ) => boolean | void;
   /** 运行中提交：消息加入队列（轮次结束后按序发出）。 */
   readonly onEnqueue: (
     text: string,
     attachments?: readonly ContentBlock[],
+    options?: SendOptions,
   ) => boolean | void;
   readonly onSteer?: (
     text: string,
     attachments?: readonly ContentBlock[],
+    options?: SendOptions,
   ) => boolean;
   readonly onCancel: () => void;
 }
@@ -196,6 +220,8 @@ export function ChatInput({
   queue,
   fileCandidates,
   skillCandidates,
+  resolveSlashSkills,
+  skillWorkspace,
   extensionEntries,
   extensionGroup,
   openDiagnostics,
@@ -264,8 +290,32 @@ export function ChatInput({
     );
   }, [imagesByScope, imagesLoaded, imageStorage]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const skillRailRef = useRef<HTMLDivElement | null>(null);
+  const [skillRailWidth, setSkillRailWidth] = useState(0);
   const turnState = useSessionValue((state) => state.turnState);
   const agentKey = useSessionValue((state) => state.agentKey);
+  const sessionAgent = agentKey === undefined ? null : sessionAgentId(agentKey);
+  const slashSkills = useMemo(
+    () => (sessionAgent ? resolveSlashSkills?.(sessionAgent) : undefined),
+    [resolveSlashSkills, sessionAgent],
+  );
+  const usesSkillReferences = slashSkills !== undefined;
+  const { text: draftText, references: skillReferences } = useMemo(
+    () => readSkillReferences(draft),
+    [draft],
+  );
+  const hasSkillReferences = skillReferences.length > 0;
+  // 引用浮在首行，文本域只缩进首行，后续行仍使用完整宽度。
+  useLayoutEffect(() => {
+    const rail = skillRailRef.current;
+    if (!hasSkillReferences || !rail) return;
+    const measure = () => setSkillRailWidth(rail.getBoundingClientRect().width);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(rail);
+    return () => observer.disconnect();
+  }, [hasSkillReferences]);
   const activeSessionId = useSessionValue((state) => state.activeSessionId);
   // 审批默认模式（ask / auto-allow）：客户端对权限请求的缺省应答策略，
   // 即时切换（与设置页同一字段）；「自动拒绝」已下线（误触后全拒，危险）
@@ -360,6 +410,47 @@ export function ChatInput({
     readonly query: string;
     readonly index: number;
   } | null>(null);
+  const slashOpen = slash !== null;
+  const listSlashCatalog = slashSkills?.listCatalog;
+  const listSlashSkills = listSlashCatalog ?? slashSkills?.listDescriptions;
+  const slashWorkspace =
+    skillWorkspace === undefined ? activePath : skillWorkspace;
+  const slashRequest = useMemo(
+    () =>
+      slashOpen && listSlashSkills
+        ? { list: listSlashSkills, project: slashWorkspace }
+        : null,
+    [listSlashSkills, slashOpen, slashWorkspace],
+  );
+  const [slashResult, setSlashResult] = useState<{
+    request: NonNullable<typeof slashRequest>;
+    catalog: SlashSkillCatalog | SlashSkillDescriptions | null;
+  }>();
+  const loadedSkills =
+    slashResult?.request === slashRequest ? slashResult.catalog : undefined;
+  const slashCatalog =
+    loadedSkills && "skills" in loadedSkills ? loadedSkills : undefined;
+  const descriptions =
+    loadedSkills && "descriptions" in loadedSkills
+      ? loadedSkills.descriptions
+      : undefined;
+  const isCatalogPending =
+    !!listSlashCatalog && !!slashRequest && !slashCatalog;
+  useEffect(() => {
+    if (!slashRequest) return;
+    let current = true;
+    void slashRequest.list(slashRequest.project).then(
+      (catalog) => {
+        if (current) setSlashResult({ request: slashRequest, catalog });
+      },
+      () => {
+        if (current) setSlashResult({ request: slashRequest, catalog: null });
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [slashRequest]);
   // Agent 适配器提供归一化的技能名称和调用方式。
   const runtimeSkillNames = useRuntimeValue(
     (state) => state.runtime.skillNames,
@@ -553,7 +644,11 @@ export function ChatInput({
     }
     element.style.height = "0px";
     element.style.height = `${Math.min(element.scrollHeight, MAX_HEIGHT_PX)}px`;
-  }, [draft]);
+    if (skillRailRef.current) {
+      skillRailRef.current.style.visibility =
+        element.scrollTop > 0 ? "hidden" : "";
+    }
+  }, [draftText, hasSkillReferences, skillRailWidth]);
 
   const mentionOptions = useMemo(() => {
     if (mention === null) {
@@ -573,18 +668,27 @@ export function ChatInput({
         ? []
         : filterSlashItems(
             buildSlashItems(
-              skillNames,
-              agentCommands,
+              isCatalogPending ? [] : skillNames,
+              isCatalogPending ? [] : agentCommands,
               skillInvocations,
               extensionEntries,
               extensionGroup,
+              slashCatalog,
+              usesSkillReferences,
+              descriptions,
             ).filter(
               (item) => item.actionId !== "diagnostics" || openDiagnostics,
             ),
             slash.query,
+            !!listSlashCatalog,
           ),
     [
       slash,
+      isCatalogPending,
+      listSlashCatalog,
+      slashCatalog,
+      descriptions,
+      usesSkillReferences,
       skillNames,
       agentCommands,
       skillInvocations,
@@ -660,12 +764,22 @@ export function ChatInput({
   /** 选中 slash 条目：action 类移除 /token 并执行；insert 类替换为插入文本。 */
   const selectSlashItem = (item: SlashItem): void => {
     const element = textareaRef.current;
-    const caret = element?.selectionStart ?? draft.length;
+    const caret = element?.selectionStart ?? draftText.length;
     const query = slash?.query ?? "";
     const replacement =
-      item.kind === "insert" ? `${item.insertText ?? ""} ` : "";
-    const result = replaceSlashToken(draft, caret, query, replacement);
-    setDraft(result.text);
+      item.kind === "insert" && !item.skillReference
+        ? `${item.insertText ?? ""} `
+        : "";
+    const result = replaceSlashToken(draftText, caret, query, replacement);
+    const reference = item.skillReference;
+    const references =
+      reference &&
+      !skillReferences.some(
+        (item) => skillReferenceKey(item) === skillReferenceKey(reference),
+      )
+        ? [...skillReferences, reference]
+        : skillReferences;
+    setDraft(withSkillReferences(result.text, references));
     setSlash(null);
     if (item.kind === "action") {
       if (item.actionId) runSlashAction(item.actionId);
@@ -684,20 +798,20 @@ export function ChatInput({
   const insertMention = (option: MentionOption): void => {
     const element = textareaRef.current;
     const token = mention?.query ?? "";
-    const caret = element?.selectionStart ?? draft.length;
+    const caret = element?.selectionStart ?? draftText.length;
     // @ 起点在 caret - token.length - 1；校验仍是 @（ IME/粘贴等边缘）
     const atIndex = caret - token.length - 1;
     const insert = option.insert;
     let nextText: string;
     let caretAfter: number;
-    if (atIndex < 0 || draft[atIndex] !== "@") {
-      nextText = `${draft}${draft.length > 0 ? " " : ""}${insert}`;
+    if (atIndex < 0 || draftText[atIndex] !== "@") {
+      nextText = `${draftText}${draftText.length > 0 ? " " : ""}${insert}`;
       caretAfter = nextText.length;
     } else {
-      nextText = `${draft.slice(0, atIndex)}${insert}${draft.slice(caret)}`;
+      nextText = `${draftText.slice(0, atIndex)}${insert}${draftText.slice(caret)}`;
       caretAfter = atIndex + insert.length;
     }
-    setDraft(nextText);
+    setDraft(withSkillReferences(nextText, skillReferences));
     setMention(null);
     requestAnimationFrame(() => {
       const node = textareaRef.current;
@@ -710,7 +824,7 @@ export function ChatInput({
 
   const submit = (): void => {
     if (steerDisabled) return;
-    const trimmed = draft.trim();
+    const message = skillPrompt(draftText, skillReferences);
     if (
       !hasContent ||
       disabled ||
@@ -733,7 +847,7 @@ export function ChatInput({
       return;
     }
     const prompt = encodeAnnotationMessage(
-      trimmed,
+      message.text,
       annotationDraft.annotations,
     );
     const submittedScope = draftKeyRef.current;
@@ -747,20 +861,17 @@ export function ChatInput({
     };
     let accepted: boolean | void;
     try {
-      const enqueue = steering ? onSteer : onEnqueue;
-      accepted = running
-        ? images.length
-          ? enqueue(
-              prompt,
-              images.map((image) => image.block),
-            )
-          : enqueue(prompt)
-        : images.length
-          ? onSend(
-              prompt,
-              images.map((image) => image.block),
-            )
-          : onSend(prompt);
+      const dispatch = running ? (steering ? onSteer : onEnqueue) : onSend;
+      const attachments = images.length
+        ? images.map((image) => image.block)
+        : undefined;
+      accepted = message.skillReferences.length
+        ? dispatch(prompt, attachments, {
+            skillReferences: message.skillReferences,
+          })
+        : attachments
+          ? dispatch(prompt, attachments)
+          : dispatch(prompt);
     } catch {
       rejected();
       return;
@@ -772,7 +883,9 @@ export function ChatInput({
     const sentSessionId = foregroundSession?.getState().activeSessionId ?? null;
     promptHistory?.setScope(activePath, sentSessionId ?? "__new__", agentKey);
     if (sentSessionId !== null || activePath === null) {
-      promptHistory?.record(decodeAnnotationMessage(prompt)?.text ?? prompt);
+      promptHistory?.record(
+        promptWithEditableSkills(message.text, message.skillReferences),
+      );
     }
     historyIndexRef.current = null;
     // 发送/入队即清存稿（写穿透会因 setDraft("") 再补一次删键，这里先删是保序）
@@ -789,6 +902,16 @@ export function ChatInput({
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     // 输入法组词中的按键一律放行给 IME（导航键也不抢）
     if (event.nativeEvent.isComposing) {
+      return;
+    }
+    if (
+      event.key === "Backspace" &&
+      event.currentTarget.selectionStart === 0 &&
+      event.currentTarget.selectionEnd === 0 &&
+      skillReferences.length
+    ) {
+      event.preventDefault();
+      setDraft(withSkillReferences(draftText, skillReferences.slice(0, -1)));
       return;
     }
     // slash 命令面板开着的导航优先
@@ -884,9 +1007,11 @@ export function ChatInput({
               ? []
               : (foregroundSession?.getState().items ?? [])
                   .filter((item) => item.kind === "user")
-                  .map(
-                    (item) =>
+                  .map((item) =>
+                    promptWithEditableSkills(
                       decodeAnnotationMessage(item.text)?.text ?? item.text,
+                      item.skillReferences,
+                    ),
                   ),
           ) ?? []);
     if (
@@ -925,7 +1050,7 @@ export function ChatInput({
   };
 
   const handleChange = (value: string, caret: number): void => {
-    setDraft(value);
+    setDraft(withSkillReferences(value, skillReferences));
     const before = value.slice(0, caret);
     // 行首 / 命令面板（顿号归一）；与 @ 提及互斥
     const slashTrigger = detectSlashTrigger(before);
@@ -969,7 +1094,17 @@ export function ChatInput({
             aria-label="命令面板"
             className={`mx-auto max-h-56 overflow-y-auto rounded-2xl border border-line bg-surface px-1 py-0.75 shadow-floating selection-popup ${widthClass}`}
           >
-            {slashOptions.length === 0 ? (
+            {isCatalogPending && (
+              <p
+                role="status"
+                className="px-4 py-2 text-ui-caption text-ink-mute"
+              >
+                {loadedSkills === null
+                  ? "技能目录读取失败，重新输入 / 可重试。"
+                  : "正在读取技能目录…"}
+              </p>
+            )}
+            {slashOptions.length === 0 && !isCatalogPending ? (
               <p className="px-4 py-3 text-ui-base text-ink-subtlest">
                 没有匹配的命令
               </p>
@@ -998,8 +1133,16 @@ export function ChatInput({
                   >
                     {/* label 上限 40% + 截断、描述 14px（ZCode
                         slashCommandPanelSections.tsx:34/:39） */}
-                    <span className="max-w-[40%] shrink-0 truncate text-ui-base font-medium">
-                      /{item.label}
+                    <span className="flex max-w-[40%] shrink-0 items-center gap-1.5 text-ui-base font-medium">
+                      {item.skillReference && (
+                        <SkillIcon className="ui-icon-16 shrink-0" />
+                      )}
+                      <span
+                        className="truncate"
+                        data-hint={item.skillReference?.path}
+                      >
+                        {item.skillReference ? item.label : `/${item.label}`}
+                      </span>
                     </span>
                     <span className="min-w-0 flex-1 truncate text-ui-base text-ink-subtlest">
                       {item.description}
@@ -1077,7 +1220,7 @@ export function ChatInput({
           event.preventDefault();
           void addImageFiles(Array.from(event.dataTransfer.files));
         }}
-        className={`composer-card @container/composer mx-auto w-full overflow-hidden rounded-2xl border border-line bg-surface transition-[max-width] duration-150 ease-out ${widthClass}`}
+        className={`composer-card @container/composer mx-auto w-full overflow-hidden rounded-2xl border border-line bg-surface transition-[max-width] duration-150 ease-out [--composer-inline-inset:calc(var(--spacing)*4.5_+_var(--ui-icon-unit)*2)] ${widthClass}`}
       >
         {queue}
         {imageSaveFailed && (
@@ -1181,11 +1324,19 @@ export function ChatInput({
               "当前 Agent 不支持图片，请移除图片或切换到支持图片的 Agent"}
           </p>
         )}
-        {/* 上行：透明无边框的多行输入（ZCode 壳 p-3：文字距卡缘 12px） */}
-        <div className="px-3 pb-0 pt-3">
+        {/* 左侧内距对齐审批按钮的盾牌描边，包含按钮内距和 SVG 留白。 */}
+        <div
+          className={`px-[var(--composer-inline-inset)] pb-0 pt-3 ${
+            usesSkillReferences || hasSkillReferences ? "relative flex" : ""
+          }`}
+        >
+          <SkillReferenceTokens
+            references={skillReferences}
+            railRef={skillRailRef}
+          />
           <textarea
             ref={textareaRef}
-            value={draft}
+            value={draftText}
             onChange={(event) => {
               handleChange(
                 event.target.value,
@@ -1193,6 +1344,12 @@ export function ChatInput({
               );
             }}
             onKeyDown={handleKeyDown}
+            onScroll={(event) => {
+              if (skillRailRef.current) {
+                skillRailRef.current.style.visibility =
+                  event.currentTarget.scrollTop > 0 ? "hidden" : "";
+              }
+            }}
             aria-label="消息输入框"
             aria-autocomplete="list"
             aria-expanded={mention !== null}
@@ -1205,13 +1362,20 @@ export function ChatInput({
                 : "输入消息，Enter 发送，Shift+Enter 换行，/ 命令，@ 引用"
             }
             rows={1}
-            className={`max-h-40 min-h-[2.5rem] w-full resize-none overflow-y-auto rounded bg-transparent text-ui-base leading-5 text-ink outline-none placeholder:text-ink-subtlest disabled:cursor-not-allowed disabled:opacity-60`}
+            style={
+              hasSkillReferences && skillRailWidth > 0
+                ? {
+                    textIndent: `calc(${skillRailWidth}px + var(--spacing) * 2)`,
+                  }
+                : undefined
+            }
+            className={`max-h-40 min-h-[2.5rem] resize-none overflow-y-auto rounded bg-transparent text-ui-base leading-5 text-ink outline-none placeholder:text-ink-subtlest disabled:cursor-not-allowed disabled:opacity-60 ${usesSkillReferences || hasSkillReferences ? "min-w-0 flex-1" : "w-full"}`}
           />
         </div>
         {/* 下行：左=AAW 审批策略；右=模型 + 上下文圆环 + 发送/停止
             （ZCode 式：无分隔横线；工具栏行 items-end + 壳 p-3：与编辑器间距 12px、
             底距 12px，ChatPromptEditor.tsx:440-443） */}
-        <div className="mt-3 flex items-end gap-1.5 px-3 pb-3">
+        <div className="mt-3 flex items-end gap-1.5 ps-3 pe-[var(--composer-inline-inset)] pb-3">
           <StatusChipMenu
             title={`审批默认模式：客户端对权限请求的缺省应答（当前「${policyLabelOf(approvalPolicy)}」）`}
             menuLabel="审批默认模式"
