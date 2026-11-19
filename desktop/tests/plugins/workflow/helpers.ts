@@ -1,5 +1,5 @@
 import { pathKey } from "../../../src/shared/panelPaths.ts";
-import { fireEvent, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { NodePlanEntry } from "../../../src/plugins/workflow/status/nodePlans.ts";
 import type { WorkflowEvent } from "../../../src/plugins/workflow/engine/protocol.ts";
 import type {
@@ -323,3 +323,37 @@ export function fakeWorkflowService() {
 }
 
 export type FakeWorkflowService = ReturnType<typeof fakeWorkflowService>;
+
+/**
+ * 找流程图里的一个步骤卡：流程图默认只显示阶段，按顺序展开阶段（以及其中的子流程）直到找到。
+ * 名字是步骤卡的可访问名「节点名，状态」。
+ */
+export async function findStep(name: string | RegExp): Promise<HTMLElement> {
+  const query = () => screen.queryAllByRole("button", { name })[0] ?? null;
+  await waitFor(() => {
+    if (!query() && !document.querySelector(".wf-stage")) throw new Error("流程图还没出来");
+  });
+  let hit = query();
+  if (hit) return hit;
+  for (const stage of [...document.querySelectorAll<HTMLElement>(".wf-stage")]) {
+    if (stage.getAttribute("aria-expanded") !== "true") await clickSettled(stage);
+    hit = query();
+    if (hit) return hit;
+    for (let depth = 0; depth < 6; depth++) {
+      const closed = document.querySelector<HTMLElement>(".wf-step.is-flow > button[aria-expanded='false']");
+      if (!closed) break;
+      await clickSettled(closed);
+      hit = query();
+      if (hit) return hit;
+    }
+  }
+  throw new Error(`流程图里没有步骤「${String(name)}」`);
+}
+
+/** 点一下并等它的异步展开收起走完（流程图在测试里不做动画，但展开是异步的）。 */
+export async function clickSettled(element: Element): Promise<void> {
+  await act(async () => {
+    fireEvent.click(element);
+    await Promise.resolve();
+  });
+}

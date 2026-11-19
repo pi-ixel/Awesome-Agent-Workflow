@@ -21,7 +21,7 @@ it("previews an import, lists its scripts and opens the imported workflow", asyn
   fake.setDetail({ ...workflowSummary("shared", "user"), catalogs: {}, files: [{ path: "scripts/task.py", text: "print(1)" }], scripts: [{ path: "scripts/task.py", trusted: false }] });
   render(<WorkflowPanel service={fake.service} transfer={files} />);
 
-  fireEvent.click(await screen.findByRole("button", { name: "导入…" }));
+  fireEvent.click(await screen.findByRole("button", { name: "导入" }));
   const preview = await screen.findByRole("group", { name: "导入预览" });
   expect(preview).toHaveTextContent("分享的流程");
   expect(preview).toHaveTextContent("包含 1 个脚本");
@@ -43,7 +43,7 @@ it("refuses an invalid file with a readable reason", async () => {
   const fake = fakeWorkflowService();
   fake.setImportResult(new Error("WORKFLOW_PACKAGE_INVALID"));
   render(<WorkflowPanel service={fake.service} transfer={transfer("not json")} />);
-  fireEvent.click(await screen.findByRole("button", { name: "导入…" }));
+  fireEvent.click(await screen.findByRole("button", { name: "导入" }));
   expect(await screen.findByText(/这不是有效的工作流文件/)).toBeInTheDocument();
   expect(screen.queryByRole("group", { name: "导入预览" })).not.toBeInTheDocument();
 });

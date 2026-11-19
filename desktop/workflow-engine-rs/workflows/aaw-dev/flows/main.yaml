@@ -7,6 +7,8 @@ steps:
     stage: design
     agent:
       label: 需求确认
+      why: 先把要做什么、做到哪为止说清楚，后面的设计才有依据。
+      delivers: 一份确认过的需求文档：要做什么、做到哪为止
       prompt: 确认需求及边界，必要时在当前会话提问。需要用户决策时在当前会话提问并等待答复；完成确认后再提交结果。给出确认后需求及证据。
       knowledge: [host-tools.md, dev-init.md]
       does:
@@ -20,6 +22,7 @@ steps:
         reference: 需求文档
     next:
       - to: design
+        explain: 需求已确认，并留下了需求文档和证据
         when: |-
           requirement.status == "ready"
           && nonempty(requirement.reference)
@@ -27,11 +30,14 @@ steps:
         set:
           confirmed: requirement
       - to: $blocked
+        explain: 需求没能确认清楚
 
   design:
     stage: design
     agent:
       label: 设计
+      why: 把需求落成可审查的设计，作为测试和实现的共同依据。
+      delivers: 一份设计文档：方案、改动范围和验收方式
       prompt: 依据确认需求完成设计，按提供的工作方法查证和提问；缺少条件不得虚构。交付供后续节点读取的设计成果及必要说明；无法完成时说明阻塞。
       knowledge: [host-tools.md, design-method.md, design-template.md]
       does:
@@ -49,15 +55,19 @@ steps:
       cleanup: [design.files]
     next:
       - to: design_review
+        explain: 交出了设计文档
         when: nonempty(design.reference) || nonempty(design.files.values)
         set:
           design: design
       - to: $blocked
+        explain: 没能交出设计
 
   design_review:
     stage: design
     agent:
       label: 独立设计检查
+      why: 换一个会话独立检查设计，避开作者自查的盲区。
+      delivers: 一份检查报告：设计能否通过，以及发现的问题
       role: 设计独立检查
       prompt: 独立只读检查设计。只对既有授权内均可安全修正的问题返回 revise 且 safe=true。
       knowledge: [host-tools.md, review-criteria.md]
@@ -76,6 +86,7 @@ steps:
         decision.revise: 需要修正
     next:
       - to: design_repair
+        explain: 发现的问题都能安全修正（最多自动修正 2 轮）
         label: 可修正
         when: |-
           design_review.decision == "revise"
@@ -85,16 +96,20 @@ steps:
           designRepairs: vars.designRepairs + 1
           designReview: design_review
       - to: tests
+        explain: 检查通过
         label: 通过
         when: design_review.decision == "pass" && nonempty(design_review.report)
         set:
           designReview: design_review
       - to: $blocked
+        explain: 有不能自动修正的问题，或修正 2 轮后仍未通过
 
   design_repair:
     stage: design
     agent:
       label: 设计修正
+      why: 只修复检查中能安全处理的问题，不扩大改动。
+      delivers: 修正后的设计文档
       role: 设计
       prompt: 在既有授权内修正独立设计检查的问题；交付修正后的设计成果，无法安全处理则说明阻塞。
       knowledge: [host-tools.md, repair-policy.md, design-method.md]
@@ -112,15 +127,19 @@ steps:
       cleanup: [design_repair.files]
     next:
       - to: design_recheck
+        explain: 交出了修正后的设计
         when: nonempty(design_repair.reference) || nonempty(design_repair.files.values)
         set:
           design: design_repair
       - to: $blocked
+        explain: 没能完成修正
 
   design_recheck:
     stage: design
     agent:
       label: 设计复查
+      why: 确认修正真正解决了检查发现的问题。
+      delivers: 一份复查报告：修正后的设计能否通过，以及仍存在的问题
       role: 设计独立检查
       prompt: 重新独立只读检查修正后的设计。
       knowledge: [host-tools.md, review-criteria.md]
@@ -139,6 +158,7 @@ steps:
         decision.revise: 需要修正
     next:
       - to: design_repair
+        explain: 发现的问题都能安全修正（最多自动修正 2 轮）
         label: 可修正
         when: |-
           design_recheck.decision == "revise"
@@ -148,16 +168,20 @@ steps:
           designRepairs: vars.designRepairs + 1
           designReview: design_recheck
       - to: tests
+        explain: 复查通过
         label: 通过
         when: design_recheck.decision == "pass" && nonempty(design_recheck.report)
         set:
           designReview: design_recheck
       - to: $blocked
+        explain: 有不能自动修正的问题，或修正 2 轮后仍未通过
 
   tests:
     stage: design
     agent:
       label: 测试设计
+      why: 动手实现之前先想清楚怎么验证。
+      delivers: 一份测试设计：要验证什么、怎么验证
       prompt: 依据通过检查的设计形成测试设计；证据或设计不足时应在当前会话说明并与用户确认，不代上游作决定。
       knowledge: [host-tools.md, test-design-method.md, test-design-template.md]
       does:
@@ -171,6 +195,7 @@ steps:
         reference: 测试设计
     next:
       - to: gate
+        explain: 交出了测试设计和证据
         when: |-
           tests.status == "ready"
           && nonempty(tests.reference)
@@ -178,11 +203,14 @@ steps:
         set:
           tests: tests
       - to: $blocked
+        explain: 没能完成测试设计
 
   gate:
     stage: design
     agent:
       label: 设计门禁
+      why: 进入开发前，独立确认需求、设计和测试设计能闭环。
+      delivers: 一份门禁报告：能否进入开发，以及发现的问题
       role: 设计门禁检查
       prompt: 独立只读检查需求、设计和测试设计的闭环。只有均可在既有授权内安全整改时 revise 且 safe=true。
       knowledge: [host-tools.md, gate-review.md]
@@ -201,22 +229,27 @@ steps:
         decision.revise: 需要修正
     next:
       - to: gate_repair
+        explain: 发现的问题都能安全修正（最多自动修正 2 轮）
         label: 可修正
         when: gate.decision == "revise" && gate.safe == true && vars.gateRepairs < 2
         set:
           gateRepairs: vars.gateRepairs + 1
           gateReview: gate
       - to: plan
+        explain: 门禁通过
         label: 通过
         when: gate.decision == "pass" && nonempty(gate.report)
         set:
           gateReview: gate
       - to: $blocked
+        explain: 有不能自动修正的问题，或修正 2 轮后仍未通过
 
   gate_repair:
     stage: design
     agent:
       label: 门禁整改
+      why: 只整改门禁指出的、能安全处理的问题。
+      delivers: 整改后的设计文档和测试设计
       role: 设计门禁整改
       prompt: 仅整改门禁中确定安全的问题，返回设计和测试设计实际版本引用；未修改的一方沿用原引用。
       knowledge: [host-tools.md, gate-repair.md]
@@ -233,6 +266,7 @@ steps:
         tests: 测试设计
     next:
       - to: gate_recheck
+        explain: 交出了整改后的设计和测试设计
         when: |-
           gate_repair.status == "ready"
           && nonempty(gate_repair.design)
@@ -242,11 +276,14 @@ steps:
           design: gate_repair.design
           tests: gate_repair.tests
       - to: $blocked
+        explain: 没能完成整改
 
   gate_recheck:
     stage: design
     agent:
       label: 门禁复查
+      why: 确认门禁问题已经整改到位。
+      delivers: 一份复查报告：整改后能否进入开发，以及仍存在的问题
       role: 设计门禁检查
       prompt: 重新只读检查整改后的设计和测试设计版本。
       knowledge: [host-tools.md, gate-review.md]
@@ -265,6 +302,7 @@ steps:
         decision.revise: 需要修正
     next:
       - to: gate_repair
+        explain: 发现的问题都能安全修正（最多自动修正 2 轮）
         label: 可修正
         when: |-
           gate_recheck.decision == "revise"
@@ -274,16 +312,20 @@ steps:
           gateRepairs: vars.gateRepairs + 1
           gateReview: gate_recheck
       - to: plan
+        explain: 复查通过
         label: 通过
         when: gate_recheck.decision == "pass" && nonempty(gate_recheck.report)
         set:
           gateReview: gate_recheck
       - to: $blocked
+        explain: 有不能自动修正的问题，或修正 2 轮后仍未通过
 
   plan:
     stage: task
     agent:
       label: 任务规划
+      why: 把设计拆成能逐个实现、逐个验证的任务，开发前由你把关。
+      delivers: 一份实施计划和任务列表：每项任务的目标、范围和要做的测试
       prompt: 规划有序任务，明确每项范围与测试责任，更新测试设计；不允许空计划或只有标题。
       knowledge: [host-tools.md, task-split.md]
       does:
@@ -307,6 +349,7 @@ steps:
     next:
       # 进入写代码之前，任务计划要你确认。
       - to: task_call
+        explain: 计划完整（每项任务都有目标、范围和测试）
         label: 确认计划后开发
         confirm: must
         when: |-
@@ -322,11 +365,14 @@ steps:
           planVersion: plan.plan
           testVersion: plan.tests
       - to: $blocked
+        explain: 计划不完整
 
   final:
     stage: delivery
     agent:
       label: 最终交接
+      why: 交代清楚实际完成了什么、怎么验证的、还剩什么问题。
+      delivers: 一份交付说明：完成了什么、怎么验证的、还剩什么问题
       prompt: 汇总实际验证、证据与遗留事项。遇到需要用户决定的问题，在当前会话中说明并等待答复，处理后继续；无法完成时如实说明，不得虚构已完成。
       knowledge: [host-tools.md, dev-completion.md]
       does:
@@ -341,6 +387,7 @@ steps:
     next:
       # 交付前请你确认；启动时选了自动放行则直接完成。
       - to: $complete
+        explain: 交付说明和证据齐全
         label: 确认交付
         confirm: ask
         when: |-
@@ -348,6 +395,7 @@ steps:
           && nonempty(final.reference)
           && nonempty(final.evidence)
       - to: $blocked
+        explain: 交付说明或证据不全
 
   task_call:
     stage: task
@@ -369,6 +417,7 @@ steps:
       任务: item.id
     next:
       - to: final
+        explain: 所有任务都已交付完成
         when: |-
           task_call[len(vars.plan.tasks) - 1].output.delivery.status == "ready"
           && nonempty(task_call[len(vars.plan.tasks) - 1].output.delivery.plan)
@@ -380,4 +429,5 @@ steps:
           planVersion: task_call[len(vars.plan.tasks) - 1].output.delivery.plan
           testVersion: task_call[len(vars.plan.tasks) - 1].output.delivery.tests
       - to: $blocked
+        explain: 有任务没能交付完成
         reason: 任务交付未满足继续条件

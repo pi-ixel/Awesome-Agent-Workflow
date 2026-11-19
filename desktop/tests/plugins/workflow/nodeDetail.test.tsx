@@ -8,7 +8,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { WorkflowPanel } from "../../../src/plugins/workflow/ui/WorkflowPanel.tsx";
 import { describeResult, tidyText, entryConditions, looksLikePath } from "../../../src/plugins/workflow/ui/nodeDetail.ts";
 import type { CanvasSnapshot, RunSummary, WorkflowCatalog } from "../../../src/plugins/workflow/types.ts";
-import { fakeWorkflowService, runSummary } from "./helpers.ts";
+import { fakeWorkflowService, runSummary, findStep } from "./helpers.ts";
 
 const catalog: WorkflowCatalog = {
   id: "aaw-dev", name: "AAW dev", revision: "r1", entry: "design",
@@ -76,7 +76,7 @@ it("only treats whitespace-free, path-shaped strings as files", () => {
 
 it("derives when a node runs from the routes pointing at its phase, with author labels", () => {
   const label = (site: string) => catalog.nodes.find((node) => node.id === site)?.label ?? site;
-  expect(entryConditions(catalog.structure!, "ask#3", "repair", label)).toEqual(["「设计检查」之后 · 可修正"]);
+  expect(entryConditions(catalog.structure!, "ask#3", "repair", label)).toEqual(["「设计检查」之后（可修正）"]);
   expect(entryConditions(catalog.structure!, "ask#1", undefined, label)).toEqual(["流程开始时执行"]);
   expect(entryConditions(catalog.structure!, "ask#2", "review", label)).toEqual(["「设计」之后", "「修正设计」之后"]);
 });
@@ -84,7 +84,7 @@ it("derives when a node runs from the routes pointing at its phase, with author 
 it("shows a finished node's verdict and openable files, with the raw result folded", async () => {
   const onOpenFile = vi.fn();
   mount([record("ask#2", "review", "completed", { decision: "revise", issues: "缺少回滚方案", report: ".aaw/review.md", safe: true })], { onOpenFile });
-  fireEvent.click(await screen.findByRole("button", { name: /^设计检查，/ }));
+  fireEvent.click(await findStep(/^设计检查，/));
   const inspector = screen.getByRole("complementary", { name: "节点详情" });
   expect(within(inspector).getByText("需修正")).toBeInTheDocument();
   expect(within(inspector).getByText("缺少回滚方案")).toBeInTheDocument();
@@ -97,17 +97,17 @@ it("shows a finished node's verdict and openable files, with the raw result fold
 
 it("tells what a not-yet-run node will do and when it runs", async () => {
   mount([record("ask#1", "design", "running")]);
-  fireEvent.click(await screen.findByRole("button", { name: "修正设计，未触发" }));
+  fireEvent.click(await findStep("修正设计，未触发"));
   const inspector = screen.getByRole("complementary", { name: "节点详情" });
   expect(within(inspector).getByText("这个节点会做")).toBeInTheDocument();
   expect(within(inspector).getByText("修复可安全修正的问题")).toBeInTheDocument();
-  expect(within(inspector).getByText("「设计检查」之后 · 可修正")).toBeInTheDocument();
+  expect(within(inspector).getByText("「设计检查」之后（可修正）")).toBeInTheDocument();
   expect(within(inspector).queryByText("原始结果")).not.toBeInTheDocument();
 });
 
 it("shows the steps of a running node rather than an empty output", async () => {
   mount([record("ask#1", "design", "running")]);
-  fireEvent.click(await screen.findByRole("button", { name: "设计，运行中" }));
+  fireEvent.click(await findStep("设计，运行中"));
   const inspector = screen.getByRole("complementary", { name: "节点详情" });
   expect(within(inspector).getByText("这一步要做")).toBeInTheDocument();
   expect(within(inspector).getByText("验证项目事实")).toBeInTheDocument();
@@ -117,13 +117,17 @@ it("shows the steps of a running node rather than an empty output", async () => 
 it("puts the inspector beside the canvas on a wide panel and below it on a narrow one", async () => {
   const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(820);
   mount([record("ask#1", "design", "running")]);
-  fireEvent.click(await screen.findByRole("button", { name: "设计，运行中" }));
-  expect(screen.getByRole("complementary", { name: "节点详情" }).parentElement).toHaveClass("is-wide");
+  fireEvent.click(await findStep("设计，运行中"));
+  expect(screen.getByRole("complementary", { name: "节点详情" }).closest(".workflow-workspace")).toHaveClass("is-wide");
   cleanup();
   width.mockReturnValue(520);
   mount([record("ask#1", "design", "running")]);
-  fireEvent.click(await screen.findByRole("button", { name: "设计，运行中" }));
-  expect(screen.getByRole("complementary", { name: "节点详情" }).parentElement).toHaveClass("is-stacked");
+  fireEvent.click(await findStep("设计，运行中"));
+  // 窄时上下分屏：流程图还在，详情在下面，中间有可拖动的分隔线。
+  const workspace = screen.getByRole("complementary", { name: "节点详情" }).closest(".workflow-workspace");
+  expect(workspace).toHaveClass("is-stacked");
+  expect(screen.getByRole("separator", { name: "调整节点详情高度" })).toBeInTheDocument();
+  expect(screen.getByLabelText("流程画布")).toBeInTheDocument();
 });
 
 it("uses the labels written in the workflow definition before guessing from field names", () => {

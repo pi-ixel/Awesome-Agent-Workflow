@@ -10,6 +10,8 @@ steps:
     stage: task
     agent:
       label: 任务规划
+      why: 把设计拆成能逐个实现、逐个验证的任务，开发前由你把关。
+      delivers: 一份实施计划和任务列表：每项任务的目标、范围和要做的测试
       prompt: 规划有序任务，明确每项范围与测试责任，更新测试设计；不允许空计划或只有标题。
       knowledge: [host-tools.md, task-split.md]
       does:
@@ -34,6 +36,7 @@ steps:
     next:
       # 进入写代码之前，任务计划要你确认。
       - to: task_call
+        explain: 计划完整（每项任务都有目标、范围和测试）
         label: 确认计划后开发
         confirm: must
         when: |-
@@ -49,11 +52,14 @@ steps:
           planVersion: plan.plan
           testVersion: plan.tests
       - to: $blocked
+        explain: 计划不完整
 
   final:
     stage: delivery
     agent:
       label: 模块组交付
+      why: 汇总这个模块组的实际验证、产物和遗留问题。
+      delivers: 这个模块组的交付说明：验证情况、产物和遗留问题
       prompt: 汇总实际验证、证据与遗留事项。遇到需要用户决定的问题，在当前会话中说明并等待答复，处理后继续；无法完成时如实说明，不得虚构已完成。
       knowledge: [host-tools.md, dev-completion.md]
       does:
@@ -68,17 +74,21 @@ steps:
         reference: 模块交付说明
     next:
       - to: $return
+        explain: 交付说明和证据齐全
         when: |-
           final.status == "ready"
           && nonempty(final.reference)
           && nonempty(final.evidence)
       - to: $blocked
+        explain: 交付说明或证据不全
         reason: 必要工作未完成或需要用户决定，请查看节点结果。
 
   module_design:
     stage: design
     agent:
       label: 模块设计
+      why: 先分析模块现状，再给出目标设计。
+      delivers: 一份模块设计：现状分析和目标设计
       prompt: 对当前模块组先做现状证据分析，再形成目标设计。在 files 中列出这一步新建的文档路径。
       knowledge: [host-tools.md, module-design-method.md]
       does:
@@ -97,6 +107,7 @@ steps:
       cleanup: [module_design.files]
     next:
       - to: module_tests
+        explain: 交出了模块设计和证据
         when: |-
           module_design.status == "ready"
           && nonempty(module_design.reference)
@@ -104,12 +115,15 @@ steps:
         set:
           design: module_design
       - to: $blocked
+        explain: 没能完成模块设计
         reason: 必要工作未完成或需要用户决定，请查看节点结果。
 
   module_tests:
     stage: design
     agent:
       label: 模块测试设计
+      why: 为模块设计准备最小但充分的验证方案。
+      delivers: 一份模块测试设计：要验证什么、怎么验证
       prompt: 依据当前模块组设计形成最小充分验证方案。
       knowledge: [host-tools.md, test-design-method.md, test-design-template.md]
       does:
@@ -124,6 +138,7 @@ steps:
         reference: 测试设计
     next:
       - to: module_gate
+        explain: 交出了测试设计和证据
         when: |-
           module_tests.status == "ready"
           && nonempty(module_tests.reference)
@@ -131,12 +146,15 @@ steps:
         set:
           tests: module_tests
       - to: $blocked
+        explain: 没能完成测试设计
         reason: 必要工作未完成或需要用户决定，请查看节点结果。
 
   module_gate:
     stage: design
     agent:
       label: 模块设计门禁
+      why: 进入任务规划前，独立确认模块设计和测试设计可行。
+      delivers: 一份门禁报告：模块设计能否进入任务规划，以及发现的问题
       prompt: 独立检查当前模块设计及测试设计。
       knowledge: [host-tools.md, module-gate-method.md]
       does:
@@ -155,6 +173,7 @@ steps:
         decision.revise: 需要修正
     next:
       - to: module_repair
+        explain: 发现的问题都能安全修正（最多自动修正 2 轮）
         label: 可修正
         when: |-
           module_gate.decision == "revise"
@@ -165,17 +184,21 @@ steps:
           moduleRepairs: vars.moduleRepairs + 1
           gateReview: module_gate
       - to: plan
+        explain: 门禁通过
         label: 通过
         when: module_gate.decision == "pass" && nonempty(module_gate.report)
         set:
           gateReview: module_gate
       - to: $blocked
+        explain: 有不能自动修正的问题，或修正 2 轮后仍未通过
         reason: 门禁未通过、证据不足或已达到整改上限；请查看报告并处理。
 
   module_repair:
     stage: design
     agent:
       label: 模块设计整改
+      why: 按门禁报告在授权内修正设计和测试，不替你做决定。
+      delivers: 修正后的模块设计和测试设计
       prompt: 依据最新模块门禁报告，在授权内修正设计与测试；不得擅自作用户决策。
       knowledge: [host-tools.md, module-design-method.md, repair-policy.md]
       does:
@@ -191,6 +214,7 @@ steps:
         tests: 测试设计
     next:
       - to: module_recheck
+        explain: 交出了修正后的设计和测试设计
         when: |-
           module_repair.status == "ready"
           && nonempty(module_repair.design)
@@ -200,12 +224,16 @@ steps:
           design: module_repair.design
           tests: module_repair.tests
       - to: $blocked
+        explain: 没能完成修正
         reason: 必要工作未完成或需要用户决定，请查看节点结果。
 
   module_recheck:
     stage: design
     agent:
-      label: 模块设计门禁
+      label: 模块门禁复核
+      why: 确认模块门禁的问题已经解决。
+      delivers: 一份复核报告：整改后能否进入任务规划，以及仍存在的问题
+      role: 模块设计门禁
       prompt: 根据最新模块设计及测试设计独立复核。
       knowledge: [host-tools.md, module-gate-method.md]
       does:
@@ -223,6 +251,7 @@ steps:
         decision.revise: 需要修正
     next:
       - to: module_repair
+        explain: 发现的问题都能安全修正（最多自动修正 2 轮）
         label: 可修正
         when: |-
           module_recheck.decision == "revise"
@@ -233,11 +262,13 @@ steps:
           moduleRepairs: vars.moduleRepairs + 1
           gateReview: module_recheck
       - to: plan
+        explain: 复核通过
         label: 通过
         when: module_recheck.decision == "pass" && nonempty(module_recheck.report)
         set:
           gateReview: module_recheck
       - to: $blocked
+        explain: 有不能自动修正的问题，或修正 2 轮后仍未通过
         reason: 门禁未通过、证据不足或已达到整改上限；请查看报告并处理。
 
   task_call:
@@ -260,6 +291,7 @@ steps:
       任务: item.id
     next:
       - to: final
+        explain: 所有任务都已交付完成
         when: |-
           task_call[len(vars.plan.tasks) - 1].output.delivery.status == "ready"
           && nonempty(task_call[len(vars.plan.tasks) - 1].output.delivery.plan)
@@ -271,4 +303,5 @@ steps:
           planVersion: task_call[len(vars.plan.tasks) - 1].output.delivery.plan
           testVersion: task_call[len(vars.plan.tasks) - 1].output.delivery.tests
       - to: $blocked
+        explain: 有任务没能交付完成
         reason: 任务交付未满足继续条件

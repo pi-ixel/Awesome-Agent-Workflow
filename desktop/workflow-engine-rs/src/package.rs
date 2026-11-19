@@ -310,6 +310,9 @@ pub struct DraftInfo {
     /// 草稿里工作流的名称（编译失败时取原工作流 id，新建时为空）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// 草稿里工作流的说明（编译通过且改过时才有；没动过的起步模板说明不算）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     /// 相对原工作流（新建时相对起步模板）改了几个文件。
     pub changes: usize,
     /// 能否编译通过。
@@ -356,6 +359,7 @@ impl Library {
             dir: dir.display().to_string(),
             created_at: meta["createdAt"].as_u64().unwrap_or(0),
             name: None,
+            description: None,
             changes: 0,
             ok: false,
             mcp_server: crate::authoring_mcp::server_spec(&dir),
@@ -368,6 +372,9 @@ impl Library {
         info.name = compiled.as_ref().ok().map(|c| c.meta.name.clone()).or_else(|| info.base.clone());
         info.changes = changes.len();
         info.ok = compiled.is_ok();
+        if info.changes > 0 {
+            info.description = compiled.as_ref().ok().map(|c| c.meta.description.clone()).filter(|d| !d.trim().is_empty());
+        }
         Ok(info)
     }
 

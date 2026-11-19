@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, expect, it, vi } from "vitest";
 import { WorkflowPanel } from "../../../src/plugins/workflow/ui/WorkflowPanel.tsx";
 import type { WorkflowCatalog } from "../../../src/plugins/workflow/types.ts";
-import { fakeWorkflowService, runSummary, workflowSummary } from "./helpers.ts";
+import { fakeWorkflowService, runSummary, workflowSummary, findStep } from "./helpers.ts";
 
 /** 工作流库和运行管理平级，模板详情和运行分别进入。 */
 afterEach(() => {
@@ -114,11 +114,11 @@ it("goes from the library to the workflow, previews its graph and source, then s
   fake.setDetail({ ...workflowSummary(), catalogs: { dev: catalog }, files: [{ path: "workflow.yaml", text: "id: aaw-dev" }, { path: "flows/main.yaml", text: "label: dev" }], scripts: [] });
   render(<WorkflowPanel service={fake.service} />);
   fireEvent.click(await screen.findByRole("button", { name: "查看工作流 AAW 轻量开发" }));
-  // 流程图预览：节点都未触发，点开能看到它会做什么
-  fireEvent.click(await screen.findByRole("button", { name: "需求确认，未触发" }));
-  // 这一步做什么现在直接写在卡片第二行（YAML 的 does），检视器里也还在。
-  expect(within(screen.getByRole("complementary", { name: "节点说明" })).getByText("确认需求与边界")).toBeInTheDocument();
-  expect(within(screen.getByRole("button", { name: "需求确认，未触发" })).getByText("确认需求与边界")).toBeInTheDocument();
+  // 流程图预览：卡片上写着这一步做什么；点开在分屏里审查它。
+  fireEvent.click(await findStep("需求确认"));
+  const review = screen.getByRole("complementary", { name: "节点说明" });
+  expect(within(review).getByRole("region", { name: "做什么" })).toHaveTextContent("确认需求与边界");
+  expect(within(screen.getByRole("button", { name: "需求确认" })).getByText("确认需求与边界")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("tab", { name: /源码/ }));
   fireEvent.click(screen.getByRole("button", { name: "flows/main.yaml" }));
   expect(screen.getByLabelText("flows/main.yaml")).toHaveTextContent("label: dev");
@@ -130,11 +130,10 @@ it("goes from the library to the workflow, previews its graph and source, then s
   await vi.waitFor(() => expect(crumb()).toBe("做一件小事"));
   // 运行标题就在页头，面包屑不再重复它。
   expect(screen.getByRole("navigation", { name: "位置" })).toHaveTextContent(/^AAW 轻量开发运行详情$/);
+  // 返回到工作流详情（流程图），详情页不再列运行记录。
   fireEvent.click(screen.getByRole("button", { name: "AAW 轻量开发" }));
-  expect(await screen.findByRole("tab", { name: /本项目的运行/, selected: true })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "查看运行 做一件小事" }));
-  fireEvent.click(screen.getByRole("button", { name: "AAW 轻量开发" }));
-  expect(await screen.findByRole("tab", { name: /本项目的运行/, selected: true })).toBeInTheDocument();
+  expect(await screen.findByRole("tab", { name: "流程图", selected: true })).toBeInTheDocument();
+  expect(screen.queryByRole("tab", { name: /运行/ })).not.toBeInTheDocument();
 });
 
 it("copies a preset as mine and opens the copy", async () => {
@@ -169,4 +168,17 @@ it("lands on the latest run when it has not finished cleanly", async () => {
   fake.setRuns([runSummary({ runId: "r2", title: "中断的运行", status: "stopped" }), runSummary({ runId: "r1", status: "completed" })]);
   render(<WorkflowPanel service={fake.service} />);
   await vi.waitFor(() => expect(crumb()).toBe("中断的运行"));
+});
+
+it("deletes one of my workflows from its card after confirming, presets have no delete", async () => {
+  const fake = fakeWorkflowService();
+  fake.setLibrary([workflowSummary(), workflowSummary("mine", "user")]);
+  render(<WorkflowPanel service={fake.service} />);
+  expect(await screen.findByRole("button", { name: /查看工作流 AAW 轻量开发/ })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "删除工作流" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", { name: "我的 1" }));
+  const card = (await screen.findByRole("button", { name: "查看工作流 mine" })).closest("article")!;
+  fireEvent.click(within(card).getByRole("button", { name: "删除工作流" }));
+  fireEvent.click(within(card).getByRole("button", { name: "确认删除工作流" }));
+  await vi.waitFor(() => expect(fake.calls).toContainEqual({ method: "deleteWorkflow", args: "mine" }));
 });

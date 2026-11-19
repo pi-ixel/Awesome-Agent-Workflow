@@ -73,6 +73,8 @@ steps:
     stage: design               # 归入哪个阶段分带
     agent:                      # 内联一个 Agent 节点，节点名与步骤名相同
       label: 需求确认
+      why: 先把要做什么说清楚，后面的设计才有依据。   # 给审查的人看：这一步为什么存在
+      delivers: 一份确认过的需求文档：要做什么、做到哪为止   # 给审查的人看：最后交出什么
       role: 需求确认            # 同一 role 的节点共用一个会话；缺省同 label
       prompt: 确认需求及边界，必要时在当前会话提问。
       knowledge: [host-tools.md, dev-init.md]
@@ -84,6 +86,7 @@ steps:
         evidence: string
     next:                       # 去向：从上到下第一个满足条件的
       - to: design
+        explain: 需求已确认，并留下需求文档和证据   # 给审查的人看：什么情况下走这条（只写条件）
         when: requirement.status == "ready" && nonempty(requirement.evidence)
         set:
           confirmed: requirement
@@ -117,6 +120,7 @@ steps:
 | `label` | 画布连线上的字，如「可修正」 |
 | `reason` | 走到 `$blocked` 时告诉用户的原因 |
 | `confirm` | 走这条去向前停下等用户确认：`must` 每次都停；`ask` 在启动时选了「自动放行」就直接通过。`$blocked` 不能写 |
+| `explain` | 给审查工作流的人看的一句话：什么情况下走这条，只写条件，例如「计划完整，每项任务都有目标、范围和测试」「计划不完整」。走了之后会怎样（进入哪一步、停下等确认、流程停下）界面会自己接上，不用写。用用户能懂的话，不写表达式和字段名；有分支的步骤每条去向（包括兜底）都要写 |
 
 所有去向都带条件时会有提醒：都不满足时运行会失败，最好在最后放一个兜底。
 
@@ -126,11 +130,15 @@ steps:
 
 内联在步骤里，或写在流程文件的 `nodes:` 下（被 `run` 引用）：
 
+`label`、`does`、`why`、`delivers`，以及去向的 `label`、`explain`、`reason` 是写给人看的：用户在应用里审查工作流打算怎么运行时，流程图和节点详情显示的就是它们，读的人不了解工作流内部（字段、表达式、节点 id、内部用语）。其余字段给 Agent 和引擎用。
+
 | 字段 | 含义 |
 |---|---|
 | `kind` | 只在 `nodes:` 里写：`agent`（缺省）、`python`、`flow` |
 | `label` | 显示名 |
-| `role` | 会话角色；同一流程里 role 相同的节点共用一个会话，它们的 `result` 与 `session_scope` 必须一致。用哪个 Agent 和模型由用户在 Desktop 工作流详情的「执行者」里按角色选，不写进定义 |
+| `why` | 给审查工作流的人看的一句话：这一步为什么存在、解决什么问题。用用户能懂的话写；Agent 和 Python 节点没写会有提醒 |
+| `delivers` | 给审查工作流的人看的一句话：这一步最后交出什么，如「一份设计文档：方案、改动范围和验收方式」。说交付物本身，不列字段名；Agent 和 Python 节点没写会有提醒 |
+| `role` | 会话角色；同一流程里 role 相同的节点共用一个会话，它们的 `result` 与 `session_scope` 必须一致。所有节点都用用户当前选中的 Agent |
 | `prompt` | 这一步让 Agent 做什么。长文本用 `\|` 块写 |
 | `knowledge` | `knowledge/` 下的文件名，原文附在提示后面 |
 | `does` | 画布上的步骤说明 |

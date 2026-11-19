@@ -92,17 +92,21 @@ it("asks for the request first, then creates the draft and opens the editing ses
   render(<WorkflowPanel service={fake.service} editor={editor} />);
 
   fireEvent.click(await screen.findByRole("button", { name: "用 AI 新建" }));
-  const sheet = screen.getByRole("dialog", { name: "让 AI 新建工作流" });
+  // 弹窗里只有输入框；Esc 关掉，什么也不留下。
+  const sheet = screen.getByRole("dialog", { name: "用 AI 新建工作流" });
   expect(fake.calls.map((call) => call.method)).not.toContain("createDraft");
-  fireEvent.click(within(sheet).getByRole("button", { name: "取消" }));
+  fireEvent.keyDown(within(sheet).getByRole("textbox"), { key: "Escape" });
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(fake.calls.map((call) => call.method)).not.toContain("createDraft");
 
   fireEvent.click(screen.getByRole("button", { name: "用 AI 新建" }));
-  const again = screen.getByRole("dialog", { name: "让 AI 新建工作流" });
-  expect(within(again).getByRole("button", { name: "开始" })).toBeDisabled();
-  fireEvent.change(within(again).getByRole("textbox", { name: "你的要求" }), { target: { value: "做一个先设计再实现的流程" } });
-  fireEvent.click(within(again).getByRole("button", { name: "开始" }));
+  const again = screen.getByRole("dialog", { name: "用 AI 新建工作流" });
+  expect(within(again).getByRole("button", { name: "发送" })).toBeDisabled();
+  const box = within(again).getByRole("textbox");
+  fireEvent.change(box, { target: { value: "做一个先设计再实现的流程" } });
+  fireEvent.keyDown(box, { key: "Enter", shiftKey: true });
+  expect(started).toHaveLength(0);
+  fireEvent.keyDown(box, { key: "Enter" });
   await vi.waitFor(() => expect(started).toHaveLength(1));
   expect(started[0]).toContain("用户的要求：做一个先设计再实现的流程");
   expect(await screen.findByRole("button", { name: "回到编辑会话" })).toBeInTheDocument();
@@ -137,10 +141,11 @@ it("returns to the existing draft of a workflow instead of creating another one"
   render(<WorkflowPanel service={fake.service} editor={editor} />);
 
   fireEvent.click(await screen.findByRole("tab", { name: "我的 1" }));
-  const list = await screen.findByRole("list", { name: "未保存的草稿" });
-  expect(list).toHaveTextContent("修改「mine」");
-  expect(list).toHaveTextContent("改了 2 个文件 · 编译通过，可以保存");
-  expect(screen.getByText("有未保存的修改")).toBeInTheDocument();
+  // 修改已有工作流的草稿不单独成卡，标在原卡片上。
+  const card = (await screen.findByRole("button", { name: "查看工作流 mine" })).closest("article")!;
+  expect(within(card).getByText("草稿")).toBeInTheDocument();
+  expect(within(card).queryByRole("img", { name: "有错误" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /打开草稿/ })).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "查看工作流 mine" }));
   expect(await screen.findByLabelText("未保存的修改")).toHaveTextContent("改了 2 个文件");
@@ -157,10 +162,9 @@ it("copies a preset before letting AI edit it", async () => {
   render(<WorkflowPanel service={fake.service} editor={editor} />);
   fireEvent.click(await screen.findByRole("button", { name: /查看工作流 AAW 轻量开发/ }));
   fireEvent.click(await screen.findByRole("button", { name: "复制并用 AI 修改" }));
-  const sheet = screen.getByRole("dialog", { name: /让 AI 修改/ });
-  expect(sheet).toHaveTextContent("会先复制一份");
-  fireEvent.change(within(sheet).getByRole("textbox", { name: "你的要求" }), { target: { value: "加一个人工确认" } });
-  fireEvent.click(within(sheet).getByRole("button", { name: "开始" }));
+  const page = screen.getByRole("dialog", { name: /用 AI 修改/ });
+  fireEvent.change(within(page).getByRole("textbox"), { target: { value: "加一个人工确认" } });
+  fireEvent.click(within(page).getByRole("button", { name: "发送" }));
   await vi.waitFor(() => expect(fake.calls).toContainEqual({ method: "createDraft", args: { base: "aaw-dev-copy" } }));
   expect(started[0]).toContain("用户的要求：加一个人工确认");
 });
@@ -170,11 +174,23 @@ it("discards a draft from the library after confirmation", async () => {
   fake.addDraft({ draftId: "new-1", base: null, dir: "D:/drafts/new-1", createdAt: 1, changes: 0, ok: true, name: "我的工作流" });
   render(<WorkflowPanel service={fake.service} editor={fakeEditor().editor} />);
   fireEvent.click(await screen.findByRole("tab", { name: /我的 \d+/ }));
-  const list = await screen.findByRole("list", { name: "未保存的草稿" });
-  expect(list).toHaveTextContent("新建「我的工作流」");
-  expect(list).toHaveTextContent("还没有改动");
-  fireEvent.click(within(list).getByRole("button", { name: "放弃" }));
-  fireEvent.click(within(within(list).getByRole("group", { name: "确认放弃" })).getByRole("button", { name: "放弃" }));
+  const card = (await screen.findByRole("button", { name: "打开草稿 我的工作流" })).closest("article")!;
+  expect(within(card).getByText("草稿")).toBeInTheDocument();
+  fireEvent.click(within(card).getByRole("button", { name: "放弃草稿" }));
+  fireEvent.click(within(card).getByRole("button", { name: "确认放弃草稿" }));
   await vi.waitFor(() => expect(fake.calls).toContainEqual({ method: "discardDraft", args: "new-1" }));
-  await vi.waitFor(() => expect(screen.queryByRole("list", { name: "未保存的草稿" })).not.toBeInTheDocument());
+  await vi.waitFor(() => expect(screen.queryByRole("button", { name: "打开草稿 我的工作流" })).not.toBeInTheDocument());
+});
+
+it("marks a draft that has errors and opens it from its card", async () => {
+  const fake = fakeWorkflowService();
+  const draft = { draftId: "new-2", base: null, dir: "D:/drafts/new-2", createdAt: 1, changes: 1, ok: false, name: "坏草稿" };
+  fake.addDraft(draft);
+  fake.setDraftCheck({ draft, ok: false, meta: null, catalogs: {}, diagnostics: [], changes: [] });
+  render(<WorkflowPanel service={fake.service} editor={fakeEditor().editor} />);
+  fireEvent.click(await screen.findByRole("tab", { name: /我的 \d+/ }));
+  const open = await screen.findByRole("button", { name: "打开草稿 坏草稿" });
+  expect(within(open).getByRole("img", { name: "有错误" })).toBeInTheDocument();
+  fireEvent.click(open);
+  await vi.waitFor(() => expect(fake.calls).toContainEqual({ method: "checkDraft", args: "new-2" }));
 });

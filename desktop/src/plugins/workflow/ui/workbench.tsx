@@ -13,7 +13,6 @@
  *   进中央 SessionView，与用户点侧栏会话条目同一条路径。
  */
 import type { AgentSwitchGuard } from "../../agents/service.ts";
-import { readWorkflowExecutors, writeWorkflowExecutors } from "../status/executors.ts";
 import { createDraftEditor } from "../editing/draftSessions.ts";
 import type { Context } from "cordis";
 import { createStore } from "zustand/vanilla";
@@ -25,7 +24,7 @@ import { errorLine } from "../status/errorText.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { WorkflowIcon } from "../../../shared/ui/icons.tsx";
 import type { ProjectActivities, ProjectExtension, ProjectQuickAction, ProjectService } from "../../project/service.ts";
-import type { WorkflowExecutors, WorkflowDraftEditor, WorkflowFileTransfer,
+import type { WorkflowDraftEditor, WorkflowFileTransfer,
   RunSessionLinks,
   WorkflowEntryCommand,
   WorkflowLaunchRequest,
@@ -36,6 +35,7 @@ import type { WorkflowExecutors, WorkflowDraftEditor, WorkflowFileTransfer,
   WorkflowView,
 } from "../types.ts";
 import { WorkflowPanel } from "./WorkflowPanel.tsx";
+import { SplitStorageContext } from "./SplitPane.tsx";
 import { WorkflowSidebar } from "./WorkflowSidebar.tsx";
 import { TextLink } from "../../../shared/ui/TextLink.tsx";
 import { WorkflowOverview } from "./WorkflowOverview.tsx";
@@ -43,8 +43,6 @@ import { WorkflowSessionBanner } from "./WorkflowSessionBanner.tsx";
 import { AWAITING_CONFIRM_CHIP, AWAITING_INPUT_CHIP, runSessionGroups } from "./sessionGroups.ts";
 
 const panelId = "aaw";
-/** 右栏默认比例（与工作台 panelLayout 的默认值一致；跨插件不引其内部模块）。 */
-const DEFAULT_PANEL_RATIO = 0.45;
 
 /** 进行中与等你确认的运行 → 会话区 / 总览用的简报（等你处理的排前面）。 */
 export function runBriefs(runs: readonly RunSessionLinks[]): WorkflowRunBrief[] {
@@ -100,7 +98,8 @@ export function createWorkflowWorkbench(
   pickFiles?: () => Promise<readonly string[]>,
   transfer?: WorkflowFileTransfer,
   editor?: WorkflowDraftEditor,
-  executors?: WorkflowExecutors,
+  /** 面板里分屏尺寸等界面偏好的存储（宿主存储）。 */
+  layoutStorage?: { getItem(key: string): string | null; setItem(key: string, value: string): void },
 ) {
   let disposed = false;
   const active = () => !disposed && workflow.isActive() && workbench.navigationGuard.isActive();
@@ -143,14 +142,6 @@ export function createWorkflowWorkbench(
     }).catch((cause: unknown) => {
       workbench.showToast({ message: `无法打开 ${path}：${cause instanceof Error ? cause.message : String(cause)}`, variant: "warn" });
     });
-  }
-
-  /** 窄屏提示「拉宽」：在当前比例上加一档（与原型同步长，上限 0.62）。 */
-  function widen(projectPath: string): void {
-    if (!active()) return;
-    const panels = workbench.panels.getState();
-    const ratio = panels.projects[pathKey(projectPath)]?.sizeRatio ?? DEFAULT_PANEL_RATIO;
-    panels.resize(projectPath, Math.min(0.62, ratio + 0.1));
   }
 
   function openRun(projectPath: string, runId: string): void {
@@ -269,6 +260,7 @@ export function createWorkflowWorkbench(
     View: function WorkflowPanelView({ visible, project: projectPath }: PanelViewProps) {
       return (
         <section aria-label={visible ? "AAW 面板" : undefined} hidden={!visible} className="workflow-panel-view">
+          <SplitStorageContext.Provider value={layoutStorage ?? null}>
           <WorkflowPanel
             service={workflow}
             project={projectPath}
@@ -281,12 +273,10 @@ export function createWorkflowWorkbench(
             pickFiles={pickFiles}
             transfer={transfer}
             editor={editor}
-            executors={executors}
             onOpenSession={openNodeSession}
             onOpenFile={(path) => openResultFile(projectPath, path)}
-            onWiden={() => widen(projectPath)}
-            onFullView={() => workbench.panels.getState().fullViewOpen(projectPath, "side-pane")}
           />
+          </SplitStorageContext.Provider>
         </section>
       );
     },
@@ -342,10 +332,10 @@ export function workflowSwitchGuard(workflow: Pick<WorkflowService, "runsAcrossP
 }
 
 export const name = "workflow-workbench";
-export const inject = ["workflow", "workbench", "project", "host", "agents"];
+export const inject = ["workflow", "workbench", "project", "host"];
 
 export function apply(ctx: Context): void {
-  const { workflow, workbench, project, host, agents } = ctx;
+  const { workflow, workbench, project, host } = ctx;
   const draftEditor = createDraftEditor({
     project,
     currentProject: () => workbench.navigation.getState().contextPath ?? null,
@@ -362,11 +352,7 @@ export function apply(ctx: Context): void {
       const [path] = await host.dialogs.pickFiles("选择要导入的工作流文件");
       return path ? host.archives.readTextFile(path) : null;
     },
-  }, draftEditor, {
-    defaultName: () => agents.resolve()?.displayName ?? "当前 Agent",
-    read: (workflowId) => readWorkflowExecutors(host.storage, workflowId),
-    write: (workflowId, plan) => writeWorkflowExecutors(host.storage, workflowId, plan),
-  });
+  }, draftEditor, host.storage);
   ctx.effect(() => () => ui.dispose(), "workflow:resources");
   ctx.effect(() => {
     // 工作区作用域：只在当前项目路径真的变化时重绑引擎请求作用域（run

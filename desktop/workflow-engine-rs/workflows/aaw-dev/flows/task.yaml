@@ -10,6 +10,8 @@ steps:
     stage: task
     agent:
       label: 实现与测试
+      why: 按任务范围实现，用实际跑过的验证结果说明做到了。
+      delivers: 这个任务的代码改动，以及实际跑过的验证结果
       role: 任务实现与测试
       prompt: 实现当前任务并执行实际验证，返回变更及证据；不得越过任务范围。files 列出这一步新增或修改的文件（相对项目目录的路径）。
       knowledge: [host-tools.md, task-implementation.md]
@@ -31,6 +33,7 @@ steps:
         reference: 实现说明
     next:
       - to: review_call
+        explain: 交出了实现说明和验证证据
         when: |-
           implementation.status == "ready"
           && nonempty(implementation.reference)
@@ -41,11 +44,14 @@ steps:
           forceRecheckA: false
           forceRecheckB: false
       - to: $blocked
+        explain: 没能完成实现或验证
 
   scan:
     stage: review
     agent:
       label: 代码检查
+      why: 交付前查出规范问题和明显缺陷。
+      delivers: 一份检查结论和问题清单，并说明用什么方式检查的
       prompt: |-
         检查本次任务的实际变更：代码规范、明显缺陷、边界与数据处理、与设计和测试的一致性。
         有可用的代码检查 skill 或工具（例如团队提供的代码检查 skill，或项目自带的 lint、类型检查、测试）就用它们，保留原始输出；
@@ -73,11 +79,13 @@ steps:
     max_visits: 3000
     next:
       - to: delivery
+        explain: 检查通过
         label: 通过
         when: scan.decision == "pass" && nonempty(scan.evidence)
         set:
           scan: scan
       - to: scan_repair
+        explain: 发现的问题都能安全修正（最多自动修正 2 轮）
         label: 可修正
         when: |-
           scan.decision == "revise"
@@ -88,12 +96,15 @@ steps:
           scanRepairs: vars.scanRepairs + 1
           scan: scan
       - to: $blocked
+        explain: 有需要你决定的问题，或修正 2 轮后仍未通过
         reason: 代码检查发现需要你决定的问题，或自动修正已达上限；请查看检查结果后在会话里处理。
 
   scan_repair:
     stage: review
     agent:
       label: 代码检查整改
+      why: 只修正检查中确定安全的问题，修完重新检查。
+      delivers: 修复后的代码，以及重新检查的结果
       role: 代码检查整改
       prompt: 只修正代码检查中确定安全的问题并重跑受影响测试，禁止弱化规则；需要用户决策时在当前会话提问并等待答复，再完成可执行的处置。files 列出这一步新增或修改的文件（相对项目目录的路径）。
       knowledge: [host-tools.md, codecheck.md]
@@ -111,16 +122,20 @@ steps:
     max_visits: 2000
     next:
       - to: scan
+        explain: 交出了修复说明和证据
         when: |-
           scan_repair.status == "ready"
           && nonempty(scan_repair.reference)
           && nonempty(scan_repair.evidence)
       - to: $blocked
+        explain: 没能完成修复
 
   delivery:
     stage: delivery
     agent:
       label: 任务交付
+      why: 确认这个任务确实完成，更新计划后交给下一个任务。
+      delivers: 这个任务的完成确认，以及更新后的计划
       prompt: 核对当前任务实际证据并更新任务计划和测试设计版本。还有任务时 done=false 且 nextTaskId 为下一个任务 ID；全部完成时 done=true 且 nextTaskId 为空。不得跳过任务。
       knowledge: [host-tools.md, task-delivery.md]
       does:

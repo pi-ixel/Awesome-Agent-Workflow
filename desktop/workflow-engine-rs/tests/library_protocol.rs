@@ -388,13 +388,11 @@ fn preflight_names_the_role_whose_agent_is_missing() {
     let project = service.dir.join("project");
     let command = std::env::current_exe().unwrap();
     let input = json!({"cwd": project, "workflow":"aaw-dev", "entry":"dev", "inputs":{}, "command":[command],
-        "roleCommands": {"设计": ["aaw-missing-agent-for-role"]}, "roleModels": {"设计": "fast-model"}, "mcpServers":[]});
+        "roleCommands": {"设计": ["aaw-missing-agent-for-role"]}, "mcpServers":[]});
     let report = service.request("preflight", json!({"input":input})).unwrap();
     let agent = preflight_item(&report, "agent");
     assert_eq!(agent["status"], "fail");
     assert!(agent["message"].as_str().unwrap().contains("「设计」"), "{agent}");
-    let bad = json!({"cwd": project, "workflow":"aaw-dev", "entry":"dev", "inputs":{}, "command":[std::env::current_exe().unwrap()], "roleModels": {"设计": " "}, "mcpServers":[]});
-    assert_eq!(preflight_item(&service.request("preflight", json!({"input":bad})).unwrap(), "workspace")["status"], "fail");
 }
 
 /// 编写工具（ADR 036）：草稿给出的 MCP 服务能按标准启动，AI 调用 check_workflow 拿到编译结果。

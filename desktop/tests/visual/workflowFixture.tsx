@@ -1,5 +1,5 @@
 /**
- * 流程画布的真机同源夹具：直接渲染产品里的 GraphCanvas + WorkflowHierarchy，
+ * 流程画布的真机同源夹具：直接渲染产品里的 FlowStages，
  * 结构与 aaw-dev 的 main/task 流程一致（含条件轨道、回环、子流程调用、终点）。
  *
  * 用途：在浏览器里以真实 CSS 与真实字号复核画布外观（托盘层级、卡片、叠板、
@@ -8,8 +8,7 @@
 import { createRoot } from "react-dom/client";
 import "../../src/shared/styles/index.css";
 import "../../src/plugins/workflow/ui/workflowPanel.css";
-import { GraphCanvas } from "../../src/plugins/workflow/ui/GraphCanvas.tsx";
-import { WorkflowHierarchy } from "../../src/plugins/workflow/ui/WorkflowHierarchy.tsx";
+import { FlowStages } from "../../src/plugins/workflow/ui/FlowStages.tsx";
 import { WorkflowPanel } from "../../src/plugins/workflow/ui/WorkflowPanel.tsx";
 import { fakeWorkflowService, runSummary } from "../plugins/workflow/helpers.ts";
 import type {
@@ -136,19 +135,16 @@ if (params.has("inspector")) {
   <div className="workflow-panel" style={{ height: "100vh" }}>
     <div className="workflow-workspace is-wide">
       <div className="workflow-viewport-frame">
-        <GraphCanvas label="流程画布" fitKey="fixture:main">
-          {(context) => <WorkflowHierarchy
-            rootLabel="dev 工作流"
-            entry="requirement"
-            structure={structure}
-            nodes={nodes}
-            stages={stages}
-            snapshot={snapshot}
-            selected=""
-            bandWidth={context.bandWidth}
-            onSelect={() => {}}
-          />}
-        </GraphCanvas>
+        <FlowStages
+          label="流程画布"
+          rootLabel="dev 工作流"
+          entry="requirement"
+          structure={structure}
+          nodes={nodes}
+          stages={stages}
+          snapshot={snapshot}
+          onSelect={() => {}}
+        />
       </div>
     </div>
   </div>,
