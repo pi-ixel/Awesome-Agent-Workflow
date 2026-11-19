@@ -15,6 +15,12 @@
  *
  * 只认本项目的进程：仓库外的同名进程（比如安装版 AAW Desktop）只报告不杀，
  * 删除别人的正在运行的进程不该由构建脚本来做。
+ *
+ * 退出码约定：只有「确定会让 tauri dev 失败」的问题才返回 1——它挂在
+ * beforeDevCommand 的 `&&` 链上，返回非 0 就等于整个 dev 起不来。软提示
+ * （组策略存在与否、仓库外的同名进程）一律走 note()，只打印不阻断：
+ * 企业内网几乎每台机器都配了 WebView2 更新策略，把这种常态当成错误会让
+ * 所有人都以为项目坏了。
  */
 import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
@@ -34,12 +40,19 @@ const artifacts = [
 const watched = ["desktop.exe", "workflow_service.exe", "electron.exe"];
 
 const problems = [];
+const notes = [];
 const report = (level, text) => {
   process.stdout.write(`[${level}] ${text}\n`);
 };
+/** 确定会让 dev 失败的项：计入退出码。 */
 const warn = (text) => {
   problems.push(text);
   report("warn", text);
+};
+/** 只是提醒：常见但不必然致命，不参与退出码。 */
+const note = (text) => {
+  notes.push(text);
+  report("note", text);
 };
 
 const normalize = (value) => value.replace(/\\/g, "/").toLowerCase();
@@ -219,8 +232,7 @@ const isOurs = (entry) =>
 let ours = processes.filter(isOurs);
 const foreign = processes.filter((entry) => !isOurs(entry));
 for (const entry of foreign) {
-  report(
-    "warn",
+  note(
     `${entry.Name} (PID ${entry.ProcessId}) 在仓库外运行：${entry.ExecutablePath ?? "路径未知"}。它不锁构建产物，但与开发版共用同一个 WebView2 用户数据目录，建议先退出。`,
   );
 }
@@ -312,9 +324,11 @@ if (webview) {
     );
   }
 
+  // 组策略存在 ≠ 限制了运行时：绝大多数企业只是用它统一推送更新策略。
+  // 这一条只提示，不让它把 dev 拦下来。
   if (webview.policy)
-    warn(
-      "存在 WebView2 组策略（HKLM\\SOFTWARE\\Policies\\Microsoft\\Edge\\WebView2）：可能限定了允许的运行时；这一项要 IT 放开。",
+    note(
+      "检测到 WebView2 组策略（HKLM\\SOFTWARE\\Policies\\Microsoft\\Edge\\WebView2）：多数机器只是配置了更新策略，不影响启动；若窗口创建失败再回来查这一项。",
     );
 
   if (webview.dirState === "locked")
@@ -337,9 +351,13 @@ if (webview) {
 
 if (problems.length) {
   process.stdout.write(
-    `\n还有 ${problems.length} 项需要处理${fix ? "" : "（加 --fix 可自动结束本项目的残留进程）"}。\n`,
+    `\n发现 ${problems.length} 项会让 tauri dev 失败的问题${fix ? "" : "（加 --fix 可自动结束本项目的残留进程）"}。\n`,
   );
   process.exitCode = 1;
+} else if (notes.length) {
+  process.stdout.write(
+    `\n没有阻断项，可以直接 npm run tauri dev；上面 ${notes.length} 条只是提醒。\n`,
+  );
 } else {
   process.stdout.write("\n没有发现占用，可以直接 npm run tauri dev。\n");
 }
