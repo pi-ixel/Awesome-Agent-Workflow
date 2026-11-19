@@ -69,6 +69,23 @@ describe("nodeStatus", () => {
     }))).toEqual({ label: "未触发", state: "pending", count: 1, note: "已授权重试一次，继续运行后重新执行" });
   });
 
+  it("a stopped step continues in place, and counts as done once the agent submitted while stopped", () => {
+    const running = record({ status: "running" });
+    // 停止后自动登记的「接着做」：不是重做。
+    expect(nodeStatus(node, snapshot({
+      active: false,
+      retries: [{ siteId: "ask#1", ordinal: 1, resume: true }],
+      nodes: [running],
+    }))).toEqual({ label: "未触发", state: "pending", count: 1, note: "已停止，继续运行后接着做这一步" });
+    // 停着时 Agent 已经交了结果：这一步算完成。
+    const submitted = record({ status: "running", candidates: [{ id: "c1", state: "submitted", result: {} }] });
+    expect(nodeStatus(node, snapshot({
+      active: false,
+      retries: [{ siteId: "ask#1", ordinal: 1, resume: true }],
+      nodes: [submitted],
+    }))).toEqual({ label: "已完成", state: "done", count: 1, note: "结果已交，继续运行后往下走" });
+  });
+
   it("keeps 运行中 but notes that the engine is waiting for a reply in the session", () => {
     const waiting = record({ status: "running", awaitingInput: true });
     expect(nodeStatus(node, snapshot({ nodes: [waiting] })))

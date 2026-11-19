@@ -3,15 +3,15 @@
 mod preflight;
 use aaw_workflow_core::{
     ProcessOutput, Stage, Workflow,
-    headless_host::HeadlessHost,
     intervention::{InterventionRequest, apply_cleanup},
     journal::{Journal, RunInfo, RunSnapshot},
     package::Library,
     python_process,
     source,
     remote_host::{HostFrame, HostFrameSink, RemoteHost},
+    result_channel::ResultChannelStore,
     runtime::{Runtime, RuntimeConfig},
-    service_host::{EventSink, ServiceHost, SessionHostAsHost, SessionHostProtocol},
+    service_host::{EventSink, ServiceHost},
     session_host::SessionHost,
 };
 use serde_json::{Value, json};
@@ -30,10 +30,8 @@ use uuid::Uuid;
 
 struct Active {
     cancel: Arc<AtomicBool>,
-    /// ADR 023 二期-1：宿主经 SessionHost 接缝可注入。Desktop 进程装配
-    /// RemoteHost（宿主回调帧 → WebView 里的 nativeHost），受控联调装配
-    /// 进程内参考宿主 HeadlessHost（职责不变）。运行期只依赖 trait。
-    session_host: Arc<dyn SessionHostProtocol>,
+    /// 这次运行的会话宿主：RemoteHost，把宿主请求编码成回调帧交给 Desktop。
+    session_host: Arc<dyn SessionHost>,
 }
 struct Service {
     db: PathBuf,
@@ -41,16 +39,14 @@ struct Service {
     library: Library,
     active: Arc<Mutex<BTreeMap<String, Active>>>,
     sink: EventSink,
-    /// 宿主装配点（ADR 023 二期-1）：按运行构造一个可注入的 SessionHost。
-    /// `headless`（默认）＝进程内参考宿主；`native`＝远程桥，把 hook 编码
-    /// 成宿主回调帧经事件信封发往对端，应答帧由 stdin 路由按 id 投回。
-    session_host_mode: SessionHostMode,
-    /// native 模式的应答帧路由：runId → 该运行 RemoteHost 的应答投递闭包
+    /// 宿主应答帧路由：runId → 该运行 RemoteHost 的应答投递闭包
     /// （launch 装配时登记，运行收尾时移除；按关联 id 精确投递）。
     frame_router: Arc<Mutex<BTreeMap<String, HostFrameSink>>>,
-    /// native 模式各运行的远程宿主（`host-reset` 用：WebView 重载后新宿主
+    /// 各运行的远程宿主（`host-reset` 用：WebView 重载后新宿主
     /// 宣告上线，旧宿主的挂起请求一律以 HOST_RESET 应答）。
     remote_hosts: Arc<Mutex<BTreeMap<String, Arc<RemoteHost>>>>,
+    /// 结果通道（跨停止与继续保留；运行完成或删除时清掉）。
+    channels: Arc<ResultChannelStore>,
     /// 宿主应答等待的截止时间（RemoteLink 用；默认 120s，测试经环境变量
     /// 注入更短值——接缝断链的失败必须可观测而不是挂死）。
     host_response_timeout: Duration,
@@ -107,34 +103,6 @@ fn run_status(w: &Workflow, active: bool) -> &'static str {
     }
 }
 
-/// 宿主装配模式（ADR 023 二期-1）：`headless` 为进程内参考宿主（受控联
-/// 调与过渡期），`native` 为远程宿主桥（Desktop 进程）。默认 headless，
-/// Desktop 侧经 `--session-host native` 打开。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SessionHostMode {
-    Headless,
-    Native,
-}
-
-/// headless 装配的协议面：簿记在 HeadlessHost 的固有方法上，runtime 用
-/// `Arc<HeadlessHost>`（SessionHost），协议 dispatch 用本适配器。
-struct HeadlessProtocol {
-    inner: Arc<HeadlessHost>,
-}
-impl SessionHostProtocol for HeadlessProtocol {
-    fn enqueue_user_message(&self, session_id: &str, text: &str) -> Result<(), String> {
-        self.inner.enqueue_user_message(session_id, text)
-    }
-    fn cancel_waiting(&self) {
-        self.inner.cancel_waiting()
-    }
-    fn pending_interactions(&self) -> Result<Vec<Value>, String> {
-        self.inner.pending_interactions()
-    }
-    fn respond_interaction(&self, id: &str, kind: &str, answer: Value) -> Result<(), String> {
-        self.inner.respond_interaction(id, kind, answer)
-    }
-}
 fn run_value(id: &str, w: &Workflow, active: bool, info: &RunInfo) -> Value {
     let definition = &w.graph.definition;
     let source = definition.source.clone().unwrap_or(Value::Null);
@@ -509,62 +477,36 @@ impl Service {
             self.db.clone(),
             self.sink.clone(),
         ));
-    // ADR 023 二期-1：装配点按模式注入。两种模式都实现 SessionHost，
-    // 运行期只依赖 trait；受控联调与 Desktop 的差别只在装配（铁律 5：
-    // 业务语义零变化）。native 模式的应答帧由 main 的 stdin 路由按
-    // 关联 id 调 deliver 精确投递（每运行一个 RemoteHost，登记表分发）。
-    // 两条面各取所需：runtime 用 SessionHost（spawn/turn/信封），服务协议
-    // dispatch 用 SessionHostProtocol（消息/交互/等待）。同一装配，两个视图。
-    let (session_host, protocol): (Arc<dyn SessionHost>, Arc<dyn SessionHostProtocol>) =
-        match self.session_host_mode {
-            SessionHostMode::Headless => {
-                // 二期-2：headless 宿主是纯内存桩（无 host_* 表）——消息
-                // 排队/送达语义与反向请求中继都在桩内，引擎侧零持久化。
-                // 二期-3：tracker 进程也由宿主拉起（TrackerClient 在桩内）。
-                let inner: Arc<HeadlessHost> = Arc::new(HeadlessHost::new(
-                    id.clone(),
-                    self.sink.clone(),
-                ));
-                (
-                    inner.clone(),
-                    Arc::new(HeadlessProtocol { inner }) as Arc<dyn SessionHostProtocol>,
+        // 会话宿主：RemoteHost 把宿主请求编码成回调帧交给 Desktop；应答帧由
+        // main 的 stdin 路由按 runId 与关联 id 投回（每运行一个 RemoteHost）。
+        // 引擎→Desktop 的宿主回调帧走与普通事件同一条事件信封
+        // （{"type":"event","event":{…}}）：Desktop 的事件泵只分发
+        // event 信封行（workflowService.receive），顶层行到不了
+        // observers。frame 是 RemoteHost 的序列化线帧（字符串），
+        // runId 随信封携带——Desktop 应答帧按它路由回来。
+        let run_id_for_frames = id.clone();
+        let event_sink = self.sink.clone();
+        let remote: Arc<RemoteHost> = Arc::new(RemoteHost::new(
+            Box::new(move |line: &str| {
+                (event_sink)(
+                    json!({"type":"host-frame","runId":run_id_for_frames,"frame":line}),
                 )
-            }
-            SessionHostMode::Native => {
-                // 引擎→Desktop 的宿主回调帧走与普通事件同一条事件信封
-                // （{"type":"event","event":{…}}）：Desktop 的事件泵只分发
-                // event 信封行（workflowService.receive），顶层行到不了
-                // observers。frame 是 RemoteHost 的序列化线帧（字符串），
-                // runId 随信封携带——Desktop 应答帧按它路由回来。
-                let run_id_for_frames = id.clone();
-                let event_sink = self.sink.clone();
-                let remote: Arc<RemoteHost> = Arc::new(RemoteHost::new(
-                    Box::new(move |line: &str| {
-                        (event_sink)(
-                            json!({"type":"host-frame","runId":run_id_for_frames,"frame":line}),
-                        )
-                    }),
-                    self.host_response_timeout,
-                ));
-                // 应答帧路由：main 按 runId 解码后调 deliver（按关联 id 从
-                // 登记表精确投递到等待中的请求；运行收尾移除）。
-                let deliver: HostFrameSink = {
-                    let remote = remote.clone();
-                    Arc::new(move |frame: HostFrame| remote.deliver(frame))
-                };
-                if let Ok(mut router) = self.frame_router.lock() {
-                    router.insert(id.clone(), deliver);
-                }
-                if let Ok(mut hosts) = self.remote_hosts.lock() {
-                    hosts.insert(id.clone(), remote.clone());
-                }
-                (
-                    remote.clone(),
-                    Arc::new(SessionHostAsHost(remote)) as Arc<dyn SessionHostProtocol>,
-                )
-            }
+            }),
+            self.host_response_timeout,
+        ));
+        // 应答帧路由：main 按 runId 解码后调 deliver（按关联 id 从
+        // 登记表精确投递到等待中的请求；运行收尾移除）。
+        let deliver: HostFrameSink = {
+            let remote = remote.clone();
+            Arc::new(move |frame: HostFrame| remote.deliver(frame))
         };
-    // native 模式下每个运行占用一份 frame 通道发送端；headless 模式丢弃。
+        if let Ok(mut router) = self.frame_router.lock() {
+            router.insert(id.clone(), deliver);
+        }
+        if let Ok(mut hosts) = self.remote_hosts.lock() {
+            hosts.insert(id.clone(), remote.clone());
+        }
+        let session_host: Arc<dyn SessionHost> = remote;
         {
             let mut active = self.active.lock().map_err(|_| "SERVICE_LOCKED")?;
             if active.contains_key(&id) {
@@ -574,7 +516,7 @@ impl Service {
                 id.clone(),
                 Active {
                     cancel: cancel.clone(),
-                    session_host: protocol.clone(),
+                    session_host: session_host.clone(),
                 },
             );
         }
@@ -583,6 +525,7 @@ impl Service {
         let sink = self.sink.clone();
         let frame_router = self.frame_router.clone();
         let remote_hosts = self.remote_hosts.clone();
+        let channels = self.channels.clone();
         std::thread::spawn(move || {
             let _ = sink(json!({"type":"run-starting","runId":id,"project":project}));
             let result = (|| -> Result<Value, String> {
@@ -609,6 +552,7 @@ impl Service {
                     )?
                 };
                 runtime.set_cancel_handle(cancel.clone());
+                runtime.set_channel_store(channels.clone());
                 loop {
                     let state = runtime.state()?;
                     if matches!(state.stage, Stage::Blocked | Stage::Completed | Stage::Waiting) {
@@ -638,7 +582,14 @@ impl Service {
             }
             if let Ok(mut hosts) = remote_hosts.lock() {
                 hosts.remove(&id);
-            }            match result {
+            }            // 运行完成：结果工具不再需要。其余情况（停止、等确认、出错）保留，继续时沿用。
+            if Journal::open(&db)
+                .and_then(|journal| journal.load(&id, &project))
+                .is_ok_and(|(_, workflow)| workflow.stage == Stage::Completed)
+            {
+                channels.clear_run(&id);
+            }
+            match result {
                 Ok(outcome) => {
                     let _ = sink(json!({"type":"run-settled","runId":id,"project":project,"settlement":outcome}));
                 }
@@ -649,13 +600,96 @@ impl Service {
         });
         Ok(())
     }
+    fn session_tools(&self, project: &str, session_id: &str) -> Result<Value, String> {
+        let journal = self.open()?;
+        let Some((run, actor)) = journal.session_actor(project, session_id)? else {
+            return Ok(Value::Null);
+        };
+        let (_, workflow) = journal.load(&run, project)?;
+        if workflow.stage == Stage::Completed {
+            return Ok(Value::Null);
+        }
+        let exe = std::env::current_exe()
+            .map_err(|_| "SERVICE_EXECUTABLE_UNAVAILABLE")?
+            .to_string_lossy()
+            .into_owned();
+        if let Some(channel) = self.channels.get(&run, &actor) {
+            return serde_json::to_value(channel.offer(&exe)).map_err(|e| e.to_string());
+        }
+        if self.is_active(&run)? {
+            return Ok(Value::Null);
+        }
+        // 停着的运行：这个角色手上正在做的 Agent 动作。
+        let Some(action) = workflow
+            .inflight
+            .values()
+            .find(|a| a.actor == actor && a.input["__node"]["kind"] == "agent")
+            .cloned()
+        else {
+            return Ok(Value::Null);
+        };
+        let request = aaw_workflow_core::prompt::agent_request(&action)?;
+        let schema = request.schema.clone();
+        let channel = self
+            .channels
+            .get_or_create(&run, &actor, || aaw_workflow_core::result_channel::ResultChannel::new(schema))?;
+        let host = Arc::new(ServiceHost::new(
+            run.clone(),
+            project.to_owned(),
+            String::new(),
+            self.db.clone(),
+            self.sink.clone(),
+        ));
+        let recorded = action.clone();
+        channel.begin_with_recorder(
+            request.schema,
+            Some(Arc::new(move |value| {
+                use aaw_workflow_core::runtime::Host;
+                host.record_result_candidate(&recorded, &Uuid::new_v4().to_string(), value)
+            })),
+        )?;
+        serde_json::to_value(channel.offer(&exe)).map_err(|e| e.to_string())
+    }
     fn snapshot(&self, id: &str, project: &str) -> Result<Value, String> {
         let db = self.open()?;
         let (_, workflow) = db.load(id, project)?;
         let active = self.is_active(id)?;
         let nodes = db.nodes(id, project)?;
         let links = db.session_links(id, project)?;
-        let nodes:Vec<Value>=nodes.into_iter().map(|n| -> Result<Value,String> { let candidates=db.result_candidates(id,project,&n.site_id,n.ordinal)?; let kind = workflow.graph.definition.nodes.get(&n.site_id).ok_or("NODE_DEFINITION_MISSING")?.kind.as_str(); Ok(json!({"siteId":n.site_id,"ordinal":n.ordinal,"kind":match kind {"agent"=>"ask","python"=>"world-run",_=>"flow"},"status":n.status,"scope":n.scope,"callPath":n.call_path,"phaseId":n.phase_id,"actorSiteId":n.actor,"actorOrdinal":1,"result":n.result,"candidates":candidates,"awaitingInput":n.awaiting_input,"awaitingInputSince":n.awaiting_input_since,"checkpoint":n.checkpoint,"mark":n.mark,"startedAt":n.started_at,"endedAt":n.ended_at,"waitedMs":n.waited_ms})) }).collect::<Result<_,_>>()?;
+        let sessions_by_action: BTreeMap<_, _> = links
+            .iter()
+            .map(|link| ((link.site.as_str(), link.ordinal), link.session_id.as_str()))
+            .collect();
+        let nodes: Vec<Value> = nodes
+            .into_iter()
+            .map(|node| {
+                let candidates = db.result_candidates(id, project, &node.site_id, node.ordinal)?;
+                let kind = workflow.graph.definition.nodes.get(&node.site_id)
+                    .ok_or("NODE_DEFINITION_MISSING")?.kind.as_str();
+                let session_id = sessions_by_action.get(&(node.site_id.as_str(), node.ordinal));
+                Ok(json!({
+                    "siteId": node.site_id,
+                    "ordinal": node.ordinal,
+                    "kind": match kind { "agent" => "ask", "python" => "world-run", _ => "flow" },
+                    "status": node.status,
+                    "scope": node.scope,
+                    "callPath": node.call_path,
+                    "phaseId": node.phase_id,
+                    "actorSiteId": node.actor,
+                    "actorOrdinal": 1,
+                    "sessionId": session_id,
+                    "result": node.result,
+                    "candidates": candidates,
+                    "awaitingInput": node.awaiting_input,
+                    "awaitingInputSince": node.awaiting_input_since,
+                    "checkpoint": node.checkpoint,
+                    "mark": node.mark,
+                    "startedAt": node.started_at,
+                    "endedAt": node.ended_at,
+                    "waitedMs": node.waited_ms,
+                }))
+            })
+            .collect::<Result<_, String>>()?;
         let mut actors = BTreeMap::new();
         for link in links {
             actors.insert(link.actor.clone(),json!({"siteId":link.actor,"ordinal":1,"name":link.actor,"sessionId":link.session_id}));
@@ -669,10 +703,16 @@ impl Service {
             .retry_approvals
             .iter()
             .filter_map(|site| {
-                workflow
-                    .inflight
-                    .get(site)
-                    .map(|a| json!({"siteId":a.site,"ordinal":a.ordinal}))
+                workflow.inflight.get(site).map(|a| {
+                    // 运行被停止后自动登记的「接着做」，与用户选择的「重做」区分开（ADR 037）。
+                    let resume = workflow
+                        .recovery_audit
+                        .iter()
+                        .rev()
+                        .find(|audit| audit.site == a.site && audit.ordinal == a.ordinal && audit.action == "authorized")
+                        .is_some_and(|audit| audit.evidence == aaw_workflow_core::runtime::STOPPED_STEP_EVIDENCE);
+                    json!({"siteId":a.site,"ordinal":a.ordinal,"resume":resume})
+                })
             })
             .collect();
         Ok(
@@ -743,7 +783,8 @@ impl Service {
             let n = ordinal(&args["ordinal"])?;
             let evidence = string(args, "evidence")?;
             if method == "authorize-retry" {
-                db.authorize_retry(id, project, &owner, site, n, evidence)
+                db.authorize_retry(id, project, &owner, site, n, evidence)?;
+                db.supersede_candidates(id, project, &owner, site, n)
             } else if db
                 .load(id, project)?
                 .1
@@ -882,6 +923,9 @@ impl Service {
                 Ok(json!(runs))
             }
             "snapshot" => self.snapshot(string(args, "runId")?, string(args, "cwd")?),
+            // ADR 037：节点会话被（重新）打开时要装的结果工具。运行还没结束就给；
+            // 停着的运行按这一步当前的动作新开或沿用结果通道。
+            "session-tools" => self.session_tools(string(args, "cwd")?, string(args, "sessionId")?),
             // ADR 036 运行管理：改标题、归档 / 取消归档、永久删除（只删已停下且没有占用的）。
             "run-rename" => self.open()?.rename_run(string(args, "runId")?, string(args, "cwd")?, string(args, "title")?).map(|_| Value::Null),
             "run-archive" => self
@@ -893,7 +937,9 @@ impl Service {
                 if self.is_active(id)? {
                     return Err("RUN_ALREADY_ACTIVE".into());
                 }
-                self.open()?.delete_run(id, string(args, "cwd")?).map(|_| Value::Null)
+                self.open()?.delete_run(id, string(args, "cwd")?)?;
+                self.channels.clear_run(id);
+                Ok(Value::Null)
             }
             "session-links" => self.links(string(args, "cwd")?),
             // 其他项目的会话关联（侧栏给每个项目分组）：[{project, runs}]，不含 exclude 指定的当前项目。
@@ -926,43 +972,6 @@ impl Service {
                     host.reset();
                 }
                 Ok(json!({"runs":hosts.len()}))
-            }
-            // ADR 023 P4：session-log 协议已删除——会话事件的持久化与回放
-            // 真相归宿主（Desktop 的 sessionStore 本地快照），引擎不再持有
-            // 事件缓冲。历史客户端迁移期间不应再调用此方法。
-            "interactions" => {
-                let id = string(args, "runId")?;
-                self.open()?.load(id, string(args, "cwd")?)?;
-                let active = self.active.lock().map_err(|_| "SERVICE_LOCKED")?;
-                Ok(json!(
-                    active
-                        .get(id)
-                        .map(|a| a.session_host.pending_interactions())
-                        .transpose()?
-                        .unwrap_or_default()
-                ))
-            }
-            "answer" | "permission" => {
-                let id = string(args, "runId")?;
-                let active = self.active.lock().map_err(|_| "SERVICE_LOCKED")?;
-                let item = active.get(id).ok_or("RUN_NOT_ACTIVE")?;
-                item.session_host.respond_interaction(
-                    string(args, "interactionId")?,
-                    if method == "answer" {
-                        "question"
-                    } else {
-                        "permission"
-                    },
-                    args["answer"].clone(),
-                )?;
-                Ok(Value::Null)
-            }
-            "session-message" => {
-                let active = self.active.lock().map_err(|_| "SERVICE_LOCKED")?;
-                let item = active.get(string(args, "runId")?).ok_or("RUN_NOT_ACTIVE")?;
-                item.session_host
-                    .enqueue_user_message(string(args, "sessionId")?, string(args, "text")?)?;
-                Ok(json!({"status":"queued"}))
             }
             "stop" => {
                 let id = string(args, "runId")?;
@@ -1039,12 +1048,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
     }
-    // ADR 023 二期-1：`--session-host native` 打开远程宿主桥（Desktop 进
-    // 程）；缺省 headless（进程内参考宿主，受控联调与过渡形态）。
-    let session_host_mode = match std::env::args().find(|a| a == "--session-host=native") {
-        Some(_) => SessionHostMode::Native,
-        None => SessionHostMode::Headless,
-    };
     let db = PathBuf::from(std::env::args_os().nth(1).ok_or("database path required")?);
     if let Some(parent) = db.parent() {
         std::fs::create_dir_all(parent)?;
@@ -1060,9 +1063,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .and_then(|_| out.flush())
             .map_err(|_| "SERVICE_OUTPUT_CLOSED".into())
     });
-    // native 模式的宿主应答帧入口：stdin 的 `{"type":"host-frame","frame":…}`
-    // 行解码后投给对应运行的 frames 通道（launch 装配时登记）；headless
-    // 模式下不存在该行型。
+    // 宿主应答帧入口：stdin 的 `{"type":"host-frame","frame":…}` 行解码后
+    // 投给对应运行的 frames 通道（launch 装配时登记）。
     let frame_router = Arc::new(Mutex::new(BTreeMap::<String, HostFrameSink>::new()));
     // 宿主应答截止时间：生产默认 120s；接缝集成测试经环境变量注入秒级值，
     // 让「宿主沉默」路径的失败在测试时限内可观测。
@@ -1091,9 +1093,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         db,
         active: Arc::new(Mutex::new(BTreeMap::new())),
         sink,
-        session_host_mode,
         frame_router,
         remote_hosts: Arc::new(Mutex::new(BTreeMap::new())),
+        channels: Arc::new(ResultChannelStore::new()),
         host_response_timeout,
     };
     {
@@ -1110,7 +1112,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(v) => v,
             Err(_) => continue,
         };
-        // ADR 023 二期-1：native 模式的宿主应答帧（Desktop → 引擎）。行内
+        // 宿主应答帧（Desktop → 引擎）。行内
         // frame 是 RemoteHost 的线帧（含关联 id），按其所属运行投递；
         // runId 由 Desktop 侧在 host-frame-response 请求里带回。
         if message["type"] == "host-frame" {

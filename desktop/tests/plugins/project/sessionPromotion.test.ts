@@ -5,8 +5,6 @@ import { createDesktopRuntime } from "../../../src/bootstrap/bootstrap.ts";
 import { desktopSettingsKey } from "../../../src/plugins/configuration/config.ts";
 import { standardAcpPeer } from "../../helpers/standardAcpPeer.ts";
 import type { Context } from "cordis";
-import { AcpConnection } from "../../../src/plugins/acpConnection/channels/AcpConnection.ts";
-import { createAcpSession } from "../../../src/plugins/acpRuntime/sessions/channelSession.ts";
 
 it.each([
   ["open", false], ["entry", false], ["open", true], ["entry", true],
@@ -87,42 +85,4 @@ it.each([
   expect(prompts()).toHaveLength(3);
   expect(diagnosticRunning()).toBe(3);
   finish.forEach((resolve) => resolve());
-});
-
-it("does not promote externally owned sessions through the user session pool", async () => {
-  const peer = standardAcpPeer();
-  const connection = new AcpConnection(peer.client, 3);
-  let context!: Context;
-  const runtime = createDesktopRuntime(undefined, undefined, undefined, (ctx) => {
-    context = ctx;
-    // 单 Agent 原则：收养现在走主池（prepare 预热），给一个无害的进程替身。
-    vi.spyOn(ctx.agents, "openTransport").mockImplementation(() => {
-      const pooled = standardAcpPeer();
-      return Promise.resolve(pooled.client);
-    });
-  });
-  onTestFinished(async () => {
-    peer.peer.exit(0);
-    await runtime.shutdown();
-    await connection.close();
-  });
-  const { project } = await runtime.ready;
-  const promote = vi.spyOn(context.acpRuntime.protocol, "promote");
-  const path = "/externally-owned";
-  const adopted = await project.sessions.adoptExternalSession({
-    workspacePath: path,
-    onUserMessage: () => Promise.resolve(),
-    create: async (options) => {
-      const session = createAcpSession(connection, options);
-      await session.initialize();
-      await session.loadSession("external-session", path);
-      return session;
-    },
-  });
-  expect(adopted).toEqual({ sessionId: "external-session" });
-  const owner = Object.values(project.sessions.activity.getState().entries)
-    .find((entry) => entry.sessionId === "external-session")!;
-  await project.sessions.openSessionFromEntry(path, "external-session", owner.agentKey);
-  expect(project.conversation.foreground.session.getState().activeSessionId).toBe("external-session");
-  expect(promote).not.toHaveBeenCalled();
 });

@@ -1,4 +1,7 @@
+mod support;
+
 use serde_json::{Value, json};
+use support::SimSpawn;
 use std::{
     io::{BufRead, BufReader, Write},
     process::{Command, Stdio},
@@ -25,7 +28,7 @@ fn enterprise_entry_runs(mode: &str, entry: &str) {
         .env("QUESTION_TRACKER_HOME", dir.join("pool"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn()
+        .sim_spawn()
         .unwrap();
     let mut input = child.stdin.take().unwrap();
     let (tx, rx) = mpsc::channel();
@@ -135,14 +138,12 @@ fn ar_entry_runs_shared_flow_and_reports_iteration_scope() {
 }
 
 #[test]
-#[ignore = "requires Python; terminates an isolated service to check durable recovery evidence"]
-// ADR 023 二期-2 更名（原名 crash_keeps_queued_input_and_submitted_candidate
-// 与断言相反）：排队消息归 Desktop 原生（宿主进程内存，中断后需用户重发，
-// 引擎与宿主均不留痕）；本测试只断言引擎合同类数据的崩溃存续（结果候选、
-// inflight 动作）与会话内容绝不落引擎库的边界。
-fn crash_persists_submitted_candidate_and_never_persists_queued_input() {
+#[ignore = "requires Python; verifies crash durability of a submitted result candidate"]
+// 进程在 Agent 已提交结果、这一轮还没结束时被杀：结果候选与进行中的动作
+// 必须落库存续；会话内容（消息）归 Desktop，引擎库里没有任何宿主表。
+fn crash_persists_submitted_candidate() {
     use aaw_workflow_core::journal::Journal;
-    struct KillOnDrop(std::process::Child);
+    struct KillOnDrop(support::SimChild);
     impl Drop for KillOnDrop {
         fn drop(&mut self) {
             let _ = self.0.kill();
@@ -159,19 +160,16 @@ fn crash_persists_submitted_candidate_and_never_persists_queued_input() {
     ));
     std::fs::create_dir(&dir).unwrap();
     let db = dir.join("journal.sqlite");
-    let scanner = dir.join("scan.py");
-    std::fs::write(&scanner, "print('unused')\n").unwrap();
-    let fake = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/dev-fake-acp.py");
+    let fake = support::fake_agent();
     let mut child = KillOnDrop(
         Command::new(env!("CARGO_BIN_EXE_workflow_service"))
             .arg(&db)
             .env("AAW_FAKE_BLOCK_AFTER_SUBMIT", "1")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
+            .env("QUESTION_TRACKER_HOME", dir.join("pool"))
+            .sim_spawn()
             .unwrap(),
     );
+    let host = child.0.host.clone();
     let mut input = child.0.stdin.take().unwrap();
     let output = child.0.stdout.take().unwrap();
     let (tx, rx) = mpsc::channel();
@@ -192,46 +190,21 @@ fn crash_persists_submitted_candidate_and_never_persists_queued_input() {
     writeln!(input,"{}",json!({"id":1,"method":"start","params":{"input":crash_input}})).unwrap();
     input.flush().unwrap();
     let mut run = String::new();
-    let mut session = String::new();
-    let mut submitted = false;
-    while !submitted {
+    while run.is_empty() {
         let v = rx.recv_timeout(Duration::from_secs(10)).unwrap();
         if v["id"] == 1 {
             run = v["result"]["runId"].as_str().unwrap().into();
         }
-        if v["event"]["type"] == "acp-session-created" {
-            session = v["event"]["sessionId"].as_str().unwrap().into();
-        }
-        if v["event"]["event"]["type"] == "agent_message_chunk" {
-            submitted = true;
-        }
     }
-    assert!(!run.is_empty() && !session.is_empty());
-    writeln!(input,"{}",json!({"id":2,"method":"session-message","params":{"runId":run,"sessionId":session,"text":"中断前排队"}})).unwrap();
-    input.flush().unwrap();
-    loop {
-        let v = rx.recv_timeout(Duration::from_secs(5)).unwrap();
-        if v["id"] == 2 {
-            assert_eq!(v["result"]["status"], "queued");
-            break;
-        }
-    }
+    // 测试 Agent 提交结果后说一句话，再卡住不结束这一轮。
+    assert!(host.messages().wait_for(Duration::from_secs(20), |text| text == "已完成本次工作。").is_some());
     child.0.kill().unwrap();
     child.0.wait().unwrap();
     drop(input);
     reader.join().unwrap();
     let journal = Journal::open(&db).unwrap();
     let project = dir.to_str().unwrap();
-    // ADR 023 二期-2：引擎侧没有消息队列也没有任何宿主持久化——排队
-    // 消息的存续语义归 Desktop 原生。引擎落库面只验证合同类数据：
-    // 结果候选与 inflight 动作崩溃存续，且消息文本绝不落入引擎库。
     {
-        let raw = std::fs::read(&db).unwrap();
-        let text = String::from_utf8_lossy(&raw);
-        assert!(
-            !text.contains("中断前排队"),
-            "engine storage must never persist conversation content"
-        );
         let tables: String = rusqlite::Connection::open(&db)
             .unwrap()
             .query_row(
@@ -256,9 +229,8 @@ fn crash_persists_submitted_candidate_and_never_persists_queued_input() {
             .is_some()
     );
     drop(journal);
-    std::fs::remove_file(scanner).unwrap();
-    std::fs::remove_file(db).unwrap();
-    std::fs::remove_dir(dir).unwrap();
+    drop(child);
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -284,8 +256,9 @@ fn standard_acp_text_question_accepts_followup_in_same_session() {
         .env("QUESTION_TRACKER_HOME", dir.join("pool"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn()
+        .sim_spawn()
         .unwrap();
+    let host = child.host.clone();
     let mut input = child.stdin.take().unwrap();
     let output = child.stdout.take().unwrap();
     let (tx, rx) = mpsc::channel();
@@ -307,52 +280,31 @@ fn standard_acp_text_question_accepts_followup_in_same_session() {
     writeln!(input,"{}",json!({"id":1,"method":"start","params":{"input":start_input.clone()}})).unwrap();
     input.flush().unwrap();
     let mut run = String::new();
-    let mut session = String::new();
     let mut waiting = false;
     while !waiting {
         let value = rx.recv_timeout(Duration::from_secs(10)).unwrap();
         if value["id"] == 1 {
             run = value["result"]["runId"].as_str().unwrap().into();
         }
-        if value["event"]["type"] == "acp-session-created" {
-            session = value["event"]["sessionId"].as_str().unwrap().into();
-        }
-        if value["event"]["event"]["type"] == "workflow_waiting_input" {
+        // 这一轮结束、结果还没交：引擎把节点标成「等你回复」。
+        if value["event"]["event"]["status"] == "awaiting_input" {
             waiting = true;
         }
     }
-    assert!(!run.is_empty() && !session.is_empty());
-    writeln!(input,"{}",json!({"id":8,"method":"session-message","params":{"runId":run,"sessionId":"other-session","text":"不能串线"}})).unwrap();
-    input.flush().unwrap();
-    loop {
-        let value = rx.recv_timeout(Duration::from_secs(5)).unwrap();
-        if value["id"] == 8 {
-            assert_eq!(value["error"], "WORKFLOW_SESSION_NOT_ACCEPTING_INPUT");
-            break;
-        }
-    }
-    writeln!(input,"{}",json!({"id":2,"method":"session-message","params":{"runId":run,"sessionId":session,"text":"选择 A"}})).unwrap();
-    input.flush().unwrap();
-    // ADR 023 二期-2：排队/送达/确认的引擎指纹事件（workflow_input_*）
-    // 已删除；消息进入会话流以一条普通用户消息事件呈现（宿主合成），
-    // 轮次边界后引擎核验交付并收尾。
-    let mut entered_session_flow = false;
+    assert!(!run.is_empty());
+    let (session, _) = host
+        .messages()
+        .wait_for(Duration::from_secs(5), |text| text.contains("选择 A 还是 B"))
+        .expect("agent asked the user");
+    host.user_turn(&session, "选择 A", Duration::from_secs(10)).unwrap();
     let mut completed_input_round = false;
     let mut finished = false;
     while !finished {
         let value = rx.recv_timeout(Duration::from_secs(20)).unwrap();
-        if value["event"]["event"]["type"] == "user_message_chunk"
-            && value["event"]["event"]["text"] == "选择 A"
-        {
-            entered_session_flow = true;
-        }
         if value["event"]["event"]["status"] == "input_round_completed" {
             assert_eq!(value["event"]["project"], dir.to_str().unwrap());
             assert_eq!(value["event"]["runId"], run);
             completed_input_round = true;
-        }
-        if value["event"]["event"]["type"].as_str().unwrap_or("").starts_with("workflow_input") {
-            panic!("engine input fingerprint events must be gone: {value}");
         }
         if value["event"]["type"] == "run-error" {
             panic!("{:?}", value["event"]);
@@ -365,7 +317,6 @@ fn standard_acp_text_question_accepts_followup_in_same_session() {
             finished = true;
         }
     }
-    assert!(entered_session_flow);
     assert!(completed_input_round);
     writeln!(input, "{}", json!({"id":4,"method":"shutdown","params":{}})).unwrap();
     input.flush().unwrap();
@@ -373,10 +324,8 @@ fn standard_acp_text_question_accepts_followup_in_same_session() {
     assert!(child.wait().unwrap().success());
     reader.join().unwrap();
     {
-        // The engine relays the user's reply without writing the pool; the
-        // pool stays empty because the fixture agent records nothing itself.
-        // 二期-3：检查客户端用宿主侧 TrackerClient（进程归宿主后的探针）。
-        let client = aaw_workflow_core::headless_host::TrackerClient::start(
+        // 用户的回复不写问题池：测试 Agent 自己不记问题，池子保持为空。
+        let client = support::Tracker::start(
             &aaw_workflow_core::question_pool::tracker_start_params(
                 &dir,
                 &run,
@@ -389,7 +338,7 @@ fn standard_acp_text_question_accepts_followup_in_same_session() {
             .call_tool("get_status", json!({"detail":"full"}), &run)
             .unwrap()
             .to_string();
-        assert!(status.contains("\\\"total\\\":0"));
+        assert!(status.contains("\\\"total\\\":0"), "{status}");
     }
     std::fs::remove_dir_all(dir.join("pool")).unwrap();
     std::fs::remove_file(scanner).unwrap();
@@ -413,19 +362,13 @@ fn sidecar_serves_real_run_over_desktop_protocol() {
     let db = dir.join("journal.sqlite");
     let scanner = dir.join("scan.py");
     std::fs::write(&scanner,"import json\nprint(json.dumps({'decision':'pass','evidence':'test fixture','safe':True,'simulated':False}))\n").unwrap();
-    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/dev-fake-acp.py");
-    let fake = dir.join("interactive_fake.py");
-    let contents=std::fs::read_to_string(source).unwrap()
-        .replace("        text = request[\"params\"][\"prompt\"][0][\"text\"]", "        text = request[\"params\"][\"prompt\"][0][\"text\"]\n        if '确认需求及边界' in text:\n            pending = request_id\n            send({'jsonrpc':'2.0','id':'question-1','method':'_chrys/request_input','params':{'sessionId':session,'requestId':'q1','questions':[{'question':'继续?','header':'测试','options':[],'multiSelect':False}]}})\n            continue")
-        .replace("    elif method == \"session/close\":", "    elif request_id == 'question-1':\n        result={'status':'ready','reference':'confirmed','evidence':'user answered'}\n        submit_result(result)\n        send({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':session,'update':{'sessionUpdate':'agent_message_chunk','content':{'type':'text','text':'需求已确认'}}}})\n        send({'jsonrpc':'2.0','id':pending,'result':{'stopReason':'end_turn'}})\n    elif method == \"session/close\":");
-    std::fs::write(&fake, contents).unwrap();
+    let fake = support::fake_agent();
     let mut child = Command::new(env!("CARGO_BIN_EXE_workflow_service"))
         .arg(&db)
         .env("QUESTION_TRACKER_HOME", dir.join("pool"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn()
+        .sim_spawn()
         .unwrap();
     let mut input = child.stdin.take().unwrap();
     let output = child.stdout.take().unwrap();
@@ -446,23 +389,12 @@ fn sidecar_serves_real_run_over_desktop_protocol() {
     input.flush().unwrap();
     let mut run_id = None;
     let mut settled = false;
-    let mut session_events = 0;
-    let mut question_answered = false;
     let start = std::time::Instant::now();
     while start.elapsed() < Duration::from_secs(30) && !settled {
         let value = recv.recv_timeout(Duration::from_secs(10)).unwrap();
         if value["type"] == "response" && value["id"] == 1 {
             assert!(value.get("error").is_none(), "{value}");
             run_id = value["result"]["runId"].as_str().map(str::to_owned);
-        }
-        if value["event"]["type"] == "acp-event" {
-            session_events += 1;
-        }
-        if value["event"]["type"] == "question" {
-            let event = &value["event"];
-            writeln!(input,"{}",json!({"id":9,"method":"answer","params":{"runId":event["runId"],"interactionId":event["interactionId"],"answer":{"answers":[{"values":["继续"]}]}}})).unwrap();
-            input.flush().unwrap();
-            question_answered = true;
         }
         if value["event"]["type"] == "run-error" {
             panic!("run error: {value}");
@@ -475,7 +407,7 @@ fn sidecar_serves_real_run_over_desktop_protocol() {
             settled = true;
         }
     }
-    assert!(settled && session_events > 0 && question_answered);
+    assert!(settled);
     let id = run_id.unwrap();
     writeln!(
         input,
@@ -537,10 +469,8 @@ fn sidecar_serves_real_run_over_desktop_protocol() {
     assert!(child.wait().unwrap().success());
     reader.join().unwrap();
     {
-        // The engine relays the question/answer without pool writes; the pool
-        // stays empty because the fixture agent records nothing itself.
-        // 二期-3：检查客户端用宿主侧 TrackerClient（进程归宿主后的探针）。
-        let client = aaw_workflow_core::headless_host::TrackerClient::start(
+        // 引擎不写问题池：测试 Agent 自己不记问题，池子保持为空。
+        let client = support::Tracker::start(
             &aaw_workflow_core::question_pool::tracker_start_params(
                 &dir,
                 &id,
@@ -553,11 +483,10 @@ fn sidecar_serves_real_run_over_desktop_protocol() {
             .call_tool("get_status", json!({"detail":"full"}), &id)
             .unwrap()
             .to_string();
-        assert!(status.contains("\\\"total\\\":0"));
+        assert!(status.contains("\\\"total\\\":0"), "{status}");
     }
     std::fs::remove_dir_all(dir.join("pool")).unwrap();
     std::fs::remove_file(scanner).unwrap();
-    std::fs::remove_file(fake).unwrap();
     std::fs::remove_file(db).unwrap();
     std::fs::remove_dir(dir).unwrap();
 }
@@ -584,7 +513,7 @@ fn definition_drives_agent_and_python_nodes_over_service() {
         .env("QUESTION_TRACKER_HOME", dir.join("pool"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn()
+        .sim_spawn()
         .unwrap();
     let mut input = child.stdin.take().unwrap();
     let output = child.stdout.take().unwrap();
@@ -678,7 +607,7 @@ fn definition_drives_agent_and_python_nodes_over_service() {
 #[ignore = "uses installed iCode and its configured model; real Agent/Python smoke"]
 fn real_icode_executes_definition_and_hands_result_to_python() {
     use aaw_workflow_core::journal::Journal;
-    struct KillOnDrop(std::process::Child);
+    struct KillOnDrop(support::SimChild);
     impl Drop for KillOnDrop {
         fn drop(&mut self) {
             let _ = self.0.kill();
@@ -699,7 +628,7 @@ fn real_icode_executes_definition_and_hands_result_to_python() {
             .env("QUESTION_TRACKER_HOME", dir.join("pool"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .spawn()
+            .sim_spawn()
             .unwrap(),
     );
     let mut input = child.0.stdin.take().unwrap();
@@ -766,7 +695,7 @@ fn script_only_definition_runs_without_agent_or_question_pool() {
         .env("QUESTION_TRACKER_HOME", dir.join("pool"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn()
+        .sim_spawn()
         .unwrap();
     let mut input = child.stdin.take().unwrap();
     let output = child.stdout.take().unwrap();
@@ -818,7 +747,7 @@ fn script_only_definition_runs_without_agent_or_question_pool() {
 #[ignore = "uses real iCode; verifies cross-session result access"]
 fn real_icode_reads_prior_agent_result_across_sessions() {
     use aaw_workflow_core::journal::Journal;
-    struct KillOnDrop(std::process::Child);
+    struct KillOnDrop(support::SimChild);
     impl Drop for KillOnDrop {
         fn drop(&mut self) {
             let _ = self.0.kill();
@@ -838,7 +767,7 @@ fn real_icode_reads_prior_agent_result_across_sessions() {
             .env("QUESTION_TRACKER_HOME", dir.join("pool"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .spawn()
+            .sim_spawn()
             .unwrap(),
     );
     let mut input = child.0.stdin.take().unwrap();
@@ -909,7 +838,7 @@ fn safe_script_failure_is_retried_once_with_durable_audit() {
         .arg(dir.join("journal.sqlite"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn()
+        .sim_spawn()
         .unwrap();
     let mut input = child.stdin.take().unwrap();
     let output = child.stdout.take().unwrap();
@@ -985,7 +914,7 @@ fn dynamic_instances_replenish_slots_and_are_visible_in_service_snapshot() {
         .arg(dir.join("journal.sqlite"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn()
+        .sim_spawn()
         .unwrap();
     let mut input = child.stdin.take().unwrap();
     let output = child.stdout.take().unwrap();
@@ -1075,7 +1004,7 @@ fn dynamic_agent_instances_have_independent_acp_sessions() {
         .env("QUESTION_TRACKER_HOME", dir.join("pool"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn()
+        .sim_spawn()
         .unwrap();
     let mut input = child.stdin.take().unwrap();
     let output = child.stdout.take().unwrap();
@@ -1146,7 +1075,7 @@ fn dependency_edges_release_only_ready_actions_without_a_global_batch_barrier() 
         .arg(dir.join("journal.sqlite"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn()
+        .sim_spawn()
         .unwrap();
     let mut input = child.stdin.take().unwrap();
     let output = child.stdout.take().unwrap();
@@ -1240,7 +1169,7 @@ fn sr_expands_multiple_ars_and_tasks_with_real_service_records() {
         .env("QUESTION_TRACKER_HOME", dir.join("pool"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn()
+        .sim_spawn()
         .unwrap();
     let mut input = child.stdin.take().unwrap();
     let output = child.stdout.take().unwrap();
@@ -1343,7 +1272,7 @@ fn subflow_and_action_dependencies_run_concurrently_through_service() {
         .arg(dir.join("journal.sqlite"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn()
+        .sim_spawn()
         .unwrap();
     let mut input = child.stdin.take().unwrap();
     let output = child.stdout.take().unwrap();
@@ -1441,7 +1370,7 @@ fn an_unselected_subflow_is_recorded_as_skipped_without_creating_a_session() {
         .arg(dir.join("journal.sqlite"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn()
+        .sim_spawn()
         .unwrap();
     let mut input = child.stdin.take().unwrap();
     let output = child.stdout.take().unwrap();
@@ -1541,7 +1470,7 @@ fn a_failed_subflow_action_requires_authorization_before_the_graph_continues() {
         .arg(dir.join("journal.sqlite"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn()
+        .sim_spawn()
         .unwrap();
     let mut input = child.stdin.take().unwrap();
     let output = child.stdout.take().unwrap();
@@ -1671,7 +1600,7 @@ fn an_invalid_edge_error_survives_service_restart_without_blame_on_the_source() 
         .arg(&db)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn()
+        .sim_spawn()
         .unwrap();
     let mut input = child.stdin.take().unwrap();
     let output = child.stdout.take().unwrap();
@@ -1715,7 +1644,7 @@ fn an_invalid_edge_error_survives_service_restart_without_blame_on_the_source() 
         .arg(&db)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn()
+        .sim_spawn()
         .unwrap();
     let mut input = child.stdin.take().unwrap();
     let output = child.stdout.take().unwrap();
@@ -1778,7 +1707,7 @@ fn startup_failure_is_persisted_without_claiming_or_starting_an_action() {
         .env("QUESTION_TRACKER_HOME", &invalid_home)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn()
+        .sim_spawn()
         .unwrap();
     let mut input = child.stdin.take().unwrap();
     let output = child.stdout.take().unwrap();
@@ -1843,7 +1772,7 @@ fn blocked_run_can_be_previewed_and_rewound_over_the_service() {
         .env("QUESTION_TRACKER_HOME", dir.join("pool"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn()
+        .sim_spawn()
         .unwrap();
     let mut input = child.stdin.take().unwrap();
     let output = child.stdout.take().unwrap();

@@ -1,7 +1,7 @@
 /**
- * AAW 面板外壳：工作流库 → 工作流 → 运行 三层，顶部面包屑表达从属。
+ * AAW 面板有工作流库和运行管理两个入口，模板详情和运行各自沿面包屑返回。
  *
- * - **工作流库**（WorkflowLibrary）：进行中的运行、预置的与我的工作流；
+ * - **工作流库**（WorkflowLibrary）：预置的与我的工作流；
  * - **工作流**（WorkflowDetailView）：流程图、源码、本项目的运行；启动表单在这里展开；
  * - **运行**（RunView）：一次运行的画布与节点检视器。
  *
@@ -13,7 +13,7 @@ import { DraftPage } from "./DraftPage.tsx";
 import { RunManager } from "./RunManager.tsx";
 import { describeError, serviceExitText, type ErrorText } from "../status/errorText.ts";
 import { useEffect, useRef, useState } from "react";
-import type { WorkflowDraft, WorkflowExecutors, WorkflowDraftEditor, WorkflowFileTransfer, RunSummary, WorkflowLaunchRequest, WorkflowPanelRequest, WorkflowService } from "../types.ts";
+import type { WorkflowDraft, WorkflowExecutors, WorkflowDraftEditor, WorkflowFileTransfer, RunManagerFilters, RunSummary, WorkflowLaunchRequest, WorkflowPanelRequest, WorkflowService } from "../types.ts";
 import { AiEditSheet } from "./AiEditSheet.tsx";
 import { draftPrompt } from "../editing/draftSessions.ts";
 import { errorLine } from "../status/errorText.ts";
@@ -24,12 +24,17 @@ import "./workflowPanel.css";
 import { secondaryButton } from "./buttons.ts";
 import { Callout } from "../../../shared/ui/Callout.tsx";
 import { Breadcrumb } from "../../../shared/ui/Breadcrumb.tsx";
+import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
+import { DEFAULT_RUN_FILTERS } from "./runSearch.ts";
+import { attentionOf } from "./runList.ts";
 
+type WorkflowRoute = { readonly kind: "workflow"; readonly id: string; readonly launch: { readonly entry?: string } | null; readonly initialTab?: "runs" };
+type RunsRoute = { readonly kind: "runs"; readonly filters?: RunManagerFilters };
 type Route =
   | { readonly kind: "library"; readonly hint?: string }
-  | { readonly kind: "workflow"; readonly id: string; readonly launch: { readonly entry?: string } | null }
-  | { readonly kind: "run"; readonly runId: string }
-  | { readonly kind: "runs" }
+  | WorkflowRoute
+  | { readonly kind: "run"; readonly runId: string; readonly back?: WorkflowRoute | RunsRoute }
+  | RunsRoute
   | { readonly kind: "draft"; readonly draftId: string };
 
 function routeOfLaunch({ workflowId, entry }: WorkflowLaunchRequest): Route {
@@ -39,15 +44,15 @@ function routeOfLaunch({ workflowId, entry }: WorkflowLaunchRequest): Route {
 }
 
 function routeOfPanelRequest(request: WorkflowPanelRequest): Route {
-  return request.kind === "detail"
-    ? { kind: "workflow", id: request.workflowId, launch: null }
-    : routeOfLaunch(request.launch);
+  if (request.kind === "run") return { kind: "run", runId: request.runId, back: { kind: "runs", filters: request.returnFilters } };
+  if (request.kind === "detail") return { kind: "workflow", id: request.workflowId, launch: null };
+  return routeOfLaunch(request.launch);
 }
 
-function initialRoute(service: WorkflowService): Route {
+function initialRoute(service: WorkflowService, project?: string): Route {
   const focused = service.takeFocusRun();
   if (focused !== "") return { kind: "run", runId: focused };
-  const request = service.takePanelRequest();
+  const request = service.takePanelRequest(project);
   if (request) return routeOfPanelRequest(request);
   return landingRoute(service.runs());
 }
@@ -63,7 +68,7 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
   /** 面板所属项目（跨项目总览用来区分当前项目）。 */
   project?: string;
   /** 打开别的项目的运行：切到那个项目再打开。 */
-  onOpenProjectRun?: (project: string, runId: string) => void;
+  onOpenProjectRun?: (project: string, runId: string, filters: RunManagerFilters) => void;
   /** 宿主文件选择器（启动表单的附件）。 */
   pickFiles?: () => Promise<readonly string[]>;
   /** 工作流文件的导入导出（ADR 036）。 */
@@ -80,9 +85,10 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
   onWiden?: () => void;
   onFullView?: () => void;
 }) {
-  const [route, setRoute] = useState<Route>(() => initialRoute(service));
+  const [route, setRoute] = useState<Route>(() => initialRoute(service, project));
   // 库页的页签存在这里（不随 WorkflowLibrary 卸载丢失）：进详情再返回还在原页签。
   const [libraryTab, setLibraryTab] = useState<LibraryTab>("presets");
+  const [runFilters, setRunFilters] = useState(DEFAULT_RUN_FILTERS);
   const [runs, setRuns] = useState<readonly RunSummary[]>(() => service.runs());
   const [libraryVersion, setLibraryVersion] = useState(0);
   const [error, setError] = useState<ErrorText | null>(null);
@@ -96,6 +102,7 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
   const touched = useRef(false);
   const go = (next: Route) => {
     touched.current = true;
+    if (next.kind === "runs" && next.filters) setRunFilters(next.filters);
     setRoute(next);
   };
 
@@ -122,7 +129,7 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
         const focused = service.takeFocusRun();
         if (focused !== "") setRoute({ kind: "run", runId: focused });
       } else if (event.type === "focus-workflow-panel") {
-        const request = service.takePanelRequest();
+        const request = service.takePanelRequest(project);
         if (request) setRoute(routeOfPanelRequest(request));
       } else if (event.type === "library-changed") {
         // 导入、复制、删除、信任脚本之后重新读取工作流库。
@@ -136,7 +143,7 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
       live = false;
       unsubscribe();
     };
-  }, [service]);
+  }, [service, project]);
 
   // 面包屑上的工作流名称：从库里取（运行记录里也带着启动时的名称）。
   useEffect(() => {
@@ -198,31 +205,31 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
     setLibraryVersion((v) => v + 1);
   };
 
-  // 已归档的运行也能打开查看，所以在全部运行里找。
-  const run = route.kind === "run" ? service.allRuns().find((item) => item.runId === route.runId) : undefined;
-  const workflowId = route.kind === "workflow" ? route.id : run?.workflowId ?? "";
-  const workflowName = names[workflowId] ?? run?.name ?? workflowId;
   const openWorkflow = (id: string, launch: { entry?: string } | null = null) => go({ kind: "workflow", id, launch });
+  const openWorkflowRun = (id: string, runId: string) =>
+    go({ kind: "run", runId, back: { kind: "workflow", id, launch: null, initialTab: "runs" } });
+  const back = route.kind === "run" ? route.back ?? { kind: "runs" as const } : { kind: "library" as const };
+  const backLabel = back.kind === "workflow" ? names[back.id] ?? back.id : back.kind === "runs" ? "运行管理" : "工作流库";
   const crumbs = [
-    { key: "library", label: "工作流库", current: route.kind === "library", onSelect: () => go({ kind: "library" }) },
-    ...(workflowId !== "" ? [{
-      key: "workflow",
-      label: workflowName,
-      current: route.kind === "workflow",
-      disabled: !(workflowId in names),
-      hint: workflowId in names ? undefined : "这个工作流已不在库里",
-      onSelect: () => openWorkflow(workflowId),
-    }] : []),
-    ...(route.kind === "runs" ? [{ key: "runs", label: "全部运行", current: true }] : []),
-    ...(route.kind === "draft" ? [{ key: "draft", label: "编辑草稿", current: true }] : []),
+    { key: back.kind, label: backLabel, onSelect: () => go(back) },
+    { key: route.kind, label: route.kind === "run" ? "运行详情" : route.kind === "draft" ? "编辑草稿" : "模板详情", current: true },
   ];
 
-  // 只有一项（就在工作流库，或打开的是内联定义的运行）时不渲染面包屑：
-  // 库页自己有标题行，单项面包屑既不是导航也不该兼职标题。
-  const crumbable = workflowId !== "" || route.kind === "runs" || route.kind === "draft";
+  const root = route.kind === "library" || route.kind === "runs" ? route.kind : null;
 
   return <section className="workflow-panel" aria-label="AAW 工作流">
-    {crumbable && <Breadcrumb className="workflow-crumbs" items={crumbs} />}
+    {root ? <div className="workflow-root-nav">
+      <SegmentedControl<"library" | "runs">
+        tabs
+        groupLabel="工作流面板"
+        value={root}
+        options={[
+          { value: "library", label: "工作流库" },
+          { value: "runs", label: "运行管理", dot: attentionOf(runs).length > 0 },
+        ]}
+        onChange={(kind) => go({ kind })}
+      />
+    </div> : <Breadcrumb className="workflow-crumbs" items={crumbs} />}
     {error && <Callout tone="danger" className="workflow-callout" title={error.title}
       details={error.code || error.detail ? [error.code, error.detail].filter(Boolean).join("\n") : undefined}
       actions={<button type="button" className={secondaryButton} onClick={() => {
@@ -246,7 +253,6 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
     {route.kind === "library" && <div className="workflow-scroll">
       <WorkflowLibrary
         service={service}
-        runs={runs}
         version={libraryVersion}
         hint={route.hint}
         transfer={transfer}
@@ -254,8 +260,6 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
         onTabChange={setLibraryTab}
         onOpenWorkflow={(id) => openWorkflow(id)}
         onLaunch={(id) => openWorkflow(id, {})}
-        onOpenRun={(runId) => go({ kind: "run", runId })}
-        onOpenAllRuns={() => go({ kind: "runs" })}
         drafts={editor ? drafts : undefined}
         onNewWithAi={editor ? requestNew : undefined}
         onOpenDraft={(draftId) => go({ kind: "draft", draftId })}
@@ -273,8 +277,10 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
       />
     </div>}
     {route.kind === "runs" && <div className="workflow-scroll">
-      <section className="workflow-library" aria-label="全部运行">
-        <RunManager service={service} runs={service.allRuns()} onOpenRun={(runId) => go({ kind: "run", runId })} project={project} onOpenProjectRun={onOpenProjectRun} />
+      <section className="workflow-library workflow-runs-page" aria-label="运行管理">
+        <RunManager service={service} runs={service.allRuns()} onOpenRun={(runId) => go({ kind: "run", runId })}
+          filters={runFilters} onFiltersChange={setRunFilters} project={project}
+          onOpenProjectRun={onOpenProjectRun ? (target, runId) => onOpenProjectRun(target, runId, runFilters) : undefined} />
       </section>
     </div>}
     {route.kind === "workflow" && <div className="workflow-scroll">
@@ -284,6 +290,7 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
         id={route.id}
         runs={runs}
         launch={route.launch}
+        initialTab={route.initialTab}
         pickFiles={pickFiles}
         transfer={transfer}
         executors={executors}
@@ -292,8 +299,8 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
         onOpenDraft={(draftId) => go({ kind: "draft", draftId })}
         onLaunch={(entry) => openWorkflow(route.id, { entry })}
         onCloseLaunch={() => openWorkflow(route.id)}
-        onStarted={(runId) => go({ kind: "run", runId })}
-        onOpenRun={(runId) => go({ kind: "run", runId })}
+        onStarted={(runId) => openWorkflowRun(route.id, runId)}
+        onOpenRun={(runId) => openWorkflowRun(route.id, runId)}
         onCopied={(id) => {
           setLibraryVersion((v) => v + 1);
           openWorkflow(id);

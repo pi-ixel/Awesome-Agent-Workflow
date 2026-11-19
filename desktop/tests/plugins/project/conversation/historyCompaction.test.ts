@@ -167,11 +167,11 @@ describe("verified historical compaction", () => {
       ),
     ).toEqual([user("same", "1"), user("same", "2")]);
   });
-  it("preserves longer messages, attachments, workflow users and unavailable evidence", async () => {
+  it("preserves longer messages, attachments, plugin messages and unavailable evidence", async () => {
     const items = [
       user("summary plus user text"),
       { ...user("summary"), attachments: [{ type: "image" }] },
-      { ...user("summary", "workflow"), origin: "workflow" as const },
+      { ...user("summary", "workflow"), display: { source: "workflow", visible: "", foldLabel: "说明" } },
     ];
     const source = await evidence([["summary", true]]);
     for (const item of items)
@@ -228,6 +228,17 @@ describe("verified historical compaction", () => {
     expect(readSessionLog("compact-history", createLogger("test"))).toEqual([
       items[0],
     ]);
+    await store.getState().setSessionLogTarget(null);
+  });
+  it("keeps a plugin message's display across a saved snapshot", async () => {
+    const store = createSessionStore();
+    await store.getState().setSessionLogTarget("plugin-display");
+    const items: SessionItem[] = [
+      { ...user("要求\n\n规则"), display: { source: "workflow", visible: "要求", foldLabel: "工作流说明" } },
+    ];
+    store.setState({ items });
+    await store.getState().flushSessionLog();
+    expect(readSessionLog("plugin-display", createLogger("test"))).toEqual(items);
     await store.getState().setSessionLogTarget(null);
   });
   it("renders a marker as an independent non-collapsible row, not a new user turn", () => {

@@ -6,15 +6,16 @@
  * 点别的项目的运行直接切到那个项目打开。
  */
 import { useEffect, useState } from "react";
-import type { ProjectRunSummary, RunSummary, WorkflowService } from "../types.ts";
+import type { ProjectRunSummary, RunManagerFilters, RunSummary, WorkflowService } from "../types.ts";
 import { errorLine } from "../status/errorText.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { useNow } from "./time.ts";
-import { groupByProject, matchesRun } from "./runSearch.ts";
+import { DEFAULT_RUN_FILTERS, groupByProject, matchesRun } from "./runSearch.ts";
 import { MoreMenu } from "./MoreMenu.tsx";
 import { CheckSquare, Listbox } from "../../../shared/ui/controls.tsx";
 import { settingsInputClass } from "../../../shared/ui/SettingsPageParts.tsx";
 import { ghostButton, primaryButton } from "./buttons.ts";
+import { attentionOf, ordinalOf } from "./runList.ts";
 import { RunRow } from "./RunList.tsx";
 import { Callout } from "../../../shared/ui/Callout.tsx";
 import { InlineConfirm } from "../../../shared/ui/InlineConfirm.tsx";
@@ -34,21 +35,24 @@ const ALL_PROJECTS_REFRESH_MS = 5000;
 
 const projectName = (path: string) => path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
 
-export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun }: {
+export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun, filters: controlledFilters, onFiltersChange }: {
   service: Pick<WorkflowService, "renameRun" | "archiveRun" | "deleteRun" | "runsAcrossProjects">;
   /** 要管理的运行（含已归档的），最近在前。 */
   runs: readonly RunSummary[];
   onOpenRun: (runId: string) => void;
+  filters?: RunManagerFilters;
+  onFiltersChange?: (filters: RunManagerFilters) => void;
   /** 当前项目；与 onOpenProjectRun 一起给出时可以切到「全部项目」。 */
   project?: string;
   onOpenProjectRun?: (project: string, runId: string) => void;
 }) {
   const now = useNow();
-  const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState("all");
-  const [scope, setScope] = useState<"project" | "all">("project");
+  const [localFilters, setLocalFilters] = useState(DEFAULT_RUN_FILTERS);
+  const filters = controlledFilters ?? localFilters;
+  const updateFilters = (change: Partial<RunManagerFilters>) =>
+    (onFiltersChange ?? setLocalFilters)({ ...filters, ...change });
+  const { query, status, scope, showArchived } = filters;
   const [everywhere, setEverywhere] = useState<readonly ProjectRunSummary[] | null>(null);
-  const [showArchived, setShowArchived] = useState(false);
   const [editing, setEditing] = useState<{ runId: string; title: string } | null>(null);
   const [deleting, setDeleting] = useState("");
   const [busy, setBusy] = useState(false);
@@ -79,11 +83,13 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
     };
   }, [all, runs, service]);
 
-  const match = FILTERS.find((item) => item.id === filter)?.match ?? (() => true);
+  const match = FILTERS.find((item) => item.id === status)?.match ?? (() => true);
   const source: readonly RunSummary[] = all ? everywhere ?? [] : runs;
   const archivedCount = source.filter((run) => run.archivedAt != null).length;
   const visible = (run: RunSummary) => (showArchived || run.archivedAt == null) && match(run) && matchesRun(run, query);
   const shown = source.filter(visible);
+  const pendingIds = new Set(attentionOf(shown.filter((run) => run.archivedAt == null)).map((run) => run.runId));
+  const ordinals = all ? {} : ordinalOf(runs);
   const isHere = (path: string | undefined) => path === undefined || (project !== undefined && pathKey(path) === pathKey(project));
 
   const act = async (work: () => Promise<void>) => {
@@ -99,7 +105,7 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
     }
   };
 
-  const row = (run: RunSummary, path?: string) => {
+  const row = (run: RunSummary, workflowName: string, path?: string) => {
     const active = run.status === "running";
     const archived = run.archivedAt != null;
     // 当前项目的运行不带项目参数（服务用当前项目）；别的项目的带上它所属的项目。
@@ -118,7 +124,8 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
         : <RunRow
           run={run}
           now={now}
-          workflowName={run.name}
+          ordinal={ordinals[run.runId]}
+          workflowName={workflowName}
           suffix={archived ? "（已归档）" : ""}
           onOpen={() => where === undefined ? onOpenRun(run.runId) : onOpenProjectRun?.(where, run.runId)}
         />}
@@ -133,37 +140,58 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
     </li>;
   };
 
+  const renderRuns = (pending: boolean) => {
+    const inSection = (run: RunSummary) => pendingIds.has(run.runId) === pending;
+    if (all) {
+      return groupByProject((everywhere ?? []).filter((run) => visible(run) && inSection(run))).map((group) =>
+        <section key={pathKey(group.project)} className="workflow-run-group" aria-label={projectName(group.project)}>
+          <h4 data-hint={group.project}>{projectName(group.project)}{isHere(group.project) && <small>当前项目</small>}</h4>
+          <ul className="workflow-run-list">{group.runs.map((run) => row(run, run.name, group.project))}</ul>
+        </section>);
+    }
+    const section = shown.filter(inSection);
+    return <ul className="workflow-run-list">{section.map((run, index) => {
+      const previous = section[index - 1];
+      const workflowName = previous && (previous.workflowId || previous.name) === (run.workflowId || run.name) ? "" : run.name;
+      return row(run, workflowName);
+    })}</ul>;
+  };
+
   return <div className="workflow-run-manager">
     <div className="workflow-run-filters">
-      <input type="search" className={settingsInputClass} aria-label="搜索运行" placeholder="搜索标题、工作流或需求" value={query} onChange={(event) => setQuery(event.target.value)} />
+      <input type="search" className={settingsInputClass} aria-label="搜索运行" placeholder="搜索标题、工作流或需求" value={query} onChange={(event) => updateFilters({ query: event.target.value })} />
       {crossProject && <Listbox
         label="范围"
         value={scope}
         options={[{ value: "project", label: "当前项目" }, { value: "all", label: "全部项目" }]}
-        onChange={(value) => setScope(value === "all" ? "all" : "project")}
+        onChange={(value) => updateFilters({ scope: value === "all" ? "all" : "project" })}
       />}
       <Listbox
         label="按状态筛选"
-        value={filter}
+        value={status}
         options={FILTERS.map((item) => ({ value: item.id, label: item.label }))}
-        onChange={setFilter}
+        onChange={(value) => updateFilters({ status: value })}
       />
-      <label className="workflow-check">
-        <input type="checkbox" className="peer sr-only" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />
-        <CheckSquare checked={showArchived} />
-        <span>显示已归档{archivedCount > 0 ? `（${archivedCount}）` : ""}</span>
-      </label>
     </div>
+    <label className="workflow-check workflow-show-archived">
+      <input type="checkbox" className="peer sr-only" checked={showArchived} onChange={(event) => updateFilters({ showArchived: event.target.checked })} />
+      <CheckSquare checked={showArchived} />
+      <span>显示已归档{archivedCount > 0 ? `（${archivedCount}）` : ""}</span>
+    </label>
     {error !== "" && <Callout tone="danger" className="workflow-callout" title={error} onDismiss={() => setError("")} />}
     {all && everywhere === null
       ? <p className="workflow-muted">正在读取…</p>
       : shown.length === 0
       ? <EmptyState title={source.length === 0 ? "还没有运行" : "没有符合条件的运行"} description={source.length === 0 ? "在工作流库里选一个工作流，点「运行」。" : "换个关键词，或者改一下状态筛选。"} />
-      : all
-      ? groupByProject((everywhere ?? []).filter(visible)).map((group) => <section key={pathKey(group.project)} className="workflow-run-group" aria-label={projectName(group.project)}>
-        <h4 data-hint={group.project}>{projectName(group.project)}{isHere(group.project) && <small>当前项目</small>}</h4>
-        <ul className="workflow-run-list">{group.runs.map((run) => row(run, group.project))}</ul>
-      </section>)
-      : <ul className="workflow-run-list">{shown.map((run) => row(run))}</ul>}
+      : <>
+        {pendingIds.size > 0 && <section className="workflow-run-section" aria-label="待处理">
+          <h3>待处理</h3>
+          {renderRuns(true)}
+        </section>}
+        {shown.length > pendingIds.size && <section className="workflow-run-section" aria-label="运行记录">
+          <h3>运行记录</h3>
+          {renderRuns(false)}
+        </section>}
+      </>}
   </div>;
 }

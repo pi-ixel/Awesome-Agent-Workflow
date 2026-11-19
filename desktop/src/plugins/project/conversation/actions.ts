@@ -1,3 +1,4 @@
+import type { MessageDisplay } from "../../../shared/messageDisplay.ts";
 import { createSteering } from "./steering.ts";
 import { beginPerformance } from "./sessionPerformance.ts";
 import { parseTurnUsage, sessionUsageDelta, type TurnUsage } from "./turnUsage.ts";
@@ -45,7 +46,7 @@ interface SessionActionContext {
   replaying: boolean;
   cancelledByUser: boolean;
   queueWasPaused: boolean;
-  beginTurn(this: void, text: string): void;
+  beginTurn(this: void, text: string, display?: MessageDisplay): void;
   endTurn(this: void, outcome: TurnOutcome): void;
   noteActivity(this: void): void;
   pushSystemItem(
@@ -354,7 +355,7 @@ export function createSessionActions(
         });
     },
     drainNextQueued,
-    sendPrompt: (text, attachments = []) => {
+    sendPrompt: (text, attachments = [], options = {}) => {
       const trimmed = text.trim();
       if (
         (steering.active && !steering.dispatching) ||
@@ -480,7 +481,7 @@ export function createSessionActions(
         if (!usage || usageScope?.accounting !== "turn-delta") return usage;
         return sessionUsageDelta(usage, previousUsage) ?? undefined;
       };
-      beginTurn(trimmed);
+      beginTurn(trimmed, options.display);
       if (delivery) set({ items: get().items.map((item, i, items) => i === items.length - 1 && item.kind === "user" ? { ...item, steer: true } : item) });
       if (attachments.length)
         set((state) => ({

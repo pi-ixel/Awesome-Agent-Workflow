@@ -154,13 +154,14 @@ ws.addEventListener("message", (e) => {
 
 ### 3.3 已经定下来的布局约定
 
+- **面板入口**：「工作流库」和「运行管理」同级，可在面板首页直接切换。工作流库列出预置与我的模板，可导入、编辑和发起。运行管理默认看当前项目，支持切换到全部项目，待处理置于运行记录之前。进详情后，面包屑返回打开来源，从运行管理返回时恢复筛选。
 - **运行页头两行**：第一行标题 +「总结」+ 当前唯一的运行动作 +「⋯」；第二行状态、阶段进度、当前 / 停在哪一步、工作流名、用时、「需求」链接。
 - **提示条**在页头下面，同一时刻只有一条（`RunView.tsx` 的 `bannerOf`），顺序：运行失败 > 等你回复 > 等你确认 > 阻塞。跑完且没有别的提示时显示绿色「已完成」+ 交付说明 +「查看总结」，可关闭，不自动跳转。
-- **画布工具**（跟随、缩放、1:1、适应）浮在画布右下角；小地图在右上角；「回到当前节点」浮在画布可见区域底部居中（`GraphCanvas` 的 `tools` / `floating`）。
-- **节点详情**：右栏宽时放在画布右边；窄时盖住整个画布，顶上有「返回流程图」。
+- **画布工具**（跟随、缩放、1:1、适应）与子流程路径共用顶部控制带，悬停或键盘聚焦时恢复完整对比度；流程导航浮在右上角；「回到当前节点」浮在画布可见区域底部居中（`GraphCanvas` 的 `tools` / `floating`）。
+- **节点详情**：右栏宽时放在画布右边；窄时盖住整个画布，顶上有「返回流程图」。有会话的节点可从画布直达最近一轮，详情可打开所选轮次的会话。
 - **卡片**：普通 Agent 节点不挂类型标签，只标出子流程、脚本这类特殊节点；预览图（还没运行）不写状态。卡片高度常量 `CARD_H` / `CARD_NOTE_H`（`WorkflowHierarchy.tsx`）要和卡片实际内容高度一致，改了卡片里的元素要重新核对，否则附注会被截掉。
-- **阶段收起**：走完的阶段自动收起，但当前节点、选中节点、等确认的步骤所在的阶段不收。
-- **侧栏运行分组**：组内会话按执行顺序、和画布同名；做完的收进「已完成」；进行中和带提醒胶囊（等你回复 / 等你确认 / 出错停下）的分组固定在项目最上面；点标题打开运行页并展开，点箭头只展开收起。
+- **阶段收起**：有分组的流程默认显示阶段摘要。当前节点、选中节点、失败节点或待确认节点所在的阶段自动展开，其他阶段可手动展开。
+- **侧栏运行分组**：组内会话按执行顺序、和画布同名；做完的收进「已完成」；进行中和带提醒胶囊（等你回复 / 等你确认 / 出错停下）的分组固定在项目最上面；点标题打开运行页并保留折叠状态，点箭头展开或收起。
 - **会话里工作流给 Agent 的说明**：用 `shared/workflowInstruction.ts` 的标记包起来，会话界面收成一行「工作流给 Agent 的说明」；标记之前的文字（如用户自己的要求）照常显示。新的说明要发给 Agent 时也照这个做。
 - **用时**：只算真正在跑的时间（`status/timing.ts` 的 `runActiveMs`），停着的时间、被打断又作废的那一轮都不算；运行停下后，没结束的节点用时停在停下那一刻。
 
@@ -233,7 +234,7 @@ cargo test --manifest-path workflow-engine-rs/Cargo.toml -- --skip real_icode   
 | AI 编辑 | `ui/AiEditSheet.tsx`、`ui/DraftPage.tsx`、`editing/draftSessions.ts` |
 | 侧栏分组、节点会话回指条 | `ui/sessionGroups.ts`、`ui/WorkflowSessionBanner.tsx`；渲染在 `plugins/project/ui/ProjectTree.tsx`、`sessionGroupLayout.ts` |
 | 状态词、报错说明、用时 | `status/snapshot.ts`、`status/errorText.ts`、`status/timing.ts` |
-| 节点会话宿主（给 Agent 发说明） | `sessionHost/nativeSessionHost.ts` |
+| 节点会话宿主（给 Agent 发说明） | `sessionHost/nodeSessionHost.ts` |
 | 样式 | `ui/workflowPanel.css` |
 | 引擎服务端、预置工作流 | `desktop/workflow-engine-rs/src/bin/workflow_service.rs`、`workflow-engine-rs/workflows/` |
 

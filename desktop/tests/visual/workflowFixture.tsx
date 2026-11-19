@@ -10,6 +10,8 @@ import "../../src/shared/styles/index.css";
 import "../../src/plugins/workflow/ui/workflowPanel.css";
 import { GraphCanvas } from "../../src/plugins/workflow/ui/GraphCanvas.tsx";
 import { WorkflowHierarchy } from "../../src/plugins/workflow/ui/WorkflowHierarchy.tsx";
+import { WorkflowPanel } from "../../src/plugins/workflow/ui/WorkflowPanel.tsx";
+import { fakeWorkflowService, runSummary } from "../plugins/workflow/helpers.ts";
 import type {
   CanvasSnapshot,
   HierarchyStructure,
@@ -97,7 +99,40 @@ const snapshot = {
   ],
 } as unknown as CanvasSnapshot;
 
-createRoot(document.querySelector("#root")!).render(
+const root = createRoot(document.querySelector("#root")!);
+if (params.has("inspector")) {
+  const service = fakeWorkflowService();
+  const run = runSummary({ runId: snapshot.runId, title: "流程画布排版验证" });
+  const label = "检查工作流节点的长标题和大字号在窄面板中的显示表现";
+  service.setRuns([run]);
+  service.setSnapshot(run.runId, {
+    ...snapshot,
+    run,
+    catalog: {
+      id: "aaw-dev", name: "dev 工作流", revision: "r1", entry: "requirement", structure, stages,
+      nodes: nodes.map((node) => node.id === "design" ? { ...node, label } : node),
+    },
+    actors: [],
+    nodes: Array.from({ length: 18 }, (_, index) => ({
+      siteId: "design", phaseId: "design", ordinal: index + 1, kind: "ask",
+      status: index < 17 ? "completed" : "running",
+      scope: {}, callPath: [], actorSiteId: "设计", actorOrdinal: 1,
+      result: null, candidates: [], sessionId: `session-${index + 1}`,
+    })),
+  });
+  root.render(<div style={{ height: "100vh" }}>
+    <WorkflowPanel service={service.service} onOpenSession={(id) => { document.documentElement.dataset.openedSession = id; }} />
+  </div>);
+} else if (params.has("panel")) {
+  const service = fakeWorkflowService();
+  service.setRuns([
+    runSummary({ runId: "done", title: "整理交接记录", status: "completed" }),
+    runSummary({ runId: "pending", title: "确认设计方案", status: "waiting" }),
+  ]);
+  root.render(<div style={{ height: "100vh" }}>
+    <WorkflowPanel service={service.service} />
+  </div>);
+} else root.render(
   <div className="workflow-panel" style={{ height: "100vh" }}>
     <div className="workflow-workspace is-wide">
       <div className="workflow-viewport-frame">

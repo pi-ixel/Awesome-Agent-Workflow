@@ -1,6 +1,6 @@
 import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
-import { splitWorkflowInstruction } from "../../../../shared/workflowInstruction.ts";
+import { foldedText } from "../../../../shared/messageDisplay.ts";
 import { Disclosure } from "../../../../shared/ui/Disclosure.tsx";
 import type { UserMessageItem } from "../types.ts";
 import type { ContentBlock } from "../../../../contracts/acp/protocol.ts";
@@ -28,9 +28,9 @@ function UserMessageBase({
   readonly showActions?: boolean;
 }) {
   const composer = useProjectComposer();
-  const split = splitWorkflowInstruction(item.text);
-  const annotated = decodeAnnotationMessage(split.visible);
-  const text = annotated?.text ?? split.visible;
+  const visible = item.display ? item.display.visible : item.text;
+  const annotated = decodeAnnotationMessage(visible);
+  const text = annotated?.text ?? visible;
   return (
     <div
       className="group flex flex-col items-end gap-1"
@@ -51,9 +51,9 @@ function UserMessageBase({
           <p className="whitespace-pre-wrap break-words">{text}</p>
         </div>
       )}
-      {split.instruction !== null && (
-        <Disclosure summary="工作流给 Agent 的说明" className="w-full text-ink-mute">
-          <p className="max-h-80 overflow-y-auto rounded-lg border border-line bg-surface px-3 py-2 text-ui-sm leading-relaxed whitespace-pre-wrap break-words text-ink-soft">{split.instruction}</p>
+      {item.display && (
+        <Disclosure summary={item.display.foldLabel} className="w-full text-ink-mute">
+          <p className="max-h-80 overflow-y-auto rounded-lg border border-line bg-surface px-3 py-2 text-ui-sm leading-relaxed whitespace-pre-wrap break-words text-ink-soft">{foldedText(item.text, item.display)}</p>
         </Disclosure>
       )}
       {showActions && text.trim() && (
@@ -62,7 +62,7 @@ function UserMessageBase({
             type="button"
             onClick={() => {
               composer?.prefill(
-                item.text,
+                visible,
                 item.attachments as readonly ContentBlock[] | undefined,
               );
             }}

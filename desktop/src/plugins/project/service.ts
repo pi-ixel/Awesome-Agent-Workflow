@@ -1,3 +1,7 @@
+import type { AcpSessionEvent } from "../acpRuntime/events.ts";
+import type { PluginSessionOptions, SessionTurnEvent } from "./sessions/types.ts";
+import type { SessionToolProvider } from "./sessions/sessionTools.ts";
+import type { SendOptions } from "./conversation/sessionStore.ts";
 import type {
   DeleteSessionTarget,
   SessionDeletion,
@@ -9,10 +13,6 @@ import type {
   WorkspaceToolPaths,
   WorkspaceView,
 } from "./workspace/types.ts";
-import type {
-  AcpProtocolSessionOptions,
-  AcpSessionPort,
-} from "../acpRuntime/types.ts";
 import type { AnnotationDraftSnapshot } from "./composer/annotationTypes.ts";
 import type {
   ConversationExpansion,
@@ -40,6 +40,16 @@ export type {
   SessionGroupsState,
   SessionGroupStatus,
 } from "./sessions/sessionGroups.ts";
+export type { PluginSessionOptions, SessionTarget, SessionTurnEvent } from "./sessions/types.ts";
+export type {
+  ProjectActivities,
+  ProjectActivity,
+  ProjectExtension,
+  ProjectQuickAction,
+  ProjectSlashEntry,
+  ProjectTreeAction,
+} from "./ui/extension.ts";
+export type { SessionToolContext, SessionToolProvider } from "./sessions/sessionTools.ts";
 import type { ExitReason } from "../workbench/types.ts";
 import type { ContentBlock } from "../../contracts/acp/protocol.ts";
 import type { DocumentAnnotation } from "../documents/types.ts";
@@ -134,43 +144,20 @@ export interface ProjectSessions extends Pick<
     agentKey?: string,
   ): Promise<void>;
   /**
-   * 外部会话收养端口（ADR 024 §9 开放问题 1）：插件自建并调度的 ACP 会话
-   * （workflow 节点会话）登记进标准会话体系，取得侧栏条目、活动感知与
-   * 中央 SessionView——与用户会话同一套折叠/渲染/审批规则。
-   *
-   * 职责分界：project 建视图与目录状态（事件投影、审批/表单/问答挂接、
-   * catalog 登记、本地快照恢复），并提供**标准会话回调**给 create；调用方
-   * 在 create 里开连接、完成握手（initialize → new/load → 私有扩展）并
-   * 返回已具身份的端口。连接与释出归调用方，进程恢复也归调度方（收养
-   * 会话不参与 project 侧的连接恢复）。
-   *
-   * 输入语义固定为「调度方驱动」：发送经 onUserMessage 路由（工作流节点
-   * 会话进原生消息队列，轮次边界送达）；停止走标准 ACP cancel（协议层
-   * turn 事件驱动运行态，与用户会话零分叉）。同 sessionId 重复收养幂等
-   * （换接新端口、视图保留）。
+   * 登记会话附加工具（ADR 037）：会话新建、打开或重连时，应用问各登记方这个
+   * 会话要额外装哪些 MCP 工具（如工作流的交结果工具）。返回的函数撤销登记。
    */
-  adoptExternalSession(options: {
-    readonly workspacePath: string;
-    /**
-     * 侧栏初始标题（如工作流节点角色名）；chrys 自动改题后随原生标题。
-     * 单 Agent 原则：会话一律开在当前选中的 Agent 上（与普通会话同池），
-     * 不接受调用方指定别的 Agent。
-     */
-    readonly title?: string;
-    /** 用户补充消息路由（轮次边界送达语义由调用方承担）。 */
-    readonly onUserMessage: (sessionId: string, text: string) => Promise<void>;
-    /**
-     * 按注入的标准会话回调装配并初始化会话：open（可带需求单的
-     * mcpServers 等会话级参数）→ initialize → new/load → 返回端口。
-     * 返回值必须是完整 AcpSessionPort（project 要挂事件投影
-     * acp.onEvent 与下行绑定）；抛错视为 spawn 失败（project 清理现场
-     * 后原样上抛）。连接释出归调用方（closeSession + 池 release）。
-     */
-    readonly create: (
-      sessionOptions: AcpProtocolSessionOptions,
-      context: { readonly agentKey: string },
-    ) => Promise<AcpSessionPort>;
-  }): Promise<{ readonly sessionId: string } | null>;
+  registerSessionTools(provider: SessionToolProvider): () => void;
+  /**
+   * 插件打开（新建或恢复）一个普通会话（ADR 037）：会话由应用持有，出现在
+   * 侧栏，用户可以直接对话；打开时不抢前台。返回会话地址；失败时抛出原因。
+   * 发消息用 conversation.send（带 display 选项），轮次进展用 watchTurns。
+   */
+  openPluginSession(options: PluginSessionOptions): Promise<SessionTarget>;
+  /** 订阅一个会话的轮次事件（不管这一轮是谁发起的）。返回的函数取消订阅。 */
+  watchTurns(target: SessionTarget, listener: (event: SessionTurnEvent) => void): () => void;
+  /** 订阅一个会话的原始事件（Agent 的消息、工具调用、计划等）。返回的函数取消订阅。 */
+  watchEvents(target: SessionTarget, listener: (event: AcpSessionEvent) => void): () => void;
   deliverToSession(
     path: string,
     selection: SessionSelection,
@@ -210,6 +197,7 @@ export interface ProjectConversation {
     target: SessionTarget,
     text: string,
     attachments?: readonly ContentBlock[],
+    options?: SendOptions,
   ): boolean;
   steer(target: SessionTarget, text: string, attachments?: readonly ContentBlock[]): boolean;
   stopSteering(target: SessionTarget): void;

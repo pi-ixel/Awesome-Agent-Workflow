@@ -1,10 +1,11 @@
+mod support;
+
 use aaw_workflow_core::{
     Stage, Workflow,
-    headless_host::HeadlessHost,
     journal::{Journal, RunSnapshot},
     runtime::{Host, Runtime, RuntimeConfig},
 };
-use serde_json::{Value, json};
+use serde_json::json;
 use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -52,7 +53,6 @@ fn controlled_run_uses_supervised_agents_and_real_scanner_process() {
     journal
         .create_with_snapshot("r", &project_str, &defined_workflow, &snapshot)
         .unwrap();
-    let sink = Arc::new(|_: Value| Ok(()));
     let runtime = Runtime::start(
         journal,
         "r".into(),
@@ -60,7 +60,7 @@ fn controlled_run_uses_supervised_agents_and_real_scanner_process() {
         "owner".into(),
         config.clone(),
         Arc::new(ControlledHost),
-        Arc::new(HeadlessHost::new("r".into(), sink.clone())),
+        Arc::new(support::InProcessHost::new()),
     )
     .unwrap();
     // A single advance now drains all ready work instead of stopping after
@@ -70,7 +70,7 @@ fn controlled_run_uses_supervised_agents_and_real_scanner_process() {
     let mut changed = config.clone();
     changed.python = "other-python".into();
     assert!(
-        matches!(Runtime::resume(Journal::open(&db_path).unwrap(),"r".into(),project_str.clone(),"resume-check".into(),changed,Arc::new(ControlledHost),Arc::new(HeadlessHost::new("r".into(),sink.clone()))), Err(ref e) if e=="RUNTIME_CONFIGURATION_CHANGED")
+        matches!(Runtime::resume(Journal::open(&db_path).unwrap(),"r".into(),project_str.clone(),"resume-check".into(),changed,Arc::new(ControlledHost),Arc::new(support::InProcessHost::new())), Err(ref e) if e=="RUNTIME_CONFIGURATION_CHANGED")
     );
     let mut runtime = Runtime::resume(
         Journal::open(&db_path).unwrap(),
@@ -79,7 +79,7 @@ fn controlled_run_uses_supervised_agents_and_real_scanner_process() {
         "resumed".into(),
         config,
         Arc::new(ControlledHost),
-        Arc::new(HeadlessHost::new("r".into(), sink)),
+        Arc::new(support::InProcessHost::new()),
     )
     .unwrap();
     for _ in 0..30 {

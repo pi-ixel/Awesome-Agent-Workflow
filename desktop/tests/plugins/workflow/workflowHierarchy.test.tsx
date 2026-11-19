@@ -286,8 +286,22 @@ it("puts what the step does and who does it on the card, not only in the inspect
   // 第二行是作者写的 does，第三行左边是角色（不是重复一遍标题）。
   expect(within(card).getByText("实现当前任务 · 执行验证并留证")).toBeInTheDocument();
   expect(within(card).getByText("任务实现与测试")).toBeInTheDocument();
-  // 没有 steps 的卡不多出空行；没有 role 时第三行退到类型词（脚本 / Agent）。
+  // 脚本卡第三行显示类型。
   expect(screen.getByRole("button", { name: "检查，未触发" }).querySelector(".workflow-card-who")).toHaveTextContent("脚本");
+});
+
+it("shows the same role on both the original step and the repair step", () => {
+  const withRoles = nodes.map((node) => {
+    if (node.id === "impl") return { ...node, role: "实现" };
+    if (node.id === "fix") return { ...node, role: "实现" };
+    return node;
+  });
+  render(<WorkflowHierarchy entry="implement" structure={structure} nodes={withRoles} snapshot={null} selected="" onSelect={() => {}} />);
+  const card = screen.getByRole("button", { name: "实现，未触发" });
+  expect(card.querySelector(".workflow-card-who")).toHaveTextContent(/^实现$/);
+  fireEvent.click(screen.getByRole("button", { name: "进入子流程 ›" }));
+  const repair = screen.getByRole("button", { name: "处置，未触发" });
+  expect(repair.querySelector(".workflow-card-who")).toHaveTextContent(/^实现$/);
 });
 
 it("labels the subflow card with its step count and step dots", () => {
@@ -302,5 +316,20 @@ it("marks the selected card with the accent color and keeps the title readable",
   render(<WorkflowHierarchy entry="implement" structure={structure} nodes={nodes} snapshot={null} selected="impl" onSelect={() => {}} />);
   const card = screen.getByRole("button", { name: "实现，未触发" });
   expect(card).toHaveClass("selected");
-  expect(within(card).getByText("实现").tagName).toBe("B");
+  expect(within(card).getByText("实现", { selector: ".workflow-card-title b" })).toBeInTheDocument();
+});
+
+it("starts template previews with stage summaries and lets users expand and collapse a stage", () => {
+  const main = structure.flows.main!;
+  const staged = { ...structure, flows: { ...structure.flows, main: {
+    ...main, phases: main.phases.map((phase) => ({ ...phase, stage: "design" })),
+  } } };
+  render(<WorkflowHierarchy entry="implement" structure={staged} nodes={nodes}
+    stages={[{ id: "design", label: "需求与设计" }]} snapshot={null} selected="" onSelect={() => {}} />);
+  const summary = { name: /需求与设计 · 3 步.*展开/ };
+  expect(screen.queryByRole("button", { name: "实现，未触发" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", summary));
+  expect(screen.getByRole("button", { name: "实现，未触发" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "收起 需求与设计" }));
+  expect(screen.getByRole("button", summary)).toBeInTheDocument();
 });

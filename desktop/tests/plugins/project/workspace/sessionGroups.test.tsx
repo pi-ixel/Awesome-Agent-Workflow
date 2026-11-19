@@ -205,12 +205,14 @@ describe("ProjectTree session groups", () => {
     expect(screen.queryByLabelText("已完成，未查看")).not.toBeInTheDocument();
     expect(screen.queryByText("chrys 标题 A")).not.toBeInTheDocument();
     expect(screen.getByText("我自己的会话")).toBeInTheDocument();
-    // 箭头只管收起；点标题打开运行页并重新展开。
+    // 手动收起后，点标题打开运行页，折叠状态保持。
     fireEvent.click(screen.getByRole("button", { name: "收起 AAW dev · run-1" }));
     expect(screen.getByRole("button", { name: "展开 AAW dev · run-1" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("list", { name: "AAW dev · run-1 的会话" })).not.toBeInTheDocument();
     fireEvent.click(row);
     expect(open).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("list", { name: "AAW dev · run-1 的会话" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "展开 AAW dev · run-1" }));
     expect(screen.getByRole("list", { name: "AAW dev · run-1 的会话" })).toBeInTheDocument();
     // 撤下分组后会话回到平铺。
     act(() => publisher.dispose());

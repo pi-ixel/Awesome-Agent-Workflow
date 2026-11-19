@@ -23,8 +23,9 @@ export interface NavigatorStage {
   readonly bars: readonly NodeState[];
 }
 
-export function WorkflowNavigator({ rootLabel, stages, tree, activePath, onJump, onJumpIndex }: {
+export function WorkflowNavigator({ rootLabel, stages, tree, activePath, onJump, onJumpIndex, isCompact = false }: {
   rootLabel: string;
+  isCompact?: boolean;
   stages: readonly NavigatorStage[];
   /** 子流程树（根在一层，往下嵌套）。 */
   tree: readonly FlowTreeStep[];
@@ -35,8 +36,8 @@ export function WorkflowNavigator({ rootLabel, stages, tree, activePath, onJump,
   /** 回到路径上的第 index 层（点根 / 上级）。 */
   onJumpIndex: (index: number) => void;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
-  if (collapsed) {
+  const [collapsed, setCollapsed] = useState<boolean>();
+  if (collapsed ?? isCompact) {
     return <div className="workflow-nav collapsed">
       <IconButton iconSize="compact" type="button" className={ghostButton} aria-label="展开流程导航" aria-expanded={false} onClick={() => setCollapsed(false)} data-hint="展开流程导航"><PanelRightOpenIcon className="ui-icon-14" /></IconButton>
     </div>;

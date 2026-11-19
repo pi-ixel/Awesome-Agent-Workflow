@@ -39,6 +39,7 @@ it("owns protocol leases without the project service and clears them on Fiber re
 
     const live = protocol.open("test-agent");
     await live.initialize();
+    const tool = { name: "extra-tool", command: "tool.exe", args: [], env: [] };
     await protocol.restore(live, {
       sessionId: "existing",
       workspacePath: "/workspace",
@@ -46,8 +47,12 @@ it("owns protocol leases without the project service and clears them on Fiber re
       configuration: [],
       isCurrent: () => true,
       onReplay: () => {},
+      mcpServers: [tool],
     });
     expect(live.sessionId).toBe("existing");
+    // 重连恢复时附加工具随 session/load 下发（ADR 037）。
+    const load = peers.flatMap(({ received }) => received).find(({ method }) => method === "session/load");
+    expect(load?.params).toMatchObject({ sessionId: "existing", mcpServers: [tool] });
     await fiber.dispose();
     expect(peers).toHaveLength(4);
     expect(peers.every(({ client }) => client.isClosed)).toBe(true);

@@ -5,13 +5,13 @@ import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.t
 import { errorLine } from "../status/errorText.ts";
 import { statusLabel } from "../status/snapshot.ts";
 import type { WorkflowService, WorkflowSummary } from "../types.ts";
-import type { LibraryTab } from "./WorkflowLibrary.tsx";
+type SidebarTab = "presets" | "mine" | "runs";
 
 const tabs = [
   { value: "presets", label: "预置" },
   { value: "mine", label: "我的" },
   { value: "runs", label: "运行" },
-] satisfies readonly { value: LibraryTab; label: string }[];
+] satisfies readonly { value: SidebarTab; label: string }[];
 const row = `flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-left text-ui-sm text-ink hover:bg-hover ${focusVisibleRing}`;
 
 export function WorkflowSidebar({ project, service, onOpenWorkflow, onOpenRun }: {
@@ -20,7 +20,7 @@ export function WorkflowSidebar({ project, service, onOpenWorkflow, onOpenRun }:
   readonly onOpenWorkflow: (id: string) => void;
   readonly onOpenRun: (id: string) => void;
 }) {
-  const [tab, setTab] = useState<LibraryTab>("presets");
+  const [tab, setTab] = useState<SidebarTab>("presets");
   const [items, setItems] = useState<readonly WorkflowSummary[] | null>(null);
   const [error, setError] = useState("");
   const projectKey = pathKey(project);
@@ -62,7 +62,7 @@ export function WorkflowSidebar({ project, service, onOpenWorkflow, onOpenRun }:
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-2 px-2 py-2" aria-label="工作流列表">
       <div className="flex min-h-9 shrink-0 items-center">
-        <SegmentedControl<LibraryTab> groupLabel="工作流列表类别" value={tab} onChange={setTab} options={tabs} />
+        <SegmentedControl<SidebarTab> groupLabel="工作流列表类别" value={tab} onChange={setTab} options={tabs} />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {message && <p className="m-2 text-ui-sm text-ink-mute">{message}</p>}

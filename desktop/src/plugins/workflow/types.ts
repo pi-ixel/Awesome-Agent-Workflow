@@ -7,6 +7,7 @@
  * - **WorkflowView**（文件尾部）：工作流插件给会话区、项目总览提供的入口
  *   与状态（`workflowUi` 服务，project 插件可选注入）。
  */
+import type { MessageDisplay } from "../../shared/messageDisplay.ts";
 import type { NodePlanEntry } from "./status/nodePlans.ts";
 import type { ReadonlySnapshot } from "../../shared/state/readonlySnapshot.ts";
 import type { ComponentType } from "react";
@@ -169,6 +170,8 @@ export interface CanvasNodeSnapshot {
   readonly phaseId: string | null;
   readonly actorSiteId: string;
   readonly actorOrdinal: number;
+  /** 本轮实际使用的会话；旧版引擎未返回时可用角色关联兼容。 */
+  readonly sessionId?: string | null;
   readonly result: unknown;
   readonly candidates: readonly unknown[];
   /** 这一轮已结束但还没有结果，引擎在等用户经会话回复（引擎记录，只在执行中出现）。 */
@@ -263,6 +266,8 @@ export interface CanvasSnapshot {
   readonly retries: readonly {
     readonly siteId: string;
     readonly ordinal: number;
+    /** 运行被停止后自动登记的「接着做」（不是用户选择的重做）。 */
+    readonly resume?: boolean;
   }[];
   readonly nodes: readonly CanvasNodeSnapshot[];
   readonly actors: readonly {
@@ -432,7 +437,7 @@ export interface WorkflowDraftCheck {
 /** AI 编辑的会话（ADR 036）：由工作台创建，工作目录指向草稿。 */
 export interface WorkflowDraftEditor {
   /** 开编辑会话、打开它，并发出第一条消息。 */
-  start(draft: WorkflowDraft, title: string, firstMessage: string): Promise<void>;
+  start(draft: WorkflowDraft, title: string, firstMessage: { readonly text: string; readonly display: MessageDisplay }): Promise<void>;
   /** 打开这份草稿已有的编辑会话；没有（例如界面重载过）时返回 false。 */
   show(draftId: string): Promise<boolean>;
   has(draftId: string): boolean;
@@ -498,9 +503,18 @@ export interface WorkflowLaunchRequest {
   readonly entry?: string;
 }
 
+/** 运行管理的筛选条件，跨项目打开运行时随返回入口保留。 */
+export interface RunManagerFilters {
+  readonly query: string;
+  readonly status: string;
+  readonly scope: "project" | "all";
+  readonly showArchived: boolean;
+}
+
 export type WorkflowPanelRequest =
   | { readonly kind: "detail"; readonly workflowId: string }
-  | { readonly kind: "launch"; readonly launch: WorkflowLaunchRequest };
+  | { readonly kind: "launch"; readonly launch: WorkflowLaunchRequest }
+  | { readonly kind: "run"; readonly project: string; readonly runId: string; readonly returnFilters: RunManagerFilters };
 
 export interface WorkflowService {
   isActive(): boolean;
@@ -561,8 +575,8 @@ export interface WorkflowService {
   takeFocusRun(): string;
   /** 请求面板查看工作流详情或打开启动表单。 */
   requestPanel(request: WorkflowPanelRequest): void;
-  /** 取走尚未处理的面板请求；没有则返回 null。 */
-  takePanelRequest(): WorkflowPanelRequest | null;
+  /** 取走尚未处理的面板请求。跨项目的请求只由目标面板取走。 */
+  takePanelRequest(project?: string): WorkflowPanelRequest | null;
   /** 手动刷新（运行列表 + 已打开的快照流；错误向调用方抛出）。 */
   refresh(): Promise<void>;
   /** `run-detail` → 画布快照（每 runId 一个只读快照流）。 */

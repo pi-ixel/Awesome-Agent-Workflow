@@ -272,10 +272,17 @@ it("keeps all 16 plugin names and 87 dependency relations aligned with their pro
     ],
     [
       "project",
-      "可选：工作流进度",
+      "可选：项目界面扩展",
       "workflow",
       "src/plugins/project/ui/workbench.ts",
-      'ctx.inject(["workflowUi"]',
+      'ctx.inject(["projectExtension"]',
+    ],
+    [
+      "agents",
+      "可选：切换前停下进行中的工作",
+      "workflow",
+      "src/plugins/agents/ui/workbench.tsx",
+      'ctx.inject(["agentSwitchGuard"]',
     ],
     [
       "documents",

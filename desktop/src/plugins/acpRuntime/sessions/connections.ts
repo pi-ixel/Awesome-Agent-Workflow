@@ -359,7 +359,11 @@ export class RuntimeConnections implements AcpProtocolResources {
       throw new Error("Agent 未声明恢复原会话的能力");
     const stopReplay = session.onEvent(options.onReplay);
     try {
-      await session.loadSession(options.sessionId, options.workspacePath);
+      await session.loadSession(
+        options.sessionId,
+        options.workspacePath,
+        options.mcpServers?.length ? { mcpServers: options.mcpServers } : undefined,
+      );
     } finally {
       stopReplay();
     }

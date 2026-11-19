@@ -1,3 +1,4 @@
+import type { MessageDisplay } from "../../../shared/messageDisplay.ts";
 import type {
   AcpDialect,
   AcpSessionOptions,
@@ -356,8 +357,8 @@ export class AcpSession implements AcpSessionPort {
     options: {
       timeoutMs?: number;
       beforeDispatch?: () => void;
-      /** 替用户发的消息（如工作流给 Agent 的说明）：轮次开始后把原文作为用户消息告诉会话视图。 */
-      echo?: "workflow";
+      /** 插件替用户发的消息：轮次开始后把原文连同显示方式作为用户消息告诉会话视图。 */
+      echo?: MessageDisplay;
     } = {},
   ): Promise<PromptResult> {
     this.assertSession();
@@ -371,8 +372,8 @@ export class AcpSession implements AcpSessionPort {
       // 输入、工作流调度）一视同仁，会话视图运行态以它为准。
       this.emit({ type: "turn_started", sessionId });
     }
-    if (options.echo === "workflow" && typeof text === "string") {
-      this.emit({ type: "user_message_chunk", sessionId, text, origin: "workflow" });
+    if (options.echo && typeof text === "string") {
+      this.emit({ type: "user_message_chunk", sessionId, text, display: options.echo });
     }
     let result: PromptResult | null = null;
     try {

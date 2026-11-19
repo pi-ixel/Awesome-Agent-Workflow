@@ -60,7 +60,10 @@ export const {
   closeSessionRuntime,
   deleteArchivedSession,
   canDeleteArchivedSession,
-  adoptExternalSessionRuntime,
+  registerSessionTools,
+  openPluginSessionRuntime,
+  watchSessionTurns,
+  watchSessionEvents,
   projectFactory,
   dispose,
 } = createSessionCoordinator({

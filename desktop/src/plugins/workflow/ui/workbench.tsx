@@ -2,14 +2,17 @@
  * workflow 插件的 workbench 挂载。
  *
  * - panelId "aaw"：launcher（新标签页入口）+ View（AAW 面板）；
- * - `workflowUi` 服务（WorkflowView）：会话输入框的工作流斜杠命令、空会话的
- *   工作流入口、会话状态卡与项目总览里的运行、节点会话顶部的回指条；
+ * - `projectExtension` 服务（ADR 037）：项目界面的通用扩展位——会话输入框的
+ *   工作流斜杠命令、空会话的工作流入口、会话状态卡与项目总览里的运行、节点
+ *   会话顶部的回指条、项目树上的工作流按钮；`workflowUi` 只供插件内部用
+ *   （通知打开运行）；
  * - 工作区作用域：订阅 workbench 导航的 contextPath，把当前项目路径经
  *   `service.bindWorkspace` 绑定为引擎请求作用域（list/snapshot 的 cwd）；
  * - 侧栏会话分组：一次运行的节点会话收进一组（ADR 027）；
  * - 节点会话打开：面板「打开会话」经 project.sessions.openSessionFromEntry
  *   进中央 SessionView，与用户点侧栏会话条目同一条路径。
  */
+import type { AgentSwitchGuard } from "../../agents/service.ts";
 import { readWorkflowExecutors, writeWorkflowExecutors } from "../status/executors.ts";
 import { createDraftEditor } from "../editing/draftSessions.ts";
 import type { Context } from "cordis";
@@ -21,7 +24,7 @@ import { openRunFromNotification } from "../status/notifications.ts";
 import { errorLine } from "../status/errorText.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { WorkflowIcon } from "../../../shared/ui/icons.tsx";
-import type { ProjectService } from "../../project/service.ts";
+import type { ProjectActivities, ProjectExtension, ProjectQuickAction, ProjectService } from "../../project/service.ts";
 import type { WorkflowExecutors, WorkflowDraftEditor, WorkflowFileTransfer,
   RunSessionLinks,
   WorkflowEntryCommand,
@@ -38,7 +41,6 @@ import { TextLink } from "../../../shared/ui/TextLink.tsx";
 import { WorkflowOverview } from "./WorkflowOverview.tsx";
 import { WorkflowSessionBanner } from "./WorkflowSessionBanner.tsx";
 import { AWAITING_CONFIRM_CHIP, AWAITING_INPUT_CHIP, runSessionGroups } from "./sessionGroups.ts";
-import { configurationDigest, readSessionOwner } from "../sessionHost/sessionOwner.ts";
 
 const panelId = "aaw";
 /** 右栏默认比例（与工作台 panelLayout 的默认值一致；跨插件不引其内部模块）。 */
@@ -96,7 +98,6 @@ export function createWorkflowWorkbench(
   workbench: WorkbenchService,
   project: ProjectService,
   pickFiles?: () => Promise<readonly string[]>,
-  sessionOwnerKey?: (path: string, sessionId: string) => Promise<string | undefined>,
   transfer?: WorkflowFileTransfer,
   editor?: WorkflowDraftEditor,
   executors?: WorkflowExecutors,
@@ -124,11 +125,9 @@ export function createWorkflowWorkbench(
     const path = projectPath ?? workbench.navigation.getState().contextPath;
     if (!path) return;
     void (async () => {
-      const owner = await sessionOwnerKey?.(path, sessionId);
-      if (!active()) return;
       // 完整视图会盖住中间的会话：打开会话时退回普通布局，会话才看得见。
       workbench.panels.getState().fullViewExit(path);
-      await project.sessions.openSessionFromEntry(path, sessionId, owner);
+      await project.sessions.openSessionFromEntry(path, sessionId);
     })().catch((error: unknown) => {
       workbench.showToast({ message: error instanceof Error ? error.message : String(error), variant: "warn" });
     });
@@ -165,9 +164,32 @@ export function createWorkflowWorkbench(
   // ------------------------------------------------------------ workflowUi
   const status = createStore<WorkflowProjectStatus>(() => ({ workspacePath: null, runs: [] }));
   const entries = createStore<readonly WorkflowEntryCommand[]>(() => []);
+  // 项目界面的通用扩展位用的同一份状态（ADR 037）。
+  const activities = createStore<ProjectActivities>(() => ({ workspacePath: null, items: [] }));
+  const quickAction = createStore<ProjectQuickAction | null>(() => ({ label: "启动工作流", run: (path) => openLaunch(path) }));
   const publishStatus = () => {
     const { workspace, runs } = workflow.sessionLinks();
-    status.setState({ workspacePath: workspace, runs: runBriefs(runs) }, true);
+    const briefs = runBriefs(runs);
+    status.setState({ workspacePath: workspace, runs: briefs }, true);
+    activities.setState({
+      workspacePath: workspace,
+      items: briefs.map((run) => ({
+        id: run.runId,
+        title: run.title,
+        label: run.label,
+        attention: run.waiting,
+        detail: `${run.workflowName}${run.step ? ` · ${run.step}` : ""}`,
+        summary: `${run.title} · ${run.label}${run.step ? ` · ${run.step}` : ""}`,
+        openLabel: `查看工作流运行：${run.title}`,
+      })),
+    }, true);
+    const lead = briefs[0];
+    quickAction.setState(
+      lead
+        ? { label: lead.waiting ? "回复进行中的工作流" : "查看进行中的工作流", run: (path) => openRun(path, lead.runId) }
+        : { label: "启动工作流", run: (path) => openLaunch(path) },
+      true,
+    );
   };
   let entriesSeq = 0;
   const loadEntries = () => {
@@ -250,7 +272,12 @@ export function createWorkflowWorkbench(
           <WorkflowPanel
             service={workflow}
             project={projectPath}
-            onOpenProjectRun={(target, runId) => openRunFromNotification(workbench, openRun, target, runId)}
+            onOpenProjectRun={(target, runId, returnFilters) => openRunFromNotification(
+              workbench,
+              (path, id) => show(path, () => workflow.requestPanel({ kind: "run", project: path, runId: id, returnFilters })),
+              target,
+              runId,
+            )}
             pickFiles={pickFiles}
             transfer={transfer}
             editor={editor}
@@ -264,10 +291,23 @@ export function createWorkflowWorkbench(
       );
     },
   };
+  const extension: ProjectExtension = {
+    activityTitle: "AAW 工作流",
+    activities,
+    openActivity: openRun,
+    slashGroup: "工作流入口",
+    slashEntries: entries,
+    quickAction,
+    // 打开右侧 AAW 面板并落在工作流库（与总览区块的「工作流库」按钮同一条链路）。
+    treeAction: { label: "工作流", hint: "打开工作流", Icon: WorkflowIcon, run: (path) => openLaunch(path, {}) },
+    Overview: view.Overview,
+    SessionBanner: view.SessionBanner,
+  };
   return {
     sidebar,
     panel,
     view,
+    extension,
     openRun,
     openNodeSession,
     publishStatus,
@@ -278,18 +318,40 @@ export function createWorkflowWorkbench(
   };
 }
 
+/**
+ * 切换 Agent 的闸（ADR 037）：节点会话与普通会话同池，切换前先停下进行中的
+ * 运行（运行中或停在确认关卡，不含已归档）。
+ */
+export function workflowSwitchGuard(workflow: Pick<WorkflowService, "runsAcrossProjects" | "stop">): AgentSwitchGuard {
+  return {
+    activeWork: () =>
+      workflow
+        .runsAcrossProjects()
+        .then((runs) =>
+          runs
+            .filter((run) => run.archivedAt == null && (run.status === "running" || run.status === "waiting"))
+            .map((run) => ({ id: run.runId, title: run.title })),
+        ),
+    describe: (work) => {
+      const names = work.map((item) => item.title.trim() || item.id.slice(0, 8));
+      const titles = names.length <= 3 ? names.join("、") : `${names.slice(0, 3).join("、")} 等`;
+      return `有 ${work.length} 个工作流正在运行（${titles}），切换会先停止它们；之后可在工作流面板重跑。`;
+    },
+    stopAll: (work) => Promise.all(work.map((item) => workflow.stop(item.id))).then(() => undefined),
+  };
+}
+
 export const name = "workflow-workbench";
-export const inject = ["workflow", "workbench", "project", "host", "agents", "acpRuntime"];
+export const inject = ["workflow", "workbench", "project", "host", "agents"];
 
 export function apply(ctx: Context): void {
-  const { workflow, workbench, project, host, agents, acpRuntime } = ctx;
-  const ui = createWorkflowWorkbench(workflow, workbench, project, () => host.dialogs.pickFiles("选择附件"), async (path, sessionId) => {
-    const owner = readSessionOwner(host.storage, path, sessionId);
-    if (!owner || !agents.resolve(owner.agentId)) throw new Error("无法找到节点会话所属的 Agent，请检查运行状态。");
-    const agentKey = agents.selectionKey(project.projects.workspace.getState().toolPaths, owner.agentId);
-    if (await configurationDigest(agentKey) !== owner.configuration) throw new Error("节点会话所属的 Agent 配置已更改，请恢复原配置后打开。");
-    return agents.selectedId === owner.agentId ? undefined : agentKey;
-  }, {
+  const { workflow, workbench, project, host, agents } = ctx;
+  const draftEditor = createDraftEditor({
+    project,
+    currentProject: () => workbench.navigation.getState().contextPath ?? null,
+  });
+  ctx.effect(() => project.sessions.registerSessionTools(draftEditor.sessionTools), "workflow:draft-tools");
+  const ui = createWorkflowWorkbench(workflow, workbench, project, () => host.dialogs.pickFiles("选择附件"), {
     async saveText(defaultName, text) {
       const path = await host.dialogs.saveFile({ defaultPath: defaultName, filters: [{ name: "AAW 工作流", extensions: ["json"] }] });
       if (!path) return false;
@@ -300,12 +362,7 @@ export function apply(ctx: Context): void {
       const [path] = await host.dialogs.pickFiles("选择要导入的工作流文件");
       return path ? host.archives.readTextFile(path) : null;
     },
-  }, createDraftEditor({
-    project,
-    agents,
-    protocol: acpRuntime.protocol,
-    currentProject: () => workbench.navigation.getState().contextPath ?? null,
-  }), {
+  }, draftEditor, {
     defaultName: () => agents.resolve()?.displayName ?? "当前 Agent",
     read: (workflowId) => readWorkflowExecutors(host.storage, workflowId),
     write: (workflowId, plan) => writeWorkflowExecutors(host.storage, workflowId, plan),
@@ -370,4 +427,6 @@ export function apply(ctx: Context): void {
     };
   }, "workflow:session-groups");
   ctx.provide("workflowUi", ui.view);
+  ctx.provide("projectExtension", ui.extension);
+  ctx.provide("agentSwitchGuard", workflowSwitchGuard(workflow));
 }

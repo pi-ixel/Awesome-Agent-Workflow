@@ -5,7 +5,7 @@ import { useRegisteredSnapshot } from "../../../../shared/state/useRegisteredSna
 import { useProjectGit, type GitService } from "../../../git/service.ts";
 import type { GitReviewNavigation } from "../../../git/types.ts";
 import type { ProjectWorkspace } from "../../service.ts";
-import type { WorkflowRunBrief, WorkflowView } from "../../../workflow/types.ts";
+import type { ProjectActivity, ProjectExtension } from "../../ui/extension.ts";
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { pathKey } from "../../../../shared/panelPaths.ts";
@@ -58,7 +58,7 @@ function Section({
   );
 }
 
-const NO_RUNS: readonly WorkflowRunBrief[] = [];
+const NO_ACTIVITIES: readonly ProjectActivity[] = [];
 
 /** 会话消息容器内的摘要，开关浮层不重挂消息流或输入区。 */
 export function SessionStatusOverlay({
@@ -66,7 +66,7 @@ export function SessionStatusOverlay({
   queryGit,
   openGitReview,
   watchActivity,
-  workflow,
+  extension,
   enabled,
   centered = false,
   topLeft,
@@ -77,7 +77,7 @@ export function SessionStatusOverlay({
   queryGit?: GitService["query"];
   openGitReview?: GitReviewNavigation["open"];
   watchActivity?: ProjectWorkspace["subscribeWorkspaceActivity"];
-  workflow?: Pick<WorkflowView, "status" | "openRun">;
+  extension?: Pick<ProjectExtension, "activities" | "openActivity" | "activityTitle">;
   enabled: boolean;
   /** 空态居中（ZCode 式）：滚动区改为内容高并以 mt-auto 下推，与 footer
    * （mb-auto）作为一组垂直居中；溢出时自动边距归零，内容从顶部可滚。 */
@@ -122,18 +122,18 @@ export function SessionStatusOverlay({
     () => (plan?.kind === "plan" ? taskProgressSummary(plan.entries) : null),
     [plan],
   );
-  const workflowStatus = useRegisteredSnapshot(
-    workflow?.status,
+  const extensionStatus = useRegisteredSnapshot(
+    extension?.activities,
     useShallow((state) => ({
       project: state?.workspacePath ?? null,
-      runs: state?.runs ?? NO_RUNS,
+      items: state?.items ?? NO_ACTIVITIES,
     })),
   );
-  const runs =
-    !!project && !!workflowStatus.project && pathKey(project) === pathKey(workflowStatus.project)
-      ? workflowStatus.runs
-      : NO_RUNS;
-  const leadRun = runs[0] ?? null;
+  const activities =
+    !!project && !!extensionStatus.project && pathKey(project) === pathKey(extensionStatus.project)
+      ? extensionStatus.items
+      : NO_ACTIVITIES;
+  const leadRun = activities[0] ?? null;
   const hasContent =
     enabled &&
     !!project &&
@@ -154,7 +154,7 @@ export function SessionStatusOverlay({
         : git.watchError
           ? "自动刷新不可用"
           : "正在读取状态…";
-  const hasWarning = !!(git.error || git.watchError || leadRun?.waiting);
+  const hasWarning = !!(git.error || git.watchError || leadRun?.attention);
   const openGit = (): void => {
     if (!project || !gitModel) return;
     openGitReview?.(project, "changes");
@@ -355,28 +355,25 @@ export function SessionStatusOverlay({
                       />
                     </Section>
                   )}
-                  {runs.length > 0 && (
-                    <Section title="AAW 工作流">
-                      {runs.map((run) => (
+                  {activities.length > 0 && extension && (
+                    <Section title={extension.activityTitle}>
+                      {activities.map((item) => (
                         <button
-                          key={run.runId}
+                          key={item.id}
                           type="button"
-                          aria-label={`查看工作流运行：${run.title}`}
+                          aria-label={item.openLabel}
                           onClick={() => {
-                            if (project) workflow?.openRun(project, run.runId);
+                            if (project) extension.openActivity(project, item.id);
                           }}
                           className="block w-full rounded px-2 py-2 text-left text-sm hover:bg-raised"
                         >
                           <span className="flex items-center justify-between gap-2">
-                            <span className="truncate" data-hint={run.title}>{run.title}</span>
-                            <span className={run.waiting ? "shrink-0 text-warn-ink" : "shrink-0 text-info"}>
-                              {run.label}
+                            <span className="truncate" data-hint={item.title}>{item.title}</span>
+                            <span className={item.attention ? "shrink-0 text-warn-ink" : "shrink-0 text-info"}>
+                              {item.label}
                             </span>
                           </span>
-                          <span className="mt-1 block truncate text-ink-faint">
-                            {run.workflowName}
-                            {run.step ? ` · ${run.step}` : ""}
-                          </span>
+                          <span className="mt-1 block truncate text-ink-faint">{item.detail}</span>
                         </button>
                       ))}
                     </Section>

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatInput } from "../../../../src/plugins/project/conversation/ui/ChatInput.tsx";
 import { AnnotationCards } from "../../../../src/plugins/project/conversation/ui/AnnotationCards.tsx";
 import { UserMessage } from "../../../../src/plugins/project/conversation/ui/UserMessage.tsx";
-import { WORKFLOW_INSTRUCTION_MARK, withWorkflowInstruction } from "../../../../src/shared/workflowInstruction.ts";
+import { pluginMessage } from "../../../../src/shared/messageDisplay.ts";
 import { createAnnotationDraftStore } from "../../../../src/plugins/project/composer/annotationDraftStore.ts";
 import { webviewStorage } from "../../../../src/plugins/host/storage/storage.ts";
 import { createTestWorkspace } from "../../../helpers/workspace.ts";
@@ -254,14 +254,16 @@ vi.mock("../../../../src/plugins/project/ui/bindings/composerView.ts", async () 
   return { useProjectComposer: () => testComposer };
 });
 
-it("folds what a workflow told the Agent into one line and keeps the user's own words visible", () => {
+it("folds what a plugin told the Agent into one line and keeps the user's own words visible", () => {
+  const message = pluginMessage({ source: "workflow", foldLabel: "工作流给 Agent 的说明", folded: "规则：先读格式说明，改完调用 check_workflow。", visible: "用户的要求：加一个人工确认" });
   render(
     <UserMessage
       item={{
         id: "wf",
         createdAt: "2026-11-14T00:00:00Z",
         kind: "user",
-        text: withWorkflowInstruction("规则：先读格式说明，改完调用 check_workflow。", "用户的要求：加一个人工确认"),
+        text: message.text,
+        display: message.display,
       }}
     />,
   );
@@ -269,5 +271,6 @@ it("folds what a workflow told the Agent into one line and keeps the user's own 
   const fold = screen.getByText("工作流给 Agent 的说明").closest("details");
   expect(fold).not.toHaveAttribute("open");
   expect(fold).toHaveTextContent("规则：先读格式说明");
-  expect(screen.queryByText(WORKFLOW_INSTRUCTION_MARK, { exact: false })).toBeNull();
+  // 气泡里只有用户自己的话，规则不在气泡里。
+  expect(screen.getByText("用户的要求：加一个人工确认").textContent).not.toContain("规则");
 });

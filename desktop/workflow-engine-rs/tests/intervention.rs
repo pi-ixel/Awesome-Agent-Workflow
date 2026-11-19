@@ -7,7 +7,9 @@ use aaw_workflow_core::{
 };
 use serde_json::{Value, json};
 use std::{
+    io::Write,
     path::PathBuf,
+    process::{Command, Stdio},
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -190,6 +192,31 @@ fn discarding_rewinds_the_state_deletes_declared_files_and_opens_new_sessions() 
     let links = f.db.session_links("run", &f.p()).unwrap();
     assert!(links.iter().any(|l| l.site == "design" && l.ordinal == design.ordinal && l.session_id == "s-design"));
     assert_eq!(f.db.actor_session("run", &f.p(), "Designer").unwrap().as_deref(), Some("s-design-2"));
+
+    // 快照按轮次保留原会话与重做后的会话，供画布按轮次打开。
+    let mut service = Command::new(env!("CARGO_BIN_EXE_workflow_service"))
+        .arg(&f.file)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = service.stdin.take().unwrap();
+    writeln!(input, "{}", json!({
+        "id": 2,
+        "method": "snapshot",
+        "params": { "cwd": f.p(), "runId": "run" }
+    })).unwrap();
+    drop(input);
+    let output = service.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let messages: Vec<Value> = String::from_utf8(output.stdout).unwrap()
+        .lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    let nodes = messages.iter().find(|message| message["id"] == 2).unwrap()
+        ["result"]["nodes"].as_array().unwrap();
+    for (ordinal, session_id) in [(design.ordinal, "s-design"), (again.ordinal, "s-design-2")] {
+        let node = nodes.iter().find(|node| node["siteId"] == "design" && node["ordinal"] == ordinal).unwrap();
+        assert_eq!(node["sessionId"], session_id);
+    }
 
     // 被越过的检查点不能再当目标；审计留了一条。
     let checkpoints = f.db.checkpoints("run", &f.p()).unwrap();

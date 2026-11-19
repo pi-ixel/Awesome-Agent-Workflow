@@ -175,6 +175,8 @@ export interface AcpProtocolRestoreOptions {
   readonly configuration: readonly SessionConfigOption[];
   readonly isCurrent: () => boolean;
   readonly onReplay: (event: AcpSessionEvent) => void;
+  /** 恢复时下发的附加 MCP 工具（缺省用会话构造时的清单）。 */
+  readonly mcpServers?: readonly McpServer[];
 }
 
 export interface AcpProtocolSessionOptions

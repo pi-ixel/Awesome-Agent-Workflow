@@ -1,3 +1,4 @@
+import type { SendOptions } from "../conversation/sessionStore.ts";
 import { removeSessionDraft } from "../composer/draftStore.ts";
 import {
   sameSessionAgent,
@@ -75,7 +76,10 @@ export type ProjectOperations = Pick<ProjectWorkspace, "registerProject"> &
     | "busySessionIds"
     | "runtimeDebugSnapshot"
     | "openSession"
-    | "adoptExternalSession"
+    | "registerSessionTools"
+    | "openPluginSession"
+    | "watchTurns"
+    | "watchEvents"
     | "recoverSession"
     | "stopRecovery"
     | "switchAgent"
@@ -220,7 +224,13 @@ export class DesktopProject {
         renameDisplayedSession: this.renameDisplayedSession.bind(this),
         preloadSessionList: this.preloadSessionList.bind(this),
         openSession: this.openSession.bind(this),
-        adoptExternalSession: this.adoptExternalSession.bind(this),
+        registerSessionTools: (provider) => this.operations.registerSessionTools(provider),
+        openPluginSession: (options) => {
+          this.assertOpen();
+          return this.operations.openPluginSession(options);
+        },
+        watchTurns: (target, listener) => this.operations.watchTurns(target, listener),
+        watchEvents: (target, listener) => this.operations.watchEvents(target, listener),
         recoverSession: this.recoverSession.bind(this),
         stopRecovery: this.stopRecovery.bind(this),
         switchAgent: this.switchAgent.bind(this),
@@ -611,10 +621,6 @@ export class DesktopProject {
     this.assertOpen();
     return this.operations.openSession(path, options);
   }
-  adoptExternalSession(options: Parameters<ProjectSessions["adoptExternalSession"]>[0]) {
-    this.assertOpen();
-    return this.operations.adoptExternalSession(options);
-  }
   recoverSession(target: SessionTarget): Promise<void> {
     this.assertOpen();
     return this.operations.recoverSession(target);
@@ -758,11 +764,12 @@ export class DesktopProject {
     target: SessionTarget,
     text: string,
     attachments?: readonly ContentBlock[],
+    options?: SendOptions,
   ): boolean {
     const session = this.session(target);
     return (
       !session.disposed &&
-      session.store.getState().sendPrompt(text, attachments)
+      session.store.getState().sendPrompt(text, attachments, options)
     );
   }
   steer(target: SessionTarget, text: string, attachments?: readonly ContentBlock[]): boolean {

@@ -233,6 +233,7 @@ function parseNode(value: unknown): CanvasNodeSnapshot | null {
     phaseId: asString(node.phaseId),
     actorSiteId: asString(node.actorSiteId) ?? "",
     actorOrdinal: asNumber(node.actorOrdinal) ?? 0,
+    ...(Object.hasOwn(node, "sessionId") ? { sessionId: asString(node.sessionId) } : {}),
     result: node.result ?? null,
     candidates: asArray(node.candidates),
     ...(node.awaitingInput === true ? { awaitingInput: true } : {}),
@@ -340,6 +341,7 @@ export function deriveCanvasSnapshot(runDetail: unknown): CanvasSnapshot {
       return [{
         siteId: asString(parsed.siteId) ?? "",
         ordinal: asNumber(parsed.ordinal) ?? 0,
+        ...(parsed.resume === true ? { resume: true } : {}),
       }];
     }),
     // 引擎按派发顺序给出记录：后面还有记录 = 流程已接着往下走。
@@ -538,8 +540,14 @@ export function nodeStatus(
         ? { ...view("running", latest.ordinal, AWAITING_INPUT_NOTE, true), awaiting: true }
         : view("running", latest.ordinal);
     }
-    if (snapshot.retries?.some((retry) => retry.siteId === latest.siteId && retry.ordinal === latest.ordinal)) {
-      return view("pending", latest.ordinal, "已授权重试一次，继续运行后重新执行");
+    const retry = snapshot.retries?.find((item) => item.siteId === latest.siteId && item.ordinal === latest.ordinal);
+    // 运行被停止后 Agent 已经交了结果：这一步算完成，继续运行直接往下走（ADR 037）。
+    // 意外中断（服务崩溃等）不在此列：结果是否可用仍由你在「处置」里决定。
+    if (retry?.resume && latest.candidates.some((candidate) => (candidate as { state?: unknown } | null)?.state === "submitted")) {
+      return view("done", latest.ordinal, "结果已交，继续运行后往下走");
+    }
+    if (retry) {
+      return view("pending", latest.ordinal, retry.resume ? "已停止，继续运行后接着做这一步" : "已授权重试一次，继续运行后重新执行");
     }
     return view("stuck", latest.ordinal);
   }

@@ -4,7 +4,7 @@ import { WorkflowPanel } from "../../../src/plugins/workflow/ui/WorkflowPanel.ts
 import type { WorkflowCatalog } from "../../../src/plugins/workflow/types.ts";
 import { fakeWorkflowService, runSummary, workflowSummary } from "./helpers.ts";
 
-/** 工作流库 → 工作流 → 运行 三层导航；模板与运行分页签呈现。 */
+/** 工作流库和运行管理平级，模板详情和运行分别进入。 */
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -20,25 +20,26 @@ const catalog: WorkflowCatalog = {
 
 const crumb = () => document.querySelector(".workflow-run-name")?.textContent;
 
-it("opens on the library with a real title, presets first, runs and mine on their own tabs", async () => {
+it("places the library and run management in the same navigation and keeps templates in the library", async () => {
   const fake = fakeWorkflowService();
   fake.setLibrary([workflowSummary(), workflowSummary("my-flow", "user")]);
   fake.setRuns([runSummary({ runId: "r1", title: "给 logo 加底座", status: "completed", updatedAt: Date.now() })]);
   render(<WorkflowPanel service={fake.service} />);
-  // 库页有标题行；面包屑只有一项，不再渲染。
-  expect(await screen.findByRole("heading", { level: 1, name: "工作流库" })).toBeInTheDocument();
+  const navigation = screen.getByRole("tablist", { name: "工作流面板" });
+  expect(within(navigation).getByRole("tab", { name: "工作流库" })).toHaveAttribute("aria-selected", "true");
+  expect(within(navigation).getByRole("tab", { name: "运行管理" })).toBeInTheDocument();
   expect(screen.queryByRole("navigation", { name: "位置" })).not.toBeInTheDocument();
-  // 默认停在「预置」页签：卡片第三行说上次结果，而不是只写跑过几次。
+  // 预置卡片用于查看和发起模板。
   const presets = await screen.findByRole("region", { name: "预置工作流" });
   expect(await within(presets).findByRole("button", { name: "查看工作流 AAW 轻量开发" })).toBeInTheDocument();
-  expect(within(presets).getByText(/上次 已完成 · 刚刚/)).toBeInTheDocument();
-  expect(within(presets).queryByText(/本项目运行过/)).not.toBeInTheDocument();
-  // 「我的」「运行」各自一个页签，不挤在同一屏。
+  expect(within(presets).getByRole("button", { name: "运行" })).toBeInTheDocument();
+  expect(within(presets).queryByText("给 logo 加底座")).not.toBeInTheDocument();
+  // 「我的」在库里，运行管理在上一级。
   expect(screen.getByRole("tab", { name: "预置 1" })).toHaveAttribute("aria-selected", "true");
   fireEvent.click(screen.getByRole("tab", { name: "我的 1" }));
   expect(within(screen.getByRole("region", { name: "我的工作流" })).getByRole("button", { name: "查看工作流 my-flow" })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("tab", { name: /运行 1/ }));
-  expect(within(screen.getByRole("region", { name: "运行" })).getByRole("button", { name: "查看运行 给 logo 加底座" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", { name: "运行管理" }));
+  expect(within(screen.getByRole("region", { name: "运行管理" })).getByRole("button", { name: "查看运行 给 logo 加底座" })).toBeInTheDocument();
 });
 
 it("keeps the chosen tab after going into a workflow and back", async () => {
@@ -51,7 +52,7 @@ it("keeps the chosen tab after going into a workflow and back", async () => {
   expect(await screen.findByRole("tab", { name: "我的 1" })).toHaveAttribute("aria-selected", "true");
 });
 
-it("puts the run that waits for you on top and makes 去处理 the only primary action", async () => {
+it("places runs needing confirmation in their own section above the running and completed records", async () => {
   const fake = fakeWorkflowService();
   fake.setRuns([
     runSummary({ runId: "done", title: "已经跑完", workflowId: "other", name: "AAW 完整开发", status: "completed", updatedAt: Date.now() }),
@@ -59,18 +60,15 @@ it("puts the run that waits for you on top and makes 去处理 the only primary 
   ]);
   render(<WorkflowPanel service={fake.service} />);
   // 提醒点挂在「运行」页签上：切到别的页签也不丢提醒。
-  const runTab = await screen.findByRole("tab", { name: /运行 2/ });
+  const runTab = await screen.findByRole("tab", { name: "运行管理" });
   expect(runTab.querySelector("[data-dot]")).not.toBeNull();
   fireEvent.click(runTab);
-  const panel = screen.getByRole("region", { name: "运行" });
-  const callout = within(panel).getByLabelText("要你处理的运行");
-  expect(callout).toHaveTextContent("1 次运行等你确认");
-  expect(callout).toHaveTextContent("等你确认需求");
-  expect(within(callout).getByRole("button", { name: "去处理" })).toBeInTheDocument();
-  // 待处理的排在列表最前；已完成那行不挂绿徽标。
-  const rows = within(panel).getAllByRole("button", { name: /查看运行/ });
-  expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual(["查看运行 等你确认需求", "查看运行 已经跑完"]);
-  expect(rows[1]).not.toHaveTextContent("已完成");
+  const panel = screen.getByRole("region", { name: "运行管理" });
+  const pending = within(panel).getByRole("region", { name: "待处理" });
+  const history = within(panel).getByRole("region", { name: "运行记录" });
+  expect(within(pending).getByRole("button", { name: "查看运行 等你确认需求" })).toBeInTheDocument();
+  expect(within(history).queryByRole("button", { name: "查看运行 等你确认需求" })).not.toBeInTheDocument();
+  expect(within(history).getByRole("button", { name: "查看运行 已经跑完" })).toHaveTextContent("已完成");
 });
 
 it("numbers repeat runs of one workflow, and writes the workflow name only when it changes", async () => {
@@ -82,8 +80,8 @@ it("numbers repeat runs of one workflow, and writes the workflow name only when 
     runSummary({ runId: "b1", title: "读文件并统计字数", workflowId: "other", name: "Python 转 Java", status: "completed", createdAt: 20, updatedAt: 20 }),
   ]);
   render(<WorkflowPanel service={fake.service} />);
-  fireEvent.click(await screen.findByRole("tab", { name: /运行 4/ }));
-  const panel = screen.getByRole("region", { name: "运行" });
+  fireEvent.click(await screen.findByRole("tab", { name: "运行管理" }));
+  const panel = screen.getByRole("region", { name: "运行管理" });
   expect(within(panel).getByRole("button", { name: "查看运行 写入并检查 hello.txt 第 3 次" })).toBeInTheDocument();
   expect(within(panel).getByRole("button", { name: "查看运行 写入并检查 hello.txt 第 2 次" })).toBeInTheDocument();
   expect(within(panel).getByRole("button", { name: "查看运行 写入并检查 hello.txt 第 1 次" })).toBeInTheDocument();
@@ -93,16 +91,13 @@ it("numbers repeat runs of one workflow, and writes the workflow name only when 
   expect(metas.filter((meta) => meta.textContent?.startsWith("Python 转 Java"))).toHaveLength(1);
 });
 
-it("says how many runs there are in total and links to all of them", async () => {
+it("lists all runs directly in run management", async () => {
   const fake = fakeWorkflowService();
   fake.setRuns(Array.from({ length: 7 }, (_, index) => runSummary({ runId: `r${index}`, title: `运行 ${index}`, status: "completed", createdAt: index, updatedAt: index })));
   render(<WorkflowPanel service={fake.service} />);
-  fireEvent.click(await screen.findByRole("tab", { name: /运行 7/ }));
-  const panel = screen.getByRole("region", { name: "运行" });
-  expect(within(panel).getByRole("button", { name: /查看全部 7 次/ })).toBeInTheDocument();
-  // 列表只画最近 5 条，尾巴写清楚还有几条。
-  expect(within(panel).getAllByRole("button", { name: /^查看运行/ })).toHaveLength(5);
-  expect(within(panel).getByText(/最近 5 条/)).toBeInTheDocument();
+  fireEvent.click(await screen.findByRole("tab", { name: "运行管理" }));
+  const panel = screen.getByRole("region", { name: "运行管理" });
+  expect(within(panel).getAllByRole("button", { name: /^查看运行/ })).toHaveLength(7);
 });
 
 it("shows a broken workflow with its first compile error instead of a run button", async () => {
@@ -134,7 +129,12 @@ it("goes from the library to the workflow, previews its graph and source, then s
   fireEvent.click(screen.getByRole("button", { name: "开始运行" }));
   await vi.waitFor(() => expect(crumb()).toBe("做一件小事"));
   // 运行标题就在页头，面包屑不再重复它。
-  expect(screen.getByRole("navigation", { name: "位置" })).toHaveTextContent(/^工作流库AAW 轻量开发$/);
+  expect(screen.getByRole("navigation", { name: "位置" })).toHaveTextContent(/^AAW 轻量开发运行详情$/);
+  fireEvent.click(screen.getByRole("button", { name: "AAW 轻量开发" }));
+  expect(await screen.findByRole("tab", { name: /本项目的运行/, selected: true })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "查看运行 做一件小事" }));
+  fireEvent.click(screen.getByRole("button", { name: "AAW 轻量开发" }));
+  expect(await screen.findByRole("tab", { name: /本项目的运行/, selected: true })).toBeInTheDocument();
 });
 
 it("copies a preset as mine and opens the copy", async () => {
@@ -159,7 +159,8 @@ it("opens the detail from the sidebar without opening the launch form", async ()
   const fake = fakeWorkflowService();
   fake.service.requestPanel({ kind: "detail", workflowId: "aaw-dev" });
   render(<WorkflowPanel service={fake.service} />);
-  expect(await screen.findByRole("navigation", { name: "位置" })).toHaveTextContent("AAW 轻量开发");
+  expect(screen.getByRole("navigation", { name: "位置" })).toHaveTextContent(/^工作流库模板详情$/);
+  expect(await screen.findByText("AAW 轻量开发", { selector: ".workflow-detail-title b" })).toBeInTheDocument();
   expect(screen.queryByRole("region", { name: "启动 AAW 轻量开发" })).not.toBeInTheDocument();
 });
 

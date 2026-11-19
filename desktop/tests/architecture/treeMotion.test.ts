@@ -41,9 +41,11 @@ describe("tree motion architecture", () => {
     expect(code).toContain("treeChevronClass");
     expect(code).not.toMatch(/<(?:details|summary)\b/);
     expect(code.replace("aria-expanded={menu}", "").match(/aria-expanded=/g)).toHaveLength(1);
-    for (const title of ["Git 工具", "任务进度", "AAW 工作流"]) {
+    for (const title of ["Git 工具", "任务进度"]) {
       expect(code).toMatch(new RegExp(`<Section\\s+title="${title}"`));
     }
+    // 扩展的活动分组（如「AAW 工作流」）标题由扩展给，同样走 Section。
+    expect(code).toMatch(/<Section\s+title=\{extension\.activityTitle\}/);
   });
   it("requires document outline folding to use the same branch as the file tree", () => {
     const code = readFileSync(

@@ -1,8 +1,7 @@
 /**
- * ADR 024 §5 ②：节点 Agent / 问题池 tracker 的进程工厂（transport.ts）。
+ * ADR 024 §5 ②：问题池 tracker 的进程工厂（transport.ts）。
  *
- * 原实现（源文件 nativeSessionHost.ts 底部的 createSpawnTransport，行为
- * 基准）与 realRuntime 的 createAgentTransport 走同一条 `acp_spawn` Tauri
+ * 与 realRuntime 的 createAgentTransport 走同一条 `acp_spawn` Tauri
  * IPC 路径（旧 src/acp/transport/tauriStdioTransport.ts）；远端底座把这条
  * 路径收敛为 `AcpProcessHost` 端口（spawn/subscribe/writeLine/closeInput/
  * killTree/release，wire 契约 `invoke("acp_spawn")` + `listen("acp://…")`

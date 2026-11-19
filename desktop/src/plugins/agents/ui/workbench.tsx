@@ -1,6 +1,7 @@
 import type { Context } from "cordis";
 import { useStore } from "zustand";
-import { AgentsSettingsSection, type WorkflowSwitchGuard } from "./AgentsSettings.tsx";
+import { AgentsSettingsSection } from "./AgentsSettings.tsx";
+import type { AgentSwitchGuard } from "../service.ts";
 import { BrainIcon } from "../../../shared/ui/icons.tsx";
 import { createAgentSwitchProgress } from "./agentSwitchProgress.ts";
 import { AgentSwitchPanel, AgentSwitchSidebarStatus } from "./AgentSwitchPanel.tsx";
@@ -27,23 +28,14 @@ export const agentSettings = {
         View: () => <AgentSwitchPanel controller={progress} navigation={workbench.navigation} />,
       }),
     );
-    // 工作流切换闸（软依赖 workflow 插件）：确认切换后先停进行中的运行
-    // 再切（单 Agent 原则：节点会话与普通会话同池，切换必须先清场）。
-    let workflowGuard: WorkflowSwitchGuard | undefined;
-    ctx.inject(["workflow"], (scoped) => {
-      const workflow = scoped.workflow;
-      workflowGuard = {
-        activeRuns: () =>
-          workflow
-            .runsAcrossProjects()
-            .then((runs) =>
-              runs
-                .filter((run) => run.archivedAt == null && (run.status === "running" || run.status === "waiting"))
-                .map((run) => ({ runId: run.runId, title: run.title })),
-            ),
-        stopAll: (runs) =>
-          Promise.all(runs.map((run) => workflow.stop(run.runId))).then(() => undefined),
-      };
+    // 切换闸（可选服务）：确认切换后先停下用到当前 Agent 连接的工作再切
+    // （单 Agent 原则：插件打开的会话与普通会话同池，切换必须先清场）。
+    let switchGuard: AgentSwitchGuard | undefined;
+    ctx.inject(["agentSwitchGuard"], (scoped) => {
+      switchGuard = scoped.agentSwitchGuard;
+      scoped.effect(() => () => {
+        switchGuard = undefined;
+      });
     });
     ctx.effect(() =>
       workbench.register("settings", {
@@ -56,7 +48,7 @@ export const agentSettings = {
             agents={agents}
             workspace={project.projects.workspace}
             switchAgent={(id, onRetrySuccess) => progress.start(id, onRetrySuccess)}
-            workflowGuard={workflowGuard}
+            switchGuard={switchGuard}
           />
         ),
       }),

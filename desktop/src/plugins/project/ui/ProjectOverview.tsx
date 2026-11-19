@@ -110,10 +110,11 @@ function EmptyState() {
 /** 项目总览：path 为 null 时呈引导空态。 */
 function ProjectOverview({
   path,
-  WorkflowOverview,
+  ExtensionOverview,
 }: {
   readonly path: string | null;
-  readonly WorkflowOverview?: ComponentType<{ readonly project: string }>;
+  /** 扩展在项目总览里的区块（如工作流）。 */
+  readonly ExtensionOverview?: ComponentType<{ readonly project: string }>;
 }) {
   if (path === null) {
     return <EmptyState />;
@@ -127,7 +128,7 @@ function ProjectOverview({
       >
         <ProjectStatusRow path={path} />
       </section>
-      {WorkflowOverview && <WorkflowOverview project={path} />}
+      {ExtensionOverview && <ExtensionOverview project={path} />}
     </div>
   );
 }

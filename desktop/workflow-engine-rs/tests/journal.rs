@@ -76,6 +76,28 @@ fn input_and_result_candidates_survive_reopen_without_implicit_retry() {
 }
 
 #[test]
+fn choosing_to_redo_a_step_discards_its_submitted_results() {
+    let file = path();
+    let mut db = Journal::open(&file).unwrap();
+    db.create("r", "project", &workflow("test".into(), false)).unwrap();
+    db.claim("r", "project", "owner").unwrap();
+    let action = db.dispatch("r", "project", "owner").unwrap().pop().unwrap();
+    db.link_session("r", "project", "owner", &action.site, action.ordinal, "session").unwrap();
+    let result = json!({"status":"ready","reference":"r","evidence":"e"});
+    db.record_result_candidate("r", "project", "owner", &action, "candidate", &result).unwrap();
+    db.authorize_retry("r", "project", "owner", &action.site, action.ordinal, "用户选择重做").unwrap();
+    db.supersede_candidates("r", "project", "owner", &action.site, action.ordinal).unwrap();
+    // 重做时不会把旧结果当作已交：候选作废，但留着可查。
+    assert_eq!(
+        db.result_candidates("r", "project", &action.site, action.ordinal).unwrap()[0]["state"],
+        "superseded"
+    );
+    assert_eq!(db.supersede_candidates("r", "project", "other", &action.site, action.ordinal).unwrap_err(), "RUN_LEASE_MISMATCH");
+    drop(db);
+    std::fs::remove_file(file).unwrap();
+}
+
+#[test]
 fn rejected_agent_result_remains_failed_and_can_be_reconciled() {
     let file = path();
     let mut db = Journal::open(&file).unwrap();

@@ -38,7 +38,10 @@ export function projectOperationsFrom(
     openSession: coordinator.openRealWorkspace,
     runBackgroundPrompt: coordinator.runBackgroundPrompt,
     backgroundPromptOptions: coordinator.backgroundPromptOptions,
-    adoptExternalSession: coordinator.adoptExternalSessionRuntime,
+    registerSessionTools: coordinator.registerSessionTools,
+    openPluginSession: coordinator.openPluginSessionRuntime,
+    watchTurns: coordinator.watchSessionTurns,
+    watchEvents: coordinator.watchSessionEvents,
     closeProject: coordinator.closeProjectRuntime,
     findSession: ({ workspacePath, agentKey, sessionId }) =>
       coordinator.findSessionRuntime(workspacePath, agentKey, sessionId),

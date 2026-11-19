@@ -5,15 +5,14 @@
  * 1. **engine**：WorkflowClient（IPC 三件套经 host.workflowEngine 注入——
  *    workflow_service_* 专用命令，跨 WebView 重载存活，ADR 024 §6 修正 1；
  *    装配时按宿主真相重建活动运行集，重载后退出闸门不失忆）；
- * 2. **sessionHost**：NativeSessionHost（三 hook + tracker + 交互直答），
- *    transport 工厂经 host.acpProcess 拉起节点 Agent（wire 契约
- *    invoke("acp_spawn") 同面），会话协议用共享 AcpSession（ADR 024 §7
- *    注入面修正：不注入 acpRuntime/acpConnection 服务）；
+ * 2. **sessionHost**：节点会话宿主（ADR 037）。节点会话是应用的普通会话，
+ *    宿主经 project.sessions 打开、发任务说明、订阅轮次与事件；问题池
+ *    tracker 经 host.acpProcess 拉起；
  * 3. **status**：引擎 run-detail → 画布快照的 WorkflowService，
  *    ctx.provide("workflow", service)。
  *
  * 感知面与生命周期（ADR 024 §3/§4）：
- * - subscribeSessionActivity：会话标题/活动感知 → sessionMap；
+ * - registerSessionTools：节点会话被（重新）打开时，向引擎要它的结果工具；
  * - registerWorkspaceHealthCheck：工作流服务、工作流库与节点 Agent 三项
  *   （health/healthChecks.ts）；
  * - 退出闸门：活动运行存在时参与退出（对齐旧 App.tsx 192-252 行语义——
@@ -24,30 +23,20 @@
 import { readRunExecutors, readWorkflowExecutors, writeRunExecutors } from "./status/executors.ts";
 import type { Context } from "cordis";
 import { WorkflowClient, type WorkflowPlatform } from "./engine/client.ts";
-import { NativeBridgeHub } from "./sessionHost/nativeBridge.ts";
-import type {
-  NativeHostDeps,
-  PermissionPolicyDeps,
-} from "./sessionHost/nativeSessionHost.ts";
-import {
-  attachNativeSessionHost,
-  productionCallbacks,
-} from "./sessionHost/nativeSessionHost.ts";
-import { WorkflowSessionMap } from "./sessionHost/sessionMap.ts";
 import { createTrackerTransport } from "./sessionHost/trackerRelay.ts";
+import { attachNodeSessionHost, type NodeSessionPort } from "./sessionHost/nodeSessionHost.ts";
+import { agentSupportsHttpMcp, asResultChannelOffer, resultChannelServer } from "./sessionHost/resultChannel.ts";
 import { createWorkflowService } from "./status/workflowService.ts";
 import { createNodePlans } from "./status/nodePlans.ts";
-import { createWorkflowAdoption } from "./sessionHost/adoption.ts";
-import { configurationDigest, readSessionOwner } from "./sessionHost/sessionOwner.ts";
 import { attachWorkflowNotifications, openRunFromNotification } from "./status/notifications.ts";
 import type { TrackerStartParamsWire } from "./types.ts";
+import { pathKey } from "../../shared/panelPaths.ts";
 
 export const name = "workflow";
 export const inject = [
   "host",
   "project",
   "agents",
-  "acpRuntime",
   "configuration",
   "diagnostics",
 ];
@@ -83,8 +72,6 @@ export function apply(ctx: Context): void {
   // 的 isBusy 靠这次探测把引擎侧仍在运行的 runId 补回 activeRuns
   // （ADR 024 §11「运行中退出」与「WebView 重载后插件重建」两条对策）。
   void client.rebuildActiveRunsFromHost().catch(() => {});
-  const bridge = new NativeBridgeHub();
-  const sessionMap = new WorkflowSessionMap();
 
   // 节点 Agent 启动信封：当前选中 agent 的启动命令（单 Agent 原则：新运行
   // 的全部节点用同一个 Agent，角色只允许指定模型）。
@@ -121,83 +108,66 @@ export function apply(ctx: Context): void {
     return { command: launch.command, mcpServers: [], agentId: adapter.id, roleCommands, roleModels };
   }
 
-  // 共享池会话面：节点会话与普通会话同池（主池，当前选中 Agent）。
-  // cwd/mcpServers 仍是会话级参数；审批和表单回调由 Project 注入。
-  const protocol = ctx.acpRuntime.protocol;
-  const openAgentsSession: NativeHostDeps["openAgentsSession"] = async ({
-    sessionOptions,
-    dialect,
-  }) => {
-    const adapter = agents.resolve();
-    if (!adapter) throw new Error("WORKFLOW_AGENT_UNAVAILABLE");
-    const paths = project.projects.workspace.getState().toolPaths;
-    const agentKey = agents.selectionKey(paths, adapter.id);
-    await protocol.prepare(adapter, agentKey, paths);
-    return protocol.open(agentKey, {
-      ...sessionOptions,
-      dialect,
-    } as Parameters<typeof protocol.open>[1]) as never;
-  };
-
-  // 池会话释放面：节点会话收口 / spawn 失败清理同走 protocol.release。
-  const releaseAgentsSession: NativeHostDeps["releaseAgentsSession"] = (
-    session,
-  ) => protocol.release(session as never);
-
-  // 反向请求直答面：审批模式分派 + nativeBridge 的直答槽位（未装配直答
-  // UI 时安全默认取消——本期面板会话流只读，交互卡待批次二收敛）。
-  const policy: PermissionPolicyDeps = {
-    offerQuestions: (sessionId, requestId, questions, callerName) =>
-      bridge.offerNativeQuestions(sessionId, requestId, questions, callerName),
-    resolveAgentDialect: () => {
-      const adapter = agents.resolve();
-      return adapter === null ? null : { adapter, activeAgentId: adapter.id };
-    },
-  };
-
-  const hostDeps: NativeHostDeps = {
-    workflow: client,
-    bridge,
-    adoptSession: createWorkflowAdoption(project, agents, host.storage, protocol),
-    openAgentsSession,
-    releaseAgentsSession,
-    openTrackerTransport: (params: TrackerStartParamsWire) =>
-      host.acpProcess === undefined
-        ? Promise.reject(new Error("ACP_PROCESS_UNAVAILABLE"))
-        : createTrackerTransport(host.acpProcess, params),
-  };
-  const detachHost = attachNativeSessionHost(
-    hostDeps,
-    productionCallbacks(policy),
-    platform.isTauriEnv(),
-    { logger },
-  );
-  // 宿主已订阅宿主回调帧：宣告上线，让引擎续跑被 WebView 重载打断的节点轮次。
-  void client.announceHostAttached().catch((error: unknown) =>
-    logger.warn("节点会话宿主上线宣告失败", {
-      reason: error instanceof Error ? error.message : String(error),
-    }),
-  );
-
-  const { service, onSessionActivity, dispose } = createWorkflowService({
+  const { service, project: projectEvent, dispose } = createWorkflowService({
     client,
-    bridge,
-    sessions: sessionMap,
     logger,
     agentLaunch,
     plans: createNodePlans(host.storage),
     onRunStarted: (runId, workflowId) => writeRunExecutors(host.storage, runId, readWorkflowExecutors(host.storage, workflowId)),
   });
 
+  // 节点会话就是普通会话（ADR 037）：宿主经 project 的会话能力打开、发任务说明、订阅轮次。
+  const sessions: NodeSessionPort = {
+    open: (options) => project.sessions.openPluginSession(options),
+    send: (target, message) => project.conversation.send(target, message.text, undefined, { display: message.display }),
+    cancel: (target) => project.conversation.cancel(target),
+    isRunning: (target) =>
+      target.sessionId !== null && project.sessions.busySessionIds(target.agentKey, target.workspacePath).has(target.sessionId),
+    watchTurns: (target, listener) => project.sessions.watchTurns(target, listener),
+    watchEvents: (target, listener) => project.sessions.watchEvents(target, listener),
+  };
+  const detachHost = platform.isTauriEnv()
+    ? attachNodeSessionHost({
+        workflow: client,
+        sessions,
+        onEvent: projectEvent,
+        logger,
+        openTrackerTransport: (params: TrackerStartParamsWire) =>
+          host.acpProcess === undefined
+            ? Promise.reject(new Error("ACP_PROCESS_UNAVAILABLE"))
+            : createTrackerTransport(host.acpProcess, params),
+      })
+    : () => {};
+  // 宿主已订阅宿主回调帧：宣告上线，让引擎续跑被 WebView 重载打断的节点轮次。
+  void client.announceHostAttached().catch((error: unknown) =>
+    logger.warn("节点会话宿主上线宣告失败", {
+      reason: error instanceof Error ? error.message : String(error),
+    }),
+  );
+  // 节点会话被（重新）打开、断线重连时：运行还没结束就装上交结果工具。只问工作流
+  // 认得的会话（当前项目运行的会话关联），不为普通会话启动工作流服务。
+  ctx.effect(
+    () =>
+      project.sessions.registerSessionTools(async ({ workspacePath, sessionId, agent }) => {
+        if (!sessionId) return [];
+        const links = service.sessionLinks();
+        // 运行列表还没为这个项目加载（如应用刚启动就恢复了上次打开的节点会话）时直接问引擎；
+        // 引擎对不认识的会话不给工具。已加载时只为未完成运行里的会话去问。
+        const loaded = links.workspace !== null && pathKey(links.workspace) === pathKey(workspacePath);
+        const known = links.runs.some((run) => run.status !== "completed" && run.links.some((link) => link.sessionId === sessionId));
+        if (loaded && !known) return [];
+        const raw = await client.request("session-tools", { cwd: workspacePath, sessionId }).catch(() => null);
+        const offer = asResultChannelOffer(raw);
+        return offer ? [resultChannelServer(offer, agentSupportsHttpMcp(agent))] : [];
+      }),
+    "workflow:session-tools",
+  );
+
   ctx.provide(name, service);
   ctx.effect(() => () => {
     detachHost();
     dispose();
   }, "workflow:resources");
-  ctx.effect(
-    () => project.sessions.subscribeSessionActivity(onSessionActivity),
-    "workflow:activity",
-  );
   ctx.inject(["workbench", "workflowUi"], (scoped) => {
     scoped.effect(() => attachWorkflowNotifications({
       client,
@@ -206,13 +176,7 @@ export function apply(ctx: Context): void {
       storage: host.storage,
       warn: (message) => logger.warn(message),
       openRun: (path, runId) => openRunFromNotification(scoped.workbench, scoped.workflowUi.openRun, path, runId),
-      openSession: async (path, sessionId) => {
-        const owner = readSessionOwner(host.storage, path, sessionId);
-        if (!owner || !agents.resolve(owner.agentId)) throw new Error("WORKFLOW_AGENT_UNAVAILABLE");
-        const key = agents.selectionKey(project.projects.workspace.getState().toolPaths, owner.agentId);
-        if (await configurationDigest(key) !== owner.configuration) throw new Error("WORKFLOW_AGENT_CONFIGURATION_CHANGED");
-        await project.sessions.openSessionFromEntry(path, sessionId, agents.selectedId === owner.agentId ? undefined : key);
-      },
+      openSession: (path, sessionId) => project.sessions.openSessionFromEntry(path, sessionId),
     }), "workflow:notifications");
   });
   ctx.inject(["workbench"], function workflowExitGate(scoped) {

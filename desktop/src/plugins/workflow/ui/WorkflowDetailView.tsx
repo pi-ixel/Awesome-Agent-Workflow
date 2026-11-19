@@ -32,10 +32,11 @@ import { EmptyState } from "../../../shared/ui/EmptyState.tsx";
 
 type Tab = "graph" | "source" | "runs" | "executors";
 
-export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, executors, draft, onAiEdit, onOpenDraft, onLaunch, onCloseLaunch, onStarted, onOpenRun, onCopied, onDeleted }: {
+export function WorkflowDetailView({ service, id, launch, initialTab = "graph", pickFiles, transfer, executors, draft, onAiEdit, onOpenDraft, onLaunch, onCloseLaunch, onStarted, onOpenRun, onCopied, onDeleted }: {
   service: WorkflowService;
   id: string;
   runs: readonly RunSummary[];
+  initialTab?: Tab;
   /** 非空时在顶部展开启动表单（可预选起点）。 */
   launch: { readonly entry?: string } | null;
   pickFiles?: () => Promise<readonly string[]>;
@@ -57,7 +58,7 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, e
 }) {
   const [detail, setDetail] = useState<WorkflowDetail | null>(null);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<Tab>("graph");
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [entry, setEntry] = useState("");
   const [selected, setSelected] = useState("");
   const [selectedPhase, setSelectedPhase] = useState<string | undefined>();

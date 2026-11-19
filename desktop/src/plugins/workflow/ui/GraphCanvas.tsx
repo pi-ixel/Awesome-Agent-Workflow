@@ -1,7 +1,6 @@
 /**
  * 流程图画布：运行页、工作流详情、AI 修改的前后对比共用一个。
- * 顶部一条控制带（左：缩放药丸；右：流程导航），下面才是滚动视口——
- * 控制带占位、不压住卡片，图再长也不会被药丸或导航挡住。
+ * 下钻上下文和缩放控件共用顶部控制带，流程导航浮在滚动视口右上角。
  *
  * 三件原先散在调用方的事收在这里，页面不再各写一遍：
  * - 缩放值（从前三个页面各一份 `useState(1)`）；
@@ -164,10 +163,10 @@ export function GraphCanvas({ label, viewportRef, className, before, after, empt
 
   return <div className="workflow-viewport-frame">
     {resolve(before, context)}
-    {/* 画布顶部的横条宿主（下钻上下文条挂这里）：在视口之上占一整行，不随图缩放 */}
+    {/* 下钻上下文与画布工具共用控制带，不随图缩放 */}
     <CanvasStripContext.Provider value={stripHost}>
-      <div className="workflow-strip-host" ref={setStripHost} />
       <div className="workflow-canvas-head">
+        <div className="workflow-strip-host" ref={setStripHost} />
         <div className="workflow-canvas-tools" role="toolbar" aria-label="画布工具">
           {tools}
           <CanvasToolbar zoom={zoom} onZoom={(value) => zoomTo(value)} onFit={() => {

@@ -3,7 +3,7 @@ import type { SessionItem } from "../types.ts";
 import type { SkillsService } from "../../../skills/service.ts";
 import type { GitService } from "../../../git/service.ts";
 import type { GitReviewNavigation } from "../../../git/types.ts";
-import type { WorkflowEntryCommand, WorkflowView } from "../../../workflow/types.ts";
+import type { ProjectExtension, ProjectSlashEntry } from "../../ui/extension.ts";
 import { useRightPanelSliding } from "../../../workbench/service.ts";
 import {
   useSessionValue,
@@ -306,21 +306,21 @@ function EmptyPrompts() {
   );
 }
 
-const NO_WORKFLOW_ENTRIES: readonly WorkflowEntryCommand[] = [];
+const NO_EXTENSION_ENTRIES: readonly ProjectSlashEntry[] = [];
 
 /** 空态常用入口 chips：渲染在居中输入区下方（ZCode 式空态的呈现顺序：
  * 问候 → 输入框 → chips）。文字类 chip 预填输入框，过目可改，再自己发送；
- * 工作流 chip 直接打开 AAW 面板（有进行中的运行时去看它，否则去启动）。 */
+ * 扩展给的快捷动作直接执行（如工作流：有进行中的运行时去看它，否则去启动）。 */
 function DraftPromptChips({
-  workflowAction,
+  quickAction,
   widthClass,
 }: {
-  readonly workflowAction: { readonly label: string; readonly run: () => void } | null;
+  readonly quickAction: { readonly label: string; readonly run: () => void } | null;
   readonly widthClass: string;
 }) {
   const composer = useProjectComposer();
   const prompts: readonly { label: string; text?: string; run?: () => void }[] = [
-    ...(workflowAction ? [{ label: workflowAction.label, run: workflowAction.run }] : []),
+    ...(quickAction ? [{ label: quickAction.label, run: quickAction.run }] : []),
     { label: "介绍这个项目", text: "请介绍当前项目的结构与主要功能。" },
     {
       label: "梳理可继续的事项",
@@ -365,7 +365,7 @@ export function SessionView({
   queryGit,
   openGitReview,
   watchActivity,
-  workflow,
+  extension,
   openDiagnostics,
   openArchiveSettings,
 }: {
@@ -375,7 +375,7 @@ export function SessionView({
   readonly queryGit?: GitService["query"];
   readonly openGitReview?: GitReviewNavigation["open"];
   readonly watchActivity?: ProjectWorkspace["subscribeWorkspaceActivity"];
-  readonly workflow?: WorkflowView;
+  readonly extension?: ProjectExtension;
   readonly openDiagnostics?: () => void;
   readonly openArchiveSettings?: () => void;
 }) {
@@ -384,7 +384,7 @@ export function SessionView({
   const projectView = useProjectView();
   const project = projectView?.project;
   const rightPanelSliding = useRightPanelSliding();
-  const WorkflowSessionBanner = workflow?.SessionBanner;
+  const ExtensionSessionBanner = extension?.SessionBanner;
   const {
     sendPrompt,
     enqueuePrompt,
@@ -426,22 +426,17 @@ export function SessionView({
   // 项目已关闭（activePath 落空）时的空态改为「重新打开项目」入口
   const openWorkspace = useWorkspaceCommands()?.openWorkspace;
   const contextPath = useProjectPageValue((state) => state.contextPath);
-  const workflowRun = useRegisteredSnapshot(
-    workflow?.status,
-    (state) => state?.runs[0] ?? null,
+  const extensionAction = useRegisteredSnapshot(
+    extension?.quickAction,
+    (state) => state ?? null,
   );
-  const workflowEntries = useRegisteredSnapshot(
-    workflow?.entries,
-    (state) => state ?? NO_WORKFLOW_ENTRIES,
+  const extensionEntries = useRegisteredSnapshot(
+    extension?.slashEntries,
+    (state) => state ?? NO_EXTENSION_ENTRIES,
   );
-  const workflowAction =
-    workflow && contextPath
-      ? workflowRun
-        ? {
-            label: workflowRun.waiting ? "回复进行中的工作流" : "查看进行中的工作流",
-            run: () => workflow.openRun(contextPath, workflowRun.runId),
-          }
-        : { label: "启动工作流", run: () => workflow.openLaunch(contextPath) }
+  const quickAction =
+    extensionAction && contextPath
+      ? { label: extensionAction.label, run: () => extensionAction.run(contextPath) }
       : null;
   // ZCode 式空态居中：无消息且无挂起审批/提问时，问候与输入区作为一组
   // 垂直居中；首条消息落地（items.length > 0）即回落贴底布局——composer
@@ -1054,8 +1049,8 @@ export function SessionView({
           scope="工作流节点信息"
           resetKey={`${contextPath ?? "none"}:${activeSessionId ?? ""}`}
         >
-          {WorkflowSessionBanner && contextPath && activeSessionId && (
-            <WorkflowSessionBanner project={contextPath} sessionId={activeSessionId} />
+          {ExtensionSessionBanner && contextPath && activeSessionId && (
+            <ExtensionSessionBanner project={contextPath} sessionId={activeSessionId} />
           )}
         </ScopedErrorBoundary>
         {isDraftPreparing ? (
@@ -1178,7 +1173,7 @@ export function SessionView({
           queryGit={queryGit}
           openGitReview={openGitReview}
           watchActivity={watchActivity}
-          workflow={workflow}
+          extension={extension}
           project={contextPath}
           enabled={
             !!activeSessionId &&
@@ -1293,7 +1288,8 @@ export function SessionView({
                       queue={<QueueDock />}
                       fileCandidates={fileCandidates}
                       skillCandidates={skillCandidates}
-                      workflowEntries={workflowEntries}
+                      extensionEntries={extensionEntries}
+                      extensionGroup={extension?.slashGroup}
                       openDiagnostics={openDiagnostics}
                       isAgentRunning={isAgentRunning}
                       disabled={isConnecting && !isDraftPreparing}
@@ -1311,7 +1307,7 @@ export function SessionView({
                   {showDraftChips ? (
                     <div className="mt-3 px-4">
                       <DraftPromptChips
-                        workflowAction={workflowAction}
+                        quickAction={quickAction}
                         widthClass={widthClass}
                       />
                     </div>

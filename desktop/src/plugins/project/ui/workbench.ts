@@ -6,7 +6,7 @@ import type { SkillsService } from "../../skills/service.ts";
 import type { SkillsSettingsView } from "../../skills/types.ts";
 import type { GitService } from "../../git/service.ts";
 import type { GitReviewNavigation } from "../../git/types.ts";
-import type { WorkflowView } from "../../workflow/types.ts";
+import type { ProjectExtension } from "./extension.ts";
 import type { DocumentNavigation } from "../../documents/service.ts";
 import {
   createProjectSidebar,
@@ -43,8 +43,8 @@ export function apply(ctx: Context): void {
     view?: ConversationDocumentView;
     openFileTree?: DocumentNavigation["openFileTree"];
   }>(() => ({}));
-  /** 工作流插件注入后填充（project:workflow-view 绑定）；侧栏与总览共用。 */
-  const workflowUi = createStore<{ view?: WorkflowView }>(() => ({}));
+  /** 插件给项目界面的扩展（project:extension 绑定）；会话页、侧栏与总览共用。 */
+  const extension = createStore<{ view?: ProjectExtension }>(() => ({}));
   let active = true;
   const isCurrent = () => active && project.isActive();
   const navigation = createProjectViewNavigation(workbench, project, {
@@ -56,7 +56,7 @@ export function apply(ctx: Context): void {
     sidebar: sidebar.snapshot,
     navigation: navigation.commands,
     gitReview,
-    workflowUi,
+    extension,
     isActive: isCurrent,
   };
   ctx.effect(() => () => {
@@ -113,15 +113,15 @@ export function apply(ctx: Context): void {
     return () => binding.dispose();
   }, "project:skills-settings");
   ctx.effect(() => {
-    const binding = ctx.inject(["workflowUi"], function projectWorkflowView(scoped) {
-      const view = scoped.workflowUi;
+    const binding = ctx.inject(["projectExtension"], function projectExtensionView(scoped) {
+      const view = scoped.projectExtension;
       scoped.effect(() => {
-        workflowUi.setState({ view });
-        return () => workflowUi.setState({ view: undefined });
+        extension.setState({ view });
+        return () => extension.setState({ view: undefined });
       });
     });
     return () => binding.dispose();
-  }, "project:workflow-view");
+  }, "project:extension");
   ctx.effect(() => {
     const binding = ctx.inject(["documents", "documentsUi"], function projectDocumentView(scoped) {
       const { documents, documentsUi } = scoped;
@@ -192,7 +192,7 @@ export function apply(ctx: Context): void {
   for (const page of createProjectPages({
     skills,
     gitReview,
-    workflowUi,
+    extension,
     documentView,
     watchActivity: project.projects.subscribeWorkspaceActivity,
     openDiagnostics: () => {

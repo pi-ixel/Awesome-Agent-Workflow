@@ -13,7 +13,7 @@
  * （远端 src/plugins/host/types.ts；生产装配传 ctx.host.acpProcess）——
  * spawn 与行协议经 createHostAcpProcessTransport 换接，wire 契约一致。
  *
- * 握手序列与错误码与桩侧 TrackerClient（headless_host.rs）一致：
+ * 握手序列与错误码与引擎测试用的 TrackerClient（tracker_client.rs）一致：
  * initialize → notifications/initialized → create_session(作用域)，进程
  * 退出 / 写入失败如实上抛（QUESTION_POOL_*），绝不静默兜底。tracker 的
  * 状态文件按 QUESTION_TRACKER_HOME（或其默认规则）落盘——池子状态路径

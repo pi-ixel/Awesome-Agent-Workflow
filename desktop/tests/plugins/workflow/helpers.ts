@@ -1,3 +1,4 @@
+import { pathKey } from "../../../src/shared/panelPaths.ts";
 import { fireEvent, within } from "@testing-library/react";
 import type { NodePlanEntry } from "../../../src/plugins/workflow/status/nodePlans.ts";
 import type { WorkflowEvent } from "../../../src/plugins/workflow/engine/protocol.ts";
@@ -130,8 +131,9 @@ export function fakeWorkflowService() {
       pendingPanelRequest = request;
       listeners.forEach((listener) => listener({ type: "focus-workflow-panel", runId: "" }));
     },
-    takePanelRequest: () => {
+    takePanelRequest: (project) => {
       const request = pendingPanelRequest;
+      if (request?.kind === "run" && pathKey(project ?? "") !== pathKey(request.project)) return null;
       pendingPanelRequest = null;
       return request;
     },

@@ -86,6 +86,27 @@ describe("CodeAgent compaction loading", () => {
     expect(runtime.store.getState().items).toEqual(preview);
     expect(runtime.store.getState().historyPreview).toBeUndefined();
   });
+  it("lets a plugin wait until an in-flight history load has settled", async () => {
+    const { runtime, factory, load, emit } = await setup();
+    await factory.settled(runtime);
+    let finish!: () => void;
+    load.mockImplementationOnce(() => {
+      emit(chunk("hello", "u"));
+      return new Promise((resolve) => {
+        finish = () => resolve({});
+      });
+    });
+    const loading = factory.load(runtime, sid);
+    let settled = false;
+    void factory.settled(runtime).then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(settled).toBe(false);
+    finish();
+    await loading;
+    await vi.waitFor(() => expect(settled).toBe(true));
+  });
   it("keeps the verified preview visible until source validation completes", async () => {
     const { runtime, factory, read, evidence } = await setup();
     const preview = [user("previous view", "preview")];

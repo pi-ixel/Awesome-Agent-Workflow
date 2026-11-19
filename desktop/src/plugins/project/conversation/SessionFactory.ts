@@ -1,3 +1,4 @@
+import type { McpServer } from "../../../contracts/acp/protocol.ts";
 import type { HistoryEvidence } from "../../host/types.ts";
 import { withDeadline } from "../../../shared/asyncDeadline.ts";
 import {
@@ -35,6 +36,11 @@ export class SessionFactory {
     private readonly readEvidence: NonNullable<
       AgentsService["readHistoryEvidence"]
     > = () => Promise.resolve(null),
+    /** 会话附加工具（ADR 037）：新建时 sessionId 为 null。 */
+    private readonly tools: (
+      runtime: SessionRuntime,
+      sessionId: string | null,
+    ) => Promise<readonly McpServer[]> = () => Promise.resolve([]),
   ) {
     this.logger = loggerFactory("session-factory");
   }
@@ -51,9 +57,14 @@ export class SessionFactory {
     const existing = this.creating.get(runtime);
     if (existing) return existing;
     const task = Promise.resolve()
-      .then(() => {
+      .then(async () => {
         this.assertCurrent(runtime, session);
-        return session.newSession(runtime.workspacePath);
+        const mcpServers = await this.tools(runtime, null);
+        this.assertCurrent(runtime, session);
+        return session.newSession(
+          runtime.cwd ?? runtime.workspacePath,
+          mcpServers.length ? { mcpServers } : undefined,
+        );
       })
       .then((result) => {
         this.assertCurrent(runtime, session);
@@ -73,6 +84,11 @@ export class SessionFactory {
       throw new AcpClosedError("旧连接已失效，保留新会话草稿");
   }
   private readonly loading = new WeakMap<SessionRuntime, object>();
+  private readonly loads = new WeakMap<SessionRuntime, Promise<void>>();
+  /** 这个会话正在进行的历史加载结束（成功或失败都算）；没有加载时立即返回。 */
+  async settled(runtime: SessionRuntime): Promise<void> {
+    await this.loads.get(runtime)?.catch(() => undefined);
+  }
   private async evidence(
     runtime: SessionRuntime,
     sessionId: string,
@@ -122,7 +138,15 @@ export class SessionFactory {
     runtime.store.getState().restoreItems(items, true);
     runtime.store.setState({ performanceTotals: totals });
   }
-  async load(runtime: SessionRuntime, sessionId: string): Promise<void> {
+  load(runtime: SessionRuntime, sessionId: string): Promise<void> {
+    const task = this.loadHistory(runtime, sessionId);
+    this.loads.set(runtime, task);
+    void task.finally(() => {
+      if (this.loads.get(runtime) === task) this.loads.delete(runtime);
+    }).catch(() => undefined);
+    return task;
+  }
+  private async loadHistory(runtime: SessionRuntime, sessionId: string): Promise<void> {
     const { session, workspacePath, adapter, store: viewStore } = runtime;
     if (this.loading.has(runtime)) throw new AcpClosedError("历史加载正在进行");
     const token = {};
@@ -160,7 +184,7 @@ export class SessionFactory {
       let archive: AcpSessionEvent[] = [];
       let archiveError: string | null = null;
       try {
-        archive = await this.readArchive(adapter, sessionId, workspacePath);
+        archive = await this.readArchive(adapter, sessionId, runtime.cwd ?? workspacePath);
       } catch (error) {
         archiveError = error instanceof Error ? error.message : String(error);
       }
@@ -181,7 +205,13 @@ export class SessionFactory {
         store.handleEvent(event);
       }
       store.sealStreamingItems();
-      await session.loadSession(sessionId, workspacePath);
+      const mcpServers = await this.tools(runtime, sessionId);
+      check();
+      await session.loadSession(
+        sessionId,
+        runtime.cwd ?? workspacePath,
+        mcpServers.length ? { mcpServers } : undefined,
+      );
       check();
       unsubscribe();
       unsubscribe = undefined;
@@ -304,6 +334,7 @@ export function restoreStoppedTurns(
       ? {
           ...item,
           ...(match.stopped ? { stopped: true as const } : {}),
+          ...(match.display ? { display: match.display } : {}),
           ...(match.turnUsage ? { turnUsage: match.turnUsage } : {}),
           ...(match.performance ? { performance: match.performance } : {}),
         }

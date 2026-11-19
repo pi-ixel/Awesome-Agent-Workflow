@@ -15,7 +15,7 @@ const blockedOf = (run: RunSummary): boolean =>
  * 要你处理：等你确认的，以及失败但被阻塞的（卡在门禁 / 关卡上）。
  *
  * 其余状态（已完成、已停止、只是失败）都是「结果」，不需要当下动作——
- * 库页把它们和待办分开，才不会让人逐行读徽标。
+ * 运行管理把它们和待处理运行分开，才不会让人逐行读徽标。
  */
 export function attentionOf(runs: readonly RunSummary[]): readonly RunSummary[] {
   return runs.filter(

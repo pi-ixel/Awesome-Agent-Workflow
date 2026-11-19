@@ -29,7 +29,7 @@ const record = (siteId: string, phaseId: string, status: string, extra: Record<s
 const snapshotOf = (partial: Partial<CanvasSnapshot>): CanvasSnapshot =>
   ({ runId: "run-1", run, catalog, execution: null, active: true, hasLease: true, retries: [], nodes: [], actors: [], ...partial });
 
-function mount(snapshot: CanvasSnapshot, extra: { onWiden?: () => void; onFullView?: () => void } = {}) {
+function mount(snapshot: CanvasSnapshot, extra: { onWiden?: () => void; onFullView?: () => void; onOpenSession?: (id: string) => void } = {}) {
   const fake = fakeWorkflowService();
   fake.setRuns([snapshot.run!]);
   fake.setSnapshot(snapshot.runId, snapshot);
@@ -44,11 +44,11 @@ afterEach(() => {
 
 it("groups phases into stage bands and folds a stage the run has already passed", async () => {
   // 需求确认已完成、设计修正没被需要（未触发）、运行已到下一阶段：需求与设计
-  // 收成一行摘要，如实报告未触发的条件节点；当前阶段保持展开。
+  // 收成一行摘要；当前阶段保持展开。
   mount(snapshotOf({ execution: { phase: "plan", stack: [], calls: [] }, nodes: [
     record("ask#1", "requirement", "completed"), record("ask#3", "plan", "running"),
   ] }));
-  const summary = await screen.findByRole("button", { name: /需求与设计 · 1 个节点已完成 · 1 个未触发/ });
+  const summary = await screen.findByRole("button", { name: /需求与设计 · 1\/2 已结束/ });
   expect(screen.queryByRole("button", { name: "需求确认，已完成" })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "任务规划，运行中" })).toBeInTheDocument();
   expect(screen.getByLabelText("阶段进度 1/2")).toBeInTheDocument();
@@ -60,7 +60,25 @@ it("groups phases into stage bands and folds a stage the run has already passed"
 it("keeps the stage of the running node expanded", async () => {
   mount(snapshotOf({ execution: { phase: "requirement", stack: [], calls: [] }, nodes: [record("ask#1", "requirement", "running")] }));
   expect(await screen.findByRole("button", { name: "需求确认，运行中" })).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /个节点已完成/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /任务 · 0\/1 已结束/ })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "任务规划，未触发" })).not.toBeInTheDocument();
+});
+
+it("opens the latest round directly and lets the inspector open the original round", async () => {
+  const open = vi.fn();
+  mount(snapshotOf({
+    nodes: [
+      record("ask#1", "requirement", "completed", { sessionId: "previous", mark: "superseded" }),
+      record("ask#1", "requirement", "running", { sessionId: "latest", ordinal: 2 }),
+    ],
+  }), { onOpenSession: open });
+  fireEvent.click(await screen.findByRole("button", { name: "打开「需求确认」第 2 轮会话" }));
+  expect(open).toHaveBeenLastCalledWith("latest");
+  expect(screen.queryByRole("complementary", { name: "节点详情" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "需求确认，运行中" }));
+  fireEvent.click(screen.getByRole("button", { name: "第 1 轮" }));
+  fireEvent.click(screen.getByRole("button", { name: "打开本轮会话" }));
+  expect(open).toHaveBeenLastCalledWith("previous");
 });
 
 it("shows only author labels on edges, never a generic 条件 / 其他情况", async () => {
@@ -110,7 +128,8 @@ it("lists files to delete when discarding and asks before redoing irreversible w
     cleanup: [{ path: "docs/design.md", siteId: "ask#1", kind: "file" }, { path: "docs/old.md", siteId: "ask#1", kind: "missing" }],
     cleanupProblems: [], irreversible: [{ siteId: "ask#1", label: "需求确认", reason: "会通知评审群" }], sessions: ["需求确认"],
   }, cleanupProblems: [] });
-  fireEvent.click(await screen.findByRole("button", { name: "需求确认，已完成" }));
+  fireEvent.click(await screen.findByRole("button", { name: /需求与设计 · 1\/2 已结束/ }));
+  fireEvent.click(screen.getByRole("button", { name: "需求确认，已完成" }));
   fireEvent.click(screen.getByRole("button", { name: "处置…" }));
   fireEvent.click(screen.getByRole("button", { name: "从头重做" }));
   expect(await screen.findByText("docs/design.md")).toBeInTheDocument();
@@ -160,7 +179,8 @@ it("asks before stopping a running run", async () => {
 
 it("does not let a superseded round decide the node state", async () => {
   mount(snapshotOf({ active: false, run: { ...run, status: "stopped" }, hasLease: false, nodes: [record("ask#1", "requirement", "completed", { mark: "superseded" })] }));
-  expect(await screen.findByRole("button", { name: "需求确认，未触发" })).toHaveTextContent("之前的结果已作废");
+  fireEvent.click(await screen.findByRole("button", { name: /需求与设计 · 0\/2 已结束/ }));
+  expect(screen.getByRole("button", { name: "需求确认，未触发" })).toHaveTextContent("之前的结果已作废");
   fireEvent.click(screen.getByRole("button", { name: "需求确认，未触发" }));
   expect(screen.getByText("这一轮已被回退作废，只供回看。")).toBeInTheDocument();
 });

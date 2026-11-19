@@ -21,9 +21,6 @@ struct Service {
 
 impl Service {
     fn start() -> Self {
-        Self::start_with_mode(false)
-    }
-    fn start_with_mode(native: bool) -> Self {
         static SEQ: AtomicU32 = AtomicU32::new(0);
         let dir = std::env::temp_dir().join(format!(
             "aaw-library-{}-{}-{}",
@@ -35,7 +32,6 @@ impl Service {
         let mut command = Command::new(env!("CARGO_BIN_EXE_workflow_service"));
         command.arg(dir.join("data").join("workflow-runs.sqlite"))
             .stdin(Stdio::piped()).stdout(Stdio::piped());
-        if native { command.arg("--session-host=native"); }
         let mut child = command.spawn().unwrap();
         let input = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
@@ -155,7 +151,7 @@ fn required_python_and_missing_script_block_before_any_run_is_created() {
 
 #[test]
 fn conditional_python_warns_and_start_rechecks_configuration_and_confirmation() {
-    let mut service = Service::start_with_mode(true);
+    let mut service = Service::start();
     let project = service.dir.join("project");
     std::fs::write(project.join("task.py"), "print('{}')\n").unwrap();
     let definition = json!({"id":"test", "name":"Test", "entry":"first", "initialVars":{"flag":false}, "nodes":{

@@ -13,6 +13,11 @@ const CONNECT_TIMEOUT: Duration = Duration::from_millis(200);
 const REPLY_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn root() -> io::Result<PathBuf> {
+    // 开发构建可以另用一个实例锁目录，好与另一份开发版同时运行（发布构建没有这个开关）。
+    #[cfg(debug_assertions)]
+    if let Some(dir) = std::env::var_os("AAW_DEV_INSTANCE_DIR") {
+        return Ok(PathBuf::from(dir));
+    }
     std::env::var_os("LOCALAPPDATA")
         .map(|path| PathBuf::from(path).join("com.aaw.desktop"))
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "LOCALAPPDATA"))

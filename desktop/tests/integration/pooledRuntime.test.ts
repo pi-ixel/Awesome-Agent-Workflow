@@ -23,7 +23,7 @@ import {
   attachSessionPreloading,
   switchRuntimeAgent,
   preloadSessionList,
-  adoptExternalSessionRuntime,
+  openPluginSessionRuntime,
 } from "../helpers/projectCoordinatorFixture.ts";
 import { SessionFactory } from "../../src/plugins/project/conversation/SessionFactory.ts";
 import type { AgentsService } from "../../src/plugins/agents/service.ts";
@@ -685,13 +685,13 @@ vi.mock(
   },
 );
 
-it("an adoption takes over an ordinary connection to the same session (WebView reload recovery)", async () => {
+it("插件打开一个已经作为普通会话开着的会话：沿用这条连接，不再载入第二次", async () => {
   useWorkspaceStore.setState({
     recentWorkspaces: [
       { path: "/project", lastOpenedAt: "2026-11-09T00:00:00Z" },
     ],
   });
-  // 重载后普通流程先把节点会话当作历史会话恢复（不带工作流结果工具）。
+  // 重载后普通流程先把节点会话当作历史会话恢复。
   expect(
     await openRealWorkspace("/project", { sessionId: "node-session" }),
   ).toMatchObject({
@@ -699,102 +699,45 @@ it("an adoption takes over an ordinary connection to the same session (WebView r
   });
   const ordinary = [...projectFactory.sessions()];
   expect(ordinary).toHaveLength(1);
-  // 工作流宿主随后按原会话 id 重新收养（带调度方的会话级参数）。
-  const adopted = await adoptExternalSessionRuntime({
-    workspacePath: "/project",
-    onUserMessage: () => Promise.resolve(),
-    create: async (sessionOptions, context) => {
-      const session = protocolResources.open(context.agentKey, sessionOptions);
-      await session.initialize({ timeoutMs: 5_000 });
-      await session.loadSession("node-session", "/project", { mcpServers: [] });
-      return session;
-    },
-  });
-  expect(adopted).toEqual({ sessionId: "node-session" });
-  await vi.waitFor(() => expect(ordinary[0]?.disposed).toBe(true));
-  const remaining = [...projectFactory.sessions()];
-  expect(remaining).toHaveLength(1);
-  expect(remaining[0]?.adopted).toBe(true);
+  // 工作流随后按原会话 id 打开：就是这个会话，不另开连接、不接管。
+  const target = await openPluginSessionRuntime({ workspacePath: "/project", resumeSessionId: "node-session" });
+  expect(target.sessionId).toBe("node-session");
+  expect(ordinary[0]?.disposed).toBe(false);
+  expect([...projectFactory.sessions()]).toEqual(ordinary);
+  const loads = peers.flatMap((peer) => peer.received).filter((wire) => wire.method === "session/load");
+  expect(loads).toHaveLength(1);
 });
 
-it("切换 Agent 时收养会话随主池一并收口（确认闸负责先停运行）", async () => {
+it("切换 Agent 时插件打开的会话随主池一并收口（确认闸负责先停运行）", async () => {
   await openRealWorkspace("/project", { forceNew: true });
-  const adopted = await adoptExternalSessionRuntime({
-    workspacePath: "/project",
-    onUserMessage: () => Promise.resolve(),
-    create: async (sessionOptions, context) => {
-      // 单 Agent 原则：节点会话与普通会话同池（主池，当前选中 Agent）。
-      const session = protocolResources.open(context.agentKey, sessionOptions);
-      await session.initialize({ timeoutMs: 5_000 });
-      await session.newSession("/project");
-      return session;
-    },
-  });
+  const target = await openPluginSessionRuntime({ workspacePath: "/project" });
   const workflowSession = [...projectFactory.sessions()].find(
-    (item) => item.session.sessionId === adopted?.sessionId,
+    (item) => item.session.sessionId === target.sessionId,
   )!;
-  expect(workflowSession.adopted).toBe(true);
+  expect(workflowSession.pluginOpened).toBe(true);
   // Agent 设置页的确认闸保证切换前运行已停；这里直接切换等价于停完
-  // 之后的提交——收养会话随主池收口（目录条目保留，不随运行时消失）。
+  // 之后的提交——会话随主池收口（目录条目保留，不随运行时消失）。
   await switchRuntimeAgent("codeagent");
   expect(agentService.selectedId).toBe("codeagent");
   expect(workflowSession.disposed).toBe(true);
 });
 
-/** 收养一个节点会话（单 Agent 原则：主池、当前选中 Agent）。cwd 兼作
+/** 插件打开一个节点会话（单 Agent 原则：主池、当前选中 Agent）。cwd 兼作
  * 测试定位宿主连接的标记（session/new 请求参数带 cwd，不带 sessionId）。 */
-async function adoptNodeSession(cwd = "/project"): Promise<string> {
-  const adopted = await adoptExternalSessionRuntime({
-    workspacePath: "/project",
-    onUserMessage: () => Promise.resolve(),
-    create: async (sessionOptions, context) => {
-      const session = protocolResources.open(context.agentKey, sessionOptions);
-      await session.initialize({ timeoutMs: 5_000 });
-      await session.newSession(cwd);
-      return session;
-    },
-  });
-  return adopted!.sessionId;
+async function openNodeSession(cwd = "/project"): Promise<string> {
+  const target = await openPluginSessionRuntime({ workspacePath: "/project", cwd });
+  return target.sessionId!;
 }
 
 it("A1 聊天与节点会话混住同一支队伍：进程数恒为 4", async () => {
   await openRealWorkspace("/project", { forceNew: true });
-  await adoptNodeSession();
-  await adoptNodeSession();
+  await openNodeSession();
+  await openNodeSession();
   await openRealWorkspace("/other", { forceNew: true });
   // 会话再多也不扩池：主池固定 4 个进程，混住会话共用。
   expect(peers).toHaveLength(4);
   expect(peers.every((peer) => !peer.client.isClosed)).toBe(true);
   const sessions = [...projectFactory.sessions()];
-  expect(sessions.filter((runtime) => runtime.adopted === true)).toHaveLength(
-    2,
-  );
+  expect(sessions.filter((runtime) => runtime.pluginOpened === true)).toHaveLength(2);
   expect(sessions).toHaveLength(4);
-});
-
-it("A3 节点会话所在连接死亡：呈现失败横幅、绝不自动重连或重放（恢复归引擎）", async () => {
-  await openRealWorkspace("/project", { forceNew: true });
-  const sessionId = await adoptNodeSession("/wf-node-a3");
-  const host = peers.find((peer) =>
-    peer.received.some(
-      (wire) =>
-        wire.method === "session/new" && wire.params?.cwd === "/wf-node-a3",
-    ),
-  );
-  expect(host).toBeDefined();
-  const runtime = [...projectFactory.sessions()].find(
-    (item) => item.session.sessionId === sessionId,
-  )!;
-  host!.peer.exit(1);
-  await vi.waitFor(() =>
-    expect(runtime.store.getState().connectionFailure).toBeDefined(),
-  );
-  await new Promise((resolveWait) => setTimeout(resolveWait, 300));
-  // 收养会话不挂 project 侧恢复：没有任何 peer 收到 load 重放，
-  // 运行时保持在场（视图保留、引擎按 resume 自行重开）。
-  const replays = peers
-    .flatMap((peer) => peer.received)
-    .filter((wire) => wire.method === "session/load");
-  expect(replays).toHaveLength(0);
-  expect(runtime.disposed).toBe(false);
 });
