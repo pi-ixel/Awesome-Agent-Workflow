@@ -512,7 +512,8 @@ export interface WorkflowLaunchRequest {
 /** 运行管理的筛选条件，跨项目打开运行时随返回入口保留。 */
 export interface RunManagerFilters {
   readonly query: string;
-  readonly status: string;
+  /** 勾选的状态（RunMarkKind）；空 = 不按状态筛选。 */
+  readonly statuses: readonly string[];
   readonly scope: "project" | "all";
   readonly showArchived: boolean;
 }

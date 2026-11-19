@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { matchesRun } from "../../../src/plugins/workflow/ui/runSearch.ts";
 import { WorkflowPanel } from "../../../src/plugins/workflow/ui/WorkflowPanel.tsx";
@@ -35,19 +35,29 @@ it("searches, filters and reveals archived runs from the top-level run manager",
   openAllRuns();
   const page = await openRunManager();
   expect(within(page).queryByText(/旧实验/)).not.toBeInTheDocument();
-  fireEvent.click(within(page).getByLabelText(/显示已归档（1）/));
+  const archivedToggle = within(page).getByRole("button", { name: "显示已归档" });
+  expect(archivedToggle).toHaveTextContent("1");
+  fireEvent.click(archivedToggle);
+  expect(archivedToggle).toHaveAttribute("aria-pressed", "true");
   expect(within(page).getByText("旧实验（已归档）")).toBeInTheDocument();
   fireEvent.change(within(page).getByRole("searchbox", { name: "搜索运行" }), { target: { value: "短信" } });
   expect(within(page).getAllByRole("button", { name: /查看运行/ }).map((item) => item.getAttribute("aria-label"))).toEqual(["查看运行 登录改造 第 1 次"]);
   fireEvent.change(within(page).getByRole("searchbox", { name: "搜索运行" }), { target: { value: "" } });
-  chooseOption(within(page).getByRole("combobox", { name: "按状态筛选" }), "进行中");
+  // 状态可以多选：勾了几种就看几种，面板不收起；一种都不勾等于不筛。
+  const statusFilter = within(page).getByRole("combobox", { name: "按状态筛选" });
+  chooseOption(statusFilter, "运行中");
   expect(within(page).getAllByRole("button", { name: /查看运行/ })).toHaveLength(1);
+  fireEvent.click(within(page).getByRole("option", { name: "已停止" }));
+  expect(statusFilter).toHaveTextContent("运行中、已停止");
+  expect(within(page).getAllByRole("button", { name: /查看运行/ })).toHaveLength(2);
+  fireEvent.click(within(page).getByRole("button", { name: "清除" }));
+  expect(statusFilter).toHaveTextContent("全部状态");
+  expect(within(page).getAllByRole("button", { name: /查看运行/ })).toHaveLength(3);
 });
 
-/** 每行的操作收在「⋯」菜单里：点开后取菜单项（刚关的菜单还在退场时取最新的）。 */
-function menuItem(row: HTMLElement, name: string | RegExp): HTMLElement {
-  fireEvent.click(within(row).getByRole("button", { name: /的操作$/ }));
-  return screen.getAllByRole("menuitem", { name }).at(-1)!;
+/** 每行行尾直接摆着改标题、归档 / 恢复、删除三个图标。 */
+function action(row: HTMLElement, name: string): HTMLElement {
+  return within(row).getByRole("button", { name });
 }
 
 it("renames, archives and deletes after confirmation; running runs cannot be archived or deleted", async () => {
@@ -55,25 +65,32 @@ it("renames, archives and deletes after confirmation; running runs cannot be arc
   const page = await openRunManager();
   const row = (title: string) => within(page).getByRole("button", { name: new RegExp(`^查看运行 ${title}`) }).closest("li")!;
 
-  expect(menuItem(row("支付重构"), /^归档/)).toBeDisabled();
-  expect(menuItem(row("支付重构"), /^删除/)).toBeDisabled();
+  // 进行中的运行：图标留在原位变灰。
+  expect(action(row("支付重构"), "归档")).toBeDisabled();
+  expect(action(row("支付重构"), "删除")).toBeDisabled();
 
-  fireEvent.click(menuItem(row("登录改造"), "改标题"));
+  fireEvent.click(action(row("登录改造"), "改标题"));
   fireEvent.change(within(page).getByRole("textbox", { name: "运行标题" }), { target: { value: "短信登录" } });
   fireEvent.click(within(page).getByRole("button", { name: "保存" }));
   expect(await within(page).findByRole("button", { name: /^查看运行 短信登录/ })).toBeInTheDocument();
   expect(fake.calls).toContainEqual({ method: "renameRun", args: { runId: "r1", title: "短信登录" } });
 
-  fireEvent.click(menuItem(row("短信登录"), "归档"));
-  expect(await within(page).findByText(/显示已归档（2）/)).toBeInTheDocument();
+  // 归档也防误触：点一下变「确认」，再点一次才归档。
+  fireEvent.click(action(row("短信登录"), "归档"));
+  expect(fake.calls.some((call) => call.method === "archiveRun")).toBe(false);
+  fireEvent.click(action(row("短信登录"), "确认归档"));
+  const toggle = within(page).getByRole("button", { name: "显示已归档" });
+  await waitFor(() => expect(toggle).toHaveTextContent("2"));
   expect(within(page).queryByRole("button", { name: /^查看运行 短信登录/ })).not.toBeInTheDocument();
 
-  fireEvent.click(within(page).getByLabelText(/显示已归档/));
-  fireEvent.click(menuItem(row("旧实验"), "删除"));
-  const confirm = within(page).getByRole("group", { name: "确认删除" });
-  expect(confirm).toHaveTextContent("删除后不能恢复");
-  fireEvent.click(within(confirm).getByRole("button", { name: "删除" }));
-  expect(await screen.findByText(/显示已归档（1）/)).toBeInTheDocument();
+  fireEvent.click(toggle);
+  // 恢复不丢东西，直接生效，所以不用确认。
+  expect(action(row("旧实验"), "恢复")).toBeEnabled();
+  // 删除不能撤回：点一下变「确认」，再点一次才删。
+  fireEvent.click(action(row("旧实验"), "删除"));
+  expect(fake.calls.some((call) => call.method === "deleteRun")).toBe(false);
+  fireEvent.click(action(row("旧实验"), "确认删除"));
+  await waitFor(() => expect(toggle).toHaveTextContent("1"));
   expect(fake.calls).toContainEqual({ method: "deleteRun", args: "r3" });
 });
 
@@ -94,15 +111,17 @@ it("lists runs of every project grouped by project, busy projects first, and ope
   expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual(["web", "docs", "app"]);
   expect(within(groups[2]!).getByText("当前项目")).toBeInTheDocument();
   fireEvent.click(within(page).getByRole("button", { name: "查看运行 埋点修复" }));
-  expect(opened).toHaveBeenCalledWith("D:/work/web", "x2", { query: "", status: "all", scope: "all", showArchived: false });
-  fireEvent.click(menuItem(within(groups[1]!).getByRole("button", { name: "查看运行 接口文档" }).closest("li")!, "归档"));
+  expect(opened).toHaveBeenCalledWith("D:/work/web", "x2", { query: "", statuses: [], scope: "all", showArchived: false });
+  const docs = within(groups[1]!).getByRole("button", { name: "查看运行 接口文档" }).closest("li")!;
+  fireEvent.click(action(docs, "归档"));
+  fireEvent.click(action(docs, "确认归档"));
   expect(fake.calls.find((call) => call.method === "archiveRun")?.args).toEqual({ runId: "x1", archived: true, project: "D:/work/docs" });
 });
 
 it("returns from a run to the same manager filters", async () => {
   openAllRuns();
   const page = await openRunManager();
-  fireEvent.click(within(page).getByLabelText(/显示已归档/));
+  fireEvent.click(within(page).getByRole("button", { name: "显示已归档" }));
   fireEvent.change(within(page).getByRole("searchbox", { name: "搜索运行" }), { target: { value: "短信" } });
   chooseOption(within(page).getByRole("combobox", { name: "按状态筛选" }), "已完成");
   fireEvent.click(within(page).getByRole("button", { name: /查看运行 登录改造/ }));
@@ -110,7 +129,7 @@ it("returns from a run to the same manager filters", async () => {
   const returned = screen.getByRole("region", { name: "运行管理" });
   expect(within(returned).getByRole("searchbox", { name: "搜索运行" })).toHaveValue("短信");
   expect(within(returned).getByRole("combobox", { name: "按状态筛选" })).toHaveTextContent("已完成");
-  expect(within(returned).getByLabelText(/显示已归档/)).toBeChecked();
+  expect(within(returned).getByRole("button", { name: "显示已归档" })).toHaveAttribute("aria-pressed", "true");
   expect(within(returned).getAllByRole("button", { name: /查看运行/ })).toHaveLength(1);
 });
 
@@ -120,7 +139,7 @@ it("restores the all-project filters in the destination panel after a cross-proj
   fake.setOtherProjectRuns(runs.map((run) => ({ ...run, project: "D:/work/app" })));
   fake.service.requestPanel({
     kind: "run", project: "D:/work/app", runId: "r1",
-    returnFilters: { query: "短信", status: "completed", scope: "all", showArchived: true },
+    returnFilters: { query: "短信", statuses: ["completed"], scope: "all", showArchived: true },
   });
   render(<WorkflowPanel service={fake.service} project="D:/work/app" onOpenProjectRun={vi.fn()} />);
   fireEvent.click(screen.getByRole("button", { name: "运行管理" }));

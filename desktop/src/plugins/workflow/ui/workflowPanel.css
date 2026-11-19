@@ -151,7 +151,9 @@
 .workflow-library>.workflow-callout { margin:0 12px; }
 .workflow-library-tools { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; padding:0 12px; }
 .workflow-library-actions { display:flex; flex-wrap:wrap; gap:6px; }
-.workflow-runs-page { padding-inline:12px; }
+/* 运行管理撑满面板高度：图标说明的问号固定在右下角，列表长了也贴着可视区底边。 */
+.workflow-runs-page { display:flex; flex-direction:column; min-height:100%; padding-inline:12px; }
+.workflow-runs-page>.workflow-run-manager { display:flex; flex:1; flex-direction:column; }
 .workflow-tab-panel { display:flex; flex-direction:column; gap:10px; padding:0 12px; container-type:inline-size; }
 .workflow-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(244px,1fr)); gap:8px; }
 .workflow-card-item { position:relative; display:flex; flex-direction:column; gap:8px; padding:10px; border:1px solid var(--color-line-strong); border-radius:8px; background:var(--color-surface); }
@@ -179,14 +181,10 @@
 .workflow-run-group+.workflow-run-group { margin-top:10px; }
 .workflow-run-group>h4 { display:flex; align-items:baseline; gap:8px; margin:0 0 4px; padding:0 8px; color:var(--color-ink-soft); font-size:var(--text-ui-sm); font-weight:600; }
 .workflow-run-group>h4 small { color:var(--color-ink-mute); font-size:var(--text-2xs); font-weight:400; }
-.workflow-run-list li>button:not(.workflow-more) { display:grid; grid-template-columns:1fr auto; gap:2px 10px; width:100%; padding:6px 8px; border:0; border-radius:5px; background:none; text-align:left; }
-.workflow-run-list li>button:not(.workflow-more):hover { background:var(--color-surface-hover); }
 .workflow-run-list-title { display:flex; align-items:center; gap:5px; min-width:0; overflow:hidden; color:var(--color-ink); }
 .workflow-run-list-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .workflow-run-list-title em { flex:none; color:var(--color-ink-mute); font-style:normal; font-size:var(--text-2xs); }
-.workflow-run-list-meta { grid-column:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-ink-mute); font-size:var(--text-2xs); }
-.workflow-run-list-state { grid-column:2; grid-row:1 / span 2; align-self:center; color:var(--color-ink-soft); font-size:var(--text-ui-sm); }
-.workflow-run-list-running { display:inline-flex; align-items:center; gap:5px; color:var(--color-info-ink); }
+.workflow-run-list-meta { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-ink-mute); font-size:var(--text-2xs); }
 
 /* 工作流详情 */
 .workflow-detail-page { display:flex; flex-direction:column; min-height:100%; }
@@ -288,18 +286,40 @@
 .workflow-summary-steps li { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; font-size:var(--text-ui-caption); }
 .workflow-summary-steps small { color:var(--color-ink-mute); }
 /* 运行管理（ADR 036） */
-.workflow-run-filters { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; margin-bottom:8px; }
-.workflow-run-filters input[type=search] { flex:1 1 180px; min-width:0; }
-.workflow-show-archived { width:max-content; max-width:100%; margin-bottom:10px; color:var(--color-ink-soft); font-size:var(--text-ui-sm); }
+/* 筛选一行放下：窄屏时先压搜索框，控件不换行。 */
+.workflow-run-filters { display:flex; align-items:center; gap:6px; margin-bottom:10px; }
+.workflow-run-search { position:relative; display:flex; flex:1 1 0; min-width:96px; }
+.workflow-run-search>svg { position:absolute; top:50%; left:9px; translate:0 -50%; color:var(--color-ink-faint); pointer-events:none; }
 .workflow-run-section+.workflow-run-section { margin-top:12px; }
-.workflow-run-section>h3 { margin:0 0 4px; color:var(--color-ink); font-size:var(--text-ui-sm); font-weight:600; }
-.workflow-run-manager .workflow-run-list li { display:flex; flex-wrap:wrap; align-items:center; gap:4px; }
-.workflow-run-manager .workflow-run-list li > button:not(.workflow-more) { flex:1 1 0; min-width:0; }
-.workflow-run-manager .is-archived { opacity:.7; }
-.workflow-run-manager .workflow-run-list li>.workflow-more { opacity:.6; }
-.workflow-run-list li:hover>.workflow-more,.workflow-run-list li>.workflow-more[aria-expanded=true] { opacity:1; }
-.workflow-run-actions { flex-basis:100%; display:flex; flex-wrap:wrap; align-items:center; gap:4px; padding:4px 8px; font-size:var(--text-ui-sm); color:var(--color-warn-ink); }
-.workflow-run-rename { display:flex; flex:1 1 220px; gap:4px; }
+.workflow-run-section>h3 { margin:0 0 4px; padding:0 8px; color:var(--color-ink); font-size:var(--text-ui-sm); font-weight:600; }
+/* 一行：状态图标 + 标题与副行（整块可点开）| 行尾三个图标，常驻显示。 */
+.workflow-run-manager .workflow-run-list li { display:flex; flex-wrap:wrap; align-items:center; gap:4px; padding-right:4px; border-radius:6px; }
+.workflow-run-manager .workflow-run-list li:not(:has(form)):hover { background:var(--color-surface-hover); }
+.workflow-run-manager .is-archived .workflow-run-open { opacity:.65; }
+.workflow-run-open { display:grid; flex:1 1 0; grid-template-columns:auto minmax(0,1fr); align-items:center; gap:2px 10px; min-width:0; padding:7px 8px; border:0; border-radius:6px; background:none; text-align:left; }
+.workflow-run-open>.workflow-run-mark { grid-row:1 / span 2; }
+.workflow-run-open>.workflow-run-list-title,.workflow-run-open>.workflow-run-list-meta { grid-column:2; }
+.workflow-run-tools { display:flex; flex:none; align-items:center; gap:2px; }
+.workflow-run-tools>span { display:inline-flex; }
+/* 状态图标：圆底淡染状态色，图形用状态色。和流程图里完成的对勾圆同一套说法。 */
+.workflow-run-mark { --mark:var(--color-ink-mute); display:inline-flex; flex:none; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; color:var(--mark); background:color-mix(in srgb, var(--mark) 15%, transparent); }
+.workflow-run-mark.tone-running { --mark:var(--color-info-ink); }
+.workflow-run-mark.tone-waiting,.workflow-run-mark.tone-blocked { --mark:var(--color-warn-ink); }
+.workflow-run-mark.tone-failed { --mark:var(--color-danger-ink); }
+.workflow-run-mark.tone-completed { --mark:var(--color-ok-ink); }
+.workflow-run-open .workflow-run-mark.tone-running svg { animation:workflow-run-spin 1.6s linear infinite; }
+@keyframes workflow-run-spin { to { rotate:360deg; } }
+@media (prefers-reduced-motion: reduce) { .workflow-run-open .workflow-run-mark.tone-running svg { animation:none; } }
+.workflow-run-help { position:sticky; bottom:0; align-self:flex-end; display:flex; align-items:center; margin-top:auto; padding:8px 0 10px; }
+/* 说明从问号左边划出：和问号同一行，右缘贴着问号，打开时裁剪框从右往左放开（收起由 HintSurface 淡出）。 */
+.workflow-run-legend { position:absolute; top:50%; right:calc(100% + 4px); z-index:30; width:max-content; padding:6px 10px; translate:0 -50%; pointer-events:none; font-size:var(--text-2xs); }
+.workflow-run-legend ul { display:flex; gap:14px; margin:0; padding:0; list-style:none; color:var(--color-ink-soft); }
+.workflow-run-legend[data-hint-open="true"] { animation:workflow-legend-out .26s cubic-bezier(.22,.8,.24,1); }
+@keyframes workflow-legend-out { from { clip-path:inset(-8px -8px -8px 100% round 8px); } to { clip-path:inset(-8px -8px -8px -8px round 8px); } }
+@media (prefers-reduced-motion: reduce) { .workflow-run-legend[data-hint-open="true"] { animation:none; } }
+.workflow-run-legend li { display:inline-flex; flex:none; align-items:center; gap:5px; white-space:nowrap; }
+.workflow-run-legend .workflow-run-mark { width:16px; height:16px; }
+.workflow-run-rename { display:flex; flex:1 1 220px; gap:4px; padding:4px 8px; }
 .workflow-run-rename input { flex:1; min-width:0; }
 /* 导入预览与脚本信任（ADR 036） */
 .workflow-import-preview { display:grid; gap:6px; margin:6px 0 10px; padding:10px 12px; border:1px solid var(--color-line-strong); border-radius:6px; }

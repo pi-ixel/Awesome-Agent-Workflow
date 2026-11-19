@@ -31,7 +31,8 @@ import { attentionOf } from "./runList.ts";
 type WorkflowRoute = { readonly kind: "workflow"; readonly id: string; readonly launch: { readonly entry?: string } | null };
 type RunsRoute = { readonly kind: "runs"; readonly filters?: RunManagerFilters };
 type Route =
-  | { readonly kind: "library"; readonly hint?: string }
+  /** picking：从「启动工作流」进来、要用户挑一个；挑之前不按最新运行改落点。 */
+  | { readonly kind: "library"; readonly picking?: boolean }
   | WorkflowRoute
   | { readonly kind: "run"; readonly runId: string; readonly back?: WorkflowRoute | RunsRoute }
   | RunsRoute
@@ -42,7 +43,7 @@ type ComposeTarget = { readonly kind: "new" } | { readonly kind: "edit"; readonl
 function routeOfLaunch({ workflowId, entry }: WorkflowLaunchRequest): Route {
   return workflowId
     ? { kind: "workflow", id: workflowId, launch: { entry } }
-    : { kind: "library", hint: "选一个工作流，点「运行」开始。" };
+    : { kind: "library", picking: true };
 }
 
 function routeOfPanelRequest(request: WorkflowPanelRequest): Route {
@@ -111,7 +112,7 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, o
         if (!isLive()) return;
         const list = service.runs();
         setRuns(list);
-        setRoute((current) => (current.kind !== "library" || current.hint || touched.current ? current : landingRoute(list)));
+        setRoute((current) => (current.kind !== "library" || current.picking || touched.current ? current : landingRoute(list)));
       })
       .catch((cause: unknown) => {
         if (isLive()) setError(describeError(cause));
@@ -247,7 +248,6 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, o
       <WorkflowLibrary
         service={service}
         version={libraryVersion}
-        hint={route.hint}
         transfer={transfer}
         tab={libraryTab}
         onTabChange={setLibraryTab}

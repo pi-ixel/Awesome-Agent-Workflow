@@ -7,24 +7,22 @@ import { errorLine } from "../status/errorText.ts";
 import { useEffect, useState } from "react";
 import type { WorkflowDraft, WorkflowFileTransfer, WorkflowImportPreview, WorkflowService, WorkflowSummary } from "../types.ts";
 import { describeDiagnostic } from "../status/library.ts";
-import { ghostButton, primaryButton, secondaryButton } from "./buttons.ts";
+import { ghostButton, goButton, primaryButton, secondaryButton } from "./buttons.ts";
 import { Badge } from "../../../shared/ui/controls.tsx";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import { Callout } from "../../../shared/ui/Callout.tsx";
 import { ConfirmIconAction } from "../../../shared/ui/ConfirmIconAction.tsx";
-import { ImportIcon, SparklesIcon, TrashIcon, TriangleAlertIcon } from "../../../shared/ui/icons.tsx";
+import { ImportIcon, PlayIcon, SparklesIcon, TrashIcon, TriangleAlertIcon } from "../../../shared/ui/icons.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
 import { EmptyState } from "../../../shared/ui/EmptyState.tsx";
 
 export type LibraryTab = "presets" | "mine";
 
-export function WorkflowLibrary({ service, version, hint, transfer, drafts, tab: controlledTab, onTabChange, onNewWithAi, onOpenWorkflow, onLaunch, onOpenDraft, onDiscardDraft }: {
+export function WorkflowLibrary({ service, version, transfer, drafts, tab: controlledTab, onTabChange, onNewWithAi, onOpenWorkflow, onLaunch, onOpenDraft, onDiscardDraft }: {
   service: WorkflowService;
   /** 库变化（复制、删除）后递增，触发重新读取。 */
   version: number;
-  /** 顶部提示（如「选择要启动的工作流」）。 */
-  hint?: string;
   /** 导入用的打开对话框（ADR 036）。 */
   transfer?: WorkflowFileTransfer;
   /** 当前页签与切换：由面板持有，进详情再返回时还在原来那一页。 */
@@ -95,7 +93,6 @@ export function WorkflowLibrary({ service, version, hint, transfer, drafts, tab:
   const standalone = drafts?.filter((draft) => !draft.base || !mine.some((item) => item.id === draft.base)) ?? [];
 
   return <div className="workflow-library">
-    {hint && <Callout tone="info" role="status" title={hint} />}
     {error !== "" && <Callout tone="danger" className="workflow-callout" title={<>读取工作流库失败：{error}</>} />}
     {importError !== "" && <Callout tone="danger" className="workflow-callout" title={importError} onDismiss={() => setImportError("")} />}
     {importing && <ImportPreviewCard preview={importing.preview} busy={busy} onConfirm={() => void confirmImport()} onCancel={() => setImporting(null)} />}
@@ -113,7 +110,7 @@ export function WorkflowLibrary({ service, version, hint, transfer, drafts, tab:
       />
       <div className="workflow-library-actions">
         {transfer && <IconButton className={`${secondaryButton} workflow-icon-only`} aria-label="导入" data-hint="导入" onClick={() => void pickImport()}><ImportIcon className="ui-icon-16" /></IconButton>}
-        {onNewWithAi && <IconButton className={`${primaryButton} workflow-icon-only`} aria-label="用 AI 新建" data-hint="用 AI 新建" onClick={onNewWithAi}><SparklesIcon className="ui-icon-16" /></IconButton>}
+        {onNewWithAi && <IconButton className={`${secondaryButton} workflow-icon-only`} aria-label="用 AI 新建" data-hint="用 AI 新建" onClick={onNewWithAi}><SparklesIcon className="ui-icon-16" /></IconButton>}
       </div>
     </div>
 
@@ -207,7 +204,7 @@ function WorkflowCard({ item, draft, onOpen, onLaunch, confirming = false, setCo
     </button>
     {onDelete && setConfirming && <CardDelete label="删除工作流" confirming={confirming} setConfirming={setConfirming} onConfirm={onDelete} />}
     {meta && <div className="workflow-template-actions">
-      <button type="button" className={secondaryButton} onClick={() => onLaunch(item.id)}>运行</button>
+      <IconButton className={`${goButton} workflow-icon-only`} aria-label="运行" data-hint="运行" onClick={() => onLaunch(item.id)}><PlayIcon className="ui-icon-14" /></IconButton>
     </div>}
   </article>;
 }

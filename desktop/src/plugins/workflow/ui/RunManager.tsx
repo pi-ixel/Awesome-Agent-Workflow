@@ -1,37 +1,47 @@
 /**
- * 运行管理（ADR 036，B3）：搜索、按状态筛选、显示已归档；每条运行可以改标题、归档或恢复、删除。
- * 进行中的运行不能归档或删除；删除要再确认一次，删除后不能恢复。
+ * 运行管理（ADR 036，B3）：搜索、按状态筛选、显示已归档；每条运行行尾直接给出改标题、归档或恢复、删除三个图标。
+ * 进行中的运行不能归档或删除；归档和删除都防误触：点一下变「确认」再点一次。恢复不丢东西，直接生效。
  *
  * 范围可切到「全部项目」（B4）：按项目分组，有运行在进行的项目排在前面；
  * 点别的项目的运行直接切到那个项目打开。
  */
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { ProjectRunSummary, RunManagerFilters, RunSummary, WorkflowService } from "../types.ts";
 import { errorLine } from "../status/errorText.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { useNow } from "./time.ts";
 import { DEFAULT_RUN_FILTERS, groupByProject, matchesRun } from "./runSearch.ts";
-import { MoreMenu } from "./MoreMenu.tsx";
-import { CheckSquare, Listbox } from "../../../shared/ui/controls.tsx";
+import { focusVisibleRing, Listbox, MultiListbox } from "../../../shared/ui/controls.tsx";
 import { settingsInputClass } from "../../../shared/ui/SettingsPageParts.tsx";
 import { ghostButton, primaryButton } from "./buttons.ts";
 import { attentionOf, ordinalOf } from "./runList.ts";
-import { RunRow } from "./RunList.tsx";
+import { RunMarkLegend, RunRow } from "./RunList.tsx";
+import { RUN_MARK_OPTIONS, runMarkKind } from "./runMarks.tsx";
 import { Callout } from "../../../shared/ui/Callout.tsx";
-import { InlineConfirm } from "../../../shared/ui/InlineConfirm.tsx";
+import { ConfirmIconAction } from "../../../shared/ui/ConfirmIconAction.tsx";
 import { EmptyState } from "../../../shared/ui/EmptyState.tsx";
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
+import { ArchiveIcon, ArchiveRestoreIcon, PencilIcon, SearchIcon, TrashIcon } from "../../../shared/ui/icons.tsx";
 
-const FILTERS: readonly { readonly id: string; readonly label: string; readonly match: (run: RunSummary) => boolean }[] = [
-  { id: "all", label: "全部状态", match: () => true },
-  { id: "running", label: "进行中", match: (run) => run.status === "running" },
-  { id: "waiting", label: "等你确认", match: (run) => run.status === "waiting" },
-  { id: "completed", label: "已完成", match: (run) => run.status === "completed" },
-  { id: "failed", label: "失败", match: (run) => run.status === "failed" },
-  { id: "stopped", label: "已停止", match: (run) => run.status === "stopped" },
-];
 
 /** 全部项目时多久刷新一次（别的项目的事件不推到这里）。 */
 const ALL_PROJECTS_REFRESH_MS = 5000;
+
+/** 筛选行的控件统一高度与字号（搜索框、两个下拉）。 */
+const FILTER_SIZE = "min-h-8 text-ui-base";
+/** 行尾图标按钮。 */
+const ROW_ICON = "rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent";
+
+/** 同一工作流的运行里起点不止一种时，起点名才有区分作用。 */
+function entriesVary(runs: readonly RunSummary[]): ReadonlySet<string> {
+  const entries = new Map<string, Set<string>>();
+  for (const run of runs) {
+    const key = run.workflowId || run.name;
+    entries.set(key, (entries.get(key) ?? new Set()).add(run.entry || run.entryLabel));
+  }
+  return new Set([...entries].filter(([, set]) => set.size > 1).map(([key]) => key));
+}
 
 const projectName = (path: string) => path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
 
@@ -51,10 +61,11 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
   const filters = controlledFilters ?? localFilters;
   const updateFilters = (change: Partial<RunManagerFilters>) =>
     (onFiltersChange ?? setLocalFilters)({ ...filters, ...change });
-  const { query, status, scope, showArchived } = filters;
+  const { query, statuses, scope, showArchived } = filters;
   const [everywhere, setEverywhere] = useState<readonly ProjectRunSummary[] | null>(null);
   const [editing, setEditing] = useState<{ runId: string; title: string } | null>(null);
-  const [deleting, setDeleting] = useState("");
+  /** 正在确认的行尾操作：`archive:<runId>` 或 `delete:<runId>`，同一时间只有一个。 */
+  const [confirming, setConfirming] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const crossProject = project !== undefined && onOpenProjectRun !== undefined;
@@ -83,13 +94,14 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
     };
   }, [all, runs, service]);
 
-  const match = FILTERS.find((item) => item.id === status)?.match ?? (() => true);
+  const match = (run: RunSummary) => statuses.length === 0 || statuses.includes(runMarkKind(run));
   const source: readonly RunSummary[] = all ? everywhere ?? [] : runs;
   const archivedCount = source.filter((run) => run.archivedAt != null).length;
   const visible = (run: RunSummary) => (showArchived || run.archivedAt == null) && match(run) && matchesRun(run, query);
   const shown = source.filter(visible);
   const pendingIds = new Set(attentionOf(shown.filter((run) => run.archivedAt == null)).map((run) => run.runId));
   const ordinals = all ? {} : ordinalOf(runs);
+  const varied = entriesVary(source);
   const isHere = (path: string | undefined) => path === undefined || (project !== undefined && pathKey(path) === pathKey(project));
 
   const act = async (work: () => Promise<void>) => {
@@ -110,8 +122,19 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
     const archived = run.archivedAt != null;
     // 当前项目的运行不带项目参数（服务用当前项目）；别的项目的带上它所属的项目。
     const where = isHere(path) ? undefined : path;
+    const renaming = editing?.runId === run.runId;
+    const archiveLabel = archived ? "恢复" : "归档";
+    /** 要确认的操作：点一下变「确认」；进行中时图标留在原位变灰，悬停说明原因（外层承接悬停，禁用的按钮收不到）。 */
+    const guarded = (kind: string, label: string, icon: ReactNode, work: () => Promise<void>) => active || busy
+      ? <span {...hintTooltipProps(active ? `停下后才能${label}` : label)}>
+        <IconButton iconSize="compact" className={ROW_ICON} aria-label={label} disabled>{icon}</IconButton>
+      </span>
+      : <ConfirmIconAction label={label} icon={icon}
+        confirming={confirming === `${kind}:${run.runId}`}
+        setConfirming={(value) => setConfirming(value ? `${kind}:${run.runId}` : "")}
+        onConfirm={() => void act(work)} />;
     return <li key={run.runId} className={archived ? "is-archived" : undefined}>
-      {editing?.runId === run.runId
+      {renaming
         ? <form className="workflow-run-rename" onSubmit={(event) => {
           event.preventDefault();
           const title = editing.title;
@@ -126,17 +149,19 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
           now={now}
           ordinal={ordinals[run.runId]}
           workflowName={workflowName}
+          showEntry={varied.has(run.workflowId || run.name)}
           suffix={archived ? "（已归档）" : ""}
           onOpen={() => where === undefined ? onOpenRun(run.runId) : onOpenProjectRun?.(where, run.runId)}
         />}
-      {deleting === run.runId
-        ? <InlineConfirm className="workflow-run-actions" label="确认删除" message="永久删除这次运行的记录？删除后不能恢复，项目里的文件不受影响。" confirmLabel="删除" busy={busy} onConfirm={() => void act(async () => { await service.deleteRun(run.runId, where); setDeleting(""); })} onCancel={() => setDeleting("")} />
-        : editing?.runId !== run.runId && <MoreMenu label={`${run.title} 的操作`} entries={[
-          { id: "rename", label: "改标题", disabled: busy, onSelect: () => setEditing({ runId: run.runId, title: run.title }) },
-          { id: "archive", label: archived ? "恢复" : active ? "归档（停下后可用）" : "归档", disabled: busy || active, onSelect: () => void act(() => service.archiveRun(run.runId, !archived, where)) },
-          { type: "separator" },
-          { id: "delete", label: active ? "删除（停下后可用）" : "删除", danger: true, disabled: busy || active, onSelect: () => setDeleting(run.runId) },
-        ]} />}
+      {!renaming && <div className="workflow-run-tools">
+        <IconButton iconSize="compact" className={ROW_ICON} aria-label="改标题" {...hintTooltipProps("改标题")} disabled={busy}
+          onClick={() => setEditing({ runId: run.runId, title: run.title })}><PencilIcon className="ui-icon-14" /></IconButton>
+        {archived
+          ? <IconButton iconSize="compact" className={ROW_ICON} aria-label={archiveLabel} {...hintTooltipProps(archiveLabel)} disabled={busy}
+            onClick={() => void act(() => service.archiveRun(run.runId, false, where))}><ArchiveRestoreIcon className="ui-icon-14" /></IconButton>
+          : guarded("archive", "归档", <ArchiveIcon className="ui-icon-14" />, () => service.archiveRun(run.runId, true, where))}
+        {guarded("delete", "删除", <TrashIcon className="ui-icon-14" />, () => service.deleteRun(run.runId, where))}
+      </div>}
     </li>;
   };
 
@@ -159,25 +184,36 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
 
   return <div className="workflow-run-manager">
     <div className="workflow-run-filters">
-      <input type="search" className={settingsInputClass} aria-label="搜索运行" placeholder="搜索标题、工作流或需求" value={query} onChange={(event) => updateFilters({ query: event.target.value })} />
+      <label className="workflow-run-search">
+        <SearchIcon className="ui-icon-14" aria-hidden="true" />
+        <input type="search" className={`${settingsInputClass} ${FILTER_SIZE}`} style={{ paddingInlineStart: 30 }} aria-label="搜索运行" placeholder="搜索标题、工作流或需求" value={query} onChange={(event) => updateFilters({ query: event.target.value })} />
+      </label>
       {crossProject && <Listbox
         label="范围"
+        className={FILTER_SIZE}
         value={scope}
         options={[{ value: "project", label: "当前项目" }, { value: "all", label: "全部项目" }]}
         onChange={(value) => updateFilters({ scope: value === "all" ? "all" : "project" })}
       />}
-      <Listbox
+      <MultiListbox
         label="按状态筛选"
-        value={status}
-        options={FILTERS.map((item) => ({ value: item.id, label: item.label }))}
-        onChange={(value) => updateFilters({ status: value })}
+        className={`${FILTER_SIZE} max-w-36`}
+        values={statuses}
+        options={RUN_MARK_OPTIONS}
+        emptyLabel="全部状态"
+        unit="种状态"
+        onChange={(values) => updateFilters({ statuses: values })}
       />
+      {/* 显示已归档：和两个下拉同高的图标开关，数字是归档了几条；窄屏时不单独占一行。 */}
+      <button type="button" aria-label="显示已归档" aria-pressed={showArchived}
+        {...hintTooltipProps(showArchived ? "隐藏已归档" : "显示已归档")}
+        className={`inline-flex min-h-8 min-w-8 shrink-0 items-center justify-center gap-1 rounded-md border px-2 text-ui-sm tabular-nums transition-colors ${focusVisibleRing} ${
+          showArchived ? "border-ink-faint bg-raised text-ink" : "border-line-strong bg-surface text-ink-soft hover:border-ink-faint hover:text-ink"}`}
+        onClick={() => updateFilters({ showArchived: !showArchived })}>
+        <ArchiveIcon className="ui-icon-14" />
+        {archivedCount > 0 && <span>{archivedCount}</span>}
+      </button>
     </div>
-    <label className="workflow-check workflow-show-archived">
-      <input type="checkbox" className="peer sr-only" checked={showArchived} onChange={(event) => updateFilters({ showArchived: event.target.checked })} />
-      <CheckSquare checked={showArchived} />
-      <span>显示已归档{archivedCount > 0 ? `（${archivedCount}）` : ""}</span>
-    </label>
     {error !== "" && <Callout tone="danger" className="workflow-callout" title={error} onDismiss={() => setError("")} />}
     {all && everywhere === null
       ? <p className="workflow-muted">正在读取…</p>
@@ -188,10 +224,12 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
           <h3>待处理</h3>
           {renderRuns(true)}
         </section>}
+        {/* 页签本身就是运行管理：只有和「待处理」并列时才需要这个小标题。 */}
         {shown.length > pendingIds.size && <section className="workflow-run-section" aria-label="运行记录">
-          <h3>运行记录</h3>
+          {pendingIds.size > 0 && <h3>运行记录</h3>}
           {renderRuns(false)}
         </section>}
       </>}
+    {shown.length > 0 && <RunMarkLegend />}
   </div>;
 }

@@ -437,7 +437,7 @@ it("lets only the destination panel consume a pending cross-project run request"
     kind: "run",
     project: "D:/work/target",
     runId: "run-9",
-    returnFilters: { query: "设计", status: "all", scope: "all", showArchived: false },
+    returnFilters: { query: "设计", statuses: [], scope: "all", showArchived: false },
   } as const;
   h.service.requestPanel(request);
   expect(h.service.takePanelRequest("D:/work/source")).toBeNull();

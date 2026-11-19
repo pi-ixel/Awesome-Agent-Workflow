@@ -68,7 +68,8 @@ it("places runs needing confirmation in their own section above the running and 
   const history = within(panel).getByRole("region", { name: "运行记录" });
   expect(within(pending).getByRole("button", { name: "查看运行 等你确认需求" })).toBeInTheDocument();
   expect(within(history).queryByRole("button", { name: "查看运行 等你确认需求" })).not.toBeInTheDocument();
-  expect(within(history).getByRole("button", { name: "查看运行 已经跑完" })).toHaveTextContent("已完成");
+  // 状态是行首的图标，悬停给出状态词。
+  expect(within(history).getByRole("button", { name: "查看运行 已经跑完" }).querySelector(".workflow-run-mark.tone-completed")).toHaveAttribute("data-hint", "已完成");
 });
 
 it("numbers repeat runs of one workflow, and writes the workflow name only when it changes", async () => {
@@ -85,8 +86,9 @@ it("numbers repeat runs of one workflow, and writes the workflow name only when 
   expect(within(panel).getByRole("button", { name: "查看运行 写入并检查 hello.txt 第 3 次" })).toBeInTheDocument();
   expect(within(panel).getByRole("button", { name: "查看运行 写入并检查 hello.txt 第 2 次" })).toBeInTheDocument();
   expect(within(panel).getByRole("button", { name: "查看运行 写入并检查 hello.txt 第 1 次" })).toBeInTheDocument();
-  // 相邻三行同属一个工作流，工作流名只写在第一行的副行里。
-  const metas = within(panel).getAllByText(/从来需求|从需求开始|从头开始|刚刚|分钟前/);
+  // 相邻三行同属一个工作流，工作流名只写在第一行的副行里；起点都一样，不写起点。
+  const metas = [...panel.querySelectorAll(".workflow-run-list-meta")];
+  expect(metas.some((meta) => meta.textContent?.includes("从头开始"))).toBe(false);
   expect(metas.filter((meta) => meta.textContent?.startsWith("AAW 轻量开发"))).toHaveLength(1);
   expect(metas.filter((meta) => meta.textContent?.startsWith("Python 转 Java"))).toHaveLength(1);
 });
