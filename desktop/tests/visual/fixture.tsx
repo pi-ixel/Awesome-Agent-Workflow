@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import { PerformanceFixture } from "./performanceFixture.tsx";
 import { HintTooltip } from "../../src/shared/ui/controls/HintTooltip.tsx";
 import { HintMotionFixture } from "./hintMotionFixture.tsx";
+import { ImageAttachments } from "../../src/plugins/project/conversation/ui/ImageAttachments.tsx";
 import "../../src/shared/styles/index.css";
 import SettingsPage from "../../src/plugins/workbench/ui/SettingsPage.tsx";
 import { WorkbenchContext } from "../../src/plugins/workbench/ui/bindings/react.ts";
@@ -99,7 +100,23 @@ if (params.has("protocol")) void initializeUsage();
 createRoot(document.querySelector("#root")!).render(
   <div className="h-screen bg-base p-3 text-ink">
     <HintTooltip />
-    {params.has("hint-motion") ? (
+    {params.has("image-attachments") ? (
+      <ImageAttachments
+        images={[
+          {
+            name: "screenshot.svg",
+            block: {
+              type: "image",
+              mimeType: "image/svg+xml",
+              data: btoa(
+                '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900"><rect width="1200" height="900" fill="blue"/></svg>',
+              ),
+            },
+          },
+        ]}
+        onRemove={() => {}}
+      />
+    ) : params.has("hint-motion") ? (
       <HintMotionFixture />
     ) : params.has("performance") ? (
       <PerformanceFixture />
