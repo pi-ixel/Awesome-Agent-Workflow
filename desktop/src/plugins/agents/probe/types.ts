@@ -73,6 +73,8 @@ export interface AgentProbeResult {
 }
 
 export interface AgentProbeSnapshot {
+  /** 测试连接、协议自检和深度探查共用的运行状态。 */
+  readonly isBusy: boolean;
   /** idle 未探查 / probing 进行中 / done 已出结果（含失败）。 */
   readonly phase: "idle" | "probing" | "done";
   /** 进行中的当前步骤（中文短语，进度展示用）。 */
