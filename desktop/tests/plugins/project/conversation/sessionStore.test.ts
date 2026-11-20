@@ -1411,6 +1411,31 @@ describe("会话标题：原生跟随 + 手动覆盖层", () => {
     );
   });
 
+  it("keeps the title from the first message when the Agent echoes browser context", () => {
+    const store = useSessionStore.getState();
+    const title = sessionTitleOf([
+      { kind: "user", id: "u1", text: "梳理项目目录", createdAt: "" },
+    ]);
+    store.setSessions([listEntry("sess-1", title)], PATH);
+    const updatedAt = "2026-11-05T10:00:00Z";
+    store.handleEvent({
+      type: "session_info_update",
+      sessionId: "sess-1",
+      title: "AAW 内嵌浏览器工具当前不可用…",
+      updatedAt,
+    });
+    const state = useSessionStore.getState();
+    for (const entry of [state.sessions[0], state.sessionsByPath[PATH]?.[0]]) {
+      expect(entry).toMatchObject({ title, nativeTitle: title, updatedAt });
+    }
+    store.handleEvent({
+      type: "session_info_update",
+      sessionId: "sess-1",
+      title: "排查浏览器工具权限",
+    });
+    expect(useSessionStore.getState().sessions[0]?.title).toBe("排查浏览器工具权限");
+  });
+
   it("手动改名压制原生跟随；后续 session_info_update 只更新原生名不改展示", () => {
     const store = useSessionStore.getState();
     void store.renameSession("sess-1", "我的名字");

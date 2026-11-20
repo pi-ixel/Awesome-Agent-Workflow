@@ -96,7 +96,7 @@ it("按目录 Agent 显示徽标和置顶，不混用同 ID 或旧版未归属�
     indexes.catalog.setState({ agentKey: "A" });
   });
   expect(screen.getByLabelText("置顶任务")).toBeInTheDocument();
-  expect(screen.getByLabelText("运行中")).toBeInTheDocument();
+  expect(within(screen.getByLabelText("置顶任务")).getByRole("img", { name: "运行中" })).toBeInTheDocument();
   expect(screen.queryByLabelText("已完成，未查看")).not.toBeInTheDocument();
   // Restore the default demo store's owner for other component tests.
   act(() => {

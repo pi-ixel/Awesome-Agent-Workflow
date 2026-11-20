@@ -15,7 +15,7 @@ import { WorkGroupCard } from "./WorkGroupCard.tsx";
 import { useExpansionState } from "./useExpansionState.ts";
 import { AssistantMessage } from "./AssistantMessage.tsx";
 import { ChevronRightIcon } from "../../../../shared/ui/icons.tsx";
-import { Spinner } from "../../../../shared/ui/controls.tsx";
+import { SessionRunningIndicator } from "../../ui/SessionRunningIndicator.tsx";
 import { formatWorkDuration } from "./clock.ts";
 
 /** 回合工作段时长：起点取用户消息落笔，终点取答案落笔（无答案则取最晚
@@ -147,15 +147,7 @@ function ConversationTurnViewBase({
           />
         ),
       )}
-      {turn.running && (
-        <div
-          role="status"
-          aria-label="工作中"
-          className="flex ui-icon-16 items-center justify-center"
-        >
-          <Spinner className="ui-icon-16 shrink-0 text-ink-mute" />
-        </div>
-      )}
+      {turn.running && <SessionRunningIndicator surface="conversation" />}
     </div>
   );
   return (

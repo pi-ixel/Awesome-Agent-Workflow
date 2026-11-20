@@ -67,6 +67,7 @@ import type {
   ToolKind,
 } from "../../../contracts/acp/protocol.ts";
 import {
+  agentSessionTitle,
   displayTitleOf,
   manualTitleOf,
   setManualTitle,
@@ -1610,15 +1611,15 @@ export const createSessionStore = (
           case "session_info_update": {
             // ACP 推送的会话名变更（agent 侧自动总结改题）：原生名随时跟随，
             // 展示标题仍被手动覆盖层压制（手动 > 原生）
-            const native = event.title?.trim() ?? "";
-            if (native.length === 0 && event.updatedAt === undefined) {
+            const native = agentSessionTitle(event.title);
+            if (native === undefined && event.updatedAt === undefined) {
               return;
             }
             set((state) => ({
               sessions: applyNativeTitleToList(
                 state.sessions,
                 event.sessionId,
-                native || null,
+                native ?? null,
                 agentKey,
                 event.updatedAt,
               ),
@@ -1628,7 +1629,7 @@ export const createSessionStore = (
                   applyNativeTitleToList(
                     list,
                     event.sessionId,
-                    native || null,
+                    native ?? null,
                     agentKey,
                     event.updatedAt,
                   ),

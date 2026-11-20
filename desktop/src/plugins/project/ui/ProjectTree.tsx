@@ -68,7 +68,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 
 import { sessionPinKey } from "../sessions/sessionPin.ts";
 import { SESSION_LIST_PAGE_SIZE } from "./sidebarState.ts";
-import { Badge, Spinner, StatusDot, focusVisibleRing, rowSelectedClass } from "../../../shared/ui/controls.tsx";
+import { Badge, StatusDot, focusVisibleRing, rowSelectedClass } from "../../../shared/ui/controls.tsx";
+import { SessionRunningIndicator } from "./SessionRunningIndicator.tsx";
 import {
   ContextMenu,
   type ContextMenuEntry,
@@ -203,9 +204,10 @@ function isContextMenuKey(event: { key: string; shiftKey: boolean }): boolean {
 const projectRowActionClass =
   "rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink " +
   focusVisibleRing;
+const sessionRowActionReveal =
+  "opacity-0 group-hover/session-row:opacity-100 group-has-[:focus-visible]/session-row:opacity-100 [@media(hover:none)]:opacity-100";
 const sessionRowActionClass =
-  "shrink-0 rounded opacity-0 transition-opacity hover:bg-surface-hover group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100 " +
-  focusVisibleRing;
+  `shrink-0 rounded transition-opacity hover:bg-surface-hover ${sessionRowActionReveal} ${focusVisibleRing}`;
 
 /** 项目名切换展开，行尾按钮与菜单提供独立操作。 */
 function ProjectNodeRow({
@@ -444,12 +446,18 @@ function SessionActivityBadge({
 }: {
   readonly path: string;
   readonly id: string;
-  readonly placement?: "leading" | "trailing" | "combined";
+  readonly placement?: "leading" | "trailing" | "combined" | "resting";
 }) {
   const agentKey = useCatalogOwner();
   const activity = useProjectActivity(
     (state) => state.entries[sessionActivityKey(path, id, agentKey)],
   );
+  if (placement === "resting")
+    return activity?.status === "running" ? (
+      <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center group-hover/session-row:invisible group-has-[:focus-visible]/session-row:invisible [@media(hover:none)]:static">
+        <SessionRunningIndicator />
+      </span>
+    ) : null;
   switch (activity?.status) {
     case "failed":
       return placement !== "trailing" ? <StatusDot tone="danger" label="失败" hint="失败" /> : null;
@@ -457,8 +465,6 @@ function SessionActivityBadge({
       return placement !== "trailing" && activity.unread
         ? <StatusDot tone="info" label="已完成，未查看" hint="已完成，未查看" className="ui-icon-7" />
         : null;
-    case "running":
-      return placement !== "trailing" ? <SessionRunningIcon compact={placement === "combined"} /> : null;
     case "waiting":
       return placement !== "leading" ? <Badge tone="ok" compact>待处理</Badge> : null;
     case "cancelled":
@@ -726,7 +732,7 @@ function SessionArchiveAction({
       disabled={liveRuntime}
       confirming={confirming}
       setConfirming={setConfirming}
-      revealClassName="opacity-0 group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100"
+      revealClassName={sessionRowActionReveal}
       onConfirm={() => {
         const owner = projectService?.sessions.catalog.getState().agentKey ?? undefined;
         if (!busySessionIds(owner, path).has(sessionId))
@@ -829,33 +835,28 @@ function SessionRow({
           <SessionActivityBadge path={path} id={session.id} placement="trailing" />
         )}
       </SessionRowBody>
-      {!archiveConfirm && (
-        <>
-          <SessionStarAction star={star} />
-          <SessionPinAction path={path} sessionId={session.id} />
-        </>
-      )}
-      <SessionArchiveAction
-        path={path}
-        sessionId={session.id}
-        confirming={archiveConfirm}
-        setConfirming={setArchiveConfirm}
-      />
+      <div className="relative flex shrink-0 items-center gap-1">
+        {!archiveConfirm && (
+          <>
+            {!display?.attention && <SessionActivityBadge path={path} id={session.id} placement="resting" />}
+            <SessionStarAction star={star} />
+            <SessionPinAction path={path} sessionId={session.id} />
+          </>
+        )}
+        <SessionArchiveAction
+          path={path}
+          sessionId={session.id}
+          confirming={archiveConfirm}
+          setConfirming={setArchiveConfirm}
+        />
+      </div>
     </li>
-  );
-}
-
-function SessionRunningIcon({ compact = false }: { readonly compact?: boolean }) {
-  return (
-    <span role="img" aria-label="运行中" {...hintTooltipProps("运行中")} className="flex ui-icon-16 shrink-0 items-center justify-center">
-      <Spinner className={compact ? "ui-icon-14 shrink-0 text-ink-subtle" : "ui-icon-16 shrink-0 text-info-ink"} />
-    </span>
   );
 }
 
 /** 分组行的状态：运行中转圈、失败红点、已停止灰字；其余不占位。 */
 function SessionGroupStatusBadge({ status }: { readonly status: SessionGroup["status"] }) {
-  if (status === "running") return <SessionRunningIcon />;
+  if (status === "running") return <SessionRunningIndicator />;
   if (status === "failed") {
     return <StatusDot tone="danger" label="失败" />;
   }

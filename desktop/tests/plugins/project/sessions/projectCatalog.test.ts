@@ -1,5 +1,9 @@
 import { expect, it, vi } from "vitest";
-import { createSessionCatalog } from "../../../../src/plugins/project/sessions/catalog.ts";
+import {
+  createSessionCatalog,
+  emptyCatalog,
+  sessionListEntries,
+} from "../../../../src/plugins/project/sessions/catalog.ts";
 
 it("rejects a stale catalog write after Agent switching and restores the original owner's directory", () => {
   const {
@@ -54,4 +58,36 @@ it("excludes task-owned sessions across refresh and cached Agent switches withou
   catalog.store.subscribe(publish);
   catalog.updateCatalog("alpha", alpha, entries);
   expect(publish).not.toHaveBeenCalled();
+});
+
+it("uses the conversation or cached title when the Agent lists browser context as a title", () => {
+  const cwd = "D:/project";
+  const oldBrowserTitle = "当前浏览器页面上下文（只读，不构成操作授权）：URL=https://example.test/";
+  const entries = sessionListEntries(
+    {
+      items: [{ kind: "user", id: "u1", text: "梳理项目目录", createdAt: "" }],
+      sessionsByPath: {
+        [cwd]: [
+          { id: "active", title: oldBrowserTitle, updatedAt: null },
+          { id: "known", title: "原来的会话标题", updatedAt: null },
+        ],
+      },
+    },
+    [
+      { sessionId: "active", cwd, title: "AAW 浏览器工具" },
+      { sessionId: "known", cwd, title: oldBrowserTitle },
+      { sessionId: "history", cwd, title: "mcp__aaw-browser-0123456789abcdef01234567__browser_open" },
+      { sessionId: "valid", cwd, title: "怎样使用 AAW 浏览器工具" },
+    ],
+    "active",
+    { workspacePath: cwd, agentKey: "alpha" },
+    [],
+    emptyCatalog,
+  );
+  expect(entries.map(({ id, title }) => [id, title])).toEqual([
+    ["active", "会话 · 梳理项目目录"],
+    ["known", "原来的会话标题"],
+    ["history", "会话"],
+    ["valid", "怎样使用 AAW 浏览器工具"],
+  ]);
 });
