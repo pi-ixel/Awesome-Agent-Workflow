@@ -26,7 +26,9 @@ export function apply(ctx: Context): void {
         onChange={(directory) => skills.setSourceDirectory(directory)}
       />
     ),
-    Installer: () => <SkillsInstallerSection skills={skills} />,
+    Installer: ({ active }) => (
+      <SkillsInstallerSection skills={skills} active={active} />
+    ),
   };
   ctx.provide("skillsUi", view);
   ctx.inject(["project", "agents", "host"], (ctx) => {

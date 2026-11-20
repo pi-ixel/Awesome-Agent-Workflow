@@ -1,5 +1,12 @@
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
-import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import { Listbox, focusVisibleRing } from "../../../shared/ui/controls.tsx";
 import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
@@ -61,9 +68,13 @@ const categoryDescriptions: Readonly<Partial<Record<string, string>>> = {
 export function StorageView({
   request,
   reminderGroups,
+  active = true,
+  revision = 0,
 }: {
   readonly request?: (request: StorageRequest) => Promise<StorageResponse>;
   readonly reminderGroups?: readonly ReminderGroup[];
+  readonly active?: boolean;
+  readonly revision?: number;
 }) {
   const [rows, setRows] = useState<StorageRow[]>([]);
   const [at, setAt] = useState<number>();
@@ -77,25 +88,44 @@ export function StorageView({
     targets: StorageRow[];
     preview: CleanupPreview;
   }>();
+  const readId = useRef(0);
+  const lastRead = useRef<{
+    request: typeof request;
+    revision: number;
+    at: number;
+  }>(undefined);
   const refresh = useCallback(async () => {
     if (!request) return;
+    const id = ++readId.current;
     setBusy(true);
     setError("");
     try {
-      setRows((await request({ action: "list" })) as StorageRow[]);
-      setAt(Date.now());
+      const next = (await request({ action: "list" })) as StorageRow[];
+      if (id !== readId.current) return;
+      const at = Date.now();
+      lastRead.current = { request, revision, at };
+      setRows(next);
+      setAt(at);
     } catch (error) {
-      setError(String(error));
+      if (id === readId.current) setError(String(error));
     } finally {
-      setBusy(false);
+      if (id === readId.current) setBusy(false);
     }
-  }, [request]);
+  }, [request, revision]);
   useEffect(() => {
+    if (!active || !request) return;
+    const previous = lastRead.current;
+    if (
+      previous?.request === request &&
+      previous.revision === revision &&
+      Date.now() - previous.at < 60_000
+    )
+      return;
     const timer = setTimeout(() => {
       void refresh();
     }, 0);
     return () => clearTimeout(timer);
-  }, [refresh]);
+  }, [active, refresh, request, revision]);
 
   async function preview(row: StorageRow, targets: StorageRow[] = [row]) {
     if (!request) return;

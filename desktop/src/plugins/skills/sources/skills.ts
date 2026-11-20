@@ -74,7 +74,12 @@ export function createSkills(
 
   function watchInstaller(): () => void {
     if (disposed) return () => {};
-    if (observers++ === 0) schedule();
+    if (
+      observers++ === 0 &&
+      !state.store.getState().isScanning &&
+      Date.now() - state.lastScanAt() >= 60_000
+    )
+      schedule();
     let released = false;
     return () => {
       if (disposed || released) return;

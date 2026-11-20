@@ -3,7 +3,7 @@ import type { ComponentType } from "react";
 
 export interface SkillsSettingsView {
   readonly Source: ComponentType;
-  readonly Installer: ComponentType;
+  readonly Installer: ComponentType<{ readonly active?: boolean }>;
 }
 
 export interface SkillPackage {

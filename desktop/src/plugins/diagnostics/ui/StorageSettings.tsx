@@ -1,6 +1,7 @@
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
+import { useShallow } from "zustand/react/shallow";
 import { createStore } from "zustand/vanilla";
 import { btnSecondary } from "../../../shared/ui/controls";
 import { XIcon } from "../../../shared/ui/icons.tsx";
@@ -35,6 +36,7 @@ export function createStorageSettings(
   type Thresholds = Awaited<ReturnType<typeof readThresholds>>;
   const model = createStore(() => ({
     rows: [] as StorageRow[],
+    usageRevision: 0,
     thresholds: undefined as Thresholds | undefined,
     notices: [] as StorageGroup[],
     readError: "",
@@ -51,18 +53,41 @@ export function createStorageSettings(
     if (!rows || revision !== loadRevision) return;
     const thresholds = model.getState().thresholds;
     const notices: StorageGroup[] = [];
+    let hasLimitChanged = false;
     for (const group of storageGroups) {
       const bytes = groupBytes(rows, group);
       if (bytes === undefined || !thresholds) continue;
       if (bytes > thresholdMiB(thresholds, group) * MIB) {
-        if (!over.has(group.id)) notices.push(group);
+        if (!over.has(group.id)) {
+          notices.push(group);
+          hasLimitChanged = true;
+        }
         over.add(group.id);
       } else {
-        over.delete(group.id);
+        hasLimitChanged = over.delete(group.id) || hasLimitChanged;
       }
     }
     model.setState((state) => ({
       rows,
+      usageRevision:
+        state.usageRevision +
+        Number(
+          hasLimitChanged ||
+            rows.length !== state.rows.length ||
+            rows.some((row, index) => {
+              const previous = state.rows[index];
+              return (
+                !previous ||
+                row.id !== previous.id ||
+                row.agent !== previous.agent ||
+                row.project !== previous.project ||
+                row.bytes !== previous.bytes ||
+                row.count !== previous.count ||
+                row.protected !== previous.protected ||
+                row.error !== previous.error
+              );
+            }),
+        ),
       notices: [
         ...state.notices.filter((group) => over.has(group.id)),
         ...notices,
@@ -112,13 +137,23 @@ export function createStorageSettings(
     return true;
   }
 
-  function Settings() {
-    const state = useStore(model);
+  function Settings({ active = true }: { readonly active?: boolean }) {
+    const state = useStore(
+      model,
+      useShallow((state) => ({
+        thresholds: state.thresholds,
+        readError: state.readError,
+        writeError: state.writeError,
+        saving: state.saving,
+        usageRevision: active ? state.usageRevision : 0,
+      })),
+    );
     useEffect(() => {
+      if (!active) return;
       void loadPreferences().catch((error: unknown) => {
         model.setState({ readError: String(error) });
       });
-    }, []);
+    }, [active]);
     return (
       <section className="flex min-w-0 flex-col gap-5" aria-label="存储明细">
         {desktopManagedStorage.available() && (
@@ -145,6 +180,8 @@ export function createStorageSettings(
           <h3 className="mb-2 text-ui-base font-semibold text-ink">存储明细</h3>
           <StorageView
             request={reader.storage}
+            active={active}
+            revision={state.usageRevision}
             reminderGroups={storageGroups.map((group) => ({
               ...group,
               render: (label) => (
