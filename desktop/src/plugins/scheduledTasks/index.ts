@@ -93,7 +93,11 @@ export async function apply(ctx: Context) {
   const setCloseToTray = host.window.setCloseToTray?.bind(host.window);
   if (setCloseToTray) {
     ctx.effect(() => workbench.register("settings", {
-      id: "scheduled-tasks", order: 30, label: "定时任务", Icon: ClockIcon,
+      id: "scheduled-tasks",
+      group: "agent",
+      order: 46,
+      label: "定时任务",
+      Icon: ClockIcon,
       View: function TraySettings() {
         const [enabled, setEnabled] = useState(closeToTray);
         const [saving, setSaving] = useState(false);

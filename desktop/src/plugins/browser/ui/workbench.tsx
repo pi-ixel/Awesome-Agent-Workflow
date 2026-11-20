@@ -14,7 +14,8 @@ export function apply(ctx: Context): void {
     () =>
       ctx.workbench.register("settings", {
         id: "browser",
-        order: 25,
+        group: "agent",
+        order: 45,
         label: "浏览器",
         Icon: GlobeIcon,
         View: () => <BrowserAgentControlSettings host={ctx.host.browser} />,
