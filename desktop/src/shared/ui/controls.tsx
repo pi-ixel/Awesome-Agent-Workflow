@@ -195,9 +195,10 @@ export function Checkbox({
   readonly onChange: (checked: boolean) => void;
   readonly className?: string;
 }) {
+  // 将视觉隐藏的原生输入定位在标签内，避免聚焦时滚动外层弹窗。
   return (
     <label
-      className={`${className} ${disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}
+      className={`relative ${className} ${disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}
     >
       <input
         type="checkbox"
