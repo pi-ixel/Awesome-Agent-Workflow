@@ -947,12 +947,17 @@ test("文件树吸顶目录和原行共用外观，折叠后回到原行并保�
   expect(await tree.getByRole("treeitem").count()).toBeLessThan(150);
   await expect(original).toBeFocused();
   await expect(original).toHaveAttribute("aria-selected", "true");
+  await expect(original.locator("svg")).toHaveCount(1);
+  const openFolderDrawing = await original.locator("svg path").getAttribute("d");
+  expect(openFolderDrawing).toBeTruthy();
   const scroll = tree.locator("..");
   const scrollOffset = 28 * 45;
   await scroll.evaluate((el, top) => { el.scrollTop = top; }, scrollOffset);
   const sticky = scroll.locator(".sticky").getByRole("treeitem", { name: "发布检查", exact: true });
   await expect(sticky).toBeInViewport();
   await expect(sticky).toHaveAttribute("aria-selected", "true");
+  await expect(sticky.locator("svg")).toHaveCount(1);
+  await expect(sticky.locator("svg path")).toHaveAttribute("d", openFolderDrawing!);
   await sticky.press("Shift+F10");
   const menu = documents.getByRole("menu", { name: "发布检查" });
   await expect(menu).toBeFocused();
@@ -978,13 +983,14 @@ test("文件树吸顶目录和原行共用外观，折叠后回到原行并保�
     expect(ratio(await color(sticky, "color"), surface)).toBeGreaterThanOrEqual(4.5);
     expect(ratio(await color(sticky, "--color-focus-ring"), surface)).toBeGreaterThanOrEqual(3);
     await expect.poll(async () => Math.abs(
-      (await sticky.locator("svg").boundingBox())!.width - 12 * px / 14,
+      (await sticky.locator("svg").boundingBox())!.width - 16 * px / 14,
     )).toBeLessThan(0.1);
     expect(await scroll.evaluate((el) => el.scrollTop)).toBe(scrollOffset);
   }
   await sticky.press("ArrowLeft");
   await expect(sticky).toBeHidden();
   await expect(original).toHaveAttribute("aria-expanded", "false");
+  await expect(original.locator("svg path")).not.toHaveAttribute("d", openFolderDrawing!);
   await expect(original).toHaveAttribute("aria-selected", "true");
   await expect(original).toBeInViewport();
   await expect(original).toBeFocused();
