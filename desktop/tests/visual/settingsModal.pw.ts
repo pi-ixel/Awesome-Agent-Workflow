@@ -184,3 +184,56 @@ test("the settings backdrop and panel enter together", async ({ page }) => {
   await expect(layer).toHaveCSS("animation-name", "none");
   await expect(layer).toHaveCSS("opacity", "1");
 });
+
+test("勾选存储范围时保持设置弹窗和内容滚动位置", async ({ page }) => {
+  await page.setViewportSize({ width: 1034, height: 880 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/tests/visual/fixture.html?storage-scroll");
+  const dialog = page.getByRole("dialog", { name: "设置", exact: true });
+  await dialog.getByRole("tab", { name: "存储", exact: true }).click();
+  await dialog.getByRole("button", { name: "诊断日志", exact: true }).click();
+  const legacy = dialog.getByRole("button", { name: "迁移遗留数据", exact: true });
+  await legacy.click();
+  const details = dialog.locator(`[id="${await legacy.getAttribute("aria-controls")}"]`);
+  const checkbox = details.getByRole("checkbox", {
+    name: "选择 应用数据 历史记录",
+    exact: true,
+  });
+  const inputLabel = checkbox
+    .locator("..")
+    .getByText("应用数据", { exact: true });
+  const help = dialog.getByRole("button", {
+    name: "迁移遗留数据说明",
+    exact: true,
+  });
+  await inputLabel.scrollIntoViewIfNeeded();
+  await expect(help).toBeInViewport();
+  const layout = () =>
+    dialog.evaluate((panel) => {
+      const content = panel
+        .querySelector<HTMLElement>("#settings-panel-storage")!
+        .closest<HTMLElement>(".overflow-auto")!;
+      return {
+        dialogScroll: panel.scrollTop,
+        contentScroll: content.scrollTop,
+        headerTop: panel.querySelector("header")!.getBoundingClientRect().top,
+        statusTop: panel.querySelector('[role="status"]')!.getBoundingClientRect()
+          .top,
+      };
+    });
+  const before = await layout();
+  expect(before.dialogScroll).toBe(0);
+  expect(before.contentScroll).toBeGreaterThan(0);
+
+  await inputLabel.click();
+  await expect(checkbox).toBeChecked();
+  await expect(checkbox).toBeFocused();
+  expect(await layout()).toEqual(before);
+
+  await help.focus();
+  await page.keyboard.press("Tab");
+  await expect(checkbox).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(checkbox).not.toBeChecked();
+  expect(await layout()).toEqual(before);
+});
