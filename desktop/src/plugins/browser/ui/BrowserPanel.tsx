@@ -29,10 +29,10 @@ import type {
 import {
   calculateBrowserBounds,
   changeBrowserPageZoom,
-  createBrowserRestorePlan,
   normalizeBrowserNavigationTarget,
 } from "../domain/model.ts";
 import { isNativeOccludingLayer } from "../domain/occlusion.ts";
+import { useBrowserRestore } from "./useBrowserRestore.ts";
 
 export interface BrowserPanelProps {
   host: HostService["browser"];
@@ -49,7 +49,7 @@ interface CleanupResultView {
 }
 
 export function BrowserPanel(props: BrowserPanelProps) {
-  return <BrowserPanelSession key={props.sessionId} {...props} />;
+  return <BrowserPanelSession key={JSON.stringify([props.workspaceId, props.sessionId])} {...props} />;
 }
 
 function BrowserPanelSession({
@@ -92,12 +92,6 @@ function BrowserPanelSession({
   const [picking, setPicking] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(1280);
   const [viewportHeight, setViewportHeight] = useState(720);
-  const [restoreEnabled, setRestoreEnabled] = useState(
-    () =>
-      window.localStorage.getItem(
-        `aaw-browser-restore:${sessionId}:enabled`,
-      ) === "true",
-  );
   const activeTab =
     space?.tabs.find(
       (tab) => tab.tabId === activeTabId && tab.lifecycle !== "closed",
@@ -333,7 +327,8 @@ function BrowserPanelSession({
 
   const bounds = useCallback(() => {
     const rect = viewportRef.current?.getBoundingClientRect();
-    if (!rect) return { x: 0, y: 0, width: 640, height: 480 };
+    if (!rect || rect.width <= 0 || rect.height <= 0)
+      return { x: 0, y: 0, width: 640, height: 480 };
     return calculateBrowserBounds(rect, window.devicePixelRatio || 1);
   }, []);
 
@@ -354,12 +349,14 @@ function BrowserPanelSession({
         );
         setActiveTabId(tab.tabId);
         setError(null);
+        return tab;
       } catch (cause) {
         setError(String(cause));
       }
     },
     [bounds, host, sessionId],
   );
+  const restore = useBrowserRestore(host, workspaceId, sessionId, space, createTab);
 
   useEffect(() => {
     let active = true;
@@ -460,26 +457,6 @@ function BrowserPanelSession({
               created.tabs.find((tab) => tab.lifecycle !== "closed")?.tabId ??
               null,
           );
-          if (created.tabs.length === 0 && restoreEnabled) {
-            try {
-              const saved: unknown = JSON.parse(
-                window.localStorage.getItem(
-                  `aaw-browser-restore:${sessionId}:tabs`,
-                ) ?? "[]",
-              );
-              if (Array.isArray(saved)) {
-                for (const url of createBrowserRestorePlan(
-                  saved.filter(
-                    (item): item is string => typeof item === "string",
-                  ),
-                )) {
-                  await createTab(url);
-                }
-              }
-            } catch (cause) {
-              setError(`标签恢复失败：${String(cause)}`);
-            }
-          }
         }
       } catch (cause) {
         if (!String(cause).includes("SESSION_EXISTS")) {
@@ -493,7 +470,7 @@ function BrowserPanelSession({
     return () => {
       active = false;
     };
-  }, [createTab, host, refresh, restoreEnabled, sessionId, workspaceId]);
+  }, [host, refresh, sessionId, workspaceId]);
 
   const nativeTabId = activeTab?.tabId;
   useEffect(() => {
@@ -656,20 +633,6 @@ function BrowserPanelSession({
       });
     };
   }, [host, nativeOccluded, nativeTabId, sessionId, visible]);
-
-  useEffect(() => {
-    if (!space) return;
-    const urls = createBrowserRestorePlan(
-      space.tabs
-        .filter((tab) => tab.lifecycle !== "closed")
-        .map((tab) => tab.committedUrl)
-        .filter((url): url is string => typeof url === "string"),
-    );
-    window.localStorage.setItem(
-      `aaw-browser-restore:${sessionId}:tabs`,
-      JSON.stringify(urls),
-    );
-  }, [sessionId, space]);
 
   const navigate = async () => {
     if (!userCanControl) {
@@ -1003,6 +966,7 @@ function BrowserPanelSession({
             ))}
         </div>
       )}
+      {restore.error && <p role="status" className="px-2 py-1 text-ui-sm text-warn-ink">{restore.error}</p>}
       {error && (
         <p
           role="alert"
@@ -1241,14 +1205,9 @@ function BrowserPanelSession({
           <Checkbox
             className="mt-3 flex items-center gap-2 text-xs"
             label="重启后恢复合法标签 URL"
-            checked={restoreEnabled}
-            onChange={(enabled) => {
-              setRestoreEnabled(enabled);
-              window.localStorage.setItem(
-                `aaw-browser-restore:${sessionId}:enabled`,
-                String(enabled),
-              );
-            }}
+            checked={restore.enabled}
+            disabled={restore.isSaving}
+            onChange={(enabled) => { void restore.toggle(enabled); }}
           />
           <div className="mt-3 flex flex-wrap gap-2">
             <ActionButton tone="secondary" size="compact"
@@ -1291,6 +1250,8 @@ function BrowserPanelSession({
                     <span role="alert">
                       确认清理“{confirmCleanup}”范围？{preview?.affected.join("、")}
                       。已完成的子项不会因取消而回滚。
+                      {(confirmCleanup === "session" || confirmCleanup === "workspace" || confirmCleanup === "all") &&
+                        " 该范围内的标签恢复快照也会清理。"}
                     </span>
                   }
                   confirmLabel="确认清理"

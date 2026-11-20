@@ -45,8 +45,23 @@ export interface BrowserEvidence {
 
 export type BrowserMcpStatus = "active" | "revoked" | "not_bound";
 
+export interface BrowserRestoreScope {
+  readonly workspaceId: string;
+  readonly sessionId: string;
+}
+
+export interface BrowserRestoreSnapshot {
+  readonly epoch: string;
+  readonly revision: string | null;
+  readonly urls: readonly string[];
+}
+
 export interface BrowserHost {
   isAvailable(): boolean;
+  readRestore(scope: BrowserRestoreScope): Promise<BrowserRestoreSnapshot>;
+  saveRestore(scope: BrowserRestoreScope, update: BrowserRestoreSnapshot & { enabled: boolean }): Promise<BrowserRestoreSnapshot>;
+  forgetRestore(scope: BrowserRestoreScope): Promise<void>;
+  migrateLegacyRestores(): () => void;
   agentControlEnabled(): Promise<boolean>;
   setAgentControl(enabled: boolean): Promise<boolean>;
   onAgentControl(
