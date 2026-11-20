@@ -126,10 +126,8 @@ pub fn agent_exited(handle: u32) {
 }
 
 #[tauri::command]
-pub fn diagnostics_resources<R: tauri::Runtime>(
-    webview: tauri::Webview<R>,
-) -> Result<serde_json::Value, String> {
-    if !matches!(webview.label(), "main" | "diagnostics") {
+pub fn diagnostics_resources(webview: tauri::Webview) -> Result<serde_json::Value, String> {
+    if !crate::diagnostics::is_diagnostics_view(webview.label()) {
         return Err("无权读取进程资源".into());
     }
     let state = state().lock().map_err(|e| e.to_string())?;

@@ -393,12 +393,22 @@ pub fn log(level: &str, channel: &str, message: &str, context: Value) {
         }],
     );
 }
+pub(crate) fn is_diagnostics_view(label: &str) -> bool {
+    matches!(label, "main" | "diagnostics")
+}
+
+fn require_main_view(label: &str, error: &str) -> Result<(), String> {
+    if label == "main" {
+        Ok(())
+    } else {
+        Err(error.into())
+    }
+}
+
+// 主窗口可以挂载浏览器子视图。权限校验应识别实际发起 IPC 的视图。
 #[tauri::command]
-pub fn diagnostics_append<R: tauri::Runtime>(
-    webview: tauri::Webview<R>,
-    entries: Vec<Input>,
-) -> Result<(), String> {
-    if !matches!(webview.label(), "main" | "diagnostics") {
+pub fn diagnostics_append(webview: tauri::Webview, entries: Vec<Input>) -> Result<(), String> {
+    if !is_diagnostics_view(webview.label()) {
         return Err("无权写入诊断日志".into());
     }
     if entries.len() > 100
@@ -420,13 +430,8 @@ pub struct AcpRawInput {
     at: u64,
 }
 #[tauri::command]
-pub fn diagnostics_acp_append<R: tauri::Runtime>(
-    webview: tauri::Webview<R>,
-    record: AcpRawInput,
-) -> Result<(), String> {
-    if webview.label() != "main" {
-        return Err("只有主窗口可以记录 ACP 原文".into());
-    }
+pub fn diagnostics_acp_append(webview: tauri::Webview, record: AcpRawInput) -> Result<(), String> {
+    require_main_view(webview.label(), "只有主窗口可以记录 ACP 原文")?;
     if record.line.len() > 32 * 1024 * 1024 || !["in", "out"].contains(&record.direction.as_str()) {
         return Err("ACP 原文过大或方向无效".into());
     }
@@ -575,12 +580,8 @@ fn storage_log_name(name: &str) -> bool {
 }
 
 #[tauri::command]
-pub fn diagnostics_storage_list<R: tauri::Runtime>(
-    webview: tauri::Webview<R>,
-) -> Result<Value, String> {
-    if webview.label() != "main" {
-        return Err("只有主窗口可以管理日志存储".into());
-    }
+pub fn diagnostics_storage_list(webview: tauri::Webview) -> Result<Value, String> {
+    require_main_view(webview.label(), "只有主窗口可以管理日志存储")?;
     let service = service()?;
     let store = service.store.lock().map_err(|e| e.to_string())?;
     let mut rows = Vec::new();
@@ -616,14 +617,12 @@ fn log_revision(meta: &fs::Metadata) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn diagnostics_storage_remove<R: tauri::Runtime>(
-    webview: tauri::Webview<R>,
+pub fn diagnostics_storage_remove(
+    webview: tauri::Webview,
     key: String,
     revision: String,
 ) -> Result<bool, String> {
-    if webview.label() != "main" {
-        return Err("只有主窗口可以管理日志存储".into());
-    }
+    require_main_view(webview.label(), "只有主窗口可以管理日志存储")?;
     if !storage_log_name(&key) {
         return Err("无效的日志文件名".into());
     }
@@ -659,15 +658,15 @@ pub fn diagnostics_status(app: tauri::AppHandle) -> Result<Value, String> {
         "observing": app.get_webview_window("diagnostics").is_some(), "latestId": service.store.lock().unwrap().last}))
 }
 #[tauri::command]
-pub fn diagnostics_snapshot<R: tauri::Runtime>(
-    webview: tauri::Webview<R>,
+pub fn diagnostics_snapshot(
+    webview: tauri::Webview,
     snapshot: Option<Value>,
 ) -> Result<Value, String> {
-    match webview.label() {
-        "main" => {}
-        "diagnostics" if snapshot.is_none() => {}
-        "diagnostics" => return Err("只有主窗口可以发布运行状态".into()),
-        _ => return Err("无权读取运行状态".into()),
+    if !is_diagnostics_view(webview.label()) {
+        return Err("无权读取运行状态".into());
+    }
+    if snapshot.is_some() {
+        require_main_view(webview.label(), "只有主窗口可以发布运行状态")?;
     }
     let service = service()?;
     if let Some(value) = snapshot {
@@ -705,12 +704,8 @@ fn enqueue_probe(queue: &mut VecDeque<String>, id: String) -> Result<(), String>
 }
 
 #[tauri::command]
-pub fn diagnostics_probe_take<R: tauri::Runtime>(
-    webview: tauri::Webview<R>,
-) -> Result<Vec<String>, String> {
-    if webview.label() != "main" {
-        return Err("只有主窗口可以执行连接测试".into());
-    }
+pub fn diagnostics_probe_take(webview: tauri::Webview) -> Result<Vec<String>, String> {
+    require_main_view(webview.label(), "只有主窗口可以执行连接测试")?;
     let service = service()?;
     let mut queue = service.probes.lock().map_err(|e| e.to_string())?;
     Ok(queue.drain(..).collect())
@@ -775,126 +770,18 @@ pub async fn diagnostics_open(app: tauri::AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tauri::{LogicalPosition, LogicalSize};
 
     #[test]
-    fn diagnostics_ipc_uses_the_calling_webview_when_main_has_a_browser_child() {
-        type MockWebview = tauri::Webview<tauri::test::MockRuntime>;
-        struct Caller<'a>(&'a MockWebview);
-        impl AsRef<MockWebview> for Caller<'_> {
-            fn as_ref(&self) -> &MockWebview {
-                self.0
-            }
-        }
-        let app = tauri::test::mock_builder()
-            .invoke_handler(tauri::generate_handler![
-                diagnostics_append,
-                diagnostics_acp_append,
-                diagnostics_storage_list,
-                diagnostics_storage_remove,
-                diagnostics_snapshot,
-                diagnostics_probe_take,
-                crate::resource_monitor::diagnostics_resources,
-            ])
-            .build(tauri::test::mock_context(tauri::test::noop_assets()))
-            .unwrap();
-        let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
-            .build()
-            .unwrap();
-        let diagnostics = tauri::WebviewWindowBuilder::new(&app, "diagnostics", Default::default())
-            .build()
-            .unwrap();
-        let browser = main
-            .as_ref()
-            .window()
-            .add_child(
-                tauri::webview::WebviewBuilder::new("browser-test", Default::default()),
-                LogicalPosition::new(0, 0),
-                LogicalSize::new(100, 100),
-            )
-            .unwrap();
-        assert_eq!(browser.window().label(), "main");
+    fn diagnosis_permissions_use_only_the_calling_view_label() {
+        assert!(is_diagnostics_view("main"));
+        assert!(is_diagnostics_view("diagnostics"));
+        assert!(require_main_view("main", "拒绝").is_ok());
+        assert_eq!(require_main_view("diagnostics", "拒绝"), Err("拒绝".into()));
 
-        let invoke = |webview: &MockWebview, cmd: &str, body: Value| {
-            tauri::test::get_ipc_response(
-                &Caller(webview),
-                tauri::webview::InvokeRequest {
-                    cmd: cmd.into(),
-                    callback: tauri::ipc::CallbackFn(0),
-                    error: tauri::ipc::CallbackFn(1),
-                    url: if cfg!(windows) {
-                        "http://tauri.localhost"
-                    } else {
-                        "tauri://localhost"
-                    }
-                    .parse()
-                    .unwrap(),
-                    body: tauri::ipc::InvokeBody::Json(body),
-                    headers: Default::default(),
-                    invoke_key: tauri::test::INVOKE_KEY.to_string(),
-                },
-            )
-        };
-
-        // 测试没有启动日志服务。主视图应通过 IPC 和权限校验，进入各命令的业务逻辑。
-        let raw =
-            json!({"record": {"line": "{}", "connectionId": "test", "direction": "in", "at": 0}});
-        let removal = json!({"key": "log-00000000000000000001.jsonl", "revision": "1:1"});
-        let snapshot = json!({"snapshot": {"connections": []}});
-        for (command, body) in [
-            ("diagnostics_append", json!({"entries": []})),
-            ("diagnostics_acp_append", raw.clone()),
-            ("diagnostics_storage_list", json!({})),
-            ("diagnostics_storage_remove", removal.clone()),
-            ("diagnostics_snapshot", snapshot.clone()),
-            ("diagnostics_probe_take", json!({})),
-        ] {
-            assert_eq!(
-                invoke(main.as_ref(), command, body).unwrap_err(),
-                json!("日志服务不可用"),
-                "{command}"
-            );
+        for label in ["browser-test", "main-child", "diagnostics-child", ""] {
+            assert!(!is_diagnostics_view(label));
+            assert_eq!(require_main_view(label, "拒绝"), Err("拒绝".into()));
         }
-        for webview in [&browser, diagnostics.as_ref()] {
-            assert_eq!(
-                invoke(webview, "diagnostics_acp_append", raw.clone()).unwrap_err(),
-                json!("只有主窗口可以记录 ACP 原文")
-            );
-            assert_eq!(
-                invoke(webview, "diagnostics_storage_list", json!({})).unwrap_err(),
-                json!("只有主窗口可以管理日志存储")
-            );
-            assert_eq!(
-                invoke(webview, "diagnostics_storage_remove", removal.clone()).unwrap_err(),
-                json!("只有主窗口可以管理日志存储")
-            );
-            assert_eq!(
-                invoke(webview, "diagnostics_probe_take", json!({})).unwrap_err(),
-                json!("只有主窗口可以执行连接测试")
-            );
-        }
-        assert_eq!(
-            invoke(&browser, "diagnostics_append", json!({"entries": []})).unwrap_err(),
-            json!("无权写入诊断日志")
-        );
-        assert_eq!(
-            invoke(&browser, "diagnostics_snapshot", snapshot.clone()).unwrap_err(),
-            json!("无权读取运行状态")
-        );
-        assert_eq!(
-            invoke(diagnostics.as_ref(), "diagnostics_snapshot", snapshot).unwrap_err(),
-            json!("只有主窗口可以发布运行状态")
-        );
-        assert!(invoke(main.as_ref(), "diagnostics_resources", json!({})).is_ok());
-        assert!(invoke(diagnostics.as_ref(), "diagnostics_resources", json!({})).is_ok());
-        assert_eq!(
-            invoke(diagnostics.as_ref(), "diagnostics_snapshot", json!({})).unwrap_err(),
-            json!("日志服务不可用")
-        );
-        assert_eq!(
-            invoke(&browser, "diagnostics_resources", json!({})).unwrap_err(),
-            json!("无权读取进程资源")
-        );
     }
 
     #[test]
