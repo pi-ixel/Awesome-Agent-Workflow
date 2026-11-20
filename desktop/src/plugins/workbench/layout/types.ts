@@ -11,6 +11,7 @@ export interface WorkbenchUiState extends PageActivation {
   /** 功能页覆盖（全屏语义）；null 表示显示基底视图。 */
   readonly overlay: OverlayView | null;
   readonly settingsInitialTab: string;
+  readonly settingsTabRequest: number;
   readonly settingsFocus: { readonly elementId: string } | null;
   readonly openSettingsTab: (tab: string, isCurrent?: () => boolean) => void;
   readonly openFileTreeSettings: (isCurrent?: () => boolean) => void;

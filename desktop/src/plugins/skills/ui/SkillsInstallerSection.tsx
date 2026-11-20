@@ -18,8 +18,10 @@ import {
 
 function SkillsInstallerSection({
   skills,
+  active = true,
 }: {
   readonly skills: SkillsService;
+  readonly active?: boolean;
 }) {
   const capability = useSyncExternalStore(skills.subscribeInstaller, skills.getInstaller);
   const skillsSourceDir = useSyncExternalStore(
@@ -47,7 +49,9 @@ function SkillsInstallerSection({
     if (capability) void skills.rescan();
   };
 
-  useEffect(() => skills.watchInstaller(), [skills]);
+  useEffect(() => {
+    if (active) return skills.watchInstaller();
+  }, [active, skills]);
 
   const installedCount = entries.filter((entry) => entry.isInstalled).length;
   const hasInstalled = installedCount > 0;

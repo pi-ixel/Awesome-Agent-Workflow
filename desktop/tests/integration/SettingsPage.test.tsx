@@ -1,7 +1,8 @@
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Context } from "cordis";
-import { beforeEach, describe, expect, it } from "vitest";
+import { useEffect, useState } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { version as desktopVersion } from "../../package.json";
 import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
 import * as skillsPlugin from "../../src/plugins/skills/index.ts";
@@ -128,8 +129,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     ).toBeVisible();
     expect(screen.getByText("界面语言")).not.toBeVisible();
     await openTab("外观");
-    // 工具路径面板 hidden（仍在 DOM，但不可见）
-    expect(screen.getByLabelText("iCode 路径")).not.toBeVisible();
+    expect(screen.queryByLabelText("iCode 路径")).not.toBeInTheDocument();
 
     await openTab("Agent");
     expect(screen.getByRole("tab", { name: "Agent" })).toHaveAttribute(
@@ -153,7 +153,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
   it("工具路径页不再有首版 CLI 的 uv / aaw 脚本设置，iCode 路径在 Agent 页保存", async () => {
     await renderSettingsPage();
     await openTab("工具路径");
-    expect(screen.getByLabelText("iCode 路径")).not.toBeVisible();
+    expect(screen.queryByLabelText("iCode 路径")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("uv 命令")).toBeNull();
     expect(screen.queryByLabelText("aaw 脚本路径")).toBeNull();
     await openTab("Agent");
@@ -167,6 +167,50 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     expect(agentService.executableConfiguration("chrys")?.value).toBe(
       "X:/Program Files/icode.exe",
     );
+  });
+
+  it("按需挂载页签，切回和重复直达均保留本次编辑", async () => {
+    const mounted = vi.fn();
+    function DraftSettings({ active }: { readonly active: boolean }) {
+      const [draft, setDraft] = useState("");
+      useEffect(() => {
+        mounted();
+      }, []);
+      return (
+        <input
+          aria-label="测试草稿"
+          disabled={!active}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+      );
+    }
+    const release = settingsWorkbench.register("settings", {
+      id: "draft-test",
+      label: "测试页签",
+      Icon: () => null,
+      View: DraftSettings,
+    });
+    try {
+      await renderSettingsPage();
+      expect(mounted).not.toHaveBeenCalled();
+      await openTab("测试页签");
+      await userEvent.type(screen.getByLabelText("测试草稿"), "draft");
+      await openTab("外观");
+      expect(screen.getByLabelText("测试草稿")).not.toBeVisible();
+      act(() =>
+        settingsWorkbench.navigation.getState().openSettingsTab("draft-test"),
+      );
+      expect(screen.getByLabelText("测试草稿")).toHaveValue("draft");
+      await openTab("外观");
+      act(() =>
+        settingsWorkbench.navigation.getState().openSettingsTab("draft-test"),
+      );
+      expect(screen.getByLabelText("测试草稿")).toBeVisible();
+      expect(mounted).toHaveBeenCalledOnce();
+    } finally {
+      act(release);
+    }
   });
 
   it("页头显示自动保存，并能同时重置外观和其他设置", async () => {
