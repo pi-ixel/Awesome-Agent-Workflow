@@ -1,3 +1,8 @@
+import { ActionButton } from "../../../../shared/ui/controls.tsx";
+import { ContextMenu } from "../../../../shared/ui/ContextMenu.tsx";
+import { useMenuController } from "../../../../shared/ui/useMenuController.ts";
+import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
+import { NavigationRow } from "../../../../shared/ui/NavigationRow.tsx";
 import { useSessionValue } from "../../ui/bindings/conversationView.ts";
 import { useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
 import { useProject } from "../../ui/bindings/projectView.tsx";
@@ -6,7 +11,7 @@ import { useProjectGit, type GitService } from "../../../git/service.ts";
 import type { GitReviewNavigation } from "../../../git/types.ts";
 import type { ProjectWorkspace } from "../../service.ts";
 import type { ProjectActivity, ProjectExtension } from "../../ui/extension.ts";
-import { useId, useMemo, useState, type ReactNode } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { pathKey } from "../../../../shared/panelPaths.ts";
 import {
@@ -37,11 +42,11 @@ function Section({
   const branchId = useId();
   return (
     <section className="border-b border-line py-2 last:border-b-0">
-      <button
-        type="button"
+      <NavigationRow
+        layout="tree"
         aria-expanded={open}
         aria-controls={branchId}
-        className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm text-ink-faint hover:bg-raised"
+        className="text-ink-faint"
         onClick={() => setOpen((current) => !current)}
       >
         <ChevronRightIcon
@@ -50,7 +55,7 @@ function Section({
         />
         <span>{title}</span>
         {metric}
-      </button>
+      </NavigationRow>
       <TreeBranch id={branchId} open={open}>
         {children}
       </TreeBranch>
@@ -93,7 +98,30 @@ export function SessionStatusOverlay({
   const mode = useRegisteredSnapshot(conversation?.statusView, (state) => state?.mode ?? "auto");
   const moving = useLayoutMotion(mode, { scope: project });
   const setMode = (next: StatusCardMode) => conversation?.setStatusMode(next);
-  const [menu, setMenu] = useState(false);
+  const { menu, open: openMenu, dismiss: dismissMenu } = useMenuController();
+  const capsule = useRef<HTMLButtonElement>(null);
+  const focusAfterMode = useRef(false);
+  useLayoutEffect(() => {
+    if (!focusAfterMode.current) return;
+    focusAfterMode.current = false;
+    const button = capsule.current;
+    if (!button || getComputedStyle(button).getPropertyValue("--status-mini-visible").trim() !== "1")
+      return;
+    const previous = document.activeElement;
+    const deadline = performance.now() + 220;
+    let frame = 0;
+    const focus = () => {
+      const active = document.activeElement;
+      if (active !== previous && active !== document.body && !button.parentElement?.contains(active))
+        return;
+      if (getComputedStyle(button).visibility === "visible")
+        button.focus({ preventScroll: true });
+      else if (performance.now() < deadline)
+        frame = requestAnimationFrame(focus);
+    };
+    focus();
+    return () => cancelAnimationFrame(frame);
+  }, [mode]);
   const git = useProjectGit(enabled ? project : null, queryGit, watchActivity);
   const gitModel = useMemo(() => gitStatusSummary(git.data), [git.data]);
   const activeProject = useWorkspaceValue((state) => state.activePath);
@@ -180,16 +208,17 @@ export function SessionStatusOverlay({
             aria-label="会话状态悬浮卡"
             className="pointer-events-none absolute right-4 top-2 z-20"
           >
-              <button
+              <ActionButton
+                ref={capsule}
+                tone="secondary"
                 inert={mode === "panel"}
                 type="button"
                 aria-label={`展开会话状态：${compactLabel}`}
                 data-hint={compactLabel}
                 onClick={() => {
-                  setMenu(false);
                   setMode("panel");
                 }}
-                className="session-status-mini absolute right-0 top-0 inline-flex w-max max-w-[min(20rem,calc(100cqw-2rem))] items-center gap-2 rounded-full border border-line-strong bg-surface px-3 py-2 text-xs text-ink-soft shadow-floating"
+                className="session-status-mini absolute right-0 top-0 inline-flex w-max max-w-[min(20rem,calc(100cqw-2rem))] items-center gap-2 rounded-full! px-3 py-2 text-ui-sm shadow-floating"
               >
                 <span
                   aria-hidden="true"
@@ -202,11 +231,12 @@ export function SessionStatusOverlay({
                   aria-hidden="true"
                   className="ui-icon-14 shrink-0 text-ink-faint"
                 />
-              </button>
+              </ActionButton>
               <div
                 inert={mode === "mini"}
-                className="session-status-panel absolute right-0 top-0 w-80 max-w-[calc(100cqw-2rem)] rounded-2xl border border-line-strong bg-surface text-ink shadow-floating"
+                className="session-status-panel absolute right-0 top-0 w-80 max-w-[calc(100cqw-2rem)]"
               >
+              <HintSurface open role="region" aria-label="会话状态">
                 <div className="relative flex items-center justify-end gap-1 px-2 pt-2">
                   <span className="mr-auto pl-2 text-sm text-ink-faint">
                     会话状态
@@ -214,8 +244,22 @@ export function SessionStatusOverlay({
                   <IconButton
                     type="button"
                     aria-label="状态卡显示选项"
-                    aria-expanded={menu}
-                    onClick={() => setMenu((old) => !old)}
+                    aria-haspopup="menu"
+                    aria-expanded={menu !== null && !menu.closing}
+                    onClick={(event) => {
+                      if (menu && !menu.closing) {
+                        dismissMenu();
+                        return;
+                      }
+                      openMenu("status-card", "状态卡显示选项", [{
+                        id: "auto",
+                        label: "恢复自动展开",
+                        onSelect: () => {
+                          focusAfterMode.current = true;
+                          setMode("auto");
+                        },
+                      }], { trigger: event.currentTarget });
+                    }}
                   >
                     <EllipsisIcon className="ui-icon-14" />
                   </IconButton>
@@ -224,33 +268,22 @@ export function SessionStatusOverlay({
                     aria-label="收起会话状态"
                     {...hintCollapse}
                     onClick={() => {
-                      setMenu(false);
+                      if (menu) dismissMenu();
+                      focusAfterMode.current = true;
                       setMode("mini");
                     }}
                   >
                     <Minimize2Icon className="ui-icon-14" />
                   </IconButton>
                   {menu && (
-                    <div
-                      className="absolute right-9 top-9 z-30 rounded-lg border border-line-strong bg-surface p-1 shadow-floating"
-                      onKeyDown={(event) => {
-                        if (event.key === "Escape") {
-                          event.stopPropagation();
-                          setMenu(false);
-                        }
-                      }}
-                    >
-                      <button
-                        type="button"
-                        className="rounded px-3 py-2 text-sm hover:bg-raised"
-                        onClick={() => {
-                          setMenu(false);
-                          setMode("auto");
-                        }}
-                      >
-                        恢复自动展开
-                      </button>
-                    </div>
+                    <ContextMenu
+                      label={menu.label}
+                      entries={menu.entries}
+                      placement={menu.placement}
+                      trigger={menu.trigger}
+                      closing={menu.closing}
+                      onDismiss={dismissMenu}
+                    />
                   )}
                 </div>
                 <div className="max-h-[min(64dvh,32rem)] overflow-y-auto px-2 pb-2">
@@ -261,11 +294,10 @@ export function SessionStatusOverlay({
                     <Section title="Git 工具">
                       {gitModel && (
                         <>
-                          <button
-                            type="button"
+                          <NavigationRow
                             onClick={openGit}
                             aria-label="查看 Git 更改"
-                            className="flex w-full items-center gap-2 rounded px-2 py-2 text-left font-sans text-ui-base tabular-nums hover:bg-raised"
+                            className="font-sans tabular-nums"
                           >
                             <span aria-hidden="true">▤</span>
                             <span className="flex-1">
@@ -285,11 +317,10 @@ export function SessionStatusOverlay({
                                 </span>
                               </>
                             )}
-                          </button>
-                          <button
-                            type="button"
+                          </NavigationRow>
+                          <NavigationRow
                             aria-label="查看 Unversioned Files"
-                            className="flex w-full items-center gap-2 rounded px-2 py-2 text-left font-sans text-ui-base tabular-nums text-danger-ink hover:bg-raised"
+                            className="font-sans tabular-nums text-danger-ink"
                             onClick={() => {
                               if (!project) return;
                               openGitReview?.(project, "untracked");
@@ -302,7 +333,7 @@ export function SessionStatusOverlay({
                             <span className="text-ok-ink">
                               +{gitModel.untrackedAdded}
                             </span>
-                          </button>
+                          </NavigationRow>
                           <p
                             className="truncate px-2 py-1 text-xs text-ink-soft"
                             data-hint={gitModel.branch}
@@ -358,27 +389,28 @@ export function SessionStatusOverlay({
                   {activities.length > 0 && extension && (
                     <Section title={extension.activityTitle}>
                       {activities.map((item) => (
-                        <button
+                        <NavigationRow
                           key={item.id}
-                          type="button"
                           aria-label={item.openLabel}
                           onClick={() => {
                             if (project) extension.openActivity(project, item.id);
                           }}
-                          className="block w-full rounded px-2 py-2 text-left text-sm hover:bg-raised"
                         >
-                          <span className="flex items-center justify-between gap-2">
-                            <span className="truncate" data-hint={item.title}>{item.title}</span>
-                            <span className={item.attention ? "shrink-0 text-warn-ink" : "shrink-0 text-info"}>
-                              {item.label}
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-center justify-between gap-2">
+                              <span className="truncate" data-hint={item.title}>{item.title}</span>
+                              <span className={item.attention ? "shrink-0 text-warn-ink" : "shrink-0 text-info"}>
+                                {item.label}
+                              </span>
                             </span>
+                            <span className="mt-1 block truncate text-ink-faint">{item.detail}</span>
                           </span>
-                          <span className="mt-1 block truncate text-ink-faint">{item.detail}</span>
-                        </button>
+                        </NavigationRow>
                       ))}
                     </Section>
                   )}
                 </div>
+                </HintSurface>
               </div>
           </aside>
         </ScopedErrorBoundary>

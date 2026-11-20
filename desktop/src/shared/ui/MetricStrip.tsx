@@ -21,7 +21,7 @@ export function MetricStrip({
     metrics.length === 4
       ? "grid-cols-2 @sm:grid-cols-4"
       : metrics.length === 3
-        ? "grid-cols-3"
+        ? "grid-cols-2 @sm:grid-cols-3"
         : "grid-cols-2";
   return (
     <div
@@ -36,17 +36,17 @@ export function MetricStrip({
             {index > 0 && (
               <span
                 aria-hidden="true"
-                className={`absolute left-0 top-1/2 h-7 w-px -translate-y-1/2 bg-line ${metrics.length === 4 && index === 2 ? "hidden @sm:block" : ""}`}
+                className={`absolute left-0 top-1/2 h-7 w-px -translate-y-1/2 bg-line ${metrics.length >= 3 && index === 2 ? "hidden @sm:block" : ""}`}
               />
             )}
             <dt
-              className="mt-1 truncate text-ui-base text-ink-mute"
+              className="mt-1 text-ui-base text-ink-mute [overflow-wrap:anywhere]"
               data-hint={label}
             >
               {label}
             </dt>
             <dd
-              className="truncate text-ui-xl font-medium tabular-nums"
+              className="text-ui-xl font-medium tabular-nums [overflow-wrap:anywhere]"
               data-hint={title}
             >
               {value}

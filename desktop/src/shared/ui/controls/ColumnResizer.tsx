@@ -1,195 +1,260 @@
-/**
- * 三栏可拖拽调宽（开发页三栏布局）：
- *
- * - 4px 宽竖向拖拽热区（hover / 拖拽中高亮 accent，cursor-col-resize）；
- * - 拖拽实时更新指定 CSS 变量（挂在 documentElement 上，供 App 的
- *   grid-template-columns 引用），结束时通知调用方保存；
- * - 双击热区恢复默认宽度；
- * - 拖拽期间给 body 加 user-select:none，避免划选沿途文字。
- *
- * 本组件只负责「一条分隔线」的交互，不感知布局结构；左右栏各挂
- * 一个，方向相反（左栏往右拖增宽，右栏往左拖增宽）。axis="y" 时是横向
- * 分隔线，调的是上下分屏里一块的高度（start=往上拖增高，即下面那块）。
- */
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
-import { useFrameTask } from "./useFrameTask.ts";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type RefObject,
+} from "react";
 import { clampWidth } from "./columnWidth.ts";
+import { useFrameTask } from "./useFrameTask.ts";
 
-export interface ColumnResizerProps {
-  /** 要更新的 CSS 变量名（如 LEFT_WIDTH_VAR）。 */
-  readonly cssVarName: string;
-  readonly rootRef?: RefObject<HTMLElement | null>;
-  readonly onCommitWidth?: (width: number) => void;
-  /** 默认宽度（双击复位的目标值），也作为无 CSS 变量时的拖拽基准。 */
+type SizeBounds = { readonly min: number; readonly max: number };
+
+type Sizing =
+  | {
+      readonly cssVarName: string;
+      readonly rootRef?: RefObject<HTMLElement | null>;
+      readonly readWidth?: never;
+      readonly onPreviewWidth?: never;
+    }
+  | {
+      readonly cssVarName?: never;
+      readonly rootRef?: never;
+      readonly readWidth: () => number;
+      readonly onPreviewWidth: (width: number) => void;
+    };
+
+export type ColumnResizerProps = Sizing & {
   readonly defaultWidthPx: number;
   readonly minPx: number;
   readonly maxPx: number;
-  /** 增宽方向：end=向右拖增宽（左栏），start=向左拖增宽（右栏）。 */
+  readonly readBounds?: () => SizeBounds;
+  readonly paneRef?: RefObject<HTMLElement | null>;
+  readonly onCommitWidth?: (width: number) => void;
+  readonly onDraggingChange?: (dragging: boolean) => void;
+  readonly onReset?: () => void;
+  readonly cancelBehavior?: "commit" | "revert";
   readonly growDirection: "end" | "start";
-  /** 无障碍名称（role=separator 的 aria-label）。 */
   readonly label: string;
-  /** x：竖线调宽（默认）；y：横线调高。 */
+  readonly hint?: string;
   readonly axis?: "x" | "y";
+  readonly placement?: "flow" | "overlay" | "seam";
+};
+
+function root(props: ColumnResizerProps) {
+  return props.rootRef ? props.rootRef.current : document.documentElement;
 }
 
-/** 一次拖拽会话的现场（起点指针位置 / 起始宽度 / 最新宽度）。 */
-interface DragSession {
-  startX: number;
-  startWidth: number;
-  lastWidth: number;
+function bounds(props: ColumnResizerProps) {
+  return props.readBounds?.() ?? { min: props.minPx, max: props.maxPx };
 }
 
-export function ColumnResizer({
-  cssVarName,
-  rootRef,
-  onCommitWidth,
-  defaultWidthPx,
-  minPx,
-  maxPx,
-  growDirection,
-  label,
-  axis = "x",
-}: ColumnResizerProps) {
-  const vertical = axis === "y";
-  // 拖拽中高亮 + 决定全局指针监听是否挂载
-  const [isDragging, setIsDragging] = useState(false);
-  // 拖拽会话现场用 ref 持有：pointermove 高频触发，不走 state 重渲染
-  const dragSessionRef = useRef<DragSession | null>(null);
-  const resizeFrame = useFrameTask();
-  const readWidth = useCallback(() => {
-    const root = rootRef ? rootRef.current : document.documentElement;
-    const width = Number.parseFloat(root?.style.getPropertyValue(cssVarName) ?? "");
-    return Number.isFinite(width) && width > 0 ? width : defaultWidthPx;
-  }, [cssVarName, defaultWidthPx, rootRef]);
-  const previewWidth = useCallback((width: number) => {
-    const root = rootRef ? rootRef.current : document.documentElement;
-    root?.style.setProperty(cssVarName, `${width}px`);
-  }, [cssVarName, rootRef]);
-
-  const handlePointerDown = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      if (event.button !== 0) {
-        return;
-      }
-      const startWidth = clampWidth(
-        readWidth(),
-        minPx,
-        maxPx,
-      );
-      dragSessionRef.current = {
-        startX: vertical ? event.clientY : event.clientX,
-        startWidth,
-        lastWidth: startWidth,
-      };
-      setIsDragging(true);
-      // 拖拽期间禁文字划选（收口时移除）
-      document.body.style.setProperty("user-select", "none");
-      event.preventDefault();
-    },
-    [readWidth, minPx, maxPx, vertical],
+function readWidth(props: ColumnResizerProps) {
+  if (props.readWidth) return props.readWidth();
+  const width = Number.parseFloat(
+    root(props)?.style.getPropertyValue(props.cssVarName) ?? "",
   );
+  return Number.isFinite(width) && width > 0 ? width : props.defaultWidthPx;
+}
 
-  // 拖拽中的全局指针监听：指针移出热区后仍持续跟手，收口即持久化
-  useEffect(() => {
-    if (!isDragging) {
-      return;
-    }
-    function handlePointerMove(event: PointerEvent): void {
-      const session = dragSessionRef.current;
-      if (session === null) {
-        return;
-      }
-      const position = vertical ? event.clientY : event.clientX;
-      const delta =
-        growDirection === "end"
-          ? position - session.startX
-          : session.startX - position;
-      const next = clampWidth(session.startWidth + delta, minPx, maxPx);
-      session.lastWidth = next;
-      resizeFrame.schedule(() => previewWidth(next));
-    }
-    function finishDrag(): void {
-      const session = dragSessionRef.current;
-      if (session === null) {
-        return;
-      }
-      resizeFrame.flush();
-      onCommitWidth?.(session.lastWidth);
-      dragSessionRef.current = null;
-      setIsDragging(false);
-      document.body.style.removeProperty("user-select");
-    }
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", finishDrag);
-    window.addEventListener("pointercancel", finishDrag);
-    window.addEventListener("blur", finishDrag);
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", finishDrag);
-      window.removeEventListener("pointercancel", finishDrag);
-      window.removeEventListener("blur", finishDrag);
-      resizeFrame.cancel();
-      document.body.style.removeProperty("user-select");
-    };
-  }, [
-    growDirection,
-    isDragging,
-    maxPx,
+function previewWidth(props: ColumnResizerProps, width: number) {
+  if (props.onPreviewWidth) props.onPreviewWidth(width);
+  else root(props)?.style.setProperty(props.cssVarName, `${width}px`);
+}
+
+function syncRange(
+  divider: HTMLElement,
+  props: ColumnResizerProps,
+  width = readWidth(props),
+) {
+  const { min, max } = bounds(props);
+  divider.setAttribute("aria-valuemin", String(min));
+  divider.setAttribute("aria-valuemax", String(max));
+  divider.setAttribute("aria-valuenow", String(clampWidth(width, min, max)));
+}
+
+/** 分隔线统一处理指针、键盘、焦点与预览。宽度布局和持久化由所属面板提供。 */
+export function ColumnResizer(props: ColumnResizerProps) {
+  const {
+    label,
+    hint,
     minPx,
-    onCommitWidth,
-    previewWidth,
-    resizeFrame,
-    vertical,
-  ]);
+    maxPx,
+    paneRef,
+    axis = "x",
+    placement = "flow",
+    growDirection,
+  } = props;
+  const vertical = axis === "y";
+  const divider = useRef<HTMLDivElement>(null);
+  const current = useRef(props);
+  const stopDrag = useRef<(() => void) | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const frame = useFrameTask();
+
+  useLayoutEffect(() => {
+    current.current = props;
+    if (divider.current && !stopDrag.current) syncRange(divider.current, props);
+  });
+
+  useEffect(() => {
+    const pane = paneRef?.current;
+    if (!pane || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (divider.current) syncRange(divider.current, current.current);
+    });
+    observer.observe(pane);
+    if (pane.parentElement) observer.observe(pane.parentElement);
+    return () => observer.disconnect();
+  }, [paneRef]);
+
+  useEffect(() => () => stopDrag.current?.(), []);
+
+  const start = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || event.isPrimary === false || stopDrag.current)
+      return;
+    event.preventDefault();
+    const handle = event.currentTarget;
+    handle.focus({ preventScroll: true });
+    const pointerId = event.pointerId;
+    if (Number.isFinite(pointerId)) handle.setPointerCapture?.(pointerId);
+    const offset = (event: PointerEvent) =>
+      vertical ? event.clientY : event.clientX;
+    const origin = offset(event.nativeEvent);
+    const initial = readWidth(props);
+    let width = initial;
+    let resized = false;
+    const selection = document.body.style.getPropertyValue("user-select");
+    const priority = document.body.style.getPropertyPriority("user-select");
+    document.body.style.setProperty("user-select", "none");
+    const apply = (next: number) => {
+      previewWidth(current.current, next);
+      syncRange(handle, current.current, next);
+    };
+    const measure = (event: PointerEvent) => {
+      const { min, max } = bounds(current.current);
+      const delta =
+        (offset(event) - origin) * (growDirection === "end" ? 1 : -1);
+      return clampWidth(initial + delta, min, max);
+    };
+    const move = (event: PointerEvent) => {
+      if (event.pointerId !== pointerId) return;
+      width = measure(event);
+      if (!resized && width === initial) return;
+      resized = true;
+      frame.schedule(() => apply(width));
+    };
+    const detach = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("blur", finish);
+      handle.removeEventListener("lostpointercapture", lost);
+      frame.cancel();
+      stopDrag.current = null;
+      if (selection)
+        document.body.style.setProperty("user-select", selection, priority);
+      else document.body.style.removeProperty("user-select");
+    };
+    const finish = () => {
+      detach();
+      if (resized || width !== initial) {
+        apply(width);
+        current.current.onCommitWidth?.(width);
+      }
+      setDragging(false);
+      current.current.onDraggingChange?.(false);
+    };
+    const up = (event: PointerEvent) => {
+      if (event.pointerId !== pointerId) return;
+      if (Number.isFinite(pointerId)) width = measure(event);
+      finish();
+    };
+    const lost = (event: PointerEvent) => {
+      if (event.pointerId === pointerId) finish();
+    };
+    const cancel = (event: PointerEvent) => {
+      if (event.pointerId !== pointerId) return;
+      if (current.current.cancelBehavior !== "revert") {
+        finish();
+        return;
+      }
+      detach();
+      if (resized) apply(initial);
+      setDragging(false);
+      current.current.onDraggingChange?.(false);
+    };
+
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+    window.addEventListener("blur", finish);
+    handle.addEventListener("lostpointercapture", lost);
+    stopDrag.current = () => {
+      detach();
+      current.current.onDraggingChange?.(false);
+    };
+    setDragging(true);
+    props.onDraggingChange?.(true);
+  };
+
+  const commit = (width: number) => {
+    previewWidth(props, width);
+    if (divider.current) syncRange(divider.current, props, width);
+    props.onCommitWidth?.(width);
+  };
+  const position =
+    placement === "overlay"
+      ? "absolute inset-y-0 -left-1 z-10 w-2"
+      : placement === "seam"
+        ? "relative z-10 h-full w-px bg-line before:absolute before:inset-y-0 before:-left-1 before:w-[9px] before:content-['']"
+        : vertical
+          ? "relative h-1 w-full"
+          : "relative h-full w-1";
+  const indicator = vertical
+    ? `inset-x-2 h-0.5 ${growDirection === "end" ? "top-0" : "bottom-0"}`
+    : `inset-y-2 w-0.5 ${placement !== "flow" ? "left-1/2 -translate-x-1/2" : growDirection === "end" ? "left-0" : "right-0"}`;
 
   return (
     <div
+      ref={divider}
       role="separator"
       aria-orientation={vertical ? "horizontal" : "vertical"}
       aria-label={label}
-      tabIndex={0}
       aria-valuemin={minPx}
       aria-valuemax={maxPx}
+      tabIndex={0}
+      data-hint={hint}
+      data-resizing={dragging || undefined}
+      onPointerDown={start}
+      onDoubleClick={props.onReset ?? (() => commit(props.defaultWidthPx))}
       onKeyDown={(event) => {
-        const keys = vertical ? ["ArrowUp", "ArrowDown", "Home", "End"] : ["ArrowLeft", "ArrowRight", "Home", "End"];
-        if (!keys.includes(event.key))
+        const decrease = vertical ? "ArrowUp" : "ArrowLeft";
+        const increase = vertical ? "ArrowDown" : "ArrowRight";
+        if (
+          ![decrease, increase, "Home", "End"].includes(event.key) ||
+          stopDrag.current
+        )
           return;
         event.preventDefault();
-        const delta =
-          (event.key === (vertical ? "ArrowDown" : "ArrowRight") ? 16 : -16) *
+        const { min, max } = bounds(props);
+        const step =
+          (event.key === increase ? 16 : -16) *
           (growDirection === "end" ? 1 : -1);
-        const next =
+        const width =
           event.key === "Home"
-            ? minPx
+            ? min
             : event.key === "End"
-              ? maxPx
-              : clampWidth(
-                  readWidth() + delta,
-                  minPx,
-                  maxPx,
-                );
-        previewWidth(next);
-        onCommitWidth?.(next);
+              ? max
+              : clampWidth(readWidth(props) + step, min, max);
+        commit(width);
       }}
-      onPointerDown={handlePointerDown}
-      onDoubleClick={() => {
-        previewWidth(defaultWidthPx);
-        onCommitWidth?.(defaultWidthPx);
-      }}
-      className={`group relative flex shrink-0 touch-none items-stretch bg-transparent outline-none ${vertical ? "h-1 w-full cursor-ns-resize" : "h-full w-1 cursor-ew-resize"}`}
+      className={`group flex shrink-0 touch-none items-stretch outline-none ${position} ${vertical ? "cursor-ns-resize" : "cursor-ew-resize"}`}
     >
-      {/* 指示条(ZCode separator after 形态,WorkspaceShellLayout.tsx:2313-2335):
-          2px 圆头短棒、上下内缩(inset-y-2)、foreground-subtlest/50 灰,
-          常态 opacity-0,hover / 键盘聚焦 / 拖拽同色淡入——只动透明度,
-          无宽度跳变。钉在真实栏界(左栏 = 热区左缘,右栏 = 热区右缘),
-          不存在错位。 */}
       <span
         aria-hidden={true}
-        className={`pointer-events-none absolute rounded-full bg-ink-subtlest/50 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 ${
-          isDragging ? "opacity-100" : ""
-        } ${vertical
-          ? `inset-x-2 h-0.5 ${growDirection === "end" ? "top-0" : "bottom-0"}`
-          : `inset-y-2 w-0.5 ${growDirection === "end" ? "left-0" : "right-0"}`}`}
+        className={`pointer-events-none absolute rounded-full bg-focus-ring opacity-0 transition-opacity motion-reduce:transition-none group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[resizing=true]:opacity-100 ${indicator}`}
       />
     </div>
   );

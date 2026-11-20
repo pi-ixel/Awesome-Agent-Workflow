@@ -6,7 +6,7 @@ import { STATE_TONE } from "./nodeText.ts";
 export function StatusWord({ state, waiting, label }: { state: NodeState; waiting?: boolean; label?: string }) {
   return <span className={`workflow-status contents state-${state}${waiting ? " waiting" : ""}`}>
     <Badge tone={waiting ? "warn" : STATE_TONE[state]} compact>
-      <BadgeDot className={`ui-icon-6${state === "running" && !waiting ? " animate-pulse motion-reduce:animate-none" : ""}`} />
+      <BadgeDot pulse={state === "running" && !waiting} />
       {label ?? STATE_LABEL[state]}
     </Badge>
   </span>;

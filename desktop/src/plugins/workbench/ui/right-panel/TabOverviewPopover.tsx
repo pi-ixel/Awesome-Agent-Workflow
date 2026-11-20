@@ -1,4 +1,7 @@
+import { embeddedFieldClass } from "../../../../shared/ui/inputStyles.ts";
 import { IconButton } from "../../../../shared/ui/IconButton.tsx";
+import { NavigationRow } from "../../../../shared/ui/NavigationRow.tsx";
+import { focusVisibleRing } from "../../../../shared/ui/controls.tsx";
 import type { PanelTab } from "../../layout/types.ts";
 import type { PanelTabPresentation, WorkbenchSnapshot } from "../../types.ts";
 /**
@@ -10,8 +13,7 @@ import type { PanelTabPresentation, WorkbenchSnapshot } from "../../types.ts";
  *   popover.tsx 基元：z-[60] / w-72 / rounded-xl / border-border / shadow-floating /
  *   sideOffset 4；入退场沿用既有 100ms context-menu-in-* 动效；
  * - 搜索面与评分用 panelTabModel 的纯函数（sidePaneTabSearch.ts 逐行移植）；
- * - 键盘：↑↓ roving + Enter 激活（原生 button）+ Esc 关闭（照 ContextMenu
- *   handleKeyDown 模式）；Tab 不选中只关闭；
+ * - 方向键浏览结果，Tab 可访问搜索框、结果和关闭按钮，Esc 归还焦点。
  * - 关闭时清空搜索词（ZCode onOpenChange :137-142 同款）。
  */
 import {
@@ -23,7 +25,12 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { ChevronsDownIcon, SearchIcon, XIcon } from "../../../../shared/ui/icons.tsx";
+import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
+import {
+  ChevronsDownIcon,
+  SearchIcon,
+  XIcon,
+} from "../../../../shared/ui/icons.tsx";
 import {
   buildSearchFields,
   filterAndRankSearchItems,
@@ -62,11 +69,7 @@ function buildRows(
       presentation,
       title,
       timeLabel: formatTabRelativeTime(closedAt ?? tab.openedAt ?? currentTime),
-      searchFields: buildSearchFields(
-        title,
-        searchHint ?? "",
-        typeLabel ?? "",
-      ),
+      searchFields: buildSearchFields(title, searchHint ?? "", typeLabel ?? ""),
     };
   });
 }
@@ -94,7 +97,7 @@ export function TabOverviewPopover({
 }) {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [currentTime, setCurrentTime] = useState(() => Date.now());
@@ -102,8 +105,9 @@ export function TabOverviewPopover({
   const [pos, setPos] = useState<{
     x: number;
     y: number;
+    maxHeight: number;
   } | null>(null);
-  const [measured, setMeasured] = useState(false);
+  const measured = pos !== null;
 
   const queryParts = useMemo(() => normalizeSearchQuery(query), [query]);
   const openRows = useMemo(
@@ -122,13 +126,13 @@ export function TabOverviewPopover({
     () => filterAndRankSearchItems(closedRows, queryParts),
     [closedRows, queryParts],
   );
-  const hasAnyResult =
-    filteredOpen.length > 0 || filteredClosed.length > 0;
+  const hasAnyResult = filteredOpen.length > 0 || filteredClosed.length > 0;
 
   // 仅收起浮层并清搜索词：不触达 ref，渲染期创建的行回调可安全引用
   const dismiss = (): void => {
     setOpen(false);
     setQuery("");
+    setPos(null);
   };
   const close = (reopenFocus = true): void => {
     dismiss();
@@ -140,14 +144,6 @@ export function TabOverviewPopover({
       close();
       return;
     }
-    const rect = triggerRef.current?.getBoundingClientRect();
-    restoreFocusRef.current = document.activeElement as HTMLElement | null;
-    setPos(
-      rect
-        ? { x: rect.left, y: rect.bottom + 4 }
-        : { x: 8, y: 8 },
-    );
-    setMeasured(false);
     setCurrentTime(Date.now());
     setOpen(true);
   };
@@ -163,26 +159,52 @@ export function TabOverviewPopover({
     return () => window.clearInterval(interval);
   }, [open]);
 
-  // 首帧量测定稿：横向夹进视口（左右 8px），纵向放不下翻转到触发钮上方
   useLayoutEffect(() => {
-    if (!open || !pos) return;
-    const rect = panelRef.current?.getBoundingClientRect();
-    const width = rect?.width ?? 0;
-    const height = rect?.height ?? 0;
-    let x = Math.min(pos.x, window.innerWidth - width - 8);
-    x = Math.max(8, x);
-    let y = pos.y;
-    if (y + height > window.innerHeight - 8 && height > 0) {
-      const triggerRect = triggerRef.current?.getBoundingClientRect();
-      y = (triggerRect?.top ?? pos.y) - height - 4;
-    }
-    y = Math.max(8, y);
-    setPos({ x, y });
-    setMeasured(true);
-    panelRef.current?.querySelector<HTMLInputElement>("input")?.focus();
-    // 仅开启时量测定稿一次（placement 由 toggle 给定，不随后续渲染复算）
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const panel = panelRef.current;
+    const trigger = triggerRef.current;
+    if (!open || !panel || !trigger) return;
+    const place = () => {
+      const anchor = trigger.getBoundingClientRect();
+      const width = panel.offsetWidth;
+      const height = panel.offsetHeight;
+      const below = Math.max(0, window.innerHeight - anchor.bottom - 12);
+      const above = Math.max(0, anchor.top - 12);
+      const useBelow = height <= below || below >= above;
+      const maxHeight = useBelow ? below : above;
+      const x = Math.max(
+        8,
+        Math.min(anchor.left, window.innerWidth - width - 8),
+      );
+      const y = Math.max(
+        8,
+        useBelow
+          ? anchor.bottom + 4
+          : anchor.top - Math.min(height, maxHeight) - 4,
+      );
+      setPos((previous) =>
+        previous?.x === x &&
+        previous.y === y &&
+        previous.maxHeight === maxHeight
+          ? previous
+          : { x, y, maxHeight },
+      );
+    };
+    place();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(place);
+    observer?.observe(panel);
+    observer?.observe(trigger);
+    window.addEventListener("resize", place);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", place);
+    };
   }, [open]);
+  useLayoutEffect(() => {
+    if (measured) searchRef.current?.focus();
+  }, [measured]);
 
   // 点击外部关闭（触发钮与浮层自身除外）
   useEffect(() => {
@@ -196,29 +218,40 @@ export function TabOverviewPopover({
         return;
       close(false);
     };
-    const handleResize = (): void => close(false);
     window.addEventListener("pointerdown", handlePointerDown);
-    window.addEventListener("resize", handleResize);
     return () => {
       window.removeEventListener("pointerdown", handlePointerDown);
-      window.removeEventListener("resize", handleResize);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
-    if (event.key === "Escape" || event.key === "Tab") {
-      event.preventDefault();
-      close();
-      return;
-    }
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-    event.preventDefault();
-    const rows = Array.from(
+  const resultButtons = () =>
+    Array.from(
       panelRef.current?.querySelectorAll<HTMLButtonElement>(
         "[data-overview-row]",
       ) ?? [],
     );
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      close();
+      return;
+    }
+    if (event.key === "Tab") {
+      const controls =
+        event.currentTarget.querySelectorAll<HTMLElement>("input, button");
+      const boundary = event.shiftKey
+        ? controls[0]
+        : controls[controls.length - 1];
+      if (event.target === boundary) {
+        event.preventDefault();
+        close();
+      }
+      return;
+    }
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    const rows = resultButtons();
     if (rows.length === 0) return;
     const currentIndex = rows.indexOf(
       document.activeElement as HTMLButtonElement,
@@ -236,7 +269,7 @@ export function TabOverviewPopover({
 
   const renderRows = (
     rows: OverviewRow[],
-    onOpen: (tab: PanelTab) => void,
+    onOpen: (id: string) => void,
     closable: boolean,
   ) =>
     rows.map(({ tab, presentation, title, timeLabel }) => {
@@ -244,16 +277,18 @@ export function TabOverviewPopover({
       return (
         <div
           key={tab.id}
-          className={`mb-0.5 flex items-center rounded-md px-2 last:mb-0 hover:bg-menu-hover focus-within:bg-menu-hover ${isActive ? "bg-selected" : ""}`}
+          className={`mb-0.5 flex items-center rounded-md px-2 last:mb-0 ${isActive ? "bg-selected" : "hover:bg-menu-hover"}`}
         >
-          <button
-            type="button"
-            role="option"
-            aria-selected={isActive}
+          <NavigationRow
+            layout="compound"
+            aria-current={isActive ? "page" : undefined}
             data-overview-row=""
             data-hint={title}
-            className="flex min-h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 text-left outline-none"
-            onClick={() => onOpen(tab)}
+            className="min-h-8 cursor-pointer items-center gap-2"
+            onClick={() => {
+              onOpen(tab.id);
+              close();
+            }}
           >
             <span className="flex size-5 shrink-0 items-center justify-center text-ink-subtle">
               <PanelTabIcon presentation={presentation} />
@@ -264,13 +299,28 @@ export function TabOverviewPopover({
             <span className="mr-0.5 shrink-0 text-ui-base text-ink-subtle">
               {timeLabel}
             </span>
-          </button>
+          </NavigationRow>
           {closable && (
             <IconButton
               iconSize="compact"
               aria-label={`关闭 ${title}`}
-              className="flex shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-subtle opacity-70 hover:bg-hover hover:opacity-100"
-              onClick={() => onCloseTab(tab.id)}
+              className={`flex shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-subtle opacity-70 hover:bg-hover hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-inset ${focusVisibleRing}`}
+              onClick={(event) => {
+                if (event.detail === 0) {
+                  const row =
+                    event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(
+                      "[data-overview-row]",
+                    );
+                  const rows = resultButtons();
+                  const index = row ? rows.indexOf(row) : -1;
+                  (
+                    rows[index + 1] ??
+                    rows[index - 1] ??
+                    searchRef.current
+                  )?.focus();
+                }
+                onCloseTab(tab.id);
+              }}
             >
               <XIcon className="ui-icon-12" />
             </IconButton>
@@ -287,85 +337,73 @@ export function TabOverviewPopover({
         data-testid="tab-overview-trigger"
         aria-label="搜索标签页"
         aria-expanded={open}
-        className={GHOST_ICON_MD}
+        className={`${GHOST_ICON_MD} focus-visible:ring-inset ${focusVisibleRing}`}
         onClick={toggle}
       >
         <ChevronsDownIcon className="ui-icon-16" />
       </IconButton>
-      {open &&
-        pos &&
-        createPortal(
-          <div
-            ref={panelRef}
-            role="listbox"
-            aria-label="搜索标签页"
-            tabIndex={-1}
-            onKeyDown={handleKeyDown}
-            data-testid="tab-overview"
-            style={{
-              position: "fixed",
-              left: pos.x,
-              top: pos.y,
-              visibility: measured ? "visible" : "hidden",
-            }}
-            className={`z-[60] flex w-72 flex-col overflow-hidden rounded-xl border border-border bg-menu p-0 text-ink shadow-floating outline-none ${measured ? "selection-popup" : ""}`}
-          >
-            <div className="border-b border-border p-1">
-              <div className="flex h-8 items-center gap-2 px-2">
-                <SearchIcon className="ui-icon-16 shrink-0 text-ink-subtlest" />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="搜索标签页..."
-                  className="w-full bg-transparent text-ui-base outline-none placeholder:text-ink-subtlest"
-                />
+      {createPortal(
+        <HintSurface
+          open={open}
+          ref={panelRef}
+          role="dialog"
+          aria-label="搜索标签页"
+          tabIndex={-1}
+          onKeyDown={handleKeyDown}
+          data-testid="tab-overview"
+          style={{
+            position: "fixed",
+            left: pos?.x ?? 0,
+            top: pos?.y ?? 0,
+            maxHeight: pos?.maxHeight,
+            visibility: measured ? "visible" : "hidden",
+          }}
+          className="z-[60] flex w-[min(18rem,calc(100vw-16px))] flex-col overflow-hidden p-0 outline-none"
+        >
+          <div className="shrink-0 border-b border-border p-1">
+            <div className="flex h-8 items-center gap-2 px-2">
+              <SearchIcon className="ui-icon-16 shrink-0 text-ink-subtlest" />
+              <input
+                ref={searchRef}
+                aria-label="查找标签页"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="搜索标签页..."
+                className={`${embeddedFieldClass} w-full`}
+              />
+            </div>
+          </div>
+          <div className="min-h-0 max-h-80 overflow-y-auto">
+            {!hasAnyResult && (
+              <div className="border-b border-border p-1 last:border-b-0">
+                <p className="px-2 py-2 text-ui-base font-medium text-ink-subtle">
+                  打开的标签页
+                </p>
+                <div className="px-4 py-5 text-ink-subtle">
+                  没有找到标签页。
+                </div>
               </div>
-            </div>
-            <div className="max-h-80 overflow-y-auto">
-              {!hasAnyResult && (
-                <div className="border-b border-border p-1 last:border-b-0">
-                  <p className="px-2 py-2 text-ui-base font-medium text-ink-subtle">
-                    打开的标签页
-                  </p>
-                  <div className="px-4 py-5 text-ink-subtle">
-                    没有找到标签页。
-                  </div>
-                </div>
-              )}
-              {filteredOpen.length > 0 && (
-                <div className="border-b border-border p-1 last:border-b-0">
-                  <p className="px-2 py-2 text-ui-base font-medium text-ink-subtle">
-                    打开的标签页
-                  </p>
-                  {renderRows(
-                    filteredOpen,
-                    (tab) => {
-                      onActivateTab(tab.id);
-                      dismiss();
-                    },
-                    true,
-                  )}
-                </div>
-              )}
-              {filteredClosed.length > 0 && (
-                <div className="border-b border-border p-1 last:border-b-0">
-                  <p className="px-2 py-2 text-ui-base font-medium text-ink-subtle">
-                    最近关闭的标签页
-                  </p>
-                  {renderRows(
-                    filteredClosed,
-                    (tab) => {
-                      onReopenClosedTab(tab.id);
-                      dismiss();
-                    },
-                    false,
-                  )}
-                </div>
-              )}
-            </div>
-          </div>,
-          document.body,
-        )}
+            )}
+            {filteredOpen.length > 0 && (
+              <div className="border-b border-border p-1 last:border-b-0">
+                <p className="px-2 py-2 text-ui-base font-medium text-ink-subtle">
+                  打开的标签页
+                </p>
+                {renderRows(filteredOpen, onActivateTab, true)}
+              </div>
+            )}
+            {filteredClosed.length > 0 && (
+              <div className="border-b border-border p-1 last:border-b-0">
+                <p className="px-2 py-2 text-ui-base font-medium text-ink-subtle">
+                  最近关闭的标签页
+                </p>
+                {renderRows(filteredClosed, onReopenClosedTab, false)}
+              </div>
+            )}
+          </div>
+        </HintSurface>,
+        document.body,
+      )}
     </>
   );
 }

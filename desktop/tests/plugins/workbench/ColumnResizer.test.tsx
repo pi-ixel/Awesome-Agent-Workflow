@@ -18,10 +18,12 @@ import {
   LEFT_WIDTH_VAR,
 } from "../../../src/plugins/workbench/ui/columnWidths.ts";
 import { ColumnResizer } from "../../../src/shared/ui/controls/ColumnResizer.tsx";
-import { clampWidth, saveColumnWidth } from "../../../src/shared/ui/controls/columnWidth.ts";
+import {
+  clampWidth,
+  saveColumnWidth,
+} from "../../../src/shared/ui/controls/columnWidth.ts";
 
-/** 「growDirection=start」方向测试用的就地常量（右栏已退役，
- *  组件本身仍是方向无关的通用分隔线）。 */
+/** 验证分隔线向起始侧增宽时的独立宽度设置。 */
 const START_WIDTH_VAR = "--test-start-w";
 const START_WIDTH_STORAGE_KEY = "test/layout/start-w";
 const START_DEFAULT_PX = 340;
@@ -45,7 +47,9 @@ describe("ColumnResizer", () => {
     render(
       <ColumnResizer
         cssVarName={LEFT_WIDTH_VAR}
-        onCommitWidth={(width) => saveColumnWidth(webviewStorage, LEFT_WIDTH_STORAGE_KEY, width)}
+        onCommitWidth={(width) =>
+          saveColumnWidth(webviewStorage, LEFT_WIDTH_STORAGE_KEY, width)
+        }
         defaultWidthPx={LEFT_DEFAULT_PX}
         minPx={LEFT_MIN_PX}
         maxPx={LEFT_MAX_PX}
@@ -55,11 +59,18 @@ describe("ColumnResizer", () => {
     );
     const resizer = screen.getByRole("separator", { name: "调整左栏宽度" });
 
-    fireEvent.pointerDown(resizer, { button: 0, clientX: 500 });
+    fireEvent.pointerDown(resizer, {
+      button: 0,
+      clientX: 500,
+      isPrimary: true,
+      pointerId: 1,
+    });
     // 拖拽期间禁文字划选
     expect(document.body.style.getPropertyValue("user-select")).toBe("none");
-    fireEvent.pointerMove(window, { clientX: 560 });
-    fireEvent.pointerUp(window);
+    fireEvent.pointerMove(window, { clientX: 560, pointerId: 1 });
+    fireEvent.pointerUp(window, { clientX: 560, pointerId: 2 });
+    expect(window.localStorage.getItem(LEFT_WIDTH_STORAGE_KEY)).toBeNull();
+    fireEvent.pointerUp(window, { clientX: 560, pointerId: 1 });
 
     expect(readVar(LEFT_WIDTH_VAR)).toBe("324px");
     expect(window.localStorage.getItem(LEFT_WIDTH_STORAGE_KEY)).toBe("324");
@@ -71,7 +82,9 @@ describe("ColumnResizer", () => {
     render(
       <ColumnResizer
         cssVarName={START_WIDTH_VAR}
-        onCommitWidth={(width) => saveColumnWidth(webviewStorage, START_WIDTH_STORAGE_KEY, width)}
+        onCommitWidth={(width) =>
+          saveColumnWidth(webviewStorage, START_WIDTH_STORAGE_KEY, width)
+        }
         defaultWidthPx={START_DEFAULT_PX}
         minPx={START_MIN_PX}
         maxPx={START_MAX_PX}
@@ -83,10 +96,15 @@ describe("ColumnResizer", () => {
       name: "调整 start 方向分隔线",
     });
 
-    fireEvent.pointerDown(resizer, { button: 0, clientX: 900 });
+    fireEvent.pointerDown(resizer, {
+      button: 0,
+      clientX: 900,
+      isPrimary: true,
+      pointerId: 1,
+    });
     // 向左拖 800px：远超上限，钳制在上限
-    fireEvent.pointerMove(window, { clientX: 100 });
-    fireEvent.pointerUp(window);
+    fireEvent.pointerMove(window, { clientX: 100, pointerId: 1 });
+    fireEvent.pointerUp(window, { clientX: 100, pointerId: 1 });
 
     expect(readVar(START_WIDTH_VAR)).toBe(`${START_MAX_PX}px`);
     expect(window.localStorage.getItem(START_WIDTH_STORAGE_KEY)).toBe(
@@ -95,10 +113,16 @@ describe("ColumnResizer", () => {
   });
 
   it("拖拽位移映射到左栏：向左拖收窄，且不低于下限", () => {
+    document.documentElement.style.setProperty(
+      LEFT_WIDTH_VAR,
+      `${LEFT_MIN_PX + 70}px`,
+    );
     render(
       <ColumnResizer
         cssVarName={LEFT_WIDTH_VAR}
-        onCommitWidth={(width) => saveColumnWidth(webviewStorage, LEFT_WIDTH_STORAGE_KEY, width)}
+        onCommitWidth={(width) =>
+          saveColumnWidth(webviewStorage, LEFT_WIDTH_STORAGE_KEY, width)
+        }
         defaultWidthPx={LEFT_DEFAULT_PX}
         minPx={LEFT_MIN_PX}
         maxPx={LEFT_MAX_PX}
@@ -108,12 +132,18 @@ describe("ColumnResizer", () => {
     );
     const resizer = screen.getByRole("separator", { name: "调整左栏宽度" });
 
-    fireEvent.pointerDown(resizer, { button: 0, clientX: 500 });
-    // 向左拖 400px：低于下限 200，钳制在下限
-    fireEvent.pointerMove(window, { clientX: 100 });
-    fireEvent.pointerUp(window);
+    fireEvent.pointerDown(resizer, {
+      button: 0,
+      clientX: 500,
+      isPrimary: true,
+      pointerId: 1,
+    });
+    // 向左拖 400px 后停在最小宽度
+    fireEvent.pointerMove(window, { clientX: 100, pointerId: 1 });
+    fireEvent.pointerUp(window, { clientX: 100, pointerId: 1 });
 
     expect(readVar(LEFT_WIDTH_VAR)).toBe(`${LEFT_MIN_PX}px`);
+    expect(resizer).toHaveAttribute("aria-valuenow", String(LEFT_MIN_PX));
     expect(window.localStorage.getItem(LEFT_WIDTH_STORAGE_KEY)).toBe(
       String(LEFT_MIN_PX),
     );
@@ -124,7 +154,9 @@ describe("ColumnResizer", () => {
     render(
       <ColumnResizer
         cssVarName={LEFT_WIDTH_VAR}
-        onCommitWidth={(width) => saveColumnWidth(webviewStorage, LEFT_WIDTH_STORAGE_KEY, width)}
+        onCommitWidth={(width) =>
+          saveColumnWidth(webviewStorage, LEFT_WIDTH_STORAGE_KEY, width)
+        }
         defaultWidthPx={LEFT_DEFAULT_PX}
         minPx={LEFT_MIN_PX}
         maxPx={LEFT_MAX_PX}

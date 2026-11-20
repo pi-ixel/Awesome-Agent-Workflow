@@ -28,7 +28,7 @@ it("places the library and run management in the same navigation and keeps templ
   const navigation = screen.getByRole("tablist", { name: "工作流面板" });
   expect(within(navigation).getByRole("tab", { name: "工作流库" })).toHaveAttribute("aria-selected", "true");
   expect(within(navigation).getByRole("tab", { name: "运行管理" })).toBeInTheDocument();
-  expect(screen.queryByRole("navigation", { name: "位置" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("navigation", { name: "工作流路径" })).not.toBeInTheDocument();
   // 预置卡片用于查看和发起模板。
   const presets = await screen.findByRole("region", { name: "预置工作流" });
   expect(await within(presets).findByRole("button", { name: "查看工作流 AAW 轻量开发" })).toBeInTheDocument();
@@ -129,7 +129,7 @@ it("goes from the library to the workflow, previews its graph and source, then s
   fireEvent.click(screen.getByRole("button", { name: "开始运行" }));
   await vi.waitFor(() => expect(crumb()).toBe("做一件小事"));
   // 运行标题就在页头，面包屑不再重复它。
-  expect(screen.getByRole("navigation", { name: "位置" })).toHaveTextContent(/^AAW 轻量开发运行详情$/);
+  expect(screen.getByRole("navigation", { name: "工作流路径" })).toHaveTextContent(/^AAW 轻量开发运行详情$/);
   // 返回到工作流详情（流程图），详情页不再列运行记录。
   fireEvent.click(screen.getByRole("button", { name: "AAW 轻量开发" }));
   expect(await screen.findByRole("tab", { name: "流程图", selected: true })).toBeInTheDocument();
@@ -158,7 +158,7 @@ it("opens the detail from the sidebar without opening the launch form", async ()
   const fake = fakeWorkflowService();
   fake.service.requestPanel({ kind: "detail", workflowId: "aaw-dev" });
   render(<WorkflowPanel service={fake.service} />);
-  expect(screen.getByRole("navigation", { name: "位置" })).toHaveTextContent(/^工作流库模板详情$/);
+  expect(screen.getByRole("navigation", { name: "工作流路径" })).toHaveTextContent(/^工作流库模板详情$/);
   expect(await screen.findByText("AAW 轻量开发", { selector: ".workflow-detail-title b" })).toBeInTheDocument();
   expect(screen.queryByRole("region", { name: "启动 AAW 轻量开发" })).not.toBeInTheDocument();
 });

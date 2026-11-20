@@ -1,3 +1,4 @@
+import { ActionButton } from "../../../../shared/ui/controls.tsx";
 import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
 import { useEffect, useRef, useState } from "react";
@@ -79,7 +80,8 @@ export function SessionPerformanceBadge() {
     stats.tps === null ? "— tok/s" : `${stats.tps.toFixed(1)} tok/s`;
   return (
     <>
-      <button
+      <ActionButton
+        tone="ghost"
         ref={anchor}
         type="button"
         aria-label="会话统计"
@@ -105,7 +107,7 @@ export function SessionPerformanceBadge() {
           {stats.rounds} 轮 · {stats.toolCalls} 次工具调用 ·{" "}
         </span>
         {speed}
-      </button>
+      </ActionButton>
       {createPortal(
           <HintSurface
             open={position !== null}

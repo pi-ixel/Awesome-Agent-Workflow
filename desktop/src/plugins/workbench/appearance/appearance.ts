@@ -63,6 +63,14 @@ export function createWorkbenchAppearance(scope: ConfigurationScope, logger = cr
   } satisfies WorkbenchAppearance & { dispose(): void; resetStorage(): void };
 }
 
+export function applyWindowAppearance(
+  root: HTMLElement,
+  { theme, uiFontSize }: Pick<WorkbenchAppearancePreferences, "theme" | "uiFontSize">,
+) {
+  root.classList.toggle("theme-warm", theme === "warm");
+  root.style.setProperty("--ui-font-size", `${uiFontSize}px`);
+}
+
 export function bindWorkbenchAppearance(
   root: HTMLElement,
   appearance: WorkbenchAppearance,
@@ -70,11 +78,7 @@ export function bindWorkbenchAppearance(
   const previousTheme = root.classList.contains("theme-warm");
   const previousFont = root.style.getPropertyValue("--ui-font-size");
   const previousPriority = root.style.getPropertyPriority("--ui-font-size");
-  const apply = () => {
-    const { theme, uiFontSize } = appearance.getSnapshot();
-    root.classList.toggle("theme-warm", theme === "warm");
-    root.style.setProperty("--ui-font-size", `${uiFontSize}px`);
-  };
+  const apply = () => applyWindowAppearance(root, appearance.getSnapshot());
   apply();
   const unsubscribe = appearance.subscribe(apply);
   return () => {

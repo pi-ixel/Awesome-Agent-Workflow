@@ -16,11 +16,13 @@ it("opens templates and shows only the active project's run records", async () =
 
   fireEvent.click(await screen.findByRole("button", { name: "AAW 轻量开发" }));
   expect(openWorkflow).toHaveBeenCalledWith("aaw-dev");
-  fireEvent.click(screen.getByRole("button", { name: "我的" }));
+  const userWorkflows = screen.getByRole("tab", { name: "我的" });
+  fireEvent.click(userWorkflows);
+  expect(userWorkflows).toHaveAttribute("aria-selected", "true");
   fireEvent.click(screen.getByRole("button", { name: "custom" }));
   expect(openWorkflow).toHaveBeenCalledWith("custom");
 
-  fireEvent.click(screen.getByRole("button", { name: "运行" }));
+  fireEvent.click(screen.getByRole("tab", { name: "运行" }));
   expect(screen.queryByText("其他项目的运行")).not.toBeInTheDocument();
   workspace = project;
   act(() => fake.setRuns([runSummary({ runId: "run-1", title: "当前项目的运行" })]));

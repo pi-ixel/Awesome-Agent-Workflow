@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useRef,
+  type KeyboardEventHandler,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -21,6 +22,20 @@ const panelSizes = {
   form: "flex max-h-[calc(100dvh-32px)] max-w-2xl min-h-0 flex-col overflow-hidden rounded-3xl",
   preview:
     "flex h-[min(1000px,87dvh)] max-w-[1200px] min-h-0 flex-col overflow-hidden rounded-3xl",
+  composer:
+    "flex max-h-full max-w-[560px] min-h-0 flex-col gap-2.5 overflow-y-auto rounded-[18px] px-4 py-3.5",
+  gallery:
+    "flex h-full min-h-0 flex-col items-center justify-center gap-4 overflow-hidden p-4 sm:p-8",
+} as const;
+
+const centeredScrim = "items-center bg-scrim p-4";
+const backdropClasses = {
+  default: "items-center bg-overlay-shade/60 p-4",
+  settings: centeredScrim,
+  form: centeredScrim,
+  preview: "items-center bg-overlay-shade/60 p-4 backdrop-blur-sm",
+  composer: "items-start bg-base/45 px-4 pt-[clamp(48px,18%,160px)] pb-4 backdrop-blur-[10px]",
+  gallery: "items-center bg-overlay-shade/85",
 } as const;
 
 interface ModalShellProps {
@@ -28,9 +43,11 @@ interface ModalShellProps {
   readonly role?: "dialog" | "alertdialog";
   readonly descriptionId?: string;
   readonly layer?: "default" | "foreground";
+  readonly placement?: "window" | "container";
   readonly size?: keyof typeof panelSizes;
   readonly dismissOnBackdrop?: boolean;
   readonly onDismiss: () => void;
+  readonly onPanelKeyDown?: KeyboardEventHandler<HTMLDivElement>;
   readonly children: ReactNode;
 }
 
@@ -39,13 +56,21 @@ export function ModalShell({
   role = "dialog",
   descriptionId,
   layer = "default",
+  placement = "window",
   size = "default",
   dismissOnBackdrop = true,
   onDismiss,
+  onPanelKeyDown,
   children,
 }: ModalShellProps) {
   const depth = useContext(ModalDepth);
-  const priority = Math.max(depth, layer === "foreground" ? 100 : 50);
+  const isLocal = placement === "container";
+  const isGallery = size === "gallery";
+  const priority = Math.max(
+    depth,
+    layer === "foreground" ? 100 : isLocal ? 20 : 50,
+  );
+  const backdrop = useRef<HTMLDivElement>(null);
   const card = useRef<HTMLDivElement>(null);
   const opener = useRef(
     document.activeElement instanceof HTMLElement
@@ -53,6 +78,7 @@ export function ModalShell({
       : null,
   );
   const dismiss = useRef(onDismiss);
+  const dialogKeyDown = useRef<((event: KeyboardEvent) => void) | null>(null);
   useEffect(() => {
     dismiss.current = onDismiss;
   }, [onDismiss]);
@@ -75,9 +101,12 @@ export function ModalShell({
     if (isTop() && !card.current?.contains(document.activeElement))
       focusFirst();
     function handleKeyDown(event: KeyboardEvent) {
-      if (!isTop() || event.defaultPrevented) return;
+      if (!isTop() || event.defaultPrevented || event.isComposing) return;
+      if (isLocal && !backdrop.current?.contains(document.activeElement))
+        return;
       if (event.key === "Escape") {
         event.preventDefault();
+        event.stopPropagation();
         dismiss.current();
       } else if (event.key === "Tab") {
         const items = controls();
@@ -103,14 +132,14 @@ export function ModalShell({
         }
       }
     }
-    // Portal siblings are the application surface; nested modal portals remain interactive.
     const inertElements: HTMLElement[] = [];
-    if (depth === 0) {
-      for (const child of document.body.children) {
+    const surface = isLocal ? backdrop.current?.parentElement : document.body;
+    // 局部弹窗只锁定容器，窗口弹窗锁定整个窗口；独立弹窗层保持可交互。
+    if (depth === 0 || isLocal) {
+      for (const child of surface?.children ?? []) {
         if (
           child instanceof HTMLElement &&
           !child.hasAttribute("data-modal-layer") &&
-          !child.querySelector("[data-modal-layer]") &&
           (!child.inert || backgroundLocks.has(child))
         ) {
           backgroundLocks.set(child, (backgroundLocks.get(child) ?? 0) + 1);
@@ -119,10 +148,17 @@ export function ModalShell({
         }
       }
     }
-    window.addEventListener("keydown", handleKeyDown);
+    dialogKeyDown.current = handleKeyDown;
+    function handleWindowKeyDown(event: KeyboardEvent) {
+      if (event.target === window || event.target === document.body) {
+        handleKeyDown(event);
+      }
+    }
+    window.addEventListener("keydown", handleWindowKeyDown, true);
     return () => {
       activeModals.delete(id);
-      window.removeEventListener("keydown", handleKeyDown);
+      dialogKeyDown.current = null;
+      window.removeEventListener("keydown", handleWindowKeyDown, true);
       for (const element of inertElements) {
         const remaining = (backgroundLocks.get(element) ?? 1) - 1;
         if (remaining > 0) backgroundLocks.set(element, remaining);
@@ -134,30 +170,45 @@ export function ModalShell({
       if (previous?.isConnected && !previous.closest("[inert]"))
         previous.focus();
     };
-  }, [depth, priority]);
+  }, [depth, isLocal, priority]);
 
-  return createPortal(
+  const content = (
     <ModalDepth.Provider value={priority + 1}>
       <div
+        ref={backdrop}
         data-modal-layer={size}
-        className={`modal-in fixed inset-0 flex items-center justify-center p-4 ${size !== "default" ? "bg-black/25" : "bg-black/60"}`}
+        className={`modal-in inset-0 flex justify-center ${isLocal ? "absolute" : "fixed"} ${backdropClasses[size]}`}
         style={{ zIndex: priority }}
+        onMouseDown={(event) => {
+          if (!dismissOnBackdrop && event.target === event.currentTarget)
+            event.preventDefault();
+        }}
+        onKeyDown={(event) => dialogKeyDown.current?.(event.nativeEvent)}
         onClick={dismissOnBackdrop ? onDismiss : undefined}
       >
         <div
           ref={card}
           tabIndex={-1}
           role={role}
-          aria-modal="true"
+          aria-modal={isLocal ? undefined : true}
           aria-label={label}
           aria-describedby={descriptionId}
-          className={`modal-panel w-full border border-dialog-line bg-surface text-ink shadow-floating outline-none ${panelSizes[size]}`}
-          onClick={(event) => event.stopPropagation()}
+          className={`modal-panel w-full outline-none ${isGallery ? "text-media-ink" : "border border-dialog-line bg-surface text-ink shadow-floating"} ${panelSizes[size]}`}
+          onKeyDown={onPanelKeyDown}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (
+              isGallery &&
+              dismissOnBackdrop &&
+              event.target === event.currentTarget
+            )
+              onDismiss();
+          }}
         >
           {children}
         </div>
       </div>
-    </ModalDepth.Provider>,
-    document.body,
+    </ModalDepth.Provider>
   );
+  return isLocal ? content : createPortal(content, document.body);
 }

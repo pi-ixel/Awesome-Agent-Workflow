@@ -9,12 +9,7 @@ import { useStore } from "zustand";
 import type { SkillInstallerInfo } from "../types.ts";
 import type { SkillsService } from "../service.ts";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
-import {
-  Badge,
-  btnPrimary,
-  btnSecondary,
-  ProgressBar,
-} from "../../../shared/ui/controls.tsx";
+import { ActionButton, Badge, ProgressBar } from "../../../shared/ui/controls.tsx";
 
 function SkillsInstallerSection({
   skills,
@@ -83,14 +78,15 @@ function SkillsInstallerSection({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-medium text-ink">AAW skills 安装器</h3>
-        <button
+        <ActionButton
+          tone="secondary"
           type="button"
           onClick={handleRescan}
           disabled={isScanning || isInstalling}
-          className={`${btnSecondary} px-2.5 py-1 text-xs`}
+          className="px-2.5 py-1 text-xs"
         >
           {isScanning ? "检测中…" : "重新检测"}
-        </button>
+        </ActionButton>
       </div>
       <p className="mt-2 text-xs text-ink-faint">
         安装目标：
@@ -143,22 +139,24 @@ function SkillsInstallerSection({
       )}
 
       <div className="mt-4 flex items-center gap-3">
-        <button
+        <ActionButton
+          tone="primary"
           type="button"
           onClick={handleInstallClick}
           disabled={isInstalling || isScanning || destDir === null}
-          className={`${btnPrimary} px-3 py-1.5 text-sm`}
+          className="px-3 py-1.5 text-sm"
         >
           {isInstalling ? "安装中…" : "安装 / 更新 AAW skills"}
-        </button>
+        </ActionButton>
         {isInstalling && progress !== null && (
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <ProgressBar
+              label="技能安装进度"
               value={progress.done}
               max={progress.total}
               className="h-1.5 min-w-16 flex-1"
             />
-            <span className="shrink-0 text-xs text-ink-faint">
+            <span className="min-w-0 text-xs text-ink-faint [overflow-wrap:anywhere]">
               {`${progress.current ?? ""} ${progress.done}/${progress.total}`}
             </span>
           </div>

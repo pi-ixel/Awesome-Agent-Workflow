@@ -56,3 +56,12 @@ export function buildFileMentionMarkdown(
 ): string {
   return `[${escapeMarkdownLabel(name)}](${escapeMarkdownDestination(relativePath)})`;
 }
+
+/** 将焦点交给已经挂载的树行，保持当前滚动位置。 */
+export function focusFileTreeRow(list: HTMLElement | null, key: string): boolean {
+  const row = list?.querySelector<HTMLElement>(
+    `[data-file-tree-key="${CSS.escape(key)}"]`,
+  );
+  row?.focus({ preventScroll: true });
+  return row !== undefined && row !== null;
+}

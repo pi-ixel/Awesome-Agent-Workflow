@@ -6,7 +6,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { installDesktopWorkbench } from "./installDesktopWorkbench.ts";
 import {
-  publishWorkbenchFontSize,
+  publishWorkbenchAppearance,
   type WorkbenchService,
 } from "../plugins/workbench/service.ts";
 import { LoggerContext } from "../shared/logging/react.ts";
@@ -54,14 +54,14 @@ void runtime.ready
       document.getElementById("root") as HTMLElement,
     );
     let mounted: WorkbenchService | undefined;
-    let stopPublishingFontSize: (() => void) | undefined;
+    let stopPublishingAppearance: (() => void) | undefined;
     const renderWorkbench = () => {
       const workbench = runtime.workbench;
       if (workbench === mounted) return;
       if (!workbench && mounted?.windowClose.getState().kind === "exiting")
         return;
-      stopPublishingFontSize?.();
-      stopPublishingFontSize = workbench && publishWorkbenchFontSize(
+      stopPublishingAppearance?.();
+      stopPublishingAppearance = workbench && publishWorkbenchAppearance(
         workbench.appearance,
       );
       mounted = workbench;
@@ -78,12 +78,12 @@ void runtime.ready
     };
     const unsubscribe = runtime.subscribeWorkbench(renderWorkbench);
     renderWorkbench();
-    window.addEventListener("pagehide", () => stopPublishingFontSize?.(), {
+    window.addEventListener("pagehide", () => stopPublishingAppearance?.(), {
       once: true,
     });
     import.meta.hot?.dispose(() => {
       unsubscribe();
-      stopPublishingFontSize?.();
+      stopPublishingAppearance?.();
       root.unmount();
     });
   })

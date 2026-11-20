@@ -1,5 +1,6 @@
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
-import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
+import { XIcon } from "../../../shared/ui/icons.tsx";
 import { DangerButton } from "../../../shared/ui/controls.tsx";
 import {
   readWorkbenchUi,
@@ -192,15 +193,7 @@ function SettingsContent({
           onClick={() => readWorkbenchUi(workbenchLayout).closeOverlay()}
           className={`flex items-center justify-center rounded-lg hover:bg-surface-hover ${focusVisibleRing}`}
         >
-          <UiIcon
-            className="ui-icon-16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          >
-            <path d="m6 6 12 12M18 6 6 18" />
-          </UiIcon>
+          <XIcon className="ui-icon-16" strokeWidth={1.5} />
         </IconButton>
       </header>
       <section className="relative flex min-h-0 flex-1 flex-row max-[560px]:flex-col">
@@ -215,6 +208,20 @@ function SettingsContent({
             aria-label="设置页签"
             aria-orientation="vertical"
             className="flex flex-col gap-5"
+            onKeyDown={(event) => {
+              const { key, target } = event;
+              if (!(target instanceof HTMLButtonElement) || target.getAttribute("role") !== "tab") return;
+              if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(key)) return;
+              const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+              const index = items.indexOf(target);
+              if (index === -1) return;
+              const next = key === "Home" ? 0
+                : key === "End" ? items.length - 1
+                : (index + (key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+              event.preventDefault();
+              items[next]?.focus();
+              items[next]?.click();
+            }}
           >
             {settingsGroups.map(({ id, label }) => {
               const groupTabs = tabs.filter(
@@ -237,13 +244,13 @@ function SettingsContent({
                   {groupTabs.map((tab) => {
                     const isActive = activeTab === tab.id;
                     return (
-                      <button
+                      <NavigationRow
                         key={tab.id}
-                        type="button"
                         role="tab"
                         id={`settings-tab-${tab.id}`}
                         aria-selected={isActive}
                         aria-controls={`settings-panel-${tab.id}`}
+                        tabIndex={isActive ? 0 : -1}
                         onClick={() => {
                           setSelection({
                             initialTab,
@@ -253,17 +260,13 @@ function SettingsContent({
                           if (contentRef.current)
                             contentRef.current.scrollTop = 0;
                         }}
-                        className={`flex min-h-8 w-full shrink-0 items-center gap-2 rounded-xl px-3 text-left text-ui-base leading-6 font-normal transition-colors ${
-                          isActive
-                            ? "bg-selected text-ink"
-                            : "text-ink-soft hover:bg-surface-hover hover:text-ink"
-                        } ${focusVisibleRing}`}
+                        className={isActive ? "text-ink" : "text-ink-soft hover:text-ink"}
                       >
                         <tab.Icon
                           className={`ui-icon-16 shrink-0 ${isActive ? "text-ink" : "text-ink-soft"}`}
                         />
                         {tab.label}
-                      </button>
+                      </NavigationRow>
                     );
                   })}
                 </div>

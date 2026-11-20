@@ -1,0 +1,1791 @@
+{
+  "plugins/account/ui/LoginScreen.tsx": {
+    "definitions": {
+      "布局与操纵": ["LoginScreen"]
+    },
+    "targets": []
+  },
+  "plugins/account/ui/workbench.tsx": {
+    "definitions": {
+      "布局与操纵": [
+        "apply/accessGates/\"account-login\"/View",
+        "apply/sidebarFooters/\"account-profile\"/View"
+      ]
+    },
+    "targets": [
+      "apply/accessGates/\"account-login\"/View → (inline)",
+      "apply/sidebarFooters/\"account-profile\"/View → (inline)"
+    ]
+  },
+  "plugins/agents/enhancements/codeagent/credit/QuotaContent.tsx": {
+    "definitions": {
+      "图标与内容标识": ["CreditIcon"],
+      "布局与操纵": ["QuotaContent", "TokenContent"],
+      "导航与列表": ["QuotaRow"],
+      "状态与统计": ["QuotaStatus"]
+    },
+    "targets": []
+  },
+  "plugins/agents/enhancements/codeagent/credit/index.tsx": {
+    "definitions": {
+      "布局与操纵": ["apply/QuotaPanel", "apply/Settings"],
+      "命令按钮": ["apply/RailAction"]
+    },
+    "targets": [
+      "apply/sync/activityRailActions/name/View → plugins/agents/enhancements/codeagent/credit/index.tsx#apply/RailAction",
+      "apply/sync/settings/name/Icon → plugins/agents/enhancements/codeagent/credit/QuotaContent.tsx#CreditIcon",
+      "apply/sync/settings/name/View → plugins/agents/enhancements/codeagent/credit/index.tsx#apply/Settings"
+    ]
+  },
+  "plugins/agents/ui/AgentSwitchPanel.tsx": {
+    "definitions": {
+      "状态与统计": ["AgentSwitchPanel", "AgentSwitchSidebarStatus"],
+      "命令按钮": ["SwitchStatusButton"]
+    },
+    "targets": []
+  },
+  "plugins/agents/ui/AgentsSettings.tsx": {
+    "definitions": {
+      "布局与操纵": [
+        "AgentListCard",
+        "AgentsSettingsSection",
+        "ProtocolReportCard"
+      ],
+      "状态与统计": ["ProbeSummaryBadge"]
+    },
+    "targets": []
+  },
+  "plugins/agents/ui/workbench.tsx": {
+    "definitions": {
+      "布局与操纵": [
+        "apply/about/\"active-agent\"/Value",
+        "settings/\"agents\"/View"
+      ],
+      "提示与确认": [
+        "overlays/\"agent-switch-progress\"/View",
+        "overlays/\"agent-switch-sidebar-status\"/View"
+      ]
+    },
+    "targets": [
+      "apply/about/\"active-agent\"/Value → (inline)",
+      "overlays/\"agent-switch-progress\"/View → (inline)",
+      "overlays/\"agent-switch-sidebar-status\"/View → (inline)",
+      "settings/\"agents\"/Icon → shared/ui/icons.tsx#BrainIcon",
+      "settings/\"agents\"/View → (inline)"
+    ]
+  },
+  "plugins/browser/ui/BrowserPanel.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["BrowserPanel", "BrowserPanelSession"]
+    },
+    "targets": []
+  },
+  "plugins/browser/ui/BrowserToolRecovery.tsx": {
+    "definitions": {
+      "提示与确认": ["BrowserToolRecovery", "BrowserToolRecoverySession"]
+    },
+    "targets": []
+  },
+  "plugins/browser/ui/settings.tsx": {
+    "definitions": {
+      "布局与操纵": ["BrowserAgentControlSettings"]
+    },
+    "targets": []
+  },
+  "plugins/browser/ui/workbench.tsx": {
+    "definitions": {
+      "布局与操纵": [
+        "apply/panels/\"browser\"/View",
+        "apply/settings/\"browser\"/View"
+      ]
+    },
+    "targets": [
+      "apply/panels/\"browser\"/Icon → shared/ui/icons.tsx#GlobeIcon",
+      "apply/panels/\"browser\"/View → (inline)",
+      "apply/settings/\"browser\"/Icon → shared/ui/icons.tsx#GlobeIcon",
+      "apply/settings/\"browser\"/View → (inline)"
+    ]
+  },
+  "plugins/diagnostics/index.ts": {
+    "definitions": {},
+    "targets": ["loadWindow/import → ./ui/DiagnosticsWindow.tsx"]
+  },
+  "plugins/diagnostics/ui/ConnectionReport.tsx": {
+    "definitions": {
+      "布局与操纵": ["ConnectionReport", "RuntimeDetails"]
+    },
+    "targets": []
+  },
+  "plugins/diagnostics/ui/DiagnosticsPage.tsx": {
+    "definitions": {
+      "布局与操纵": ["DiagnosticsPage", "RuntimeView"]
+    },
+    "targets": []
+  },
+  "plugins/diagnostics/ui/DiagnosticsWindow.tsx": {
+    "definitions": {
+      "布局与操纵": ["DiagnosticsWindow"]
+    },
+    "targets": []
+  },
+  "plugins/diagnostics/ui/LogView.tsx": {
+    "definitions": {
+      "布局与操纵": ["LogView"]
+    },
+    "targets": []
+  },
+  "plugins/diagnostics/ui/PerfHud.tsx": {
+    "definitions": {
+      "状态与统计": ["PerfHud", "PerfReport"]
+    },
+    "targets": []
+  },
+  "plugins/diagnostics/ui/ResourceReport.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["Chart"],
+      "状态与统计": ["ResourceReport"]
+    },
+    "targets": []
+  },
+  "plugins/diagnostics/ui/StorageLocationSetting.tsx": {
+    "definitions": {
+      "布局与操纵": ["StorageLocationSetting"]
+    },
+    "targets": []
+  },
+  "plugins/diagnostics/ui/StorageSettings.tsx": {
+    "definitions": {
+      "编辑输入": ["ThresholdInput"],
+      "状态与统计": ["createStorageSettings/Monitor"],
+      "布局与操纵": [
+        "createStorageSettings/Settings",
+        "createStorageSettings/Settings/render"
+      ]
+    },
+    "targets": [
+      "createStorageSettings/Monitor → plugins/diagnostics/ui/StorageSettings.tsx#createStorageSettings/Monitor",
+      "createStorageSettings/Settings → plugins/diagnostics/ui/StorageSettings.tsx#createStorageSettings/Settings",
+      "createStorageSettings/Settings/render → (inline)"
+    ]
+  },
+  "plugins/diagnostics/ui/StorageView.tsx": {
+    "definitions": {
+      "布局与操纵": [
+        "ConversationStorage",
+        "StorageCategoryHelp",
+        "StorageView",
+        "StorageView/categories"
+      ],
+      "状态与统计": ["EmptyStorageGroup", "StorageCategoryName"],
+      "导航与列表": ["StorageCategoryTable"]
+    },
+    "targets": []
+  },
+  "plugins/diagnostics/ui/perf/MemoryChart.tsx": {
+    "definitions": {
+      "状态与统计": ["MemoryChart"]
+    },
+    "targets": []
+  },
+  "plugins/diagnostics/ui/workbench.ts": {
+    "definitions": {},
+    "targets": [
+      "apply/helpItems/\"diagnostics\"/Icon → shared/ui/icons.tsx#ActivityIcon",
+      "apply/overlays/\"storage-monitor\"/View → plugins/diagnostics/ui/StorageSettings.tsx#createStorageSettings/Monitor",
+      "apply/settings/\"storage\"/Icon → shared/ui/icons.tsx#ActivityIcon",
+      "apply/settings/\"storage\"/View → plugins/diagnostics/ui/StorageSettings.tsx#createStorageSettings/Settings"
+    ]
+  },
+  "plugins/documents/ui/FileAnnotations.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["FileAnnotations"]
+    },
+    "targets": []
+  },
+  "plugins/documents/ui/FileDocumentTools.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["FileDocumentTools"],
+      "布局与操纵": ["FileDocumentTools/renderBranch"]
+    },
+    "targets": []
+  },
+  "plugins/documents/ui/FileMarkdownPreview.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["FileMarkdownPreview"]
+    },
+    "targets": []
+  },
+  "plugins/documents/ui/FilePreview.tsx": {
+    "definitions": {
+      "内容与专用绘制": [
+        "FilePreview",
+        "LocalImage",
+        "PreviewBody",
+        "PreviewBody/renderLocalImage"
+      ]
+    },
+    "targets": [
+      "PreviewBody/plugins/documents/ui/FileMarkdownPreview.tsx#FileMarkdownPreview@renderLocalImage → plugins/documents/ui/FilePreview.tsx#PreviewBody/renderLocalImage"
+    ]
+  },
+  "plugins/documents/ui/FileTree.tsx": {
+    "definitions": {
+      "导航与列表": ["FileTree"]
+    },
+    "targets": []
+  },
+  "plugins/documents/ui/MarkdownDocumentDialogs.tsx": {
+    "definitions": {
+      "提示与确认": ["DocumentDialog", "MarkdownDocumentDialogs"],
+      "命令按钮": ["MarkdownConflictActions"]
+    },
+    "targets": []
+  },
+  "plugins/documents/ui/MarkdownSourceEditor.tsx": {
+    "definitions": {
+      "编辑输入": ["MarkdownSourceEditor"]
+    },
+    "targets": []
+  },
+  "plugins/documents/ui/annotationView.ts": {
+    "definitions": {
+      "布局与操纵": ["DocumentAnnotationContext"]
+    },
+    "targets": []
+  },
+  "plugins/documents/ui/file-tree/FileTreeList.tsx": {
+    "definitions": {
+      "导航与列表": [
+        "FileTreeList",
+        "FileTreeList/plugins/documents/ui/file-tree/FileTreeList.tsx#StaticBranch@renderRow",
+        "FileTreeList/renderRow"
+      ],
+      "布局与操纵": ["StaticBranch"]
+    },
+    "targets": [
+      "FileTreeList/plugins/documents/ui/file-tree/FileTreeList.tsx#StaticBranch@renderRow → (inline)",
+      "StaticBranch/plugins/documents/ui/file-tree/FileTreeList.tsx#StaticBranch@renderRow → plugins/documents/ui/file-tree/FileTreeList.tsx#StaticBranch/renderRow"
+    ]
+  },
+  "plugins/documents/ui/file-tree/FileTreeRow.tsx": {
+    "definitions": {
+      "导航与列表": ["FileTreeRow"]
+    },
+    "targets": []
+  },
+  "plugins/documents/ui/file-tree/FileTreeStickyFolders.tsx": {
+    "definitions": {
+      "导航与列表": ["FileTreeStickyFolders"]
+    },
+    "targets": []
+  },
+  "plugins/documents/ui/file-tree/RowName.tsx": {
+    "definitions": {
+      "导航与列表": ["FileTreeRowName"]
+    },
+    "targets": []
+  },
+  "plugins/documents/ui/workbench.tsx": {
+    "definitions": {
+      "提示与确认": ["apply/overlays/\"documents-dialogs\"/View"],
+      "布局与操纵": [
+        "documentPanels/\"directory\"/View",
+        "documentPanels/\"file\"/View",
+        "documentPanels/fileTreeId/View"
+      ],
+      "内容与专用绘制": ["documentPanels/WorkbenchFilePreview"],
+      "导航与列表": ["documentPanels/WorkbenchFileTree"]
+    },
+    "targets": [
+      "apply/overlays/\"documents-dialogs\"/View → (inline)",
+      "apply/panels → plugins/documents/ui/workbench.tsx#apply/panel",
+      "documentPanels/\"directory\"/View → (inline)",
+      "documentPanels/\"file\"/View → (inline)",
+      "documentPanels/fileTreeId/Icon → shared/ui/icons.tsx#FolderGlyph",
+      "documentPanels/fileTreeId/View → (inline)"
+    ]
+  },
+  "plugins/git/ui/GitDiffView.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["GitDiffView"]
+    },
+    "targets": []
+  },
+  "plugins/git/ui/GitLineStats.tsx": {
+    "definitions": {
+      "布局与操纵": ["GitLineStats"]
+    },
+    "targets": []
+  },
+  "plugins/git/ui/GitPanel.tsx": {
+    "definitions": {
+      "导航与列表": ["GitFileTree"],
+      "布局与操纵": ["GitPanel"],
+      "内容与专用绘制": ["GitReview", "GitReview/renderChange"]
+    },
+    "targets": []
+  },
+  "plugins/git/ui/GitReviewDiff.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["GitReviewDiff", "GitReviewDiff/cell"]
+    },
+    "targets": []
+  },
+  "plugins/git/ui/workbench.tsx": {
+    "definitions": {
+      "布局与操纵": ["gitPanels/\"diff\"/View", "gitPanels/\"git\"/View"]
+    },
+    "targets": [
+      "apply/panels → plugins/git/ui/workbench.tsx#apply/panel",
+      "gitPanels/\"diff\"/View → (inline)",
+      "gitPanels/\"git\"/Icon → shared/ui/icons.tsx#FileDiffIcon",
+      "gitPanels/\"git\"/View → (inline)"
+    ]
+  },
+  "plugins/project/conversation/ui/AnnotationCards.tsx": {
+    "definitions": {
+      "提示与确认": ["AnnotationCards"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/AnnotationSummary.tsx": {
+    "definitions": {
+      "布局与操纵": ["AnnotationSummary"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/AssistantMessage.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["AssistantMessage", "AssistantMessageBase"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/BrowserElementSummary.tsx": {
+    "definitions": {
+      "图标与内容标识": ["BrowserElementSummary"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/ChatInput.tsx": {
+    "definitions": {
+      "编辑输入": ["ChatInput"],
+      "命令按钮": ["ComposerActionHint"],
+      "图标与内容标识": ["StopIcon"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/ConversationNavigator.tsx": {
+    "definitions": {
+      "导航与列表": ["ConversationNavigator"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/ConversationTurnView.tsx": {
+    "definitions": {
+      "内容与专用绘制": [
+        "ConversationTurnView",
+        "ConversationTurnViewBase",
+        "ConversationTurnViewBase/renderWorkItem"
+      ],
+      "布局与操纵": ["WorkGroup"]
+    },
+    "targets": [
+      "ConversationTurnViewBase/plugins/project/conversation/ui/ConversationTurnView.tsx#WorkGroup@renderItem → plugins/project/conversation/ui/ConversationTurnView.tsx#ConversationTurnViewBase/renderItem",
+      "WorkGroup/plugins/project/conversation/ui/WorkGroupCard.tsx#WorkGroupCard@renderItem → plugins/project/conversation/ui/ConversationTurnView.tsx#WorkGroup/renderItem"
+    ]
+  },
+  "plugins/project/conversation/ui/EditDiffView.tsx": {
+    "definitions": {
+      "导航与列表": ["DiffRowsView"],
+      "内容与专用绘制": [
+        "EditCard",
+        "EditDiffView",
+        "FileChangeCard",
+        "WriteCard",
+        "WritePreview"
+      ]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/ImageAttachmentThumbnail.tsx": {
+    "definitions": {
+      "图标与内容标识": ["ImageAttachmentThumbnail"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/ImageAttachments.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["ImageAttachments"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/InputStatusBar.tsx": {
+    "definitions": {
+      "状态与统计": ["ContextRing", "InputStatusRight"],
+      "图标与内容标识": ["ModelTag"],
+      "导航与列表": ["TurnStatusRow"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/MessageAttachments.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["MessageAttachments"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/OrdinaryToolCallCard.tsx": {
+    "definitions": {
+      "布局与操纵": ["OrdinaryToolCallCard"]
+    },
+    "targets": [
+      "edit → shared/ui/icons.tsx#PencilIcon",
+      "execute → shared/ui/icons.tsx#SquareTerminalIcon",
+      "fetch → shared/ui/icons.tsx#GlobeIcon",
+      "other → shared/ui/icons.tsx#WrenchIcon",
+      "read → shared/ui/icons.tsx#SearchIcon",
+      "search → shared/ui/icons.tsx#SearchIcon"
+    ]
+  },
+  "plugins/project/conversation/ui/PlanCard.tsx": {
+    "definitions": {
+      "图标与内容标识": ["EntryStatusIcon"],
+      "内容与专用绘制": ["PlanCard", "PlanCardBase"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/QueueDock.tsx": {
+    "definitions": {
+      "布局与操纵": ["QueueDock"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/ReconnectButton.tsx": {
+    "definitions": {
+      "命令按钮": ["ReconnectButton"],
+      "布局与操纵": ["SessionReconnect"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/SessionDock.tsx": {
+    "definitions": {
+      "布局与操纵": ["SessionDock"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/SessionPerformanceBadge.tsx": {
+    "definitions": {
+      "状态与统计": ["SessionPerformanceBadge"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/SessionStatusOverlay.tsx": {
+    "definitions": {
+      "布局与操纵": ["Section"],
+      "提示与确认": ["SessionStatusOverlay"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/SessionView.tsx": {
+    "definitions": {
+      "状态与统计": ["DraftPromptChips", "EmptyPrompts"],
+      "内容与专用绘制": ["SessionItemView", "renderSessionItem"],
+      "布局与操纵": ["SessionView"]
+    },
+    "targets": [
+      "SessionView/plugins/project/conversation/ui/ConversationTurnView.tsx#ConversationTurnView@renderItem → plugins/project/conversation/ui/SessionView.tsx#renderSessionItem"
+    ]
+  },
+  "plugins/project/conversation/ui/SkillReferenceTokens.tsx": {
+    "definitions": {
+      "图标与内容标识": ["SkillReferenceToken"],
+      "布局与操纵": ["SkillReferenceTokens"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/StatusChipMenu.tsx": {
+    "definitions": {
+      "提示与确认": ["StatusChipMenu"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/StatusTaskProgress.tsx": {
+    "definitions": {
+      "状态与统计": ["StatusTaskProgress"],
+      "布局与操纵": ["StatusTaskProgress/group"],
+      "导航与列表": ["TaskRows"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/SubagentDetails.tsx": {
+    "definitions": {
+      "布局与操纵": ["SubagentDetails"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/SubagentProgressView.tsx": {
+    "definitions": {
+      "状态与统计": ["SubagentProgressView"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/SubagentToolRow.tsx": {
+    "definitions": {
+      "导航与列表": ["SubagentToolRow"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/SystemNotice.tsx": {
+    "definitions": {
+      "状态与统计": ["SystemNotice", "SystemNoticeBase"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/TerminalOutput.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["TerminalOutput"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/ThoughtBlock.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["ThoughtBlock", "ThoughtBlockBase"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/ToolCallCard.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["ToolCallCard", "ToolCallCardBase"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/ToolContent.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["ToolContent"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/TurnUsageBadge.tsx": {
+    "definitions": {
+      "状态与统计": ["TurnUsageBadge"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/UserMessage.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["UserMessage", "UserMessageBase"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/WorkGroupCard.tsx": {
+    "definitions": {
+      "布局与操纵": ["WorkGroupCard"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/documentView.ts": {
+    "definitions": {
+      "布局与操纵": ["ConversationDocumentContext"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/expansionState.tsx": {
+    "definitions": {
+      "布局与操纵": ["ExpansionScopeProvider"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/ui/useExpansionState.ts": {
+    "definitions": {
+      "布局与操纵": ["ExpansionScope"]
+    },
+    "targets": []
+  },
+  "plugins/project/interactions/ui/ApprovalModal.tsx": {
+    "definitions": {
+      "提示与确认": ["ApprovalModal"]
+    },
+    "targets": []
+  },
+  "plugins/project/interactions/ui/ElicitationModal.tsx": {
+    "definitions": {
+      "布局与操纵": [
+        "ElicitationDock",
+        "ElicitationDockView",
+        "FormCard",
+        "FormQueue"
+      ],
+      "提示与确认": ["ElicitationModal", "ElicitationModalView"]
+    },
+    "targets": []
+  },
+  "plugins/project/interactions/ui/QuestionDock.tsx": {
+    "definitions": {
+      "布局与操纵": ["QuestionDock"]
+    },
+    "targets": []
+  },
+  "plugins/project/interactions/ui/QuestionPanel.tsx": {
+    "definitions": {
+      "选择控件": ["QuestionChoices"],
+      "布局与操纵": ["QuestionPanel"]
+    },
+    "targets": []
+  },
+  "plugins/project/ui/AddProjectPanel.tsx": {
+    "definitions": {
+      "布局与操纵": ["AddProjectPanel"],
+      "导航与列表": ["KnownProjectRow"]
+    },
+    "targets": []
+  },
+  "plugins/project/ui/ArchiveManagementSection.tsx": {
+    "definitions": {
+      "布局与操纵": ["ArchiveManagementSection"]
+    },
+    "targets": []
+  },
+  "plugins/project/ui/ArchiveNotice.tsx": {
+    "definitions": {
+      "提示与确认": ["ArchiveNotice"]
+    },
+    "targets": []
+  },
+  "plugins/project/ui/FilePathButton.tsx": {
+    "definitions": {
+      "命令按钮": ["FilePathButton"]
+    },
+    "targets": []
+  },
+  "plugins/project/ui/InteractionPicker.tsx": {
+    "definitions": {
+      "选择控件": ["InteractionPicker"],
+      "内容与专用绘制": [
+        "InteractionPicker/plugins/project/ui/SettingsPreviewPicker.tsx#SettingsPreviewPicker@renderPreview",
+        "InteractionPreview"
+      ]
+    },
+    "targets": [
+      "InteractionPicker/plugins/project/ui/SettingsPreviewPicker.tsx#SettingsPreviewPicker@renderPreview → (inline)"
+    ]
+  },
+  "plugins/project/ui/LegacyAgentDataSection.tsx": {
+    "definitions": {
+      "布局与操纵": [
+        "LegacyAgentDataSection",
+        "createLegacyAgentDataView/LegacyAgentDataView"
+      ]
+    },
+    "targets": []
+  },
+  "plugins/project/ui/MessageStreamPicker.tsx": {
+    "definitions": {
+      "选择控件": ["MessageStreamPicker"],
+      "内容与专用绘制": [
+        "MessageStreamPicker/plugins/project/ui/SettingsPreviewPicker.tsx#SettingsPreviewPicker@renderPreview",
+        "renderPreviewItem"
+      ]
+    },
+    "targets": [
+      "MessageStreamPicker/plugins/project/conversation/ui/ConversationTurnView.tsx#ConversationTurnView@renderItem → plugins/project/ui/MessageStreamPicker.tsx#renderPreviewItem",
+      "MessageStreamPicker/plugins/project/ui/SettingsPreviewPicker.tsx#SettingsPreviewPicker@renderPreview → (inline)"
+    ]
+  },
+  "plugins/project/ui/NewTaskButtonGroup.tsx": {
+    "definitions": {
+      "命令按钮": ["NewTaskButtonGroup"]
+    },
+    "targets": [
+      "NewTaskButtonGroup/shared/ui/SidebarCreateButton.tsx#SidebarCreateButton@Icon → shared/ui/icons.tsx#MessageCirclePlusIcon"
+    ]
+  },
+  "plugins/project/ui/ProjectOverview.tsx": {
+    "definitions": {
+      "布局与操纵": ["ProjectOverview"],
+      "状态与统计": ["ProjectSetup"],
+      "导航与列表": ["ProjectStatusRow"]
+    },
+    "targets": []
+  },
+  "plugins/project/ui/ProjectTree.tsx": {
+    "definitions": {
+      "命令按钮": [
+        "SectionAddButton",
+        "SessionArchiveAction",
+        "SessionPinAction",
+        "SessionStarAction",
+        "TreeViewSwitchButton"
+      ],
+      "状态与统计": ["SessionActivityBadge", "SessionGroupStatusBadge"],
+      "布局与操纵": [
+        "BusySessionsContext",
+        "ListHeader",
+        "PinnedSessionsBand",
+        "ProjectChildren"
+      ],
+      "导航与列表": [
+        "ProjectNodeRow",
+        "ProjectTree",
+        "ProjectTreeContent",
+        "ProjectsView",
+        "ProjectsView/renderProject",
+        "SessionGroupNode",
+        "SessionGroupNode/renderMember",
+        "SessionRow",
+        "SessionRowBody",
+        "SessionRowTitle",
+        "SessionsView",
+        "TreeSection"
+      ],
+      "编辑输入": ["SessionRenameInput"],
+      "图标与内容标识": ["SessionRunningIcon"]
+    },
+    "targets": []
+  },
+  "plugins/project/ui/SettingsPreviewPicker.tsx": {
+    "definitions": {
+      "选择控件": ["SettingsPreviewPicker"]
+    },
+    "targets": []
+  },
+  "plugins/project/ui/bindings/projectView.tsx": {
+    "definitions": {
+      "布局与操纵": [
+        "ProjectViewContext",
+        "withProjectView/PreferencesView",
+        "withProjectView/ProjectView"
+      ]
+    },
+    "targets": []
+  },
+  "plugins/project/ui/preferencesView.tsx": {
+    "definitions": {
+      "布局与操纵": [
+        "ProjectPreferencesContext",
+        "withProjectPreferences/ProjectPreferencesView"
+      ]
+    },
+    "targets": []
+  },
+  "plugins/project/ui/projectHeaders.tsx": {
+    "definitions": {
+      "命令按钮": ["BackButton", "FolderButton", "NewSessionHeaderAction"],
+      "提示与确认": ["ConnectErrorBanner"],
+      "布局与操纵": ["OverviewBar", "SessionBar"]
+    },
+    "targets": [
+      "projectConversationPageId/Banner → plugins/project/ui/projectHeaders.tsx#ConnectErrorBanner",
+      "projectConversationPageId/View → plugins/project/ui/projectHeaders.tsx#SessionBar",
+      "projectOverviewPageId/Banner → plugins/project/ui/projectHeaders.tsx#ConnectErrorBanner",
+      "projectOverviewPageId/View → plugins/project/ui/projectHeaders.tsx#OverviewBar"
+    ]
+  },
+  "plugins/project/ui/settings.tsx": {
+    "definitions": {
+      "布局与操纵": [
+        "ArchiveSettings",
+        "SessionSettings",
+        "ToolSettings",
+        "createProjectSettings/\"archive\"/View",
+        "createProjectSettings/\"session\"/View",
+        "createProjectSettings/\"tools\"/View"
+      ]
+    },
+    "targets": [
+      "createProjectSettings/\"archive\"/Icon → shared/ui/icons.tsx#ArchiveIcon",
+      "createProjectSettings/\"archive\"/View → (inline)",
+      "createProjectSettings/\"session\"/Icon → shared/ui/icons.tsx#ShieldCheckIcon",
+      "createProjectSettings/\"session\"/View → (inline)",
+      "createProjectSettings/\"tools\"/Icon → shared/ui/icons.tsx#TerminalIcon",
+      "createProjectSettings/\"tools\"/View → (inline)"
+    ]
+  },
+  "plugins/project/ui/workbench.ts": {
+    "definitions": {
+      "布局与操纵": [
+        "apply/LegacyAgentData",
+        "apply/Sidebar",
+        "apply/exitDetails/\"project-approvals\"/View"
+      ]
+    },
+    "targets": [
+      "apply/collapsedHeaderActions/\"new-session\"/View → withProjectView(NewSessionHeaderAction, projectView)",
+      "apply/exitDetails/\"project-approvals\"/View → (inline)",
+      "apply/headers/header.id/Banner → header.Banner && withProjectView(header.Banner, projectView)",
+      "apply/headers/header.id/View → withProjectView(header.View, projectView)",
+      "apply/overlays/View → withProjectView(projectOverlay.View, projectView)",
+      "apply/pages/View → withProjectView(page.View, projectView)",
+      "apply/settings → plugins/project/usage/settingsEntry.ts#createUsageSettingsEntry",
+      "apply/settings/View → withProjectView(settings.View, projectView)",
+      "apply/sidebar/\"project-tree\"/Icon → shared/ui/icons.tsx#MessageCircleIcon",
+      "apply/sidebar/\"project-tree\"/View → plugins/project/ui/workbench.ts#apply/Sidebar"
+    ]
+  },
+  "plugins/project/ui/workbenchViews.tsx": {
+    "definitions": {
+      "提示与确认": ["ProjectDialogs"],
+      "状态与统计": ["ProjectExitDetails"],
+      "布局与操纵": [
+        "createProjectPages/OverviewPage",
+        "createProjectPages/SessionPage"
+      ],
+      "导航与列表": ["createProjectSidebar/ProjectSidebar"]
+    },
+    "targets": [
+      "\"project-dialogs\"/View → plugins/project/ui/workbenchViews.tsx#ProjectDialogs",
+      "createProjectPages/projectConversationPageId/View → plugins/project/ui/workbenchViews.tsx#createProjectPages/SessionPage",
+      "createProjectPages/projectOverviewPageId/View → plugins/project/ui/workbenchViews.tsx#createProjectPages/OverviewPage"
+    ]
+  },
+  "plugins/project/ui/workspaces/RemoveProjectDialog.tsx": {
+    "definitions": {
+      "提示与确认": ["RemoveProjectDialog"]
+    },
+    "targets": []
+  },
+  "plugins/project/usage/UsageHeatmap.tsx": {
+    "definitions": {
+      "布局与操纵": ["Cell"],
+      "状态与统计": ["DailyCell", "UsageHeatmap", "WeeklyColumn"]
+    },
+    "targets": []
+  },
+  "plugins/project/usage/UsageSettings.tsx": {
+    "definitions": {
+      "状态与统计": ["Trend"],
+      "选择控件": ["UsageAgentFilter"],
+      "布局与操纵": ["UsageSettings"]
+    },
+    "targets": []
+  },
+  "plugins/project/usage/settingsEntry.ts": {
+    "definitions": {
+      "布局与操纵": [
+        "createUsageSettingsEntry/\"usage-statistics\"/HeaderAction",
+        "createUsageSettingsEntry/\"usage-statistics\"/View"
+      ]
+    },
+    "targets": [
+      "createUsageSettingsEntry/\"usage-statistics\"/HeaderAction → (inline)",
+      "createUsageSettingsEntry/\"usage-statistics\"/Icon → shared/ui/icons.tsx#BarChart3Icon",
+      "createUsageSettingsEntry/\"usage-statistics\"/View → (inline)"
+    ]
+  },
+  "plugins/scheduledTasks/index.ts": {
+    "definitions": {
+      "布局与操纵": [
+        "apply/settings/\"scheduled-tasks\"/View",
+        "apply/sidebar/section/View",
+        "apply/sidebar/section/WorkArea"
+      ]
+    },
+    "targets": [
+      "apply/settings/\"scheduled-tasks\"/Icon → shared/ui/icons.tsx#ClockIcon",
+      "apply/settings/\"scheduled-tasks\"/View → (inline)",
+      "apply/sidebar/section/Icon → shared/ui/icons.tsx#ClockIcon",
+      "apply/sidebar/section/View → (inline)",
+      "apply/sidebar/section/WorkArea → (inline)"
+    ]
+  },
+  "plugins/scheduledTasks/ui/TaskViews.tsx": {
+    "definitions": {
+      "布局与操纵": ["TaskEditor", "TaskWorkspace"],
+      "导航与列表": ["TaskSidebar"]
+    },
+    "targets": [
+      "TaskSidebar/shared/ui/SidebarCreateButton.tsx#SidebarCreateButton@Icon → shared/ui/icons.tsx#PlusIcon"
+    ]
+  },
+  "plugins/skills/ui/SkillCards.tsx": {
+    "definitions": {
+      "命令按钮": ["ActionsRow"],
+      "选择控件": ["SelectableSkillCard"],
+      "布局与操纵": ["SkillCard", "SkillDetail"],
+      "图标与内容标识": ["SkillCardIcon"],
+      "导航与列表": ["SkillGroup"]
+    },
+    "targets": []
+  },
+  "plugins/skills/ui/SkillLibrary.tsx": {
+    "definitions": {
+      "布局与操纵": ["LibraryPage", "SkillLibrary"]
+    },
+    "targets": []
+  },
+  "plugins/skills/ui/SkillPackageActions.tsx": {
+    "definitions": {
+      "命令按钮": ["SkillPackageActions"]
+    },
+    "targets": []
+  },
+  "plugins/skills/ui/SkillsInstallerSection.tsx": {
+    "definitions": {
+      "布局与操纵": ["SkillsInstallerSection"]
+    },
+    "targets": []
+  },
+  "plugins/skills/ui/SkillsSourceSettings.tsx": {
+    "definitions": {
+      "布局与操纵": ["SkillsSourceSettings"]
+    },
+    "targets": []
+  },
+  "plugins/skills/ui/workbench.tsx": {
+    "definitions": {
+      "布局与操纵": [
+        "apply/Installer",
+        "apply/Source",
+        "apply/sidebar/\"plugin-management\"/WorkArea"
+      ],
+      "导航与列表": ["apply/Sidebar"]
+    },
+    "targets": [
+      "apply/Installer → (inline)",
+      "apply/Sidebar/Icon → shared/ui/icons.tsx#SkillIcon",
+      "apply/Sidebar/Icon → shared/ui/icons.tsx#TrashIcon",
+      "apply/Source → (inline)",
+      "apply/sidebar/\"plugin-management\"/Icon → shared/ui/icons.tsx#PuzzleIcon",
+      "apply/sidebar/\"plugin-management\"/View → plugins/skills/ui/workbench.tsx#apply/Sidebar",
+      "apply/sidebar/\"plugin-management\"/WorkArea → (inline)"
+    ]
+  },
+  "plugins/terminal/ui/TerminalPanel.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["TerminalPanel"],
+      "导航与列表": ["TerminalTabChip"]
+    },
+    "targets": []
+  },
+  "plugins/terminal/ui/TerminalSessionView.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["TerminalSessionView"]
+    },
+    "targets": []
+  },
+  "plugins/terminal/ui/workbench.ts": {
+    "definitions": {
+      "布局与操纵": ["terminalDock/\"terminal\"/View"]
+    },
+    "targets": [
+      "apply/docks → plugins/terminal/ui/workbench.ts#terminalDock",
+      "terminalDock/\"terminal\"/Icon → shared/ui/icons.tsx#SquareTerminalIcon",
+      "terminalDock/\"terminal\"/View → (inline)"
+    ]
+  },
+  "plugins/updates/ui/DesktopUpdate.tsx": {
+    "definitions": {
+      "命令按钮": ["UpdateButton"],
+      "布局与操纵": ["UpdateController", "UpdateSettings"]
+    },
+    "targets": []
+  },
+  "plugins/updates/ui/ReleaseHistory.tsx": {
+    "definitions": {
+      "布局与操纵": ["ReleaseHistory"]
+    },
+    "targets": []
+  },
+  "plugins/updates/ui/UpdateReleaseNotes.tsx": {
+    "definitions": {
+      "布局与操纵": ["ReleaseNotes", "UpdateReleaseNotes"]
+    },
+    "targets": []
+  },
+  "plugins/updates/ui/workbench.tsx": {
+    "definitions": {
+      "布局与操纵": [
+        "apply/headerIndicators/\"updates\"/View",
+        "updateSettings/\"updates\"/View"
+      ],
+      "提示与确认": ["apply/overlays/\"updates-dialog\"/View"]
+    },
+    "targets": [
+      "apply/headerIndicators/\"updates\"/View → (inline)",
+      "apply/overlays/\"updates-dialog\"/View → (inline)",
+      "apply/settings → plugins/updates/ui/workbench.tsx#updateSettings",
+      "updateSettings/\"updates\"/Icon → shared/ui/icons.tsx#ArrowDownToLineIcon",
+      "updateSettings/\"updates\"/View → (inline)"
+    ]
+  },
+  "plugins/workbench/composition/workbench.ts": {
+    "definitions": {},
+    "targets": [
+      "DesktopWorkbench/Window → plugins/workbench/composition/workbench.ts#DesktopWorkbench/Window"
+    ]
+  },
+  "plugins/workbench/index.ts": {
+    "definitions": {},
+    "targets": [
+      "apply/Window → plugins/workbench/ui/WorkbenchWindow.tsx#WorkbenchWindow"
+    ]
+  },
+  "plugins/workbench/ui/ActivityRail.tsx": {
+    "definitions": {
+      "导航与列表": ["ActivityRail"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/CloseConfirmModal.tsx": {
+    "definitions": {
+      "提示与确认": ["CloseConfirmModal", "ExitOverlay"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/CloseGuard.tsx": {
+    "definitions": {
+      "提示与确认": ["CloseGuard"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/ContentArea.tsx": {
+    "definitions": {
+      "布局与操纵": ["ContentArea"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/ContextBar.tsx": {
+    "definitions": {
+      "布局与操纵": ["ContextBar", "DockToggle", "SidePaneToggle"],
+      "提示与确认": ["HelpMenu", "HelpMenuButton"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/HeaderIndicators.tsx": {
+    "definitions": {
+      "状态与统计": ["HeaderIndicators"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/SettingsPage.tsx": {
+    "definitions": {
+      "提示与确认": ["ResetConfirm"],
+      "布局与操纵": ["SettingsContent", "SettingsPage", "SettingsPanel"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/SidebarFooter.tsx": {
+    "definitions": {
+      "导航与列表": ["SidebarFooter"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/SidebarToggle.tsx": {
+    "definitions": {
+      "导航与列表": ["SidebarToggle"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/StartupGate.tsx": {
+    "definitions": {
+      "布局与操纵": ["StartupGate", "StartupScreen"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/ToastHost.tsx": {
+    "definitions": {
+      "状态与统计": ["ToastEntry", "ToastHost"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/WindowControls.tsx": {
+    "definitions": {
+      "布局与操纵": ["WindowControls"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/WorkbenchShell.tsx": {
+    "definitions": {
+      "布局与操纵": ["WorkbenchShell"]
+    },
+    "targets": [
+      "WorkbenchShell/plugins/workbench/ui/WorkbenchShell.tsx#WorkbenchShell/Footer@Footer → plugins/workbench/ui/SidebarFooter.tsx#SidebarFooter"
+    ]
+  },
+  "plugins/workbench/ui/WorkbenchWindow.tsx": {
+    "definitions": {
+      "布局与操纵": ["WindowContent", "WorkbenchWindow"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/WorkspaceGate.tsx": {
+    "definitions": {
+      "布局与操纵": ["BlockingScreen", "WorkspaceGate"]
+    },
+    "targets": [
+      "WorkspaceGate/plugins/workbench/ui/WorkspaceGate.tsx#WorkspaceGate/Gate@BlockingScreen → plugins/workbench/ui/WorkspaceGate.tsx#BlockingScreen"
+    ]
+  },
+  "plugins/workbench/ui/bindings/react.ts": {
+    "definitions": {
+      "布局与操纵": ["WorkbenchContext"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/right-panel/FullViewHost.tsx": {
+    "definitions": {
+      "布局与操纵": ["FullViewHost", "FullViewHostFrame"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/right-panel/NewTabPane.tsx": {
+    "definitions": {
+      "导航与列表": ["NewTabPane"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/right-panel/PanelTabStrip.tsx": {
+    "definitions": {
+      "导航与列表": ["PanelTabStrip", "PanelTabTrigger"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/right-panel/RightPanel.tsx": {
+    "definitions": {
+      "布局与操纵": ["PanelWorkspace", "ProjectPanel"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/right-panel/TabOverviewPopover.tsx": {
+    "definitions": {
+      "提示与确认": ["TabOverviewPopover"],
+      "导航与列表": ["TabOverviewPopover/renderRows"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/right-panel/fullViewContext.ts": {
+    "definitions": {
+      "布局与操纵": ["RightPanelSlideContext", "RightPanelSlotContext"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/right-panel/panelTabModel.tsx": {
+    "definitions": {
+      "图标与内容标识": ["PanelTabIcon"]
+    },
+    "targets": []
+  },
+  "plugins/workbench/ui/settingsContributions.tsx": {
+    "definitions": {
+      "布局与操纵": ["GeneralSettings"]
+    },
+    "targets": [
+      "\"general\"/Icon → shared/ui/icons.tsx#SlidersHorizontalIcon",
+      "\"general\"/View → plugins/workbench/ui/settingsContributions.tsx#GeneralSettings"
+    ]
+  },
+  "plugins/workbench/ui/workbench.ts": {
+    "definitions": {},
+    "targets": [
+      "apply/pages/\"settings\"/View → plugins/workbench/ui/SettingsPage.tsx#SettingsPage",
+      "apply/settings → plugins/workbench/ui/workbench.ts#apply/settings"
+    ]
+  },
+  "plugins/workflow/ui/AiComposeDialog.tsx": {
+    "definitions": {
+      "编辑输入": ["AiComposeDialog"]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/DisposePanel.tsx": {
+    "definitions": {
+      "布局与操纵": ["DisposePanel"]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/DraftPage.tsx": {
+    "definitions": {
+      "布局与操纵": ["DraftPage"],
+      "内容与专用绘制": ["GraphPane"]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/FlowStages.tsx": {
+    "definitions": {
+      "内容与专用绘制": [
+        "FlowStages",
+        "FlowStages/pills",
+        "FlowStages/stepCard"
+      ]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/KnowledgeDetail.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["KnowledgeDetail"]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/MoreMenu.tsx": {
+    "definitions": {
+      "提示与确认": ["MoreMenu"]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/NodeDetail.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["NodeDetail"]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/NodeReview.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["NodeReview"]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/RunList.tsx": {
+    "definitions": {
+      "导航与列表": ["RunRow"]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/RunManager.tsx": {
+    "definitions": {
+      "布局与操纵": ["RunManager"],
+      "导航与列表": ["RunManager/renderRuns", "RunManager/row"]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/RunSummaryPage.tsx": {
+    "definitions": {
+      "布局与操纵": ["RunSummaryPage"]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/RunView.tsx": {
+    "definitions": {
+      "布局与操纵": ["RunView"]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/SplitPane.tsx": {
+    "definitions": {
+      "布局与操纵": ["SplitPane", "SplitStorageContext"]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/StatusWord.tsx": {
+    "definitions": {
+      "状态与统计": ["StatusWord"]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/WorkflowDetailView.tsx": {
+    "definitions": {
+      "布局与操纵": ["WorkflowDetailView"]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/WorkflowLauncher.tsx": {
+    "definitions": {
+      "导航与列表": ["FileList"],
+      "布局与操纵": ["WorkflowLauncher"]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/WorkflowLibrary.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["ImportPreviewCard"],
+      "布局与操纵": ["WorkflowCard", "WorkflowLibrary"],
+      "提示与确认": ["CardDelete"],
+      "导航与列表": ["CardName", "DraftCard"]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/WorkflowOverview.tsx": {
+    "definitions": {
+      "布局与操纵": ["WorkflowOverview"]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/WorkflowPanel.tsx": {
+    "definitions": {
+      "布局与操纵": ["WorkflowPanel"]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/WorkflowSessionBanner.tsx": {
+    "definitions": {
+      "布局与操纵": ["WorkflowSessionBanner"]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/WorkflowSidebar.tsx": {
+    "definitions": {
+      "导航与列表": ["WorkflowSidebar"]
+    },
+    "targets": []
+  },
+  "plugins/workflow/ui/workbench.tsx": {
+    "definitions": {
+      "布局与操纵": [
+        "createWorkflowWorkbench/\"workflow\"/View",
+        "createWorkflowWorkbench/Overview",
+        "createWorkflowWorkbench/SessionBanner",
+        "createWorkflowWorkbench/panelId/View"
+      ]
+    },
+    "targets": [
+      "apply/panels → plugins/workflow/ui/workbench.tsx#createWorkflowWorkbench/panel",
+      "apply/sidebar → plugins/workflow/ui/workbench.tsx#createWorkflowWorkbench/sidebar",
+      "createWorkflowWorkbench/\"workflow\"/Icon → shared/ui/icons.tsx#WorkflowIcon",
+      "createWorkflowWorkbench/\"workflow\"/View → (inline)",
+      "createWorkflowWorkbench/Icon → shared/ui/icons.tsx#WorkflowIcon",
+      "createWorkflowWorkbench/Overview → (inline)",
+      "createWorkflowWorkbench/Overview → plugins/workflow/types.ts#Overview",
+      "createWorkflowWorkbench/SessionBanner → (inline)",
+      "createWorkflowWorkbench/panelId/Icon → shared/ui/icons.tsx#WorkflowIcon",
+      "createWorkflowWorkbench/panelId/View → (inline)"
+    ]
+  },
+  "shared/logging/react.ts": {
+    "definitions": {
+      "布局与操纵": ["LoggerContext"]
+    },
+    "targets": []
+  },
+  "shared/ui/BrandLoading.tsx": {
+    "definitions": {
+      "状态与统计": ["BrandLoading"]
+    },
+    "targets": []
+  },
+  "shared/ui/BrandMark.tsx": {
+    "definitions": {
+      "图标与内容标识": ["BrandMark"]
+    },
+    "targets": []
+  },
+  "shared/ui/Breadcrumb.tsx": {
+    "definitions": {
+      "导航与列表": ["Breadcrumb"]
+    },
+    "targets": []
+  },
+  "shared/ui/Callout.tsx": {
+    "definitions": {
+      "提示与确认": ["Callout"],
+      "图标与内容标识": ["ToneIcon"]
+    },
+    "targets": []
+  },
+  "shared/ui/ConfirmIconAction.tsx": {
+    "definitions": {
+      "提示与确认": ["ConfirmIconAction"]
+    },
+    "targets": []
+  },
+  "shared/ui/ConfirmationDialog.tsx": {
+    "definitions": {
+      "提示与确认": ["ConfirmationDialog"]
+    },
+    "targets": []
+  },
+  "shared/ui/ContextMenu.tsx": {
+    "definitions": {
+      "提示与确认": ["ContextMenu"]
+    },
+    "targets": []
+  },
+  "shared/ui/CopyButton.tsx": {
+    "definitions": {
+      "命令按钮": ["CopyButton"]
+    },
+    "targets": []
+  },
+  "shared/ui/Disclosure.tsx": {
+    "definitions": {
+      "布局与操纵": ["Disclosure"]
+    },
+    "targets": []
+  },
+  "shared/ui/DocumentPreview.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["DocumentPreview", "MarkdownView"]
+    },
+    "targets": [
+      "default → shared/ui/MarkdownView.tsx#MarkdownView",
+      "import → ./MarkdownView.tsx"
+    ]
+  },
+  "shared/ui/EmptyState.tsx": {
+    "definitions": {
+      "状态与统计": ["EmptyState"]
+    },
+    "targets": []
+  },
+  "shared/ui/ErrorBoundary.tsx": {
+    "definitions": {
+      "布局与操纵": [
+        "AppErrorBoundary",
+        "AppFallback",
+        "ErrorBoundaryBase",
+        "PanelFallback",
+        "ScopedErrorBoundary",
+        "StackDetails"
+      ]
+    },
+    "targets": []
+  },
+  "shared/ui/IconButton.tsx": {
+    "definitions": {
+      "图标与内容标识": ["IconHoverProvider"],
+      "布局与操纵": ["PlacementContext"],
+      "命令按钮": ["IconButton"]
+    },
+    "targets": []
+  },
+  "shared/ui/InlineConfirm.tsx": {
+    "definitions": {
+      "提示与确认": ["InlineConfirm"]
+    },
+    "targets": []
+  },
+  "shared/ui/MarkdownView.tsx": {
+    "definitions": {
+      "布局与操纵": ["BlockCodeContext"],
+      "内容与专用绘制": [
+        "MarkdownCode",
+        "MarkdownRenderBoundary",
+        "MarkdownView",
+        "MarkdownViewBase",
+        "buildMarkdownComponents/a",
+        "buildMarkdownComponents/blockquote",
+        "buildMarkdownComponents/h1",
+        "buildMarkdownComponents/h2",
+        "buildMarkdownComponents/h3",
+        "buildMarkdownComponents/h4",
+        "buildMarkdownComponents/h5",
+        "buildMarkdownComponents/h6",
+        "buildMarkdownComponents/img",
+        "buildMarkdownComponents/li",
+        "buildMarkdownComponents/ol",
+        "buildMarkdownComponents/pre",
+        "buildMarkdownComponents/strong",
+        "buildMarkdownComponents/td",
+        "buildMarkdownComponents/th",
+        "buildMarkdownComponents/tr",
+        "buildMarkdownComponents/ul",
+        "trimTrailingNewlinesInCodeTree"
+      ]
+    },
+    "targets": [
+      "buildMarkdownComponents/a → (inline)",
+      "buildMarkdownComponents/blockquote → (inline)",
+      "buildMarkdownComponents/code → shared/ui/MarkdownView.tsx#MarkdownCode",
+      "buildMarkdownComponents/h1 → (inline)",
+      "buildMarkdownComponents/h2 → (inline)",
+      "buildMarkdownComponents/h3 → (inline)",
+      "buildMarkdownComponents/h4 → (inline)",
+      "buildMarkdownComponents/h5 → (inline)",
+      "buildMarkdownComponents/h6 → (inline)",
+      "buildMarkdownComponents/img → (inline)",
+      "buildMarkdownComponents/li → (inline)",
+      "buildMarkdownComponents/ol → (inline)",
+      "buildMarkdownComponents/p → shared/ui/markdown/MarkdownImage.tsx#MarkdownImageParagraph",
+      "buildMarkdownComponents/pre → (inline)",
+      "buildMarkdownComponents/strong → (inline)",
+      "buildMarkdownComponents/table → shared/ui/markdown/MarkdownTable.tsx#MarkdownTable",
+      "buildMarkdownComponents/td → (inline)",
+      "buildMarkdownComponents/th → (inline)",
+      "buildMarkdownComponents/tr → (inline)",
+      "buildMarkdownComponents/ul → (inline)"
+    ]
+  },
+  "shared/ui/MetricStrip.tsx": {
+    "definitions": {
+      "状态与统计": ["MetricStrip"]
+    },
+    "targets": []
+  },
+  "shared/ui/ModalShell.tsx": {
+    "definitions": {
+      "布局与操纵": ["ModalDepth"],
+      "提示与确认": ["ModalShell"]
+    },
+    "targets": []
+  },
+  "shared/ui/NavigationRow.tsx": {
+    "definitions": {
+      "导航与列表": ["NavigationRow"]
+    },
+    "targets": []
+  },
+  "shared/ui/PageHeader.tsx": {
+    "definitions": {
+      "布局与操纵": ["PageHeader"]
+    },
+    "targets": []
+  },
+  "shared/ui/PageVisibility.ts": {
+    "definitions": {
+      "布局与操纵": ["PageVisibility"]
+    },
+    "targets": []
+  },
+  "shared/ui/SettingsPageParts.tsx": {
+    "definitions": {
+      "编辑输入": ["IntegerSettingInput"],
+      "布局与操纵": ["SettingCard", "SettingRow"]
+    },
+    "targets": []
+  },
+  "shared/ui/SidebarCreateButton.tsx": {
+    "definitions": {
+      "命令按钮": ["SidebarCreateButton"]
+    },
+    "targets": []
+  },
+  "shared/ui/SidebarFooterRow.tsx": {
+    "definitions": {
+      "导航与列表": ["SidebarFooterRow"]
+    },
+    "targets": []
+  },
+  "shared/ui/SidebarItemTitle.tsx": {
+    "definitions": {
+      "导航与列表": ["SidebarItemTitle"]
+    },
+    "targets": []
+  },
+  "shared/ui/TextLink.tsx": {
+    "definitions": {
+      "命令按钮": ["TextLink"]
+    },
+    "targets": []
+  },
+  "shared/ui/TreeMotion.tsx": {
+    "definitions": {
+      "导航与列表": ["CollapsibleTreePane", "TreeBranch"]
+    },
+    "targets": []
+  },
+  "shared/ui/UiIcon.tsx": {
+    "definitions": {
+      "图标与内容标识": ["Svg", "UiIcon"]
+    },
+    "targets": []
+  },
+  "shared/ui/controls.tsx": {
+    "definitions": {
+      "状态与统计": [
+        "Badge",
+        "BadgeDot",
+        "ProgressBar",
+        "Spinner",
+        "StatusDot"
+      ],
+      "选择控件": ["Checkbox", "Listbox", "RadioDot", "ToggleSwitch"],
+      "命令按钮": ["ActionButton", "DangerButton"]
+    },
+    "targets": []
+  },
+  "shared/ui/controls/ColumnResizer.tsx": {
+    "definitions": {
+      "布局与操纵": ["ColumnResizer"]
+    },
+    "targets": []
+  },
+  "shared/ui/controls/EdgeDrawer.tsx": {
+    "definitions": {
+      "提示与确认": ["EdgeDrawer"]
+    },
+    "targets": []
+  },
+  "shared/ui/controls/FindBar.tsx": {
+    "definitions": {
+      "编辑输入": ["FindBar"]
+    },
+    "targets": []
+  },
+  "shared/ui/controls/HintNumber.tsx": {
+    "definitions": {
+      "布局与操纵": ["HintNumber"]
+    },
+    "targets": []
+  },
+  "shared/ui/controls/HintSurface.tsx": {
+    "definitions": {
+      "提示与确认": ["HintSurface"]
+    },
+    "targets": []
+  },
+  "shared/ui/controls/HintTooltip.tsx": {
+    "definitions": {
+      "提示与确认": ["HintTooltip"]
+    },
+    "targets": []
+  },
+  "shared/ui/controls/RefreshButton.tsx": {
+    "definitions": {
+      "命令按钮": ["RefreshButton"]
+    },
+    "targets": []
+  },
+  "shared/ui/controls/SegmentedControl.tsx": {
+    "definitions": {
+      "选择控件": ["SegmentedControl"]
+    },
+    "targets": []
+  },
+  "shared/ui/controls/UsageMeter.tsx": {
+    "definitions": {
+      "状态与统计": ["UsageMeter"]
+    },
+    "targets": []
+  },
+  "shared/ui/controls/hintMotion.ts": {
+    "definitions": {
+      "布局与操纵": ["HintOpening"]
+    },
+    "targets": []
+  },
+  "shared/ui/feedback.ts": {
+    "definitions": {
+      "布局与操纵": ["Feedback"]
+    },
+    "targets": []
+  },
+  "shared/ui/file-icons/fileDisplay.tsx": {
+    "definitions": {
+      "图标与内容标识": ["FileDisplayIcon", "GlyphMotif"]
+    },
+    "targets": []
+  },
+  "shared/ui/file-icons/icons.tsx": {
+    "definitions": {
+      "图标与内容标识": [
+        "AlertCircleIcon",
+        "ExternalLinkIcon",
+        "EyeIcon",
+        "FilesIcon",
+        "GitCommitVerticalIcon"
+      ]
+    },
+    "targets": []
+  },
+  "shared/ui/icons.tsx": {
+    "definitions": {
+      "图标与内容标识": [
+        "ActivityIcon",
+        "ArchiveIcon",
+        "ArrowDownIcon",
+        "ArrowDownToLineIcon",
+        "ArrowLeftIcon",
+        "ArrowRightIcon",
+        "ArrowUpIcon",
+        "BarChart3Icon",
+        "BotIcon",
+        "BrainIcon",
+        "CameraIcon",
+        "CheckIcon",
+        "ChevronDownIcon",
+        "ChevronRightIcon",
+        "ChevronUpIcon",
+        "ChevronsDownIcon",
+        "CircleHelpIcon",
+        "ClipboardPasteIcon",
+        "ClockIcon",
+        "CopyIcon",
+        "CornerDownRightIcon",
+        "DatabaseIcon",
+        "EllipsisIcon",
+        "FileDiffIcon",
+        "FileIcon",
+        "FileTreeIcon",
+        "FitIcon",
+        "FolderGlyph",
+        "GlobeIcon",
+        "GripVerticalIcon",
+        "HandIcon",
+        "ImportIcon",
+        "ListFilterIcon",
+        "LogOutIcon",
+        "Maximize2Icon",
+        "MaximizeIcon",
+        "MessageCircleIcon",
+        "MessageCirclePlusIcon",
+        "Minimize2Icon",
+        "MinusIcon",
+        "MousePointer2Icon",
+        "PanelLeftCloseIcon",
+        "PanelLeftOpenIcon",
+        "PanelRightCloseIcon",
+        "PanelRightOpenIcon",
+        "PencilIcon",
+        "PinIcon",
+        "PinOffIcon",
+        "PlusIcon",
+        "PuzzleIcon",
+        "RefreshIcon",
+        "SearchIcon",
+        "SettingsIcon",
+        "ShieldAlertIcon",
+        "ShieldCheckIcon",
+        "SkillIcon",
+        "SlidersHorizontalIcon",
+        "SparkleIcon",
+        "SparklesIcon",
+        "SquareIcon",
+        "SquareTerminalIcon",
+        "StarFilledIcon",
+        "StarOutlineIcon",
+        "TerminalIcon",
+        "TrashIcon",
+        "TriangleAlertIcon",
+        "WidthFullIcon",
+        "WidthStandardIcon",
+        "WidthWideIcon",
+        "WindowMaximizeIcon",
+        "WindowRestoreIcon",
+        "WorkflowIcon",
+        "WrapTextIcon",
+        "WrenchIcon",
+        "XIcon"
+      ]
+    },
+    "targets": []
+  },
+  "shared/ui/markdown/CodeBlock.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["CodeBlock"],
+      "布局与操纵": ["CodeBlockContext"],
+      "命令按钮": ["CodeBlockPreviewButton", "CodeBlockWrapButton"]
+    },
+    "targets": []
+  },
+  "shared/ui/markdown/DiagramPreviewDialog.tsx": {
+    "definitions": {
+      "图标与内容标识": ["CircleIcon"],
+      "提示与确认": ["DiagramPreviewDialog"]
+    },
+    "targets": []
+  },
+  "shared/ui/markdown/MarkdownImage.tsx": {
+    "definitions": {
+      "图标与内容标识": ["ImagePlaceholderIcon"],
+      "提示与确认": ["ImagePreviewDialog"],
+      "内容与专用绘制": ["MarkdownImage", "MarkdownImageParagraph"]
+    },
+    "targets": []
+  },
+  "shared/ui/markdown/MarkdownTable.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["MarkdownTable"],
+      "导航与列表": ["TableEdgeShadow"],
+      "提示与确认": ["TablePreviewDialog"]
+    },
+    "targets": []
+  },
+  "shared/ui/markdown/MermaidBlock.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["MermaidBlock"]
+    },
+    "targets": []
+  },
+  "shared/ui/markdown/theme.ts": {
+    "definitions": {
+      "布局与操纵": ["MarkdownAppearance"]
+    },
+    "targets": []
+  }
+}

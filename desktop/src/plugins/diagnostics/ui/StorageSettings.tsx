@@ -3,9 +3,9 @@ import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { createStore } from "zustand/vanilla";
-import { btnSecondary } from "../../../shared/ui/controls";
+import { ActionButton } from "../../../shared/ui/controls";
 import { XIcon } from "../../../shared/ui/icons.tsx";
-import { settingsInputClass } from "../../../shared/ui/SettingsPageParts.tsx";
+import { settingsNumberInputClass } from "../../../shared/ui/SettingsPageParts.tsx";
 import type { DiagnosticsReader } from "../types.ts";
 import type { StorageRow } from "../capture/storageRegistry.ts";
 import {
@@ -26,10 +26,9 @@ import {
   nativeConversationTextStatus,
 } from "../../host/service.ts";
 
-const settingsButton = `${btnSecondary} min-h-8 shrink-0 px-3 py-1 text-ui-base`;
 
 export function createStorageSettings(
-  reader: DiagnosticsReader,
+  reader: Pick<DiagnosticsReader, "storage" | "onStorageCleaned">,
   openStorageSettings: () => void,
   pickStorageDirectory?: () => Promise<string | null>,
 ) {
@@ -162,13 +161,14 @@ export function createStorageSettings(
         {state.readError && (
           <p role="alert" className="text-ui-caption text-danger-ink">
             读取存储状态失败。{state.readError}{" "}
-            <button
+            <ActionButton
+              tone="secondary"
               type="button"
-              className={settingsButton}
+              className="min-h-8 shrink-0 px-3 py-1 text-ui-base"
               onClick={() => void load()}
             >
               重试
-            </button>
+            </ActionButton>
           </p>
         )}
         {state.writeError && (
@@ -242,9 +242,9 @@ export function createStorageSettings(
             <p data-hint={failure} className="truncate text-xs text-ink-mute">
               {failure}
             </p>
-            <button
+            <ActionButton
+              tone="secondary"
               type="button"
-              className={btnSecondary}
               disabled={configuration.saving || conversation.saving}
               onClick={() =>
                 void (async () => {
@@ -254,7 +254,7 @@ export function createStorageSettings(
               }
             >
               重试
-            </button>
+            </ActionButton>
           </div>
         )}
         {backgroundFailure &&
@@ -269,23 +269,23 @@ export function createStorageSettings(
                 {backgroundMessage}
               </p>
               <div className="flex items-center gap-2">
-                <button
+                <ActionButton
+                  tone="secondary"
                   type="button"
-                  className={btnSecondary}
                   onClick={() => {
                     setDismissedFailure(backgroundMessage);
                     openStorageSettings();
                   }}
                 >
                   查看存储
-                </button>
-                <button
+                </ActionButton>
+                <ActionButton
+                  tone="secondary"
                   type="button"
-                  className={btnSecondary}
                   onClick={() => setDismissedFailure(backgroundMessage)}
                 >
                   关闭
-                </button>
+                </ActionButton>
               </div>
             </div>
           )}
@@ -297,27 +297,29 @@ export function createStorageSettings(
                 <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5">
                   <span
                     data-hint={notice.label}
-                    className="whitespace-nowrap font-medium text-warn-ink"
+                    className="min-w-0 max-w-full font-medium text-warn-ink [overflow-wrap:anywhere]"
                   >
                     存储超阈值
                   </span>
                   {noticeBytes !== undefined && (
-                    <span className="whitespace-nowrap tabular-nums text-ink-mute">
+                    <span className="min-w-0 max-w-full tabular-nums text-ink-mute [overflow-wrap:anywhere]">
                       {(noticeBytes / MIB).toFixed(1)}/
                       {thresholdMiB(thresholds ?? {}, notice)} MiB
                     </span>
                   )}
                 </div>
-                <button
+                <ActionButton
+                  tone="ghost"
+                  size="compact"
                   type="button"
-                  className="min-h-6 shrink-0 rounded-md px-1.5 font-medium text-ink-soft transition-colors hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  className="shrink-0"
                   onClick={() => {
                     dismissNotice();
                     openStorageSettings();
                   }}
                 >
                   管理
-                </button>
+                </ActionButton>
                 <IconButton iconSize="compact"
                   type="button"
                   aria-label="关闭提醒"
@@ -384,7 +386,7 @@ function ThresholdInput({
           max={Math.floor(Number.MAX_SAFE_INTEGER / MIB)}
           step={1}
           aria-label={label + "提醒阈值（MiB）"}
-          className={`${settingsInputClass} max-w-20 tabular-nums`}
+          className={settingsNumberInputClass}
           disabled={disabled}
           value={draft ?? threshold}
           onChange={(event) => setDraft(event.currentTarget.value)}

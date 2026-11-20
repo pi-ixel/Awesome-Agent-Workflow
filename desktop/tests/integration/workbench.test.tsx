@@ -274,6 +274,18 @@ describe("项目树 → 项目总览", () => {
     expect(useWorkbenchUiStore.getState().contextPath).toBe(PATH);
   });
 
+  it("项目空态取消目录选择后可重试并进入项目", async () => {
+    vi.mocked(dialogHost.pickDirectory).mockResolvedValueOnce(null).mockResolvedValueOnce(PATH);
+    renderDesktopApp(services.workbench);
+    const add = within(screen.getByText(/从左侧选择或新建一个项目目录/).closest('[role="status"]') as HTMLElement)
+      .getByRole("button", { name: "添加项目" });
+    await userEvent.click(add);
+    expect(await screen.findByRole("alert")).toHaveTextContent("目录选择不可用或已取消");
+    await userEvent.click(add);
+    await waitFor(() => expect(useWorkspaceStore.getState().selectedPath).toBe(PATH));
+    expect(screen.queryByText(/目录选择不可用或已取消/)).toBeNull();
+  });
+
   it("【+】面板「添加项目」tab：目录对话框选择后进树并选中进总览", async () => {
     vi.mocked(dialogHost.pickDirectory).mockResolvedValue("D:/dev/new-project");
     renderDesktopApp(services.workbench);

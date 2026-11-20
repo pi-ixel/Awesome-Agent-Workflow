@@ -15,7 +15,7 @@ import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { useContext } from "react";
 import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
 import {
-  MinimizeIcon,
+  MinusIcon,
   WindowMaximizeIcon,
   WindowRestoreIcon,
   XIcon,
@@ -51,7 +51,7 @@ export function WindowControls() {
         className={buttonBase}
         {...hintMinimize}
       >
-        <MinimizeIcon className="ui-icon-16" strokeWidth={2} />
+        <MinusIcon className="ui-icon-16" strokeWidth={2} />
       </IconButton>
       <IconButton
         type="button"

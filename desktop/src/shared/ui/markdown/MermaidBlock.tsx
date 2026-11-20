@@ -7,12 +7,14 @@
 import type { MermaidConfig } from "mermaid";
 import {
   type CSSProperties,
+  useContext,
   useEffect,
   useId,
   useMemo,
   useRef,
   useState,
 } from "react";
+import { MarkdownAppearance } from "./theme.ts";
 import { Spinner } from "../controls.tsx";
 import { useLogger } from "../../logging/react.ts";
 
@@ -155,7 +157,7 @@ function resolveCssColor(raw: string, fallback: string): string {
 }
 
 /** 主题变量从 desktop 语义 token 采样,双主题自动跟随。 */
-function createMermaidConfig(resolvedTheme: "light" | "dark"): MermaidConfig {
+function createMermaidConfig(resolvedTheme: "light" | "dark", uiFontSize: number): MermaidConfig {
   const dark = resolvedTheme === "dark";
   const background = resolveCssColor(
     "var(--color-surface)",
@@ -193,6 +195,7 @@ function createMermaidConfig(resolvedTheme: "light" | "dark"): MermaidConfig {
     suppressErrorRendering: true,
     theme: "base",
     themeVariables: {
+      fontSize: `${uiFontSize}px`,
       actorBkg: background,
       actorBorder: border,
       actorTextColor: text,
@@ -235,13 +238,14 @@ export function MermaidBlock({
   const trimmedCode = code.trim();
   const resolvedTheme: "light" | "dark" = theme === "warm" ? "light" : "dark";
   const logger = useLogger("ui");
+  const { uiFontSize } = useContext(MarkdownAppearance);
   const mermaidConfig = useMemo(
-    () => createMermaidConfig(resolvedTheme),
-    [resolvedTheme],
+    () => createMermaidConfig(resolvedTheme, uiFontSize),
+    [resolvedTheme, uiFontSize],
   );
   const renderKey = useMemo(
-    () => `${resolvedTheme}:${hashMermaidCode(trimmedCode)}`,
-    [resolvedTheme, trimmedCode],
+    () => `${resolvedTheme}:${uiFontSize}:${hashMermaidCode(trimmedCode)}`,
+    [resolvedTheme, uiFontSize, trimmedCode],
   );
   const [result, setResult] = useState<{
     key: string;
@@ -290,9 +294,8 @@ export function MermaidBlock({
             onPreviewSvgChange?.(null);
           }
         });
-      return;
+      return () => { cancelled = true; };
     }
-    onPreviewSvgChange?.(null);
     const renderId = `aaw-mermaid-${renderIdPrefix}-${hashMermaidCode(renderKey)}`;
     const pendingRender = enqueueMermaidRender(async () => {
       const plugin = await loadMermaidPlugin();
@@ -330,7 +333,6 @@ export function MermaidBlock({
       });
     return () => {
       cancelled = true;
-      onPreviewSvgChange?.(null);
     };
   }, [
     logger,

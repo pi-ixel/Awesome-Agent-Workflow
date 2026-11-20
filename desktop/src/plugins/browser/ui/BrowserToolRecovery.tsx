@@ -8,7 +8,7 @@ type BrowserMcpStatus = Awaited<
   ReturnType<HostService["browser"]["mcpStatus"]>
 >;
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
-import { btnSecondary, DangerButton } from "../../../shared/ui/controls.tsx";
+import { ActionButton, DangerButton } from "../../../shared/ui/controls.tsx";
 
 export interface BrowserToolRecoveryProps {
   readonly host: HostService["browser"];
@@ -114,9 +114,9 @@ function BrowserToolRecoverySession({
                 当前会话无法使用浏览器工具，开启后仍需确认重连。
               </p>
             </div>
-            <button
+            <ActionButton tone="secondary"
               type="button"
-              className={`${btnSecondary} shrink-0 px-3 py-1.5`}
+              className="shrink-0 px-3 py-1.5"
               onClick={() => {
                 void host
                   .setAgentControl(true)
@@ -128,7 +128,7 @@ function BrowserToolRecoverySession({
               }}
             >
               开启 Agent 浏览器控制
-            </button>
+            </ActionButton>
           </div>
         </section>
       )}
@@ -144,13 +144,13 @@ function BrowserToolRecoverySession({
                 需要重连当前会话；工具注册以重连后的真实运行时为准。
               </p>
             </div>
-            <button
+            <ActionButton tone="secondary"
               type="button"
-              className={`${btnSecondary} shrink-0 px-3 py-1.5`}
+              className="shrink-0 px-3 py-1.5"
               onClick={() => setConfirming(true)}
             >
               重连并恢复浏览器工具
-            </button>
+            </ActionButton>
           </div>
         </section>
       )}
@@ -175,14 +175,14 @@ function BrowserToolRecoverySession({
                   重连会停止同一连接上的任务。未完成消息不会自动重发，消息队列保持暂停。
                 </p>
                 <div className="flex justify-end gap-2">
-                  <button
+                  <ActionButton tone="secondary"
                     type="button"
-                    className={`${btnSecondary} min-h-9 px-4 text-sm`}
+                    className="min-h-9 px-4 text-sm"
                     disabled={recovering}
                     onClick={() => setConfirming(false)}
                   >
                     取消
-                  </button>
+                  </ActionButton>
                   <DangerButton
                     className="min-h-9 px-4 text-sm"
                     disabled={recovering}

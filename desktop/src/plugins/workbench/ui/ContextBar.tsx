@@ -1,4 +1,5 @@
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
 import { useWorkbenchUiValue, useRightPanelValue, readRightPanel, useWorkbenchLayout } from "./bindings/layoutView.ts";
 import { emptyPanel } from "../layout/rightPanelStore.ts";
 import { useContext } from "react";
@@ -7,7 +8,7 @@ import { useWorkbenchBasePage } from "./bindings/pages.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
-import { useHeaderMenu } from "../../../shared/ui/useHeaderMenu.ts";
+import { useMenuController } from "../../../shared/ui/useMenuController.ts";
 import { CircleHelpIcon, PanelRightCloseIcon, PanelRightOpenIcon } from "../../../shared/ui/icons.tsx";
 import type { WorkbenchLauncher, WorkbenchSnapshot } from "../types.ts";
 import { SidebarToggle } from "./SidebarToggle.tsx";
@@ -15,7 +16,7 @@ import { HeaderIndicators } from "./HeaderIndicators.tsx";
 import { WindowControls } from "./WindowControls.tsx";
 
 const BAR_BUTTON_CLASS =
-  "flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink";
+  `flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink focus-visible:ring-inset ${focusVisibleRing}`;
 
 function HelpMenuButton() {
   const items = useWorkbenchEntries("helpItems");
@@ -25,7 +26,7 @@ function HelpMenuButton() {
 function HelpMenu({ items }: { readonly items: WorkbenchSnapshot["helpItems"] }) {
   const workbench = useContext(WorkbenchContext);
   const hint = hintTooltipProps("帮助");
-  const { menu, open, dismiss } = useHeaderMenu();
+  const { menu, open, dismiss } = useMenuController();
   // closing 态（退场动画中）视作已关：aria-expanded 翻 false，触发器
   // 再点即重开（open 已清挂起的退场计时器）
   const isOpen = menu !== null && menu.id === "help" && !menu.closing;
@@ -51,27 +52,17 @@ function HelpMenu({ items }: { readonly items: WorkbenchSnapshot["helpItems"] })
             dismiss();
             return;
           }
-          const anchor = event.currentTarget.getBoundingClientRect();
-          open(
-            "help",
-            "帮助菜单",
-            entries,
-            {
-              x: anchor.right,
-              y: anchor.bottom + 4,
-              side: "bottom",
-              align: "end",
-            },
-          );
+          open("help", "帮助菜单", entries, { trigger: event.currentTarget });
         }}
         className={BAR_BUTTON_CLASS}
       >
         <CircleHelpIcon className="ui-icon-16" />
       </IconButton>
-      {isOpen && menu !== null && (
+      {menu !== null && (
         <ContextMenu
           entries={entries}
           placement={menu.placement}
+          trigger={menu.trigger}
           label={menu.label}
           closing={menu.closing}
           onDismiss={dismiss}
@@ -90,6 +81,7 @@ function DockToggle({ id, launcher }: { id: string; launcher: WorkbenchLauncher 
     <IconButton
       type="button"
       data-testid={`${id}-toggle`}
+      data-dock-toggle={id}
       aria-label={label}
       aria-pressed={open}
       onClick={() => toggle(id)}

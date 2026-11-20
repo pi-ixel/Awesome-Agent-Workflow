@@ -1,3 +1,4 @@
+import { NavigationRow } from "../../../../shared/ui/NavigationRow.tsx";
 import type { ThoughtItem } from "../types.ts";
 import { MessageAttachments } from "./MessageAttachments.tsx";
 /**
@@ -98,13 +99,14 @@ function ThoughtBlockBase({ item }: { readonly item: ThoughtItem }) {
   return (
     <div className="w-full" data-item-kind="thought" data-item-id={item.id}>
       <MessageAttachments blocks={item.attachments} />
-      <button
+      <NavigationRow
+        layout="compound"
         type="button"
         aria-expanded={isOpen}
         onClick={() => {
           setIsOpen((current) => !current);
         }}
-        className="group/thought inline-flex max-w-full min-w-0 items-center gap-2 self-start text-left text-ui-base transition-colors"
+        className="group/thought inline-flex! flex-none max-w-full min-w-0 items-center gap-2 self-start text-left text-ui-base transition-colors"
       >
         {/* 长流式下旋转 loader 会长期占用渲染资源：glyph 固定静态脑形 */}
         <BrainIcon className="ui-icon-16 shrink-0 text-ink-mute" />
@@ -138,7 +140,7 @@ function ThoughtBlockBase({ item }: { readonly item: ThoughtItem }) {
         <ChevronRightIcon
           className={`ui-icon-16 shrink-0 text-ink-mute transition-opacity transition-transform ${isOpen ? "rotate-90 opacity-100" : "rotate-0 opacity-0 group-hover/thought:opacity-100"}`}
         />
-      </button>
+      </NavigationRow>
       {isOpen ? (
         /* pt-3 在导线容器外层：左导线上方留 12px 空隙（ZCode reasoning.tsx 同款） */
         <div className="pt-3">

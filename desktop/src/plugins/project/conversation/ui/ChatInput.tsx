@@ -1,3 +1,6 @@
+import { NavigationRow } from "../../../../shared/ui/NavigationRow.tsx";
+import { ActionButton } from "../../../../shared/ui/controls.tsx";
+import { composerFieldClass } from "../../../../shared/ui/inputStyles.ts";
 import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
 import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
@@ -76,10 +79,11 @@ import {
 import type { ApprovalMode } from "../../types.ts";
 import { useProjectPreferences } from "../../ui/preferencesView.tsx";
 import { chatWidthClassOf } from "./chatWidth.ts";
-import { MenuItemRow, StatusChipMenu } from "./StatusChipMenu.tsx";
+import { StatusChipMenu } from "./StatusChipMenu.tsx";
 import type { FileCandidates } from "./documentView.ts";
 import { InputStatusRight } from "./InputStatusBar.tsx";
 import {
+  ArrowUpIcon,
   HandIcon,
   ShieldAlertIcon,
   SkillIcon,
@@ -121,24 +125,6 @@ const approvalModeOptions: readonly { value: ApprovalMode; label: string }[] = [
 
 function policyLabelOf(mode: ApprovalMode): string {
   return mode === "auto-allow" ? "自动放行" : "每次询问";
-}
-
-/** arrow-up：发送主钮内的箭头。 */
-function ArrowUpIcon() {
-  return (
-    <UiIcon
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="ui-icon-16"
-    >
-      <path d="m5 12 7-7 7 7" />
-      <path d="M12 19V5" />
-    </UiIcon>
-  );
 }
 
 /** 停止：ZCode 式次级钮（variant=secondary）内的实心方块（SquareIcon size-4）。 */
@@ -1140,7 +1126,8 @@ export function ChatInput({
                       {header}
                     </p>
                   ) : null}
-                  <button
+                  <NavigationRow
+                    layout="compound"
                     type="button"
                     role="option"
                     aria-selected={index === slash.index}
@@ -1149,7 +1136,7 @@ export function ChatInput({
                       event.preventDefault();
                       selectSlashItem(item);
                     }}
-                    className={`flex min-h-8 w-full items-center gap-3 rounded-xl px-3 text-left transition-colors ${
+                    className={`flex min-h-8 w-full items-center gap-3 rounded-xl! px-3 text-left transition-colors ${
                       index === slash.index
                         ? "bg-selected text-ink"
                         : "text-ink-soft hover:bg-hover"
@@ -1171,7 +1158,7 @@ export function ChatInput({
                     <span className="min-w-0 flex-1 truncate text-ui-base text-ink-subtlest">
                       {item.description}
                     </span>
-                  </button>
+                  </NavigationRow>
                 </div>
               ))
             )}
@@ -1199,7 +1186,8 @@ export function ChatInput({
                       {header}
                     </p>
                   ) : null}
-                  <button
+                  <NavigationRow
+                    layout="compound"
                     type="button"
                     role="option"
                     aria-selected={index === mention.index}
@@ -1207,7 +1195,7 @@ export function ChatInput({
                       event.preventDefault();
                       insertMention(option);
                     }}
-                    className={`flex min-h-8 w-full items-center gap-3 rounded-xl px-3 text-left transition-colors ${
+                    className={`flex min-h-8 w-full items-center gap-3 rounded-xl! px-3 text-left transition-colors ${
                       index === mention.index
                         ? "bg-selected text-ink"
                         : "text-ink-soft hover:bg-hover"
@@ -1219,7 +1207,7 @@ export function ChatInput({
                     <span className="min-w-0 flex-1 truncate text-ui-base font-medium">
                       {option.label}
                     </span>
-                  </button>
+                  </NavigationRow>
                 </div>
               ))
             )}
@@ -1244,13 +1232,15 @@ export function ChatInput({
           event.preventDefault();
           void addImageFiles(Array.from(event.dataTransfer.files));
         }}
-        className={`composer-card @container/composer mx-auto w-full overflow-hidden rounded-2xl border border-line bg-surface transition-[max-width] duration-150 ease-out [--composer-inline-inset:calc(var(--spacing)*4.5_+_var(--ui-icon-unit)*2)] ${widthClass}`}
+        className={`composer-card @container/composer mx-auto w-full overflow-hidden rounded-2xl bg-surface transition-[max-width] duration-150 ease-out [--composer-inline-inset:calc(var(--spacing)*4.5_+_var(--ui-icon-unit)*2)] ${widthClass}`}
       >
         {queue}
         {imageSaveFailed && (
           <div role="alert">
             图片草稿未保存，关闭后可能丢失。{" "}
-            <button
+            <ActionButton
+              tone="secondary"
+              size="compact"
               type="button"
               onClick={() => {
                 void imageStorage?.save(imagesRef.current).then(
@@ -1260,7 +1250,7 @@ export function ChatInput({
               }}
             >
               重试保存
-            </button>
+            </ActionButton>
           </div>
         )}
         {annotationError && (
@@ -1316,9 +1306,11 @@ export function ChatInput({
             >
               <span>上次批注消息未确认完成，请先查看会话，避免重复执行</span>
               {entry.state === "uncertain" && (
-                <button
+                <ActionButton
+                  tone="ghost"
+                  size="compact"
                   type="button"
-                  className="shrink-0 rounded px-2 py-1 hover:bg-hover"
+                  className="shrink-0"
                   onClick={() => {
                     if (!draftKey) return;
                     const restored = annotationDrafts?.recover(draftKey, id);
@@ -1329,16 +1321,14 @@ export function ChatInput({
                   }}
                 >
                   取回输入框
-                </button>
+                </ActionButton>
               )}
             </div>
           ))}
         {queueSaveError ? (
           <div role="alert" className="px-3 pt-2 text-ui-caption text-warn-ink">
             {queueSaveError}{" "}
-            <button type="button" onClick={retryQueueSave}>
-              重试保存
-            </button>
+            <ActionButton tone="secondary" size="compact" type="button" onClick={retryQueueSave}>重试保存</ActionButton>
           </div>
         ) : null}
         <ImageAttachments
@@ -1408,7 +1398,7 @@ export function ChatInput({
                   }
                 : undefined
             }
-            className={`max-h-40 min-h-[2.5rem] resize-none overflow-y-auto rounded bg-transparent text-ui-base leading-5 text-ink outline-none placeholder:text-ink-subtlest disabled:cursor-not-allowed disabled:opacity-60 ${usesSkillReferences || hasSkillReferences ? "min-w-0 flex-1" : "w-full"}`}
+            className={`${composerFieldClass} max-h-40 min-h-[2.5rem] resize-none overflow-y-auto rounded leading-5 disabled:cursor-not-allowed disabled:opacity-60 ${usesSkillReferences || hasSkillReferences ? "min-w-0 flex-1" : "w-full"}`}
           />
         </div>
         {/* 下行：左=AAW 审批策略；右=模型 + 上下文圆环 + 发送/停止
@@ -1418,9 +1408,7 @@ export function ChatInput({
           <StatusChipMenu
             title={`审批默认模式：客户端对权限请求的缺省应答（当前「${policyLabelOf(approvalPolicy)}」）`}
             menuLabel="审批默认模式"
-            variant="permission"
-            // 自动放行=放权给客户端自动应答，用琥珀警示色与每次询问区分
-            tone={approvalPolicy === "auto-allow" ? "warn" : "neutral"}
+            warning={approvalPolicy === "auto-allow"}
             label={
               <>
                 <span aria-hidden="true">
@@ -1433,36 +1421,22 @@ export function ChatInput({
                 {policyLabelOf(approvalPolicy)}
               </>
             }
-          >
-            <div className="space-y-0.5">
-              {approvalModeOptions.map((option) => (
-                <MenuItemRow
-                  key={option.value}
-                  variant="permission"
-                  tone={option.value === "auto-allow" ? "warn" : "neutral"}
-                  icon={
-                    option.value === "auto-allow" ? (
-                      <ShieldAlertIcon />
-                    ) : (
-                      <HandIcon strokeWidth={2} />
-                    )
-                  }
-                  title={
-                    option.value === "auto-allow" ? "自动放行" : "每次询问"
-                  }
-                  description={
-                    option.value === "auto-allow"
-                      ? "自动批准可放行的请求，其余仍询问。"
-                      : "收到权限请求时，由你确认。"
-                  }
-                  selected={option.value === approvalPolicy}
-                  onClick={() => {
-                    preferences?.setApprovalMode(option.value);
-                  }}
-                />
-              ))}
-            </div>
-          </StatusChipMenu>
+            entries={approvalModeOptions.map((option) => {
+              const warning = option.value === "auto-allow";
+              return {
+                id: option.value,
+                label: warning ? "自动放行" : "每次询问",
+                description: warning
+                  ? "自动批准可放行的请求，其余仍询问。"
+                  : "收到权限请求时，由你确认。",
+                icon: warning ? <ShieldAlertIcon /> : <HandIcon strokeWidth={2} />,
+                warning,
+                radio: true,
+                selected: option.value === approvalPolicy,
+                onSelect: () => preferences?.setApprovalMode(option.value),
+              };
+            })}
+          />
           <span aria-hidden={true} className="flex-1" />
           <InputStatusRight />
           {/* 按钮形态（评审确认）：运行中「有草稿=发送（入队），无草稿=停止」；
@@ -1513,7 +1487,7 @@ export function ChatInput({
                 aria-label={running && !steering ? "加入队列" : "发送"}
                 className="flex shrink-0 items-center justify-center rounded-lg bg-brand text-foreground-inverse transition-colors hover:bg-brand/80 disabled:pointer-events-none disabled:opacity-50"
               >
-                <ArrowUpIcon />
+                <ArrowUpIcon className="ui-icon-16" />
               </IconButton>
             </ComposerActionHint>
           )}

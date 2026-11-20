@@ -1,3 +1,6 @@
+import { ActionButton } from "../../../shared/ui/controls.tsx";
+import { HintSurface } from "../../../shared/ui/controls/HintSurface.tsx";
+import { settingsTextareaClass } from "../../../shared/ui/SettingsPageParts.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { DangerButton } from "../../../shared/ui/controls.tsx";
 import type { MarkdownEditorApi } from "./MarkdownSourceEditor.tsx";
@@ -431,7 +434,7 @@ export function FileAnnotations({
   }
   return (
     <>
-      <style>{`::highlight(${highlightName}) { background: #facc1538; text-decoration: underline var(--color-annotation-underline); }`}</style>
+      <style>{`::highlight(${highlightName}) { background: color-mix(in srgb, var(--color-annotation-underline) 22%, transparent); text-decoration: underline var(--color-annotation-underline); }`}</style>
       {notice && (
         <div
           role="status"
@@ -450,10 +453,13 @@ export function FileAnnotations({
       )}
       {editor &&
         createPortal(
-          <div
+          <HintSurface
+            open
+            role={editor.open ? "dialog" : "group"}
+            aria-label={editor.open ? "文档批注" : "选区操作"}
             data-file-find-ignore
             data-annotation-overlay
-            className={`fixed z-[100] max-w-[calc(100vw-16px)] border border-line bg-surface text-ink ${editor.open ? "rounded-xl p-2.5 text-ui-base" : "annotation-rainbow-border rounded-md p-0.5 text-ui-caption"}`}
+            className={`fixed z-[100] max-w-[calc(100vw-16px)] ${editor.open ? "p-2.5 text-ui-base" : "annotation-rainbow-border rounded-md p-0.5 text-ui-caption"}`}
             style={{
               left: editor.x,
               top: editor.y,
@@ -461,7 +467,7 @@ export function FileAnnotations({
             }}
           >
             {editor.open ? (
-              <div role="dialog" aria-label="文档批注">
+              <>
                 <p className="mb-2 truncate text-ui-caption text-ink-mute">
                   {editor.annotation.path.split(/[\\/]/).at(-1)}
                   <span className="ml-2">
@@ -490,7 +496,7 @@ export function FileAnnotations({
                       save();
                     }
                   }}
-                  className="min-h-20 w-full resize-y rounded-lg border border-control-line bg-base p-2"
+                  className={`${settingsTextareaClass} min-h-20`}
                 />
                 <div className="mt-2 flex justify-end gap-2">
                   {annotations.some((a) => a.id === editor.annotation.id) && (
@@ -504,26 +510,29 @@ export function FileAnnotations({
                       删除
                     </DangerButton>
                   )}
-                  <button
+                  <ActionButton
+                    tone="ghost"
+                    size="compact"
                     type="button"
-                    className="rounded px-2 py-1 hover:bg-hover"
                     onClick={() => setEditor(null)}
                   >
                     取消
-                  </button>
-                  <button
+                  </ActionButton>
+                  <ActionButton
+                    tone="primary"
+                    size="compact"
                     type="button"
-                    className="rounded bg-ink px-3 py-1 text-[var(--color-base)]"
                     onClick={save}
                   >
                     添加到会话
-                  </button>
+                  </ActionButton>
                 </div>
-              </div>
+              </>
             ) : (
-              <button
+              <ActionButton
+                tone="ghost"
+                size="compact"
                 type="button"
-                className="rounded px-2 py-1 hover:bg-hover"
                 onPointerDown={(e) => e.preventDefault()}
                 onClick={() =>
                   setEditor({
@@ -534,9 +543,9 @@ export function FileAnnotations({
                 }
               >
                 批注
-              </button>
+              </ActionButton>
             )}
-          </div>,
+          </HintSurface>,
           document.body,
         )}
     </>

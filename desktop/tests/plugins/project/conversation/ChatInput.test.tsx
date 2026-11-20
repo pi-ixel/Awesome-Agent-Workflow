@@ -258,6 +258,8 @@ describe("ChatInput 悬浮形态", () => {
       "text-foreground-inverse",
     );
     expect(sendButton).toHaveAttribute("data-icon-button-size", "standard");
+    expect(sendButton.querySelector("svg")).toHaveClass("ui-icon-16");
+    expect(sendButton.querySelector("svg")).toHaveAttribute("stroke-width", "2");
     expect(sendButton).toBeDisabled();
     await userEvent.type(getTextarea(), "悬浮输入");
     expect(sendButton).toBeEnabled();
@@ -829,7 +831,7 @@ describe("ChatInput 审批默认模式切换器", () => {
     // 「自动拒绝」已下线：菜单不再出现
     expect(menu).not.toHaveTextContent("自动拒绝");
 
-    await userEvent.click(screen.getByRole("menuitem", { name: /自动放行/ }));
+    await userEvent.click(screen.getByRole("menuitemradio", { name: "自动放行" }));
     expect(projectPreferences.getState().approvalMode).toBe("auto-allow");
     expect(
       screen.queryByRole("menu", { name: "审批默认模式" }),

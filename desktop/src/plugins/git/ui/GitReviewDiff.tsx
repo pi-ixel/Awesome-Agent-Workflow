@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ReviewMatch, ReviewModel } from "../review/review.ts";
-import { btnGhost } from "../../../shared/ui/controls.tsx";
+import { ActionButton } from "../../../shared/ui/controls.tsx";
+import {
+  diffAppearance,
+  diffSurfaceClass,
+} from "../../../shared/ui/diffStyles.ts";
 
 export function GitReviewDiff({
   model,
@@ -100,7 +104,8 @@ export function GitReviewDiff({
         i++;
       const end = i;
       const contextButton = (
-        <button
+        <ActionButton
+          tone="ghost"
           key={`context-${start}`}
           className="block w-full px-3 py-1 text-left text-ink-mute transition-colors hover:bg-hover"
           onClick={() =>
@@ -112,7 +117,7 @@ export function GitReviewDiff({
           }
         >
           展开 {end - start + 1} 行未修改内容
-        </button>
+        </ActionButton>
       );
       pushPair(contextButton, contextButton);
       continue;
@@ -122,6 +127,7 @@ export function GitReviewDiff({
       const present =
         item && (side === "old" ? item.old !== null : item.next !== null);
       const text = present ? item.text.slice(1) : " ";
+      const appearance = diffAppearance[present ? item.kind : "missing"];
       const parts = [];
       let from = 0;
       if (needle && present) {
@@ -157,21 +163,11 @@ export function GitReviewDiff({
       return (
         <div
           key={`row-${displayed[side === "old" ? 0 : 1].length}`}
-          className={`flex min-w-0 ${!present ? "bg-raised" : item.kind === "add" ? "bg-diff-added-row shadow-[inset_3px_0_0_var(--color-diff-added)]" : item.kind === "del" ? "bg-diff-removed-row shadow-[inset_3px_0_0_var(--color-diff-removed)]" : ""}`}
+          className={`flex min-w-0 ${appearance.row}`}
         >
-          {/* 行号格自带 inset 3px 状态条（ZCode gutterStyle boxShadow）：
-              sticky 不透明格会盖住行级的 inset 条，分屏里的增删色条须画在
-              格上才可见（与 GitDiffView/EditDiffView 行首露出条一致） */}
+          {/* 固定行号覆盖行首，因此也绘制增删状态条。 */}
           <span
-            className={`sticky left-0 z-[1] w-12 shrink-0 select-none border-r border-line px-2 text-right tabular-nums ${
-              !present
-                ? "bg-raised text-ink-subtlest"
-                : item.kind === "add"
-                  ? "bg-diff-added-gutter text-diff-added shadow-[inset_3px_0_0_var(--color-diff-added)]"
-                  : item.kind === "del"
-                    ? "bg-diff-removed-gutter text-diff-removed shadow-[inset_3px_0_0_var(--color-diff-removed)]"
-                    : "bg-base text-ink-subtlest"
-            }`}
+            className={`sticky left-0 z-[1] w-[max(48px,6ch)] shrink-0 select-none border-r border-line px-2 text-right tabular-nums ${appearance.stickyGutter}`}
           >
             {present ? (side === "old" ? item.old : item.next) : ""}
           </span>
@@ -217,15 +213,17 @@ export function GitReviewDiff({
     <div
       ref={ref}
       aria-label="Git 左右差异"
-      className="overflow-x-auto bg-base font-mono text-xs leading-relaxed text-ink"
+      className={`overflow-x-auto text-ui-sm ${diffSurfaceClass}`}
     >
       {pageStart > 0 && !match && (
-        <button
-          className={`${btnGhost} p-2`}
+        <ActionButton
+          tone="ghost"
+          type="submit"
+          className="p-2"
           onClick={() => setPage(Math.max(0, pageStart - 1000))}
         >
           上一段
-        </button>
+        </ActionButton>
       )}
       <div className="grid grid-cols-2 divide-x divide-line">
         {displayed.map((column, side) => (
@@ -250,12 +248,14 @@ export function GitReviewDiff({
         ))}
       </div>
       {pageStart + 1000 < rows.length && !match && (
-        <button
-          className={`${btnGhost} p-2`}
+        <ActionButton
+          tone="ghost"
+          type="submit"
+          className="p-2"
           onClick={() => setPage(pageStart + 1000)}
         >
           下一段（共 {rows.length} 行）
-        </button>
+        </ActionButton>
       )}
     </div>
   );

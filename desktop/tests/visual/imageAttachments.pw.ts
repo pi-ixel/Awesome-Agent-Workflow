@@ -38,5 +38,8 @@ for (const { mode, context, buttonName, imageName } of [
     const image = preview.getByRole("img", { name: imageName });
     await expect(image).toHaveJSProperty("naturalWidth", 1200);
     expect((await image.boundingBox())?.width).toBeGreaterThan(64);
+    await page.keyboard.press("Escape");
+    await expect(preview).toBeHidden();
+    await expect(thumbnail).toBeFocused();
   });
 }

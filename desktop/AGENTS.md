@@ -75,6 +75,7 @@ CI（`.github/workflows/desktop.yml`）对涉及 `desktop/**` 的 PR 依次执�
 | 插件架构与依赖 | `docs/architecture/cordis-plugin-architecture.md`、`cordis-plugin-dependencies.md`              |
 | ACP 与方言     | `docs/architecture/acp-architecture.md`                                                         |
 | 工程与风格     | `docs/engineering/conventions.md`、`frontend-style.md`、`development.md`（开发入口与 ACP 宿主） |
+| Desktop 主题与控件准入 | [主题与组件治理方案](docs/engineering/desktop-theme.md) |
 | 工作流引擎     | `workflow-engine-rs/README.md`、`workflow-engine-rs/docs/workflow-format.md`                    |
 | 功能现状       | `docs/features/`                                                                                |
 | 发布           | `docs/engineering/CI-CD.md`                                                                     |

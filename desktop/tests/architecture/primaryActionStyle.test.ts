@@ -13,7 +13,7 @@ it("keeps the shared primary action in the theme foreground palette", () => {
   expect(btnPrimary.split(/\s+/)).toEqual(expect.arrayContaining([
     "bg-ink",
     "text-foreground-inverse",
-    "hover:bg-ink/90",
+    "enabled:hover:bg-ink/90",
   ]));
   expect(btnPrimary).not.toMatch(coloredSurface);
   const style = readFileSync("src/shared/styles/index.css", "utf8");

@@ -10,8 +10,9 @@ export function UsageMeter({
   readonly percent: number;
   readonly tone?: "info" | "warn" | "danger";
 }) {
-  const value = Math.min(100, Math.max(0, percent));
-  const display = String(Number(percent.toFixed(1)));
+  const actual = Number.isFinite(percent) ? Math.max(0, percent) : 0;
+  const value = Math.min(100, actual);
+  const display = String(Number(actual.toFixed(1)));
   const fill = {
     info: "bg-usage-meter-fill",
     warn: "bg-usage-meter-warn",

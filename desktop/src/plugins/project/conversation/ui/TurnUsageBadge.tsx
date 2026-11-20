@@ -1,3 +1,4 @@
+import { ActionButton } from "../../../../shared/ui/controls.tsx";
 import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
 import { HintNumber } from "../../../../shared/ui/controls/HintNumber.tsx";
 import type { TurnUsageDetails } from "../turnUsage.ts";
@@ -54,7 +55,8 @@ export function TurnUsageBadge({ usage }: { readonly usage: TurnUsageDetails | n
       : "未知";
   return (
     <div className="w-fit text-ui-sm text-ink-mute">
-      <button
+      <ActionButton
+        tone="ghost"
         ref={anchor}
         type="button"
         aria-describedby={position ? id : undefined}
@@ -70,7 +72,7 @@ export function TurnUsageBadge({ usage }: { readonly usage: TurnUsageDetails | n
       >
         <DatabaseIcon className="ui-icon-15 shrink-0" />
         用量 {total === undefined ? "未知" : `${compactTokens.format(total)} tok`}
-      </button>
+      </ActionButton>
       {createPortal(
           <HintSurface
             open={position !== null}

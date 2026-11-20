@@ -1,5 +1,6 @@
 import { useState, type CSSProperties } from "react";
-import logo from "../assets/aaw-logo.png";
+import { BrandMark } from "./BrandMark.tsx";
+import { UiIcon } from "./UiIcon.tsx";
 import "./BrandLoading.css";
 
 const greetings = [
@@ -34,7 +35,7 @@ export function BrandLoading({
     >
       <div className="startup-mark" aria-hidden="true">
         <div className="startup-halo" />
-        <img className="startup-logo" src={logo} alt="" draggable={false} />
+        <BrandMark className="startup-logo" />
       </div>
       <Heading className="startup-name">
         Awesome Agent <span>Workspace</span>
@@ -51,7 +52,7 @@ export function BrandLoading({
               }
             >
               <span className="startup-ink">{character}</span>
-              <svg className="startup-pen" viewBox="0 0 24 24" fill="none">
+              <UiIcon className="startup-pen" viewBox="0 0 24 24" fill="none">
                 <path
                   d="M4 20 7 10 17 3 21 7 14 17 4 20Z"
                   fill="currentColor"
@@ -62,7 +63,7 @@ export function BrandLoading({
                   strokeWidth="1.2"
                 />
                 <circle cx="12" cy="12" r="1.5" fill="var(--color-base)" />
-              </svg>
+              </UiIcon>
             </span>
           ))}
         </span>

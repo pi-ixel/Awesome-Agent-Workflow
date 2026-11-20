@@ -33,6 +33,8 @@ import type { ComponentProps } from "react";
 import { FileTree as DocumentFileTree } from "../../src/plugins/documents/ui/FileTree.tsx";
 import { createGitHost } from "../../src/plugins/host/filesystem/git.ts";
 import { panelService } from "../../src/plugins/host/filesystem/panelService.ts";
+import { webviewStorage } from "../../src/plugins/host/service.ts";
+import { pathKey } from "../../src/shared/panelPaths.ts";
 
 let documents: ReturnType<typeof createTestDocuments>;
 const readGitStatus = createGitHost(() => false).status;
@@ -211,9 +213,9 @@ describe("文件树仓库根集成", () => {
   });
 
   it.each(["left", "right"] as const)("%s 目录分隔线实时跟手，松手后恢复比例宽度", async (treePosition) => {
-    vi.stubGlobal("PointerEvent", MouseEvent);
     const direction = treePosition === "left" ? 1 : -1;
-    const view = render(<FileTree root={`D:/resize/${treePosition}`} treePosition={treePosition} onOpen={() => {}} />);
+    const root = `D:/resize/${treePosition}`;
+    const view = render(<FileTree root={root} treePosition={treePosition} onOpen={() => {}} />);
     try {
       const divider = screen.getByRole("separator", { name: "调整目录列宽度" });
       const row = divider.parentElement!;
@@ -221,18 +223,22 @@ describe("文件树仓库根集成", () => {
       Object.defineProperty(row, "clientWidth", { value: 1000 });
       Object.defineProperty(column, "clientWidth", { value: 250 });
       Object.defineProperty(divider, "setPointerCapture", { value: vi.fn() });
-      fireEvent.pointerDown(divider, { button: 0, clientX: 250 });
-      fireEvent.pointerMove(divider, { clientX: 250 + 100 * direction });
-      await waitFor(() => expect(column).toHaveStyle({ width: "350px" }));
-      fireEvent.pointerMove(divider, { clientX: 250 + 140 * direction });
-      fireEvent.pointerUp(divider, { clientX: 250 + 140 * direction });
-      expect(column).toHaveStyle({ width: "39%" });
-      // Cancelled animation-frame writes must not overwrite the committed %.
+      fireEvent.pointerDown(divider, { button: 0, clientX: 250, isPrimary: true, pointerId: 1 });
+      fireEvent.pointerMove(divider, { clientX: 250 + 100 * direction, pointerId: 1 });
+      const preview = () => column.style.getPropertyValue("--file-tree-preview-width");
+      await waitFor(() => expect(preview()).toBe("350px"));
+      fireEvent.pointerMove(divider, { clientX: 250 + 140 * direction, pointerId: 1 });
+      fireEvent.pointerUp(divider, { clientX: 250 + 140 * direction, pointerId: 1 });
+      expect(preview()).toBe("");
+      expect(JSON.parse(webviewStorage.getItem(`aaw-desktop/file-split/${pathKey(root)}`)!)).toEqual({
+        ratio: 0.39,
+        visible: true,
+      });
+      // 松手并保存比例后，未执行的预览帧不能再写入像素宽度。
       await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
-      expect(column).toHaveStyle({ width: "39%" });
+      expect(preview()).toBe("");
     } finally {
       view.unmount();
-      vi.unstubAllGlobals();
     }
   });
   it("根目录全部条目渲染为行：目录不丢、垃圾文件与正常文件并存", async () => {
@@ -405,7 +411,7 @@ describe("文件树仓库根集成", () => {
     expect(pane.textContent).toContain("预览正文内容");
     // 树保持完整（不遮挡、不替换），选中行呈灰色 pill
     expect(tree.querySelectorAll('[role="treeitem"]').length).toBe(17);
-    expect(junk.className).toContain("bg-surface-hover");
+    expect(junk).toHaveAttribute("aria-selected", "true");
     // 预览区无关闭钮（关闭路径 = 顶栏分段开关）
     expect(screen.queryByRole("button", { name: /关闭/ })).toBeNull();
     // 树内点击不再外开 tab（无 tab 芯片形态的来源）
@@ -469,9 +475,8 @@ describe("文件树仓库根集成", () => {
     );
     // 树中 desktop 行被选中（pill），预览内容保持
     await waitFor(() => {
-      expect(getAllByHint(document.body, "desktop")[0]!.className).toContain(
-        "bg-surface-hover",
-      );
+      const tree = screen.getByRole("tree", { name: "Awesome-Agent-Workflow" });
+      expect(getAllByHint(tree, "desktop")[0]).toHaveAttribute("aria-selected", "true");
     });
     expect(pane.textContent).toContain("预览正文内容");
   });

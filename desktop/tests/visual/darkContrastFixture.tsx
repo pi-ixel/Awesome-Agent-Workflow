@@ -26,10 +26,10 @@ createRoot(document.getElementById("root")!).render(
   <main className="min-h-screen bg-base p-4 text-ink">
     <div className="bg-surface p-4" data-testid="surface">
       <div
-        className="composer-card border border-line bg-surface"
-        data-testid="composer-border"
+        className="border border-line bg-surface"
+        data-testid="control-border-reference"
       >
-        输入框
+        控件边框
       </div>
       <NewTaskButtonGroup />
       <SettingCard label="设置">
@@ -42,7 +42,7 @@ createRoot(document.getElementById("root")!).render(
         </SettingRow>
       </SettingCard>
       <button className={btnPrimary}>主按钮</button>
-      <button className="contrast-danger-solid bg-red-500 text-white">
+      <button className="bg-danger-solid text-danger-solid-ink hover:bg-danger-solid-hover">
         危险操作
       </button>
       <button className={btnSecondary}>普通按钮</button>

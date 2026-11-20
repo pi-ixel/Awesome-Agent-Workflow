@@ -1,3 +1,5 @@
+import { ActionButton } from "../../../../shared/ui/controls.tsx";
+
 export function ImageAttachmentThumbnail({
   src,
   alt,
@@ -11,14 +13,14 @@ export function ImageAttachmentThumbnail({
 }) {
   return (
     <div className="size-16 shrink-0">
-      <button
-        type="button"
+      <ActionButton
+        tone="ghost"
         aria-label={label}
         onClick={onPreview}
-        className="block size-full overflow-hidden rounded-xl border border-line bg-raised transition-colors hover:border-ink-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="block size-full overflow-hidden rounded-xl! border border-line bg-raised hover:border-ink-faint"
       >
         <img src={src} alt={alt} className="size-full object-cover" />
-      </button>
+      </ActionButton>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { BrowserPanel } from "../../../src/plugins/browser/ui/BrowserPanel.tsx";
@@ -566,6 +567,41 @@ describe("TD-030 数据管理结果与关闭闭环", () => {
       await screen.findByText("completed", { selector: "strong" }),
     ).toBeInTheDocument();
     expect(clearAllData).toHaveBeenCalledTimes(2);
+  });
+
+  it("清理确认默认聚焦取消，进行中的清理可以停止剩余子项且不能重复提交", async () => {
+    const fake = host();
+    fake.createSpace = vi.fn().mockResolvedValue(spaceWithTab());
+    let complete!: () => void;
+    const operation = new Promise<{ status: "completed"; items: [] }>((resolve) => {
+      complete = () => resolve({ status: "completed", items: [] });
+    });
+    const clear = vi.fn<BrowserHost["clearAllData"]>().mockReturnValue(operation);
+    const cancelCleanup = vi.fn().mockResolvedValue(undefined);
+    fake.clearAllData = clear;
+    fake.cancelCleanup = cancelCleanup;
+    render(<BrowserPanel host={fake} sessionId="session-a" visible />);
+    fireEvent.click(await screen.findByRole("button", { name: "浏览器数据管理" }));
+    const trigger = screen.getByRole("button", { name: "清除全部浏览器数据" });
+    const scope = () => screen.getByRole("group", { name: "确认清理浏览器数据" });
+    fireEvent.click(trigger);
+    const cancel = within(scope()).getByRole("button", { name: "取消" });
+    expect(cancel).toHaveFocus();
+    fireEvent.keyDown(cancel, { key: "Escape" });
+    expect(trigger).toHaveFocus();
+    expect(clear).not.toHaveBeenCalled();
+
+    fireEvent.click(trigger);
+    const confirmation = within(scope()).getByRole("button", { name: "确认清理" });
+    fireEvent.click(confirmation);
+    expect(confirmation).toBeDisabled();
+    fireEvent.click(confirmation);
+    expect(clear).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "取消剩余子项" }));
+    expect(cancelCleanup).toHaveBeenCalledWith(clear.mock.calls[0]?.[0]);
+    complete();
+    await screen.findByRole("region", { name: "清理结果" });
+    expect(screen.queryByRole("group", { name: "确认清理浏览器数据" })).toBeNull();
   });
 });
 

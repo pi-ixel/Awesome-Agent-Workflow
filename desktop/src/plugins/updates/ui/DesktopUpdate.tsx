@@ -1,16 +1,17 @@
+import { TextLink } from "../../../shared/ui/TextLink.tsx";
 import {
   SettingCard,
   SettingRow,
   settingsInputClass,
 } from "../../../shared/ui/SettingsPageParts.tsx";
-import { ToggleSwitch, DangerButton, btnPrimary, btnSecondary } from "../../../shared/ui/controls.tsx";
+import { ActionButton, ToggleSwitch, DangerButton, btnPrimary } from "../../../shared/ui/controls.tsx";
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
 import { ArrowDownToLineIcon } from "../../../shared/ui/icons.tsx";
 import { ReleaseNotes, UpdateReleaseNotes } from "./UpdateReleaseNotes.tsx";
 import { ReleaseHistory } from "./ReleaseHistory.tsx";
-import logo from "../../../shared/assets/aaw-logo.png";
+import { BrandMark } from "../../../shared/ui/BrandMark.tsx";
 import type { UpdatesService } from "../service.ts";
 import type { UpdateExit } from "../types.ts";
 import "./updateButton.css";
@@ -19,17 +20,18 @@ export function UpdateButton({
   updates,
   compact = false,
 }: {
-  readonly updates: UpdatesService;
+  readonly updates: Pick<UpdatesService, "state" | "setDialog" | "openExternal">;
   readonly compact?: boolean;
 }) {
   const ready = useStore(updates.state, (s) => s.snapshot?.ready);
   if (!ready) return null;
   return (
     <UpdateReleaseNotes key={ready.version} release={ready} openExternal={updates.openExternal}>
-      <button
+      <ActionButton
+        tone="ghost"
         type="button"
         aria-label="更新 Desktop"
-        className="update-button inline-flex min-h-[26px] min-w-[30px] shrink-0 items-center justify-center rounded-full px-2.5 text-ui-caption font-medium leading-none text-foreground-inverse transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ok"
+        className="update-button inline-flex min-h-[26px] min-w-[30px] shrink-0 items-center justify-center rounded-full! px-2.5 text-ui-caption font-medium leading-none text-foreground-inverse transition-[filter] hover:brightness-110"
         onClick={() => updates.setDialog(true)}
       >
         <ArrowDownToLineIcon
@@ -42,7 +44,7 @@ export function UpdateButton({
         {!compact && (
           <span className="hidden @min-[216px]/sidebar-header:inline">更新</span>
         )}
-      </button>
+      </ActionButton>
     </UpdateReleaseNotes>
   );
 }
@@ -70,13 +72,14 @@ export function UpdateSettings({
                 <p role="alert" className="text-danger-ink">
                   无法读取更新状态。{initialization.error}
                 </p>
-                <button
+                <ActionButton
+                  tone="secondary"
                   type="button"
-                  className={`${btnSecondary} min-h-8 px-3 py-1`}
+                  className="min-h-8 px-3 py-1"
                   onClick={() => void updates.reloadStatus()}
                 >
                   重试
-                </button>
+                </ActionButton>
               </>
             ) : (
               <p role="status">正在读取更新状态…</p>
@@ -240,25 +243,27 @@ export function UpdateSettings({
               帮助分发暂未完成，下轮重试；不影响本机更新。
             </p>
           ) : null}
-          <button
+          <ActionButton
+            tone="secondary"
             type="button"
             disabled={
               checking ||
               snapshot.phase === "checking" ||
               snapshot.phase === "downloading"
             }
-            className={`${btnSecondary} min-h-8 px-3 py-1 text-sm`}
+            className="min-h-8 px-3 py-1 text-sm"
             onClick={() => {
               void updates.check()
                 .catch((e: unknown) => setError(String(e)));
             }}
           >
             检查更新
-          </button>
+          </ActionButton>
           {snapshot.available && snapshot.installed ? (
-            <button
+            <ActionButton
+              tone="secondary"
               type="button"
-              className={`${btnSecondary} ml-2 min-h-8 px-3 py-1 text-sm`}
+              className="ml-2 min-h-8 px-3 py-1 text-sm"
               disabled={
                 checking ||
                 snapshot.phase === "checking" ||
@@ -270,16 +275,17 @@ export function UpdateSettings({
               }}
             >
               下载 {snapshot.available.version}
-            </button>
+            </ActionButton>
           ) : null}
           {snapshot.ready ? (
-            <button
+            <ActionButton
+              tone="secondary"
               type="button"
-              className={`${btnSecondary} ml-2 min-h-8 px-3 py-1 text-sm`}
+              className="ml-2 min-h-8 px-3 py-1 text-sm"
               onClick={() => updates.setDialog(true)}
             >
               查看更新
-            </button>
+            </ActionButton>
           ) : null}
         </div>
         <ReleaseHistory currentVersion={snapshot.currentVersion} openExternal={updates.openExternal} />
@@ -358,11 +364,7 @@ export function UpdateController({
     <ModalShell label="Desktop 更新" onDismiss={dismiss}>
       <section className="p-6">
         <header className="flex items-center gap-3">
-          <img
-            src={logo}
-            alt="AAW Desktop"
-            className="size-12 shrink-0 object-contain"
-          />
+          <BrandMark alt="AAW Desktop" className="ui-icon-48" />
           <div>
             <h2
               id="desktop-update-title"
@@ -392,25 +394,26 @@ export function UpdateController({
           </p>
         ) : null}
         {error ? (
-          <button
+          <TextLink
             type="button"
-            className="mb-3 text-sm underline"
+            className="mb-3"
             onClick={() => {
               void updates.openFolder();
             }}
           >
             打开安装包位置
-          </button>
+          </TextLink>
         ) : null}
         <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-          <button
+          <ActionButton
+            tone="secondary"
             type="button"
             disabled={installing}
-            className={`${btnSecondary} px-3 py-1.5 text-sm whitespace-nowrap`}
+            className="px-3 py-1.5 text-sm whitespace-nowrap"
             onClick={dismiss}
           >
             稍后
-          </button>
+          </ActionButton>
           <ConfirmButton
             type="button"
             disabled={installing}

@@ -296,8 +296,30 @@ describe("ProjectTree session groups", () => {
     render(<ProjectTree />, { wrapper: fixture.Wrapper });
     fireEvent.click(screen.getByRole("button", { name: "归档这次运行" }));
     expect(archive).not.toHaveBeenCalled();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "确认归档这次运行" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "归档这次运行" }));
+    fireEvent.pointerDown(document.body);
+    expect(archive).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "归档这次运行" }));
     fireEvent.click(screen.getByRole("button", { name: "确认归档这次运行" }));
     expect(archive).toHaveBeenCalledTimes(1);
+  });
+
+  it("最近会话保留原标题，点击和键盘菜单都打开分组指定的目标", () => {
+    fixture.sidebar.setState({ treeViewMode: "sessions" });
+    const publisher = indexes.registerSessionGroups();
+    const open = vi.fn();
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
+    act(() => publisher.publish(PATH, [group("run", [], {
+      members: [{ sessionId: "s-design", title: "设计", open }],
+    })]));
+    const row = screen.getByRole("button", { name: /chrys 标题 A/ });
+    expect(row).toHaveTextContent("pager · 运行 run · 设计");
+    fireEvent.click(row);
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    fireEvent.click(screen.getByRole("menuitem", { name: "打开会话" }));
+    expect(open).toHaveBeenCalledTimes(2);
   });
 
   it("starts a finished run collapsed with its session count", () => {

@@ -3,15 +3,16 @@
  * 错误/加载/空态分流、吸顶行遮罩 mask——mask 位置由原生 scroll 回调直接写
  * CSS 变量同步（透明→hiddenHeight 的渐变遮住从吸顶层下经过的原行）。
  */
-import { useState, type CSSProperties, type RefCallback } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type RefCallback } from "react";
 import { TreeBranch } from "../../../../shared/ui/TreeMotion.tsx";
 import type { VirtualItem } from "@tanstack/react-virtual";
+import { focusFileTreeRow } from "./helpers.ts";
 import {
   AlertCircleIcon,
   FilesIcon,
-  LoaderCircleIcon,
 } from "../../../../shared/ui/file-icons/icons.tsx";
-import { FileTreeNotice } from "./Notice.tsx";
+import { EmptyState } from "../../../../shared/ui/EmptyState.tsx";
+import { Spinner } from "../../../../shared/ui/controls.tsx";
 import {
   FileTreeRow as FileTreeRowView,
   type FileTreeRowHandlers,
@@ -110,6 +111,18 @@ export function FileTreeList({
    *  也让 0 高度测试环境（jsdom）能正常断言行内容。 */
   readonly virtual: boolean;
 }) {
+  const listElement = useRef<HTMLDivElement | null>(null);
+  const focusedKey = useRef<string | null>(null);
+  const attachList = useCallback<RefCallback<HTMLDivElement>>((element) => {
+    listElement.current = element;
+    listRef(element);
+  }, [listRef]);
+  useLayoutEffect(() => {
+    const key = focusedKey.current;
+    if (key && document.activeElement === document.body) {
+      focusFileTreeRow(listElement.current, key);
+    }
+  }, [virtual]);
   const [trackedRows, setTrackedRows] = useState(() => ({
     rows,
     previous: new Set(rows.map((row) => row.key)),
@@ -121,8 +134,10 @@ export function FileTreeList({
   }
   if (rootError) {
     return (
-      <FileTreeNotice
-        icon={<AlertCircleIcon className="ui-icon-16" />}
+      <EmptyState
+        density="compact"
+        role="alert"
+        icon={<AlertCircleIcon />}
         title="读取目录失败"
         description={rootError}
       />
@@ -130,16 +145,18 @@ export function FileTreeList({
   }
   if (showInitialLoading) {
     return (
-      <FileTreeNotice
-        icon={<LoaderCircleIcon className="ui-icon-16 animate-spin" />}
+      <EmptyState
+        density="compact"
+        icon={<Spinner className="ui-icon-16" />}
         title="加载中..."
       />
     );
   }
   if (rows.length === 0) {
     return (
-      <FileTreeNotice
-        icon={<FilesIcon className="ui-icon-16" />}
+      <EmptyState
+        density="compact"
+        icon={<FilesIcon />}
         title={emptyTitle}
       />
     );
@@ -177,7 +194,16 @@ export function FileTreeList({
   } as CSSProperties;
   return (
     <div
-      ref={listRef}
+      ref={attachList}
+      onFocusCapture={(event) => {
+        if (event.target instanceof HTMLElement)
+          focusedKey.current = event.target.dataset.fileTreeKey ?? null;
+      }}
+      onBlurCapture={(event) => {
+        const next = event.relatedTarget;
+        if (!(next instanceof Node) || !event.currentTarget.contains(next))
+          focusedKey.current = null;
+      }}
       className="relative w-full"
       style={listStyle}
       role="tree"

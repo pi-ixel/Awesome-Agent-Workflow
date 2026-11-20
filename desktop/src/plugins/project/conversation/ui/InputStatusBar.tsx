@@ -25,7 +25,7 @@ import { useSessionCommands } from "./useSessionCommands.ts";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { MenuItemRow, StatusChipMenu } from "./StatusChipMenu.tsx";
+import { StatusChipMenu } from "./StatusChipMenu.tsx";
 
 /** 模型标识短格式：裸 hash 只留前 12 位（悬停见全量）。 */
 function shortModelLabel(label: string): string {
@@ -343,27 +343,15 @@ export function ModelTag(): React.JSX.Element {
               : shortModelLabel(label)}
         </span>
       }
-    >
-      <div className="max-h-52 overflow-y-auto py-1">
-        {availableModels.map((model) => (
-          <MenuItemRow
-            key={model.modelId}
-            title={<span className="block truncate">{model.name}</span>}
-            description={
-              model.description !== null &&
-              model.description !== undefined &&
-              model.description.length > 0
-                ? model.description
-                : " "
-            }
-            selected={model.modelId === effectiveCurrentId}
-            onClick={() => {
-              switchModel(model.modelId);
-            }}
-          />
-        ))}
-      </div>
-    </StatusChipMenu>
+      entries={availableModels.map((model) => ({
+        id: model.modelId,
+        label: model.name,
+        description: model.description || undefined,
+        radio: true,
+        selected: model.modelId === effectiveCurrentId,
+        onSelect: () => { switchModel(model.modelId); },
+      }))}
+    />
   );
 }
 
@@ -411,7 +399,7 @@ export function TurnStatusRow(): React.JSX.Element | null {
     <li
       aria-live="polite"
       data-turn-status=""
-      className="flex items-center gap-2 px-1 py-1.5 text-xs"
+      className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-1 py-1.5 text-ui-sm"
     >
       {turnState === "unknown" ? (
         <span className="text-ink-faint">

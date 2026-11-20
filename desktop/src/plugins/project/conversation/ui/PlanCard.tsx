@@ -1,3 +1,4 @@
+import { NavigationRow } from "../../../../shared/ui/NavigationRow.tsx";
 import type { PlanItem } from "../types.ts";
 /**
  * 步骤清单卡（流内条目，ZCode 同款呈现）：agent 经 todo_write 推送的
@@ -9,31 +10,41 @@ import type { PlanItem } from "../types.ts";
  */
 import { useState, memo } from "react";
 import type { PlanEntry } from "../../../../contracts/acp/protocol.ts";
-import { ChevronRightIcon } from "../../../../shared/ui/icons.tsx";
-import { StatusDot } from "../../../../shared/ui/controls.tsx";
+import { CheckIcon, ChevronRightIcon } from "../../../../shared/ui/icons.tsx";
+import { Badge, StatusDot } from "../../../../shared/ui/controls.tsx";
 
-function EntryStatusIcon({ status }: { readonly status: PlanEntry["status"] }) {
+export function EntryStatusIcon({
+  status,
+}: {
+  readonly status: PlanEntry["status"];
+}) {
   if (status === "completed") {
     return (
       <span
-        aria-hidden={true}
-        className="shrink-0 text-xs leading-4 text-ok-ink"
+        role="img"
+        aria-label="已完成"
+        className="flex ui-icon-14 shrink-0 items-center justify-center text-ok-ink"
       >
-        ✓
+        <CheckIcon className="ui-icon-12" />
       </span>
     );
   }
   if (status === "in_progress") {
     return (
-      <span role="status" aria-label="进行中" className="shrink-0 leading-4">
+      <span
+        role="status"
+        aria-label="进行中"
+        className="flex ui-icon-14 shrink-0 items-center justify-center"
+      >
         <StatusDot tone="info" pulse />
       </span>
     );
   }
   return (
     <span
-      aria-hidden={true}
-      className="shrink-0 text-xs leading-4 text-ink-ghost"
+      role="img"
+      aria-label="待办"
+      className="flex ui-icon-14 shrink-0 items-center justify-center text-xs text-ink-mute"
     >
       ○
     </span>
@@ -68,13 +79,14 @@ function PlanCardBase({ item }: { readonly item: PlanItem }) {
       data-item-kind="plan"
       data-item-id={item.id}
     >
-      <button
+      <NavigationRow
+        layout="compound"
         type="button"
         aria-expanded={isOpen}
         onClick={() => {
           setIsOpen((current) => !current);
         }}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-surface"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-ui-sm transition-colors hover:bg-surface"
       >
         <span
           className={`shrink-0 text-ink-ghost transition-transform ${isOpen ? "rotate-90" : ""}`}
@@ -87,7 +99,9 @@ function PlanCardBase({ item }: { readonly item: PlanItem }) {
           任务步骤 {done}/{item.entries.length}
         </span>
         {allDone ? (
-          <span className="shrink-0 text-2xs text-ok-ink">已完成</span>
+          <Badge tone="ok" compact>
+            已完成
+          </Badge>
         ) : current !== null ? (
           <span
             className="min-w-0 flex-1 truncate text-ink-soft"
@@ -98,7 +112,7 @@ function PlanCardBase({ item }: { readonly item: PlanItem }) {
         ) : (
           <span className="min-w-0 flex-1" />
         )}
-      </button>
+      </NavigationRow>
       {isOpen ? (
         <ol className="list-none space-y-1 border-t border-line px-3 py-2">
           {item.entries.map((entry, index) => (

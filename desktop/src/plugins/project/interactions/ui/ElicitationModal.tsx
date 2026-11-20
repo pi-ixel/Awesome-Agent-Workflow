@@ -1,3 +1,4 @@
+import { settingsInputClass } from "../../../../shared/ui/SettingsPageParts.tsx";
 import {
   useProject,
   useProjectPageValue,
@@ -13,7 +14,8 @@ import {
 import type { FormViewItem } from "../form.ts";
 import { type FormValue } from "../../../../contracts/acp/elicitation.ts";
 import { useProjectPreferences } from "../../ui/preferencesView.tsx";
-import { Listbox, btnSecondary } from "../../../../shared/ui/controls.tsx";
+import { ActionButton, Listbox } from "../../../../shared/ui/controls.tsx";
+import { Callout } from "../../../../shared/ui/Callout.tsx";
 import { QuestionChoices, QuestionPanel } from "./QuestionPanel.tsx";
 
 function questionText(text: string | undefined): string | undefined {
@@ -211,7 +213,7 @@ function FormCard({
                         : {}),
                     })
                   }
-                  className="w-full rounded-lg border border-control-line bg-base px-3 py-2 text-ui-base placeholder:text-ink-faint"
+                  className={settingsInputClass}
                 />
               )}
             </>
@@ -228,7 +230,7 @@ function FormCard({
               }
               onChange={(event) => change(event.target.value)}
               placeholder="填写回答"
-              className="w-full rounded-lg border border-line-strong bg-base px-3 py-2 text-ui-base"
+              className={settingsInputClass}
             />
           ) : (
             <p className="text-warn-ink">暂不支持此字段类型</p>
@@ -326,21 +328,23 @@ function ElicitationModalView({ project }: { project: ProjectService }) {
       className="fixed bottom-4 right-4 z-40 w-[min(520px,calc(100vw-32px))] space-y-2"
     >
       {background.map((item) => (
-        <div
+        <Callout
           key={item.id}
-          className="flex items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-ui-base text-ink shadow-floating"
-        >
-          <span className="min-w-0 flex-1 truncate">
-            {item.label} 有问题待回答
-          </span>
-          <button
-            type="button"
-            className={`${btnSecondary} shrink-0 px-3 py-1`}
-            onClick={() => project.interactions.activateForm(item.id)}
-          >
-            前往回答
-          </button>
-        </div>
+          tone="neutral"
+          role="status"
+          className="shadow-floating"
+          title={`${item.label} 有问题待回答`}
+          actions={
+            <ActionButton
+              tone="secondary"
+              type="button"
+              size="compact"
+              onClick={() => project.interactions.activateForm(item.id)}
+            >
+              前往回答
+            </ActionButton>
+          }
+        />
       ))}
       <FormQueue items={unscoped} project={project} />
     </aside>

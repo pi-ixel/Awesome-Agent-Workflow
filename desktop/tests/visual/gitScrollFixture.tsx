@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { GitReviewDiff } from "../../src/plugins/git/ui/GitReviewDiff.tsx";
+import { bindSecondaryWindowAppearance } from "../../src/plugins/workbench/appearance/windowAppearance.ts";
 import "../../src/shared/styles/index.css";
+if (new URLSearchParams(location.search).has("appearance"))
+  bindSecondaryWindowAppearance(document.documentElement);
 const long = "abcdefghij".repeat(100) + "SEARCHTARGET";
 const model = {
   rows: [

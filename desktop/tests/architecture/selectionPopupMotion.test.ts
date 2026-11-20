@@ -14,7 +14,7 @@ it("uses the same theme animation for every listbox and the composer model menu"
           (item): item is ts.JsxAttribute => ts.isJsxAttribute(item) && item.name.getText(source) === name,
         )?.initializer?.getText(source);
         const classes = attribute("className") ?? "";
-        if ((attribute("role") === '"listbox"' || (file.endsWith("StatusChipMenu.tsx") && classes.includes("shadow-floating")))
+        if ((attribute("role") === '"listbox"' || (file.endsWith("ContextMenu.tsx") && attribute("role") === '"menu"'))
           && !classes.includes("selection-popup")) {
           const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
           violations.push(`${file}:${line}`);

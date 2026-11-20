@@ -1,3 +1,7 @@
+import { TextLink } from "../../../shared/ui/TextLink.tsx";
+import { PageHeader } from "../../../shared/ui/PageHeader.tsx";
+import { fieldSurfaceClass } from "../../../shared/ui/SettingsPageParts.tsx";
+import { ActionButton } from "../../../shared/ui/controls.tsx";
 import { Listbox } from "../../../shared/ui/controls.tsx";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import { StorageView } from "./StorageView.tsx";
@@ -10,15 +14,14 @@ import type {
   DiagnosticsStatus,
   ResourceSnapshot,
 } from "../types.ts";
-import logo from "../../../shared/assets/aaw-logo.png";
+import { BrandMark } from "../../../shared/ui/BrandMark.tsx";
 import { CopyButton } from "../../../shared/ui/CopyButton.tsx";
+import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
+import { HintSurface } from "../../../shared/ui/controls/HintSurface.tsx";
 import { ConnectionReport, type ProbeFeedback } from "./ConnectionReport.tsx";
 import { ResourceReport } from "./ResourceReport.tsx";
 
-const buttonClass =
-  "rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-sm text-ink hover:bg-raised disabled:opacity-50";
-const inputClass =
-  "rounded-lg border border-line-strong bg-surface px-2 py-1.5 text-sm text-ink";
+const inputClass = `${fieldSurfaceClass} px-2 py-1.5 text-ui-sm`;
 const pressFeedback =
   "[&_button:enabled:active]:translate-y-px [&_button:enabled:active]:brightness-90 [&_summary:active]:brightness-90 [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-offset-2 [&_button:focus-visible]:outline-focus-ring";
 const PROBE_FEEDBACK_TIMEOUT_MS = 15_000;
@@ -52,16 +55,19 @@ export function DiagnosticsWindow({
     error: string;
     loading: boolean;
   } | null>(null);
+  const rawRequest = useRef(0);
   async function showRaw(id: number) {
+    const request = ++rawRequest.current;
+    setHover(null);
     setRaw({ id, text: "", error: "", loading: true });
     try {
       const text = await reader.raw(id);
       setRaw((current) =>
-        current?.id === id ? { id, text, error: "", loading: false } : current,
+        current?.id === id && rawRequest.current === request ? { id, text, error: "", loading: false } : current,
       );
     } catch (error) {
       setRaw((current) =>
-        current?.id === id
+        current?.id === id && rawRequest.current === request
           ? { id, text: "", error: String(error), loading: false }
           : current,
       );
@@ -69,6 +75,7 @@ export function DiagnosticsWindow({
   }
   const [hover, setHover] = useState<{
     row: DiagnosticRecord;
+    anchor: HTMLElement;
     left: number;
     top: number;
     width: number;
@@ -76,17 +83,31 @@ export function DiagnosticsWindow({
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
+  const detailsPanel = useRef<HTMLDivElement>(null);
+  const shouldFocusDetails = useRef(false);
+  const isRestoringDetailsFocus = useRef(false);
   const keepDetails = () => clearTimeout(hoverTimer.current);
   const hideDetails = () => {
     keepDetails();
     hoverTimer.current = setTimeout(() => setHover(null), 180);
   };
-  const showDetails = (row: DiagnosticRecord, element: HTMLElement) => {
+  const closeDetails = () => {
     keepDetails();
+    setHover(null);
+    if (!hover?.anchor.isConnected) return;
+    isRestoringDetailsFocus.current = true;
+    hover.anchor.focus({ preventScroll: true });
+    isRestoringDetailsFocus.current = false;
+  };
+  const showDetails = (row: DiagnosticRecord, element: HTMLElement, focus = false) => {
+    if (isRestoringDetailsFocus.current) return;
+    keepDetails();
+    shouldFocusDetails.current = focus;
     const rect = element.getBoundingClientRect();
     const width = Math.min(720, window.innerWidth - 32);
     setHover({
       row,
+      anchor: element,
       width,
       left: Math.max(16, Math.min(rect.left, window.innerWidth - width - 16)),
       top: Math.max(
@@ -98,6 +119,11 @@ export function DiagnosticsWindow({
       ),
     });
   };
+  useLayoutEffect(() => {
+    if (!hover || !shouldFocusDetails.current) return;
+    shouldFocusDetails.current = false;
+    detailsPanel.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+  }, [hover]);
   useEffect(() => () => clearTimeout(hoverTimer.current), []);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [olderError, setOlderError] = useState("");
@@ -169,11 +195,6 @@ export function DiagnosticsWindow({
         if (!stopped) {
           setStatus(next);
           setResources(resourceState);
-          if (state)
-            document.documentElement.classList.toggle(
-              "theme-warm",
-              state.data.theme === "warm",
-            );
         }
       } catch (e) {
         if (!stopped) setReadError(String(e));
@@ -308,18 +329,14 @@ export function DiagnosticsWindow({
     <main
       className={`flex h-screen flex-col gap-3 bg-base p-5 text-ink ${pressFeedback}`}
     >
-      <header className="flex flex-wrap items-center gap-3">
-        <img src={logo} alt="" className="size-9" />
-        <div className="mr-auto">
-          <h1 className="text-ui-xl font-semibold">AAW Desktop 诊断</h1>
-          <p className="text-xs text-ink-mute">
-            {tab === "storage"
-              ? "本地数据占用、保存状态与分类清理"
-              : "关闭此窗口不影响采集 · ACP 原文包含消息、工具参数及图片数据"}
-          </p>
-        </div>
-        {tab === "logs" && (
-          <div className="flex flex-wrap items-center justify-end gap-2">
+      <PageHeader
+        title="AAW Desktop 诊断"
+        leading={<BrandMark className="ui-icon-36" />}
+        description={tab === "storage"
+          ? "本地数据占用、保存状态与分类清理"
+          : "关闭此窗口不影响采集 · ACP 原文包含消息、工具参数及图片数据"}
+        actions={tab === "logs" && (
+          <>
             {exportFeedback && (
               <span
                 role={exportFeedback.error ? "alert" : "status"}
@@ -328,8 +345,10 @@ export function DiagnosticsWindow({
                 {exportFeedback.text}
               </span>
             )}
-            <button
-              className={buttonClass}
+            <ActionButton
+              tone="secondary"
+              type="submit"
+              className="px-3 py-1.5 text-ui-sm"
               disabled={exporting || !reader.isNative()}
               aria-busy={exporting}
               onClick={() => {
@@ -337,10 +356,10 @@ export function DiagnosticsWindow({
               }}
             >
               {exporting ? "正在导出…" : "导出匹配日志"}
-            </button>
-          </div>
+            </ActionButton>
+          </>
         )}
-      </header>
+      />
       <nav aria-label="诊断视图">
         <SegmentedControl
           groupLabel="诊断分段"
@@ -377,7 +396,7 @@ export function DiagnosticsWindow({
               value={level}
               options={[{ value: "", label: "全部级别" }, ...["debug", "info", "warn", "error"].map((value) => ({ value, label: value }))]}
               onChange={(value) => { setLevel(value); followTail.current = true; }}
-              className="py-1.5 text-sm"
+              className="py-1.5 text-ui-base"
             />
             <input
               aria-label="模块"
@@ -421,11 +440,13 @@ export function DiagnosticsWindow({
               const { scrollHeight, scrollTop, clientHeight } =
                 event.currentTarget;
               followTail.current = scrollHeight - scrollTop - clientHeight <= 2;
-              setHover(null);
+              if (!detailsPanel.current?.contains(document.activeElement)) setHover(null);
             }}
           >
-            <button
-              className={`${buttonClass} m-2`}
+            <ActionButton
+              tone="secondary"
+              type="submit"
+              className="px-3 py-1.5 text-ui-sm m-2"
               aria-busy={loadingOlder}
               disabled={
                 !records.length ||
@@ -444,7 +465,7 @@ export function DiagnosticsWindow({
                   : records.length >= 5000
                     ? "已达到显示上限"
                     : "加载更早记录"}
-            </button>
+            </ActionButton>
             {olderError && (
               <span role="alert" className="text-xs text-danger-ink">
                 加载失败：{olderError}
@@ -495,21 +516,23 @@ export function DiagnosticsWindow({
                         ? ` · ${row.context.durationMs}ms`
                         : ""}
                       {row.hasRaw ? (
-                        <button
-                          className="ml-2 rounded px-1 underline hover:bg-raised"
+                        <TextLink
+                          type="submit"
+                          className="ml-2"
                           onClick={() => {
                             void showRaw(row.id);
                           }}
                         >
                           查看原文
-                        </button>
+                        </TextLink>
                       ) : null}
                     </td>
                     <td className="p-2">
-                      <div
-                        tabIndex={0}
+                      <TextLink
                         aria-label={`详情：${row.message}`}
-                        className="truncate whitespace-nowrap font-mono text-ink-soft outline-offset-2"
+                        aria-haspopup="dialog"
+                        aria-expanded={hover?.row.id === row.id}
+                        className="block! w-full truncate whitespace-nowrap font-mono text-ink-soft!"
                         onMouseEnter={(event) =>
                           showDetails(row, event.currentTarget)
                         }
@@ -517,13 +540,14 @@ export function DiagnosticsWindow({
                         onFocus={(event) =>
                           showDetails(row, event.currentTarget)
                         }
+                        onClick={(event) => showDetails(row, event.currentTarget, true)}
                         onBlur={hideDetails}
                         onKeyDown={(event) => {
                           if (event.key === "Escape") setHover(null);
                         }}
                       >
                         {JSON.stringify(row.context)}
-                      </div>
+                      </TextLink>
                     </td>
                   </tr>
                 ))}
@@ -572,53 +596,36 @@ export function DiagnosticsWindow({
           </>
         </div>
       )}
-      {raw
-        ? createPortal(
-            <aside
-              role="dialog"
-              aria-label="ACP 原始报文"
-              className={`fixed inset-8 z-[60] flex flex-col gap-3 rounded-lg border border-line bg-surface p-4 text-ink shadow-floating ${pressFeedback}`}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") setRaw(null);
-              }}
-            >
-              <div className="flex gap-3">
-                <h2 className="mr-auto font-medium">ACP 原始报文 · {raw.id}</h2>
-                {raw.loading || raw.error ? (
-                  <button className={buttonClass} disabled>
-                    复制原文
-                  </button>
-                ) : (
-                  <CopyButton
-                    key={raw.id}
-                    label="复制原文"
-                    getText={() => raw.text}
-                  />
-                )}
-                <button className={buttonClass} onClick={() => setRaw(null)}>
-                  关闭原文
-                </button>
-              </div>
-              {raw.error ? (
-                <p role="alert">{raw.error}</p>
-              ) : raw.loading ? (
-                <p>正在读取原文…</p>
-              ) : (
-                <pre className="min-h-0 flex-1 select-text overflow-auto whitespace-pre-wrap break-all text-xs">
-                  {raw.text}
-                </pre>
-              )}
-            </aside>,
-            document.body,
-          )
-        : null}
-      {hover
-        ? createPortal(
-            <aside
+      {raw && (
+        <ModalShell size="preview" label="ACP 原始报文" dismissOnBackdrop={false} onDismiss={() => setRaw(null)}>
+          <div className="flex flex-wrap items-center gap-2 border-b border-line p-4">
+            <h2 className="mr-auto text-ui-base font-medium">ACP 原始报文 · {raw.id}</h2>
+            {raw.loading || raw.error ? (
+              <ActionButton tone="secondary" size="compact" disabled>复制原文</ActionButton>
+            ) : (
+              <CopyButton key={raw.id} label="复制原文" getText={() => raw.text} />
+            )}
+            <ActionButton tone="secondary" size="compact" autoFocus onClick={() => setRaw(null)}>关闭原文</ActionButton>
+          </div>
+          {raw.error ? (
+            <p role="alert" className="p-4 text-ui-sm text-danger-ink">{raw.error}</p>
+          ) : raw.loading ? (
+            <p role="status" className="p-4 text-ui-sm text-ink-soft">正在读取原文…</p>
+          ) : (
+            <pre tabIndex={0} aria-label="原文内容" className="min-h-0 flex-1 select-text overflow-auto whitespace-pre-wrap break-all p-4 text-ui-sm focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-inset focus-visible:outline-none">
+              {raw.text}
+            </pre>
+          )}
+        </ModalShell>
+      )}
+      {createPortal(
+            <HintSurface
+              ref={detailsPanel}
+              open={hover !== null}
               role="dialog"
               aria-label="原始日志详情"
-              className={`fixed z-50 flex max-h-[min(360px,calc(100vh-32px))] flex-col rounded-lg border border-line-strong bg-surface p-3 text-ink shadow-floating ${pressFeedback}`}
-              style={{ left: hover.left, top: hover.top, width: hover.width }}
+              className={`fixed z-50 flex max-h-[min(360px,calc(100vh-32px))] flex-col p-3 ${pressFeedback}`}
+              style={hover ? { left: hover.left, top: hover.top, width: hover.width } : undefined}
               onMouseEnter={keepDetails}
               onMouseLeave={hideDetails}
               onFocus={keepDetails}
@@ -627,16 +634,21 @@ export function DiagnosticsWindow({
                   hideDetails();
               }}
               onKeyDown={(event) => {
-                if (event.key === "Escape") setHover(null);
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  closeDetails();
+                }
               }}
             >
-              <div className="mb-2 flex items-center gap-2 text-xs">
+              {hover && <><div className="mb-2 flex flex-wrap items-center gap-2 text-ui-sm">
                 <span className="min-w-0 flex-1 truncate">
                   {hover.row.message} · {hover.row.source} · {hover.row.runId}
                 </span>
                 {typeof hover.row.context.operationId === "string" ? (
-                  <button
-                    className={buttonClass}
+                  <ActionButton
+                    tone="secondary"
+                    type="submit"
+                    className="px-3 py-1.5 text-ui-sm"
                     onClick={() => {
                       setText(String(hover.row.context.operationId));
                       followTail.current = true;
@@ -644,23 +656,22 @@ export function DiagnosticsWindow({
                     }}
                   >
                     关联操作
-                  </button>
+                  </ActionButton>
                 ) : null}
                 <CopyButton
                   key={hover.row.id}
                   getText={() => JSON.stringify(hover.row.context, null, 2)}
                 />
-                <button className={buttonClass} onClick={() => setHover(null)}>
+                <ActionButton tone="secondary" size="compact" onClick={closeDetails}>
                   关闭
-                </button>
+                </ActionButton>
               </div>
-              <pre className="min-h-0 select-text overflow-auto whitespace-pre-wrap break-all text-xs">
+              <pre className="min-h-0 select-text overflow-auto whitespace-pre-wrap break-all text-ui-sm">
                 {JSON.stringify(hover.row.context, null, 2)}
-              </pre>
-            </aside>,
+              </pre></>}
+            </HintSurface>,
             document.body,
-          )
-        : null}
+          )}
     </main>
   );
 }

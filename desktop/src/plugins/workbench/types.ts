@@ -156,6 +156,7 @@ export interface PanelTabPresentation {
 export interface DockViewProps extends ProjectViewProps {
   readonly visible: boolean;
   readonly close: () => void;
+  readonly restoreLauncherFocus?: () => void;
 }
 
 export interface WorkbenchContributions {

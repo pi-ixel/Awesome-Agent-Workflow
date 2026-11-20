@@ -5,12 +5,9 @@ import { IconButton } from "../../../shared/ui/IconButton.tsx";
  * 结构自上而下：
  * - **头部两行**：标题 + 总结 + 唯一可用的运行动作 + 「⋯」（再次运行、刷新）；
  *   状态词 + 阶段进度 + 当前节点 + 工作流 · 起点 · 用时，需求原文点开再看。
- *   跟随与缩放浮在画布角上；
  * - **一条横幅**：阻塞 / 中断 / 服务错误 / 版本不匹配 / 等你回复 / 等你确认都收进
  *   同一条——首行人话原因，错误码折叠，最多一个主操作（等你确认另有「退回…」）；
- * - **画布**：WorkflowHierarchy（纵向分带）。条带宽度按视口 clamp 到
- *   BAND_MIN…BAND_MAX；低于下限横向滚动并出单行提示（拉宽 / 完整视图）；
- *   离开当前节点时浮出「回到当前节点」；Ctrl+滚轮与 +/-/0 缩放；
+ * - **画布**：FlowStages 展示阶段及其步骤，按需向右展开子流程；
  * - **检视器**：面板 ≥ 700px（或完整视图）放画布右侧，否则放画布下方。
  *   头部是状态、轮次圆点和「打开会话」；正文按节点处境给内容（NodeDetail），
  *   原始结果折叠在最后；运行停着时可切到「处置」页（DisposePanel：重跑、
@@ -53,8 +50,8 @@ import { MoreMenu } from "./MoreMenu.tsx";
 import { disposeActions } from "./dispose.ts";
 import { describeResult, entryConditions } from "./nodeDetail.ts";
 import "./workflowPanel.css";
-import { dangerSize, iconButton, primaryButton, secondaryButton } from "./buttons.ts";
-import { Badge, DangerButton } from "../../../shared/ui/controls.tsx";
+import { dangerSize, iconButton } from "./buttons.ts";
+import { ActionButton, Badge, DangerButton } from "../../../shared/ui/controls.tsx";
 import { XIcon } from "../../../shared/ui/icons.tsx";
 import { Callout } from "../../../shared/ui/Callout.tsx";
 import { InlineConfirm } from "../../../shared/ui/InlineConfirm.tsx";
@@ -111,6 +108,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile }:
   const [, setPlanVersion] = useState(0);
   const [panelWidth, setPanelWidth] = useState(0);
   const panelRef = useRef<HTMLElement | null>(null);
+  const stopButton = useRef<HTMLButtonElement>(null);
   const [reveal, setReveal] = useState<FlowReveal | undefined>();
   const store = useMemo(() => (runId === "" ? undefined : service.snapshot(runId)), [service, runId]);
   const snapshot = useRegisteredSnapshot(store, (value) => value ?? null);
@@ -360,17 +358,17 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile }:
       <div className="workflow-head-row workflow-run-titlebar">
         <b className="workflow-run-name" data-hint={runTitle}>{runTitle}</b>
         <span className="workflow-run-action">
-          {snapshot?.run && <button type="button" className={secondaryButton} onClick={() => setShowSummary(!showSummary)} aria-pressed={showSummary} data-hint="这次运行的概况、各节点做了什么和产出文件">{showSummary ? "返回流程图" : "总结"}</button>}
-          {snapshot?.active && <DangerButton className={dangerSize} onClick={() => setConfirmStop(true)} disabled={confirmStop}>停止</DangerButton>}
-          {snapshot?.run && !snapshot.active && snapshot.hasLease && <button type="button" className={primaryButton} onClick={() => void run(() => service.recover(runId, "Desktop：确认服务进程退出后解除占用"))}>检查并解除占用</button>}
-          {snapshot?.run && !snapshot.active && !snapshot.hasLease && snapshot.run.status === "stopped" && withoutAuthorization.length === 0 && <button type="button" className={primaryButton} disabled={busy} onClick={() => void run(() => service.resume(runId))}>继续运行</button>}
+          {snapshot?.run && <ActionButton type="button" tone="secondary" size="compact" onClick={() => setShowSummary(!showSummary)} aria-pressed={showSummary} data-hint="这次运行的概况、各节点做了什么和产出文件">{showSummary ? "返回流程图" : "总结"}</ActionButton>}
+          {snapshot?.active && <DangerButton ref={stopButton} className={dangerSize} onClick={() => setConfirmStop(true)} disabled={confirmStop}>停止</DangerButton>}
+          {snapshot?.run && !snapshot.active && snapshot.hasLease && <ActionButton type="button" tone="primary" size="compact" onClick={() => void run(() => service.recover(runId, "Desktop：确认服务进程退出后解除占用"))}>检查并解除占用</ActionButton>}
+          {snapshot?.run && !snapshot.active && !snapshot.hasLease && snapshot.run.status === "stopped" && withoutAuthorization.length === 0 && <ActionButton type="button" tone="primary" size="compact" disabled={busy} onClick={() => void run(() => service.resume(runId))}>继续运行</ActionButton>}
           <MoreMenu entries={[
             ...(onLaunch && summary?.workflowId ? [{ id: "again", label: "再次运行", onSelect: () => onLaunch({ workflowId: summary.workflowId, entry: summary.entry || undefined }) }] : []),
             { id: "refresh", label: "刷新", onSelect: () => void reload() },
           ]} />
         </span>
       </div>
-      {snapshot?.active && confirmStop && <InlineConfirm className="workflow-stop-confirm" label="确认停止" message="正在执行的节点会被中断，之后可以继续运行或处置。确定停止？" confirmLabel="停止" onConfirm={() => { setConfirmStop(false); void run(() => service.stop(runId)); }} onCancel={() => setConfirmStop(false)} />}
+      {snapshot?.active && confirmStop && <InlineConfirm className="workflow-stop-confirm" label="确认停止" message="正在执行的节点会被中断，之后可以继续运行或处置。确定停止？" confirmLabel="停止" getReturnFocus={() => stopButton.current} onConfirm={() => { setConfirmStop(false); void run(() => service.stop(runId)); }} onCancel={() => setConfirmStop(false)} />}
       <div className="workflow-head-row workflow-run-meta">
         {snapshot?.run && <StatusWord state={runState} waiting={awaiting !== undefined} label={runWord} />}
         {stages.length > 0 && <span className="workflow-progress" aria-label={`阶段进度 ${stages.filter((s) => isSettled(s.state)).length}/${stages.length}`}>
@@ -396,18 +394,18 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile }:
       details={banner.code || banner.detail ? [banner.code, banner.detail].filter(Boolean).join("\n") : undefined}
       onDismiss={banner.action === "dismiss" ? () => setError(null) : undefined}
       actions={banner.action === "dispose" && stuckRecord && !(page === "dispose" && record === stuckRecord)
-        ? <button type="button" className={primaryButton} onClick={() => openDispose(stuckRecord)}>去处理</button>
+        ? <ActionButton type="button" tone="primary" size="compact" onClick={() => openDispose(stuckRecord)}>去处理</ActionButton>
         : banner.action === "confirm" && gate ? <>
-          {gateRecord && <button type="button" className={secondaryButton} onClick={() => showRecord(gateRecord)}>查看</button>}
-          {gateRecord && <button type="button" className={secondaryButton} onClick={() => openDispose(gateRecord)}>退回…</button>}
-          <button type="button" className={primaryButton} disabled={busy} onClick={() => void commit(() => service.confirm(runId, gate.instance))}>继续</button>
+          {gateRecord && <ActionButton type="button" tone="secondary" size="compact" onClick={() => showRecord(gateRecord)}>查看</ActionButton>}
+          {gateRecord && <ActionButton type="button" tone="secondary" size="compact" onClick={() => openDispose(gateRecord)}>退回…</ActionButton>}
+          <ActionButton type="button" tone="primary" size="compact" disabled={busy} onClick={() => void commit(() => service.confirm(runId, gate.instance))}>继续</ActionButton>
         </> : undefined}
     >
       {banner.hint}
       {banner.action === "open-session" && <div className="workflow-waiting-list" aria-label="等待回复的节点">
         {waitingItems.map((item) => <div className="workflow-waiting-item" key={`${item.record.siteId}@${item.record.ordinal}`}>
           <div><strong>{item.label}</strong><p>{item.excerpt ?? "请打开会话查看 Agent 的消息；也可能是节点尚未提交结果。"}</p></div>
-          {item.sessionId && onOpenSession && <button type="button" className={secondaryButton} onClick={() => { select(item.record.siteId, [...item.record.callPath], item.record.phaseId ?? undefined); setSelectedOrdinal(item.record.ordinal); onOpenSession(item.sessionId!); }}>打开会话</button>}
+          {item.sessionId && onOpenSession && <ActionButton type="button" tone="secondary" size="compact" onClick={() => { select(item.record.siteId, [...item.record.callPath], item.record.phaseId ?? undefined); setSelectedOrdinal(item.record.ordinal); onOpenSession(item.sessionId!); }}>打开会话</ActionButton>}
         </div>)}
       </div>}
     </Callout>}
@@ -418,7 +416,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile }:
       className="workflow-callout"
       title="已完成"
       onDismiss={() => setDoneDismissed(true)}
-      actions={<button type="button" className={secondaryButton} onClick={() => setShowSummary(true)}>查看总结</button>}
+      actions={<ActionButton type="button" tone="secondary" size="compact" onClick={() => setShowSummary(true)}>查看总结</ActionButton>}
     >{handoffLine.length > 90 ? `${handoffLine.slice(0, 90)}…` : handoffLine || undefined}</Callout>}
     {showSummary && summaryView ? <div className="workflow-workspace workflow-summary-wrap">
       <RunSummaryPage
@@ -439,9 +437,24 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile }:
         {<IconButton iconSize="compact" type="button" className={iconButton} onClick={() => { setSelected(""); clearSelection(); }} aria-label="关闭节点详情"><XIcon className="ui-icon-14" /></IconButton>}
       </div>
       {(selectedRecords.length > 1 || (recordSession && onOpenSession)) && <div className="workflow-inspector-actions">
-        {recordSession && onOpenSession && <button type="button" className={secondaryButton} aria-label="打开本轮会话" onClick={() => onOpenSession(recordSession)}>打开会话</button>}
+        {recordSession && onOpenSession && <ActionButton type="button" tone="secondary" size="compact" aria-label="打开本轮会话" onClick={() => onOpenSession(recordSession)}>打开会话</ActionButton>}
         {selectedRecords.length > 1 && <span className="workflow-rounds" role="group" aria-label="执行轮次">
-          {[...selectedRecords].reverse().map((item) => <button key={item.ordinal} type="button" aria-pressed={item.ordinal === record?.ordinal} aria-label={`第 ${item.ordinal} 轮`} data-hint={`第 ${item.ordinal} 轮 · ${recordStatus(item)}`} onClick={() => setSelectedOrdinal(item.ordinal)} />)}
+          {[...selectedRecords].reverse().map((item) => {
+            const selected = item.ordinal === record?.ordinal;
+            return (
+              <ActionButton
+                key={item.ordinal}
+                tone="ghost"
+                aria-pressed={selected}
+                aria-label={`第 ${item.ordinal} 轮`}
+                data-hint={`第 ${item.ordinal} 轮 · ${recordStatus(item)}`}
+                className="grid min-h-7 min-w-7 shrink-0 place-items-center p-1"
+                onClick={() => setSelectedOrdinal(item.ordinal)}
+              >
+                <span aria-hidden="true" className={`ui-icon-8 rounded-full ${selected ? "bg-ink" : "bg-ink-mute"}`} />
+              </ActionButton>
+            );
+          })}
         </span>}
       </div>}
       {(state.note || record) && <p className="workflow-inspector-note">
@@ -477,8 +490,8 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile }:
             {record?.ordinal === latestRecord?.ordinal && candidates.map((candidate, index) => <Disclosure key={candidate.id || index} className="workflow-candidate" summary={`Agent 已提交的结果 ${index + 1} · 流程尚未接受`}><pre>{typeof candidate.result === "string" ? candidate.result : JSON.stringify(candidate.result, null, 2)}</pre></Disclosure>)}
             {record?.mark === "superseded" && <p className="workflow-inspector-note">这一轮已被回退作废，只供回看。</p>}
             {disposable && (snapshot?.active
-              ? <button type="button" className={secondaryButton} disabled data-hint="运行正在执行；先在上方停止运行">处置…</button>
-              : <button type="button" className={secondaryButton} onClick={() => setTab("dispose")}>处置…</button>)}
+              ? <ActionButton type="button" tone="secondary" size="compact" disabled data-hint="运行正在执行；先在上方停止运行">处置…</ActionButton>
+              : <ActionButton type="button" tone="secondary" size="compact" onClick={() => setTab("dispose")}>处置…</ActionButton>)}
           </NodeDetail>}
       </div>
 </aside>}>

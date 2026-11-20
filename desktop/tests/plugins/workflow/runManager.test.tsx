@@ -44,10 +44,15 @@ it("searches, filters and reveals archived runs from the top-level run manager",
   expect(within(page).getAllByRole("button", { name: /查看运行/ })).toHaveLength(1);
 });
 
-/** 每行的操作收在「⋯」菜单里：点开后取菜单项（刚关的菜单还在退场时取最新的）。 */
+/** 每行的操作收在「⋯」菜单里，已打开的菜单继续使用。 */
 function menuItem(row: HTMLElement, name: string | RegExp): HTMLElement {
-  fireEvent.click(within(row).getByRole("button", { name: /的操作$/ }));
-  return screen.getAllByRole("menuitem", { name }).at(-1)!;
+  const trigger = within(row).getByRole("button", { name: /的操作$/ });
+  if (trigger.getAttribute("aria-expanded") !== "true") {
+    fireEvent.pointerDown(trigger);
+    fireEvent.click(trigger);
+  }
+  const menu = screen.getByRole("menu", { name: trigger.getAttribute("aria-label") ?? "" });
+  return within(menu).getByRole("menuitem", { name });
 }
 
 it("renames, archives and deletes after confirmation; running runs cannot be archived or deleted", async () => {

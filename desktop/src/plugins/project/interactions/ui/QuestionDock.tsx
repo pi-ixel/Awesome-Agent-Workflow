@@ -1,3 +1,4 @@
+import { settingsInputClass } from "../../../../shared/ui/SettingsPageParts.tsx";
 import { useApprovalValue, useConversation } from "../../ui/bindings/conversationView.ts";
 import { useProjectPageValue } from "../../ui/bindings/projectView.tsx";
 import { useSessionCommands } from "../../conversation/ui/useSessionCommands.ts";
@@ -134,7 +135,7 @@ export function QuestionDock() {
               onChange={(event) =>
                 write({ notes: { ...draft.notes, [page]: event.target.value } })
               }
-              className="w-full rounded-lg border border-line bg-base px-3 py-2 text-ui-base placeholder:text-ink-faint"
+              className={settingsInputClass}
             />
           </>
         )}

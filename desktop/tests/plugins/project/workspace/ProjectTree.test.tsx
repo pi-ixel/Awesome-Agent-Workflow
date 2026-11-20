@@ -17,6 +17,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ProjectTree } from "../../../../src/plugins/project/ui/ProjectTree.tsx";
+import { useProject } from "../../../../src/plugins/project/ui/bindings/projectView.tsx";
 import type { ProjectExtension } from "../../../../src/plugins/project/service.ts";
 import { createTestWorkspace } from "../../../helpers/workspace.ts";
 const useWorkspaceStore = createTestWorkspace();
@@ -118,6 +119,8 @@ describe("ProjectTree 查看文件快捷入口", () => {
     render(<ProjectTree />, { wrapper: fixture.Wrapper });
 
     const button = screen.getByRole("button", { name: "浏览项目文件" });
+    const folder = screen.getByRole("button", { name: "pager" }).querySelector("svg");
+    expect(folder).toHaveClass("ui-icon-16", "text-ink-subtle");
     expect(button.querySelector("svg")).not.toBeNull();
     expect(button.textContent).toBe("");
     fireEvent.click(button);
@@ -585,9 +588,14 @@ describe("ProjectTree 会话归档（本机覆盖层）", () => {
       ).toBeNull();
       await user.click(document.body);
       expect(screen.queryByRole("button", { name: "确认归档" })).toBeNull();
-      await user.click(within(row).getByRole("button", { name: "归档任务" }));
+      within(row).getByRole("button", { name: "归档任务" }).focus();
+      await user.keyboard("{Enter}");
+      const confirm = within(row).getByRole("button", { name: "确认归档" });
+      expect(confirm).toHaveFocus();
+      expect(fireEvent.keyDown(confirm, { key: "Enter", repeat: true })).toBe(false);
       await user.keyboard("{Escape}");
       expect(screen.queryByRole("button", { name: "确认归档" })).toBeNull();
+      expect(within(row).getByRole("button", { name: "归档任务" })).toHaveFocus();
       expect(indexes.archive.getState().archivedSessions.size).toBe(0);
       await user.click(within(row).getByRole("button", { name: "归档任务" }));
       await user.click(within(row).getByRole("button", { name: "确认归档" }));
@@ -595,6 +603,28 @@ describe("ProjectTree 会话归档（本机覆盖层）", () => {
       expect(screen.queryByRole("button", { name: /归档会话/ })).toBeNull();
     },
   );
+
+  it("确认期间会话开始运行时重新检查，保留会话", async () => {
+    const user = userEvent.setup();
+    const busy = new Set<string>();
+    function TreeWithRuntime() {
+      const project = useProject();
+      return <ProjectTree project={project} />;
+    }
+    fixture.register({
+      sessions: { ...indexes, busySessionIds: () => busy },
+      projects: { workspace: useWorkspaceStore },
+    });
+    seedTwoSessions();
+    fixture.sidebar.setState({ treeViewMode: "projects" });
+    render(<TreeWithRuntime />, { wrapper: fixture.Wrapper });
+    const row = screen.getByRole("button", { name: /归档会话/ }).closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "归档任务" }));
+    busy.add("s-hide");
+    await user.click(within(row).getByRole("button", { name: "确认归档" }));
+    expect(indexes.archive.getState().archivedSessions.size).toBe(0);
+    expect(within(row).getByRole("button", { name: "归档任务（会话回合运行中，暂不可归档）" })).toBeDisabled();
+  });
 
   it("右键归档先显示行内确认，确认后才归档", async () => {
     const user = userEvent.setup();

@@ -7,7 +7,7 @@ import {
 } from "../../../shared/panelPaths.ts";
 import { FileDisplayIcon } from "../../../shared/ui/file-icons/fileDisplay.tsx";
 import { resolveIconName } from "../../../shared/ui/file-icons/fileDisplayHelpers.ts";
-import { FolderIcon } from "../../../shared/ui/file-icons/icons.tsx";
+import { FolderGlyph } from "../../../shared/ui/icons.tsx";
 
 export function documentTab(
   path: string,
@@ -65,7 +65,7 @@ export function presentDocumentTab(
           className="shrink-0"
         />
       ) : (
-        <FolderIcon className="ui-icon-14 shrink-0" />
+        <FolderGlyph isExpanded={false} className="ui-icon-14 shrink-0" />
       ),
   };
 }

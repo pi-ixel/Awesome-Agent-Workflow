@@ -1,3 +1,4 @@
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 /**
  * AI 编辑工作流的草稿页（ADR 036）。
  *
@@ -6,7 +7,7 @@
  * - 每隔几秒重新编译草稿：报错（文件、行号、原因）、改了哪些文件与逐行差异、改动前后的流程图；
  * - 保存前编译必须通过；放弃要再确认一次。
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import type { WorkflowCatalog, WorkflowDraftCheck, WorkflowDraftEditor, WorkflowService } from "../types.ts";
 import { describeDiagnostic } from "../status/library.ts";
@@ -14,8 +15,8 @@ import { errorLine } from "../status/errorText.ts";
 import { draftPrompt } from "../editing/draftSessions.ts";
 import { FlowStages } from "./FlowStages.tsx";
 import { diffLines, withContext } from "./textDiff.ts";
-import { Badge, Listbox } from "../../../shared/ui/controls.tsx";
-import { primaryButton, secondaryButton } from "./buttons.ts";
+import { ActionButton, Badge, Listbox } from "../../../shared/ui/controls.tsx";
+
 import { Callout } from "../../../shared/ui/Callout.tsx";
 import { settingsTextareaClass } from "../../../shared/ui/SettingsPageParts.tsx";
 import { InlineConfirm } from "../../../shared/ui/InlineConfirm.tsx";
@@ -40,6 +41,7 @@ export function DraftPage({ service, editor, draftId, onSaved, onDiscarded }: {
   const [file, setFile] = useState("");
   const [entry, setEntry] = useState("");
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const discardButton = useRef<HTMLButtonElement>(null);
   const [, setSessionVersion] = useState(0);
 
   // 定时重新编译：Agent 改文件时界面跟着变。
@@ -95,17 +97,24 @@ export function DraftPage({ service, editor, draftId, onSaved, onDiscarded }: {
         <Badge tone={check.ok ? "ok" : "danger"}>{check.ok ? "编译通过" : `${errors.length} 处错误`}</Badge>
       </div>
       <div className="workflow-detail-actions">
-        <button type="button" className={primaryButton} disabled={busy || !canSave} data-hint={!check.ok ? "编译通过后才能保存" : canSave ? "" : "还没有改动"} onClick={() => void act(async () => {
+        <ActionButton
+          type="button"
+          tone="primary"
+          size="compact"
+          disabled={busy || !canSave}
+          data-hint={!check.ok ? "编译通过后才能保存" : canSave ? "" : "还没有改动"}
+          onClick={() => void act(async () => {
           await editor?.end(draftId);
           onSaved(await service.saveDraft(draftId));
-        })}>保存</button>
+        })}
+        >保存</ActionButton>
         {confirmDiscard
-          ? <InlineConfirm label="确认放弃" message="放弃后草稿里的改动全部丢掉。" confirmLabel="放弃" busy={busy} onConfirm={() => void act(async () => {
+          ? <InlineConfirm label="确认放弃" message="放弃后草稿里的改动全部丢掉。" confirmLabel="放弃" busy={busy} getReturnFocus={() => discardButton.current} onConfirm={() => void act(async () => {
             await editor?.end(draftId);
             await service.discardDraft(draftId);
             onDiscarded();
           })} onCancel={() => setConfirmDiscard(false)} />
-          : <button type="button" className={secondaryButton} onClick={() => setConfirmDiscard(true)}>放弃</button>}
+          : <ActionButton ref={discardButton} type="button" tone="secondary" size="compact" onClick={() => setConfirmDiscard(true)}>放弃</ActionButton>}
       </div>
       <p className="workflow-detail-desc">{hasSession
         ? "在中间的编辑会话里告诉 AI 要怎么改；这里随时显示编译结果和改动，看过、编译通过后再保存。"
@@ -120,7 +129,7 @@ export function DraftPage({ service, editor, draftId, onSaved, onDiscarded }: {
         <label>{check.changes.length > 0 ? "编辑会话已经结束（例如界面重载过）。告诉 AI 接着怎么改：" : "告诉 AI 你想怎么改："}
           <textarea className={settingsTextareaClass} rows={3} value={request} onChange={(e) => setRequest(e.target.value)} placeholder={base === null ? "例如：做一个先写设计、再评审、最后实现的流程" : "例如：在设计评审之后加一个人工确认"} />
         </label>
-        <button type="button" className={primaryButton} disabled={busy || request.trim() === ""} onClick={startSession}>{check.changes.length > 0 ? "继续编辑" : "开始编辑"}</button>
+        <ActionButton type="button" tone="primary" size="compact" disabled={busy || request.trim() === ""} onClick={startSession}>{check.changes.length > 0 ? "继续编辑" : "开始编辑"}</ActionButton>
       </div>)}
 
     {errors.length > 0 && <Callout tone="danger" className="workflow-callout" label="编译报错" title={`源码有 ${errors.length} 处错误，修正后才能保存`}>
@@ -145,9 +154,13 @@ export function DraftPage({ service, editor, draftId, onSaved, onDiscarded }: {
       ? <p className="workflow-muted workflow-pad">{base === null ? "这是新建的工作流，还没开始改。" : "还没有改动。"}</p>
       : <div className="workflow-source-body">
         <ul className="workflow-source-files" aria-label="改动的文件">
-          {check.changes.map((c) => <li key={c.path}><button aria-pressed={c.path === changed?.path} onClick={() => setFile(c.path)} data-hint={c.path}>
-            {c.status === "added" ? "＋ " : c.status === "removed" ? "－ " : "～ "}{c.path}
-          </button></li>)}
+          {check.changes.map((c) => (
+            <li key={c.path}>
+              <NavigationRow layout="tree" aria-pressed={c.path === changed?.path} onClick={() => setFile(c.path)} data-hint={c.path}>
+                <span className="truncate">{c.status === "added" ? "＋ " : c.status === "removed" ? "－ " : "～ "}{c.path}</span>
+              </NavigationRow>
+            </li>
+          ))}
         </ul>
         {changed && <pre className="workflow-diff" aria-label={`差异 ${changed.path}`}>
           {withContext(diffLines(changed.before ?? "", changed.after ?? "")).map((line, index) => line === null

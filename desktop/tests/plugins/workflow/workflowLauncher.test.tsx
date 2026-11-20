@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { WorkflowLauncher } from "../../../src/plugins/workflow/ui/WorkflowLauncher.tsx";
-import type { WorkflowMeta } from "../../../src/plugins/workflow/types.ts";
+import type { WorkflowMeta, WorkflowPreflightReport } from "../../../src/plugins/workflow/types.ts";
 import { fakeWorkflowService, workflowSummary } from "./helpers.ts";
 
 /** 启动表单：起点与输入都来自工作流源码，界面不写死入口代号。 */
@@ -43,13 +43,19 @@ it("starts the chosen workflow with the declared inputs and hands the run back",
 
 it("offers each entry with its description and sends the chosen one", async () => {
   const fake = fakeWorkflowService();
+  let finishPreflight!: (report: WorkflowPreflightReport) => void;
+  const preflight = new Promise<WorkflowPreflightReport>((resolve) => { finishPreflight = resolve; });
+  fake.service.preflight = () => preflight;
   render(<WorkflowLauncher service={fake.service} meta={enterprise} initialEntry="ar" />);
   expect(screen.getByRole("radio", { name: /从单个 AR 开始/ })).toBeChecked();
   expect(screen.getByText("已有 SR 设计")).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("AR 内容"), { target: { value: "AR-12 登录改造" } });
   await checkAndStart();
+  for (const option of screen.getAllByRole("radio")) expect(option).toBeDisabled();
+  finishPreflight({ items: [] });
   await vi.waitFor(() => {
     expect(fake.calls.find((item) => item.method === "start")?.args).toMatchObject({ workflowId: "aaw-enterprise", entry: "ar" });
+    expect(screen.getByRole("radio", { name: /从单个 AR 开始/ })).toBeEnabled();
   });
 });
 

@@ -18,53 +18,99 @@ function isIcon(node: ts.Node, source: ts.SourceFile): boolean {
   if (ts.isJsxText(node)) return /^[×✕]$/.test(node.text.trim());
   if (ts.isJsxFragment(node)) {
     const children = visibleChildren(node.children);
-    return children.length > 0 && children.every((child) => isIcon(child, source));
+    return (
+      children.length > 0 && children.every((child) => isIcon(child, source))
+    );
   }
   if (ts.isJsxSelfClosingElement(node) || ts.isJsxElement(node)) {
-    const tag = ts.isJsxElement(node) ? node.openingElement.tagName : node.tagName;
+    const tag = ts.isJsxElement(node)
+      ? node.openingElement.tagName
+      : node.tagName;
     if (/(?:Icon|Glyph)$|^svg$/.test(tag.getText(source))) return true;
     if (ts.isJsxElement(node) && tag.getText(source) === "span") {
       const children = visibleChildren(node.children);
-      return children.length > 0 && children.every((child) => isIcon(child, source));
+      return (
+        children.length > 0 && children.every((child) => isIcon(child, source))
+      );
     }
     return false;
   }
-  if (ts.isJsxExpression(node) && node.expression) return isIcon(node.expression, source);
-  if (ts.isParenthesizedExpression(node)) return isIcon(node.expression, source);
+  if (ts.isJsxExpression(node) && node.expression)
+    return isIcon(node.expression, source);
+  if (ts.isParenthesizedExpression(node))
+    return isIcon(node.expression, source);
   if (ts.isConditionalExpression(node))
     return [node.whenTrue, node.whenFalse].every(
-      (value) => value.kind === ts.SyntaxKind.NullKeyword || isIcon(value, source),
+      (value) =>
+        value.kind === ts.SyntaxKind.NullKeyword || isIcon(value, source),
     );
-  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken)
+  if (
+    ts.isBinaryExpression(node) &&
+    node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+  )
     return isIcon(node.right, source);
   return false;
 }
 
 describe("全应用图标按钮公共能力", () => {
+  it("复制按钮从共享图标库取得复制和完成图形", () => {
+    const source = read("shared/ui/CopyButton.tsx");
+    expect(source).toMatch(
+      /import\s*\{\s*CheckIcon,\s*CopyIcon\s*\}\s*from\s*"\.\/icons\.tsx"/,
+    );
+    expect(source).not.toMatch(/<(?:svg|Svg|UiIcon)\b/);
+  });
   it("扫描全部前端 TSX，纯图标操作使用公共按钮且不自定义尺寸和动效", () => {
     const violations: string[] = [];
-    for (const entry of readdirSync(src, { recursive: true, encoding: "utf8" })) {
+    for (const entry of readdirSync(src, {
+      recursive: true,
+      encoding: "utf8",
+    })) {
       if (!entry.endsWith(".tsx")) continue;
       const file = entry.replaceAll("\\", "/");
-      const source = ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+      const source = ts.createSourceFile(
+        file,
+        read(file),
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TSX,
+      );
       function visit(node: ts.Node): void {
         if (ts.isJsxElement(node)) {
           const opening = node.openingElement;
           const tag = opening.tagName.getText(source);
           const attrs = opening.attributes.getText(source);
           const usesButtonRole = /\brole=["']button["']/.test(attrs);
-          const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
-          if (tag === "button" || usesButtonRole) {
+          const line =
+            source.getLineAndCharacterOfPosition(node.getStart(source)).line +
+            1;
+          if (tag === "button" || tag === "ActionButton" || usesButtonRole) {
             const children = visibleChildren(node.children);
-            if (children.length && children.every((child) => isIcon(child, source)))
-              violations.push(file + ":" + line + " 使用 IconButton 渲染纯图标操作");
+            if (
+              children.length &&
+              children.every((child) => isIcon(child, source))
+            )
+              violations.push(
+                file + ":" + line + " 使用 IconButton 渲染纯图标操作",
+              );
           }
           if (tag === "IconButton") {
-            const style = opening.attributes.properties.find(
-              (attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText(source) === "className",
-            )?.getText(source) ?? "";
-            if (/(?:^|[\s"'\x60:])(?:min-|max-)?(?:w|h|size)-(?:\d|\[)|\b(?:hover|active):(?:-?translate|scale)|\bpress\b/.test(style))
-              violations.push(file + ":" + line + " 使用 IconButton 的尺寸与动效规格");
+            const style =
+              opening.attributes.properties
+                .find(
+                  (attribute) =>
+                    ts.isJsxAttribute(attribute) &&
+                    attribute.name.getText(source) === "className",
+                )
+                ?.getText(source) ?? "";
+            if (
+              /(?:^|[\s"'\x60:])(?:min-|max-)?(?:w|h|size)-(?:\d|\[)|\b(?:hover|active):(?:-?translate|scale)|\bpress\b/.test(
+                style,
+              )
+            )
+              violations.push(
+                file + ":" + line + " 使用 IconButton 的尺寸与动效规格",
+              );
           }
         }
         ts.forEachChild(node, visit);
@@ -87,9 +133,9 @@ describe("全应用图标按钮公共能力", () => {
     expect(read("plugins/workbench/ui/SidebarToggle.tsx")).toContain(
       'placement="top"',
     );
-    expect(read("shared/ui/controls/RefreshButton.tsx")).toContain(
-      'showLabel ? "button" : IconButton',
-    );
+    const refresh = read("shared/ui/controls/RefreshButton.tsx");
+    expect(refresh).toMatch(/<ActionButton\s+tone="secondary"/);
+    expect(refresh).toContain('<IconButton');
   });
 
   it.each([
@@ -147,8 +193,23 @@ describe("全应用图标按钮公共能力", () => {
     );
   });
 
-  it("状态卡两个操作都使用公共按钮默认外观，避免底色和尺寸分叉", () => {
-    const file = "plugins/project/conversation/ui/SessionStatusOverlay.tsx";
+  it.each([
+    {
+      file: "plugins/project/conversation/ui/SessionStatusOverlay.tsx",
+      names: ["状态卡显示选项", "收起会话状态"],
+      toolbar: false,
+    },
+    {
+      file: "shared/ui/markdown/DiagramPreviewDialog.tsx",
+      names: ["缩小", "放大", "关闭"],
+      toolbar: true,
+    },
+    {
+      file: "shared/ui/markdown/MarkdownTable.tsx",
+      names: ["复制 Markdown", "下载 CSV", "表格预览"],
+      toolbar: true,
+    },
+  ])("$file 的图标操作直接使用公共外观", ({ file, names, toolbar }) => {
     const source = ts.createSourceFile(
       file,
       read(file),
@@ -156,7 +217,7 @@ describe("全应用图标按钮公共能力", () => {
       true,
       ts.ScriptKind.TSX,
     );
-    const labels = new Set(["状态卡显示选项", "收起会话状态"]);
+    const labels = new Set(names);
     const found: string[] = [];
     function visit(node: ts.Node): void {
       if (ts.isJsxOpeningElement(node)) {
@@ -171,10 +232,22 @@ describe("全应用图标按钮公共能力", () => {
           ts.isJsxAttribute(label) &&
           label.initializer &&
           ts.isStringLiteral(label.initializer) &&
-          labels.has(label.initializer.text)
+          labels.has(label.initializer.text) &&
+          !props.some(
+            (prop) =>
+              ts.isJsxAttribute(prop) &&
+              prop.name.getText(source) === "role" &&
+              prop.initializer &&
+              ts.isStringLiteral(prop.initializer) &&
+              prop.initializer.text === "dialog",
+          )
         ) {
           found.push(label.initializer.text);
           expect(node.tagName.getText(source)).toBe("IconButton");
+          if (toolbar)
+            expect(node.attributes.getText(source)).toContain(
+              'appearance="toolbar"',
+            );
           expect(
             props.some(
               (prop) =>
@@ -188,6 +261,7 @@ describe("全应用图标按钮公共能力", () => {
     }
     visit(source);
     expect(found.sort()).toEqual([...labels].sort());
-    expect(read(file)).toContain('<EllipsisIcon className="ui-icon-14" />');
+    if (!toolbar)
+      expect(read(file)).toContain('<EllipsisIcon className="ui-icon-14" />');
   });
 });

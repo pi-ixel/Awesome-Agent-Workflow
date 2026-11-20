@@ -181,4 +181,20 @@ describe("SettingsPage（侧边 Tab 版）", () => {
       '"sessionAutoArchiveEnabled":true',
     );
   });
+
+  it("关闭自动归档也可编辑天数，回车向下取整，清空取下限", async () => {
+    await renderSettingsPage();
+    await openTab("归档管理");
+    const days = () => screen.getByRole("spinbutton", { name: "自动归档闲置天数" });
+    await userEvent.clear(days());
+    await userEvent.type(days(), "15.6{Enter}");
+    expect(days()).toHaveValue(15);
+    await userEvent.click(days());
+    await userEvent.keyboard("{Enter}");
+    expect(days()).toHaveFocus();
+    await userEvent.clear(days());
+    await userEvent.tab();
+    expect(days()).toHaveValue(1);
+    expect(projectPreferences.getState().sessionAutoArchiveEnabled).toBe(false);
+  });
 });

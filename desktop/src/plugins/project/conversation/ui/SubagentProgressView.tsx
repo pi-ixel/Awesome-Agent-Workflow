@@ -1,6 +1,6 @@
+import { Disclosure } from "../../../../shared/ui/Disclosure.tsx";
 import type { SubagentToolPresentation } from "../../../acpRuntime/types.ts";
 import type { SubagentCompaction } from "../../../acpRuntime/types.ts";
-import { ChevronRightIcon } from "../../../../shared/ui/icons.tsx";
 
 export function SubagentProgressView({
   agent,
@@ -58,19 +58,19 @@ export function SubagentProgressView({
         </div>
       )}
       {!!compactions.length && (
-        <details className="group/compaction" open={active}>
-          <summary className="flex cursor-pointer list-none items-center gap-2 hover:text-ink-soft [&::-webkit-details-marker]:hidden">
-            上下文压缩（已应用{" "}
-            {
-              compactions.filter((record) => record.state === "committed")
-                .length
-            }{" "}
-            次）
-            <ChevronRightIcon
-              aria-hidden="true"
-              className="ui-icon-16 shrink-0 transition-transform duration-200 group-open/compaction:rotate-90"
-            />
-          </summary>
+        <Disclosure
+          defaultOpen={active}
+          summary={
+            <>
+              上下文压缩（已应用{" "}
+              {
+                compactions.filter((record) => record.state === "committed")
+                  .length
+              }{" "}
+              次）
+            </>
+          }
+        >
           <ol className="mt-2 space-y-2">
             {compactions.map((record, index) => (
               <li key={record.id}>
@@ -94,7 +94,7 @@ export function SubagentProgressView({
               </li>
             ))}
           </ol>
-        </details>
+        </Disclosure>
       )}
     </div>
   );

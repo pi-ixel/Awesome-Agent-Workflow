@@ -25,18 +25,18 @@ export function FileTreeStickyFolders({
   readonly gitStatusByPath: ReadonlyMap<string, FileTreeGitStatus>;
   readonly root: string;
   readonly handlers: FileTreeRowHandlers;
-  readonly onRevealRow: (item: StickyFolderItem) => void;
+  readonly onRevealRow: (item: StickyFolderItem, stickyIndex: number) => void;
 }) {
   if (items.length === 0) return null;
   return (
     <div className="pointer-events-none sticky top-0 z-10 h-0 overflow-visible px-1">
       <div className="pointer-events-auto overflow-hidden rounded-lg">
-        {items.map((item) => {
+        {items.map((item, stickyIndex) => {
           const row = item.row;
           const handleToggle = (nextRow: FileTreeRow) => {
             handlers.onToggleDirectory(nextRow);
             if (nextRow.expanded) {
-              requestAnimationFrame(() => onRevealRow(item));
+              requestAnimationFrame(() => onRevealRow(item, stickyIndex));
             }
           };
           return (

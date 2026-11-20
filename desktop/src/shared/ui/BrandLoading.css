@@ -14,8 +14,8 @@
 .startup-mark {
   position: relative;
   display: grid;
-  width: 152px;
-  height: 152px;
+  width: calc(var(--ui-icon-unit) * 152);
+  height: calc(var(--ui-icon-unit) * 152);
   place-items: center;
   margin-bottom: 30px;
 }
@@ -24,21 +24,21 @@
   inset: -42px;
   border-radius: 50%;
   background:
-    radial-gradient(ellipse at 35% 35%, rgb(34 211 238 / 12%), transparent 62%),
-    radial-gradient(ellipse at 65% 65%, rgb(168 85 247 / 13%), transparent 65%);
+    radial-gradient(ellipse at 35% 35%, var(--color-brand-halo-cyan), transparent 62%),
+    radial-gradient(ellipse at 65% 65%, var(--color-brand-halo-violet), transparent 65%);
   animation: startup-breathe 3s ease-in-out infinite;
 }
 .startup-logo {
   position: relative;
-  width: 120px;
-  height: 120px;
+  width: calc(var(--ui-icon-unit) * 120);
+  height: calc(var(--ui-icon-unit) * 120);
   object-fit: contain;
-  filter: drop-shadow(0 6px 18px rgb(124 58 237 / 12%));
+  filter: drop-shadow(0 6px 18px var(--color-brand-logo-shadow));
   animation: startup-breathe 3s ease-in-out infinite;
 }
 .startup-name {
   margin: 0;
-  font-size: clamp(24px, 3vw, 34px);
+  font-size: calc(var(--ui-font-size) + clamp(10px, 3vw - 14px, 20px));
   font-weight: 500;
   line-height: 1.3;
   letter-spacing: -0.035em;
@@ -51,7 +51,7 @@
 .startup-caption {
   margin: 20px 0 0;
   color: var(--color-ink-mute);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) - 2px);
   font-weight: 400;
   line-height: 1.6;
   letter-spacing: normal;
@@ -62,19 +62,19 @@
   transform: none;
 }
 .startup-brand--compact .startup-mark {
-  width: 88px;
-  height: 88px;
+  width: calc(var(--ui-icon-unit) * 88);
+  height: calc(var(--ui-icon-unit) * 88);
   margin-bottom: 16px;
 }
 .startup-brand--compact .startup-logo {
-  width: 76px;
-  height: 76px;
+  width: calc(var(--ui-icon-unit) * 76);
+  height: calc(var(--ui-icon-unit) * 76);
 }
 .startup-brand--compact .startup-halo {
   inset: -24px;
 }
 .startup-brand--compact .startup-name {
-  font-size: clamp(18px, 2.4vw, 24px);
+  font-size: calc(var(--ui-font-size) + clamp(4px, 2.4vw - 14px, 10px));
 }
 .startup-brand--compact .startup-caption {
   margin-top: 12px;
@@ -84,25 +84,25 @@
   transform: none;
 }
 .startup-brand--immersive .startup-mark {
-  width: clamp(112px, 16vh, 152px);
-  height: clamp(112px, 16vh, 152px);
+  width: clamp(calc(var(--ui-icon-unit) * 112), calc(16vh + var(--ui-font-size) - 14px), calc(var(--ui-icon-unit) * 152));
+  height: clamp(calc(var(--ui-icon-unit) * 112), calc(16vh + var(--ui-font-size) - 14px), calc(var(--ui-icon-unit) * 152));
   margin-bottom: 24px;
 }
 .startup-brand--immersive .startup-logo {
   width: 88%;
   height: 88%;
-  filter: drop-shadow(0 10px 30px rgb(124 58 237 / 22%));
+  filter: drop-shadow(0 10px 30px var(--color-brand-immersive-shadow));
 }
 .startup-brand--immersive .startup-halo {
   inset: -32px;
 }
 .startup-brand--immersive .startup-name {
-  font-size: clamp(24px, 3.5vw, 42px);
+  font-size: calc(var(--ui-font-size) + clamp(10px, 3.5vw - 14px, 28px));
 }
 .startup-hint {
   margin: 16px 0 0;
   color: var(--color-ink-soft);
-  font-size: 16px;
+  font-size: calc(var(--ui-font-size) + 2px);
   font-weight: 400;
   line-height: 1.8;
   letter-spacing: normal;
@@ -121,8 +121,8 @@
 }
 .startup-pen {
   position: absolute;
-  width: 18px;
-  height: 18px;
+  width: calc(var(--ui-icon-unit) * 18);
+  height: calc(var(--ui-icon-unit) * 18);
   left: 0;
   top: -3px;
   opacity: 0;

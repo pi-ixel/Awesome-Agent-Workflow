@@ -1,5 +1,5 @@
+import { Disclosure } from "../../../../shared/ui/Disclosure.tsx";
 import { useState } from "react";
-import { createPortal } from "react-dom";
 import { ImagePreviewDialog } from "../../../../shared/ui/markdown/MarkdownImage.tsx";
 import { ImageAttachmentThumbnail } from "./ImageAttachmentThumbnail.tsx";
 
@@ -45,24 +45,24 @@ export function MessageAttachments({
           );
         }
         return (
-          <details key={index} className={compact ? undefined : "w-full"}>
-            <summary>
-              {typeof block.type === "string" ? block.type : "未知内容"}
-            </summary>
+          <Disclosure
+            key={index}
+            className={compact ? undefined : "w-full"}
+            summary={typeof block.type === "string" ? block.type : "未知内容"}
+          >
             <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words">
               {JSON.stringify(value, null, 2)}
             </pre>
-          </details>
+          </Disclosure>
         );
       })}
       {preview !== null &&
-        createPortal(
+        (
           <ImagePreviewDialog
             initialIndex={0}
             items={[{ src: preview, alt: "消息图片", filename: "图片" }]}
             onClose={() => setPreview(null)}
-          />,
-          document.body,
+          />
         )}
     </div>
   );

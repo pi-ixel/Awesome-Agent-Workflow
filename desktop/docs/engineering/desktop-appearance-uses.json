@@ -1,0 +1,310 @@
+{
+  "plugins/account/ui/LoginScreen.tsx": [
+    "LoginScreen · <h1>",
+    "LoginScreen · <input>",
+    "LoginScreen · <input>"
+  ],
+  "plugins/agents/enhancements/codeagent/credit/QuotaContent.tsx": [
+    "CreditIcon · 内嵌图形"
+  ],
+  "plugins/agents/ui/AgentsSettings.tsx": [
+    "AgentListCard · <input>",
+    "AgentListCard · <input>",
+    "AgentListCard · <input>",
+    "AgentListCard · <input>",
+    "AgentListCard · <input>"
+  ],
+  "plugins/browser/ui/BrowserPanel.tsx": [
+    "BrowserPanelSession · <input>",
+    "BrowserPanelSession · <input>",
+    "BrowserPanelSession · <input>",
+    "BrowserPanelSession · <input>"
+  ],
+  "plugins/diagnostics/ui/DiagnosticsWindow.tsx": [
+    "DiagnosticsWindow · <input>",
+    "DiagnosticsWindow · <input>",
+    "DiagnosticsWindow · <input>"
+  ],
+  "plugins/diagnostics/ui/LogView.tsx": ["LogView · <input>"],
+  "plugins/diagnostics/ui/ResourceReport.tsx": ["Chart · <svg>"],
+  "plugins/diagnostics/ui/StorageLocationSetting.tsx": [
+    "StorageLocationSetting · <input>"
+  ],
+  "plugins/diagnostics/ui/StorageSettings.tsx": ["ThresholdInput · <input>"],
+  "plugins/diagnostics/ui/perf/MemoryChart.tsx": ["MemoryChart · <svg>"],
+  "plugins/documents/ui/FileAnnotations.tsx": ["FileAnnotations · <textarea>"],
+  "plugins/documents/ui/FileDocumentTools.tsx": [
+    "FileDocumentTools · <input>",
+    "FileDocumentTools · 内嵌图形",
+    "FileDocumentTools · 内嵌图形"
+  ],
+  "plugins/documents/ui/FilePreview.tsx": [
+    "FilePreview/headerInner · 内嵌图形",
+    "专用渲染依赖 · highlight.js/lib/common"
+  ],
+  "plugins/documents/ui/FileTree.tsx": ["FileTree · <input>"],
+  "plugins/documents/ui/MarkdownSourceEditor.tsx": [
+    "专用渲染依赖 · @codemirror/lang-markdown",
+    "专用渲染依赖 · @codemirror/language",
+    "专用渲染依赖 · @codemirror/state",
+    "专用渲染依赖 · @codemirror/view",
+    "专用渲染依赖 · @lezer/highlight"
+  ],
+  "plugins/documents/ui/markdownFind.ts": [
+    "专用渲染依赖 · @codemirror/search",
+    "专用渲染依赖 · @codemirror/view"
+  ],
+  "plugins/project/conversation/ui/AnnotationCards.tsx": [
+    "AnnotationCards · <textarea>"
+  ],
+  "plugins/project/conversation/ui/ChatInput.tsx": [
+    "ChatInput · <textarea>",
+    "StopIcon · 内嵌图形"
+  ],
+  "plugins/project/conversation/ui/InputStatusBar.tsx": [
+    "ContextRing · 内嵌图形"
+  ],
+  "plugins/project/conversation/ui/SessionPerformanceBadge.tsx": [
+    "SessionPerformanceBadge · 内嵌图形"
+  ],
+  "plugins/project/interactions/ui/ElicitationModal.tsx": [
+    "FormCard · <input>",
+    "FormCard · <input>"
+  ],
+  "plugins/project/interactions/ui/QuestionDock.tsx": [
+    "QuestionDock · <input>"
+  ],
+  "plugins/project/ui/ArchiveManagementSection.tsx": [
+    "ArchiveManagementSection · <input>"
+  ],
+  "plugins/project/ui/LegacyAgentDataSection.tsx": [
+    "LegacyAgentDataSection · <input>"
+  ],
+  "plugins/project/ui/ProjectTree.tsx": ["SessionRenameInput · <input>"],
+  "plugins/project/ui/projectHeaders.tsx": [
+    "SessionBar · <h1>",
+    "SessionBar · <input>"
+  ],
+  "plugins/project/usage/UsageSettings.tsx": ["Trend · <canvas>"],
+  "plugins/scheduledTasks/ui/TaskViews.tsx": [
+    "TaskEditor · <input>",
+    "TaskEditor · <input>",
+    "TaskEditor · <textarea>",
+    "TaskWorkspace · <h1>"
+  ],
+  "plugins/skills/ui/SkillLibrary.tsx": ["LibraryPage · <input>"],
+  "plugins/skills/ui/SkillsSourceSettings.tsx": [
+    "SkillsSourceSettings · <input>"
+  ],
+  "plugins/terminal/rendering/terminalLinks.ts": [
+    "专用渲染依赖 · @xterm/xterm"
+  ],
+  "plugins/terminal/rendering/terminalTheme.ts": [
+    "专用渲染依赖 · @xterm/xterm"
+  ],
+  "plugins/terminal/ui/TerminalPanel.tsx": ["TerminalTabChip · role=tab"],
+  "plugins/terminal/ui/TerminalSessionView.tsx": [
+    "专用渲染依赖 · @xterm/addon-clipboard",
+    "专用渲染依赖 · @xterm/addon-fit",
+    "专用渲染依赖 · @xterm/xterm",
+    "专用渲染依赖 · @xterm/xterm/css/xterm.css"
+  ],
+  "plugins/updates/ui/DesktopUpdate.tsx": [
+    "UpdateSettings · <input>",
+    "UpdateSettings · <input>"
+  ],
+  "plugins/workbench/appearance/appearance.ts": [
+    "restore/theme · 主题分支 saved.theme === \"warm\""
+  ],
+  "plugins/workbench/appearance/windowAppearance.ts": [
+    "bindSecondaryWindowAppearance/theme · 主题分支 saved?.theme === \"warm\""
+  ],
+  "plugins/workbench/ui/SettingsPage.tsx": [
+    "SettingsContent · <h1>",
+    "SettingsContent · role=tab"
+  ],
+  "plugins/workbench/ui/right-panel/PanelTabStrip.tsx": [
+    "PanelTabTrigger · role=tab"
+  ],
+  "plugins/workbench/ui/right-panel/TabOverviewPopover.tsx": [
+    "TabOverviewPopover · <input>"
+  ],
+  "plugins/workflow/ui/AiComposeDialog.tsx": ["AiComposeDialog · <textarea>"],
+  "plugins/workflow/ui/DisposePanel.tsx": [
+    "DisposePanel · <textarea>",
+    "DisposePanel · <textarea>"
+  ],
+  "plugins/workflow/ui/DraftPage.tsx": ["DraftPage · <textarea>"],
+  "plugins/workflow/ui/FlowStages.tsx": ["FlowStages · <canvas>"],
+  "plugins/workflow/ui/RunManager.tsx": [
+    "RunManager · <input>",
+    "RunManager/row · <input>"
+  ],
+  "plugins/workflow/ui/WorkflowLauncher.tsx": [
+    "FileList · <input>",
+    "WorkflowLauncher · <input>",
+    "WorkflowLauncher · <input>",
+    "WorkflowLauncher · <textarea>"
+  ],
+  "plugins/workflow/ui/flowStages.css": [
+    "主题分支 · html.theme-warm .wf-flow, html.theme-warm .wf-fx"
+  ],
+  "shared/styles/index.css": [
+    ".annotation-rainbow-border::before mask · #fff",
+    ".annotation-rainbow-border::before mask · #fff",
+    "atrule --shadow-elev-1 · rgb(0 0 0 / 0.4)",
+    "atrule --shadow-elev-2 · rgb(0 0 0 / 0.3)",
+    "atrule --shadow-elev-2 · rgb(0 0 0 / 0.45)",
+    "atrule --shadow-elev-2 · rgb(255 255 255 / 0.06)",
+    "atrule --shadow-elev-3 · rgb(0 0 0 / 0.4)",
+    "atrule --shadow-elev-3 · rgb(0 0 0 / 0.55)",
+    "atrule --shadow-elev-3 · rgb(255 255 255 / 0.08)",
+    "atrule --terminal-bg · #0a0a0a",
+    "atrule --terminal-black · #262626",
+    "atrule --terminal-blue · #0284c7",
+    "atrule --terminal-bright-black · #737373",
+    "atrule --terminal-bright-blue · #0284c7",
+    "atrule --terminal-bright-cyan · #0891b2",
+    "atrule --terminal-bright-green · #16a34a",
+    "atrule --terminal-bright-magenta · #c026d3",
+    "atrule --terminal-bright-red · #dc2626",
+    "atrule --terminal-bright-white · #fafafa",
+    "atrule --terminal-bright-yellow · #ca8a04",
+    "atrule --terminal-cursor · #fafafa",
+    "atrule --terminal-cursor-accent · #0a0a0a",
+    "atrule --terminal-cyan · #0891b2",
+    "atrule --terminal-fg · #fafafa",
+    "atrule --terminal-green · #16a34a",
+    "atrule --terminal-magenta · #c026d3",
+    "atrule --terminal-red · #dc2626",
+    "atrule --terminal-selection-bg · rgb(14 165 233 / 0.26)",
+    "atrule --terminal-selection-inactive-bg · rgb(250 250 250 / 0.16)",
+    "atrule --terminal-white · #e5e5e5",
+    "atrule --terminal-yellow · #ca8a04",
+    "atrule --turn-status-shimmer-soft · rgb(255 255 255 / 0.2)",
+    "atrule --turn-status-shimmer-strong · rgb(255 255 255 / 1)",
+    "html.theme-warm --shadow-elev-2 · rgb(0 0 0 / 0.06)",
+    "html.theme-warm --shadow-elev-2 · rgb(0 0 0 / 0.06)",
+    "html.theme-warm --shadow-elev-2 · rgb(0 0 0 / 0.1)",
+    "html.theme-warm --shadow-elev-3 · rgb(0 0 0 / 0.07)",
+    "html.theme-warm --shadow-elev-3 · rgb(0 0 0 / 0.08)",
+    "html.theme-warm --shadow-elev-3 · rgb(0 0 0 / 0.14)",
+    "html.theme-warm --terminal-bg · #fafafa",
+    "html.theme-warm --terminal-black · #404040",
+    "html.theme-warm --terminal-blue · #0ea5e9",
+    "html.theme-warm --terminal-bright-black · #737373",
+    "html.theme-warm --terminal-bright-blue · #0ea5e9",
+    "html.theme-warm --terminal-bright-cyan · #06b6d4",
+    "html.theme-warm --terminal-bright-green · #22c55e",
+    "html.theme-warm --terminal-bright-magenta · #d946ef",
+    "html.theme-warm --terminal-bright-red · #ef4444",
+    "html.theme-warm --terminal-bright-white · #0a0a0a",
+    "html.theme-warm --terminal-bright-yellow · #eab308",
+    "html.theme-warm --terminal-cursor · #0a0a0a",
+    "html.theme-warm --terminal-cursor-accent · #fafafa",
+    "html.theme-warm --terminal-cyan · #06b6d4",
+    "html.theme-warm --terminal-fg · #0a0a0a",
+    "html.theme-warm --terminal-green · #22c55e",
+    "html.theme-warm --terminal-magenta · #d946ef",
+    "html.theme-warm --terminal-red · #ef4444",
+    "html.theme-warm --terminal-selection-bg · rgb(14 165 233 / 0.32)",
+    "html.theme-warm --terminal-selection-inactive-bg · rgb(14 165 233 / 0.22)",
+    "html.theme-warm --terminal-white · #737373",
+    "html.theme-warm --terminal-yellow · #eab308",
+    "html.theme-warm --turn-status-shimmer-soft · rgb(10 10 10 / 0.22)",
+    "html.theme-warm --turn-status-shimmer-strong · rgb(10 10 10 / 1)"
+  ],
+  "shared/ui/BrandLoading.tsx": ["BrandLoading · 内嵌图形"],
+  "shared/ui/BrandMark.tsx": ["品牌图形 · ../assets/aaw-logo.png"],
+  "shared/ui/Breadcrumb.tsx": ["Breadcrumb · <button>"],
+  "shared/ui/Callout.tsx": ["ToneIcon · 内嵌图形"],
+  "shared/ui/ContextMenu.tsx": [
+    "ContextMenu · <button>",
+    "ContextMenu · 原生 role=menu",
+    "ContextMenu · 原生 role=menu"
+  ],
+  "shared/ui/Disclosure.tsx": [
+    "Disclosure · <details>",
+    "Disclosure · <summary>"
+  ],
+  "shared/ui/IconButton.tsx": ["IconButton · <button>"],
+  "shared/ui/MarkdownView.tsx": [
+    "buildMarkdownComponents/h1 · <h1>",
+    "专用渲染依赖 · @streamdown/cjk",
+    "专用渲染依赖 · @streamdown/math",
+    "专用渲染依赖 · streamdown",
+    "专用渲染依赖 · streamdown"
+  ],
+  "shared/ui/ModalShell.tsx": ["ModalShell/content · aria-modal"],
+  "shared/ui/NavigationRow.tsx": ["NavigationRow · <button>"],
+  "shared/ui/SettingsPageParts.tsx": ["IntegerSettingInput · <input>"],
+  "shared/ui/TextLink.tsx": ["TextLink · <button>"],
+  "shared/ui/UiIcon.tsx": ["UiIcon · <svg>"],
+  "shared/ui/controls.tsx": [
+    "ActionButton · <button>",
+    "Checkbox · <input>",
+    "Checkbox · 内嵌图形",
+    "Listbox · <button>",
+    "Listbox · <button>",
+    "Listbox · role=combobox",
+    "ProgressBar · 原生 role=progressbar",
+    "ToggleSwitch · <input>",
+    "ToggleSwitch · role=switch"
+  ],
+  "shared/ui/controls/ColumnResizer.tsx": ["ColumnResizer · 原生可调分隔线"],
+  "shared/ui/controls/FindBar.tsx": ["FindBar · <input>"],
+  "shared/ui/controls/SegmentedControl.tsx": ["SegmentedControl · <button>"],
+  "shared/ui/controls/UsageMeter.tsx": ["UsageMeter · 原生 role=progressbar"],
+  "shared/ui/diffStyles.ts": [
+    "addedEdge · 差异样式 shadow-[inset_3px_0_0_var(--color-diff-added)]",
+    "addedGutter · 差异样式 bg-diff-added-gutter",
+    "addedInk · 差异样式 text-diff-added-ink",
+    "diffAppearance/add/row · 差异样式 bg-diff-added-row",
+    "diffAppearance/del/row · 差异样式 bg-diff-removed-row",
+    "removedEdge · 差异样式 shadow-[inset_3px_0_0_var(--color-diff-removed)]",
+    "removedGutter · 差异样式 bg-diff-removed-gutter",
+    "removedInk · 差异样式 text-diff-removed-ink"
+  ],
+  "shared/ui/file-icons/fileDisplay.tsx": ["FileDisplayIcon · 内嵌图形"],
+  "shared/ui/markdown/DiagramPreviewDialog.tsx": [
+    "CircleIcon · 内嵌图形",
+    "isTransparentPaint · rgba(0, 0, 0, 0)"
+  ],
+  "shared/ui/markdown/MarkdownImage.tsx": [
+    "ImagePlaceholderIcon · 内嵌图形",
+    "ImagePreviewDialog/downloadActiveImage/link · createElement(a)",
+    "startNativeDownload/link · createElement(a)"
+  ],
+  "shared/ui/markdown/MarkdownTable.tsx": [
+    "downloadText/anchor · createElement(a)"
+  ],
+  "shared/ui/markdown/MermaidBlock.tsx": [
+    "MERMAID_COLOR_CANVAS_SENTINEL · #010203",
+    "MermaidBlock/resolvedTheme · 主题分支 theme === \"warm\"",
+    "createMermaidConfig/background · #2b2b2b",
+    "createMermaidConfig/background · #ffffff",
+    "createMermaidConfig/background · 主题分支 dark",
+    "createMermaidConfig/border · #3d3d3d",
+    "createMermaidConfig/border · #d3d3d3",
+    "createMermaidConfig/border · 主题分支 dark",
+    "createMermaidConfig/infoBg · #1e2739",
+    "createMermaidConfig/infoBg · #ebf4ff",
+    "createMermaidConfig/infoBg · 主题分支 dark",
+    "createMermaidConfig/primaryColor · #363636",
+    "createMermaidConfig/primaryColor · #f4f4f5",
+    "createMermaidConfig/primaryColor · 主题分支 dark",
+    "createMermaidConfig/primaryColor · 主题分支 dark",
+    "createMermaidConfig/subtleText · #737373",
+    "createMermaidConfig/subtleText · #737373",
+    "createMermaidConfig/subtleText · 主题分支 dark",
+    "createMermaidConfig/text · #262626",
+    "createMermaidConfig/text · #d4d4d4",
+    "createMermaidConfig/text · 主题分支 dark",
+    "mermaidColorNormalizeCtx/canvas · createElement(canvas)",
+    "专用渲染依赖 · @streamdown/mermaid",
+    "专用渲染依赖 · mermaid"
+  ],
+  "shared/ui/markdown/deferredCodePlugin.ts": [
+    "专用渲染依赖 · @streamdown/code"
+  ]
+}
