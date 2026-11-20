@@ -32,6 +32,134 @@ fn skill(path: &Path, name: &str) {
 fn action(json: serde_json::Value) -> Action {
     serde_json::from_value(json).unwrap()
 }
+
+#[test]
+fn skill_detail_reads_selected_directory_and_exact_text() {
+    use files::{Request, browse};
+
+    let (_tmp, loc, query) = setup(Provider::CodeAgent);
+    let root = query.projects[0].join(".cac/skills/sample");
+    skill(&root, "sample");
+    let templates = root.join("templates");
+    fs::create_dir(&templates).unwrap();
+    let text = "# 模板\r\n\r\n正文\r\n";
+    fs::write(templates.join("模板.md"), text).unwrap();
+    let catalog = catalog::list(&loc, &query).unwrap();
+    let entry = catalog
+        .entries
+        .iter()
+        .find(|item| item.path == root)
+        .unwrap();
+    let selection = serde_json::from_value(serde_json::to_value(entry).unwrap()).unwrap();
+    let response = browse(
+        &loc,
+        &query,
+        &selection,
+        Request::Directory {
+            path: "templates".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(response).unwrap(),
+        json!({
+            "type": "directory",
+            "entries": [{ "name": "模板.md", "kind": "file", "bytes": text.len() }],
+            "truncated": false
+        })
+    );
+    let response = browse(
+        &loc,
+        &query,
+        &selection,
+        Request::Read {
+            path: "templates/模板.md".into(),
+        },
+    )
+    .unwrap();
+    let response = serde_json::to_value(response).unwrap();
+    assert_eq!(response["type"], "text");
+    assert_eq!(response["text"], text);
+    assert!(response["modifiedAt"].is_u64());
+}
+
+#[test]
+fn skill_detail_rejects_outside_paths_stale_roots_and_unreadable_content() {
+    use files::{Request, browse};
+
+    let (tmp, loc, query) = setup(Provider::CodeAgent);
+    let root = loc.home.join(".cac/skills/sample");
+    skill(&root, "sample");
+    let outside = tmp.path().join("outside.txt");
+    fs::write(&outside, "外部文档").unwrap();
+    fs::write(root.join("binary"), [0, 1, 2]).unwrap();
+    fs::write(root.join("oversize.md"), vec![b'x'; 256 * 1024 + 1]).unwrap();
+    let catalog = catalog::list(&loc, &query).unwrap();
+    let entry = catalog
+        .entries
+        .iter()
+        .find(|item| item.path == root)
+        .unwrap();
+    let identity = serde_json::to_value(entry).unwrap();
+    let selection = serde_json::from_value(identity.clone()).unwrap();
+
+    for path in [
+        outside.clone(),
+        "../outside.txt".into(),
+        "SKILL.md:stream".into(),
+        "binary".into(),
+        "oversize.md".into(),
+    ] {
+        assert!(browse(&loc, &query, &selection, Request::Read { path }).is_err());
+    }
+
+    let mut changed_identity = identity;
+    changed_identity["realPath"] = json!(tmp.path());
+    let changed = serde_json::from_value(changed_identity).unwrap();
+    assert!(
+        browse(
+            &loc,
+            &query,
+            &changed,
+            Request::Read {
+                path: "SKILL.md".into()
+            }
+        )
+        .is_err()
+    );
+
+    let link = root.join("outside-link.txt");
+    #[cfg(unix)]
+    let linked = std::os::unix::fs::symlink(outside, link).is_ok();
+    #[cfg(windows)]
+    let linked = std::os::windows::fs::symlink_file(outside, link).is_ok();
+    if linked {
+        let response = browse(
+            &loc,
+            &query,
+            &selection,
+            Request::Directory {
+                path: PathBuf::new(),
+            },
+        )
+        .unwrap();
+        let response = serde_json::to_value(response).unwrap();
+        assert!(response["entries"].as_array().unwrap().iter().any(|entry| {
+            entry["name"] == "outside-link.txt" && entry["kind"] == "unavailable"
+        }));
+        assert!(
+            browse(
+                &loc,
+                &query,
+                &selection,
+                Request::Read {
+                    path: "outside-link.txt".into()
+                }
+            )
+            .is_err()
+        );
+    }
+}
 fn delete(loc: &Locations, q: &Query, e: &Entry) -> String {
     apply(loc, q, action(json!({"type":"delete","items":[e]})))
         .unwrap()

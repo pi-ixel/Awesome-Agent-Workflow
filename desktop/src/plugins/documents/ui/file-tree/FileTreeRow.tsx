@@ -1,4 +1,4 @@
-import { treeChevronClass, treeRowEnterClass } from "../../../../shared/ui/TreeMotion.tsx";
+import { treeRowEnterClass } from "../../../../shared/ui/TreeMotion.tsx";
 import { focusVisibleRing, rowSelectedClass } from "../../../../shared/ui/controls.tsx";
 /**
  * 文件树单行渲染（对齐 ZCode WorkspaceFileTreeRowView.tsx:210-333；token
@@ -7,7 +7,7 @@ import { focusVisibleRing, rowSelectedClass } from "../../../../shared/ui/contro
  *
  * - 行高 28px，选中底色和键盘焦点复用共享变量；
  * - 左缩进 = depth*12px + 8px（CSS 变量驱动），depth>0 画层级引导线；
- * - 目录无文件夹图标，只有 size-3 ChevronRight（展开 rotate-90）；
+ * - 文件夹图标表示目录的开合状态；
  * - Git：行名全色、行尾字母 /70（无定宽列）、目录圆点 /60（loading 时隐藏圆点）；
  * - deleted 虚拟行不可拖拽、点击/Enter 只选中不打开。
  */
@@ -16,11 +16,9 @@ import {
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { ChevronRightIcon } from "../../../../shared/ui/icons.tsx";
 import { AlertCircleIcon } from "../../../../shared/ui/file-icons/icons.tsx";
 import { Spinner } from "../../../../shared/ui/controls.tsx";
-import { FileDisplayIcon } from "../../../../shared/ui/file-icons/fileDisplay.tsx";
-import { resolveIconName } from "../../../../shared/ui/file-icons/fileDisplayHelpers.ts";
+import { FileEntryLabel } from "../../../../shared/ui/file-icons/FileEntryLabel.tsx";
 import { FILE_TREE_DRAG_MIME } from "./constants.ts";
 import { getHierarchyGuideStyle } from "./hierarchyGuides.ts";
 import { buildFileMentionMarkdown } from "./helpers.ts";
@@ -31,7 +29,6 @@ import {
   getGitStatusTextClass,
   GIT_STATUS_LABELS,
 } from "./statusStyles.ts";
-import { FileTreeRowName } from "./RowName.tsx";
 import type { FileTreeGitStatus, FileTreeRow } from "./model.ts";
 
 export interface FileTreeRowHandlers {
@@ -73,8 +70,6 @@ export function FileTreeRow({
     "--workspace-file-tree-depth": row.depth,
   } as CSSProperties;
   const guideStyle = getHierarchyGuideStyle(row.depth);
-  // 文件图标：内联彩色 SVG（16 viewBox 品牌色线稿）；目录无图标只留 chevron。
-  const fileIconName = isDirectory ? null : resolveIconName(row.path);
   const statusLabel = gitStatus ? GIT_STATUS_LABELS[gitStatus] : null;
   const indicator = gitStatus ? getGitStatusIndicator(gitStatus) : null;
   const indicatorClass = gitStatus
@@ -181,26 +176,11 @@ export function FileTreeRow({
           style={guideStyle}
         />
       ) : null}
-      {isDirectory ? (
-        <span className="flex ui-icon-16 shrink-0 items-center justify-center text-ink-subtle">
-          <ChevronRightIcon
-            aria-hidden="true"
-            className={`ui-icon-12 text-ink-subtlest ${treeChevronClass} ${
-              row.expanded ? "rotate-90" : ""
-            }`}
-          />
-        </span>
-      ) : null}
-      <span className="flex min-w-0 flex-1 items-center gap-1.5">
-        {fileIconName ? (
-          <FileDisplayIcon name={fileIconName} className="ui-icon-16 shrink-0" />
-        ) : null}
-        <FileTreeRowName
-          name={row.name}
-          className={`min-w-0 flex-1 truncate ${nameStatusClass ?? ""}`}
-          slashClassName="mx-1 text-ink-subtlest"
-        />
-      </span>
+      <FileEntryLabel
+        name={row.name}
+        folder={isDirectory ? (row.expanded ? "open" : "closed") : undefined}
+        nameClassName={nameStatusClass ?? undefined}
+      />
       {indicator !== null && statusLabel !== null ? (
         <span
           data-hint={statusLabel}

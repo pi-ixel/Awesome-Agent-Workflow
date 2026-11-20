@@ -15,6 +15,7 @@ import {
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
+import { FileEntryLabel } from "../../../shared/ui/file-icons/FileEntryLabel.tsx";
 import {
   changeKey,
   createGitRevealCursor,
@@ -22,11 +23,7 @@ import {
   type GitRevealCursor,
 } from "../review/review.ts";
 import { createGitDiffCache } from "../diff/diffCache.ts";
-import {
-  ChevronDownIcon,
-  ChevronRightIcon,
-  FolderGlyph,
-} from "../../../shared/ui/icons.tsx";
+import { ChevronDownIcon } from "../../../shared/ui/icons.tsx";
 import { ColumnResizer } from "../../../shared/ui/controls/ColumnResizer.tsx";
 import { reviewRailWidths } from "../config.ts";
 import { GitReviewDiff } from "./GitReviewDiff.tsx";
@@ -483,19 +480,12 @@ function GitFileTree({
             <NavigationRow
               layout="tree"
               aria-expanded={isOpen}
+              data-hint={`${prefix}${name}`}
               onClick={() =>
                 toggleFolder(expanded, setExpanded, `${prefix}${name}`)
               }
             >
-              <span
-                aria-hidden={true}
-                className={`shrink-0 text-ink-faint ${treeChevronClass}`}
-                style={{ transform: isOpen ? "rotate(90deg)" : "rotate(0deg)" }}
-              >
-                <ChevronRightIcon className="ui-icon-12" />
-              </span>
-              <FolderGlyph isExpanded={isOpen} />
-              <span className="min-w-0 flex-1 truncate">{name}</span>
+              <FileEntryLabel name={name} folder={isOpen ? "open" : "closed"} />
             </NavigationRow>
             <TreeBranch open={isOpen}>
               <div className="ml-3 border-l border-line pl-2">
@@ -524,9 +514,7 @@ function GitFileTree({
           className={red || changes.some((c) => c.path === path && c.source === "conflict") ? "text-danger-ink" : undefined}
           onClick={() => onSelect(path)}
         >
-          <span className="min-w-0 flex-1 truncate">
-            {path.slice(prefix.length)}
-          </span>
+          <FileEntryLabel name={path.slice(prefix.length)} />
           <GitLineStats changes={changes.filter((c) => c.path === path)} />
         </NavigationRow>
       ))}

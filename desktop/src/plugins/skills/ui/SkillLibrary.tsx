@@ -28,9 +28,9 @@ import { SkillPackageActions } from "./SkillPackageActions.tsx";
 import {
   SelectableSkillCard,
   SkillCard,
-  SkillDetail,
   SkillGroup,
 } from "./SkillCards.tsx";
+import { SkillDetail } from "./SkillDetail.tsx";
 import { projectGroups, skillKey } from "./skillGroups.ts";
 import type { SkillPackageManager } from "../types.ts";
 
@@ -459,9 +459,12 @@ function LibraryPage(
       </fieldset>
       {catalog && detail && !pending && (
         <SkillDetail
+          key={skillKey(detail)}
           skill={detail}
           catalog={catalog}
           actions={actions}
+          query={scan.query}
+          readFiles={library?.files}
           message={reports.join("\n")}
           onClose={() => setDetail(null)}
         />

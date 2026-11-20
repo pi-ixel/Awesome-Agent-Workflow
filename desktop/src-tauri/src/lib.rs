@@ -186,6 +186,7 @@ pub fn run() {
             skill_library::skill_library_list,
             skill_library::skill_library_candidates,
             skill_library::skill_library_change,
+            skill_library::skill_library_files,
             commands::read_text_file,
             commands::write_text_file,
             commands::user_data_dir,

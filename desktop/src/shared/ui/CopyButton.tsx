@@ -29,6 +29,9 @@ export interface CopyButtonProps {
   readonly getText: () => string;
   /** 无障碍名称，缺省「复制」。 */
   readonly label?: string;
+  /** 紧凑描边规格同时显示复制图标和文案。 */
+  readonly appearance?: "plain" | "outlined";
+  readonly copiedLabel?: string;
   /** 图标模式：静息态只显示图标（反馈文案仍以文字出现）。 */
   readonly iconOnly?: boolean;
   readonly icon?: ReactNode;
@@ -49,6 +52,8 @@ const COPY_FEEDBACK_TIMEOUT_MS = 2_000;
 export function CopyButton({
   getText,
   label = "复制",
+  appearance = "plain",
+  copiedLabel = "已复制",
   iconOnly = false,
   icon,
   tone = "faint",
@@ -94,21 +99,32 @@ export function CopyButton({
       ? "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
       : "";
 
+  const isOutlined = !iconOnly && appearance === "outlined";
   const sizeClass = iconOnly
     ? size === "md"
       ? "rounded-lg"
       : "rounded"
-    : "min-h-7 px-1.5 py-0.5 text-ui-sm";
+    : isOutlined
+      ? ""
+      : "min-h-7 px-1.5 py-0.5 text-ui-sm";
 
   const classes = `shrink-0 transition-[color,background-color,opacity] ${sizeClass} ${revealClass} ${
     state === "done"
       ? "text-ok-ink! hover:text-ok-ink!"
       : state === "failed"
         ? "text-danger-ink! hover:text-danger-ink!"
-        : `${tone === "soft" ? "text-ink-soft" : tone === "muted" ? "text-ink-mute" : "text-ink-faint"} hover:bg-raised hover:text-ink-soft`
+        : isOutlined
+          ? ""
+          : `${tone === "soft" ? "text-ink-soft" : tone === "muted" ? "text-ink-mute" : "text-ink-faint"} hover:bg-raised hover:text-ink-soft`
   }`;
   const feedback =
-    state === "done" ? "已复制" : state === "failed" ? "复制失败" : "";
+    state === "done" ? copiedLabel : state === "failed" ? "复制失败" : "";
+  const glyph =
+    state === "done" ? (
+      <CheckIcon className="ui-icon-14 shrink-0" />
+    ) : (
+      (icon ?? <CopyIcon className="ui-icon-14 shrink-0" />)
+    );
   const buttonProps = {
     "aria-label": label,
     "data-hint": feedback || label,
@@ -122,11 +138,7 @@ export function CopyButton({
           {...buttonProps}
           iconSize={size === "md" ? "standard" : "compact"}
         >
-          {state === "done" ? (
-            <CheckIcon className="ui-icon-14" />
-          ) : (
-            (icon ?? <CopyIcon className="ui-icon-14" />)
-          )}
+          {glyph}
         </IconButton>
         {feedback && (
           <span className="sr-only" aria-live="polite">
@@ -137,7 +149,12 @@ export function CopyButton({
     );
   }
   return (
-    <ActionButton tone="ghost" {...buttonProps}>
+    <ActionButton
+      tone={isOutlined ? "secondary" : "ghost"}
+      size={isOutlined ? "compact" : undefined}
+      {...buttonProps}
+    >
+      {isOutlined && glyph}
       {feedback ? (
         <span aria-live="polite">{feedback}</span>
       ) : (

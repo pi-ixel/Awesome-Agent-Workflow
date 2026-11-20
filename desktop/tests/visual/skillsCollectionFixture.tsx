@@ -5,7 +5,10 @@ import {
   createTestSkills,
   skillsWorkbenchFixture,
 } from "../helpers/skills.tsx";
-import type { SkillCatalog } from "../../src/plugins/host/types.ts";
+import type {
+  NativeSkillLibrary,
+  SkillCatalog,
+} from "../../src/plugins/host/types.ts";
 
 export async function createSkillsCollection() {
   const ctx = new Context();
@@ -14,6 +17,29 @@ export async function createSkillsCollection() {
   const project = "D:/release/checklists";
   const source = project + "/.codeagent/skills";
   const name = "发布准备和回滚预案的完整审查";
+  const preview =
+    "---\nname: release-review\n---\n# 发布检查\n\n核对发布产物并评估回滚预案。\n\n## 验收记录\n\n| 项目 | 状态 |\n| --- | --- |\n| 发布产物 | 待核对 |";
+  const files: NonNullable<NativeSkillLibrary["files"]> = (
+    _query,
+    _skill,
+    request,
+  ) => {
+    if (request.type === "directory") {
+      return Promise.resolve({
+        type: "directory",
+        truncated: false,
+        entries: [
+          { name: "SKILL.md", kind: "file", bytes: 168 },
+          { name: "mcp.json", kind: "file", bytes: 23 },
+        ],
+      });
+    }
+    return Promise.resolve({
+      type: "text",
+      text: request.path === "SKILL.md" ? preview : '{"server":"workspace"}\n',
+      modifiedAt: Date.UTC(2026, 10, 19, 6, 30),
+    });
+  };
   const catalog: SkillCatalog = {
     profile: null,
     profiles: [],
@@ -34,7 +60,7 @@ export async function createSkillsCollection() {
         path: source + "/review",
         description: "审查发布准备",
         realPath: source + "/review",
-        preview: "# 发布检查\n\n核对发布产物并评估回滚预案。",
+        preview,
         status: "正常",
         kind: "directory",
         isLink: false,
@@ -79,6 +105,7 @@ export async function createSkillsCollection() {
         list: () => Promise.resolve(catalog),
         candidates: () => Promise.resolve([]),
         change: () => Promise.resolve([]),
+        files,
       },
     },
   } as unknown as Context["host"]);

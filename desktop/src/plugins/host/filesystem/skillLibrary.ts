@@ -53,8 +53,25 @@ export type SkillAction =
     }
   | { type: "delete"; items: Pick<NativeSkill, "name" | "path" | "revision">[] }
   | { type: "restore" | "purge"; ids: string[] };
+export type SkillFileRequest = {
+  type: "directory" | "read";
+  path: string;
+};
+export interface SkillFileRow {
+  name: string;
+  kind: "directory" | "file" | "unavailable";
+  bytes: number | null;
+}
+export type SkillFileResponse =
+  | { type: "directory"; entries: SkillFileRow[]; truncated: boolean }
+  | { type: "text"; text: string; modifiedAt: number | null };
 export interface NativeSkillLibrary {
   candidates(from: string): Promise<string[]>;
   list(query: SkillQuery): Promise<SkillCatalog>;
   change(query: SkillQuery, action: SkillAction): Promise<string[]>;
+  files?: (
+    query: SkillQuery,
+    skill: Pick<NativeSkill, "source" | "path" | "realPath">,
+    request: SkillFileRequest,
+  ) => Promise<SkillFileResponse>;
 }

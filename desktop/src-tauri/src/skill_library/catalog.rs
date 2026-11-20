@@ -193,7 +193,7 @@ fn icode(loc: &Locations, query: &Query, result: &mut Catalog) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn list(loc: &Locations, query: &Query) -> Result<Catalog> {
+pub(super) fn discover_sources(loc: &Locations, query: &Query) -> Result<Catalog> {
     let mut result = Catalog {
         profiles: vec![],
         profile: None,
@@ -213,6 +213,11 @@ pub(super) fn list(loc: &Locations, query: &Query) -> Result<Catalog> {
             source.can_import = source.kind == Kind::Directory;
         }
     }
+    Ok(result)
+}
+
+pub(super) fn list(loc: &Locations, query: &Query) -> Result<Catalog> {
+    let mut result = discover_sources(loc, query)?;
     for root in &result.sources {
         if root.kind == Kind::Inline {
             continue;

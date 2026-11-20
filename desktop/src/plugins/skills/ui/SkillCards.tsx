@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import type { NativeSkill, SkillCatalog } from "../../host/types.ts";
+import type { NativeSkill } from "../../host/types.ts";
 import { pathName } from "../../../shared/panelPaths.ts";
 import { ActionButton, DangerButton, focusVisibleRing } from "../../../shared/ui/controls.tsx";
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
@@ -15,10 +15,7 @@ import {
   GlobeIcon,
   SkillIcon,
   TrashIcon,
-  XIcon,
 } from "../../../shared/ui/icons.tsx";
-import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
-import { DocumentPreview } from "../../../shared/ui/DocumentPreview.tsx";
 
 export function SkillGroup({
   project,
@@ -67,12 +64,12 @@ export function SkillGroup({
     </section>
   );
 }
-interface Actions {
+export interface Actions {
   open: (skill: NativeSkill) => void;
   remove: (skill: NativeSkill) => void;
   busy: boolean;
 }
-function ActionsRow({
+export function ActionsRow({
   skill,
   actions,
   onDetail,
@@ -174,7 +171,7 @@ function ActionsRow({
   const button =
     "flex items-center gap-2.5 px-2 py-1.5 text-left";
   return (
-    <div className="mt-auto flex shrink-0 flex-wrap gap-1 border-t border-line pt-2 text-xs sm:flex-col">
+    <div className="flex shrink-0 flex-wrap gap-1 border-t border-line pt-2 text-ui-sm sm:flex-col">
       <ActionButton tone="ghost" className={button} onClick={() => void copyPath()}>
         {copyIcon}复制路径
       </ActionButton>
@@ -270,134 +267,5 @@ export function SkillCard({
       </div>
       <ActionsRow skill={skill} actions={actions} onDetail={onDetail} />
     </article>
-  );
-}
-export function SkillDetail({
-  skill,
-  catalog,
-  actions,
-  onClose,
-  message,
-}: {
-  skill: NativeSkill;
-  catalog: SkillCatalog;
-  actions: Actions;
-  onClose: () => void;
-  message: string;
-}) {
-  const source = catalog.sources.find((s) => s.path === skill.source);
-  const shared =
-    skill.kind !== "inline" &&
-    catalog.entries.some(
-      (other) => other.path !== skill.path && other.realPath === skill.realPath,
-    );
-  const isInline = skill.kind === "inline";
-  const project = source?.project ? pathName(source.project) : "全局技能";
-  const kind = isInline
-    ? "配置定义"
-    : skill.kind === "package"
-      ? "插件包"
-      : skill.isLink
-        ? "符号链接"
-        : "目录技能";
-  const documentName = isInline ? "配置定义" : "SKILL.md";
-  return (
-    <ModalShell size="preview" label="技能详情" onDismiss={onClose}>
-      <header className="flex shrink-0 items-center justify-between border-b border-line px-5 py-2.5">
-        <h2 className="flex min-w-0 items-center gap-2 text-xs text-ink-mute">
-          <SkillIcon className="ui-icon-16" />
-          <span className="truncate">{project}</span>
-          <span aria-hidden="true">/</span>
-          <span className="shrink-0">技能详情</span>
-        </h2>
-        <IconButton aria-label="关闭技能详情" onClick={onClose}>
-          <XIcon className="ui-icon-16" />
-        </IconButton>
-      </header>
-      <div className="shrink-0 px-5 py-4 sm:px-7 sm:py-5">
-        <h3
-          data-hint={skill.name}
-          className="truncate text-ui-settings-title-lg font-semibold tracking-tight"
-        >
-          {skill.name}
-        </h3>
-        {skill.description && (
-          <p
-            data-hint={skill.description}
-            className="mt-1.5 line-clamp-2 max-w-[90ch] whitespace-pre-line break-words text-sm text-ink-soft"
-          >
-            {skill.description}
-          </p>
-        )}
-      </div>
-      <div className="flex min-h-0 flex-1 flex-col-reverse border-t border-line sm:grid sm:grid-cols-[minmax(0,1fr)_clamp(13rem,23%,18rem)]">
-        <DocumentPreview
-          name={documentName}
-          text={skill.preview}
-          rawOnly={isInline}
-          emptyBody={<p className="text-xs text-ink-mute">此文件仅包含技能元数据，可切换到原文查看。</p>}
-        />
-        <aside
-          aria-label="技能信息"
-          className="flex min-h-0 min-w-0 flex-col gap-2 border-b border-line bg-base px-4 py-3 sm:gap-3 sm:border-b-0 sm:border-l sm:px-5 sm:py-4"
-        >
-          <h4 className="hidden text-sm font-semibold sm:block">技能信息</h4>
-          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-xs [&_dt]:text-ink-mute sm:block sm:[&_dd]:mt-0.5 sm:[&_dt:not(:first-child)]:mt-2.5 [@media(max-height:760px)]:sm:grid [@media(max-height:760px)]:sm:[&_dt:not(:first-child)]:mt-0 [@media(max-height:760px)]:sm:[&_dd]:mt-0">
-            <dt>所属项目</dt>
-            <dd className="truncate" data-hint={source?.project ?? undefined}>
-              {project}
-            </dd>
-            <dt>来源</dt>
-            <dd className="break-words">
-              {source?.label} · {kind}
-            </dd>
-            <dt>使用次数</dt>
-            <dd>{skill.usageCount ?? "未知"}</dd>
-            <dt>技能位置</dt>
-            <dd
-              className="line-clamp-2 break-all font-mono"
-              data-hint={skill.path}
-            >
-              {skill.path}
-            </dd>
-            {skill.isLink && (
-              <>
-                <dt>链接目标</dt>
-                <dd
-                  className="line-clamp-2 break-all font-mono"
-                  data-hint={skill.realPath}
-                >
-                  {skill.realPath}
-                </dd>
-              </>
-            )}
-            {!["正常", "配置内定义"].includes(skill.status) && (
-              <>
-                <dt>状态</dt>
-                <dd
-                  className="line-clamp-2 text-danger-ink"
-                  data-hint={skill.status}
-                >
-                  {skill.status}
-                </dd>
-              </>
-            )}
-          </dl>
-          {shared && (
-            <p className="text-xs text-ink-mute">其他来源也引用这个目录。</p>
-          )}
-          {message && (
-            <p
-              role="status"
-              className="line-clamp-2 break-all text-xs"
-              data-hint={message}
-            >
-              {message}
-            </p>
-          )}
-          <ActionsRow skill={skill} actions={actions} />
-        </aside>
-      </div>
-    </ModalShell>
   );
 }
