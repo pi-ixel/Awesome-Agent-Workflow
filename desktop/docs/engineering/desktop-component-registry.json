@@ -279,12 +279,6 @@
     },
     "targets": []
   },
-  "plugins/documents/ui/file-tree/RowName.tsx": {
-    "definitions": {
-      "导航与列表": ["FileTreeRowName"]
-    },
-    "targets": []
-  },
   "plugins/documents/ui/workbench.tsx": {
     "definitions": {
       "提示与确认": ["apply/overlays/\"documents-dialogs\"/View"],
@@ -899,9 +893,15 @@
     "definitions": {
       "命令按钮": ["ActionsRow"],
       "选择控件": ["SelectableSkillCard"],
-      "布局与操纵": ["SkillCard", "SkillDetail"],
+      "布局与操纵": ["SkillCard"],
       "图标与内容标识": ["SkillCardIcon"],
       "导航与列表": ["SkillGroup"]
+    },
+    "targets": []
+  },
+  "plugins/skills/ui/SkillDetail.tsx": {
+    "definitions": {
+      "布局与操纵": ["SkillDetail"]
     },
     "targets": []
   },
@@ -1642,6 +1642,12 @@
   "shared/ui/feedback.ts": {
     "definitions": {
       "布局与操纵": ["Feedback"]
+    },
+    "targets": []
+  },
+  "shared/ui/file-icons/FileEntryLabel.tsx": {
+    "definitions": {
+      "导航与列表": ["FileEntryLabel"]
     },
     "targets": []
   },

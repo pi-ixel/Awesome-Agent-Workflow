@@ -221,6 +221,14 @@ export class DesktopHost implements HostService {
               this.resources.run(() =>
                 this.invoke("skill_library_change", { query, action }),
               ),
+            files: (query, { source, path, realPath }, request) =>
+              this.resources.run(() =>
+                this.invoke("skill_library_files", {
+                  query,
+                  skill: { source, path, realPath },
+                  request,
+                }),
+              ),
           }
         : undefined,
       pathExists,

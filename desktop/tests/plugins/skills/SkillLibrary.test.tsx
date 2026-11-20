@@ -41,6 +41,120 @@ const catalog: SkillCatalog = {
   trash: [],
   warnings: [],
 };
+
+it("详情浏览真实目录，在同一弹窗切换并复制完整原文", async () => {
+  const user = userEvent.setup();
+  const main = "---\r\nname: sample\r\n---\r\n# 真正文\r\n\r\n## 审查\r\n";
+  const example = '{"enabled":true}\r\n';
+  const files = vi.fn<NonNullable<NativeSkillLibrary["files"]>>(
+    (_query, _entry, request) => {
+      if (request.type === "directory") {
+        return Promise.resolve({
+          type: "directory",
+          truncated: false,
+          entries:
+            request.path === "templates"
+              ? [{ name: "example.json", kind: "file", bytes: 18 }]
+              : [
+                  { name: "templates", kind: "directory", bytes: null },
+                  { name: "SKILL.md", kind: "file", bytes: main.length },
+                  { name: "external", kind: "unavailable", bytes: null },
+                ],
+        });
+      }
+      return Promise.resolve({
+        type: "text",
+        text: request.path === "SKILL.md" ? main : example,
+        modifiedAt: Date.UTC(2026, 10, 20),
+      });
+    },
+  );
+  render(
+    <SkillLibrary
+      library={{
+        list: () => Promise.resolve(catalog),
+        candidates: () => Promise.resolve([]),
+        change: () => Promise.resolve([]),
+        files,
+      }}
+      provider="codeagent"
+      storage={window.localStorage}
+      knownProjects={() => []}
+      pick={() => Promise.resolve(null)}
+      reveal={() => Promise.resolve()}
+    />,
+  );
+  const opener = await screen.findByRole("button", {
+    name: "查看 sample 详情",
+  });
+  await user.click(opener);
+  const dialog = within(screen.getByRole("dialog", { name: "技能详情" }));
+  expect(
+    await dialog.findByRole("region", { name: "SKILL.md 正文" }),
+  ).toBeVisible();
+  const copy = dialog.getByRole("button", { name: "复制 SKILL.md" });
+  const idleGlyph = copy.querySelector("svg path")?.getAttribute("d");
+  expect(idleGlyph).toBeTruthy();
+  await user.click(copy);
+  expect(await navigator.clipboard.readText()).toBe(main);
+  expect(copy).toHaveTextContent("已复制 SKILL.md");
+  expect(copy.querySelector("svg path")?.getAttribute("d")).not.toBe(idleGlyph);
+  await user.click(dialog.getByRole("button", { name: "原文" }));
+  const original = dialog.getByRole("region", { name: "SKILL.md 原文" });
+  expect(original.querySelector("pre[aria-hidden=true]")).toHaveTextContent(
+    "1 2 3 4 5 6 7",
+  );
+  expect(dialog.getByRole("button", { name: /external/ })).toBeDisabled();
+  await user.click(dialog.getByRole("button", { name: "templates" }));
+  await user.click(await dialog.findByRole("button", { name: /example.json/ }));
+  expect(
+    await dialog.findByRole("region", { name: "templates/example.json 原文" }),
+  ).toHaveTextContent(example.trim());
+  expect(dialog.queryByRole("group", { name: "文档显示方式" })).toBeNull();
+  expect(dialog.getByText("最近更新")).toBeInTheDocument();
+  expect(files).toHaveBeenCalledWith(
+    { provider: "codeagent", profile: null, projects: [] },
+    expect.objectContaining({ path: skill.path, realPath: skill.realPath }),
+    { type: "read", path: "templates/example.json" },
+  );
+  await user.keyboard("{Escape}");
+  expect(opener).toHaveFocus();
+});
+
+it("配置内技能只展示当前定义且不请求目录文件", async () => {
+  const files = vi.fn<NonNullable<NativeSkillLibrary["files"]>>();
+  const inline = {
+    ...skill,
+    kind: "inline" as const,
+    preview: "name: sample\ndescription: 样例",
+    status: "配置内定义",
+  };
+  render(
+    <SkillLibrary
+      library={{
+        list: () => Promise.resolve({ ...catalog, entries: [inline] }),
+        candidates: () => Promise.resolve([]),
+        change: () => Promise.resolve([]),
+        files,
+      }}
+      provider="icode"
+      storage={window.localStorage}
+      knownProjects={() => []}
+      pick={() => Promise.resolve(null)}
+      reveal={() => Promise.resolve()}
+    />,
+  );
+  await userEvent.click(
+    await screen.findByRole("button", { name: "查看 sample 详情" }),
+  );
+  const dialog = within(screen.getByRole("dialog", { name: "技能详情" }));
+  expect(
+    dialog.getByRole("region", { name: "配置定义 原文" }),
+  ).toHaveTextContent("name: sample");
+  expect(dialog.getByRole("button", { name: "定位配置" })).toBeVisible();
+  expect(dialog.queryByText("目录文件")).toBeNull();
+  expect(files).not.toHaveBeenCalled();
+});
 it("回收站卡片悬浮显示描述，缺少描述时不显示路径", async () => {
   const data = {
     ...catalog,

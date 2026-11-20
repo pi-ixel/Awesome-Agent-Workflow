@@ -102,8 +102,16 @@ test("Git 变更树在双主题与三档字号下保留当前文件、展开状�
   const tree = review.getByRole("complementary", { name: "Git 文件导航" });
   const folder = tree.getByRole("button", { name: "src", exact: true });
   const leaf = tree.getByRole("button", { name: /^定位 src\// });
+  const folderGlyph = folder.locator("svg");
+  await expect(folderGlyph).toHaveCount(1);
+  const closedDrawing = await folderGlyph.locator("path").getAttribute("d");
   await folder.press("Enter");
   await expect(folder).toHaveAttribute("aria-expanded", "true");
+  await expect(folderGlyph.locator("path")).not.toHaveAttribute(
+    "d",
+    closedDrawing!,
+  );
+  await expect(leaf.locator("svg")).toHaveCount(1);
   await folder.press("Tab");
   await expect(leaf).toBeFocused();
   await review.keyboard.press("Enter");
@@ -118,6 +126,10 @@ test("Git 变更树在双主题与三档字号下保留当前文件、展开状�
     await font.press("Enter");
     await expect(leaf).toHaveAttribute("aria-current", "true");
     await expect(folder).toHaveAttribute("aria-expanded", "true");
+    expect((await folderGlyph.boundingBox())!.width).toBeCloseTo(
+      (16 * px) / 14,
+      1,
+    );
     await expect(leaf).toHaveCSS("font-size", px - 2 + "px");
     await expect
       .poll(async () => color(leaf, "background-color"))
@@ -241,6 +253,69 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
   await expect(
     collections.getByRole("button", { name: "选择 旧版发布检查" }),
   ).toBeVisible();
+});
+
+test("技能详情宽屏并列大纲与技能信息，窄屏仍可浏览真实文件区域", async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(60_000);
+  await page.goto("/tests/visual/uiScaleFixture.html");
+  const skills = await context.newPage();
+  await skills.setViewportSize({ width: 1360, height: 900 });
+  await skills.goto("/tests/visual/sidebarTypographyFixture.html?collections");
+  const title = "发布准备和回滚预案的完整审查";
+  const opener = skills.getByRole("button", { name: `查看 ${title} 详情` });
+  await opener.press("Enter");
+  const detail = skills.getByRole("dialog", { name: "技能详情" });
+  const info = detail.getByRole("complementary", { name: "技能信息" });
+  const outline = detail.getByRole("navigation", { name: "文档目录" });
+  const section = outline.getByRole("button", { name: "验收记录" });
+  const original = detail.getByRole("button", { name: "原文", exact: true });
+  const copy = detail.getByRole("button", { name: "复制 SKILL.md" });
+  await expect(info).toBeVisible();
+  await expect(outline).toBeVisible();
+  await expect(copy).toBeVisible();
+  await expect(copy).toHaveCSS("border-top-width", "1px");
+  await expect(copy.locator("svg")).toHaveCount(1);
+  const heading = detail.getByRole("heading", { name: title });
+  for (const [theme, size] of appearanceSteps) {
+    await selectAppearance(page, theme, size);
+    await expect(heading).toHaveCSS("font-size", size + 16 + "px");
+    await expect(info).toBeVisible();
+    await expect(section).toBeVisible();
+  }
+  await section.click();
+  await expect(section).toHaveAttribute("aria-current", "location");
+  await expect(
+    detail.getByRole("heading", { name: "验收记录" }),
+  ).toBeInViewport();
+  await original.click();
+  await expect(
+    detail.getByRole("region", { name: "SKILL.md 原文" }),
+  ).toContainText("name: release-review");
+  await expect(outline).toBeHidden();
+
+  await skills.setViewportSize({ width: 390, height: 760 });
+  await expect(info).toBeHidden();
+  const inspectorToggle = detail.getByRole("button", {
+    name: "技能信息与文件",
+  });
+  await inspectorToggle.press("Enter");
+  await expect(info).toBeVisible();
+  await info.getByRole("button", { name: /mcp.json/ }).press("Enter");
+  await expect(info).toBeHidden();
+  await expect(inspectorToggle).toBeFocused();
+  await expect(
+    detail.getByRole("region", { name: "mcp.json 原文" }),
+  ).toContainText('"server":"workspace"');
+  await expect(detail.getByRole("button", { name: "复制原文" })).toBeVisible();
+  await expect(
+    detail.getByRole("group", { name: "文档显示方式" }),
+  ).toBeHidden();
+  await skills.keyboard.press("Escape");
+  await expect(detail).toBeHidden();
+  await expect(opener).toBeFocused();
 });
 
 test("业务列表的工作流卡在窄栏放得下确认按钮，并保留焦点和打开操作", async ({

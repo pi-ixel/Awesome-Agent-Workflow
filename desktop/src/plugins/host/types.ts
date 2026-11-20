@@ -290,7 +290,16 @@ export type AccountHost = Pick<
 >;
 
 import type { NativeSkillLibrary } from "./filesystem/skillLibrary.ts";
-export type { NativeSkillLibrary, SkillProvider, SkillCatalog, SkillQuery, SkillAction, NativeSkill } from "./filesystem/skillLibrary.ts";
+export type {
+  NativeSkillLibrary,
+  SkillProvider,
+  SkillCatalog,
+  SkillQuery,
+  SkillAction,
+  NativeSkill,
+  SkillFileRequest,
+  SkillFileResponse,
+} from "./filesystem/skillLibrary.ts";
 export type SkillFiles = Pick<
   HostRuntime,
   "userDataDir" | "listDirNames" | "pathExists" | "copyDir" | "writeTextFile"

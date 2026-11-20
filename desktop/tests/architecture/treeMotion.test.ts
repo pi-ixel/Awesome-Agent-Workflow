@@ -31,6 +31,17 @@ describe("tree motion architecture", () => {
     expect(code).toContain("<TreeBranch open={node.row.expanded}>");
     expect(code).toContain("virtualItems.map");
   });
+  it("keeps Git, project files and skill entries on the shared file label", () => {
+    for (const path of [
+      "plugins/git/ui/GitPanel.tsx",
+      "plugins/documents/ui/file-tree/FileTreeRow.tsx",
+      "plugins/skills/ui/SkillDetail.tsx",
+    ]) {
+      const code = readFileSync(join(src, path), "utf8");
+      expect(code, path).toContain("shared/ui/file-icons/FileEntryLabel.tsx");
+      expect(code, path).toContain("<FileEntryLabel");
+    }
+  });
   it("keeps all collapsible session status sections on the shared tree motion", () => {
     const code = readFileSync(
       join(src, "plugins/project/conversation/ui/SessionStatusOverlay.tsx"),
