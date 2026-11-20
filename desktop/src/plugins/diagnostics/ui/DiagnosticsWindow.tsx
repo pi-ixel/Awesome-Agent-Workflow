@@ -20,6 +20,7 @@ import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
 import { HintSurface } from "../../../shared/ui/controls/HintSurface.tsx";
 import { ConnectionReport, type ProbeFeedback } from "./ConnectionReport.tsx";
 import { ResourceReport } from "./ResourceReport.tsx";
+import { useCaptureHealth } from "./useCaptureHealth.ts";
 
 const inputClass = `${fieldSurfaceClass} px-2 py-1.5 text-ui-sm`;
 const pressFeedback =
@@ -31,6 +32,9 @@ export function DiagnosticsWindow({
 }: {
   readonly reader: DiagnosticsReader;
 }) {
+  const { isStale, stalled, dropped, unconfirmed } = useCaptureHealth(
+    reader.subscribeCaptureHealth,
+  );
   const [records, setRecords] = useState<DiagnosticRecord[]>([]);
   const [tab, setTab] = useState("logs");
   const [level, setLevel] = useState("");
@@ -187,13 +191,13 @@ export function DiagnosticsWindow({
       try {
         const next = await reader.status();
         if (stopped) return;
+        setStatus(next);
         const state = await reader.snapshot();
         if (stopped) return;
         setSnapshot(state);
         syncProbeFeedback(state);
         const resourceState = await reader.resources().catch(() => null);
         if (!stopped) {
-          setStatus(next);
           setResources(resourceState);
         }
       } catch (e) {
@@ -324,7 +328,7 @@ export function DiagnosticsWindow({
   }
   const globalError = !reader.isNative()
     ? "诊断历史需要 Desktop 原生服务，请在桌面客户端打开。"
-    : readError || status?.error;
+    : readError;
   return (
     <main
       className={`flex h-screen flex-col gap-3 bg-base p-5 text-ink ${pressFeedback}`}
@@ -360,6 +364,32 @@ export function DiagnosticsWindow({
           </>
         )}
       />
+      {(isStale || stalled.length > 0 || dropped > 0 || unconfirmed > 0) && (
+        <div
+          role="status"
+          className="space-y-1 rounded-lg border border-warn-line px-3 py-2 text-ui-sm text-warn-ink"
+        >
+          {isStale ? (
+            <p>暂未收到主窗口的采集状态。</p>
+          ) : (
+            stalled.map(({ name, paused }) => (
+              <p key={name}>
+                {name}
+                {paused
+                  ? "上报已暂停，正在等待原生回执。"
+                  : "上报延迟，正在尝试恢复。"}
+              </p>
+            ))
+          )}
+          {dropped > 0 && <p>本次运行的采集队列已丢弃 {dropped} 条记录。</p>}
+          {unconfirmed > 0 && <p>{unconfirmed} 条记录的接收状态未确认。</p>}
+        </div>
+      )}
+      {status?.error && (
+        <p role="alert" className="text-sm text-danger-ink">
+          原生日志写入失败：{status.error}
+        </p>
+      )}
       <nav aria-label="诊断视图">
         <SegmentedControl
           groupLabel="诊断分段"

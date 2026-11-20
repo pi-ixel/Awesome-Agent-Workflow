@@ -8,6 +8,7 @@ import { createStore } from "zustand";
 import { createSnapshotView } from "../../../shared/state/readonlySnapshot.ts";
 import { installGlobalErrorGuard } from "../capture/crashGuard.ts";
 import { startDiagnosticsCollector } from "../capture/collector.ts";
+import { subscribeCaptureHealth } from "../capture/captureHealth.ts";
 import { createDiagnosticsLogSink, type DiagnosticsCapture } from "../config.ts";
 import { createMemorySampler } from "../sampling/memorySampler.ts";
 import { createDiagnosticsReader } from "../reader/nativeReader.ts";
@@ -71,6 +72,9 @@ export class DesktopDiagnostics {
     );
     this.reader = {
       ...reader,
+      ...(host.isNative() && !ownsStorage && typeof BroadcastChannel === "function"
+        ? { subscribeCaptureHealth }
+        : {}),
       storage: ownsStorage ? requestStorage : (request) => this.storageBridge.request(request),
       onStorageCleaned: (listener) => {
         this.storageCleaned.add(listener);
