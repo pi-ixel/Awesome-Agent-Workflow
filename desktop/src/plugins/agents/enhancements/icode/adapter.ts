@@ -58,6 +58,7 @@ export function createChrysAgentAdapter(loggerFactory?: LoggerFactory): AgentAda
         command: [program, "acp"],
         cwd: context.workspacePath,
         extraEnv: {},
+        proxyPolicy: "pythonHttpxLoopback",
       };
     },
     clientInfo: { name: "aaw-desktop", version: "0.1.0" },

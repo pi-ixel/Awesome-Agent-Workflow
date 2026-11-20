@@ -1,5 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod acp_process;
+#[cfg(windows)]
+mod acp_proxy;
 pub mod browser;
 mod commands;
 mod skill_library;
@@ -123,6 +125,7 @@ pub fn run() {
             browser::enhancements::browser_pick_cancel,
             browser::mcp::browser_mcp_create,
             browser::mcp::browser_mcp_status,
+            browser::mcp::browser_mcp_registration,
             browser::mcp::browser_mcp_bind,
             browser::mcp::browser_mcp_capabilities,
             browser::mcp::browser_mcp_revoke,

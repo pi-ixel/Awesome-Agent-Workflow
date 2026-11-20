@@ -5,7 +5,7 @@ import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
 import type { AgentSettingsData } from "../configuration/types.ts";
 import type { AgentExecutableConfiguration } from "../configuration/types.ts";
 import type { SkillInstallation, SkillPackageManager } from "../../skills/types.ts";
-import type { HostAgentCommands, HostCommands } from "../../host/types.ts";
+import type { AcpProxyPolicy, HostAgentCommands, HostCommands } from "../../host/types.ts";
 import type { HostArchiveFiles } from "../../host/types.ts";
 import type { LoggerFactory } from "../../../shared/logging/logger.ts";
 
@@ -17,6 +17,7 @@ export interface AgentLaunch {
   readonly cwd: string | null;
   /** 追加的环境变量（与宿主环境合并）。 */
   readonly extraEnv: Readonly<Record<string, string>>;
+  readonly proxyPolicy?: AcpProxyPolicy;
 }
 
 /** buildLaunch 的入参。 */

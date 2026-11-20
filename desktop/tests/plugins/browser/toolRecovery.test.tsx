@@ -141,7 +141,8 @@ it("TD-032-B01 关闭开关后的标准 ACP 会话无 MCP 且提示禁止系统�
 }) => {
   let root: Context | undefined;
   const peers: ReturnType<typeof standardAcpPeer>[] = [];
-  const closeBrowserSession = vi.fn<Context["host"]["browser"]["closeSession"]>();
+  const closeBrowserSession =
+    vi.fn<Context["host"]["browser"]["closeSession"]>();
   closeBrowserSession.mockResolvedValue([]);
   const runtime = createDesktopRuntime(
     undefined,
@@ -465,6 +466,7 @@ it("TD-035-U03 端点撤销时即使工具清单未知也必须提示恢复", as
 
 it("TD-035-U04 识别 CodeAgent 的 MCP 前缀工具名", async () => {
   const host = await activeBrowserHost();
+  const registration = vi.spyOn(host, "mcpRegistration");
   await act(async () => {
     render(
       <BrowserToolRecovery
@@ -486,6 +488,76 @@ it("TD-035-U04 识别 CodeAgent 的 MCP 前缀工具名", async () => {
   expect(
     screen.queryByText("当前会话尚未注册浏览器工具"),
   ).not.toBeInTheDocument();
+  expect(registration).not.toHaveBeenCalled();
+});
+
+it("只显示当前 iCode 端点的连接失败，完成注册后消失", async () => {
+  const host = await activeBrowserHost();
+  const registration = vi.spyOn(host, "mcpRegistration").mockResolvedValue({
+    endpointName: "aaw-browser-current",
+    handshakeComplete: false,
+  });
+  const props = {
+    host,
+    project: { sessions: { recoverSession: vi.fn() } },
+    workspacePath: "D:/workspace",
+    agentKey: "chrys",
+    sessionId: "session-a",
+  };
+  const runtime = { ...missingTools, toolInventoryKnown: true };
+  const { rerender } = render(
+    <BrowserToolRecovery
+      {...props}
+      runtime={{
+        ...runtime,
+        mcpFailures: [
+          {
+            name: "aaw-browser-old",
+            error: "connection did not complete within 30s",
+          },
+        ],
+      }}
+    />,
+  );
+  expect(
+    await screen.findByText("正在连接本地浏览器工具…"),
+  ).toBeInTheDocument();
+  expect(screen.queryByText("本地浏览器工具连接失败")).not.toBeInTheDocument();
+
+  rerender(
+    <BrowserToolRecovery
+      {...props}
+      runtime={{
+        ...runtime,
+        mcpFailures: [
+          {
+            name: "aaw-browser-current",
+            error: "Server error '502 Bad Gateway' for url '<local>'",
+          },
+        ],
+      }}
+    />,
+  );
+  expect(await screen.findByText("本地浏览器工具连接失败")).toBeInTheDocument();
+  expect(screen.getByText(/HTTP 502/)).toBeInTheDocument();
+
+  registration.mockResolvedValue({
+    endpointName: "aaw-browser-current",
+    handshakeComplete: true,
+  });
+  rerender(
+    <BrowserToolRecovery
+      {...props}
+      runtime={{
+        ...runtime,
+        toolNames: ["browser_snapshot"],
+        mcpFailures: [],
+      }}
+    />,
+  );
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("status")).not.toBeInTheDocument(),
+  );
 });
 
 it("TD-035-U05 CodeAgent 连续两轮 prompt 不注入不可用文本", async ({

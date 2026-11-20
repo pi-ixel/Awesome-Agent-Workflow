@@ -26,6 +26,7 @@ pub struct McpEndpoint {
 #[derive(Default)]
 pub struct McpRegistry {
     pub endpoints: BTreeMap<String, McpEndpoint>,
+    current_endpoints: BTreeMap<String, String>,
     ready_endpoints: std::collections::BTreeSet<String>,
     shutdowns: BTreeMap<String, tokio::sync::oneshot::Sender<()>>,
 }
@@ -77,7 +78,10 @@ pub fn bind_endpoint(
     {
         return Err("ENDPOINT_ALREADY_BOUND".into());
     }
-    endpoint.session_id = Some(session_id.into());
+    if endpoint.session_id.is_none() {
+        endpoint.session_id = Some(session_id.into());
+        registry.current_endpoints.insert(session_id.into(), endpoint_id.into());
+    }
     Ok(endpoint.clone())
 }
 
@@ -125,6 +129,51 @@ pub fn browser_mcp_status(
     Ok(session_status(&registry, &session_id).into())
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpRegistration {
+    endpoint_name: String,
+    handshake_complete: bool,
+}
+
+fn current_registration(registry: &McpRegistry, session_id: &str) -> Option<McpRegistration> {
+    let endpoint_id = registry.current_endpoints.get(session_id)?;
+    let endpoint = registry.endpoints.get(endpoint_id)?;
+    (!endpoint.revoked).then(|| McpRegistration {
+        endpoint_name: endpoint.name.clone(),
+        handshake_complete: registry.ready_endpoints.contains(endpoint_id),
+    })
+}
+
+#[cfg(test)]
+#[test]
+fn registration_tracks_the_replacement_endpoint_and_its_handshake() {
+    let mut registry = McpRegistry::default();
+    let original = create_endpoint(&mut registry, 41022).unwrap();
+    let replacement = create_endpoint(&mut registry, 41023).unwrap();
+    bind_endpoint(&mut registry, &original.endpoint_id, "session").unwrap();
+    complete_handshake(&mut registry, &original.endpoint_id).unwrap();
+    bind_endpoint(&mut registry, &replacement.endpoint_id, "session").unwrap();
+    bind_endpoint(&mut registry, &original.endpoint_id, "session").unwrap();
+    revoke_endpoint(&mut registry, &original.endpoint_id).unwrap();
+    let current = current_registration(&registry, "session").unwrap();
+    assert_eq!(current.endpoint_name, replacement.name);
+    assert!(!current.handshake_complete);
+    complete_handshake(&mut registry, &replacement.endpoint_id).unwrap();
+    assert!(current_registration(&registry, "session").unwrap().handshake_complete);
+    revoke_endpoint(&mut registry, &replacement.endpoint_id).unwrap();
+    assert!(current_registration(&registry, "session").is_none());
+}
+
+#[tauri::command]
+pub fn browser_mcp_registration(
+    session_id: String,
+    state: State<'_, BrowserHost>,
+) -> Result<Option<McpRegistration>, String> {
+    let registry = state.mcp.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+    Ok(current_registration(&registry, &session_id))
+}
+
 pub fn complete_handshake(registry: &mut McpRegistry, endpoint_id: &str) -> Result<(), String> {
     let endpoint = registry
         .endpoints
@@ -158,6 +207,11 @@ pub fn revoke_endpoint(
         endpoint.generation += 1;
     }
     let endpoint = endpoint.clone();
+    if let Some(session_id) = &endpoint.session_id
+        && registry.current_endpoints.get(session_id).is_some_and(|current| current == endpoint_id)
+    {
+        registry.current_endpoints.remove(session_id);
+    }
     registry.ready_endpoints.remove(endpoint_id);
     if let Some(shutdown) = registry.shutdowns.remove(endpoint_id) {
         let _ = shutdown.send(());

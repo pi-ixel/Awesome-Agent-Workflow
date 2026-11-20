@@ -53,6 +53,7 @@ function parseRuntimeDetails(details: unknown): {
   modelProvider: string | null;
   toolNames: readonly string[] | null;
   mcpServers: readonly McpServerEntry[];
+  mcpFailuresKnown: boolean;
   mcpFailures: readonly { name: string; error: string }[];
   skillSources: readonly { source: string; count: number }[];
 } {
@@ -63,6 +64,7 @@ function parseRuntimeDetails(details: unknown): {
       modelProvider: null,
       toolNames: null,
       mcpServers: [],
+      mcpFailuresKnown: false,
       mcpFailures: [],
       skillSources: [],
     };
@@ -100,6 +102,7 @@ function parseRuntimeDetails(details: unknown): {
             name: entry.name,
             toolCount: entry.count,
           })),
+    mcpFailuresKnown: failuresRecord !== null,
     mcpFailures,
     skillSources:
       skillSources === null
@@ -150,6 +153,7 @@ export function normalizeChrysRuntime(
       next.toolInventoryKnown = true;
     }
     next.mcpServers = details.mcpServers;
+    next.mcpFailuresKnown = details.mcpFailuresKnown;
     next.mcpFailures = details.mcpFailures;
     next.skillSources = details.skillSources;
     if (skillNames !== null && skillNames.length === 0) {
