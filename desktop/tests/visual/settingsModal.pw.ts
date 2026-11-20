@@ -1,4 +1,82 @@
 import { expect, test } from "@playwright/test";
+import { color } from "./contrast.ts";
+
+test("会话设置的呈现方式卡片随双主题和三档字号更新，保留选择及键盘焦点", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/tests/visual/uiScaleFixture.html");
+  const session = await context.newPage();
+  await session.setViewportSize({ width: 430, height: 760 });
+  await session.emulateMedia({ reducedMotion: "reduce" });
+  await session.goto("/tests/visual/fixture.html?session-settings");
+  await session.getByRole("tab", { name: "会话与审批" }).click();
+  const picker = session.getByRole("group", { name: "信息流呈现方式" });
+  const initial = picker.getByRole("button", { pressed: true });
+  const choice = picker.getByRole("button", { pressed: false });
+  const label = (await choice.textContent())!.trim();
+  await expect(initial).toHaveCount(1);
+  await choice.press("Enter");
+  const selected = picker.getByRole("button", { name: label });
+  const card = selected.locator("..");
+  const size = page.getByRole("spinbutton", { name: "界面字号" });
+  for (const [theme, px] of [
+    ["暖白", 12],
+    ["暗夜", 20],
+    ["暖白", 14],
+  ] as const) {
+    await page.getByRole("button", { name: theme, exact: true }).click();
+    await size.fill(String(px));
+    await size.press("Enter");
+    await expect(selected).toHaveAttribute("aria-pressed", "true");
+    await expect(selected).toBeFocused();
+    await expect(selected).toHaveCSS("font-size", `${px}px`);
+    await expect(card).not.toHaveCSS("box-shadow", "none");
+    expect(
+      await selected.evaluate((el) => el.scrollWidth <= el.clientWidth),
+    ).toBe(true);
+  }
+  const next = picker.getByRole("button", { pressed: false });
+  await next.click();
+  await expect(selected).toHaveAttribute("aria-pressed", "false");
+});
+
+test("窄窗口的设置分组支持方向键跨组导航，焦点与选中背景跟随主题", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.goto("/tests/visual/fixture.html?settings-keyboard");
+  const tabs = page.getByRole("tablist", { name: "设置页签" });
+  const items = tabs.getByRole("tab");
+  const first = items.first();
+  const last = items.last();
+  await expect(first).toHaveText("外观");
+  await expect(tabs.getByRole("group", { name: "数据与统计" })).toContainText(
+    "存储",
+  );
+  await first.press("Home");
+  for (const warm of [true, false, true]) {
+    await page.evaluate((isWarm) => {
+      document.documentElement.classList.toggle("theme-warm", isWarm);
+      document.documentElement.style.setProperty("--ui-font-size", "20px");
+    }, warm);
+    await first.press("ArrowUp");
+    await expect(last).toBeFocused();
+    await expect(last).toHaveAttribute("aria-selected", "true");
+    await expect(last).toHaveAttribute("tabindex", "0");
+    await expect(first).toHaveAttribute("tabindex", "-1");
+    await expect(last).toHaveCSS("font-size", "18px");
+    await expect(last).not.toHaveCSS("box-shadow", "none");
+    await expect
+      .poll(() => color(last, "background-color"))
+      .toEqual(await color(last, "--color-selected"));
+    const id = await last.getAttribute("aria-controls");
+    await expect(page.locator(`[id="${id}"]`)).toBeVisible();
+    await last.press("ArrowDown");
+    await expect(first).toBeFocused();
+    await expect(first).toHaveAttribute("aria-selected", "true");
+  }
+});
 
 for (const width of [1400, 700, 390]) {
   test(`settings modal fits ${width}px and scrolls long content independently`, async ({

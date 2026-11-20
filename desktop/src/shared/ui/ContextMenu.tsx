@@ -2,7 +2,7 @@
  * 侧栏右键/下拉菜单（ZCode 菜单语言的 desktop 实现）：
  *
  * - 容器对照 ZCode ContextMenuContent（components/ui/context-menu.tsx:28）：
- *   z-[60]（必须高于仅提供说明的 tooltip，同注释）、min-w-44、rounded-lg、
+ *   z-[60]（必须高于仅提供说明的 tooltip，同注释）、rounded-lg、
  *   border-border、bg-menu、p-1、gap-0.5、shadow-floating、100ms 入退场；
  * - 菜单项对照 ContextMenuItem（:52）：min-h-7 rounded-md px-2 py-1 gap-2，
  *   Radix 的 data-[highlighted] 高亮由 hover + focus-visible（roving focus）
@@ -36,11 +36,13 @@ import { CheckIcon } from "./icons.tsx";
 export interface ContextMenuItemSpec {
   id: string;
   label: string;
+  description?: string;
   /** 菜单项图标以 ui-icon-16 为基准。 */
   icon?: ReactNode;
   /** 备用；desktop 暂无来源。 */
   shortcut?: string;
   danger?: boolean;
+  warning?: boolean;
   disabled?: boolean;
   /** 视角切换等单选语义（role=menuitemradio + aria-checked）。 */
   radio?: boolean;
@@ -81,6 +83,9 @@ export function ContextMenu({
   label,
   closing,
   onDismiss,
+  portalContainer = document.body,
+  trigger,
+  variant = "menu",
 }: {
   readonly entries: readonly ContextMenuEntry[];
   readonly placement: MenuPlacement;
@@ -89,7 +94,11 @@ export function ContextMenu({
   /** 退场中：换播 100ms 退场动画，宿主随后卸载。 */
   readonly closing: boolean;
   readonly onDismiss: () => void;
+  readonly portalContainer?: HTMLElement;
+  readonly trigger?: HTMLElement;
+  readonly variant?: "menu" | "selection";
 }) {
+  const isSelection = variant === "selection";
   const panelRef = useRef<HTMLDivElement | null>(null);
   // 首帧以 visibility:hidden 渲染于初始坐标，量得实际宽高后再定稿
   const [pos, setPos] = useState<{ x: number; y: number; side: string }>(
@@ -105,33 +114,82 @@ export function ContextMenu({
 
   useLayoutEffect(() => {
     restoreFocusRef.current = document.activeElement as HTMLElement | null;
-    panelRef.current?.focus();
-    const rect = panelRef.current?.getBoundingClientRect();
-    const width = rect?.width ?? 0;
-    const height = rect?.height ?? 0;
-    // 横向：右对齐先折算左缘，再夹进视口（左右各留 8px）
-    let x = placement.align === "end" ? placement.x - width : placement.x;
-    x = Math.min(x, window.innerWidth - width - 8);
-    x = Math.max(8, x);
-    // 纵向：side=bottom 放不下（含 8px 边距）翻转到锚点上方；y 为底缘
-    let side = placement.side;
-    let y = placement.y;
-    if (side === "top") {
-      y = placement.y - height;
-    } else if (y + height > window.innerHeight - 8) {
-      side = "top";
-      y = placement.y - height - 8;
-    }
-    y = Math.max(8, y);
-    setPos({ x, y, side });
-    setMeasured(true);
-    // 仅开启时量测定稿一次（placement 由宿主在开启时给定，不随后续渲染复算）
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (panel === null) return;
+    const updatePosition = () => {
+      const width = panel.offsetWidth;
+      const height = panel.offsetHeight;
+      const anchor = trigger?.getBoundingClientRect();
+      const anchorX =
+        (placement.align === "end" ? anchor?.right : anchor?.left) ??
+        placement.x;
+      // 先按触发器对齐，再夹进视口；空间不足时换到较宽松的一侧。
+      const left = placement.align === "end" ? anchorX - width : anchorX;
+      const x = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+      let side = placement.side;
+      let y = placement.y;
+      if (anchor) {
+        const top = anchor.top - (isSelection ? 6 : 4);
+        const bottom = anchor.bottom + 4;
+        const above = top - 8;
+        const below = window.innerHeight - bottom - 8;
+        if (side === "top" && height > above && below > above) side = "bottom";
+        else if (side === "bottom" && height > below && above > below)
+          side = "top";
+        y = side === "top" ? top - height : bottom;
+      } else if (side === "top" || y + height > window.innerHeight - 8) {
+        y -= height + (side === "top" ? 0 : 8);
+        side = "top";
+      }
+      y = Math.max(8, Math.min(y, window.innerHeight - height - 8));
+      setPos((previous) =>
+        previous.x === x && previous.y === y && previous.side === side
+          ? previous
+          : { x, y, side },
+      );
+    };
+    updatePosition();
+    setMeasured(true);
+    if (!isSelection && !trigger) return;
+    let frame = 0;
+    const schedule = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(updatePosition);
+    };
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(schedule);
+    observer?.observe(panel);
+    if (trigger) observer?.observe(trigger);
+    const repositionAfterScroll = (event: Event) => {
+      if (!(event.target instanceof Node && panel.contains(event.target)))
+        schedule();
+    };
+    window.addEventListener("resize", schedule);
+    if (trigger) window.addEventListener("scroll", repositionAfterScroll, true);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", schedule);
+      window.removeEventListener("scroll", repositionAfterScroll, true);
+    };
+  }, [isSelection, placement, trigger]);
+
+  useLayoutEffect(() => {
+    if (measured && !closing) panelRef.current?.focus({ preventScroll: true });
+  }, [closing, measured]);
 
   useEffect(() => {
     function handlePointerDown(event: PointerEvent): void {
-      if (panelRef.current?.contains(event.target as Node) === true) {
+      if (
+        event.target instanceof Node &&
+        (panelRef.current?.contains(event.target) ||
+          trigger?.contains(event.target))
+      ) {
         return;
       }
       onDismiss();
@@ -140,14 +198,15 @@ export function ContextMenu({
       onDismiss();
     }
     window.addEventListener("pointerdown", handlePointerDown);
-    window.addEventListener("resize", handleDismiss);
-    window.addEventListener("blur", handleDismiss);
+    if (!trigger) window.addEventListener("resize", handleDismiss);
+    if (!isSelection && !trigger)
+      window.addEventListener("blur", handleDismiss);
     return () => {
       window.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("resize", handleDismiss);
       window.removeEventListener("blur", handleDismiss);
     };
-  }, [onDismiss]);
+  }, [isSelection, onDismiss, trigger]);
 
   // 最终关闭（卸载）时把焦点归还给开启前的元素；但期间已有别处接手焦点
   // 时让位（如菜单项触发「重命名」输入框 autoFocus 后，归还反而夺焦，
@@ -167,6 +226,7 @@ export function ContextMenu({
   }, []);
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+    if (event.nativeEvent.isComposing) return;
     if (event.key === "Escape") {
       // 标记 Esc 已被浮层消费（SessionView 全局 Esc 的既有让位约定）
       event.preventDefault();
@@ -216,6 +276,8 @@ export function ContextMenu({
       ref={panelRef}
       role="menu"
       aria-label={label}
+      aria-hidden={closing || undefined}
+      inert={closing}
       tabIndex={-1}
       onKeyDown={handleKeyDown}
       style={{
@@ -224,12 +286,18 @@ export function ContextMenu({
         top: pos.y,
         visibility: measured ? "visible" : "hidden",
       }}
-      className={`z-[60] flex min-w-44 flex-col gap-0.5 overflow-hidden rounded-lg border border-border bg-menu p-1 text-ink shadow-floating outline-none ${
+      className={`z-[60] flex min-w-[min(11rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] flex-col gap-0.5 overflow-y-auto overscroll-contain rounded-lg border border-border bg-menu p-1 text-ink shadow-floating outline-none ${
+        isSelection
+          ? "w-64 max-h-[min(13rem,calc(100dvh-1rem))]"
+          : "max-h-[calc(100dvh-1rem)]"
+      } ${
         closing
           ? "context-menu-out"
-          : pos.side === "top"
-            ? "context-menu-in-top"
-            : "context-menu-in-bottom"
+          : isSelection
+            ? "selection-popup"
+            : pos.side === "top"
+              ? "context-menu-in-top"
+              : "context-menu-in-bottom"
       }`}
     >
       {entries.map((entry, index) =>
@@ -243,27 +311,53 @@ export function ContextMenu({
           <button
             key={entry.id}
             type="button"
-            role={entry.checked !== undefined ? "menuitemcheckbox" : entry.radio ? "menuitemradio" : "menuitem"}
-            aria-checked={entry.checked ?? (entry.radio ? entry.selected : undefined)}
+            role={
+              entry.checked !== undefined
+                ? "menuitemcheckbox"
+                : entry.radio
+                  ? "menuitemradio"
+                  : "menuitem"
+            }
+            aria-checked={
+              entry.checked ?? (entry.radio ? entry.selected : undefined)
+            }
+            aria-label={entry.description ? entry.label : undefined}
+            aria-description={entry.description}
+            tabIndex={isSelection ? -1 : undefined}
             disabled={entry.disabled}
             onClick={() => {
               entry.onSelect();
               onDismiss();
             }}
-            className={`relative flex min-h-7 w-full cursor-default items-center gap-2 rounded-md text-left text-ui-base/relaxed text-ink outline-none select-none hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:text-ink disabled:pointer-events-none disabled:text-ink-subtlest [&_svg]:pointer-events-none [&_svg]:ui-icon-16 [&_svg]:shrink-0 ${
+            className={`relative flex min-h-7 w-full shrink-0 cursor-default items-center gap-2 rounded-md text-left text-ui-base/relaxed text-ink outline-none select-none hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:text-ink disabled:pointer-events-none disabled:text-ink-subtlest [&_svg]:pointer-events-none [&_svg]:ui-icon-16 [&_svg]:shrink-0 ${
               // radio 行对照 ZCode DropdownMenuRadioItem（dropdown-menu.tsx:149）：
               // py-1.5 pr-8 pl-2，右侧留出指示位；普通项维持 ContextMenuItem 的 px-2 py-1
-              entry.radio || entry.checked !== undefined ? "py-1.5 pr-8 pl-2" : "px-2 py-1"
+              entry.radio || entry.checked !== undefined
+                ? "py-1.5 pr-8 pl-2"
+                : "px-2 py-1"
             } ${
               entry.danger
                 ? // destructive 对照 ZCode data-[variant=destructive]（context-menu.tsx:52）：
                   // 常态实字色，实底高亮 + 白字（text-destructive-foreground 同值）
                   "text-danger hover:bg-danger hover:text-danger-contrast focus-visible:bg-danger focus-visible:text-danger-contrast"
-                : ""
-            }`}
+                : entry.warning
+                  ? "text-warn-ink"
+                  : ""
+            } ${isSelection ? "min-h-8 items-start focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring" : ""}`}
           >
             {entry.icon}
-            <span className="min-w-0 flex-1 truncate">{entry.label}</span>
+            {entry.description ? (
+              <span className="min-w-0 flex-1 break-words">
+                <span className="block">{entry.label}</span>
+                <span className="mt-0.5 block text-ui-sm leading-snug text-ink-soft">
+                  {entry.description}
+                </span>
+              </span>
+            ) : (
+              <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                {entry.label}
+              </span>
+            )}
             {entry.shortcut !== undefined ? (
               <span className="ml-auto text-ui-xs tracking-widest text-ink-subtlest">
                 {entry.shortcut}
@@ -285,6 +379,6 @@ export function ContextMenu({
         ),
       )}
     </div>,
-    document.body,
+    portalContainer,
   );
 }

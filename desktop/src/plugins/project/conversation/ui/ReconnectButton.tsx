@@ -4,7 +4,7 @@ import { useProjectView, type ProjectViewBinding } from "../../ui/bindings/proje
 import { useEffect, useState } from "react";
 import { RefreshIcon } from "../../../../shared/ui/icons.tsx";
 import { IconButton } from "../../../../shared/ui/IconButton.tsx";
-import { btnSecondary } from "../../../../shared/ui/controls.tsx";
+import { ActionButton } from "../../../../shared/ui/controls.tsx";
 import { ConfirmationDialog } from "../../../../shared/ui/ConfirmationDialog.tsx";
 
 export function SessionReconnect() {
@@ -69,15 +69,16 @@ export function ReconnectButton({ iconOnly = false }: { iconOnly?: boolean }) {
           <RefreshIcon className="ui-icon-16" />
         </IconButton>
       ) : (
-        <button
+        <ActionButton
+          tone="secondary"
           type="button"
           data-hint="断开并重连"
-          className={`${btnSecondary} min-h-8 px-3 text-sm`}
+          className="min-h-8 px-3 text-sm"
           disabled={!view}
           onClick={openConfirmation}
         >
           立即重连
-        </button>
+        </ActionButton>
       )}
       {current ? (
         <ConfirmationDialog

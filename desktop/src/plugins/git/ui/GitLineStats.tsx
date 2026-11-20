@@ -1,4 +1,5 @@
 import type { GitChange } from "../../host/types.ts";
+import { diffAppearance } from "../../../shared/ui/diffStyles.ts";
 
 export function GitLineStats({ changes }: { changes: readonly GitChange[] }) {
   return (
@@ -7,10 +8,10 @@ export function GitLineStats({ changes }: { changes: readonly GitChange[] }) {
         <span className="text-xs text-ink-subtle">统计暂不可用</span>
       ) : (
         <>
-          <span className="text-diff-added">
+          <span className={diffAppearance.add.ink}>
             +{changes.reduce((n, c) => n + (c.added ?? 0), 0)}
           </span>
-          <span className="text-diff-removed">
+          <span className={diffAppearance.del.ink}>
             −{changes.reduce((n, c) => n + (c.removed ?? 0), 0)}
           </span>
         </>

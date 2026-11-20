@@ -9,6 +9,7 @@ import { FullViewHost } from "./right-panel/FullViewHost.tsx";
 
 import { useWorkbenchEntries } from "./bindings/react.ts";
 import { useWorkbenchBasePage } from "./bindings/pages.ts";
+import { useRef } from "react";
 
 /** 内容区视图分支（无 tab UI，纯状态驱动）。 */
 function ContentArea() {
@@ -17,6 +18,7 @@ function ContentArea() {
   const contextPath = useWorkbenchUiValue((state) => state.contextPath);
   const openDock = useWorkbenchUiValue((state) => state.openDock);
   const closeDock = useWorkbenchUiValue((state) => state.closeDock);
+  const contentRef = useRef<HTMLDivElement>(null);
   const pages = useWorkbenchEntries("pages");
   const sidebarId = useWorkbenchUiValue((state) => state.sidebarId);
   const WorkArea = useWorkbenchEntries("sidebar").find((entry) => entry.id === sidebarId)?.WorkArea;
@@ -27,7 +29,7 @@ function ContentArea() {
   const page = Page ? <Page project={contextPath} /> : null;
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col bg-base">
+    <div ref={contentRef} className="relative flex h-full min-h-0 flex-col bg-base">
       <ContextBar />
       <div
         hidden={!workspaceVisible || WorkArea !== undefined}
@@ -51,6 +53,11 @@ function ContentArea() {
           project={contextPath}
           visible={workspaceVisible && WorkArea === undefined && openDock === id}
           close={() => closeDock(id)}
+          restoreLauncherFocus={() =>
+            contentRef.current
+              ?.querySelector<HTMLElement>(`[data-dock-toggle="${CSS.escape(id)}"]`)
+              ?.focus()
+          }
         />
       ))}
       {Overlay &&

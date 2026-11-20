@@ -1,6 +1,8 @@
+import { TextLink } from "../../../../shared/ui/TextLink.tsx";
+import { ActionButton } from "../../../../shared/ui/controls.tsx";
+import { settingsTextareaClass } from "../../../../shared/ui/SettingsPageParts.tsx";
 import { IconButton } from "../../../../shared/ui/IconButton.tsx";
-import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
-import { PencilIcon } from "../../../../shared/ui/icons.tsx";
+import { PencilIcon, TrashIcon } from "../../../../shared/ui/icons.tsx";
 import { useContext, useState } from "react";
 import { ConversationDocumentContext } from "./documentView.ts";
 import { COMMENT_LIMIT } from "../../../documents/service.ts";
@@ -30,18 +32,18 @@ export function AnnotationCards({
           className="rounded-lg border border-line bg-base p-2 text-ui-caption"
         >
           <div className="flex items-center gap-2">
-            <button
+            <TextLink
               type="button"
               data-hint={a.path}
               disabled={!openAnnotation}
-              className="min-w-0 flex-1 truncate text-left font-medium text-ink hover:underline"
+              className="flex-1 truncate font-medium"
               onClick={() => openAnnotation?.(a, !!onRemove)}
             >
               {a.path.split(/[\\/]/).at(-1)}
               {a.startLine
                 ? ` · ${a.startLine}${a.endLine !== a.startLine ? `–${a.endLine}` : ""} 行`
                 : ""}
-            </button>
+            </TextLink>
             {onChange && (
               <IconButton iconSize="compact"
                 type="button"
@@ -64,17 +66,7 @@ export function AnnotationCards({
                 className="flex shrink-0 items-center justify-center rounded border border-danger-line bg-danger-bg text-danger-ink hover:brightness-95"
                 onClick={() => onRemove(a.id)}
               >
-                <UiIcon
-                  viewBox="0 0 16 16"
-                  className="ui-icon-14"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M2.5 4h11M6 4V2.5h4V4M4 4l.6 9.5h6.8L12 4M6.5 6.5v4.5M9.5 6.5v4.5" />
-                </UiIcon>
+                <TrashIcon className="ui-icon-14" />
               </IconButton>
             )}
           </div>
@@ -104,25 +96,27 @@ export function AnnotationCards({
                 maxLength={COMMENT_LIMIT}
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
-                className="w-full rounded border border-line bg-surface p-2"
+                className={settingsTextareaClass}
               />
-              <button
+              <ActionButton
+                tone="secondary"
+                size="compact"
                 type="button"
-                className="rounded px-2 py-1 hover:bg-hover"
                 onClick={() => {
                   if (onChange({ ...a, comment: comment.trim() }))
                     setEditing(null);
                 }}
               >
                 保存
-              </button>
-              <button
+              </ActionButton>
+              <ActionButton
+                tone="ghost"
+                size="compact"
                 type="button"
-                className="rounded px-2 py-1 hover:bg-hover"
                 onClick={() => setEditing(null)}
               >
                 取消
-              </button>
+              </ActionButton>
             </div>
           ) : (
             a.comment && (

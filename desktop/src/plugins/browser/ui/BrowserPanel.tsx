@@ -11,7 +11,12 @@ import {
   SquareIcon,
   XIcon,
 } from "../../../shared/ui/icons.tsx";
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { ActionButton, Checkbox } from "../../../shared/ui/controls.tsx";
+import { HintSurface } from "../../../shared/ui/controls/HintSurface.tsx";
+import { InlineConfirm } from "../../../shared/ui/InlineConfirm.tsx";
+import { fieldSurfaceClass, settingsInputClass } from "../../../shared/ui/inputStyles.ts";
 import type { HostService } from "../../host/service.ts";
 import type {
   BrowserCleanupPreview,
@@ -82,6 +87,10 @@ function BrowserPanelSession({
   const [activeCleanupTask, setActiveCleanupTask] = useState<string | null>(
     null,
   );
+  const [isCleaning, setCleaning] = useState(false);
+  const cleanupInFlight = useRef(false);
+  const cleanupTrigger = useRef<HTMLButtonElement>(null);
+  const cleanupPrompt = useRef<HTMLDivElement>(null);
   const [picking, setPicking] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(1280);
   const [viewportHeight, setViewportHeight] = useState(720);
@@ -675,11 +684,22 @@ function BrowserPanelSession({
         .catch((cause) => setError(String(cause)));
   };
 
+  const requestCleanup = (scope: CleanupScope, trigger: HTMLButtonElement) => {
+    if (cleanupInFlight.current) return;
+    cleanupTrigger.current = trigger;
+    setConfirmCleanup(scope);
+  };
+  const dismissCleanup = () => {
+    setConfirmCleanup(null);
+    cleanupTrigger.current?.focus({ preventScroll: true });
+  };
   const executeCleanup = async (
     scope: CleanupScope | null = confirmCleanup,
   ) => {
-    if (!scope) return;
+    if (!scope || cleanupInFlight.current) return;
     const taskId = crypto.randomUUID();
+    cleanupInFlight.current = true;
+    setCleaning(true);
     setCleanupResult(null);
     if (scope === "workspace" || scope === "all") setActiveCleanupTask(taskId);
     try {
@@ -702,7 +722,8 @@ function BrowserPanelSession({
         result = { status, items: [{ itemId: scope, status }] };
       }
       setCleanupResult({ scope, result });
-      setConfirmCleanup(null);
+      if (cleanupPrompt.current?.contains(document.activeElement)) dismissCleanup();
+      else setConfirmCleanup(null);
       setCatalog(await host.dataCatalog());
       setPreview(await host.cleanupPreview(sessionId));
       await refresh();
@@ -710,6 +731,8 @@ function BrowserPanelSession({
     } catch (cause) {
       setError(String(cause));
     } finally {
+      cleanupInFlight.current = false;
+      setCleaning(false);
       setActiveCleanupTask(null);
     }
   };
@@ -830,7 +853,7 @@ function BrowserPanelSession({
             placeholder={
               userCanControl ? "输入 HTTP/HTTPS 地址" : "Agent 正在操作"
             }
-            className="min-h-7 w-full rounded-full border border-line bg-surface px-3 text-xs outline-none focus:border-focus-ring disabled:opacity-50"
+            className={`${fieldSurfaceClass} min-h-7 w-full rounded-full! px-3 text-xs focus-visible:ring-inset`}
           />
         </form>
         <span className="w-8 shrink-0 text-center text-2xs text-ink-muted">
@@ -934,16 +957,17 @@ function BrowserPanelSession({
                 key={tab.tabId}
                 className={`flex min-w-24 max-w-48 items-center gap-1 rounded pr-1 text-xs ${tab.tabId === activeTabId ? "bg-selected" : "hover:bg-hover"}`}
               >
-                <button
+                <NavigationRow layout="compound"
                   type="button"
-                  className="min-w-0 flex-1 truncate rounded px-2 py-1 text-left"
+                  aria-current={tab.tabId === activeTabId ? "page" : undefined}
+                  className="min-w-0 items-center px-2 py-1"
                   onClick={() => {
                     setActiveTabId(tab.tabId);
                     setDraft(tab.committedUrl ?? "");
                   }}
                 >
-                  {tab.committedUrl || "空白页"}
-                </button>
+                  <span className="truncate">{tab.committedUrl || "空白页"}</span>
+                </NavigationRow>
                 <IconButton
                   aria-label={`关闭标签 ${tab.tabId}`}
                   disabled={!userCanControl}
@@ -982,7 +1006,7 @@ function BrowserPanelSession({
       <div
         ref={viewportRef}
         data-browser-viewport={sessionId}
-        className="relative min-h-0 flex-1 bg-white"
+        className="relative min-h-0 flex-1 bg-base"
         onWheel={(event) => {
           if (!event.ctrlKey) return;
           event.preventDefault();
@@ -992,10 +1016,9 @@ function BrowserPanelSession({
         {activeTab?.lifecycle === "crashed" && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-base text-sm text-ink">
             <span>页面进程已退出，标签和最后地址仍保留。</span>
-            <button
+            <ActionButton tone="secondary" size="compact"
               type="button"
               disabled={!userCanControl}
-              className="rounded border border-line px-3 py-1.5 disabled:opacity-40"
               onClick={() => {
                 if (!userCanControl) return;
                 void host
@@ -1005,7 +1028,7 @@ function BrowserPanelSession({
               }}
             >
               恢复页面
-            </button>
+            </ActionButton>
           </div>
         )}
         {!activeTab && (
@@ -1022,13 +1045,12 @@ function BrowserPanelSession({
       {evidenceUrl && (
         <div className=" right-4 top-20 z-20 max-w-[80%] rounded-lg border border-line bg-base p-2 shadow-floating">
           <div className="mb-2 flex justify-end gap-2">
-            <button
+            <ActionButton tone="ghost" size="compact"
               type="button"
-              className="text-xs"
               onClick={() => setEvidenceUrl(null)}
             >
               关闭
-            </button>
+            </ActionButton>
           </div>
           <img
             aria-label="浏览器截图证据"
@@ -1038,26 +1060,27 @@ function BrowserPanelSession({
         </div>
       )}
       {dataOpen && (
-        <div
+        <HintSurface
+          open
           role="dialog"
           aria-label="浏览器数据管理"
-          className=" inset-x-6 top-16 z-20 max-h-[70vh] overflow-y-auto rounded-lg border border-line bg-base p-4 shadow-floating"
+          className="inset-x-6 top-16 z-20 max-h-[70vh] overflow-y-auto p-4"
         >
-          <div className="sticky top-0 z-10 flex items-start justify-between gap-3 bg-base pb-2">
+          <div className="sticky top-0 z-10 flex items-start justify-between gap-3 bg-surface pb-2">
             <div>
               <h2 className="text-sm font-medium">浏览器数据管理</h2>
               <p className="mt-1 text-xs text-ink-muted">
                 支持缓存、站点、会话、工作区和全部浏览器数据分层管理；清理前必须确认实际范围。
               </p>
             </div>
-            <button
+            <ActionButton tone="secondary" size="compact"
               type="button"
               aria-label="关闭数据管理"
-              className="shrink-0 rounded border border-line px-2 py-1 text-xs hover:bg-hover"
+              className="shrink-0"
               onClick={() => setDataOpen(false)}
             >
               关闭
-            </button>
+            </ActionButton>
           </div>
           <div aria-label="数据分区列表" className="mt-3 space-y-1 text-xs">
             {catalog
@@ -1095,9 +1118,8 @@ function BrowserPanelSession({
                     {permission.origin} · {permission.permissionKind} ·{" "}
                     {permission.decision === "allow" ? "已允许" : "已拒绝"}
                   </span>
-                  <button
+                  <ActionButton tone="secondary" size="compact"
                     type="button"
-                    className="rounded border border-line px-2 py-1"
                     onClick={() => {
                       const operation =
                         permission.decision === "allow"
@@ -1138,7 +1160,7 @@ function BrowserPanelSession({
                     }}
                   >
                     {permission.decision === "allow" ? "撤销" : "允许"}
-                  </button>
+                  </ActionButton>
                 </div>
               ))}
             </div>
@@ -1153,7 +1175,7 @@ function BrowserPanelSession({
                 onChange={(event) =>
                   setViewportWidth(Number(event.target.value))
                 }
-                className="w-20 rounded border border-line bg-surface px-1"
+                className={`${fieldSurfaceClass} min-h-7 w-20 px-1 text-center tabular-nums`}
               />
             </label>
             <label>
@@ -1165,12 +1187,11 @@ function BrowserPanelSession({
                 onChange={(event) =>
                   setViewportHeight(Number(event.target.value))
                 }
-                className="w-20 rounded border border-line bg-surface px-1"
+                className={`${fieldSurfaceClass} min-h-7 w-20 px-1 text-center tabular-nums`}
               />
             </label>
-            <button
+            <ActionButton tone="secondary" size="compact"
               type="button"
-              className="rounded border border-line px-2 py-1"
               disabled={!activeTab}
               onClick={() =>
                 activeTab &&
@@ -1185,10 +1206,9 @@ function BrowserPanelSession({
               }
             >
               应用
-            </button>
-            <button
+            </ActionButton>
+            <ActionButton tone="secondary" size="compact"
               type="button"
-              className="rounded border border-line px-2 py-1"
               disabled={!activeTab}
               onClick={() =>
                 activeTab &&
@@ -1198,93 +1218,79 @@ function BrowserPanelSession({
               }
             >
               跟随容器
-            </button>
+            </ActionButton>
           </div>
-          <label className="mt-3 flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={restoreEnabled}
-              onChange={(event) => {
-                const enabled = event.target.checked;
-                setRestoreEnabled(enabled);
-                window.localStorage.setItem(
-                  `aaw-browser-restore:${sessionId}:enabled`,
-                  String(enabled),
-                );
-              }}
-            />
-            重启后恢复合法标签 URL
-          </label>
+          <Checkbox
+            className="mt-3 flex items-center gap-2 text-xs"
+            label="重启后恢复合法标签 URL"
+            checked={restoreEnabled}
+            onChange={(enabled) => {
+              setRestoreEnabled(enabled);
+              window.localStorage.setItem(
+                `aaw-browser-restore:${sessionId}:enabled`,
+                String(enabled),
+              );
+            }}
+          />
           <div className="mt-3 flex flex-wrap gap-2">
-            <button
+            <ActionButton tone="secondary" size="compact"
               type="button"
-              className="rounded border border-line px-3 py-1 text-xs"
-              onClick={() => setConfirmCleanup("cache")}
+              onClick={(event) => requestCleanup("cache", event.currentTarget)}
             >
               清除当前会话缓存
-            </button>
-            <button
+            </ActionButton>
+            <ActionButton tone="secondary" size="compact"
               type="button"
-              className="rounded border border-line px-3 py-1 text-xs"
               disabled={!activeTab}
-              onClick={() => setConfirmCleanup("site")}
+              onClick={(event) => requestCleanup("site", event.currentTarget)}
             >
               清除当前站点
-            </button>
-            <button
+            </ActionButton>
+            <ActionButton tone="danger" size="compact"
               type="button"
-              className="rounded border border-line px-3 py-1 text-xs text-danger-ink"
-              onClick={() => setConfirmCleanup("session")}
+              onClick={(event) => requestCleanup("session", event.currentTarget)}
             >
               清除当前会话数据
-            </button>
-            <button
+            </ActionButton>
+            <ActionButton tone="danger" size="compact"
               type="button"
-              className="rounded border border-line px-3 py-1 text-xs text-danger-ink"
-              onClick={() => setConfirmCleanup("workspace")}
+              onClick={(event) => requestCleanup("workspace", event.currentTarget)}
             >
               清除当前工作区
-            </button>
-            <button
+            </ActionButton>
+            <ActionButton tone="danger" size="compact"
               type="button"
-              className="rounded border border-line px-3 py-1 text-xs text-danger-ink"
-              onClick={() => setConfirmCleanup("all")}
+              onClick={(event) => requestCleanup("all", event.currentTarget)}
             >
               清除全部浏览器数据
-            </button>
+            </ActionButton>
             {confirmCleanup && (
-              <div
-                role="alert"
-                className="w-full rounded border border-line bg-surface p-3 text-xs"
-              >
-                确认清理“{confirmCleanup}”范围？{preview?.affected.join("、")}
-                。已完成的子项不会因取消而回滚。
-                <div className="mt-2 flex gap-2">
-                  <button
-                    type="button"
-                    className="rounded border border-line px-2 py-1"
-                    onClick={() => setConfirmCleanup(null)}
-                  >
-                    取消
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded border border-line px-2 py-1 text-danger-ink"
-                    onClick={() => void executeCleanup()}
-                  >
-                    确认清理
-                  </button>
-                  {activeCleanupTask && (
-                    <button
-                      type="button"
-                      className="rounded border border-line px-2 py-1"
-                      onClick={() => void host.cancelCleanup(activeCleanupTask)}
-                    >
-                      取消剩余子项
-                    </button>
-                  )}
-                </div>
+              <div ref={cleanupPrompt} className="w-full">
+                <InlineConfirm
+                  key={confirmCleanup}
+                  label="确认清理浏览器数据"
+                  message={
+                    <span role="alert">
+                      确认清理“{confirmCleanup}”范围？{preview?.affected.join("、")}
+                      。已完成的子项不会因取消而回滚。
+                    </span>
+                  }
+                  confirmLabel="确认清理"
+                  busy={isCleaning}
+                  onConfirm={() => void executeCleanup()}
+                  onCancel={dismissCleanup}
+                />
               </div>
+            )}
+            {activeCleanupTask && (
+              <ActionButton tone="secondary" size="compact"
+                type="button"
+                onClick={() =>
+                  void host.cancelCleanup(activeCleanupTask).catch((cause) => setError(String(cause)))
+                }
+              >
+                取消剩余子项
+              </ActionButton>
             )}
             {cleanupResult && (
               <section
@@ -1310,25 +1316,25 @@ function BrowserPanelSession({
                   cleanupResult.result.items.some(
                     (item) => item.status !== "completed",
                   )) && (
-                  <button
+                  <ActionButton tone="secondary" size="compact"
                     type="button"
-                    className="mt-2 rounded border border-line px-2 py-1 hover:bg-hover"
+                    className="mt-2"
+                    disabled={isCleaning}
                     onClick={() => void executeCleanup(cleanupResult.scope)}
                   >
                     重试该范围清理
-                  </button>
+                  </ActionButton>
                 )}
               </section>
             )}
-            <button
+            <ActionButton tone="ghost" size="compact"
               type="button"
-              className="rounded px-3 py-1 text-xs"
               onClick={() => setDataOpen(false)}
             >
               关闭
-            </button>
+            </ActionButton>
           </div>
-        </div>
+        </HintSurface>
       )}
       {downloads.length > 0 && (
         <section
@@ -1353,9 +1359,8 @@ function BrowserPanelSession({
                 </span>
                 {download.status === "pending" && (
                   <>
-                    <button
+                    <ActionButton tone="secondary" size="compact"
                       type="button"
-                      className="rounded border border-line px-2 py-1"
                       onClick={() =>
                         void host
                           .decideDownload(sessionId, download.downloadId, false)
@@ -1363,10 +1368,9 @@ function BrowserPanelSession({
                       }
                     >
                       拒绝
-                    </button>
-                    <button
+                    </ActionButton>
+                    <ActionButton tone="secondary" size="compact"
                       type="button"
-                      className="rounded border border-line px-2 py-1"
                       onClick={() =>
                         void host
                           .decideDownload(sessionId, download.downloadId, true)
@@ -1374,7 +1378,7 @@ function BrowserPanelSession({
                       }
                     >
                       允许
-                    </button>
+                    </ActionButton>
                   </>
                 )}
               </div>
@@ -1383,11 +1387,12 @@ function BrowserPanelSession({
         </section>
       )}
       {dialogs.map((dialog) => (
-        <div
+        <HintSurface
+          open
           key={dialog.dialogId}
           role="dialog"
           aria-label="页面对话框"
-          className=" inset-x-4 bottom-10 z-30 rounded-lg border border-line bg-base p-4 shadow-floating"
+          className="inset-x-4 bottom-10 z-30 p-4"
         >
           <h2 className="text-sm font-medium">页面{dialog.dialogType}对话框</h2>
           <p className="mt-1 text-xs text-ink-muted">
@@ -1397,16 +1402,15 @@ function BrowserPanelSession({
           {dialog.dialogType === "prompt" && (
             <input
               aria-label="对话框输入"
-              className="mt-3 w-full rounded border border-line bg-surface px-2 py-1 text-xs"
+              className={`${settingsInputClass} mt-3`}
               value={dialogInput}
               onChange={(event) => setDialogInput(event.target.value)}
             />
           )}
           <div className="mt-3 flex justify-end gap-2">
             {dialog.dialogType !== "alert" && (
-              <button
+              <ActionButton tone="secondary" size="compact"
                 type="button"
-                className="rounded border border-line px-3 py-1 text-xs"
                 onClick={() => {
                   void host
                     .decideDialog(
@@ -1426,11 +1430,10 @@ function BrowserPanelSession({
                 }}
               >
                 取消
-              </button>
+              </ActionButton>
             )}
-            <button
+            <ActionButton tone="primary" size="compact"
               type="button"
-              className="rounded bg-ink px-3 py-1 text-xs text-foreground-inverse"
               onClick={() => {
                 void host
                   .decideDialog(
@@ -1451,9 +1454,9 @@ function BrowserPanelSession({
               }}
             >
               确定
-            </button>
+            </ActionButton>
           </div>
-        </div>
+        </HintSurface>
       ))}
       <footer className="flex min-h-6 items-center justify-between border-t border-line px-3 text-2xs text-ink-muted">
         <span>

@@ -15,6 +15,7 @@ import type { ReactNode } from "react";
 export function PageHeader({
   title,
   count,
+  leading,
   description,
   actions,
   size = "page",
@@ -22,7 +23,8 @@ export function PageHeader({
 }: {
   readonly title: ReactNode;
   /** 条数（运行数、连接数…）：跟在标题后面，弱化处理。 */
-  readonly count?: number;
+  readonly count?: ReactNode;
+  readonly leading?: ReactNode;
   /** 标题下的一句说明。 */
   readonly description?: ReactNode;
   /** 右侧操作：整页 / 整块的操作放这里。 */
@@ -39,21 +41,30 @@ export function PageHeader({
     <header
       className={`flex flex-wrap items-center gap-x-3 gap-y-2 ${className}`}
     >
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-baseline gap-2">
-          <Heading className={`min-w-0 truncate ${titleClass}`}>{title}</Heading>
-          {count !== undefined && (
-            <span className="shrink-0 text-ui-sm text-ink-mute tabular-nums">
-              {count}
-            </span>
+      <div className="flex min-w-0 flex-[1_1_12rem] items-center gap-3">
+        {leading && <div className="shrink-0">{leading}</div>}
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-baseline gap-2">
+            <Heading
+              className={`min-w-0 [overflow-wrap:anywhere] ${titleClass}`}
+            >
+              {title}
+            </Heading>
+            {count !== undefined && (
+              <span className="shrink-0 text-ui-sm text-ink-mute tabular-nums">
+                {count}
+              </span>
+            )}
+          </div>
+          {description && (
+            <p className="mt-1 text-ui-sm text-ink-mute [overflow-wrap:anywhere]">
+              {description}
+            </p>
           )}
         </div>
-        {description && (
-          <p className="mt-1 text-ui-sm text-ink-mute">{description}</p>
-        )}
       </div>
       {actions && (
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">
           {actions}
         </div>
       )}

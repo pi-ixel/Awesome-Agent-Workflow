@@ -28,3 +28,46 @@ test("archived session deletion confirms once, preserves a failed row, and can r
   await dialog.getByRole("button", { name: "彻底删除", exact: true }).click();
   await expect(page.getByText("暂无归档会话。")).toBeVisible();
 });
+
+test("归档管理在窄栏换肤时保留展开和焦点，恢复会话后可继续键盘操作", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/tests/visual/uiScaleFixture.html");
+  const archive = await context.newPage();
+  await archive.emulateMedia({ reducedMotion: "reduce" });
+  await archive.setViewportSize({ width: 320, height: 720 });
+  await archive.goto("/tests/visual/sessionDeletionFixture.html?navigation&appearance");
+  const release = archive.getByRole("button", { name: "归档项目 D:/release" });
+  await release.press("Enter");
+  await expect(release).toHaveAttribute("aria-expanded", "false");
+  const group = archive.getByRole("button", { name: "归档项目 D:/project" });
+  const session = archive.getByRole("button", { name: "发布准备和回滚检查", exact: true });
+  await session.press("Enter");
+  await expect(archive.locator("html")).toHaveAttribute("data-opened-session", "session-2");
+  const font = page.getByRole("spinbutton", { name: "界面字号" });
+  for (const [theme, px] of [
+    ["暖白", 12],
+    ["暗夜", 20],
+    ["暖白", 14],
+  ] as const) {
+    await page.getByRole("button", { name: theme, exact: true }).click();
+    await font.fill(String(px));
+    await font.press("Enter");
+    await expect(archive.locator("html")).toHaveCSS("--ui-font-size", px + "px");
+    await expect(group).toHaveAttribute("aria-expanded", "true");
+    await expect(release).toHaveAttribute("aria-expanded", "false");
+    await expect(session).toBeFocused();
+    await expect(session).not.toHaveCSS("box-shadow", "none");
+    expect(await archive.locator("main").evaluate((el) => el.scrollWidth)).toBeLessThanOrEqual(320);
+    expect((await session.boundingBox())!.width).toBeGreaterThan(160);
+  }
+  const restore = archive.getByRole("button", { name: "取消归档 发布准备和回滚检查" });
+  await restore.press("Enter");
+  await expect(session).toBeHidden();
+  await expect(group).toBeFocused();
+  await archive.getByRole("button", { name: "取消归档 测试会话" }).press("Enter");
+  await expect(group).toBeHidden();
+  await expect(archive.getByRole("searchbox", { name: "搜索已归档会话" })).toBeFocused();
+  await expect(release).toHaveAttribute("aria-expanded", "false");
+});

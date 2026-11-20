@@ -1,6 +1,6 @@
+import { ActionButton } from "../../../shared/ui/controls.tsx";
 import { useEffect, useRef, useState } from "react";
 import { desktopManagedStorage } from "../../host/service.ts";
-import { btnSecondary } from "../../../shared/ui/controls";
 import {
   SettingCard,
   SettingRow,
@@ -13,7 +13,6 @@ interface StorageLocation {
   readonly migrationError: string | null;
 }
 
-const button = `${btnSecondary} min-h-8 shrink-0 px-3 py-1 text-ui-base`;
 
 export function StorageLocationSetting({
   pickDirectory,
@@ -112,28 +111,31 @@ export function StorageLocationSetting({
           />
           <div className="flex flex-wrap justify-end gap-2">
             {!location && error && (
-              <button
+              <ActionButton
+                tone="secondary"
                 type="button"
-                className={button}
+                className="min-h-8 shrink-0 px-3 py-1 text-ui-base"
                 onClick={() => void read()}
               >
                 重试
-              </button>
+              </ActionButton>
             )}
             {location?.pendingPath && (
-              <button
+              <ActionButton
+                tone="secondary"
                 type="button"
-                className={button}
+                className="min-h-8 shrink-0 px-3 py-1 text-ui-base"
                 disabled={busy}
                 onClick={() => void schedule(null)}
               >
                 取消迁移
-              </button>
+              </ActionButton>
             )}
             {pickDirectory && (
-              <button
+              <ActionButton
+                tone="secondary"
                 type="button"
-                className={button}
+                className="min-h-8 shrink-0 px-3 py-1 text-ui-base"
                 disabled={!location || busy}
                 onClick={() => {
                   void runOperation(async () => {
@@ -143,15 +145,16 @@ export function StorageLocationSetting({
                 }}
               >
                 选择文件夹
-              </button>
+              </ActionButton>
             )}
-            <button
+            <ActionButton
+              tone="secondary"
               type="submit"
-              className={button}
+              className="min-h-8 shrink-0 px-3 py-1 text-ui-base"
               disabled={!location || busy || !draft?.trim()}
             >
               保存
-            </button>
+            </ActionButton>
           </div>
         </form>
       </SettingRow>

@@ -1,10 +1,11 @@
 import { type ReactNode } from "react";
 import type { NativeSkill, SkillCatalog } from "../../host/types.ts";
 import { pathName } from "../../../shared/panelPaths.ts";
-import { DangerButton } from "../../../shared/ui/controls.tsx";
+import { ActionButton, DangerButton, focusVisibleRing } from "../../../shared/ui/controls.tsx";
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
-import { useHeaderMenu } from "../../../shared/ui/useHeaderMenu.ts";
+import { useMenuController } from "../../../shared/ui/useMenuController.ts";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { useFeedback } from "../../../shared/ui/feedback.ts";
 import {
   CopyIcon,
@@ -46,7 +47,7 @@ export function SkillGroup({
           {project ? pathName(project) : "全局技能"}
         </span>
         <span
-          className="min-w-0 truncate font-mono text-xs text-ink-mute"
+          className="min-w-0 truncate font-mono text-ui-caption text-ink-mute"
           data-hint={project ?? sources.join("\n")}
         >
           {project ??
@@ -56,7 +57,7 @@ export function SkillGroup({
           aria-hidden="true"
           className="min-w-4 flex-1 border-t border-line"
         />
-        <span className="shrink-0 text-xs tabular-nums text-ink-mute">
+        <span className="shrink-0 text-ui-caption tabular-nums text-ink-mute">
           {entries.length} 项
         </span>
       </h2>
@@ -80,7 +81,7 @@ function ActionsRow({
   actions: Actions;
   onDetail?: (button: HTMLButtonElement) => void;
 }) {
-  const { menu, open, dismiss } = useHeaderMenu();
+  const { menu, open, dismiss } = useMenuController();
   const notify = useFeedback();
   async function copyPath() {
     try {
@@ -104,8 +105,7 @@ function ActionsRow({
   const copyIcon = <CopyIcon className={glyphSize} />;
   const removeIcon = <TrashIcon className={glyphSize} />;
   if (onDetail) {
-    const iconButton =
-      "flex min-w-7 items-center justify-center rounded-md py-1.5 focus-visible:outline-offset-[-3px] disabled:opacity-50";
+    const iconButton = `flex min-w-7 items-center justify-center rounded-md py-1.5 focus-visible:ring-inset disabled:opacity-50 ${focusVisibleRing}`;
     return (
       <div className="flex shrink-0 items-center gap-0.5 pr-2 text-ink-mute">
         <IconButton
@@ -125,7 +125,10 @@ function ActionsRow({
           className={iconButton + " hover:bg-hover hover:text-ink"}
           onClick={(event) => {
             const anchor = event.currentTarget;
-            const rect = anchor.getBoundingClientRect();
+            if (menu && !menu.closing) {
+              dismiss();
+              return;
+            }
             open(
               "actions",
               skill.name + " 的操作",
@@ -149,12 +152,7 @@ function ActionsRow({
                   onSelect: () => void copyPath(),
                 },
               ],
-              {
-                x: rect.right,
-                y: rect.bottom + 4,
-                side: "bottom",
-                align: "end",
-              },
+              { trigger: anchor },
             );
           }}
         >
@@ -164,6 +162,7 @@ function ActionsRow({
           <ContextMenu
             entries={menu.entries}
             placement={menu.placement}
+            trigger={menu.trigger}
             label={menu.label}
             closing={menu.closing}
             onDismiss={dismiss}
@@ -173,16 +172,16 @@ function ActionsRow({
     );
   }
   const button =
-    "flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus-ring";
+    "flex items-center gap-2.5 px-2 py-1.5 text-left";
   return (
     <div className="mt-auto flex shrink-0 flex-wrap gap-1 border-t border-line pt-2 text-xs sm:flex-col">
-      <button className={button} onClick={() => void copyPath()}>
+      <ActionButton tone="ghost" className={button} onClick={() => void copyPath()}>
         {copyIcon}复制路径
-      </button>
-      <button className={button} onClick={() => actions.open(skill)}>
+      </ActionButton>
+      <ActionButton tone="ghost" className={button} onClick={() => actions.open(skill)}>
         {openIcon}
         {openLabel}
-      </button>
+      </ActionButton>
       <DangerButton
         className={button}
         disabled={actions.busy}
@@ -214,19 +213,20 @@ export function SelectableSkillCard({
   onToggle: () => void;
 }) {
   return (
-    <button
+    <NavigationRow
+      layout="compound"
       type="button"
       aria-label={`选择 ${name}`}
       aria-pressed={selected}
       data-hint={description?.trim() || undefined}
       onClick={onToggle}
-      className="flex min-h-[50px] min-w-0 items-center gap-2 overflow-hidden rounded-2xl border border-line bg-surface px-3.5 text-left transition-colors hover:border-line-strong focus-visible:outline-offset-2 aria-pressed:border-ink aria-pressed:bg-selected aria-pressed:ring-1 aria-pressed:ring-inset aria-pressed:ring-ink"
+      className="flex min-h-[50px] min-w-0 items-center gap-2 overflow-hidden rounded-2xl border border-line bg-surface px-3.5 text-left transition-colors hover:border-line-strong aria-pressed:border-ink aria-pressed:bg-selected aria-pressed:ring-1 aria-pressed:ring-inset aria-pressed:ring-ink focus-visible:ring-focus-ring!"
     >
       <SkillCardIcon />
       <span className="min-w-0 flex-1 truncate text-ui-base font-semibold">
         {name}
       </span>
-    </button>
+    </NavigationRow>
   );
 }
 export function SkillCard({
@@ -245,11 +245,12 @@ export function SkillCard({
     <article
       aria-label={skill.name}
       data-hint={skill.description || undefined}
-      className="flex h-[50px] min-w-0 items-stretch overflow-hidden rounded-xl border border-line bg-surface transition-colors hover:border-line-strong focus-within:border-line-strong"
+      className="flex min-h-[50px] min-w-0 items-stretch overflow-hidden rounded-xl border border-line bg-surface transition-colors hover:border-line-strong focus-within:border-line-strong"
     >
       <div className="flex min-w-0 flex-1 items-stretch">
-        <button
-          className="flex min-w-0 flex-1 items-center gap-2 px-3.5 text-left hover:bg-hover focus-visible:outline-offset-[-3px]"
+        <NavigationRow
+          layout="compound"
+          className="items-center gap-2 px-3.5 py-1.5 leading-tight hover:bg-surface-hover"
           aria-label={`查看 ${skill.name} 详情`}
           onClick={(event) => onDetail(event.currentTarget)}
         >
@@ -259,13 +260,13 @@ export function SkillCard({
           </span>
           {needsReview && (
             <span
-              className="max-w-[45%] shrink-0 truncate text-xs text-danger-ink"
+              className="max-w-[45%] shrink-0 truncate text-ui-xs text-danger-ink"
               data-hint={reviewLabel ? skill.status : undefined}
             >
               {reviewLabel ?? "待检查"}
             </span>
           )}
-        </button>
+        </NavigationRow>
       </div>
       <ActionsRow skill={skill} actions={actions} onDetail={onDetail} />
     </article>

@@ -8,6 +8,7 @@
 import type { NodeOutcome } from "./nodeDetail.ts";
 import type { WorkflowCatalogNode } from "../types.ts";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { Disclosure } from "../../../shared/ui/Disclosure.tsx";
 import { BotIcon, FileIcon, HandIcon, TerminalIcon, XIcon } from "../../../shared/ui/icons.tsx";
 import { iconButton } from "./buttons.ts";
@@ -67,7 +68,7 @@ export function NodeReview({ node, place, outcomes, sources, onOpenKnowledge, on
         <h4>依据的规范</h4>
         <ul className="workflow-review-files">{node.knowledge!.map((file) => <li key={file}>
           {onOpenKnowledge
-            ? <button type="button" onClick={() => onOpenKnowledge(file)} data-hint="查看这份规范"><FileIcon className="ui-icon-12" aria-hidden="true" />{file}</button>
+            ? <NavigationRow layout="compound" onClick={() => onOpenKnowledge(file)} data-hint="查看这份规范"><FileIcon className="ui-icon-12" aria-hidden="true" />{file}</NavigationRow>
             : <span><FileIcon className="ui-icon-12" aria-hidden="true" />{file}</span>}
         </li>)}</ul>
       </section>}

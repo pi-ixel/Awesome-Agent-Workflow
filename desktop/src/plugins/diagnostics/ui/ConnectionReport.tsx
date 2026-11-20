@@ -1,3 +1,5 @@
+import { ActionButton } from "../../../shared/ui/controls.tsx";
+import { Disclosure } from "../../../shared/ui/Disclosure.tsx";
 import type {
   AcpConnectionDiagnostic,
   AcpProbeResult,
@@ -10,8 +12,6 @@ import {
   type RuntimeRow,
 } from "./sessionPresentation.ts";
 
-const button =
-  "rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-xs text-ink transition-colors hover:bg-raised disabled:opacity-50";
 const stateText = {
   initializing: "初始化中",
   ready: "就绪",
@@ -59,14 +59,11 @@ function RuntimeDetails({ row }: { row: RuntimeRow }) {
           <span>待审批 {row.pendingApprovals}</span>
         )}
       </div>
-      <details>
-        <summary className="cursor-pointer text-ink-mute hover:text-ink">
-          运行详情
-        </summary>
+      <Disclosure summary="运行详情">
         <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-base p-3 text-xs">
           {JSON.stringify(row, null, 2)}
         </pre>
-      </details>
+      </Disclosure>
     </div>
   );
 }
@@ -100,14 +97,16 @@ export function ConnectionReport({
             {connections.length}
           </span>
         </h2>
-        <button
-          className={button}
+        <ActionButton
+          tone="secondary"
+          type="submit"
+          className="px-3 py-1.5 text-ui-xs"
           disabled={!connections.length || pendingCount > 0}
           aria-busy={pendingCount > 0}
           onClick={() => connections.forEach((item) => probe(item.id))}
         >
           {pendingCount > 0 ? `测试中 · ${pendingCount} 条` : "测试全部"}
-        </button>
+        </ActionButton>
       </header>
       <div className="divide-y divide-line">
         {connections.map((connection) => {
@@ -145,11 +144,18 @@ export function ConnectionReport({
                   {stateText[connection.state]}
                 </span>
               </div>
-              <MetricStrip embedded label={`${connection.id} 负载`} metrics={[
-                { label: "项目", value: projects.size },
-                { label: "session", value: ready.length },
-                { label: "执行中", value: ready.filter((s) => s.running).length },
-              ]} />
+              <MetricStrip
+                embedded
+                label={`${connection.id} 负载`}
+                metrics={[
+                  { label: "项目", value: projects.size },
+                  { label: "session", value: ready.length },
+                  {
+                    label: "执行中",
+                    value: ready.filter((s) => s.running).length,
+                  },
+                ]}
+              />
               {alerts.length > 0 && (
                 <p
                   className={`mb-3 break-words rounded-lg px-3 py-2 text-xs ${rows.some((r) => r.agentCrashed) ? "bg-danger-bg text-danger-ink" : "bg-warn-bg text-warn-ink"}`}
@@ -169,19 +175,21 @@ export function ConnectionReport({
                     </time>
                   )}
                 </p>
-                <button
-                  className={`${button} shrink-0`}
+                <ActionButton
+                  tone="secondary"
+                  type="submit"
+                  className="px-3 py-1.5 text-ui-xs shrink-0"
                   disabled={feedback?.pending}
                   aria-busy={feedback?.pending}
                   onClick={() => probe(connection.id)}
                 >
                   {feedback?.pending ? "测试中…" : "测试"}
-                </button>
+                </ActionButton>
               </div>
-              <details className="mt-3 border-t border-line pt-3 text-xs">
-                <summary className="cursor-pointer text-ink-soft hover:text-ink">
-                  项目与 session 明细
-                </summary>
+              <Disclosure
+                summary="项目与 session 明细"
+                className="mt-3 border-t border-line pt-3 text-xs"
+              >
                 <div className="my-3 flex items-center gap-2 text-ink-mute">
                   <span className="min-w-0 break-all font-mono">
                     {connection.id}
@@ -230,7 +238,7 @@ export function ConnectionReport({
                 {!connection.sessions.length && (
                   <p className="text-ink-mute">没有绑定的 session。</p>
                 )}
-              </details>
+              </Disclosure>
             </article>
           );
         })}
@@ -247,28 +255,31 @@ export function ConnectionReport({
             <span className="ml-2 text-ink-mute">{unmatched.length}</span>
           </h3>
           {unmatched.map((row, index) => (
-            <details
+            <Disclosure
+              layout="row"
               key={index}
               className="mt-3 rounded-lg border border-line p-3 text-xs"
+              summary={
+                <>
+                  <span className="font-mono">
+                    {row.sessionId || "未绑定 session"}
+                  </span>
+                  <span
+                    className={`ml-3 ${row.agentCrashed ? "text-danger-ink" : row.busyReason || row.busy ? "text-warn-ink" : "text-ink-mute"}`}
+                  >
+                    {String(runtimeStatus(row))}
+                  </span>
+                  {row.listOnly && (
+                    <span className="ml-2 text-ink-mute">预热</span>
+                  )}
+                </>
+              }
             >
-              <summary className="cursor-pointer break-all text-ink-soft">
-                <span className="font-mono">
-                  {row.sessionId || "未绑定 session"}
-                </span>
-                <span
-                  className={`ml-3 ${row.agentCrashed ? "text-danger-ink" : row.busyReason || row.busy ? "text-warn-ink" : "text-ink-mute"}`}
-                >
-                  {String(runtimeStatus(row))}
-                </span>
-                {row.listOnly && (
-                  <span className="ml-2 text-ink-mute">预热</span>
-                )}
-              </summary>
               <p className="mt-3 break-all">
                 {row.workspacePath || "未关联项目"}
               </p>
               <RuntimeDetails row={row} />
-            </details>
+            </Disclosure>
           ))}
         </section>
       )}

@@ -51,7 +51,8 @@ export function drawMinimap(scroller: HTMLElement | null, content: HTMLElement |
     ctx.stroke();
   }
   // 当前看得到的范围：中性色、淡淡一层，只标出位置，不抢卡片的状态色。
-  const ink = getComputedStyle(host ?? scroller).getPropertyValue("--color-ink-mute").trim() || "#888";
+  const appearance = getComputedStyle(host ?? scroller);
+  const ink = appearance.getPropertyValue("--color-ink-mute").trim() || appearance.color;
   const vx = scroller.scrollLeft * scale;
   const vy = scroller.scrollTop * scale;
   const vw = Math.min(w, scroller.clientWidth * scale);

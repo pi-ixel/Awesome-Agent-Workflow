@@ -6,11 +6,7 @@ import type { DocumentsService } from "../service.ts";
 
 import { pathKey, pathName } from "../../../shared/panelPaths.ts";
 import { markdownUnsaved } from "../editor/editor.ts";
-import {
-  DangerButton,
-  btnPrimary,
-  btnSecondary,
-} from "../../../shared/ui/controls.tsx";
+import { ActionButton, DangerButton } from "../../../shared/ui/controls.tsx";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
 
 function DocumentDialog({
@@ -110,14 +106,16 @@ export function MarkdownDocumentDialogs({
         </p>
       ) : null}
       <div className="flex justify-end gap-2">
-        <button
+        <ActionButton
+          tone="secondary"
+          type="submit"
           data-cancel
           disabled={busy}
-          className={`${btnSecondary} px-3 py-1.5 text-sm whitespace-nowrap`}
+          className="px-3 py-1.5 text-sm whitespace-nowrap"
           onClick={() => choose("cancel")}
         >
           取消
-        </button>
+        </ActionButton>
         <DangerButton
           disabled={busy}
           className="px-3 py-1.5 text-sm whitespace-nowrap"
@@ -125,13 +123,15 @@ export function MarkdownDocumentDialogs({
         >
           放弃修改
         </DangerButton>
-        <button
+        <ActionButton
+          tone="primary"
+          type="submit"
           disabled={busy}
-          className={`${btnPrimary} px-3 py-1.5 text-sm whitespace-nowrap`}
+          className="px-3 py-1.5 text-sm whitespace-nowrap"
           onClick={() => choose("save")}
         >
           {busy ? "正在保存…" : "保存"}
-        </button>
+        </ActionButton>
       </div>
     </DocumentDialog>
   );
@@ -177,13 +177,15 @@ export function MarkdownConflictActions({
           <span className="min-w-0 flex-1 break-words">
             {doc.conflict ? "磁盘文件已变化，本地编辑已保留。" : doc.error}
           </span>
-          <button
-            className={`${btnSecondary} px-2 py-1`}
+          <ActionButton
+            tone="secondary"
+            type="submit"
+            className="px-2 py-1"
             disabled={doc.saving}
             onClick={() => setDecision("reload")}
           >
             重新载入
-          </button>
+          </ActionButton>
           {doc.conflict ? (
             <DangerButton
               className="px-2 py-1"
@@ -216,14 +218,16 @@ export function MarkdownConflictActions({
             <p className="mb-3 text-danger-ink">{doc.error}</p>
           ) : null}
           <div className="flex justify-end gap-2">
-            <button
+            <ActionButton
+              tone="secondary"
+              type="submit"
               data-cancel
               disabled={busy}
-              className={`${btnSecondary} px-3 py-1.5 text-sm whitespace-nowrap`}
+              className="px-3 py-1.5 text-sm whitespace-nowrap"
               onClick={() => setDecision(null)}
             >
               取消
-            </button>
+            </ActionButton>
             <DangerButton
               disabled={busy}
               className="px-3 py-1.5 text-sm whitespace-nowrap"

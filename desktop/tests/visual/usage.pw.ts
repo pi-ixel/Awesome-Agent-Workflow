@@ -27,9 +27,13 @@ test("two ACP substitutes feed the page and an IndexedDB write survives a browse
 
 test("white cards, compact title filter, evenly spaced full months and keyboard tooltip", async ({
   page,
+  context,
 }) => {
+  const settings = await context.newPage();
+  await settings.goto("/tests/visual/uiScaleFixture.html");
+  await settings.getByRole("button", { name: "暖白", exact: true }).click();
   await page.setViewportSize({ width: 1400, height: 1060 });
-  await page.goto("/tests/visual/fixture.html");
+  await page.goto("/tests/visual/fixture.html?appearance");
   const title = page.getByRole("heading", { name: "使用统计", exact: true });
   const tab = page
     .getByRole("group", { name: "数据与统计" })
@@ -90,24 +94,34 @@ test("white cards, compact title filter, evenly spaced full months and keyboard 
   const plot = await bounds(trend.getByRole("img"));
   expect(range.y + range.height).toBeLessThan(plot.y);
   expect(range.x).toBeGreaterThan(plot.x + plot.width / 2);
-  const hasSeriesPixels = await trend
-    .locator("canvas")
-    .evaluate((element: HTMLCanvasElement) => {
-      const rgba = element
-        .getContext("2d")!
-        .getImageData(0, 0, element.width, element.height).data;
-      for (let i = 0; i < rgba.length; i += 4) {
-        if (
-          rgba[i] === 11 &&
-          rgba[i + 1] === 127 &&
-          rgba[i + 2] === 255 &&
-          (rgba[i + 3] ?? 0) > 200
-        )
-          return true;
-      }
-      return false;
-    });
-  expect(hasSeriesPixels).toBe(true);
+  const canvas = trend.locator("canvas");
+  const hasSeriesPixels = () => canvas.evaluate((element: HTMLCanvasElement) => {
+    const token = getComputedStyle(element).getPropertyValue("--color-usage-series-1").trim();
+    const probe = document.createElement("canvas").getContext("2d")!;
+    probe.fillStyle = token;
+    probe.fillRect(0, 0, 1, 1);
+    const expected = probe.getImageData(0, 0, 1, 1).data;
+    const pixels = element.getContext("2d")!.getImageData(0, 0, element.width, element.height).data;
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (pixels[i] === expected[0] && pixels[i + 1] === expected[1] &&
+          pixels[i + 2] === expected[2] && pixels[i + 3]! > 200) return true;
+    }
+    return false;
+  });
+  const warm = await canvas.evaluate(el => getComputedStyle(el).getPropertyValue("--color-usage-series-1"));
+  await expect.poll(hasSeriesPixels).toBe(true);
+  await cell.focus();
+  const cellColor = await cell.locator("span[aria-hidden=true]").evaluate((el) => getComputedStyle(el).backgroundColor);
+  await settings.getByRole("button", { name: "暗夜", exact: true }).click();
+  await expect(canvas).not.toHaveCSS("--color-usage-series-1", warm);
+  await expect(cell.locator("span[aria-hidden=true]")).not.toHaveCSS("background-color", cellColor);
+  await expect(cell).toBeFocused();
+  await expect(page.getByRole("tooltip")).toContainText("4 轮消息");
+  await expect.poll(hasSeriesPixels).toBe(true);
+  await settings.getByRole("button", { name: "暖白", exact: true }).click();
+  await expect(cell.locator("span[aria-hidden=true]")).toHaveCSS("background-color", cellColor);
+  await expect(cell).toBeFocused();
+  await expect.poll(hasSeriesPixels).toBe(true);
 });
 
 test("U09 renders an aggregated payload with bounded client work", async ({

@@ -15,13 +15,18 @@ export function useAnchoredPopover(
       const anchorBox = anchor.getBoundingClientRect();
       const gap = 4;
       const margin = 8;
+      const availableWidth = Math.max(0, window.innerWidth - 2 * margin);
       const below = window.innerHeight - anchorBox.bottom - gap - margin;
       const above = anchorBox.top - gap - margin;
-      const upwards = below < Math.min(panel.scrollHeight, 256) && above > below;
+      const upwards =
+        below < Math.min(panel.scrollHeight, 256) && above > below;
       Object.assign(panel.style, {
-        position: "fixed", margin: "0", right: "auto", bottom: "auto",
-        minWidth: `${Math.max(anchorBox.width, 160)}px`,
-        maxWidth: `${Math.max(0, window.innerWidth - 2 * margin)}px`,
+        position: "fixed",
+        margin: "0",
+        right: "auto",
+        bottom: "auto",
+        minWidth: `${Math.min(availableWidth, Math.max(anchorBox.width, 160))}px`,
+        maxWidth: `${availableWidth}px`,
         maxHeight: `${Math.max(0, Math.min(256, upwards ? above : below))}px`,
       });
       const { offsetWidth: width, offsetHeight: height } = panel;
@@ -29,6 +34,12 @@ export function useAnchoredPopover(
       panel.style.top = `${Math.max(margin, upwards ? anchorBox.top - gap - height : anchorBox.bottom + gap)}px`;
     };
     position();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(position);
+    observer?.observe(anchor);
+    observer?.observe(panel);
     const onScroll = (event: Event) => {
       if (event.target instanceof Node && panel.contains(event.target)) return;
       position();
@@ -36,6 +47,7 @@ export function useAnchoredPopover(
     window.addEventListener("resize", position);
     window.addEventListener("scroll", onScroll, true);
     return () => {
+      observer?.disconnect();
       window.removeEventListener("resize", position);
       window.removeEventListener("scroll", onScroll, true);
       panel.hidePopover?.();

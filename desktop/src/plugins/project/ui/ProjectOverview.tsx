@@ -1,3 +1,4 @@
+import { EmptyState } from "../../../shared/ui/EmptyState.tsx";
 import { useSessionValue } from "./bindings/conversationView.ts";
 import { useWorkspaceValue } from "./bindings/workspaceView.ts";
 import { useProject, useProjectNavigation } from "./bindings/projectView.tsx";
@@ -26,10 +27,7 @@ import { useProject, useProjectNavigation } from "./bindings/projectView.tsx";
  */
 import { useState, type ComponentType } from "react";
 
-import {
-  btnPrimary,
-  Spinner,
-} from "../../../shared/ui/controls.tsx";
+import { ActionButton, Badge, Spinner } from "../../../shared/ui/controls.tsx";
 
 /** 项目状态行：连接态与连接动作。 */
 function ProjectStatusRow({ path }: { readonly path: string }) {
@@ -44,25 +42,26 @@ function ProjectStatusRow({ path }: { readonly path: string }) {
       <span aria-hidden={true} className="flex-1" />
 
       {isConnectingThis ? (
-        <span className="flex items-center gap-2 rounded bg-info-bg px-2 py-1 text-xs text-info-ink">
-          <Spinner className="ui-icon-12" />
-          正在连接 agent 并恢复会话…
-        </span>
+        <Badge tone="info">
+          <Spinner className="ui-icon-12 shrink-0" />
+          <span className="text-ui-sm">正在连接 agent 并恢复会话…</span>
+        </Badge>
       ) : (
         <>
           {/* 唯一主动作：新建会话（连接是它的内部步骤，不单独成按钮——
               让用户去判断「连接」和「进入会话」先点哪个是界面在推卸责任）。
               已连接同样只留它：会话入口在树上，总览只管发起 */}
-          <button
+          <ActionButton
+            tone="primary"
             type="button"
             onClick={() => {
               void projectService?.sessions.startNewSession(path);
             }}
             disabled={isConnecting}
-            className={`${btnPrimary} shrink-0 px-3 py-1.5 text-sm`}
+            className="shrink-0 px-3 py-1.5 text-ui-sm"
           >
             新建会话
-          </button>
+          </ActionButton>
         </>
       )}
     </div>
@@ -70,7 +69,7 @@ function ProjectStatusRow({ path }: { readonly path: string }) {
 }
 
 /** 未选择项目时的空态引导：主行动入口（添加项目）+ 一行价值说明。 */
-function EmptyState() {
+function ProjectSetup() {
   const addProject = useProjectNavigation()?.addProject;
   // 目录对话框不可用 / 取消时的重试提示
   const [isDialogUnavailable, setIsDialogUnavailable] = useState(false);
@@ -84,22 +83,18 @@ function EmptyState() {
   };
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-4xl flex-col items-center justify-center gap-3 px-6 py-16 text-center">
-      <button
-        type="button"
-        onClick={handleAddProject}
-        className={`${btnPrimary} px-4 py-2 text-sm`}
-      >
-        添加项目
-      </button>
-      <p className="text-sm text-ink-mute">
-        从左侧选择或新建一个项目目录，开始与 agent 对话。
-      </p>
-      <p className="text-xs text-ink-ghost">
-        添加后自动检查项目环境。
-      </p>
+    <div className="mx-auto flex h-full w-full max-w-4xl flex-col items-center justify-center text-center">
+      <EmptyState
+        title="从左侧选择或新建一个项目目录，开始与 agent 对话。"
+        description="添加后自动检查项目环境。"
+        action={
+          <ActionButton tone="primary" type="button" onClick={handleAddProject} className="px-4 py-2 text-ui-base">
+            添加项目
+          </ActionButton>
+        }
+      />
       {isDialogUnavailable ? (
-        <p role="alert" className="text-xs text-warn-ink">
+        <p role="alert" className="text-ui-sm text-warn-ink">
           目录选择不可用或已取消，可重试，或从左侧列表选择已有项目。
         </p>
       ) : null}
@@ -117,7 +112,7 @@ function ProjectOverview({
   readonly ExtensionOverview?: ComponentType<{ readonly project: string }>;
 }) {
   if (path === null) {
-    return <EmptyState />;
+    return <ProjectSetup />;
   }
 
   return (

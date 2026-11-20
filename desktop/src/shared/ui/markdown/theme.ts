@@ -1,3 +1,3 @@
 import { createContext } from "react";
 
-export const MarkdownTheme = createContext<"dark" | "warm">("dark");
+export const MarkdownAppearance = createContext<{ readonly theme: "dark" | "warm"; readonly uiFontSize: number }>({ theme: "dark", uiFontSize: 14 });

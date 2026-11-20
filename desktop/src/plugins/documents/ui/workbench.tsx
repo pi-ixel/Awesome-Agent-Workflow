@@ -7,7 +7,7 @@ import type { GitService } from "../../git/service.ts";
 import type { ProjectAnnotationEditor, ProjectWorkspace } from "../../project/service.ts";
 import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
 import { insidePath, pathKey } from "../../../shared/panelPaths.ts";
-import { FolderOpenIcon } from "../../../shared/ui/file-icons/icons.tsx";
+import { FolderGlyph } from "../../../shared/ui/icons.tsx";
 import type { DocumentNavigation, DocumentsService } from "../service.ts";
 import { FilePreview } from "./FilePreview.tsx";
 import { FileTree } from "./FileTree.tsx";
@@ -95,7 +95,7 @@ export function documentPanels(
       launcher: {
         label: "文件",
         description: "从目录中选择一个文件",
-        Icon: FolderOpenIcon,
+        Icon: FolderGlyph,
         order: -10,
       },
       key: ({ project }) => project,

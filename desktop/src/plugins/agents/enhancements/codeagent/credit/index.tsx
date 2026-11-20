@@ -4,12 +4,12 @@ import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { IconButton } from "../../../../../shared/ui/IconButton.tsx";
 import {
-  btnSecondary,
-  btnSize,
+  ActionButton,
   focusVisibleRing,
   Listbox,
 } from "../../../../../shared/ui/controls.tsx";
 import { SegmentedControl } from "../../../../../shared/ui/controls/SegmentedControl.tsx";
+import { HintSurface } from "../../../../../shared/ui/controls/HintSurface.tsx";
 import { CreditIcon, QuotaContent, TokenContent } from "./QuotaContent.tsx";
 import { createQuotaStore, monthlyCreditRatio } from "./state.ts";
 
@@ -95,20 +95,17 @@ export function apply(ctx: Context): void {
           ) : (
             switcher
           )}
-          <button
-            type="button"
+          <ActionButton
+            tone={settings ? "secondary" : "ghost"}
+            size={settings ? "compact" : undefined}
             disabled={isLoading}
-            className={
-              settings
-                ? `${btnSecondary} ${btnSize}`
-                : `shrink-0 rounded-md px-2 py-1 text-ui-caption text-ink-mute hover:bg-hover hover:text-ink disabled:opacity-50 ${focusVisibleRing}`
-            }
+            className={settings ? undefined : "shrink-0 px-2 py-1 text-ui-caption"}
             onClick={() =>
               void (tab === "credit" ? refreshCredit() : refreshToken())
             }
           >
             刷新
-          </button>
+          </ActionButton>
         </div>
         {settings && <div>{switcher}</div>}
         <div
@@ -197,26 +194,28 @@ export function apply(ctx: Context): void {
         >
           <CreditIcon className="ui-icon-18" ratio={ratio} />
         </IconButton>
-        <div
+        <HintSurface
+          open
+          role="group"
           ref={panel}
           id={id}
           popover="auto"
           aria-label="CodeAgent 额度"
           onToggle={(event) => setIsOpen(event.newState === "open")}
-          className="fixed inset-auto m-0 max-h-[calc(100dvh-2rem)] w-80 max-w-[calc(100dvw-4.5rem)] overflow-auto rounded-2xl border border-line bg-surface p-4 text-ink shadow-floating"
+          className="fixed inset-auto m-0 max-h-[calc(100dvh-2rem)] w-80 max-w-[calc(100dvw-4.5rem)] overflow-auto p-4"
         >
           {isOpen && <QuotaPanel isActive />}
-          <button
-            type="button"
-            className={`mt-4 w-full rounded-md border-t border-line pt-3 text-left text-ui-caption text-ink-mute hover:text-ink ${focusVisibleRing}`}
+          <ActionButton
+            tone="ghost"
+            className="mt-4 w-full border-t border-line pt-3 text-left text-ui-caption"
             onClick={() => {
               panel.current?.hidePopover();
               workbench.navigation.getState().openSettingsTab(name);
             }}
           >
             查看用量配额
-          </button>
-        </div>
+          </ActionButton>
+        </HintSurface>
       </>
     );
   }

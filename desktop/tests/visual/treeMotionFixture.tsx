@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
+import { bindSecondaryWindowAppearance } from "../../src/plugins/workbench/appearance/windowAppearance.ts";
 import {
   TreeBranch,
   treeChevronClass,
@@ -36,7 +37,6 @@ function Fixture() {
     onToggleDirectory: () => setFolderOpen((value) => !value),
     onOpenFile: () => {},
     onOpenContextMenu: () => {},
-    onKeyDown: () => {},
   };
   return (
     <div>
@@ -69,4 +69,13 @@ function Fixture() {
     </div>
   );
 }
-createRoot(document.getElementById("root")!).render(<Fixture />);
+
+const root = createRoot(document.getElementById("root")!);
+const params = new URLSearchParams(location.search);
+if (params.has("sessions")) {
+  bindSecondaryWindowAppearance(document.documentElement);
+  const { renderProjectTree } = await import("./projectTreeFixture.tsx");
+  renderProjectTree(root);
+} else {
+  root.render(<Fixture />);
+}

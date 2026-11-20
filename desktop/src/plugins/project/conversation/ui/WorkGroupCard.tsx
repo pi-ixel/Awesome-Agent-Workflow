@@ -1,3 +1,4 @@
+import { NavigationRow } from "../../../../shared/ui/NavigationRow.tsx";
 import type { SessionItem } from "../types.ts";
 import { memo, type ReactNode } from "react";
 import { ChevronRightIcon } from "../../../../shared/ui/icons.tsx";
@@ -20,7 +21,8 @@ export const WorkGroupCard = memo(function WorkGroupCard({
 }) {
   return (
     <div className="pl-3" data-work-group="">
-      <button
+      <NavigationRow
+        layout="compound"
         type="button"
         aria-expanded={expanded}
         onClick={onToggle}
@@ -32,7 +34,7 @@ export const WorkGroupCard = memo(function WorkGroupCard({
         <span className={shimmer ? "turn-status-shimmer" : undefined}>
           Agent 处理了一些内容
         </span>
-      </button>
+      </NavigationRow>
       {expanded ? (
         /* 左导线 + 缩进：组内容与平级行区分开（与思考行展开区同一视觉语言） */
         <div className="py-2">

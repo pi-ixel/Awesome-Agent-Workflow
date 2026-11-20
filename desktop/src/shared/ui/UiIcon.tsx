@@ -15,3 +15,19 @@ export function UiIcon({ className, ...props }: IconProps) {
     />
   );
 }
+
+export function Svg({ children, ...rest }: IconProps) {
+  return (
+    <UiIcon
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...rest}
+    >
+      {children}
+    </UiIcon>
+  );
+}

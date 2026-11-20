@@ -1,4 +1,5 @@
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
 import { readWorkbenchUi, useWorkbenchLayout } from "./bindings/layoutView.ts";
 /**
  * 侧栏开关钮（共享组件，两处挂载）：
@@ -26,11 +27,22 @@ export function SidebarToggle({ collapsed }: { readonly collapsed: boolean }) {
       type="button"
       placement="top"
       aria-label="展开/收起侧边栏"
+      aria-controls="workbench-sidebar"
+      aria-expanded={!collapsed}
+      data-sidebar-toggle={collapsed ? "collapsed" : "expanded"}
       data-hint="展开/收起侧边栏"
-      onClick={() => {
+      onClick={(event) => {
+        const trigger = event.currentTarget;
         readWorkbenchUi(workbenchLayout).toggleSidebarCollapsed();
+        if (event.detail !== 0) return;
+        const document = trigger.ownerDocument;
+        const destination = collapsed ? "expanded" : "collapsed";
+        document.defaultView?.requestAnimationFrame(() => {
+          if (document.activeElement !== trigger && document.activeElement !== document.body) return;
+          document.querySelector<HTMLButtonElement>(`[data-sidebar-toggle="${destination}"]`)?.focus();
+        });
       }}
-      className={`flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink ${collapsed ? "" : "order-2 ml-1"}`}
+      className={`flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink focus-visible:ring-inset ${focusVisibleRing} ${collapsed ? "" : "order-2 ml-1"}`}
     >
       <Icon className="ui-icon-16" />
     </IconButton>

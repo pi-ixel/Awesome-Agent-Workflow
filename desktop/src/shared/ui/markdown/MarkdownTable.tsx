@@ -13,8 +13,7 @@ import {
   type ComponentProps,
   type ReactNode,
 } from "react";
-import { createPortal } from "react-dom";
-import { hintTooltipProps } from "../controls/HintTooltip.tsx";
+import { ModalShell } from "../ModalShell.tsx";
 import { useFeedback } from "../feedback.ts";
 import {
   ArrowDownToLineIcon,
@@ -122,30 +121,6 @@ function downloadText(filename: string, text: string): void {
 }
 
 /** 表格动作钮:ghost 图标钮 + 悬停释义(CodeBlock 头栏同款控件语言)。 */
-function TableToolbarButton({
-  label,
-  onClick,
-  children,
-}: {
-  readonly label: string;
-  readonly onClick: () => void;
-  readonly children: ReactNode;
-}) {
-  const hint = hintTooltipProps(label);
-  return (
-    <IconButton
-      iconSize="compact"
-      type="button"
-      aria-label={label}
-      onClick={onClick}
-      {...hint}
-      className="shrink-0 rounded text-ink-faint transition-colors hover:bg-raised hover:text-ink"
-    >
-      {children}
-    </IconButton>
-  );
-}
-
 /** 横向溢出边缘渐隐阴影(容器左右 12px 内阴影,随滚动进度出现/消失)。 */
 type TableEdgeShadowState = "none" | "left" | "right" | "both";
 
@@ -164,8 +139,8 @@ function TableEdgeShadow({
       aria-hidden={true}
       className={
         side === "left"
-          ? "pointer-events-none absolute inset-y-0 left-0 z-10 w-6 rounded-l-xl shadow-[inset_12px_0_12px_-12px_color-mix(in_srgb,black_15%,transparent)]"
-          : "pointer-events-none absolute inset-y-0 right-0 z-10 w-6 rounded-r-xl shadow-[inset_-12px_0_12px_-12px_color-mix(in_srgb,black_15%,transparent)]"
+          ? "pointer-events-none absolute inset-y-0 left-0 z-10 w-6 rounded-l-xl shadow-[inset_12px_0_12px_-12px_color-mix(in_srgb,var(--color-overlay-shade)_15%,transparent)]"
+          : "pointer-events-none absolute inset-y-0 right-0 z-10 w-6 rounded-r-xl shadow-[inset_-12px_0_12px_-12px_color-mix(in_srgb,var(--color-overlay-shade)_15%,transparent)]"
       }
     />
   );
@@ -181,91 +156,30 @@ function TablePreviewDialog({
   readonly tableProps: ComponentProps<"table">;
   readonly children: ReactNode;
 }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const previousFocus = document.activeElement;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    dialogRef.current?.focus();
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) {
-        return;
-      }
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        onClose();
-        return;
-      }
-      if (event.key === "Tab") {
-        const nodes = dialogRef.current?.querySelectorAll<HTMLElement>(
-          'button, [tabindex="0"]',
-        );
-        if (!nodes?.length) return;
-        const first = nodes[0]!,
-          last = nodes[nodes.length - 1]!;
-        if (
-          event.shiftKey &&
-          (document.activeElement === first ||
-            document.activeElement === dialogRef.current)
-        ) {
-          event.preventDefault();
-          last.focus();
-        } else if (
-          !event.shiftKey &&
-          (document.activeElement === last ||
-            document.activeElement === dialogRef.current)
-        ) {
-          event.preventDefault();
-          first.focus();
-        }
-      }
-    };
-    window.addEventListener("keydown", handleKey, true);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", handleKey, true);
-      if (previousFocus instanceof HTMLElement) previousFocus.focus();
-    };
-  }, [onClose]);
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="表格预览"
-        tabIndex={-1}
-        className="flex h-[86dvh] w-[92vw] max-w-6xl flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-floating outline-none"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-line px-3 text-ui-base">
-          <span className="font-medium text-ink">表格预览</span>
-          <IconButton iconSize="dialog"
-            type="button"
-            aria-label="关闭预览"
-            onClick={onClose}
-            className="flex items-center justify-center rounded text-ink-mute hover:bg-raised hover:text-ink"
+  return (
+    <ModalShell size="preview" layer="foreground" label="表格预览" onDismiss={onClose}>
+      <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-line px-3 text-ui-base">
+        <span className="font-medium text-ink">表格预览</span>
+        <IconButton iconSize="dialog"
+          type="button"
+          aria-label="关闭预览"
+          onClick={onClose}
+          className="flex items-center justify-center rounded text-ink-mute hover:bg-raised hover:text-ink"
+        >
+          <XIcon className="ui-icon-14" />
+        </IconButton>
+      </div>
+      <div className="min-h-0 flex-1 p-3">
+        <div tabIndex={0} aria-label="预览表格滚动" className="h-full overflow-auto rounded-xl border border-line bg-surface focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-inset focus-visible:outline-none">
+          <table
+            className="w-max min-w-full border-separate border-spacing-0 text-ui-base [&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-surface"
+            {...tableProps}
           >
-            <XIcon className="ui-icon-14" />
-          </IconButton>
-        </div>
-        <div className="min-h-0 flex-1 p-3">
-          <div className="h-full overflow-auto rounded-xl border border-line bg-surface">
-            <table
-              className="w-max min-w-full border-separate border-spacing-0 text-ui-base [&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-surface"
-              {...tableProps}
-            >
-              {children}
-            </table>
-          </div>
+            {children}
+          </table>
         </div>
       </div>
-    </div>,
-    document.body,
+    </ModalShell>
   );
 }
 
@@ -364,23 +278,38 @@ export function MarkdownTable({
   return (
     <div className="group/table my-3 flex w-full flex-col gap-2">
       <div className="flex items-center justify-end gap-1">
-        <TableToolbarButton label="复制 Markdown" onClick={handleCopyMarkdown}>
+        <IconButton
+          appearance="toolbar"
+          iconSize="compact"
+          aria-label="复制 Markdown"
+          onClick={handleCopyMarkdown}
+        >
           <CopyIcon className="ui-icon-14" />
-        </TableToolbarButton>
-        <TableToolbarButton label="下载 CSV" onClick={handleDownloadCsv}>
+        </IconButton>
+        <IconButton
+          appearance="toolbar"
+          iconSize="compact"
+          aria-label="下载 CSV"
+          onClick={handleDownloadCsv}
+        >
           <ArrowDownToLineIcon className="ui-icon-14" />
-        </TableToolbarButton>
-        <TableToolbarButton
-          label="表格预览"
+        </IconButton>
+        <IconButton
+          appearance="toolbar"
+          iconSize="compact"
+          aria-label="表格预览"
           onClick={() => setPreviewOpen(true)}
         >
           <Maximize2Icon className="ui-icon-14" />
-        </TableToolbarButton>
+        </IconButton>
       </div>
       <div className="relative w-full overflow-hidden rounded-xl border border-line">
         <div
           ref={scrollViewportRef}
-          className="w-full overflow-x-auto"
+          role="region"
+          aria-label="表格横向滚动"
+          tabIndex={edgeShadow === "none" ? undefined : 0}
+          className="w-full overflow-x-auto focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring focus-visible:outline-none"
           onScroll={updateEdgeShadow}
         >
           <table

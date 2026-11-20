@@ -10,7 +10,7 @@ it("settings, listboxes, the composer model menu and hints use the shared floati
   for (const [file, surface] of [
     ["shared/ui/ModalShell.tsx", "modal-panel"],
     ["shared/ui/controls.tsx", "absolute top-full"],
-    ["plugins/project/conversation/ui/StatusChipMenu.tsx", "selection-popup"],
+    ["shared/ui/ContextMenu.tsx", "bg-menu p-1"],
   ] as const) {
     const style = readFileSync(join("src", file), "utf8").split("\n")
       .find((line) => line.includes("className=") && line.includes(surface));

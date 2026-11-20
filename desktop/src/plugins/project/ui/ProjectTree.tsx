@@ -1,6 +1,9 @@
+import { ActionButton } from "../../../shared/ui/controls.tsx";
+import { fieldSurfaceClass } from "../../../shared/ui/inputStyles.ts";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { ConfirmIconAction } from "../../../shared/ui/ConfirmIconAction.tsx";
-import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
+import { TextLink } from "../../../shared/ui/TextLink.tsx";
 import { TreeBranch, treeChevronClass } from "../../../shared/ui/TreeMotion.tsx";
 import { useSessionValue } from "./bindings/conversationView.ts";
 import { useWorkspaceCommands, useWorkspaceValue } from "./bindings/workspaceView.ts";
@@ -65,19 +68,18 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 
 import { sessionPinKey } from "../sessions/sessionPin.ts";
 import { SESSION_LIST_PAGE_SIZE } from "./sidebarState.ts";
-import { StatusDot, focusVisibleRing, rowSelectedClass } from "../../../shared/ui/controls.tsx";
+import { Badge, Spinner, StatusDot, focusVisibleRing, rowSelectedClass } from "../../../shared/ui/controls.tsx";
 import {
   ContextMenu,
   type ContextMenuEntry,
-  type MenuPlacement,
 } from "../../../shared/ui/ContextMenu.tsx";
+import { useMenuController } from "../../../shared/ui/useMenuController.ts";
 import {
   ChevronRightIcon,
   ClockIcon,
   CornerDownRightIcon,
   FolderGlyph,
   ListFilterIcon,
-  LoaderIcon,
   PlusIcon,
   PinIcon,
   PinOffIcon,
@@ -133,8 +135,7 @@ function useSessionGroups(path: string): readonly SessionGroup[] {
 }
 
 /** 会话所属的分组与成员信息（会话视角的副行用；不属于任何分组返回 undefined）。 */
-function useSessionGroupMembership(path: string, sessionId: string) {
-  const groups = useSessionGroups(path);
+function findSessionGroupMembership(groups: readonly SessionGroup[], sessionId: string) {
   for (const group of groups) {
     const member = group.members.find((item) => item.sessionId === sessionId);
     if (member) return { group, member };
@@ -149,31 +150,6 @@ function useCatalogOwner() {
 /** The catalog remains selected-Agent scoped when the content view switches sessions. */
 function useSessionLists() {
   return useProjectCatalog((state) => state.sessionsByPath);
-}
-
-/**
- * folder 图标（项目行前缀，Lucide 线性图形双态）：收起合口（folder）/
- * 展开开口（folder-open），同 ZCode 面板的用法；16px + subtle 洗色对齐
- * ZCode ProjectNodeContent（size-4 text-foreground-subtle）。
- */
-function FolderIcon({ isExpanded }: { readonly isExpanded: boolean }) {
-  return (
-    <UiIcon
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="ui-icon-16 shrink-0 text-ink-subtle"
-    >
-      {isExpanded ? (
-        <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />
-      ) : (
-        <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
-      )}
-    </UiIcon>
-  );
 }
 
 /** 侧栏单例菜单的宿主接口：行组件经它开菜单，状态收在树根（ZCode 列表级
@@ -195,75 +171,9 @@ interface SidebarMenuApi {
   dismiss: () => void;
 }
 
-/** 单例菜单的现场（id 区分视角菜单 / 行菜单；closing 驱动退场动画）。 */
-interface SidebarMenuState {
-  id: string;
-  label: string;
-  entries: readonly ContextMenuEntry[];
-  placement: MenuPlacement;
-  closing: boolean;
-}
-
-/** 退场动画时长（与 index.css 的 .context-menu-out 同拍）。 */
-const MENU_CLOSE_MS = 100;
-
-/**
- * 树根的单例菜单控制器：open 即换现场（右键另一行时旧菜单直接换内容，
- * 不闪两拍）；dismiss 置 closing 播退场，100ms 后卸载（setTimeout 主
- * 路径，jsdom 无动画也能收口）。
- */
-function useSidebarMenuController(): {
-  menu: SidebarMenuState | null;
-  api: SidebarMenuApi;
-  open: (
-    id: string,
-    label: string,
-    entries: readonly ContextMenuEntry[],
-    placement: MenuPlacement,
-  ) => void;
-} {
-  const [menu, setMenu] = useState<SidebarMenuState | null>(null);
-  const closeTimerRef = useRef<number | null>(null);
-
-  const open = useCallback(
-    (
-      id: string,
-      label: string,
-      entries: readonly ContextMenuEntry[],
-      placement: MenuPlacement,
-    ) => {
-      if (closeTimerRef.current !== null) {
-        window.clearTimeout(closeTimerRef.current);
-        closeTimerRef.current = null;
-      }
-      setMenu({ id, label, entries, placement, closing: false });
-    },
-    [],
-  );
-
-  const dismiss = useCallback(() => {
-    setMenu((current) =>
-      current === null || current.closing
-        ? current
-        : { ...current, closing: true },
-    );
-    if (closeTimerRef.current === null) {
-      closeTimerRef.current = window.setTimeout(() => {
-        closeTimerRef.current = null;
-        setMenu(null);
-      }, MENU_CLOSE_MS);
-    }
-  }, []);
-
-  // 卸载时清掉挂起的退场计时器（热重载 / 视图切换不悬挂回调）
-  useEffect(
-    () => () => {
-      if (closeTimerRef.current !== null) {
-        window.clearTimeout(closeTimerRef.current);
-      }
-    },
-    [],
-  );
+/** 把项目树的行菜单适配到统一的菜单控制器。 */
+function useSidebarMenuController() {
+  const { menu, open, dismiss } = useMenuController();
 
   const api = useMemo<SidebarMenuApi>(
     () => ({
@@ -290,11 +200,14 @@ function isContextMenuKey(event: { key: string; shiftKey: boolean }): boolean {
   return event.key === "ContextMenu" || (event.shiftKey && event.key === "F10");
 }
 
-/**
- * 项目节点的一行：folder（双态图标，置顶行悬停时被钉子图替换）+ 目录名 +
- * 行尾徽标与 chevron；置顶 / 移除收进右键菜单（ZCode TaskActionMenu 形态）；
- * 展开 chevron 悬停浮现在行尾，双击整行切换收起 / 展开。
- */
+const projectRowActionClass =
+  "rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink " +
+  focusVisibleRing;
+const sessionRowActionClass =
+  "shrink-0 rounded opacity-0 transition-opacity hover:bg-surface-hover group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100 " +
+  focusVisibleRing;
+
+/** 项目名切换展开，行尾按钮与菜单提供独立操作。 */
 function ProjectNodeRow({
   path,
   isPinned,
@@ -396,19 +309,20 @@ function ProjectNodeRow({
       }`}
     >
       {/* 点项目名进总览，悬停显示完整路径。 */}
-      <button
-        type="button"
+      <NavigationRow
+        layout="compound"
         onClick={() => {
           toggleExpanded(path, isExpanded);
         }}
         aria-expanded={isExpanded}
-        className={`flex min-h-8 min-w-0 flex-1 items-center justify-start gap-2 rounded-lg pl-1.5 pr-1 text-left ${focusVisibleRing}`}
+        aria-current={isSelected ? "true" : undefined}
+        className="min-h-8 items-center gap-2 pl-1.5 pr-1"
         data-hint={path}
       >
         {/* 前导槽（ZCode ProjectNodeContent.tsx:231-255 同构）：置顶提示
             复用固定槽位，仅悬停时替换图标，避免行尾常驻钉子占位 */}
         <span
-          className="flex size-4 shrink-0 items-center justify-center"
+          className="flex ui-icon-16 shrink-0 items-center justify-center"
           aria-hidden="true"
         >
           <span
@@ -416,7 +330,7 @@ function ProjectNodeRow({
               isPinned ? "group-hover/project-row:hidden" : "inline-flex"
             }
           >
-            <FolderIcon isExpanded={isExpanded} />
+            <FolderGlyph isExpanded={isExpanded} className="ui-icon-16 shrink-0 text-ink-subtle" />
           </span>
           {isPinned ? (
             <PinIcon className="hidden ui-icon-16 text-ink-subtle group-hover/project-row:block" />
@@ -425,9 +339,9 @@ function ProjectNodeRow({
         <span className="min-w-0 flex-1 truncate text-ui-base text-ink-subtle transition-colors group-hover:text-ink">
           {name}
         </span>
-      </button>
-      {/* 未操作时让项目名称使用整行空间，键盘进入该行后也能继续聚焦行尾动作。 */}
-      <div className="hidden shrink-0 items-center gap-1 group-hover/project-row:flex group-focus-within/project-row:flex [@media(hover:none)]:flex">
+      </NavigationRow>
+      {/* 收起后保留按钮的聚焦能力，菜单关闭时可以归还焦点并露出操作。 */}
+      <div className="flex max-w-0 shrink-0 items-center gap-1 overflow-hidden group-hover/project-row:max-w-none group-hover/project-row:overflow-visible group-focus-within/project-row:max-w-none group-focus-within/project-row:overflow-visible [@media(hover:none)]:max-w-none [@media(hover:none)]:overflow-visible">
         <IconButton iconSize="compact"
           type="button"
           aria-label="更多操作"
@@ -440,7 +354,7 @@ function ProjectNodeRow({
               buildEntries(),
             );
           }}
-          className="rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
+          className={projectRowActionClass}
         >
           <EllipsisIcon className="ui-icon-14" />
         </IconButton>
@@ -452,7 +366,7 @@ function ProjectNodeRow({
             event.stopPropagation();
             navigation?.openFiles(path);
           }}
-          className={`rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
+          className={projectRowActionClass}
         >
           <FileTreeIcon className="ui-icon-14" />
         </IconButton>
@@ -464,7 +378,7 @@ function ProjectNodeRow({
             event.stopPropagation();
             void projectService?.sessions.startNewSession(path);
           }}
-          className="rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
+          className={projectRowActionClass}
         >
           <MessageCirclePlusIcon className="ui-icon-14" />
         </IconButton>
@@ -479,7 +393,7 @@ function ProjectNodeRow({
               navigation?.selectOverview(path);
               treeAction.run(path);
             }}
-            className="rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
+            className={projectRowActionClass}
           >
             <treeAction.Icon className="ui-icon-14" />
           </IconButton>
@@ -522,109 +436,36 @@ function useActiveSessionIds(path: string): readonly string[] {
   );
 }
 
-/**
- * 会话活动状态的前导徽标（ZCode TaskListItem 前导槽，优先级
- * error > unread > loading）：失败红点 > 已完成未读蓝点 > 运行 spinner。
- */
-function SessionLeadingBadge({
-  path,
-  id,
-}: {
-  readonly path: string;
-  readonly id: string;
-}) {
-  const agentKey = useCatalogOwner();
-  const activity = useProjectActivity(
-    (state) => state.entries[sessionActivityKey(path, id, agentKey)],
-  );
-  if (!activity || activity.status === "idle") {
-    return null;
-  }
-  if (activity.status === "failed") {
-    return <StatusDot tone="danger" label="失败" hint="失败" />;
-  }
-  if (activity.status === "completed") {
-    return activity.unread ? (
-      <StatusDot tone="info" label="已完成，未查看" hint="已完成，未查看" className="ui-icon-7" />
-    ) : null;
-  }
-  if (activity.status === "running") return <SessionRunningIcon />;
-  return null;
-}
-
-/** 会话活动状态的随行徽标：待处理胶囊 / 已停止灰字（ZCode attention
- *  胶囊 h-5 rounded-full px-2 同款；cancelled 是 desktop 独有态，不造
- *  新视觉，保留信息）。 */
-function SessionTrailingBadge({
-  path,
-  id,
-}: {
-  readonly path: string;
-  readonly id: string;
-}) {
-  const agentKey = useCatalogOwner();
-  const activity = useProjectActivity(
-    (state) => state.entries[sessionActivityKey(path, id, agentKey)],
-  );
-  if (!activity || activity.status === "idle") {
-    return null;
-  }
-  if (activity.status === "waiting") {
-    return (
-      <span className="inline-flex h-5 shrink-0 items-center rounded-full bg-interaction-confirmation-surface px-2 text-ui-sm font-medium text-ok-ink">
-        待处理
-      </span>
-    );
-  }
-  if (activity.status === "cancelled") {
-    return <span className="shrink-0 text-ui-sm text-ink-mute">已停止</span>;
-  }
-  return null;
-}
-
-/** 会话视角两行卡副行的随行徽标（前导/随行合一的紧凑版）。 */
+/** 项目视角分开摆放前导标记和随行文字，会话视角把两种状态放在副行。 */
 function SessionActivityBadge({
   path,
   id,
+  placement = "combined",
 }: {
   readonly path: string;
   readonly id: string;
+  readonly placement?: "leading" | "trailing" | "combined";
 }) {
   const agentKey = useCatalogOwner();
   const activity = useProjectActivity(
     (state) => state.entries[sessionActivityKey(path, id, agentKey)],
   );
-  if (!activity || activity.status === "idle") {
-    return null;
+  switch (activity?.status) {
+    case "failed":
+      return placement !== "trailing" ? <StatusDot tone="danger" label="失败" hint="失败" /> : null;
+    case "completed":
+      return placement !== "trailing" && activity.unread
+        ? <StatusDot tone="info" label="已完成，未查看" hint="已完成，未查看" className="ui-icon-7" />
+        : null;
+    case "running":
+      return placement !== "trailing" ? <SessionRunningIcon compact={placement === "combined"} /> : null;
+    case "waiting":
+      return placement !== "leading" ? <Badge tone="ok" compact>待处理</Badge> : null;
+    case "cancelled":
+      return placement !== "leading" ? <span className="shrink-0 text-ui-sm text-ink-mute">已停止</span> : null;
+    default:
+      return null;
   }
-  if (activity.status === "failed") {
-    return <StatusDot tone="danger" label="失败" hint="失败" />;
-  }
-  if (activity.status === "completed") {
-    return activity.unread ? (
-      <StatusDot tone="info" label="已完成，未查看" hint="已完成，未查看" className="ui-icon-7" />
-    ) : null;
-  }
-  if (activity.status === "running") {
-    return (
-      <span
-        role="img"
-        aria-label="运行中"
-        data-hint="运行中"
-        className="flex size-4 items-center justify-center"
-      >
-        <LoaderIcon className="ui-icon-14 shrink-0 animate-spin text-ink-subtle" />
-      </span>
-    );
-  }
-  if (activity.status === "waiting") {
-    return (
-      <span className="inline-flex h-5 shrink-0 items-center rounded-full bg-interaction-confirmation-surface px-2 text-ui-sm font-medium text-ok-ink">
-        待处理
-      </span>
-    );
-  }
-  return <span className="shrink-0 text-ui-sm text-ink-mute">已停止</span>;
 }
 
 /** 会话的置顶判定（订阅单一键的 includes 布尔，避免整组数组订阅）。 */
@@ -654,13 +495,13 @@ function SessionStarAction({ star }: { readonly star: ReturnType<typeof useSessi
       aria-label={label}
       aria-pressed={star.starred}
       {...hintTooltipProps(label)}
-      className={`shrink-0 rounded opacity-0 transition-opacity hover:bg-surface-hover group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100 ${star.starred ? "text-session-star" : "text-ink-soft hover:text-ink"}`}
+      className={`${sessionRowActionClass} ${star.starred ? "text-session-star" : "text-ink-soft hover:text-ink"}`}
       onClick={(event) => {
         event.stopPropagation();
         star.toggle();
       }}
     >
-      <Star className={star.starred ? "size-4 stroke-session-star-outline" : "size-4"} />
+      <Star className={star.starred ? "ui-icon-16 stroke-session-star-outline" : "ui-icon-16"} />
     </IconButton>
   );
 }
@@ -742,9 +583,9 @@ function SessionRenameInput({ rename }: { readonly rename: ReturnType<typeof use
         onChange={(event) => rename.setDraft(event.target.value)}
         onKeyDown={rename.onKeyDown}
         onBlur={rename.onBlur}
-        className="block w-full min-w-0 rounded-md bg-base px-1 py-0 text-ui-base text-ink caret-ink outline-none ring-1 ring-inset ring-line-strong focus:ring-focus-ring/80"
+        className={`${fieldSurfaceClass} block w-full px-1 py-0 text-ui-base caret-ink`}
       />
-      {rename.error && <span role="alert" className="block text-xs text-danger-ink">改名未保存，按回车重试。{rename.error}</span>}
+      {rename.error && <span role="alert" className="block text-ui-sm text-danger-ink">改名未保存，按回车重试。{rename.error}</span>}
     </span>
   );
 }
@@ -776,15 +617,15 @@ function SessionRowBody({ active, renaming, hint, className, onOpen, children }:
 }) {
   if (renaming) return <div className={className}>{children}</div>;
   return (
-    <button
-      type="button"
+    <NavigationRow
+      layout="compound"
       aria-current={active ? "true" : undefined}
       data-hint={hint}
       onClick={onOpen}
-      className={`${className} cursor-pointer ${focusVisibleRing}`}
+      className={`${className} cursor-pointer`}
     >
       {children}
-    </button>
+    </NavigationRow>
   );
 }
 
@@ -832,7 +673,7 @@ function SessionPinAction({
       aria-label={label}
       aria-pressed={pinned}
       {...hint}
-      className="shrink-0 rounded text-ink-soft opacity-0 transition-opacity hover:bg-surface-hover hover:text-ink group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100"
+      className={`${sessionRowActionClass} text-ink-soft hover:text-ink`}
       onClick={(event) => {
         event.stopPropagation();
         toggleSessionPinned?.(path, sessionId, agentKey);
@@ -863,30 +704,6 @@ function SessionArchiveAction({
 }) {
   const projectService = useProject();
   const busySessionIds = useContext(BusySessionsContext);
-  const container = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!confirming) return;
-    const outside = (event: PointerEvent) => {
-      if (
-        event.target instanceof Node &&
-        !container.current?.contains(event.target)
-      )
-        setConfirming(false);
-    };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        setConfirming(false);
-      }
-    };
-    document.addEventListener("pointerdown", outside);
-    document.addEventListener("keydown", escape, true);
-    return () => {
-      document.removeEventListener("pointerdown", outside);
-      document.removeEventListener("keydown", escape, true);
-    };
-  }, [confirming, setConfirming]);
   const liveRuntime = busySessionIds(
     projectService?.sessions.catalog.getState().agentKey ?? undefined,
     path,
@@ -901,65 +718,39 @@ function SessionArchiveAction({
     : activityStatus === "waiting"
       ? "归档任务（会话有待处理审批，暂不可归档）"
       : "归档任务（会话回合运行中，暂不可归档）";
-  const hintProps = hintTooltipProps(hint);
   return (
-    <div
-      ref={container}
-      className={`flex shrink-0 items-center transition-opacity ${confirming ? "opacity-100" : "opacity-0 group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100"}`}
-    >
-      {confirming ? (
-        <button
-          type="button"
-          aria-label="确认归档"
-          disabled={liveRuntime}
-          onClick={(event) => {
-            event.stopPropagation();
-            if (
-              !busySessionIds(
-                projectService?.sessions.catalog.getState().agentKey ?? undefined,
-                path,
-              ).has(sessionId)
-            )
-              projectService?.sessions.archiveWithNotice(path, sessionId);
-            setConfirming(false);
-          }}
-          className="contrast-danger-solid rounded-md bg-red-500 px-2 py-0.5 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          确认
-        </button>
-      ) : (
-        <IconButton iconSize="compact"
-          type="button"
-          aria-label={hint}
-          {...hintProps}
-          disabled={liveRuntime}
-          onClick={(event) => {
-            event.stopPropagation();
-            setConfirming(true);
-          }}
-          className="rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-        >
-          <ArchiveIcon className="ui-icon-16" />
-        </IconButton>
-      )}
-    </div>
+    <ConfirmIconAction
+      label={hint}
+      icon={<ArchiveIcon className="ui-icon-16" />}
+      confirmLabel="确认归档"
+      disabled={liveRuntime}
+      confirming={confirming}
+      setConfirming={setConfirming}
+      revealClassName="opacity-0 group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100"
+      onConfirm={() => {
+        const owner = projectService?.sessions.catalog.getState().agentKey ?? undefined;
+        if (!busySessionIds(owner, path).has(sessionId))
+          projectService?.sessions.archiveWithNotice(path, sessionId);
+      }}
+    />
   );
 }
 
-/** 会话子行（项目树视角的树叶子）：前导槽 + 标题 + 随行徽标，右键弹
- *  「打开会话 / 归档」菜单（置顶行进侧栏最顶的置顶任务带，原位
- *  保留）。 */
-function SessionNode({
+/** 三种会话行共用菜单与行尾操作。置顶行显示钉子，最近行在副行显示所属项目和分组。 */
+function SessionRow({
   path,
   session,
   menu,
+  variant = "project",
   display,
+  groupTitle,
 }: {
   readonly path: string;
   readonly session: SessionSummary;
   readonly menu: SidebarMenuApi;
-  /** 分组内的显示覆盖（显示名 / 附注 / 提醒胶囊），见 sessionGroups.ts。 */
+  readonly variant?: "project" | "pinned" | "recent";
   readonly display?: Omit<SessionGroupMember, "sessionId">;
+  readonly groupTitle?: string;
 }) {
   const projectService = useProject();
   const busySessionIds = useContext(BusySessionsContext);
@@ -968,6 +759,11 @@ function SessionNode({
   const star = useSessionStar(path, session.id);
   const [archiveConfirm, setArchiveConfirm] = useState(false);
 
+  const recent = variant === "recent";
+  const menuEntries = () => buildSessionMenuEntries(
+    projectService, busySessionIds, path, session, rename.start,
+    () => setArchiveConfirm(true), star, display?.open,
+  );
   return (
     <li
       onContextMenu={(event) => {
@@ -976,9 +772,7 @@ function SessionNode({
           event.clientX,
           event.clientY,
           "会话菜单",
-          buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-            setArchiveConfirm(true), star, display?.open,
-          ),
+          menuEntries(),
         );
       }}
       onKeyDown={(event) => {
@@ -987,9 +781,7 @@ function SessionNode({
           menu.openAtRect(
             event.currentTarget.getBoundingClientRect(),
             "会话菜单",
-            buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-              setArchiveConfirm(true), star, display?.open,
-            ),
+            menuEntries(),
           );
         }
       }}
@@ -998,30 +790,44 @@ function SessionNode({
       }`}
     >
       <SessionRowBody
-          active={isActive}
-          renaming={rename.renaming}
-          onOpen={() => {
-            if (display?.open) display.open();
-            else void projectService?.sessions.openSessionFromEntry(path, session.id);
-          }}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 pl-2.5 text-left"
-        >
-          <span className="flex size-4 shrink-0 items-center justify-center">
-            {display?.attention ? null : <SessionLeadingBadge path={path} id={session.id} />}
+        active={isActive}
+        renaming={rename.renaming}
+        hint={variant === "project" ? undefined : path}
+        onOpen={() => {
+          if (display?.open) display.open();
+          else void projectService?.sessions.openSessionFromEntry(path, session.id);
+        }}
+        className={recent
+          ? "flex min-w-0 flex-1 flex-col items-stretch gap-0.5 py-1.5 pl-2.5 text-left"
+          : "flex min-w-0 flex-1 items-center gap-2 py-1 pl-2.5 text-left"}
+      >
+        {!recent && (
+          <span className="flex ui-icon-16 shrink-0 items-center justify-center">
+            {variant === "pinned" ? <PinIcon className="ui-icon-16 shrink-0 text-ink-subtle" />
+              : !display?.attention && <SessionActivityBadge path={path} id={session.id} placement="leading" />}
           </span>
-          <SessionRowTitle starred={star.starred} rename={rename}>
-          <SidebarItemTitle
-            hint={display && display.title !== session.title ? session.title : undefined}
-          >
-            {display?.title ?? session.title}
-            {display?.note ? <span className="text-ink-mute"> · {display.note}</span> : null}
+        )}
+        <SessionRowTitle starred={star.starred} rename={rename}>
+          <SidebarItemTitle hint={!recent && display && display.title !== session.title ? session.title : undefined}>
+            {recent ? session.title : (display?.title ?? session.title)}
+            {!recent && display?.note ? <span className="text-ink-mute"> · {display.note}</span> : null}
           </SidebarItemTitle>
-          </SessionRowTitle>
-          {display?.attention ? (
-            <AttentionChip text={display.attention} />
-          ) : (
-            <SessionTrailingBadge path={path} id={session.id} />
-          )}
+        </SessionRowTitle>
+        {recent ? (
+          <div className="flex h-6 items-center gap-1.5 text-ui-base text-ink-subtle">
+            <CornerDownRightIcon className="ui-icon-14 shrink-0" />
+            <span className="min-w-0 flex-1 truncate">
+              {basenameOf(path)}
+              {display ? ` · ${groupTitle} · ${display.title}` : null}
+            </span>
+            {display?.attention ? <Badge tone="ok" compact>{display.attention}</Badge>
+              : <SessionActivityBadge path={path} id={session.id} />}
+          </div>
+        ) : display?.attention ? (
+          <Badge tone="ok" compact>{display.attention}</Badge>
+        ) : (
+          <SessionActivityBadge path={path} id={session.id} placement="trailing" />
+        )}
       </SessionRowBody>
       {!archiveConfirm && (
         <>
@@ -1039,19 +845,10 @@ function SessionNode({
   );
 }
 
-/** 提醒胶囊（与「待处理」同款视觉）。 */
-function AttentionChip({ text }: { readonly text: string }) {
+function SessionRunningIcon({ compact = false }: { readonly compact?: boolean }) {
   return (
-    <span className="inline-flex h-5 shrink-0 items-center rounded-full bg-interaction-confirmation-surface px-2 text-ui-sm font-medium text-ok-ink">
-      {text}
-    </span>
-  );
-}
-
-function SessionRunningIcon() {
-  return (
-    <span role="img" aria-label="运行中" {...hintTooltipProps("运行中")} className="flex size-4 shrink-0 items-center justify-center">
-      <LoaderIcon className="ui-icon-16 shrink-0 animate-spin text-icon-blue" />
+    <span role="img" aria-label="运行中" {...hintTooltipProps("运行中")} className="flex ui-icon-16 shrink-0 items-center justify-center">
+      <Spinner className={compact ? "ui-icon-14 shrink-0 text-ink-subtle" : "ui-icon-16 shrink-0 text-info-ink"} />
     </span>
   );
 }
@@ -1099,8 +896,11 @@ function SessionGroupNode({
       if (done.some(({ member }) => member.sessionId === inside)) setShowDone(true);
     }
   }
+  const chevron = (
+    <ChevronRightIcon className={`ui-icon-14 ${treeChevronClass} ${expanded ? "rotate-90" : ""}`} />
+  );
   const renderMember = ({ member, session }: (typeof members)[number]) => (
-    <SessionNode
+    <SessionRow
       key={member.sessionId}
       path={path}
       session={session}
@@ -1111,18 +911,20 @@ function SessionGroupNode({
   return (
     <li className="flex min-w-0 flex-col">
       <div className="group/session-row flex min-w-0 items-center gap-1 rounded-lg pr-1 transition-colors hover:bg-surface-hover">
-        {/* 箭头只管展开 / 收起。有页面的分组，点标题打开页面并保留折叠状态。 */}
-        <IconButton iconSize="compact"
-          type="button"
-          aria-expanded={expanded}
-          aria-label={expanded ? `收起 ${group.title}` : `展开 ${group.title}`}
-          onClick={() => setExpanded(!expanded)}
-          className={`ml-1 flex shrink-0 cursor-pointer items-center justify-center rounded text-ink-mute hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
-        >
-          <ChevronRightIcon className={`ui-icon-14 ${treeChevronClass} ${expanded ? "rotate-90" : ""}`} />
-        </IconButton>
-        <button
-          type="button"
+        {group.open && (
+          <IconButton
+            iconSize="compact"
+            type="button"
+            aria-expanded={expanded}
+            aria-label={`${expanded ? "收起" : "展开"} ${group.title}`}
+            onClick={() => setExpanded(!expanded)}
+            className={`ml-1 flex shrink-0 cursor-pointer items-center justify-center rounded text-ink-mute hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
+          >
+            {chevron}
+          </IconButton>
+        )}
+        <NavigationRow
+          layout="compound"
           aria-expanded={group.open ? undefined : expanded}
           aria-label={`${group.title}，${members.length} 个会话`}
           data-hint={group.open ? group.openLabel ?? "打开" : undefined}
@@ -1133,16 +935,17 @@ function SessionGroupNode({
               setExpanded(!expanded);
             }
           }}
-          className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1 pl-0.5 text-left ${focusVisibleRing}`}
+          className={`cursor-pointer items-center gap-2 py-1 ${group.open ? "pl-0.5" : "pl-2"}`}
         >
+          {!group.open && <span aria-hidden="true" className="flex shrink-0">{chevron}</span>}
           <SidebarItemTitle>{group.title}</SidebarItemTitle>
           <SessionGroupStatusBadge status={group.status} />
           {group.attention ? (
-            <AttentionChip text={group.attention} />
+            <Badge tone="ok" compact>{group.attention}</Badge>
           ) : expanded ? null : (
             <span className="shrink-0 text-ui-sm text-ink-mute">{members.length} 个会话</span>
           )}
-        </button>
+        </NavigationRow>
         {group.archive ? (
           <ConfirmIconAction
             label={group.archiveLabel ?? "归档"}
@@ -1163,18 +966,18 @@ function SessionGroupNode({
           )}
           {done.length > 0 ? (
             <li className="flex min-w-0 flex-col">
-              <button
-                type="button"
+              <NavigationRow
+                layout="tree"
                 aria-expanded={showDone}
                 aria-label={`已完成的会话，${done.length} 个`}
                 onClick={() => setShowDone(!showDone)}
-                className={`flex min-w-0 cursor-pointer items-center gap-2 rounded-lg py-0.5 pl-2.5 text-left text-ui-sm text-ink-mute transition-colors hover:bg-surface-hover hover:text-ink-soft ${focusVisibleRing}`}
+                className="cursor-pointer text-ink-mute hover:text-ink-soft"
               >
-                <span className="flex size-4 shrink-0 items-center justify-center">
+                <span className="flex ui-icon-16 shrink-0 items-center justify-center">
                   <ChevronRightIcon className={`ui-icon-12 ${treeChevronClass} ${showDone ? "rotate-90" : ""}`} />
                 </span>
                 已完成 · {done.length}
-              </button>
+              </NavigationRow>
               <TreeBranch open={showDone}>
                 <ul className="flex flex-col gap-0.5 pl-4" aria-label={`${group.title} 已完成的会话`}>
                   {done.map(renderMember)}
@@ -1222,12 +1025,14 @@ function ProjectChildren({
     status?.state === "error" ? (
       <div className="ml-2 pl-2 pt-1 text-ui-sm text-ink-ghost">
         <p>获取会话失败：{status.message}</p>
-        <button
+        <ActionButton
+          tone="secondary"
+          size="compact"
           type="button"
           onClick={() => void projectService?.sessions.preloadSessionList(path, true)}
         >
           重试
-        </button>
+        </ActionButton>
       </div>
     ) : status?.state === "unsupported" ? (
       <p className="ml-2 pl-2 pt-1 text-ui-sm text-ink-ghost">
@@ -1284,7 +1089,7 @@ function ProjectChildren({
             menu={menu}
           />
         ) : (
-          <SessionNode
+          <SessionRow
             key={item.session.id}
             path={path}
             session={item.session}
@@ -1295,19 +1100,15 @@ function ProjectChildren({
       )}
       {hiddenCount > 0 ? (
         <li>
-          <button
-            type="button"
+          <TextLink
             aria-label={`加载更多会话（还有 ${hiddenCount} 条）`}
             onClick={() => {
               expandSessionList(path);
             }}
-            // ZCode ProjectTaskRows.tsx:174-175：show-more 是无底色文本钮，
-            // 仅交互时提亮（focus-visible），不做全宽圆角行悬停；
-            // ml-8.5 让文字与会话标题文字位对齐（pl-2 + 槽 16 + gap 8 + pl-2.5 = 42px）
-            className={`ml-8.5 flex h-auto items-center p-0 text-left text-ui-base text-ink-subtlest focus-visible:text-ink ${focusVisibleRing}`}
+            className="ml-8.5 text-ui-base"
           >
             加载更多 · 还有 {hiddenCount} 条
-          </button>
+          </TextLink>
         </li>
       ) : null}
       <li></li>
@@ -1322,7 +1123,7 @@ function TreeViewSwitchButton({
   onToggleViewMenu,
 }: {
   readonly viewMenuOpen: boolean;
-  readonly onToggleViewMenu: (anchor: DOMRect) => void;
+  readonly onToggleViewMenu: (trigger: HTMLButtonElement) => void;
 }) {
   const hint = hintTooltipProps("切换视角");
   return (
@@ -1333,7 +1134,7 @@ function TreeViewSwitchButton({
       aria-expanded={viewMenuOpen}
       {...hint}
       onClick={(event) => {
-        onToggleViewMenu(event.currentTarget.getBoundingClientRect());
+        onToggleViewMenu(event.currentTarget);
       }}
       className={TREE_HEADER_BUTTON_CLASS}
     >
@@ -1389,17 +1190,17 @@ function TreeSection({
   return (
     <section aria-label={title} className="group/section min-w-0">
       <div className="ml-2 mr-1 flex h-7 min-w-0 items-center">
-        <button
-          type="button"
+        <NavigationRow
+          layout="compound"
           aria-expanded={!isCollapsed}
           onClick={() => {
             setIsCollapsed((value) => !value);
           }}
-          className={`flex min-h-7 min-w-0 flex-1 items-center gap-1 pl-1.5 pr-2.5 text-left text-ui-base font-medium text-ink-mute outline-none transition-colors hover:text-ink focus-visible:text-ink ${focusVisibleRing}`}
+          className="min-h-7 items-center gap-1 pl-1.5 pr-2.5 text-ui-base font-medium text-ink-mute hover:text-ink focus-visible:text-ink"
         >
           <span className="min-w-0 truncate">{title}</span>
           <ChevronRightIcon className={`ui-icon-14 shrink-0 opacity-0 group-hover/section:opacity-100 group-focus-within/section:opacity-100 [@media(hover:none)]:opacity-100 ${treeChevronClass} ${isCollapsed ? "" : "rotate-90"}`} />
-        </button>
+        </NavigationRow>
         <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 has-[[aria-expanded=true]]:opacity-100 [@media(hover:none)]:opacity-100">
           {action}
         </div>
@@ -1411,86 +1212,6 @@ function TreeSection({
   );
 }
 
-/** 置顶任务带的一行：钉子前导槽（本带身份标记）+ 会话标题 + 随行徽标；
- *  悬停提示显示所属项目路径，右键菜单与会话行同源
- *  （打开 / 归档），取消置顶在行尾按钮。 */
-function PinnedSessionRow({
-  path,
-  session,
-  menu,
-}: {
-  readonly path: string;
-  readonly session: SessionSummary;
-  readonly menu: SidebarMenuApi;
-}) {
-  const projectService = useProject();
-  const busySessionIds = useContext(BusySessionsContext);
-  const isActive = useIsSessionActive(path, session.id);
-  const rename = useSessionInlineRename(path, session);
-  const star = useSessionStar(path, session.id);
-  const [archiveConfirm, setArchiveConfirm] = useState(false);
-
-  return (
-    <li
-      onContextMenu={(event) => {
-        event.preventDefault();
-        menu.openAtPointer(
-          event.clientX,
-          event.clientY,
-          "会话菜单",
-          buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-            setArchiveConfirm(true), star,
-          ),
-        );
-      }}
-      onKeyDown={(event) => {
-        if (isContextMenuKey(event)) {
-          event.preventDefault();
-          menu.openAtRect(
-            event.currentTarget.getBoundingClientRect(),
-            "会话菜单",
-            buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-              setArchiveConfirm(true), star,
-            ),
-          );
-        }
-      }}
-      className={`group group/session-row flex min-w-0 items-center gap-1 rounded-lg pr-1 transition-colors ${
-        isActive ? rowSelectedClass : "hover:bg-surface-hover"
-      }`}
-    >
-      <SessionRowBody
-          active={isActive}
-          renaming={rename.renaming}
-          hint={path}
-          onOpen={() => {
-            void projectService?.sessions.openSessionFromEntry(path, session.id);
-          }}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 pl-2.5 text-left"
-        >
-          <span className="flex size-4 shrink-0 items-center justify-center">
-            <PinIcon className="ui-icon-16 shrink-0 text-ink-subtle" />
-          </span>
-          <SessionRowTitle starred={star.starred} rename={rename}>
-            <SidebarItemTitle>{session.title}</SidebarItemTitle>
-          </SessionRowTitle>
-          <SessionTrailingBadge path={path} id={session.id} />
-      </SessionRowBody>
-      {!archiveConfirm && (
-        <>
-          <SessionStarAction star={star} />
-          <SessionPinAction path={path} sessionId={session.id} />
-        </>
-      )}
-      <SessionArchiveAction
-        path={path}
-        sessionId={session.id}
-        confirming={archiveConfirm}
-        setConfirming={setArchiveConfirm}
-      />
-    </li>
-  );
-}
 
 /**
  * 置顶任务带（ZCode project-sidebar/index.tsx:252-257 TID_PROJECT_PINNED_TASKS
@@ -1522,7 +1243,8 @@ function PinnedSessionsBand({ menu }: { readonly menu: SidebarMenuApi }) {
   return (
     <ul aria-label="置顶任务" className="flex flex-col gap-0.5">
       {rows.map((row) => (
-        <PinnedSessionRow
+        <SessionRow
+          variant="pinned"
           key={`${row.path}-${row.session.id}`}
           path={row.path}
           session={row.session}
@@ -1548,7 +1270,7 @@ function ProjectsView({
   readonly conversationPage: boolean;
   readonly menu: SidebarMenuApi;
   readonly viewMenuOpen: boolean;
-  readonly onToggleViewMenu: (anchor: DOMRect) => void;
+  readonly onToggleViewMenu: (trigger: HTMLButtonElement) => void;
 }) {
   const recentWorkspaces = useWorkspaceValue((state) => state.recentWorkspaces);
   const pinnedPaths = useWorkspaceValue((state) => state.pinnedPaths);
@@ -1682,103 +1404,11 @@ function ProjectsView({
   );
 }
 
-/** 会话视角的一行（两行卡）：会话标题 + 副行（所属项目目录名 + 活动徽标）；
- *  不显示时间（#196 定案）。 */
-function RecentSessionRow({
-  path,
-  session,
-  menu,
-}: {
-  readonly path: string;
-  readonly session: SessionSummary;
-  readonly menu: SidebarMenuApi;
-}) {
-  // 会话视角不分组：属于某个分组的会话在副行注明「分组 · 组内显示名」。
-  const membership = useSessionGroupMembership(path, session.id);
-  const projectService = useProject();
-  const busySessionIds = useContext(BusySessionsContext);
-  const isActive = useIsSessionActive(path, session.id);
-  const rename = useSessionInlineRename(path, session);
-  const star = useSessionStar(path, session.id);
-  const [archiveConfirm, setArchiveConfirm] = useState(false);
-
-  return (
-    <li
-      onContextMenu={(event) => {
-        event.preventDefault();
-        menu.openAtPointer(
-          event.clientX,
-          event.clientY,
-          "会话菜单",
-          buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-            setArchiveConfirm(true), star, membership?.member.open,
-          ),
-        );
-      }}
-      onKeyDown={(event) => {
-        if (isContextMenuKey(event)) {
-          event.preventDefault();
-          menu.openAtRect(
-            event.currentTarget.getBoundingClientRect(),
-            "会话菜单",
-            buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-              setArchiveConfirm(true), star, membership?.member.open,
-            ),
-          );
-        }
-      }}
-      className={`group group/session-row flex min-w-0 items-center gap-1 rounded-lg pr-1 transition-colors ${
-        isActive ? rowSelectedClass : "hover:bg-surface-hover"
-      }`}
-    >
-      <SessionRowBody
-          active={isActive}
-          renaming={rename.renaming}
-          hint={path}
-          onOpen={() => {
-            if (membership?.member.open) membership.member.open();
-            else void projectService?.sessions.openSessionFromEntry(path, session.id);
-          }}
-          // 行体对照 ZCode TaskListItem.tsx:570-574：pl-2.5 pr-1，timeline
-          // 两行变体 py-1.5（左 10px / 右 4px / 上下 6px）
-          className="flex min-w-0 flex-1 flex-col items-stretch gap-0.5 rounded-lg py-1.5 pl-2.5 text-left"
-        >
-          <SessionRowTitle starred={star.starred} rename={rename}>
-            <SidebarItemTitle>{session.title}</SidebarItemTitle>
-          </SessionRowTitle>
-          {/* 副行对照 ZCode TaskListItem.tsx:668：text-ui-base 定高 h-6 */}
-          <div className="flex h-6 items-center gap-1.5 text-ui-base text-ink-subtle">
-            <CornerDownRightIcon className="ui-icon-14 shrink-0" />
-            <span className="min-w-0 flex-1 truncate">
-              {basenameOf(path)}
-              {membership ? ` · ${membership.group.title} · ${membership.member.title}` : null}
-            </span>
-            {membership?.member.attention ? (
-              <AttentionChip text={membership.member.attention} />
-            ) : (
-              <SessionActivityBadge path={path} id={session.id} />
-            )}
-          </div>
-      </SessionRowBody>
-      {!archiveConfirm && (
-        <>
-          <SessionStarAction star={star} />
-          <SessionPinAction path={path} sessionId={session.id} />
-        </>
-      )}
-      <SessionArchiveAction
-        path={path}
-        sessionId={session.id}
-        confirming={archiveConfirm}
-        setConfirming={setArchiveConfirm}
-      />
-    </li>
-  );
-}
-
 /** 会话视角：跨项目的「最近活跃会话」扁平列表（updatedAt 降序）。 */
 function SessionsView({ menu }: { readonly menu: SidebarMenuApi }) {
   const setTreeViewMode = useProjectSidebarValue((state) => state.setTreeViewMode);
+  const project = useProject();
+  const groupsByPath = useRegisteredSnapshot(project?.sessions.groups, (state) => state?.byPath);
   const sessionsByPath = useSessionLists();
   const isArchived = useArchiveFilter();
   // 最近列表的职责就是「最近在用的几个」，已归档的会话排除在外
@@ -1795,29 +1425,36 @@ function SessionsView({ menu }: { readonly menu: SidebarMenuApi }) {
           <br />
           进入任意项目发起一次对话，这里会按最近活跃排序。
         </p>
-        <button
+        <ActionButton
+          tone="secondary"
+          size="compact"
           type="button"
           onClick={() => {
             setTreeViewMode("projects");
           }}
-          className="rounded-md border border-line-strong px-2 py-1 text-xs text-ink-mute transition-colors hover:bg-raised hover:text-ink"
         >
           去项目列表
-        </button>
+        </ActionButton>
       </div>
     );
   }
   return (
     <nav aria-label="最近活跃会话">
       <ul className="flex flex-col gap-0.5">
-        {entries.map((entry) => (
-          <RecentSessionRow
-            key={`${entry.path}-${entry.session.id}`}
-            path={entry.path}
-            session={entry.session}
-            menu={menu}
-          />
-        ))}
+        {entries.map(({ path, session }) => {
+          const membership = findSessionGroupMembership(groupsByPath?.[pathKey(path)] ?? emptyGroups, session.id);
+          return (
+            <SessionRow
+              key={`${path}-${session.id}`}
+              variant="recent"
+              path={path}
+              session={session}
+              menu={menu}
+              display={membership?.member}
+              groupTitle={membership?.group.title}
+            />
+          );
+        })}
       </ul>
     </nav>
   );
@@ -1837,7 +1474,7 @@ function ListHeader({
   onToggleViewMenu,
 }: {
   readonly viewMenuOpen: boolean;
-  readonly onToggleViewMenu: (anchor: DOMRect) => void;
+  readonly onToggleViewMenu: (trigger: HTMLButtonElement) => void;
 }) {
   return (
     <div
@@ -1880,7 +1517,7 @@ function ProjectTreeContent() {
   const viewMenuOpen = menu !== null && menu.id === "view-menu";
 
   const openViewMenu = useCallback(
-    (anchor: DOMRect) => {
+    (trigger: HTMLButtonElement) => {
       // 视角切换菜单（ZCode radio 组形态：当前视角打勾）
       const entries: ContextMenuEntry[] = [
         {
@@ -1909,26 +1546,18 @@ function ProjectTreeContent() {
           },
         },
       ];
-      open("view-menu", "切换视角", entries, {
-        x: anchor.right,
-        y: anchor.bottom + 4,
-        side: "bottom",
-        // ZCode ProjectSidebarListHeader 的 DropdownMenuContent align="end"：
-        // 菜单右缘对齐触发器右缘
-        align: "end",
-      });
+      open("view-menu", "切换视角", entries, { trigger });
     },
     [open, setTreeViewMode, treeViewMode],
   );
 
   const toggleViewMenu = useCallback(
-    (anchor: DOMRect) => {
-      // 触发器再点一次收起（pointerdown 已把菜单置 closing，这里只补一拍）
+    (trigger: HTMLButtonElement) => {
       if (viewMenuOpen) {
         api.dismiss();
         return;
       }
-      openViewMenu(anchor);
+      openViewMenu(trigger);
     },
     [api, openViewMenu, viewMenuOpen],
   );
@@ -1974,8 +1603,10 @@ function ProjectTreeContent() {
       {/* 单例菜单（右键/下拉共用，portal 挂 body 不受侧栏裁剪） */}
       {menu !== null && (
         <ContextMenu
+          key={menu.instance}
           entries={menu.entries}
           placement={menu.placement}
+          trigger={menu.trigger}
           label={menu.label}
           closing={menu.closing}
           onDismiss={api.dismiss}

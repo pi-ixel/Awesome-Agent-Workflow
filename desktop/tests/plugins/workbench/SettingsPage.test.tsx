@@ -64,6 +64,22 @@ it("设置页随 Cordis 注册项加入和移除动态更新", async () => {
 describe("SettingsPage（侧边 Tab 版）", () => {
   beforeEach(({ onTestFinished }) => setupSettingsRuntime(onTestFinished));
 
+  it("界面字号回车四舍五入并失焦，清空沿用当前值，越界取边界", async () => {
+    await renderSettingsPage();
+    await userEvent.click(screen.getByRole("tab", { name: "外观" }));
+    const font = () => screen.getByRole("spinbutton", { name: "界面字号" });
+    await userEvent.clear(font());
+    await userEvent.type(font(), "15.6{Enter}");
+    expect(font()).toHaveValue(16);
+    expect(font()).not.toHaveFocus();
+    await userEvent.clear(font());
+    await userEvent.tab();
+    expect(font()).toHaveValue(16);
+    await userEvent.clear(font());
+    await userEvent.type(font(), "99{Enter}");
+    expect(settingsWorkbench.appearance.getSnapshot().uiFontSize).toBe(20);
+  });
+
   it("定位到外观中的文件树位置并可立即修改", async () => {
     settingsWorkbench.navigation.getState().openFileTreeSettings();
     await renderSettingsPage();

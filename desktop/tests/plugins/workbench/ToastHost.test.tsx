@@ -47,6 +47,23 @@ describe("ToastHost", () => {
     expect(screen.queryByText("进行中…")).not.toBeInTheDocument();
   });
 
+  it("键盘阅读时暂停退场，离开后恢复剩余时间", () => {
+    render(<><button>消息输入</button><ToastHost /></>, { wrapper: fixture.Wrapper });
+    act(() => {
+      fixture.workbench.showToast({ message: "等待阅读", durationMs: 3000 });
+      vi.advanceTimersByTime(0);
+    });
+    act(() => { vi.advanceTimersByTime(1000); });
+    act(() => { screen.getByRole("button", { name: "关闭提示" }).focus(); });
+    act(() => { vi.advanceTimersByTime(5000); });
+    expect(screen.getByText("等待阅读")).toBeVisible();
+    act(() => { screen.getByRole("button", { name: "消息输入" }).focus(); });
+    act(() => { vi.advanceTimersByTime(1999); });
+    expect(screen.getByText("等待阅读")).toBeVisible();
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(screen.queryByText("等待阅读")).not.toBeInTheDocument();
+  });
+
   it("同 dedupeKey 连发只留最新一条", () => {
     render(<ToastHost />, { wrapper: fixture.Wrapper });
     act(() => {

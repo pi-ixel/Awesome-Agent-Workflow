@@ -1,62 +1,23 @@
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { useWorkbenchUiValue } from "./bindings/layoutView.ts";
-import { useEffect, useRef, useState } from "react";
 
 import type { SidebarFooterProps } from "../types.ts";
 import {
   ContextMenu,
   type ContextMenuEntry,
-  type MenuPlacement,
 } from "../../../shared/ui/ContextMenu.tsx";
+import { useMenuController } from "../../../shared/ui/useMenuController.ts";
 import { SettingsIcon, SparkleIcon } from "../../../shared/ui/icons.tsx";
 import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
 
-/** 退场动画时长（与 index.css 的 .context-menu-out 同拍）。 */
-const MENU_CLOSE_MS = 100;
-
-interface FooterMenuState {
-  readonly entries: readonly ContextMenuEntry[];
-  readonly placement: MenuPlacement;
-  readonly closing: boolean;
-}
-
 export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
   const toggleOverlay = useWorkbenchUiValue((state) => state.toggleOverlay);
-  const [menu, setMenu] = useState<FooterMenuState | null>(null);
-  const closeTimerRef = useRef<number | null>(null);
+  const { menu, open, dismiss } = useMenuController();
 
-  // 两拍关闭（与 ProjectTree 的单例菜单同款）：onDismiss 置 closing 播
-  // 退场，100ms 后卸载（jsdom 无动画也能收口）
-  const dismiss = (): void => {
-    setMenu((current) =>
-      current === null || current.closing
-        ? current
-        : { ...current, closing: true },
-    );
-    if (closeTimerRef.current === null) {
-      closeTimerRef.current = window.setTimeout(() => {
-        closeTimerRef.current = null;
-        setMenu(null);
-      }, MENU_CLOSE_MS);
-    }
-  };
-
-  // 卸载时清掉挂起的退场计时器
-  useEffect(
-    () => () => {
-      if (closeTimerRef.current !== null) {
-        window.clearTimeout(closeTimerRef.current);
-      }
-    },
-    [],
-  );
-
-  function openFooterMenu(anchor: DOMRect): void {
-    // open 即换现场：清掉挂起的退场计时器（closing 态重开不能被旧计时器
-    // 误杀，ProjectTree 单例控制器同款）
-    if (closeTimerRef.current !== null) {
-      window.clearTimeout(closeTimerRef.current);
-      closeTimerRef.current = null;
+  function toggleFooterMenu(trigger: HTMLButtonElement): void {
+    if (menu !== null && !menu.closing) {
+      dismiss();
+      return;
     }
     const entries: readonly ContextMenuEntry[] = [
       {
@@ -71,30 +32,17 @@ export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
       },
       ...(menuEntries ?? []),
     ];
-    setMenu({
-      entries,
-      placement: {
-        x: anchor.left,
-        y: anchor.top - 4,
-        side: "top",
-        align: "start",
-      },
-      closing: false,
+    open("account", "账号菜单", entries, {
+      trigger,
+      side: "top",
+      align: "start",
     });
   }
 
-  // 触发器再点一次收起；closing 态（退场动画中）视作已关，重开
-  const toggleFooterMenu = (anchor: DOMRect): void => {
-    if (menu !== null && !menu.closing) {
-      dismiss();
-      return;
-    }
-    openFooterMenu(anchor);
-  };
-
   return (
     <>
-      <IconButton iconSize="rail"
+      <IconButton
+        iconSize="rail"
         type="button"
         aria-label="打开账号菜单"
         aria-description={badge?.tooltip}
@@ -102,9 +50,9 @@ export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
         aria-expanded={menu !== null && !menu.closing}
         data-hint={badge?.tooltip ?? "打开账号菜单"}
         onClick={(event) => {
-          toggleFooterMenu(event.currentTarget.getBoundingClientRect());
+          toggleFooterMenu(event.currentTarget);
         }}
-        className={`grid shrink-0 place-items-center rounded-lg transition-colors hover:bg-hover ${focusVisibleRing}`}
+        className={`grid shrink-0 place-items-center rounded-lg transition-colors hover:bg-hover focus-visible:ring-inset ${focusVisibleRing}`}
       >
         <span
           aria-hidden="true"
@@ -121,7 +69,8 @@ export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
         <ContextMenu
           entries={menu.entries}
           placement={menu.placement}
-          label="账号菜单"
+          trigger={menu.trigger}
+          label={menu.label}
           closing={menu.closing}
           onDismiss={dismiss}
         />

@@ -88,6 +88,9 @@ jobs:
       - name: Frontend tests
         run: npm test
 
+      - name: Verify Desktop UI in Edge
+        run: npm run test:visual -- --workers=2
+
       - name: Test Windows update handoff
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-update-handoff.ps1
 

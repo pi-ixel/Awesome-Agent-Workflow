@@ -1,4 +1,5 @@
 import { describeUnknownError } from "../../../../shared/errors.ts";
+import { ActionButton } from "../../../../shared/ui/controls.tsx";
 import { useRightPanelValue, readRightPanel, readWorkbenchUi, useWorkbenchLayout } from "../bindings/layoutView.ts";
 import {
   useCallback,
@@ -27,7 +28,7 @@ import {
 } from "../panelLayout.ts";
 import "./RightPanel.css";
 import { useLayoutMotion } from "../../../../shared/ui/controls/useLayoutMotion.ts";
-import { useFrameTask } from "../../../../shared/ui/controls/useFrameTask.ts";
+import { ColumnResizer } from "../../../../shared/ui/controls/ColumnResizer.tsx";
 import { EdgeDrawer } from "../../../../shared/ui/controls/EdgeDrawer.tsx";
 
 /** 内容区的子节点位置保持固定，右栏开关仅改变布局，不重挂聊天输入框。 */
@@ -44,20 +45,17 @@ export function PanelWorkspace({
   const ref = useRef<HTMLDivElement>(null);
   const asideRef = useRef<HTMLElement>(null);
   const reservationRef = useRef<HTMLDivElement>(null);
+  const scrimRef = useRef<HTMLButtonElement>(null);
+  const focusBeforeScrim = useRef<HTMLElement | null>(null);
   const previewWidth = (next: number) => {
     if (asideRef.current) asideRef.current.style.width = `${next}px`;
     if (reservationRef.current) reservationRef.current.style.width = `${next}px`;
   };
-  const resizeFrame = useFrameTask();
   const [available, setAvailable] = useState(1200);
   const [drag, setDrag] = useState<{
     project: string;
-    x: number;
-    initial: number;
     width: number;
-    pointerId: number;
   } | null>(null);
-  const dragRef = useRef(drag);
   // 完整视图 slot：右栏内容区根 div（tab 条下方）的 ref state（fullViewContext）。
   // setSlot 恒稳定，Provider 值只需随 slot 变化；ref 镜像会在渲染期读写
   // ref，被 react-hooks/refs 禁止。
@@ -79,8 +77,6 @@ export function PanelWorkspace({
     readRightPanel(workbenchLayout).resize(target, value / available);
   const width = drag?.project === project ? drag.width : layout.width;
   const maxWidth = layout.maximum;
-  const clampWidth = (value: number) =>
-    Math.min(maxWidth, Math.max(300, value));
   // 拖动结束后再切布局，避免中途卸载捕获指针的分隔条而丢失宽度。
   const overlay = drag?.project === project ? false : layout.overlay;
   const open = enabled && project !== null && panel.open;
@@ -133,6 +129,13 @@ export function PanelWorkspace({
   const visible = open || sliding || widthMotion;
   const scrim = open && overlay && !sidePaneFullScreen;
   const panelWidth = Math.min(width, Math.max(280, available - (overlay ? 12 : 0)));
+  useLayoutEffect(() => {
+    const active = document.activeElement;
+    if (scrim && active instanceof HTMLElement && active !== scrimRef.current) {
+      focusBeforeScrim.current = active;
+    }
+    if (!scrim) focusBeforeScrim.current = null;
+  }, [scrim]);
   useEffect(() => {
     const element = ref.current;
     if (!element || typeof ResizeObserver === "undefined") return;
@@ -149,8 +152,11 @@ export function PanelWorkspace({
         event.key === "Escape" &&
         !event.defaultPrevented &&
         readWorkbenchUi(workbenchLayout).overlay !== "settings"
-      )
+      ) {
+        const restore = document.activeElement === scrimRef.current ? focusBeforeScrim.current : null;
         readRightPanel(workbenchLayout).collapse(project);
+        restore?.focus({ preventScroll: true });
+      }
     };
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
@@ -170,11 +176,17 @@ export function PanelWorkspace({
         </div>
         <div ref={reservationRef} aria-hidden="true" className="workbench-right-reservation shrink-0" style={{ width: reservedWidth }} />
         {project && (scrim || (moving && overlay)) && (
-          <button
+          <ActionButton
+            ref={scrimRef}
+            tone="ghost"
             aria-label="关闭右栏遮罩"
             inert={!scrim}
-            className={`absolute inset-0 z-20 bg-scrim ${scrim ? "opacity-100" : "pointer-events-none opacity-0"} ${moving ? "motion-safe:transition-opacity duration-200 ease-out starting:opacity-0" : ""}`}
-            onClick={() => readRightPanel(workbenchLayout).collapse(project)}
+            className={`absolute inset-0 z-20 rounded-none! bg-scrim! focus-visible:ring-inset active:transform-none! ${scrim ? "opacity-100" : "pointer-events-none opacity-0"} ${moving ? "motion-safe:transition-opacity duration-200 ease-out starting:opacity-0" : ""}`}
+            onClick={() => {
+              const restore = focusBeforeScrim.current;
+              readRightPanel(workbenchLayout).collapse(project);
+              restore?.focus({ preventScroll: true });
+            }}
           />
         )}
         {project && (
@@ -192,85 +204,22 @@ export function PanelWorkspace({
             style={{ width: sidePaneFullScreen ? "100%" : open || overlay || sliding ? `${panelWidth}px` : 0 }}
           >
             {open && !overlay && !sidePaneFullScreen && !sliding && (
-              <div
-                role="separator"
-                tabIndex={0}
-                aria-label="调整右栏宽度"
-                aria-orientation="vertical"
-                aria-valuemin={300}
-                aria-valuemax={maxWidth}
-                aria-valuenow={width}
-                className="group absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none outline-none"
-                onKeyDown={(event) => {
-                  if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-                    event.preventDefault();
-                    saveWidth(
-                      project,
-                      clampWidth(
-                        width + (event.key === "ArrowLeft" ? 16 : -16),
-                      ),
-                    );
-                  }
-                }}
-                onDoubleClick={() =>
-                  readRightPanel(workbenchLayout)
-                    .resize(project, DEFAULT_PANEL_RATIO)
-                }
-                onPointerDown={(event) => {
-                  if (event.button !== 0) return;
-                  event.preventDefault();
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  dragRef.current = {
-                    project,
-                    x: event.clientX,
-                    initial: width,
-                    width,
-                    pointerId: event.pointerId,
-                  };
-                  setDrag({ ...dragRef.current });
-                }}
-                onPointerMove={(event) => {
-                  const current = dragRef.current;
-                  if (current && current.pointerId === event.pointerId) {
-                    const next = clampWidth(
-                      current.initial + current.x - event.clientX,
-                    );
-                    current.width = next;
-                    resizeFrame.schedule(() => previewWidth(next));
-                  }
-                }}
-                onPointerUp={(event) => {
-                  const current = dragRef.current;
-                  if (!current || current.pointerId !== event.pointerId) return;
-                  resizeFrame.cancel();
-                  const next = clampWidth(
-                    current.initial + current.x - event.clientX,
-                  );
-                  previewWidth(next);
-                  saveWidth(current.project, next);
-                  dragRef.current = null;
-                  setDrag(null);
-                }}
-                onPointerCancel={() => {
-                  if (dragRef.current) previewWidth(dragRef.current.initial);
-                  dragRef.current = null;
-                  setDrag(null);
-                  resizeFrame.cancel();
-                }}
-                onLostPointerCapture={(event) => {
-                  const current = dragRef.current;
-                  if (!current || current.pointerId !== event.pointerId) return;
-                  resizeFrame.flush();
-                  saveWidth(current.project, current.width);
-                  dragRef.current = null;
-                  setDrag(null);
-                }}
-              >
-                <span
-                  aria-hidden
-                  className="absolute bottom-2 left-1 top-2 w-0.5 rounded-full bg-ink-ghost/60 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-                />
-              </div>
+              <ColumnResizer
+                key={project}
+                label="调整右栏宽度"
+                placement="overlay"
+                growDirection="start"
+                minPx={300}
+                maxPx={maxWidth}
+                defaultWidthPx={resolvePanelLayout(available).width}
+                paneRef={asideRef}
+                readWidth={() => asideRef.current?.clientWidth || width}
+                onPreviewWidth={previewWidth}
+                onCommitWidth={(next) => saveWidth(project, next)}
+                onReset={() => readRightPanel(workbenchLayout).resize(project, DEFAULT_PANEL_RATIO)}
+                cancelBehavior="revert"
+                onDraggingChange={(dragging) => setDrag(dragging ? { project, width } : null)}
+              />
             )}
             <div className="flex min-h-0 w-full justify-end overflow-hidden border-l border-line">
               <div

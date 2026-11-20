@@ -7,13 +7,13 @@ import { errorLine } from "../status/errorText.ts";
 import { useEffect, useState } from "react";
 import type { WorkflowDraft, WorkflowFileTransfer, WorkflowImportPreview, WorkflowService, WorkflowSummary } from "../types.ts";
 import { describeDiagnostic } from "../status/library.ts";
-import { ghostButton, primaryButton, secondaryButton } from "./buttons.ts";
-import { Badge } from "../../../shared/ui/controls.tsx";
+import { ActionButton, Badge, btnPrimary, btnSecondary } from "../../../shared/ui/controls.tsx";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import { Callout } from "../../../shared/ui/Callout.tsx";
 import { ConfirmIconAction } from "../../../shared/ui/ConfirmIconAction.tsx";
 import { ImportIcon, SparklesIcon, TrashIcon, TriangleAlertIcon } from "../../../shared/ui/icons.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
 import { EmptyState } from "../../../shared/ui/EmptyState.tsx";
 
@@ -112,8 +112,8 @@ export function WorkflowLibrary({ service, version, hint, transfer, drafts, tab:
         ]}
       />
       <div className="workflow-library-actions">
-        {transfer && <IconButton className={`${secondaryButton} workflow-icon-only`} aria-label="导入" data-hint="导入" onClick={() => void pickImport()}><ImportIcon className="ui-icon-16" /></IconButton>}
-        {onNewWithAi && <IconButton className={`${primaryButton} workflow-icon-only`} aria-label="用 AI 新建" data-hint="用 AI 新建" onClick={onNewWithAi}><SparklesIcon className="ui-icon-16" /></IconButton>}
+        {transfer && <IconButton className={`${btnSecondary} workflow-icon-only`} aria-label="导入" data-hint="导入" onClick={() => void pickImport()}><ImportIcon className="ui-icon-16" /></IconButton>}
+        {onNewWithAi && <IconButton className={`${btnPrimary} workflow-icon-only`} aria-label="用 AI 新建" data-hint="用 AI 新建" onClick={onNewWithAi}><SparklesIcon className="ui-icon-16" /></IconButton>}
       </div>
     </div>
 
@@ -175,10 +175,10 @@ function DraftCard({ draft, confirming, setConfirming, onOpen, onDiscard }: {
 }) {
   const name = draft.name ?? draft.base ?? "未命名";
   return <article className={`workflow-card-item group/card${onDiscard ? " deletable" : ""}`}>
-    <button type="button" className="workflow-card-main" onClick={onOpen} aria-label={`打开草稿 ${name}`}>
+    <NavigationRow layout="compound" className="workflow-card-main" onClick={onOpen} aria-label={`打开草稿 ${name}`}>
       <CardName name={name} draft={draft} />
       {draft.description && <span className="workflow-card-desc" data-hint={draft.description}>{draft.description}</span>}
-    </button>
+    </NavigationRow>
     {onDiscard && <CardDelete label="放弃草稿" confirming={confirming} setConfirming={setConfirming} onConfirm={onDiscard} />}
   </article>;
 }
@@ -199,15 +199,15 @@ function WorkflowCard({ item, draft, onOpen, onLaunch, confirming = false, setCo
   const description = meta ? meta.description || "没有说明。" : "";
   const deletable = Boolean(onDelete && setConfirming);
   return <article className={`workflow-card-item group/card${meta ? "" : " broken"}${deletable ? " deletable" : ""}`}>
-    <button type="button" className="workflow-card-main" onClick={() => onOpen(item.id)} aria-label={`查看工作流 ${meta?.name ?? item.id}`}>
+    <NavigationRow layout="compound" className="workflow-card-main" onClick={() => onOpen(item.id)} aria-label={`查看工作流 ${meta?.name ?? item.id}`}>
       <CardName name={meta?.name ?? item.id} draft={draft} />
       {meta
         ? <span className="workflow-card-desc" data-hint={description}>{description}</span>
         : <span className="workflow-card-desc attention">源码有错误，暂时不能运行{firstError ? `：${describeDiagnostic(firstError)}` : ""}</span>}
-    </button>
+    </NavigationRow>
     {onDelete && setConfirming && <CardDelete label="删除工作流" confirming={confirming} setConfirming={setConfirming} onConfirm={onDelete} />}
     {meta && <div className="workflow-template-actions">
-      <button type="button" className={secondaryButton} onClick={() => onLaunch(item.id)}>运行</button>
+      <ActionButton type="button" tone="secondary" size="compact" onClick={() => onLaunch(item.id)}>运行</ActionButton>
     </div>}
   </article>;
 }
@@ -232,8 +232,8 @@ function ImportPreviewCard({ preview, busy, onConfirm, onCancel }: {
       <ul className="workflow-callout-list">{preview.scripts.map((path) => <li key={path}><code>{path}</code></li>)}</ul>
     </Callout>}
     <div className="workflow-import-actions">
-      <button type="button" className={primaryButton} disabled={busy || errors.length > 0} onClick={onConfirm}>导入</button>
-      <button type="button" className={ghostButton} onClick={onCancel}>取消</button>
+      <ActionButton type="button" tone="primary" size="compact" disabled={busy || errors.length > 0} onClick={onConfirm}>导入</ActionButton>
+      <ActionButton type="button" tone="ghost" size="compact" onClick={onCancel}>取消</ActionButton>
     </div>
   </div>;
 }

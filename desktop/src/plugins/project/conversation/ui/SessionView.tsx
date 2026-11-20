@@ -73,7 +73,7 @@ import {
 } from "react";
 import { chatWidthClassOf, chatWidthOptions } from "./chatWidth.ts";
 import { useProjectPreferences } from "../../ui/preferencesView.tsx";
-import { btnPrimary, btnSecondary } from "../../../../shared/ui/controls.tsx";
+import { ActionButton } from "../../../../shared/ui/controls.tsx";
 import { ScopedErrorBoundary } from "../../../../shared/ui/ErrorBoundary.tsx";
 import {
   ArrowDownIcon,
@@ -332,7 +332,8 @@ function DraftPromptChips({
       className={`mx-auto flex w-full flex-wrap items-center justify-center gap-2 ${widthClass}`}
     >
       {prompts.map((prompt, index) => (
-        <button
+        <ActionButton
+        tone="secondary"
           key={prompt.label}
           type="button"
           style={{ animationDelay: `${index * 60}ms` }}
@@ -340,10 +341,10 @@ function DraftPromptChips({
             if (prompt.run) prompt.run();
             else if (prompt.text) composer?.prefill(prompt.text);
           }}
-          className="chip-in lift press rounded-full border border-line-strong bg-surface px-3.5 py-1.5 text-xs text-ink-mute shadow-elev-1 hover:border-ink-faint hover:text-ink"
+          className="chip-in lift press rounded-full! border border-line-strong bg-surface px-3.5 py-1.5 text-ui-sm text-ink-mute shadow-elev-1 hover:border-ink-faint hover:text-ink"
         >
           {prompt.label}
-        </button>
+        </ActionButton>
       ))}
     </div>
   );
@@ -473,6 +474,7 @@ export function SessionView({
   const messageColumnRef = useRef<HTMLDivElement | null>(null);
   const navigationPausedRef = useRef(false);
   const jumpTargetRef = useRef<string | null>(null);
+  const queryAnchorRef = useRef<{ id: string; scrollTop: number } | null>(null);
   const [jumpRevision, setJumpRevision] = useState(0);
   const [activeQueryId, setActiveQueryId] = useState<string | null>(null);
   // ---- 会话查找（Ctrl/Cmd+F）：浮层 + 匹配索引 + DOM 高亮（ZCode
@@ -701,13 +703,31 @@ export function SessionView({
     [queryBuilder, items, isAgentRunning],
   );
   // 只让内部内容列留位，主滚动视口始终延伸到悬浮卡右边。
-  const queryRailInset = queries.length >= 2 ? "@min-[864px]/conversation:pl-7" : "";
+  const queryRailInset = queries.length >= 2
+    ? "@min-[864px]/conversation:pl-[max(28px,calc(var(--ui-icon-unit)*36_-_8px))]"
+    : "";
   const syncActiveQuery = useCallback((): void => {
     const scroll = scrollRef.current;
     if (!scroll) return;
     const positions = Array.from(
       scroll.querySelectorAll<HTMLElement>("[data-query-id]"),
     ).map((node) => ({ id: node.dataset.queryId ?? "", top: node.offsetTop }));
+    const anchor = queryAnchorRef.current;
+    const anchored = navigationPausedRef.current && anchor
+      ? positions.find(position => position.id === anchor.id)
+      : undefined;
+    if (anchor && anchored) {
+      const top = Math.max(0, Math.min(anchored.top - 20, scroll.scrollHeight - scroll.clientHeight));
+      if (top !== anchor.scrollTop) {
+        // 用户显式跳转后，字号或可用宽度变化时按同一条提问重新定位。
+        anchor.scrollTop = top;
+        markProgrammaticScroll();
+        scroll.scrollTop = top;
+        lastObservedScrollTopRef.current = scroll.scrollTop;
+      }
+      setActiveQueryId(anchor.id);
+      return;
+    }
     setActiveQueryId(
       activeQueryAt(
         queries,
@@ -716,7 +736,7 @@ export function SessionView({
         Math.max(0, items.length - visibleCount),
       ),
     );
-  }, [queries, items.length, visibleCount]);
+  }, [queries, items.length, visibleCount, markProgrammaticScroll]);
   const scope = JSON.stringify([agentKey, activeSessionId, contextPath]);
   const [viewScope, setViewScope] = useState(scope);
   if (viewScope !== scope) {
@@ -736,6 +756,7 @@ export function SessionView({
     layoutScrollGuardUntilRef.current = 0;
     programmaticScrollFrameRef.current = null;
     jumpTargetRef.current = null;
+    queryAnchorRef.current = null;
   }, [scope, clearUserScrollIntent]);
   useLayoutEffect(() => {
     syncActiveQuery();
@@ -754,6 +775,7 @@ export function SessionView({
     setVisibleCount((count) => Math.max(count, items.length - query.itemIndex));
     // 导航是用户点名要看的位置：立即全量挂载，不做渐进追赶
     setMountedTurnCount(Number.MAX_SAFE_INTEGER);
+    queryAnchorRef.current = null;
     jumpTargetRef.current = query.id;
     setJumpRevision((revision) => revision + 1);
   };
@@ -765,7 +787,8 @@ export function SessionView({
       scroll?.querySelectorAll<HTMLElement>("[data-query-id]") ?? [],
     ).find((element) => element.dataset.queryId === jumpTarget);
     if (scroll && node) {
-      const top = Math.max(0, node.offsetTop - 20);
+      const top = Math.max(0, Math.min(node.offsetTop - 20, scroll.scrollHeight - scroll.clientHeight));
+      queryAnchorRef.current = { id: jumpTarget, scrollTop: top };
       const reduced = window.matchMedia?.(
         "(prefers-reduced-motion: reduce)",
       ).matches;
@@ -1010,6 +1033,7 @@ export function SessionView({
   const backToBottom = (): void => {
     navigationPausedRef.current = false;
     jumpTargetRef.current = null;
+    queryAnchorRef.current = null;
     clearUserScrollIntent();
     const element = scrollRef.current;
     if (element !== null) {
@@ -1065,15 +1089,16 @@ export function SessionView({
                 "正在准备会话，可先编辑草稿，就绪后即可选择模型并发送。"}
             </span>
             {draftError && contextPath ? (
-              <button
+              <ActionButton
+                tone="secondary"
+                size="compact"
                 type="button"
-                className="rounded border border-line px-2 py-1 hover:bg-raised"
                 onClick={() => {
                   void project?.sessions.startNewSession(contextPath);
                 }}
               >
                 重试连接
-              </button>
+              </ActionButton>
             ) : null}
           </div>
         ) : null}
@@ -1097,9 +1122,10 @@ export function SessionView({
             </span>
             <ReconnectButton />
             {recovery.state === "reconnecting" ? (
-              <button
+              <ActionButton
+                tone="secondary"
                 type="button"
-                className={`${btnSecondary} min-h-8 px-3 text-sm`}
+                className="min-h-8 px-3 text-sm"
                 onClick={() => {
                   const { activeSessionId, agentKey } =
                     foregroundSession?.getState() ?? {};
@@ -1114,18 +1140,19 @@ export function SessionView({
                 }}
               >
                 停止重试
-              </button>
+              </ActionButton>
             ) : (
-              <button
+              <ActionButton
+                tone="secondary"
                 type="button"
-                className={`${btnSecondary} min-h-8 px-3 text-sm`}
+                className="min-h-8 px-3 text-sm"
                 onClick={() => {
                   if (activePath)
                     void project?.sessions.startNewSession(activePath);
                 }}
               >
                 新建会话继续
-              </button>
+              </ActionButton>
             )}
           </div>
         ) : null}
@@ -1137,7 +1164,9 @@ export function SessionView({
             <span className="font-medium">agent 已意外退出</span>
             <span className="text-xs opacity-80">{agentCrashed.reason}</span>
             <span className="flex-1" />
-            <button
+            <ActionButton
+              tone="secondary"
+              size="compact"
               type="button"
               onClick={() => {
                 if (activePath !== null) {
@@ -1151,20 +1180,18 @@ export function SessionView({
                   );
                 }
               }}
-              className={
-                "rounded-md border border-current px-2.5 py-1 text-xs font-medium hover:bg-raised"
-              }
             >
               重启并恢复会话
-            </button>
+            </ActionButton>
             {openDiagnostics && (
-              <button
+              <ActionButton
+                tone="secondary"
+                size="compact"
                 type="button"
                 onClick={openDiagnostics}
-                className="rounded-md border border-current px-2.5 py-1 text-xs font-medium hover:bg-raised"
               >
                 打开诊断
-              </button>
+              </ActionButton>
             )}
           </div>
         ) : null}
@@ -1227,18 +1254,18 @@ export function SessionView({
                         >
                           {turnError.message}
                         </span>
-                        <button
+                        <ActionButton
+                          tone="secondary"
+                          size="compact"
                           type="button"
                           onClick={retryLastPrompt}
-                          className={
-                            "rounded-md border border-line-strong px-2.5 py-1 text-xs font-medium text-ink hover:border-ink-faint hover:bg-raised"
-                          }
                         >
                           重试
-                        </button>
-                        <button
+                        </ActionButton>
+                        <ActionButton
+                          tone="secondary"
+                          size="compact"
                           type="button"
-                          className="rounded-md border border-line-strong px-2.5 py-1 text-xs font-medium text-ink hover:bg-raised"
                           onClick={() => {
                             const last = [
                               ...(foregroundSession?.getState().items ?? []),
@@ -1254,15 +1281,16 @@ export function SessionView({
                           }}
                         >
                           取回输入框
-                        </button>
+                        </ActionButton>
                         {turnError.category === "auth" ? (
-                          <button
+                          <ActionButton
+                            tone="secondary"
+                            size="compact"
                             type="button"
                             onClick={navigation?.openSettings}
-                            className="rounded-md border border-line-strong px-2.5 py-1 text-xs font-medium text-ink hover:border-ink-faint hover:bg-raised"
                           >
                             打开设置
-                          </button>
+                          </ActionButton>
                         ) : null}
                         <IconButton iconSize="compact"
                           type="button"
@@ -1478,15 +1506,16 @@ export function SessionView({
                    替代指路不通的「连接 agent」文案 */
                   <div className="flex flex-col items-center gap-3 py-16 text-center">
                     <p className="text-sm text-ink-mute">项目已关闭</p>
-                    <button
+                    <ActionButton
+                      tone="primary"
                       type="button"
                       onClick={() => {
                         openWorkspace?.(contextPath);
                       }}
-                      className={`${btnPrimary} px-3 py-1.5 text-sm`}
+                      className="px-3 py-1.5 text-sm"
                     >
                       重新打开项目
-                    </button>
+                    </ActionButton>
                     <p className="text-xs text-ink-ghost">
                       将重新连接 agent 并恢复该项目的会话。
                     </p>

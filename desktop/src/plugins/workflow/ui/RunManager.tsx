@@ -5,16 +5,16 @@
  * 范围可切到「全部项目」（B4）：按项目分组，有运行在进行的项目排在前面；
  * 点别的项目的运行直接切到那个项目打开。
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ProjectRunSummary, RunManagerFilters, RunSummary, WorkflowService } from "../types.ts";
 import { errorLine } from "../status/errorText.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { useNow } from "./time.ts";
 import { DEFAULT_RUN_FILTERS, groupByProject, matchesRun } from "./runSearch.ts";
 import { MoreMenu } from "./MoreMenu.tsx";
-import { CheckSquare, Listbox } from "../../../shared/ui/controls.tsx";
+import { ActionButton, Checkbox, Listbox } from "../../../shared/ui/controls.tsx";
 import { settingsInputClass } from "../../../shared/ui/SettingsPageParts.tsx";
-import { ghostButton, primaryButton } from "./buttons.ts";
+
 import { attentionOf, ordinalOf } from "./runList.ts";
 import { RunRow } from "./RunList.tsx";
 import { Callout } from "../../../shared/ui/Callout.tsx";
@@ -55,6 +55,7 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
   const [everywhere, setEverywhere] = useState<readonly ProjectRunSummary[] | null>(null);
   const [editing, setEditing] = useState<{ runId: string; title: string } | null>(null);
   const [deleting, setDeleting] = useState("");
+  const actionButtons = useRef(new Map<string, HTMLButtonElement>());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const crossProject = project !== undefined && onOpenProjectRun !== undefined;
@@ -110,6 +111,7 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
     const archived = run.archivedAt != null;
     // 当前项目的运行不带项目参数（服务用当前项目）；别的项目的带上它所属的项目。
     const where = isHere(path) ? undefined : path;
+    const actionKey = JSON.stringify([where, run.runId]);
     return <li key={run.runId} className={archived ? "is-archived" : undefined}>
       {editing?.runId === run.runId
         ? <form className="workflow-run-rename" onSubmit={(event) => {
@@ -118,8 +120,8 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
           void act(async () => { await service.renameRun(run.runId, title, where); setEditing(null); });
         }}>
           <input className={settingsInputClass} aria-label="运行标题" value={editing.title} autoFocus onChange={(event) => setEditing({ runId: run.runId, title: event.target.value })} />
-          <button type="submit" className={primaryButton} disabled={busy || editing.title.trim() === ""}>保存</button>
-          <button type="button" className={ghostButton} onClick={() => setEditing(null)}>取消</button>
+          <ActionButton type="submit" tone="primary" size="compact" disabled={busy || editing.title.trim() === ""}>保存</ActionButton>
+          <ActionButton type="button" tone="ghost" size="compact" onClick={() => setEditing(null)}>取消</ActionButton>
         </form>
         : <RunRow
           run={run}
@@ -130,8 +132,11 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
           onOpen={() => where === undefined ? onOpenRun(run.runId) : onOpenProjectRun?.(where, run.runId)}
         />}
       {deleting === run.runId
-        ? <InlineConfirm className="workflow-run-actions" label="确认删除" message="永久删除这次运行的记录？删除后不能恢复，项目里的文件不受影响。" confirmLabel="删除" busy={busy} onConfirm={() => void act(async () => { await service.deleteRun(run.runId, where); setDeleting(""); })} onCancel={() => setDeleting("")} />
-        : editing?.runId !== run.runId && <MoreMenu label={`${run.title} 的操作`} entries={[
+        ? <InlineConfirm className="workflow-run-actions" label="确认删除" message="永久删除这次运行的记录？删除后不能恢复，项目里的文件不受影响。" confirmLabel="删除" busy={busy} getReturnFocus={() => actionButtons.current.get(actionKey)} onConfirm={() => void act(async () => { await service.deleteRun(run.runId, where); setDeleting(""); })} onCancel={() => setDeleting("")} />
+        : editing?.runId !== run.runId && <MoreMenu label={`${run.title} 的操作`} triggerRef={(button) => {
+          if (button) actionButtons.current.set(actionKey, button);
+          else actionButtons.current.delete(actionKey);
+        }} entries={[
           { id: "rename", label: "改标题", disabled: busy, onSelect: () => setEditing({ runId: run.runId, title: run.title }) },
           { id: "archive", label: archived ? "恢复" : active ? "归档（停下后可用）" : "归档", disabled: busy || active, onSelect: () => void act(() => service.archiveRun(run.runId, !archived, where)) },
           { type: "separator" },
@@ -173,11 +178,12 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
         onChange={(value) => updateFilters({ status: value })}
       />
     </div>
-    <label className="workflow-check workflow-show-archived">
-      <input type="checkbox" className="peer sr-only" checked={showArchived} onChange={(event) => updateFilters({ showArchived: event.target.checked })} />
-      <CheckSquare checked={showArchived} />
-      <span>显示已归档{archivedCount > 0 ? `（${archivedCount}）` : ""}</span>
-    </label>
+    <Checkbox
+      className="workflow-check workflow-show-archived"
+      label={`显示已归档${archivedCount > 0 ? `（${archivedCount}）` : ""}`}
+      checked={showArchived}
+      onChange={(checked) => updateFilters({ showArchived: checked })}
+    />
     {error !== "" && <Callout tone="danger" className="workflow-callout" title={error} onDismiss={() => setError("")} />}
     {all && everywhere === null
       ? <p className="workflow-muted">正在读取…</p>

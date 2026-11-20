@@ -1,7 +1,7 @@
-import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { useEffect } from "react";
-import { ArchiveIcon, XIcon } from "../../../shared/ui/icons.tsx";
-import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
+import { ArchiveIcon } from "../../../shared/ui/icons.tsx";
+import { ActionButton } from "../../../shared/ui/controls.tsx";
+import { Callout } from "../../../shared/ui/Callout.tsx";
 
 import { useProject } from "./bindings/projectView.tsx";
 import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
@@ -22,40 +22,38 @@ export function ArchiveNotice({ openSettings }: { readonly openSettings?: () => 
   const { dismissArchiveNotice: dismiss, unarchiveSession: unarchive } =
     project.sessions;
   return (
-    <aside
+    <Callout
+      tone="neutral"
       role="status"
-      aria-label="归档提示"
-      className="toast-in absolute left-1/2 top-4 z-40 flex max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink shadow-floating"
-    >
-      <ArchiveIcon className="ui-icon-16 shrink-0 text-ink-mute" />
-      <span>已归档的聊天</span>
-      <button
-        type="button"
-        className={`rounded-full bg-raised px-2 py-0.5 hover:bg-surface-hover ${focusVisibleRing}`}
-        onClick={() => {
-          dismiss();
-          openSettings?.();
-        }}
-      >
-        查看
-      </button>
-      <button
-        type="button"
-        className={`rounded-full bg-ink px-2 py-0.5 font-medium text-(color:--color-base) hover:bg-ink/85 ${focusVisibleRing}`}
-        onClick={() =>
-          unarchive(notice.workspacePath, notice.sessionId, notice.agentKey)
-        }
-      >
-        撤销
-      </button>
-      <IconButton iconSize="compact"
-        type="button"
-        aria-label="关闭归档提示"
-        className={`rounded text-ink-mute hover:bg-hover ${focusVisibleRing}`}
-        onClick={dismiss}
-      >
-        <XIcon className="ui-icon-12" />
-      </IconButton>
-    </aside>
+      label="归档提示"
+      title="已归档的聊天"
+      icon={<ArchiveIcon className="mt-0.5 ui-icon-16 shrink-0 text-ink-mute" />}
+      dismissLabel="关闭归档提示"
+      onDismiss={dismiss}
+      className="toast-in absolute left-1/2 top-4 z-40 w-max max-w-[calc(100%-24px)] -translate-x-1/2 shadow-floating"
+      actions={
+        <>
+          <ActionButton
+            tone="secondary"
+            size="compact"
+            onClick={() => {
+              dismiss();
+              openSettings?.();
+            }}
+          >
+            查看
+          </ActionButton>
+          <ActionButton
+            tone="primary"
+            size="compact"
+            onClick={() =>
+              unarchive(notice.workspacePath, notice.sessionId, notice.agentKey)
+            }
+          >
+            撤销
+          </ActionButton>
+        </>
+      }
+    />
   );
 }

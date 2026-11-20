@@ -1,4 +1,5 @@
 import type { ToolCallItem } from "../types.ts";
+import { NavigationRow } from "../../../../shared/ui/NavigationRow.tsx";
 import { SubagentDetails } from "./SubagentDetails.tsx";
 import { subagentColor } from "../subagentPresentation.ts";
 import type { SubagentToolPresentation } from "../../../acpRuntime/types.ts";
@@ -37,7 +38,6 @@ export function SubagentToolRow({
     progress?.contextTokens !== undefined ||
     progress?.totalTokens !== undefined,
   );
-  const Header = hasDetails ? "button" : "div";
   const active =
     item.status === "in_progress" ||
     item.status === "pending" ||
@@ -74,6 +74,54 @@ export function SubagentToolRow({
     status,
     ...(agent.detail ? [agent.detail] : []),
   ];
+  const tooltip = hint.join("\n");
+  const headerClass =
+    "flex w-full min-w-0 items-center gap-2 text-left text-ui-base text-ink-mute";
+  const headerContent = (
+    <>
+      <span
+        className={`inline-flex min-w-0 max-w-[45%] items-center gap-2 ${identityColor}`}
+      >
+        <BotIcon className="ui-icon-16 shrink-0" />
+        {agent.name && (
+          <span className="min-w-0 truncate font-mono text-ui-base font-medium leading-[1.5]">
+            {agent.name}
+          </span>
+        )}
+      </span>
+      <span className="flex min-w-0 flex-1 items-center gap-2">
+        {agent.name && (
+          <span aria-hidden="true" className="shrink-0">
+            ·
+          </span>
+        )}
+        <span
+          className={`min-w-0 truncate ${running ? "turn-status-shimmer" : ""}`}
+        >
+          {agent.task || (active ? status : "未提供任务描述")}
+        </span>
+        {item.status === "failed" && (
+          <span
+            className="shrink-0 cursor-help whitespace-nowrap underline decoration-dotted underline-offset-2"
+            data-hint={item.resultSummary || "子代理执行失败"}
+          >
+            执行失败
+          </span>
+        )}
+        {active && phaseLabel && (
+          <span className="shrink-0 whitespace-nowrap" data-hint={agent.detail}>
+            {phaseLabel}
+          </span>
+        )}
+      </span>
+      {hasDetails && (
+        <ChevronRightIcon
+          aria-hidden="true"
+          className={`ui-icon-16 shrink-0 transition-transform duration-200 ease-out ${expanded ? "rotate-90" : ""}`}
+        />
+      )}
+    </>
+  );
   return (
     <div
       className="w-full min-w-0"
@@ -81,60 +129,22 @@ export function SubagentToolRow({
       data-item-id={item.id}
       data-subagent-tool=""
     >
-      <Header
-        className={`flex w-full min-w-0 items-center gap-2 text-left text-ui-base text-ink-mute ${hasDetails ? "cursor-pointer hover:text-ink-soft" : "cursor-default"}`}
-        {...(hasDetails
-          ? {
-              type: "button" as const,
-              "aria-expanded": expanded,
-              "aria-controls": detailsId,
-              onClick: () => setExpanded((current) => !current),
-            }
-          : {})}
-        title={hint.join("\n")}
-      >
-        <span
-          className={`inline-flex min-w-0 max-w-[45%] items-center gap-2 ${identityColor}`}
+      {hasDetails ? (
+        <NavigationRow
+          layout="compound"
+          aria-expanded={expanded}
+          aria-controls={detailsId}
+          onClick={() => setExpanded((current) => !current)}
+          className={`${headerClass} min-h-7 hover:bg-surface-hover hover:text-ink`}
+          data-hint={tooltip}
         >
-          <BotIcon className="ui-icon-16 shrink-0" />
-          {agent.name && (
-            <span className="min-w-0 truncate font-mono text-ui-base font-medium leading-[1.5]">
-              {agent.name}
-            </span>
-          )}
-        </span>
-        <span className="flex min-w-0 flex-1 items-center gap-2">
-          {agent.name && (
-            <span aria-hidden="true" className="shrink-0">
-              ·
-            </span>
-          )}
-          <span
-            className={`min-w-0 truncate ${running ? "turn-status-shimmer" : ""}`}
-          >
-            {agent.task || (active ? status : "未提供任务描述")}
-          </span>
-          {item.status === "failed" && (
-            <span
-              className="shrink-0 cursor-help whitespace-nowrap underline decoration-dotted underline-offset-2"
-              data-hint={item.resultSummary || "子代理执行失败"}
-            >
-              执行失败
-            </span>
-          )}
-          {active && phaseLabel && (
-            <span className="shrink-0 whitespace-nowrap" data-hint={agent.detail}>
-              {phaseLabel}
-            </span>
-          )}
-        </span>
-        {hasDetails && (
-          <ChevronRightIcon
-            aria-hidden="true"
-            className={`ui-icon-16 shrink-0 transition-transform duration-200 ease-out ${expanded ? "rotate-90" : ""}`}
-          />
-        )}
-      </Header>
+          {headerContent}
+        </NavigationRow>
+      ) : (
+        <div className={headerClass} data-hint={tooltip}>
+          {headerContent}
+        </div>
+      )}
       {hasDetails && (
         <div
           id={detailsId}

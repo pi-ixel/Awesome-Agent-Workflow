@@ -5,7 +5,6 @@ import { expect, it } from "vitest";
 
 const rawSvg = new Map([
   ["shared/ui/UiIcon.tsx", "ui-icon"],
-  ["shared/ui/BrandLoading.tsx", "startup-pen"],
   ["plugins/diagnostics/ui/ResourceReport.tsx", "0 0 600 160"],
   ["plugins/diagnostics/ui/perf/MemoryChart.tsx", "0 0 ${WIDTH} ${HEIGHT}"],
 ]);
@@ -25,7 +24,9 @@ const interactiveTags = new Set([
   "select",
   "textarea",
   "DangerButton",
+  "ActionButton",
   "Listbox",
+  "NavigationRow",
   "RefreshButton",
 ]);
 const interactiveRoles = new Set([
@@ -36,7 +37,7 @@ const interactiveRoles = new Set([
   "switch",
   "menuitem",
 ]);
-const iconTag = /(?:Icon|Glyph|Spinner|BadgeDot|StatusDot)$/;
+const iconTag = /(?:Icon|Glyph|Spinner|BadgeDot|StatusDot|BrandMark)$|^Svg$/;
 
 function jsxAttribute(
   node: ts.JsxOpeningLikeElement,
@@ -139,9 +140,20 @@ it("routes desktop glyphs, text and control heights through scalable UI styles",
         const terminalFont =
           file === "plugins/terminal/ui/TerminalSessionView.tsx" &&
           value === "readTerminalFontSize(host)";
-        if (!scalesWithFont.test(value) && !editorDecoration && !terminalFont) {
+        const mermaidFont = file === "shared/ui/markdown/MermaidBlock.tsx" && value === '`${uiFontSize}px`';
+        if (!scalesWithFont.test(value) && !editorDecoration && !terminalFont && !mermaidFont) {
           report(node, "derive fontSize from a shared font token");
         }
+      }
+      if (
+        file === "plugins/documents/ui/MarkdownSourceEditor.tsx" &&
+        ts.isPropertyAssignment(node) &&
+        ["width", "height"].includes(node.name.getText(ast)) &&
+        ts.isPropertyAssignment(node.parent.parent) &&
+        node.parent.parent.name.getText(ast).includes(".cm-foldGutter") &&
+        !scalesWithFont.test(node.initializer.getText(ast))
+      ) {
+        report(node, "derive the source editor's fold marker size from the shared scale");
       }
       ts.forEachChild(node, inspect);
     };
@@ -154,8 +166,6 @@ it("routes desktop glyphs, text and control heights through scalable UI styles",
       /([^{}]+)\{([^{}]+)\}/g,
     )) {
       const rule = selector.trim();
-      if (file === "shared/ui/BrandLoading.css" && rule.startsWith(".startup-"))
-        continue;
       for (const [, value = ""] of declarations.matchAll(
         /(?:^|;)\s*font-size\s*:\s*([^;]+)/g,
       )) {

@@ -1,3 +1,5 @@
+import { fieldSurfaceClass } from "../../../shared/ui/SettingsPageParts.tsx";
+import { PageHeader } from "../../../shared/ui/PageHeader.tsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   HostStorage,
@@ -8,9 +10,9 @@ import type {
   SkillProvider,
 } from "../../host/types.ts";
 import {
-  btnPrimary,
+  ActionButton,
   btnSecondary,
-  CheckSquare,
+  Checkbox,
   Listbox,
 } from "../../../shared/ui/controls.tsx";
 import {
@@ -33,8 +35,8 @@ import { projectGroups, skillKey } from "./skillGroups.ts";
 import type { SkillPackageManager } from "../types.ts";
 
 const buttonSize =
-  " inline-flex min-h-9 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-xs";
-const button = btnSecondary + buttonSize;
+  "inline-flex min-h-9 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-ui-xs";
+
 type Props = {
   library?: NativeSkillLibrary;
   provider: SkillProvider;
@@ -47,31 +49,7 @@ type Props = {
 };
 type Pending =
   { type: "delete"; items: NativeSkill[] } | { type: "purge"; ids: string[] };
-function Check({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: () => void;
-}) {
-  return (
-    <label className="inline-flex cursor-pointer items-center gap-2 text-xs">
-      <input
-        type="checkbox"
-        className="peer sr-only"
-        aria-label={label}
-        checked={checked}
-        onChange={onChange}
-      />
-      <span className="rounded peer-focus-visible:ring-2">
-        <CheckSquare checked={checked} />
-      </span>
-      {label}
-    </label>
-  );
-}
+
 
 export function SkillLibrary(props: Props) {
   const [profile, setProfile] = useState<string | null>(null);
@@ -252,20 +230,12 @@ function LibraryPage(
   return (
     <section
       aria-label="技能管理"
-      className="mx-auto w-full max-w-[112rem] space-y-5 px-[clamp(1rem,3vw,3rem)] py-6 text-sm text-ink"
+      className="mx-auto w-full max-w-[112rem] space-y-5 px-[clamp(1rem,3vw,3rem)] py-6 text-ui-sm text-ink"
     >
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <h1 className="text-ui-settings-title-lg font-semibold tracking-tight">
-            {trash ? "回收站" : "技能"}
-          </h1>
-          {catalog && !trash && (
-            <span className="border-l border-line-strong pl-3 text-xs text-ink-mute">
-              {count} 项
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
+      <PageHeader
+        title={trash ? "回收站" : "技能"}
+        count={catalog && !trash ? `${count} 项` : undefined}
+        actions={<>
           <IconButton
             iconSize="rail"
             className={btnSecondary}
@@ -277,23 +247,24 @@ function LibraryPage(
             <RefreshIcon className="ui-icon-16" />
           </IconButton>
           {!trash && (
-            <button
-              className={btnPrimary + buttonSize}
+            <ActionButton
+              tone="primary"
+              className={buttonSize}
               disabled={busy || !destinations.length}
               onClick={importSkills}
             >
               <PlusIcon className="ui-icon-14" />
               导入技能
-            </button>
+            </ActionButton>
           )}
-        </div>
-      </header>
+        </>}
+      />
       <fieldset disabled={busy} className="min-w-0 space-y-6">
         <div className="flex flex-wrap items-center gap-2 border-b border-line pb-4">
           {!!catalog?.profiles.length && (
             <Listbox
               label="配置档案"
-              className="min-h-9 max-w-52 text-xs"
+              className="min-h-9 max-w-52 text-ui-sm"
               value={catalog.profile}
               triggerLabel={`配置档案 ${catalog.profile?.replace(/\.ya?ml$/, "") ?? "内置默认配置"}`}
               options={catalog.profiles.map((p) => ({
@@ -307,7 +278,7 @@ function LibraryPage(
             <SearchIcon className="ui-icon-14 pointer-events-none absolute left-2.5 text-ink-mute" />
             <input
               aria-label="搜索技能"
-              className="min-h-9 w-44 rounded-md border border-line-strong bg-surface pl-8 pr-2 text-xs"
+              className={`${fieldSurfaceClass} min-h-9 w-44 pl-8 pr-2 text-ui-xs`}
               placeholder={trash ? "搜索回收条目" : "搜索技能…"}
               value={search}
               onChange={(e) => {
@@ -319,8 +290,9 @@ function LibraryPage(
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
             {catalog && (trash || isBulk) && (
               <div className="flex flex-wrap gap-2">
-                <button
-                  className={button}
+                <ActionButton
+                  tone="secondary"
+                  className={buttonSize}
                   disabled={!count}
                   onClick={() =>
                     select(
@@ -329,27 +301,29 @@ function LibraryPage(
                   }
                 >
                   全选
-                </button>
+                </ActionButton>
                 {trash && (
-                  <button
-                    className={button}
+                  <ActionButton
+                    tone="secondary"
+                    className={buttonSize}
                     disabled={!selected.length}
                     onClick={() =>
                       void change({ type: "restore", ids: selected })
                     }
                   >
                     恢复所选
-                  </button>
+                  </ActionButton>
                 )}
                 {trash ? (
-                  <button
-                    className={button}
+                  <ActionButton
+                    tone="danger"
+                    className={buttonSize}
                     disabled={!selected.length}
                     onClick={() => setPending({ type: "purge", ids: selected })}
                   >
                     永久删除
                     {selected.length ? `（${selected.length}）` : ""}
-                  </button>
+                  </ActionButton>
                 ) : (
                   <IconButton
                     iconSize="rail"
@@ -371,8 +345,9 @@ function LibraryPage(
               </div>
             )}
             {!trash && (
-              <button
-                className={button}
+              <ActionButton
+                tone="secondary"
+                className={buttonSize}
                 aria-pressed={isBulk}
                 onClick={() => {
                   setBulk(!isBulk);
@@ -381,7 +356,7 @@ function LibraryPage(
               >
                 <CheckIcon className="ui-icon-14" />
                 {isBulk ? "退出选择" : "批量选择"}
-              </button>
+              </ActionButton>
             )}
           </div>
         </div>
@@ -391,12 +366,13 @@ function LibraryPage(
           <div role="alert">
             {scanError}{" "}
             {profile && (
-              <button
-                className={button}
+              <ActionButton
+                tone="secondary"
+                className={buttonSize}
                 onClick={() => props.changeProfile(null)}
               >
                 返回默认配置
-              </button>
+              </ActionButton>
             )}
           </div>
         ) : !catalog ? (
@@ -563,10 +539,10 @@ function LibraryPage(
             <div className="space-y-1">
               <p>当前配置未加载此来源。</p>
               {catalog.profile && (
-                <Check
+                <Checkbox
                   label="同时将此目录加入当前配置所有会话的加载路径"
                   checked={enable}
-                  onChange={() => setEnable(!enable)}
+                  onChange={setEnable}
                 />
               )}
             </div>
@@ -576,16 +552,16 @@ function LibraryPage(
           )}
           <div className="flex max-h-60 flex-col gap-2 overflow-auto">
             {batch.names.map((n) => (
-              <Check
+              <Checkbox
                 key={n}
                 label={n}
                 checked={batch.checked.includes(n)}
-                onChange={() =>
+                onChange={(checked) =>
                   setBatch({
                     ...batch,
-                    checked: batch.checked.includes(n)
-                      ? batch.checked.filter((s) => s !== n)
-                      : [...batch.checked, n],
+                    checked: checked
+                      ? [...batch.checked, n]
+                      : batch.checked.filter((s) => s !== n),
                   })
                 }
               />

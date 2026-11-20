@@ -12,7 +12,7 @@
 import { DraftPage } from "./DraftPage.tsx";
 import { RunManager } from "./RunManager.tsx";
 import { describeError, serviceExitText, type ErrorText } from "../status/errorText.ts";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import type { WorkflowDraft, WorkflowDraftEditor, WorkflowFileTransfer, RunManagerFilters, RunSummary, WorkflowLaunchRequest, WorkflowPanelRequest, WorkflowService } from "../types.ts";
 import { AiComposeDialog } from "./AiComposeDialog.tsx";
 import { draftPrompt } from "../editing/draftSessions.ts";
@@ -21,7 +21,8 @@ import { WorkflowLibrary, type LibraryTab } from "./WorkflowLibrary.tsx";
 import { WorkflowDetailView } from "./WorkflowDetailView.tsx";
 import { RunView } from "./RunView.tsx";
 import "./workflowPanel.css";
-import { secondaryButton } from "./buttons.ts";
+import { ActionButton } from "../../../shared/ui/controls.tsx";
+
 import { Callout } from "../../../shared/ui/Callout.tsx";
 import { Breadcrumb } from "../../../shared/ui/Breadcrumb.tsx";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
@@ -84,6 +85,15 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, o
   /** 窄屏提示的两个出口（工作台右栏拉宽 / 进入完整视图）。 */
 }) {
   const [route, setRoute] = useState<Route>(() => initialRoute(service, project));
+  const panelRef = useRef<HTMLElement>(null);
+  const restoreBreadcrumbFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (!restoreBreadcrumbFocus.current) return;
+    restoreBreadcrumbFocus.current = false;
+    panelRef.current?.querySelector<HTMLElement>(
+      '.workflow-root-nav [aria-selected="true"], .workflow-crumbs button',
+    )?.focus();
+  }, [route]);
   // 库页的页签存在这里（不随 WorkflowLibrary 卸载丢失）：进详情再返回还在原页签。
   const [libraryTab, setLibraryTab] = useState<LibraryTab>("presets");
   const [runFilters, setRunFilters] = useState(DEFAULT_RUN_FILTERS);
@@ -209,13 +219,16 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, o
   const back = route.kind === "run" ? route.back ?? { kind: "runs" as const } : { kind: "library" as const };
   const backLabel = back.kind === "workflow" ? names[back.id] ?? back.id : back.kind === "runs" ? "运行管理" : "工作流库";
   const crumbs = [
-    { key: back.kind, label: backLabel, onSelect: () => go(back) },
+    { key: back.kind, label: backLabel, onSelect: (event: MouseEvent<HTMLButtonElement>) => {
+      restoreBreadcrumbFocus.current = event.detail === 0;
+      go(back);
+    } },
     { key: route.kind, label: route.kind === "run" ? "运行详情" : route.kind === "draft" ? "编辑草稿" : "模板详情", current: true },
   ];
 
   const root = route.kind === "library" || route.kind === "runs" ? route.kind : null;
 
-  return <section className="workflow-panel" aria-label="AAW 工作流">
+  return <section ref={panelRef} className="workflow-panel" aria-label="AAW 工作流">
     {root ? <div className="workflow-root-nav">
       <SegmentedControl<"library" | "runs">
         tabs
@@ -227,13 +240,13 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, o
         ]}
         onChange={(kind) => go({ kind })}
       />
-    </div> : <Breadcrumb className="workflow-crumbs" items={crumbs} />}
+    </div> : <Breadcrumb className="workflow-crumbs" label="工作流路径" items={crumbs} />}
     {error && <Callout tone="danger" className="workflow-callout" title={error.title}
       details={error.code || error.detail ? [error.code, error.detail].filter(Boolean).join("\n") : undefined}
-      actions={<button type="button" className={secondaryButton} onClick={() => {
+      actions={<ActionButton type="button" tone="secondary" size="compact" onClick={() => {
         setError(null);
         void refreshAndLand();
-      }}>重试</button>}>{error.hint}</Callout>}
+      }}>重试</ActionButton>}>{error.hint}</Callout>}
     {aiRequest && <AiComposeDialog
       key={aiRequest.kind === "edit" ? aiRequest.id : "new"}
       title={aiRequest.kind === "new" ? "用 AI 新建工作流" : `用 AI 修改「${aiRequest.name}」`}

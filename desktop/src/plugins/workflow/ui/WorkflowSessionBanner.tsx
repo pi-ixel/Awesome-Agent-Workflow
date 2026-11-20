@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import type { RunSessionLinks, WorkflowService } from "../types.ts";
 import { AWAITING_INPUT_CHIP } from "./sessionGroups.ts";
-import { ghostButton } from "./buttons.ts";
+import { ActionButton, Badge } from "../../../shared/ui/controls.tsx";
 
 export function WorkflowSessionBanner({ service, project, sessionId, onOpenRun }: {
   service: WorkflowService;
@@ -41,19 +41,19 @@ export function WorkflowSessionBanner({ service, project, sessionId, onOpenRun }
       )}
       <span className="min-w-0 truncate text-ink-faint" data-hint={run.title}>{run.title}</span>
       {waiting ? (
-        <span className="shrink-0 rounded-full border border-warn-line px-2 text-xs text-warn-ink">{AWAITING_INPUT_CHIP}</span>
+        <Badge tone="warn" compact>{AWAITING_INPUT_CHIP}</Badge>
       ) : working ? (
         <span className="shrink-0 text-xs text-info">进行中</span>
       ) : (
         <span className="shrink-0 text-xs text-ink-faint">{run.active ? "这一步已完成" : ended}</span>
       )}
-      <button
+      <ActionButton
         type="button"
         onClick={() => onOpenRun(run.runId)}
-        className={`${ghostButton} ml-auto`}
+        tone="ghost" size="compact" className="ml-auto"
       >
         查看运行
-      </button>
+      </ActionButton>
     </div>
   );
 }

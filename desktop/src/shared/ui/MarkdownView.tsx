@@ -1,3 +1,4 @@
+import { TextLink } from "./TextLink.tsx";
 /**
  * Markdown 渲染(移植 ZCode 的管线形态):streamdown 流式 markdown 组件
  * + 官方插件族(@streamdown/cjk 中日韩排版、code shiki 双主题高亮、math
@@ -42,7 +43,7 @@ import type { Pluggable, PluggableList, Plugin } from "unified";
 import remarkCjkFriendlyGfmStrikethrough from "remark-cjk-friendly-gfm-strikethrough";
 import type { Logger } from "../logging/logger.ts";
 import { LoggerContext, useLogger } from "../logging/react.ts";
-import { MarkdownTheme } from "./markdown/theme.ts";
+import { MarkdownAppearance } from "./markdown/theme.ts";
 import {
   resolveFileReference,
   type FileReference,
@@ -563,7 +564,6 @@ function buildMarkdownComponents(options: {
   onOpenExternal?: (url: string) => Promise<void>;
   assetUrl?: (path: string) => string | undefined;
   renderLocalImage?: (src: string, alt: string) => ReactNode;
-  appTheme: "dark" | "warm";
   /** 消息级 streaming 透传 CodeBlock:流式期跳过 mermaid 分支。 */
   streaming: boolean;
 }): Components {
@@ -574,7 +574,6 @@ function buildMarkdownComponents(options: {
     onOpenExternal,
     assetUrl,
     renderLocalImage,
-    appTheme,
     streaming,
     logger,
   } = options;
@@ -585,7 +584,6 @@ function buildMarkdownComponents(options: {
         <CodeBlock
           code={text}
           language={language}
-          appTheme={appTheme}
           streaming={streaming}
         >
           <BlockCodeContext.Provider value={true}>
@@ -619,23 +617,23 @@ function buildMarkdownComponents(options: {
         const reference = resolveLocalReference(fileRoot, href, fileBase);
         if (reference !== null && onOpenFile !== undefined) {
           return (
-            <button
+            <TextLink
               type="button"
-              className="inline-flex max-w-full cursor-pointer items-baseline gap-1 wrap-anywhere bg-transparent p-0 text-left align-baseline text-accent-ink no-underline decoration-dotted underline-offset-4 hover:underline"
+              className="inline-flex max-w-full items-baseline gap-1 wrap-anywhere align-baseline"
               data-hint={reference.path}
               onClick={() => onOpenFile(reference.path, reference.line)}
             >
               <FileIcon className="ui-icon-16 shrink-0 self-center" />
               <span className="min-w-0 self-baseline">{children}</span>
-            </button>
+            </TextLink>
           );
         }
       }
       if (onOpenExternal && typeof href === "string" && isExternalWebHref(href)) {
         return (
-          <button
+          <TextLink
             type="button"
-            className="wrap-anywhere cursor-pointer bg-transparent p-0 text-left font-medium text-accent-ink no-underline decoration-dotted underline-offset-4 hover:underline"
+            className="wrap-anywhere font-medium"
             data-hint={href}
             onClick={() => {
               void onOpenExternal(href).catch((error: unknown) => {
@@ -644,7 +642,7 @@ function buildMarkdownComponents(options: {
             }}
           >
             {children}
-          </button>
+          </TextLink>
         );
       }
       // 锚点/自定义 scheme/无法解析的目标:不可点 span(ZCode 同款降级)
@@ -839,7 +837,7 @@ function MarkdownViewBase({
   /** 流式输出中:streaming 解析模式 + remend 补全未闭合 markdown。 */
   readonly streaming?: boolean;
 }) {
-  const theme = useContext(MarkdownTheme);
+  const { theme } = useContext(MarkdownAppearance);
   const logger = useLogger("markdown");
   // 保持组件类型稳定，正文或外层布局更新不能把已加载图片重新挂载。
   const components = useMemo(
@@ -851,11 +849,10 @@ function MarkdownViewBase({
         onOpenExternal,
         assetUrl,
         renderLocalImage,
-        appTheme: theme,
         logger,
         streaming,
       }),
-    [fileRoot, fileBase, onOpenFile, onOpenExternal, assetUrl, renderLocalImage, theme, streaming, logger],
+    [fileRoot, fileBase, onOpenFile, onOpenExternal, assetUrl, renderLocalImage, streaming, logger],
   );
   const normalized = normalizeConsecutiveMarkdownImageBlocks(
     normalizeMessageSingleDollarMath(text),

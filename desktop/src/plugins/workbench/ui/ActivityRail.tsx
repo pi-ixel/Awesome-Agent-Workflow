@@ -5,7 +5,7 @@ import {
 import type { ReactNode } from "react";
 import { SettingsIcon } from "../../../shared/ui/icons.tsx";
 import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
-import logo from "../../../shared/assets/aaw-logo.png";
+import { BrandMark } from "../../../shared/ui/BrandMark.tsx";
 import {
   SidebarFooterRow,
   sidebarFooterInset,
@@ -13,7 +13,7 @@ import {
 import type { WorkbenchSnapshot } from "../types.ts";
 import { readWorkbenchUi, useWorkbenchLayout } from "./bindings/layoutView.ts";
 
-const iconButton = `grid shrink-0 place-items-center rounded-lg text-ink-mute transition-colors hover:bg-hover hover:text-ink data-[active=true]:bg-(--color-selected) data-[active=true]:text-ink ${focusVisibleRing}`;
+const iconButton = `grid shrink-0 place-items-center rounded-lg text-ink-mute transition-colors hover:bg-hover hover:text-ink data-[active=true]:bg-(--color-selected) data-[active=true]:text-ink focus-visible:ring-inset ${focusVisibleRing}`;
 
 export function ActivityRail({
   entries,
@@ -45,15 +45,12 @@ export function ActivityRail({
           className="mx-0.5 mt-1 flex min-h-0 flex-col"
         >
           <div
-            className="grid h-10 shrink-0 place-items-center"
+            className="grid min-h-10 shrink-0 place-items-center"
             data-tauri-drag-region=""
           >
-            <img
+            <BrandMark
               data-testid="workbench-mark"
-              src={logo}
-              alt=""
-              draggable={false}
-              className="pointer-events-none size-6 object-contain"
+              className="pointer-events-none ui-icon-24"
             />
           </div>
           <div className="flex min-h-0 flex-col items-center gap-1 overflow-y-auto px-0.5 pt-3 pb-1.5 [scrollbar-width:none]">
@@ -65,6 +62,7 @@ export function ActivityRail({
                 aria-label={label}
                 aria-controls="workbench-sidebar"
                 aria-expanded={selected === id && expanded}
+                aria-current={selected === id ? "location" : undefined}
                 data-active={selected === id}
                 data-hint={label}
                 onClick={() => {

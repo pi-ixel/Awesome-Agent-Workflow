@@ -303,7 +303,7 @@ it("shows the current storage path and schedules a folder picked by the user", a
     .mockResolvedValueOnce("D:\\Storage");
   try {
     const { Settings } = createStorageSettings(
-      { storage: () => Promise.resolve([]) } as unknown as DiagnosticsReader,
+      { storage: () => Promise.resolve([]) },
       vi.fn(),
       pick,
     );

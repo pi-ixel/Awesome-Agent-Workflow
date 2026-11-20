@@ -6,8 +6,9 @@
  * （配合 `revealOnHover`），用于消息卡右上角这类弱操作，避免常驻文字
  * 按钮成为噪音；无障碍名称始终由 label 提供。
  */
-import { UiIcon } from "./UiIcon.tsx";
+import { CheckIcon, CopyIcon } from "./icons.tsx";
 import { IconButton } from "./IconButton.tsx";
+import { ActionButton } from "./controls.tsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 async function copyText(text: string): Promise<boolean> {
@@ -21,40 +22,6 @@ async function copyText(text: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/** 复制图标（静息态）。 */
-function CopyIcon() {
-  return (
-    <UiIcon
-      viewBox="0 0 14 14"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.4}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="ui-icon-14"
-    >
-      <rect x="4.5" y="4.5" width="7" height="7" rx="1.2" />
-      <path d="M9.5 4.5v-1a1.2 1.2 0 0 0-1.2-1.2H3.7A1.2 1.2 0 0 0 2.5 3.5v4.6A1.2 1.2 0 0 0 3.7 9.3h1" />
-    </UiIcon>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <UiIcon
-      viewBox="0 0 14 14"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.4}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="ui-icon-14"
-    >
-      <path d="m3 7 2.5 2.5L11 4" />
-    </UiIcon>
-  );
 }
 
 export interface CopyButtonProps {
@@ -131,30 +98,51 @@ export function CopyButton({
     ? size === "md"
       ? "rounded-lg"
       : "rounded"
-    : "rounded px-1.5 py-0.5 text-xs";
+    : "min-h-7 px-1.5 py-0.5 text-ui-sm";
 
   const classes = `shrink-0 transition-[color,background-color,opacity] ${sizeClass} ${revealClass} ${
     state === "done"
-      ? "text-ok-ink"
+      ? "text-ok-ink! hover:text-ok-ink!"
       : state === "failed"
-        ? "text-danger-ink hover:text-danger-ink"
+        ? "text-danger-ink! hover:text-danger-ink!"
         : `${tone === "soft" ? "text-ink-soft" : tone === "muted" ? "text-ink-mute" : "text-ink-faint"} hover:bg-raised hover:text-ink-soft`
   }`;
-  const feedback = state === "done" ? "已复制" : state === "failed" ? "复制失败" : "";
-  const buttonProps = { "aria-label": label, "data-hint": feedback || label, className: classes, onClick: handleClick };
+  const feedback =
+    state === "done" ? "已复制" : state === "failed" ? "复制失败" : "";
+  const buttonProps = {
+    "aria-label": label,
+    "data-hint": feedback || label,
+    className: classes,
+    onClick: handleClick,
+  };
   if (iconOnly) {
     return (
       <>
-        <IconButton {...buttonProps} iconSize={size === "md" ? "standard" : "compact"}>
-          {state === "done" ? <CheckIcon /> : icon ?? <CopyIcon />}
+        <IconButton
+          {...buttonProps}
+          iconSize={size === "md" ? "standard" : "compact"}
+        >
+          {state === "done" ? (
+            <CheckIcon className="ui-icon-14" />
+          ) : (
+            (icon ?? <CopyIcon className="ui-icon-14" />)
+          )}
         </IconButton>
-        {feedback && <span className="sr-only" aria-live="polite">{feedback}</span>}
+        {feedback && (
+          <span className="sr-only" aria-live="polite">
+            {feedback}
+          </span>
+        )}
       </>
     );
   }
   return (
-    <button type="button" {...buttonProps}>
-      {feedback ? <span aria-live="polite">{feedback}</span> : <span>{label}</span>}
-    </button>
+    <ActionButton tone="ghost" {...buttonProps}>
+      {feedback ? (
+        <span aria-live="polite">{feedback}</span>
+      ) : (
+        <span>{label}</span>
+      )}
+    </ActionButton>
   );
 }

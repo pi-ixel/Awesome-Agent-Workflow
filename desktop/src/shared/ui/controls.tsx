@@ -34,7 +34,7 @@
  * 鼠标点击不出现（保留浏览器默认 focus 语义的工具类出口）。
  */
 import { UiIcon } from "./UiIcon.tsx";
-import { forwardRef, useEffect, useRef, useState, type ComponentPropsWithoutRef } from "react";
+import { forwardRef, useEffect, useId, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from "react";
 
 import { useAnchoredPopover } from "./controls/useAnchoredPopover.ts";
 import { ChevronDownIcon } from "./icons.tsx";
@@ -50,23 +50,38 @@ const btnBase = `press rounded-md font-medium transition-colors disabled:cursor-
  * 从前 InlineConfirm 和工作流面板各写了一份同样的类串，改一处漏一处。
  */
 export const btnSize =
-  "inline-flex h-7 shrink-0 items-center justify-center gap-1 px-2.5 text-ui-sm whitespace-nowrap";
+  "inline-flex min-h-7 shrink-0 items-center justify-center gap-1 px-2.5 py-0.5 text-ui-sm leading-tight whitespace-nowrap";
 
 /** 主操作：主题正文色实底，文字使用对应的反色。 */
-export const btnPrimary = `${btnBase} bg-ink text-foreground-inverse hover:bg-ink/90`;
+export const btnPrimary = `${btnBase} bg-ink text-foreground-inverse enabled:hover:bg-ink/90`;
 
 /** 常规操作：描边植面。 */
-export const btnSecondary = `${btnBase} border border-line-strong bg-surface text-ink hover:border-ink-faint hover:bg-raised`;
+export const btnSecondary = `${btnBase} border border-line-strong bg-surface text-ink enabled:hover:border-ink-faint enabled:hover:bg-raised`;
 
 /** 弱操作 / 取消：纯文字植面。 */
-export const btnGhost = `${btnBase} text-ink-mute hover:bg-raised/70 hover:text-ink`;
+export const btnGhost = `${btnBase} text-ink-mute enabled:hover:bg-raised/70 enabled:hover:text-ink`;
 
 /** 危险操作：浅红底色。 */
-const btnDanger = `${btnBase} bg-danger-bg text-danger-ink hover:bg-danger-bg/70`;
+const btnDanger = `${btnBase} bg-danger-bg text-danger-ink enabled:hover:bg-danger-bg/70`;
+
+const actionTones = {
+  primary: btnPrimary,
+  secondary: btnSecondary,
+  ghost: btnGhost,
+  danger: btnDanger,
+  "danger-solid": `${btnBase} bg-danger-solid text-danger-solid-ink enabled:hover:bg-danger-solid-hover`,
+  media: `${btnBase} border border-media-ink/30 text-media-ink enabled:hover:bg-media-ink/10`,
+};
+export const ActionButton = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<"button"> & {
+  readonly tone: keyof typeof actionTones;
+  readonly size?: "compact";
+}>(function ActionButton({ tone, size, className = "", type = "button", ...props }, ref) {
+  return <button {...props} ref={ref} type={type} className={`${actionTones[tone]} ${size === "compact" ? btnSize : ""} ${className}`} />;
+});
 
 export const DangerButton = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<"button">>(
   function DangerButton({ className = "", type = "button", ...props }, ref) {
-    return <button {...props} ref={ref} type={type} className={`${btnDanger} ${className}`} />;
+    return <ActionButton {...props} ref={ref} type={type} tone="danger" className={className} />;
   },
 );
 
@@ -90,6 +105,7 @@ export const rowSelectedClass = "bg-(--color-selected)";
  * 尺寸由调用处用 className 叠加（如 `h-1 w-20`、`h-1.5 flex-1`）。
  */
 export interface ProgressBarProps {
+  readonly label: string;
   readonly value: number;
   readonly max: number;
   /** 追加到轨道上的尺寸类（宽度 / 高度）。 */
@@ -97,26 +113,30 @@ export interface ProgressBarProps {
 }
 
 export function ProgressBar({
+  label,
   value,
   max,
   className = "h-1.5 w-full",
 }: ProgressBarProps) {
-  const percent =
-    max <= 0 ? 0 : Math.min(100, Math.max(0, Math.round((value / max) * 100)));
-  const isComplete = max > 0 && value >= max;
+  const hasTotal = Number.isFinite(max) && max > 0;
+  const now = hasTotal && Number.isFinite(value)
+    ? Math.min(max, Math.max(0, value))
+    : undefined;
+  const percent = now === undefined ? 0 : Math.round((now / max) * 100);
   return (
     <span
       role="progressbar"
+      aria-label={label}
       aria-valuemin={0}
-      aria-valuemax={max}
-      aria-valuenow={value}
+      aria-valuemax={hasTotal ? max : undefined}
+      aria-valuenow={now}
       className={`inline-block overflow-hidden rounded-full bg-base ring-1 ring-inset ring-line-strong/60 ${className}`}
     >
       <span
-        className={`block h-full rounded-r-full transition-all duration-300 ${
-          isComplete
-            ? "bg-gradient-to-r from-emerald-500 to-teal-400"
-            : "bg-gradient-to-r from-sky-500 to-cyan-400"
+        className={`block h-full rounded-r-full transition-[width] duration-300 motion-reduce:transition-none ${
+          now === max
+            ? "bg-gradient-to-r from-ok to-ok-ink"
+            : "bg-gradient-to-r from-info to-accent-ink-strong"
         }`}
         style={{ width: `${percent}%` }}
       />
@@ -140,7 +160,7 @@ export function RadioDot({
         checked
           ? appearance === "neutral"
             ? "border-ink bg-surface"
-            : "border-sky-500 bg-sky-500/15"
+            : "border-accent-ink bg-info-bg"
           : "border-line-strong bg-base"
       }`}
     >
@@ -149,7 +169,7 @@ export function RadioDot({
           checked
             ? appearance === "neutral"
               ? "bg-ink"
-              : "bg-sky-400"
+              : "bg-accent-ink"
             : "bg-transparent"
         }`}
       />
@@ -157,27 +177,70 @@ export function RadioDot({
   );
 }
 
-/** 自绘 checkbox 指示器：方框 + 选中时的对勾（焦点环同 RadioDot）。 */
-export function CheckSquare({ checked }: { readonly checked: boolean }) {
+/** 带可点击标签的复选框，使用原生输入处理焦点与空格键。 */
+export function Checkbox({
+  label,
+  accessibleName,
+  appearance = "label",
+  checked,
+  disabled = false,
+  onChange,
+  className = "inline-flex items-center gap-2 text-ui-sm",
+}: {
+  readonly label: ReactNode;
+  readonly accessibleName?: string;
+  readonly appearance?: "label" | "pill";
+  readonly checked: boolean;
+  readonly disabled?: boolean;
+  readonly onChange: (checked: boolean) => void;
+  readonly className?: string;
+}) {
   return (
-    <span
-      aria-hidden={true}
-      className={`flex ui-icon-16 shrink-0 items-center justify-center rounded border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring peer-focus-visible:outline-none ${
-        checked ? "border-sky-500 bg-sky-500/15" : "border-line-strong bg-base"
-      }`}
+    <label
+      className={`${className} ${disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}
     >
-      <UiIcon
-        viewBox="0 0 12 12"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={2}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className={`ui-icon-12 ${checked ? "text-sky-400" : "text-transparent"}`}
-      >
-        <path d="M2.5 6.5 5 9l4.5-6" />
-      </UiIcon>
-    </span>
+      <input
+        type="checkbox"
+        aria-label={accessibleName}
+        className="peer sr-only"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.currentTarget.checked)}
+      />
+      {appearance === "pill" ? (
+        <span
+          className={`grid min-h-8 min-w-8 place-items-center rounded-full text-ui-base transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring ${
+            checked
+              ? "bg-ink text-foreground-inverse"
+              : "text-ink-soft peer-enabled:hover:bg-surface-hover"
+          }`}
+        >
+          {label}
+        </span>
+      ) : (
+        <>
+          <span
+            aria-hidden="true"
+            className={`flex ui-icon-16 shrink-0 items-center justify-center rounded border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring ${
+              checked ? "border-info-ink bg-info-bg" : "border-line-strong bg-base"
+            }`}
+          >
+            <UiIcon
+              viewBox="0 0 12 12"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={`ui-icon-12 ${checked ? "text-info-ink" : "invisible"}`}
+            >
+              <path d="M2.5 6.5 5 9l4.5-6" />
+            </UiIcon>
+          </span>
+          <span className="min-w-0 flex-1">{label}</span>
+        </>
+      )}
+    </label>
   );
 }
 
@@ -220,7 +283,7 @@ export function ToggleSwitch({
               ? "border-ink bg-ink"
               : "border-transparent bg-ink/30"
             : checked
-              ? "border-sky-500 bg-sky-600/80"
+              ? "border-accent-ink bg-accent-ink"
               : "border-line-strong bg-raised"
         }`}
       >
@@ -228,7 +291,7 @@ export function ToggleSwitch({
           className={`absolute top-1/2 -translate-y-1/2 rounded-full transition-all ${
             neutral
               ? `ui-icon-16 bg-base ${checked ? "left-[calc(14*var(--ui-icon-unit))]" : "left-0"}`
-              : `ui-icon-10 ${checked ? "left-[calc(14*var(--ui-icon-unit))] bg-white" : "left-[calc(3*var(--ui-icon-unit))] bg-ink-mute"}`
+              : `ui-icon-10 ${checked ? "left-[calc(14*var(--ui-icon-unit))] bg-foreground-inverse" : "left-[calc(3*var(--ui-icon-unit))] bg-ink-mute"}`
           }`}
         />
       </span>
@@ -276,7 +339,7 @@ export function Badge({
   return (
     <span
       data-hint={title}
-      className={`inline-flex shrink-0 items-center gap-1 rounded border text-2xs whitespace-nowrap ${badgeToneClass[tone]} ${
+      className={`inline-flex min-w-0 max-w-full items-center gap-1 rounded border text-2xs [overflow-wrap:anywhere] ${badgeToneClass[tone]} ${
         compact ? "px-1 py-0.5" : "px-1.5 py-0.5"
       }`}
     >
@@ -288,13 +351,15 @@ export function Badge({
 /** 徽标里的状态圆点（颜色随父级 currentColor，与徽标同色系）。 */
 export function BadgeDot({
   className = "ui-icon-6",
+  pulse = false,
 }: {
   readonly className?: string;
+  readonly pulse?: boolean;
 }) {
   return (
     <span
       aria-hidden={true}
-      className={`shrink-0 rounded-full bg-current ${className}`}
+      className={`shrink-0 rounded-full bg-current ${pulse ? "animate-pulse motion-reduce:animate-none" : ""} ${className}`}
     />
   );
 }
@@ -361,7 +426,7 @@ export interface ListboxProps {
   readonly disabled?: boolean;
   /** 无值 / 无选项时的显示文案。 */
   readonly placeholder?: string;
-  /** 追加到触发按钮的尺寸类（默认 py-1 text-xs）。 */
+  /** 追加到触发按钮的尺寸类（默认 py-1 text-ui-sm）。 */
   readonly className?: string;
   /** 占满父宽（设置页表单）；默认按内容宽度。 */
   readonly fullWidth?: boolean;
@@ -389,11 +454,12 @@ export function Listbox({
   onChange,
   disabled = false,
   placeholder = "（无）",
-  className = "py-1 text-xs",
+  className = "py-1 text-ui-sm",
   fullWidth = false,
 }: ListboxProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  const listId = useId();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
   useAnchoredPopover(isOpen, containerRef, listRef);
@@ -401,6 +467,7 @@ export function Listbox({
   const selectedIndex = options.findIndex((option) => option.value === value);
   const selectedLabel =
     selectedIndex === -1 ? null : (options[selectedIndex]?.label ?? null);
+  const activeOptionId = options[activeIndex] === undefined ? undefined : `${listId}-${activeIndex}`;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -408,6 +475,28 @@ export function Listbox({
     const selected = list?.querySelector<HTMLElement>('[aria-selected="true"]');
     if (list && selected) list.scrollTop = Math.max(0, selected.offsetTop - (list.clientHeight - selected.offsetHeight) / 2);
   }, [isOpen, selectedIndex]);
+
+  useEffect(() => {
+    const list = listRef.current;
+    if (!isOpen || !list || !activeOptionId) return;
+    const active = document.getElementById(activeOptionId);
+    if (!active) return;
+    const reveal = () => {
+      const top = active.offsetTop;
+      const bottom = top + active.offsetHeight;
+      if (top < list.scrollTop || active.offsetHeight > list.clientHeight) {
+        list.scrollTop = top;
+      } else if (bottom > list.scrollTop + list.clientHeight) {
+        list.scrollTop = bottom - list.clientHeight;
+      }
+    };
+    reveal();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(reveal);
+    observer.observe(list);
+    observer.observe(active);
+    return () => observer.disconnect();
+  }, [activeOptionId, isOpen]);
 
   // 点面板外部关闭（与顶栏待办下拉同一收口模式）
   useEffect(() => {
@@ -467,6 +556,11 @@ export function Listbox({
         event.preventDefault();
         setActiveIndex((index) => Math.max(index - 1, 0));
         return;
+      case "Home":
+      case "End":
+        event.preventDefault();
+        setActiveIndex(event.key === "Home" ? 0 : Math.max(0, options.length - 1));
+        return;
       case "Enter":
       case " ":
         event.preventDefault();
@@ -474,6 +568,9 @@ export function Listbox({
         return;
       case "Escape":
         event.preventDefault();
+        setIsOpen(false);
+        return;
+      case "Tab":
         setIsOpen(false);
         return;
       default:
@@ -492,6 +589,8 @@ export function Listbox({
         aria-label={label}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
+        aria-controls={isOpen ? listId : undefined}
+        aria-activedescendant={isOpen ? activeOptionId : undefined}
         disabled={disabled}
         onClick={() => {
           if (isOpen) {
@@ -501,29 +600,32 @@ export function Listbox({
           }
         }}
         onKeyDown={handleKeyDown}
-        className={`inline-flex items-center justify-between gap-2 rounded-md px-2.5 text-left text-ink transition-colors ${appearance === "quiet" ? "border border-transparent bg-transparent hover:bg-surface-hover" : "border border-line-strong bg-surface hover:border-ink-faint"} disabled:cursor-not-allowed disabled:opacity-40 ${focusVisibleRing} ${className} ${
+        className={`inline-flex min-h-7 items-center justify-between gap-2 rounded-md px-2.5 text-left text-ink transition-colors ${appearance === "quiet" ? "border border-transparent bg-transparent enabled:hover:bg-surface-hover" : "border border-line-strong bg-surface enabled:hover:border-ink-faint"} disabled:cursor-not-allowed disabled:opacity-40 ${focusVisibleRing} ${className} ${
           fullWidth ? "w-full" : "min-w-24"
         }`}
       >
-        <span className="truncate">{triggerLabel ?? selectedLabel ?? placeholder}</span>
-        <ChevronDownIcon className="ui-icon-12 text-ink-faint" />
+        <span className="min-w-0 truncate">{triggerLabel ?? selectedLabel ?? placeholder}</span>
+        <ChevronDownIcon className="ui-icon-12 shrink-0 text-ink-faint" />
       </button>
       {isOpen ? (
         <ul
           ref={listRef}
+          id={listId}
           popover={typeof HTMLElement.prototype.showPopover === "function" ? "manual" : undefined}
           role="listbox"
           aria-label={label}
-          className={`absolute top-full z-40 mt-1 max-h-64 min-w-full overflow-y-auto border border-line-strong bg-surface py-1 shadow-floating selection-popup ${showSelectionMark ? "right-0 min-w-40 rounded-xl p-1" : "left-0 rounded-md"}`}
+          className={`absolute top-full z-40 mt-1 max-h-64 min-w-full overflow-y-auto border border-line-strong bg-surface py-1 text-ink shadow-floating selection-popup ${showSelectionMark ? "right-0 min-w-40 rounded-xl p-1" : "left-0 rounded-md"}`}
         >
           {options.map((option, index) => (
             <li key={option.value} role={option.group ? "group" : undefined} aria-label={option.group}>
               {option.group && options[index - 1]?.group !== option.group && (
-                <span aria-hidden="true" className="block px-2.5 py-1 text-xs text-ink-mute">{option.group}</span>
+                <span aria-hidden="true" className="block break-words px-2.5 py-1 text-ui-sm text-ink-mute">{option.group}</span>
               )}
               <button
                 type="button"
                 role="option"
+                id={`${listId}-${index}`}
+                tabIndex={-1}
                 aria-selected={option.value === value}
                 onPointerEnter={() => {
                   setActiveIndex(index);
@@ -531,11 +633,11 @@ export function Listbox({
                 onClick={() => {
                   commit(index);
                 }}
-                className={`flex w-full items-center gap-1.5 px-2.5 text-left text-xs whitespace-nowrap transition-colors ${showSelectionMark ? "min-h-8 rounded-lg py-1.5 tabular-nums" : "py-1"} ${
+                className={`flex min-h-7 w-full items-center gap-1.5 px-2.5 text-left text-ui-sm transition-colors ${showSelectionMark ? "min-h-8 rounded-lg py-1.5 tabular-nums" : "py-1"} ${
                   index === activeIndex ? rowSelectedClass : "text-ink-soft"
                 }`}
               >
-                {option.label}
+                <span className="min-w-0 break-words [overflow-wrap:anywhere]">{option.label}</span>
                 {showSelectionMark && option.value === value && <span aria-hidden="true" className="ml-auto">✓</span>}
               </button>
             </li>
@@ -556,7 +658,7 @@ export function Spinner({
     <span
       aria-hidden={true}
       role="status"
-      className={`inline-block animate-spin rounded-full border-2 border-current border-t-transparent ${className}`}
+      className={`inline-block animate-spin rounded-full border-2 border-current border-t-transparent motion-reduce:animate-none ${className}`}
     />
   );
 }

@@ -1,3 +1,4 @@
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 /**
  * 工作流详情（AAW 面板第二层）：它是什么、长什么样。运行记录归「运行管理」。
  *
@@ -8,7 +9,7 @@
  * 点「运行」后，启动表单替换头部显示在本页最上面（WorkflowLauncher）；流程图仍在下面可看。
  */
 import { errorLine } from "../status/errorText.ts";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import type { WorkflowCatalog, WorkflowDraft, WorkflowDetail, WorkflowFileTransfer, WorkflowService } from "../types.ts";
 import { describeDiagnostic } from "../status/library.ts";
@@ -18,9 +19,8 @@ import { KnowledgeDetail } from "./KnowledgeDetail.tsx";
 import { SplitPane } from "./SplitPane.tsx";
 import { entryConditions, nodeOutcomes } from "./nodeDetail.ts";
 import { WorkflowLauncher } from "./WorkflowLauncher.tsx";
-import { Badge, Listbox } from "../../../shared/ui/controls.tsx";
+import { ActionButton, Badge, Listbox } from "../../../shared/ui/controls.tsx";
 import { MoreMenu } from "./MoreMenu.tsx";
-import { primaryButton, secondaryButton } from "./buttons.ts";
 import { Callout } from "../../../shared/ui/Callout.tsx";
 import { TextLink } from "../../../shared/ui/TextLink.tsx";
 import { InlineConfirm } from "../../../shared/ui/InlineConfirm.tsx";
@@ -56,6 +56,7 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, d
   const [file, setFile] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const moreButton = useRef<HTMLButtonElement>(null);
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
@@ -129,11 +130,11 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, d
         {meta?.version && <small>{meta.version}</small>}
       </div>
       <div className="workflow-detail-actions">
-        {meta && <button type="button" className={primaryButton} onClick={() => onLaunch(entry || undefined)}>运行</button>}
-        {onAiEdit && <button type="button" className={secondaryButton} disabled={busy} data-hint={detail.origin === "preset" ? "预置工作流不能直接改：先复制为我的，再让 AI 修改副本" : draft ? "回到这个工作流未保存的 AI 修改" : "让 AI 改一份草稿，确认后再保存"} onClick={() => onAiEdit(detail.origin === "preset")}>
+        {meta && <ActionButton type="button" tone="primary" size="compact" onClick={() => onLaunch(entry || undefined)}>运行</ActionButton>}
+        {onAiEdit && <ActionButton type="button" tone="secondary" size="compact" disabled={busy} data-hint={detail.origin === "preset" ? "预置工作流不能直接改：先复制为我的，再让 AI 修改副本" : draft ? "回到这个工作流未保存的 AI 修改" : "让 AI 改一份草稿，确认后再保存"} onClick={() => onAiEdit(detail.origin === "preset")}>
           {detail.origin === "preset" ? "复制并用 AI 修改" : draft ? "继续 AI 修改" : "用 AI 修改"}
-        </button>}
-        <MoreMenu entries={[
+        </ActionButton>}
+        <MoreMenu triggerRef={moreButton} entries={[
           { id: "copy", label: "复制为我的", disabled: busy, onSelect: () => void act(async () => onCopied(await service.copyWorkflow(detail.id))) },
           ...(transfer ? [{ id: "export", label: "导出…", disabled: busy, onSelect: () => void act(async () => {
             const text = await service.exportWorkflow(detail.id);
@@ -142,7 +143,7 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, d
           ...(detail.origin === "user" ? [{ type: "separator" as const }, { id: "delete", label: "删除", danger: true, onSelect: () => setConfirmDelete(true) }] : []),
         ]} />
       </div>
-      {confirmDelete && <InlineConfirm className="workflow-head-confirm" label="确认删除" message="删除后不能恢复，已有的运行记录保留。" confirmLabel="删除" busy={busy} onConfirm={() => void act(async () => { await service.deleteWorkflow(detail.id); onDeleted(); })} onCancel={() => setConfirmDelete(false)} />}
+      {confirmDelete && <InlineConfirm className="workflow-head-confirm" label="确认删除" message="删除后不能恢复，已有的运行记录保留。" confirmLabel="删除" busy={busy} getReturnFocus={() => moreButton.current} onConfirm={() => void act(async () => { await service.deleteWorkflow(detail.id); onDeleted(); })} onCancel={() => setConfirmDelete(false)} />}
       {meta?.description && <p className="workflow-detail-desc">{meta.description}</p>}
     </header>}
 
@@ -150,17 +151,23 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, d
 
     {draft && onOpenDraft && <Callout tone="info" role="note" label="未保存的修改" className="workflow-callout"
       title={`有一份未保存的 AI 修改${draft.changes > 0 ? `（改了 ${draft.changes} 个文件${draft.ok ? "" : "，编译还没通过"}）` : "（还没有改动）"}`}
-      actions={<button type="button" className={secondaryButton} onClick={() => onOpenDraft(draft.draftId)}>打开草稿</button>} />}
+      actions={<ActionButton type="button" tone="secondary" size="compact" onClick={() => onOpenDraft(draft.draftId)}>打开草稿</ActionButton>} />}
 
     {untrusted.length > 0 && <Callout tone="warn" label="脚本信任" className="workflow-callout" title={`这个工作流里有 ${untrusted.length} 个脚本还没确认信任，确认前不能运行`}>
       <p>运行时这些脚本会在你的电脑上执行。请先查看内容，确认没有问题再信任。导入的工作流，或在应用外改过的脚本，都需要确认。</p>
       <ul className="workflow-callout-list">{untrusted.map((script) => <li key={script.path}>
         <TextLink mono onClick={() => { setTab("source"); setFile(script.path); }}>{script.path}</TextLink>
       </li>)}</ul>
-      <button type="button" className={primaryButton} disabled={busy} onClick={() => void act(async () => {
+      <ActionButton
+        type="button"
+        tone="primary"
+        size="compact"
+        disabled={busy}
+        onClick={() => void act(async () => {
         await service.trustScripts(detail.id);
         setDetail(await service.workflow(detail.id));
-      })}>我已查看，信任这些脚本</button>
+      })}
+      >我已查看，信任这些脚本</ActionButton>
     </Callout>}
 
     {errors.length > 0 && <Callout tone="danger" className="workflow-callout" title={`源码有 ${errors.length} 处错误，暂时不能运行`}>
@@ -223,7 +230,13 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, d
       </Callout>}
       <div className="workflow-source-body">
         <ul className="workflow-source-files" aria-label="源码文件">
-          {detail.files.map((f) => <li key={f.path}><button aria-pressed={f.path === file} onClick={() => setFile(f.path)} data-hint={f.path}>{f.path}</button></li>)}
+          {detail.files.map((f) => (
+            <li key={f.path}>
+              <NavigationRow layout="tree" aria-pressed={f.path === file} onClick={() => setFile(f.path)} data-hint={f.path}>
+                <span className="truncate">{f.path}</span>
+              </NavigationRow>
+            </li>
+          ))}
         </ul>
         <pre className="workflow-source-text" aria-label={file}>{shown?.text ?? ""}</pre>
       </div>

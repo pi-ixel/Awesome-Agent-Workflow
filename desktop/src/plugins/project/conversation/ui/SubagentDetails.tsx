@@ -1,9 +1,9 @@
+import { Disclosure } from "../../../../shared/ui/Disclosure.tsx";
 import type { ToolCallItem } from "../types.ts";
 import type { SubagentToolPresentation } from "../../../acpRuntime/types.ts";
 import { toolInputSummary } from "../sessionStore.ts";
 import { AssistantMessage } from "./AssistantMessage.tsx";
 import { ThoughtBlock } from "./ThoughtBlock.tsx";
-import { ChevronRightIcon } from "../../../../shared/ui/icons.tsx";
 import {
   OrdinaryToolCallCard,
   formatPayload,
@@ -111,18 +111,14 @@ export function SubagentDetails({
                     </div>
                   )}
                   {tool.metadata !== undefined && (
-                    <details className="group/metadata mt-2 text-ui-sm text-ink-mute">
-                      <summary className="flex cursor-pointer list-none items-center gap-2 hover:text-ink-soft [&::-webkit-details-marker]:hidden">
-                        附加信息
-                        <ChevronRightIcon
-                          aria-hidden="true"
-                          className="ui-icon-16 shrink-0 transition-transform duration-200 group-open/metadata:rotate-90"
-                        />
-                      </summary>
+                    <Disclosure
+                      className="mt-2 text-ui-sm text-ink-mute"
+                      summary="附加信息"
+                    >
                       <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words">
                         {formatPayload(tool.metadata)}
                       </pre>
-                    </details>
+                    </Disclosure>
                   )}
                 </div>
               );

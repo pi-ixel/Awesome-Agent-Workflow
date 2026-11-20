@@ -30,6 +30,16 @@ const FADE: Record<Fade, CSSProperties> = {
   both: { WebkitMaskImage: "linear-gradient(to right, transparent 0, black 16px, black calc(100% - 16px), transparent 100%)", maskImage: "linear-gradient(to right, transparent 0, black 16px, black calc(100% - 16px), transparent 100%)" },
 };
 
+function revealSegment(viewport: HTMLElement, segment: HTMLElement) {
+  const frame = viewport.getBoundingClientRect();
+  const target = segment.getBoundingClientRect();
+  const inset = Math.max(0, Math.min(16, (frame.width - target.width) / 2));
+  const left = target.left - frame.left - inset;
+  const right = target.right - frame.right + inset;
+  if (left < 0) viewport.scrollLeft += left;
+  else if (right > 0) viewport.scrollLeft += right;
+}
+
 export function Breadcrumb({
   items,
   label = "位置",
@@ -67,7 +77,12 @@ export function Breadcrumb({
     const observer = typeof ResizeObserver === "undefined"
       ? undefined
       : new ResizeObserver(() => {
-          if (followEnd) element.scrollLeft = element.scrollWidth - element.clientWidth;
+          const focused = element.ownerDocument.activeElement;
+          if (focused instanceof HTMLButtonElement && element.contains(focused)) {
+            revealSegment(element, focused);
+          } else if (followEnd) {
+            element.scrollLeft = element.scrollWidth - element.clientWidth;
+          }
           update();
         });
     observer?.observe(element);
@@ -85,30 +100,36 @@ export function Breadcrumb({
     <nav
       ref={viewport}
       aria-label={label}
+      onFocusCapture={(event) => {
+        if (scroll && event.target instanceof HTMLButtonElement && event.target.matches(":focus-visible")) {
+          revealSegment(event.currentTarget, event.target);
+        }
+      }}
       style={scroll ? FADE[fade] : undefined}
-      className={`min-w-0 text-ui-sm text-ink-subtle ${scroll ? "scrollbar-hide overflow-x-auto" : "overflow-hidden"} ${className}`}
+      className={`min-w-0 text-ui-sm text-ink-subtle ${scroll ? "@container scrollbar-hide overflow-x-auto" : "overflow-hidden"} ${className}`}
     >
       <ol className={`m-0 flex list-none items-center gap-0.5 p-0 ${scroll ? "min-w-max" : "min-w-0"}`}>
         {items.map((item, index) => {
           const current = explicit ? item.current === true : index === last;
           const content = <>{item.icon}<span className="truncate">{item.label}</span></>;
-          const base = `inline-flex min-w-0 items-center gap-1 rounded px-1 py-0.5 ${scroll ? "shrink-0" : current ? "shrink" : "max-w-[40%] shrink-[2]"}`;
+          const base = `inline-flex min-w-0 items-center gap-1 rounded px-1 py-0.5 ${scroll ? "max-w-[100cqw] shrink-0" : current ? "shrink" : "max-w-[40%] shrink-[2]"}`;
+          const hint = item.hint ?? (scroll && typeof item.label === "string" ? item.label : undefined);
           return (
             <li key={item.key ?? index} className={`contents`}>
               {current ? (
-                <span aria-current="page" data-hint={item.hint} className={`${base} font-medium text-ink`}>{content}</span>
+                <span aria-current="page" data-hint={hint} className={`${base} font-medium text-ink`}>{content}</span>
               ) : item.onSelect ? (
                 <button
                   type="button"
                   disabled={item.disabled}
-                  data-hint={item.hint}
+                  data-hint={hint}
                   onClick={item.onSelect}
-                  className={`${base} cursor-pointer transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-ink-subtle ${focusVisibleRing}`}
+                  className={`${base} cursor-pointer transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-ink-subtle focus-visible:ring-inset ${focusVisibleRing}`}
                 >
                   {content}
                 </button>
               ) : (
-                <span data-hint={item.hint} className={base}>{content}</span>
+                <span data-hint={hint} className={base}>{content}</span>
               )}
               {index !== last && <ChevronRightIcon aria-hidden={true} className="ui-icon-14 shrink-0 text-ink-subtlest" />}
             </li>

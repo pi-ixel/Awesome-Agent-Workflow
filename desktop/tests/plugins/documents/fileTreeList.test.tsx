@@ -40,24 +40,23 @@ const handlers: FileTreeRowHandlers = {
   onToggleDirectory: () => {},
   onOpenFile: () => {},
   onOpenContextMenu: () => {},
-  onKeyDown: () => {},
 };
 
 function renderList(
   rows: FileTreeRow[],
   virtual: boolean,
-  options?: { selectedKey?: string | null },
-): HTMLElement {
-  render(
+  options?: { selectedKey?: string | null; error?: string; loading?: boolean; emptyTitle?: string },
+) {
+  return render(
     <FileTreeList
-      rootError={null}
-      showInitialLoading={false}
+      rootError={options?.error ?? null}
+      showInitialLoading={options?.loading ?? false}
       rows={rows}
       virtualItems={[]}
       listRef={() => {}}
       stickyFolderCount={0}
       totalSize={virtual ? rows.length * FILE_TREE_ROW_HEIGHT_PX : 0}
-      emptyTitle="当前目录为空。"
+      emptyTitle={options?.emptyTitle ?? "当前目录为空。"}
       title="proj"
       root="/proj"
       selectedKey={options?.selectedKey ?? null}
@@ -66,12 +65,22 @@ function renderList(
       virtual={virtual}
     />,
   );
-  return screen.getByRole("tree", { name: "proj" });
 }
 
 describe("FileTreeList 布局模式", () => {
+  it.each([
+    { options: {error: "访问被拒绝", loading: true}, role: "alert", text: "读取目录失败访问被拒绝" },
+    { options: {loading: true}, role: "status", text: "加载中..." },
+    { options: {}, role: "status", text: "当前目录为空。" },
+    { options: {emptyTitle: "没有匹配的文件。"}, role: "status", text: "没有匹配的文件。" },
+  ])("文件树反馈 $text", ({ options, role, text }) => {
+    renderList([], false, options);
+    expect(screen.getByRole(role)).toHaveTextContent(text);
+    expect(screen.queryByRole("tree")).toBeNull();
+  });
   it("静态模式：行按文档流纵向排列，不落在绝对定位包装上", () => {
-    const tree = renderList(makeRows(3), false);
+    renderList(makeRows(3), false);
+    const tree = screen.getByRole("tree", { name: "proj" });
     // 静态分支：px-1 流式容器承载行（对齐虚拟行包装的水平几何）
     expect(tree.children).toHaveLength(1);
     expect((tree.children[0] as HTMLElement).className).toContain("px-1");
@@ -154,9 +163,9 @@ describe("FileTreeList 布局模式", () => {
     const tree = screen.getByRole("tree", { name: "proj" });
     const rows = tree.querySelectorAll('[role="treeitem"]');
     expect(rows).toHaveLength(2);
-    // 选中态 = 灰 pill 底，无 border-brand 描边
     const selected = rows[0] as HTMLElement;
-    expect(selected.className).toContain("bg-surface-hover");
+    expect(selected).toHaveAttribute("aria-selected", "true");
+    expect(selected).toHaveClass("bg-(--color-selected)");
     expect(selected.className).not.toContain("border-brand");
     expect(selected.className).toContain("h-7");
     expect(selected.className).toContain("text-ui-base");
@@ -164,7 +173,7 @@ describe("FileTreeList 布局模式", () => {
     // .ts → 内联 SVG 图标（typescript → code 形状，品牌蓝）
     const icon = selected.querySelector("svg");
     expect(icon).not.toBeNull();
-    expect(icon!.getAttribute("stroke")).toBe("#3178c6");
+    expect(icon!.getAttribute("stroke")).toBe("var(--color-file-typescript)");
     // git 修改行：行名橙色 + 行尾 M 字母（无定宽列，70% 透明）
     const modified = rows[1] as HTMLElement;
     const indicator = modified.querySelector('[aria-label="修改"]');

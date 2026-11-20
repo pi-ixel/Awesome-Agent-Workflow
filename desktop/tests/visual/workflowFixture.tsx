@@ -2,23 +2,29 @@
  * 流程画布的真机同源夹具：直接渲染产品里的 FlowStages，
  * 结构与 aaw-dev 的 main/task 流程一致（含条件轨道、回环、子流程调用、终点）。
  *
- * 用途：在浏览器里以真实 CSS 与真实字号复核画布外观（托盘层级、卡片、叠板、
- * 导轨、缩放药丸）。这里只搭数据，不复刻样式。
+ * 使用产品样式验证阶段展开、子流程及运行详情，并以工作流库夹具验证同一套外观设置。
  */
 import { createRoot } from "react-dom/client";
+import { bindSecondaryWindowAppearance } from "../../src/plugins/workbench/appearance/windowAppearance.ts";
 import "../../src/shared/styles/index.css";
 import "../../src/plugins/workflow/ui/workflowPanel.css";
 import { FlowStages } from "../../src/plugins/workflow/ui/FlowStages.tsx";
 import { WorkflowPanel } from "../../src/plugins/workflow/ui/WorkflowPanel.tsx";
-import { fakeWorkflowService, runSummary } from "../plugins/workflow/helpers.ts";
+import { WorkflowLibrary } from "../../src/plugins/workflow/ui/WorkflowLibrary.tsx";
+import { WorkflowLauncher } from "../../src/plugins/workflow/ui/WorkflowLauncher.tsx";
+import { WorkflowSidebar } from "../../src/plugins/workflow/ui/WorkflowSidebar.tsx";
+import { WorkflowOverview } from "../../src/plugins/workflow/ui/WorkflowOverview.tsx";
+import { fakeWorkflowService, runSummary, workflowSummary } from "../plugins/workflow/helpers.ts";
 import type {
   CanvasSnapshot,
   HierarchyStructure,
   WorkflowCatalogNode,
+  WorkflowDraftEditor,
   WorkflowStage,
 } from "../../src/plugins/workflow/types.ts";
 
 const params = new URLSearchParams(location.search);
+if (params.has("appearance")) bindSecondaryWindowAppearance(document.documentElement);
 if (params.get("theme") === "dark") document.documentElement.classList.remove("theme-warm");
 
 const stages: WorkflowStage[] = [
@@ -122,14 +128,97 @@ if (params.has("inspector")) {
   root.render(<div style={{ height: "100vh" }}>
     <WorkflowPanel service={service.service} onOpenSession={(id) => { document.documentElement.dataset.openedSession = id; }} />
   </div>);
-} else if (params.has("panel")) {
+} else if (params.has("overview")) {
+  const service = fakeWorkflowService();
+  service.setRuns([runSummary({
+    runId: "overview-run",
+    title: "检查工作区文件与运行归档记录的详细状态",
+    name: "项目交接",
+    status: "running",
+  })]);
+  root.render(<WorkflowOverview service={service.service} project="/project"
+    onOpenRun={(id) => { document.documentElement.dataset.openedRun = id; }}
+    onLaunch={() => {}} onBrowse={() => {}} />);
+} else if (params.has("files")) {
+  const fake = fakeWorkflowService();
+  const project = "D:/workflow-release";
+  const summary = workflowSummary();
+  const metadata = summary.meta!;
+  const launcher = params.has("entries") ? {
+    ...metadata,
+    entries: [
+      { ...metadata.entries[0]!, description: "从原始需求启动并生成计划。" },
+      {
+        id: "release",
+        label: "从发布审查开始",
+        description: "已有设计结果，核对发布清单和回滚步骤。",
+        inputs: [{ name: "checklist", label: "发布清单", kind: "text" as const, required: true, placeholder: "" }],
+      },
+    ],
+  } : metadata;
+  const run = runSummary({ runId: "release", title: "核对发布准备和回滚预案", status: "completed" });
+  fake.setLibrary([summary]);
+  fake.setRuns([run]);
+  const service = {
+    ...fake.service,
+    sessionLinks: () => ({ workspace: project, runs: [] }),
+  };
+  const paths = [
+    "docs/releases/发布准备和兼容性检查的详细交接说明.md",
+    "docs/releases/回滚预案.md",
+  ];
+  root.render(
+    <main className="workflow-panel min-h-screen bg-base p-2 text-ink">
+      <WorkflowSidebar
+        project={project}
+        service={service}
+        onOpenWorkflow={(id) => { document.documentElement.dataset.openedWorkflow = id; }}
+        onOpenRun={(id) => { document.documentElement.dataset.openedRun = id; }}
+      />
+      <WorkflowLauncher service={service} meta={launcher} pickFiles={() => Promise.resolve(paths)} />
+    </main>,
+  );
+} else if (params.has("library")) {
+  const fake = fakeWorkflowService();
+  const summary = workflowSummary("release-review", "user");
+  const name = "发布准备、兼容性审查和回滚演练";
+  fake.setLibrary([
+    workflowSummary(),
+    { ...summary, meta: { ...summary.meta!, name, description: "核对部署前置条件、灰度结果和回滚记录。" } },
+  ]);
+  root.render(
+    <main className="workflow-panel bg-base text-ink">
+      <WorkflowLibrary
+        service={fake.service}
+        version={0}
+        onOpenWorkflow={(id) => { document.documentElement.dataset.openedWorkflow = id; }}
+        onLaunch={(id) => { document.documentElement.dataset.launchedWorkflow = id; }}
+      />
+    </main>,
+  );
+} else if (params.has("panel") || params.has("compose")) {
   const service = fakeWorkflowService();
   service.setRuns([
     runSummary({ runId: "done", title: "整理交接记录", status: "completed" }),
     runSummary({ runId: "pending", title: "确认设计方案", status: "waiting" }),
   ]);
-  root.render(<div style={{ height: "100vh" }}>
-    <WorkflowPanel service={service.service} />
+  const editor: WorkflowDraftEditor = {
+    start: params.has("compose") ? async () => {
+      const response = await fetch("/tests/visual/workflowFixture.html?sample-compose-request");
+      if (!response.ok) throw new Error("工作流编辑会话启动失败，请重试");
+    } : () => Promise.resolve(),
+    show: () => Promise.resolve(false),
+    has: () => false,
+    send: () => false,
+    end: async () => {},
+  };
+  root.render(<div className="flex h-screen min-h-0 flex-col bg-base text-ink">
+    {params.has("compose") && (
+      <header className="flex shrink-0 items-center border-b border-line p-2 text-ui-sm">
+        <button type="button" onClick={() => { document.documentElement.dataset.projectTool = "opened"; }}>项目工具</button>
+      </header>
+    )}
+    <div className="min-h-0 flex-1"><WorkflowPanel service={service.service} editor={editor} /></div>
   </div>);
 } else root.render(
   <div className="workflow-panel" style={{ height: "100vh" }}>

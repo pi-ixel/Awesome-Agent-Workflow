@@ -4,9 +4,11 @@ import {
   type ComponentPropsWithRef,
   type ReactNode,
 } from "react";
+import { focusVisibleRing } from "./controls.tsx";
 
 export type IconBarPlacement = "left" | "right" | "top" | "bottom";
-type IconButtonSize = "compact" | "standard" | "dialog" | "rail" | "large" | "floating";
+type IconButtonSize =
+  "compact" | "standard" | "dialog" | "rail" | "large" | "floating";
 const PlacementContext = createContext<IconBarPlacement>("top");
 
 /** 竖栏朝内容区内侧轻抬，横栏向上；插件入口继承所在栏的布局。 */
@@ -28,23 +30,28 @@ type IconButtonProps = ComponentPropsWithRef<"button"> & {
   readonly "aria-label": string;
   readonly placement?: IconBarPlacement;
   readonly iconSize?: IconButtonSize;
+  readonly appearance?: "default" | "toolbar";
 };
 
-/** 只移动图标层，按钮的尺寸、背景、焦点和点击区域由调用方保持原样。 */
+/** 点击区、焦点和禁用反馈共用；悬停时只移动图标层。 */
 export function IconButton({
   placement,
   iconSize = "standard",
+  appearance = "default",
   children,
   type = "button",
-  className = "flex shrink-0 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring",
+  className = appearance === "toolbar"
+    ? "flex shrink-0 items-center justify-center rounded text-ink-mute transition-colors enabled:hover:bg-raised enabled:hover:text-ink"
+    : "flex shrink-0 items-center justify-center rounded-lg text-ink-subtle transition-colors enabled:hover:bg-hover enabled:hover:text-ink",
   ...props
 }: IconButtonProps) {
   const inheritedPlacement = useContext(PlacementContext);
   return (
     <button
+      data-hint={appearance === "toolbar" ? props["aria-label"] : undefined}
       {...props}
       type={type}
-      className={className}
+      className={`${focusVisibleRing} disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
       data-icon-hover-button=""
       data-icon-button-size={iconSize}
     >

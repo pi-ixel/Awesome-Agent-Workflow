@@ -1,3 +1,5 @@
+import { ActionButton } from "../../../shared/ui/controls.tsx";
+import { fieldSurfaceClass } from "../../../shared/ui/SettingsPageParts.tsx";
 /**
  * 运行日志视图：读取 Diagnostics 自己的日志缓冲快照。
  *
@@ -91,7 +93,7 @@ function LogView({
             onChange={(event) => {
               setChannelFilter(event.target.value);
             }}
-            className="w-36 rounded-md border border-line-strong bg-base px-2 py-1 text-xs text-ink placeholder:text-ink-ghost focus:border-ink-faint focus:outline-none"
+            className={`${fieldSurfaceClass} w-36 px-2 py-1 text-ui-xs`}
           />
         </label>
         <span className="flex items-center gap-2 text-xs text-ink-mute">
@@ -111,13 +113,14 @@ function LogView({
         <span className="ml-auto text-xs text-ink-faint">
           {`显示 ${filtered.length} / ${entries.length} 条`}
         </span>
-        <button
+        <ActionButton
+          tone="secondary"
+          size="compact"
           type="button"
           onClick={clearLogs}
-          className="rounded-md border border-line-strong px-2.5 py-1 text-xs text-ink-soft transition-colors hover:border-ink-faint hover:text-ink"
         >
           清空
-        </button>
+        </ActionButton>
       </div>
       <div
         ref={listRef}

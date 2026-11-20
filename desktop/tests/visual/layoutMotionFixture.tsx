@@ -8,6 +8,7 @@ import { documentTab } from "../../src/plugins/documents/ui/documentTabs.tsx";
 import { panelService } from "../../src/plugins/host/filesystem/panelService.ts";
 import SettingsPage from "../../src/plugins/workbench/ui/SettingsPage.tsx";
 import { workbenchSettings } from "../../src/plugins/workbench/ui/settingsContributions.tsx";
+import { bindSecondaryWindowAppearance } from "../../src/plugins/workbench/appearance/windowAppearance.ts";
 import { useWorkbenchUiValue } from "../../src/plugins/workbench/ui/bindings/layoutView.ts";
 import "../../src/shared/styles/index.css";
 
@@ -15,17 +16,73 @@ const project = "D:/layout-motion";
 const directory = `${project}/docs`;
 const markdown = "# 文件视图示例\n\nAlpha alpha alpha\n\n## 第一节\n\n### 小节\n\n## 第二节";
 const { Wrapper, workbench } = createGitWorkbench();
+const params = new URLSearchParams(location.search);
+if (params.has("appearance"))
+  bindSecondaryWindowAppearance(document.documentElement);
+if (params.has("draggable-tabs")) {
+  for (const file of ["第一份.md", "第二份.md", "第三份.md"])
+    workbench.panels.getState().openTab(project, documentTab(`${directory}/${file}`, false));
+}
+if (params.has("new-tab"))
+  workbench.panels.getState().openNewTab(project);
+if (params.has("overflow-tabs")) {
+  for (let index = 1; index <= 12; index++) {
+    const label = String(index).padStart(2, "0");
+    workbench.panels.getState().openTab(
+      project,
+      documentTab(`${directory}/交接记录-${label}-桌面发布说明.md`, false),
+    );
+  }
+}
 for (const settings of workbenchSettings) workbench.register("settings", settings);
-panelService.directory = (path) => Promise.resolve({
-  entries: [{ path: `${path}/README.md`, name: "README.md", directory: false, symlink: false }],
-  truncated: false,
-});
-panelService.preview = () => Promise.resolve({
-  kind: "text",
-  content: markdown,
-  bytes: new TextEncoder().encode(markdown).length,
-  mime: "text/plain",
-});
+const deepPath = ["docs", "平台治理与升级说明", "客户端开发交接", "双主题外观验证", "其他演练记录"];
+panelService.directory = (path) => {
+  if (params.has("virtual-tree")) {
+    if (path === project) {
+      return Promise.resolve({
+        entries: [{ path: directory, name: "docs", directory: true, symlink: false }],
+        truncated: false,
+      });
+    }
+    if (path === directory) {
+      return Promise.resolve({
+        entries: [
+          { path: `${directory}/发布检查`, name: "发布检查", directory: true, symlink: false },
+          { path: `${directory}/README.md`, name: "README.md", directory: false, symlink: false },
+        ],
+        truncated: false,
+      });
+    }
+    return Promise.resolve({
+      entries: Array.from({ length: 150 }, (_, index) => {
+        const name = `发布检查项-${String(index + 1).padStart(3, "0")}.md`;
+        return { path: `${path}/${name}`, name, directory: false, symlink: false };
+      }),
+      truncated: false,
+    });
+  }
+  const depth = path === project ? 0 : path.slice(project.length + 1).split("/").length;
+  const name = params.has("deep-path") ? deepPath[depth] : undefined;
+  const sourceName = params.has("code-content") ? "release.ts" : "README.md";
+  return Promise.resolve({
+    entries: name ? [
+      { path: `${path}/${name}`, name, directory: true, symlink: false },
+      { path: `${path}/记录.txt`, name: "记录.txt", directory: false, symlink: false },
+    ] : [{ path: `${path}/${sourceName}`, name: sourceName, directory: false, symlink: false }],
+    truncated: false,
+  });
+};
+panelService.preview = (path) => {
+  const content = path.endsWith(".ts")
+    ? 'const target = "release";\nconst fallback = "release";\nconst retry = 3;'
+    : markdown;
+  return Promise.resolve({
+    kind: "text",
+    content,
+    bytes: new TextEncoder().encode(content).length,
+    mime: "text/plain",
+  });
+};
 panelService.watch = () => Promise.resolve(() => {});
 const gitState = { loading: true };
 const queryGit = () => ({

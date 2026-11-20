@@ -1,4 +1,6 @@
 import { createRoot } from "react-dom/client";
+import { createStorageSettings } from "../../src/plugins/diagnostics/ui/StorageSettings.tsx";
+import { bindSecondaryWindowAppearance } from "../../src/plugins/workbench/appearance/windowAppearance.ts";
 import { createStore } from "zustand";
 import { createProjectForeground } from "../../src/plugins/project/conversation/foreground.ts";
 import type { SessionItem } from "../../src/plugins/project/conversation/types.ts";
@@ -17,14 +19,18 @@ import { WorkbenchShell } from "../../src/plugins/workbench/ui/WorkbenchShell.ts
 import { projectHeaders } from "../../src/plugins/project/ui/projectHeaders.tsx";
 import { projectConversationPageId } from "../../src/plugins/project/workspace/pageIds.ts";
 import { emptyWorkspace } from "../../src/plugins/project/workspace/types.ts";
+import { createProjectSessionIndexes } from "../../src/plugins/project/sessions/sessionIndexes.ts";
+import { ActionButton } from "../../src/shared/ui/controls.tsx";
 import { MessageCircleIcon, WorkflowIcon } from "../../src/shared/ui/icons.tsx";
 import "../../src/shared/styles/index.css";
 
+const params = new URLSearchParams(location.search);
 const path = "D:/status-overlay";
 const preferences = createTestProjectPreferences();
 preferences.setChatWidth("full");
 const items: SessionItem[] = [];
-for (let i = 0; i < 12; i++) {
+const queryCount = new URLSearchParams(location.search).has("long-navigation") ? 90 : 12;
+for (let i = 0; i < queryCount; i++) {
   items.push({
     kind: "user",
     id: `user-${i}`,
@@ -55,7 +61,25 @@ foreground.view.session.setState({
   items,
   isBound: true,
   activeSessionId: "sample",
+  ...(params.has("row-audit")
+    ? {
+        isAgentRunning: true,
+        isConnecting: true,
+        turnState: "unknown" as const,
+        queuedPrompts: [{ id: "queued", text: "检查发布记录", attachments: [] }],
+      }
+    : {}),
 });
+if (params.has("composer-selection")) {
+  foreground.view.session.setState({
+    agentKey: "preview",
+    availableModels: [
+      { modelId: "quick", name: "快速模型", description: "适用于日常问答和简短修改。" },
+      { modelId: "review", name: "审核模型", description: "核对长文档、变化范围与发布风险。" },
+    ],
+    currentModelId: "quick",
+  });
+}
 const statusView = createStore<SessionStatusViewState>(() => ({
   mode: "mini",
 }));
@@ -64,20 +88,37 @@ const page = createStore(() => ({
   conversationPage: true,
   overlayOpen: false,
 }));
+const archive = params.has("archive-notice")
+  ? createProjectSessionIndexes({ getItem: () => null, setItem: () => {} }).archive
+  : null;
 const binding = {
   project: {
-    projects: { workspace: createStore(() => ({ ...emptyWorkspace, activePath: path })) },
+    projects: { workspace: createStore(() => ({
+      ...emptyWorkspace,
+      activePath: path,
+      lastConnectError: params.has("connection-error")
+        ? { path, message: "Agent 暂时无法连接，请检查项目的可执行文件路径后再试。" }
+        : null,
+    })) },
     drafts: {},
     interactions: { forms: createStore(() => ({ pending: [] })) },
-    sessions: {},
+    sessions: archive ? {
+      archive,
+      dismissArchiveNotice: archive.getState().dismissNotice,
+      unarchiveSession: archive.getState().unarchiveSession,
+    } : {},
     conversation: {
       foreground: foreground.snapshot,
+      switchModel: (_owner: unknown, id: string) => foreground.view.session.setState({ currentModelId: id }),
       statusView,
       setStatusMode: (mode: SessionStatusViewState["mode"]) =>
         statusView.setState({ mode }),
     },
   },
-  navigation: { page },
+  navigation: {
+    page,
+    openSettings: () => { document.documentElement.dataset.openedAgentSettings = "true"; },
+  },
   isActive: () => true,
 } as unknown as ProjectViewBinding;
 const gitState = { loading: true };
@@ -87,7 +128,29 @@ const queryGit = () => ({
   refresh: () => Promise.resolve(),
   invalidate: () => {},
 });
-const conversation = <SessionView queryGit={queryGit} />;
+const conversation = (
+  <SessionView
+    queryGit={queryGit}
+    openArchiveSettings={archive ? () => {
+      document.documentElement.dataset.openedArchiveSettings = "true";
+    } : undefined}
+  />
+);
+const { Monitor: StorageNoticeMonitor } = createStorageSettings(
+  {
+    storage: () => Promise.resolve([{
+      id: "diagnostics.logs",
+      label: "诊断日志",
+      bytes: 1234567 * 1024 ** 2,
+      count: 1,
+      protected: 0,
+      cleanable: true,
+      exact: true,
+    }]),
+  },
+  () => { document.documentElement.dataset.openedStorage = "true"; },
+);
+
 export function RightPanelFixture() {
   const { Wrapper, workbench } = createGitWorkbench();
   const params = new URLSearchParams(location.search);
@@ -124,7 +187,7 @@ export function RightPanelFixture() {
     workbench.register("overlays", {
       id: "storage-notice",
       scope: "sidebar",
-      View: () => (
+      View: () => params.has("storage-notice") ? <StorageNoticeMonitor /> : (
         <div role="status" className={`px-3 ${sidebarFooterInset}`}>
           <SidebarFooterRow>存储超阈值</SidebarFooterRow>
         </div>
@@ -134,6 +197,13 @@ export function RightPanelFixture() {
   const workspace = (
     <div className="flex h-full flex-col">
       <ContextBar />
+      {archive && (
+        <div className="bg-base px-2 py-1">
+          <ActionButton size="compact" tone="secondary" onClick={() => archive.getState().archiveWithNotice(path, "sample")}>
+            演示归档
+          </ActionButton>
+        </div>
+      )}
       <div className="min-h-0 flex-1 overflow-hidden">
         <PanelWorkspace project={path} enabled>
           {conversation}
@@ -154,10 +224,17 @@ export function RightPanelFixture() {
   );
 }
 
+if (new URLSearchParams(location.search).has("appearance"))
+  bindSecondaryWindowAppearance(document.documentElement);
+
+const NavigationDetails = params.has("row-audit")
+  ? (await import("./navigationDetailsFixture.tsx")).NavigationDetails
+  : null;
+
 createRoot(document.getElementById("root")!).render(
   <ProjectViewContext.Provider value={binding}>
     <ProjectPreferencesContext.Provider value={preferences}>
-      {new URLSearchParams(location.search).has("right-panel") ? (
+      {NavigationDetails ? <NavigationDetails /> : params.has("right-panel") ? (
         <RightPanelFixture />
       ) : (
         <div className="h-screen">{conversation}</div>

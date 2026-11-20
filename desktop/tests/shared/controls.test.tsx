@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  Checkbox,
   DangerButton,
   btnGhost,
   btnPrimary,
@@ -22,10 +23,26 @@ import {
 
 const user = userEvent.setup();
 
+it("复选框支持文字点击、键盘空格和禁用，按选中状态回调一次", async () => {
+  const change = vi.fn();
+  const { rerender } = render(<Checkbox label="显示已归档" checked={false} onChange={change} />);
+  await user.click(screen.getByText("显示已归档"));
+  expect(change.mock.calls).toEqual([[true]]);
+  rerender(<Checkbox label="显示已归档" checked onChange={change} />);
+  const input = screen.getByRole("checkbox", { name: "显示已归档" });
+  expect(input).toHaveFocus();
+  await user.keyboard(" ");
+  expect(change.mock.calls).toEqual([[true], [false]]);
+  rerender(<Checkbox label="显示已归档" checked disabled onChange={change} />);
+  await user.click(screen.getByText("显示已归档"));
+  expect(input).toBeDisabled();
+  expect(change).toHaveBeenCalledTimes(2);
+});
+
 describe("ProgressBar", () => {
   it("按 value/max 渲染百分比宽度与无障碍属性", () => {
-    render(<ProgressBar value={2} max={6} className="h-1 w-20" />);
-    const bar = screen.getByRole("progressbar");
+    render(<ProgressBar label="安装进度" value={2} max={6} className="h-1 w-20" />);
+    const bar = screen.getByRole("progressbar", { name: "安装进度" });
     expect(bar).toHaveAttribute("aria-valuemin", "0");
     expect(bar).toHaveAttribute("aria-valuemax", "6");
     expect(bar).toHaveAttribute("aria-valuenow", "2");
@@ -34,23 +51,25 @@ describe("ProgressBar", () => {
     expect(fill).not.toBeNull();
     expect(fill.style.width).toBe("33%");
     // 未完成：accent 渐变
-    expect(fill.className).toContain("from-sky-500");
-    expect(fill.className).not.toContain("from-emerald-500");
+    expect(fill.className).toContain("from-info");
+    expect(fill.className).not.toContain("from-ok");
   });
 
   it("完成态（value = max）切换 emerald 渐变，宽度 100%", () => {
-    render(<ProgressBar value={6} max={6} />);
+    render(<ProgressBar label="安装进度" value={7} max={6} />);
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "6");
     const fill = screen.getByRole("progressbar")
       .firstElementChild as HTMLElement;
     expect(fill.style.width).toBe("100%");
-    expect(fill.className).toContain("from-emerald-500");
-    expect(fill.className).not.toContain("from-sky-500");
+    expect(fill.className).toContain("from-ok");
+    expect(fill.className).not.toContain("from-info");
   });
 
   it("max 为 0 时不产生 NaN：宽度 0%", () => {
-    render(<ProgressBar value={0} max={0} />);
-    const fill = screen.getByRole("progressbar")
-      .firstElementChild as HTMLElement;
+    render(<ProgressBar label="安装进度" value={0} max={0} />);
+    const bar = screen.getByRole("progressbar");
+    expect(bar).not.toHaveAttribute("aria-valuenow");
+    const fill = bar.firstElementChild as HTMLElement;
     expect(fill.style.width).toBe("0%");
   });
 });

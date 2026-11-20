@@ -2,6 +2,7 @@ import type { Context } from "cordis";
 import { SkillLibrary } from "./SkillLibrary.tsx";
 import { createStore, useStore } from "zustand";
 import { PuzzleIcon, SkillIcon, TrashIcon } from "../../../shared/ui/icons.tsx";
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { knownWorkspacePaths } from "../../project/service.ts";
 import type { SkillsSettingsView } from "../types.ts";
 import SkillsInstallerSection from "./SkillsInstallerSection.tsx";
@@ -40,15 +41,15 @@ export function apply(ctx: Context): void {
             { label: "技能", Icon: SkillIcon, recycle: false },
             { label: "回收站", Icon: TrashIcon, recycle: true },
           ].map(({ label, Icon, recycle }) => (
-            <button
+            <NavigationRow
               key={label}
               aria-current={trash === recycle ? "page" : undefined}
               onClick={() => navigation.setState({ trash: recycle })}
-              className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm ${trash === recycle ? "bg-selected font-semibold text-ink" : "text-ink-mute hover:bg-hover hover:text-ink"}`}
+              className={trash === recycle ? "font-semibold text-ink" : "text-ink-mute hover:text-ink"}
             >
               <Icon className="ui-icon-16" />
               {label}
-            </button>
+            </NavigationRow>
           ))}
         </nav>
       );
@@ -70,7 +71,7 @@ export function apply(ctx: Context): void {
             return (
               <section
                 aria-label="技能管理"
-                className="p-6 text-sm text-ink-mute"
+                className="p-6 text-ui-base text-ink-mute"
               >
                 {adapter?.displayName ?? configuration.activeAgentId}{" "}
                 暂未提供技能管理。

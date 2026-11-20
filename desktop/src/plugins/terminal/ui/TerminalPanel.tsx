@@ -1,15 +1,14 @@
 import { IconButton, IconHoverProvider } from "../../../shared/ui/IconButton.tsx";
+import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
+import { ColumnResizer } from "../../../shared/ui/controls/ColumnResizer.tsx";
 /**
  * 底部终端面板（顶栏终端钮的落点，ZCode Terminal.tsx:289-356 桌面可用子集）：
  *
  * - 形态：内容区底部固定高面板（默认 30%、拖拽手柄可改、clamp
  *   [140px, 容器 50%]，对齐 ZCode AnimatedTerminalPanel 的 defaultSize /
- *   min / max）。**根部保持 fragment（拖拽手柄 div + section 两个兄弟节点，
- *   都是 ContentArea flex 容器的直接子节点），不包 wrapper**——hidden 分别
- *   落在两个根节点上：包 wrapper 会让 :88-89 的拖拽钳制以无定高 wrapper 为
- *   容器（50% 上限变成「当前高×0.5」的越拖越缩回路）、:129 的百分比高度
- *   失效。可见性只是 display:none（Tailwind preflight [hidden] 规则），
- *   xterm 实例 / 宿主 DOM / PTY 全部存活，重开即见原 scrollback；
+ *   min / max）。共享分隔条和 section 是 ContentArea flex 容器的直接子节点，
+ *   高度上限和默认比例均以该容器计算。隐藏面板时保留 section、xterm 和 PTY，
+ *   重开后保留滚动缓冲和调整过的高度。
  * - 页签：全部是 shell（xterm 交互终端，TerminalSessionView）。**打开面
  *   板即确保有 shell 并激活**（ZCode ensureWorkspaceTerminalState 同款：
  *   首次打开懒创建第一个 shell，cwd=项目路径 ?? 主目录），Plus 追加新
@@ -20,11 +19,10 @@ import { IconButton, IconHoverProvider } from "../../../shared/ui/IconButton.tsx
  *   时收起面板（面板本就关闭则保持）；
  * - 高度局部 state 不再随关开重置（常驻挂载的副作用，更好——重开保持
  *   用户拖拽过的高度）；
- * - 拖拽：pointermove 实时改高度（面板平滑跟随，ZCode ResizablePanel 同
- *   款）；fit + PTY resize 的节流在 TerminalSessionView 内（300ms 低频预览
+ * - 拖拽逐帧预览高度；fit + PTY resize 的节流在 TerminalSessionView 内（300ms 低频预览
  *   + 松手 flush，拖拽态经 resizing prop 下传）。
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { XIcon, PlusIcon } from "../../../shared/ui/icons.tsx";
 import { useStore } from "zustand";
@@ -54,8 +52,7 @@ export function clampTerminalHeight(
  *  外层用 div[role=tab] 而非 button：关闭钮是真实 <button>，HTML 不允许
  *  button 嵌套 button（React validateDOMNesting 亦告警）；激活走
  *  pointerdown + Enter/Space + 左右方向键 roving（激活态 tabindex 0，
- *  非激活 -1，对齐 Radix TabsTrigger 的键盘语义）；焦点环对齐 ZCode
- *  TerminalTabTrigger（ring-[3px]，色用 desktop 焦点令牌 info）。 */
+ *  非激活 -1）。页签和关闭按钮使用共享的内侧焦点环。 */
 function TerminalTabChip({
   tab,
   active,
@@ -68,7 +65,7 @@ function TerminalTabChip({
   readonly active: boolean;
   readonly onActivate: () => void;
   readonly onArrow: (delta: -1 | 1) => void;
-  readonly onClose: () => void;
+  readonly onClose: (restoreFocus: boolean) => void;
   readonly refCallback: (element: HTMLDivElement | null) => void;
 }) {
   const title = tab.shellLabel ?? "终端";
@@ -83,6 +80,13 @@ function TerminalTabChip({
       data-hint={title}
       onPointerDown={onActivate}
       onKeyDown={(event) => {
+        if (event.target !== event.currentTarget ||
+            event.altKey || event.ctrlKey || event.metaKey) return;
+        if (event.key === "Delete") {
+          event.preventDefault();
+          onClose(true);
+          return;
+        }
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           onActivate();
@@ -98,7 +102,7 @@ function TerminalTabChip({
           onArrow(1);
         }
       }}
-      className={`group flex min-h-7 min-w-0 max-w-36 shrink-0 cursor-default select-none items-center gap-1 rounded-lg pl-2 pr-1 text-ui-base font-medium transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-focus-ring ${
+      className={`group flex min-h-7 min-w-0 max-w-36 shrink-0 cursor-default select-none items-center gap-1 rounded-lg pl-2 pr-1 text-ui-base font-medium transition-colors focus-visible:ring-inset ${focusVisibleRing} ${
         active
           ? "bg-selected text-ink"
           : "text-ink-subtle hover:bg-hover hover:text-ink"
@@ -118,9 +122,9 @@ function TerminalTabChip({
         }}
         onClick={(event) => {
           event.stopPropagation();
-          onClose();
+          onClose(event.detail === 0);
         }}
-        className={`flex shrink-0 items-center justify-center rounded-md text-ink transition-opacity hover:bg-hover hover:text-ink ${
+        className={`flex shrink-0 items-center justify-center rounded-md text-ink transition-opacity hover:bg-hover hover:text-ink focus-visible:ring-inset ${focusVisibleRing} ${
  active
  ? "opacity-100"
  : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
@@ -138,6 +142,7 @@ export function TerminalPanel({
   project,
   visible,
   close,
+  restoreLauncherFocus,
 }: {
   readonly terminal: TerminalService;
   readonly openExternal?: (url: string) => Promise<void>;
@@ -145,6 +150,7 @@ export function TerminalPanel({
   /** 面板可见性只驱动 hidden。 */
   readonly visible: boolean;
   readonly close: () => void;
+  readonly restoreLauncherFocus?: () => void;
 }) {
   const logger = useLogger("terminal");
   const tabs = useStore(terminal.tabs, (state) => state.tabs);
@@ -153,10 +159,14 @@ export function TerminalPanel({
   const sectionRef = useRef<HTMLElement | null>(null);
   // null = 未拖拽过，按默认 30% 呈现（ZCode defaultSize 0→展开 30%）
   const [height, setHeight] = useState<number | null>(null);
-  const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   // 页签钮 DOM（roving tabindex 的左右方向键聚焦用）
   const chipRefsRef = useRef<Map<string, HTMLDivElement>>(new Map());
+  const tabListRef = useRef<HTMLDivElement>(null);
+  const shouldFocusSession = useCallback(() => {
+    const list = tabListRef.current;
+    return !list?.contains(list.ownerDocument.activeElement);
+  }, []);
 
   // 打开面板即确保有 shell 并激活（store 的页签组跨开合保活，已有
   // shell 页签重开面板原样可见；仅剩空组时才新建）
@@ -176,48 +186,23 @@ export function TerminalPanel({
   const activeShellName =
     activeTab?.kind === "shell" ? activeTab.shellName : null;
 
-  function onHandlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    if (event.button !== 0) {
-      return;
-    }
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = {
-      startY: event.clientY,
-      startHeight: sectionRef.current?.getBoundingClientRect().height ?? 0,
-    };
-    setDragging(true);
-  }
-
-  function onHandlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (drag === null) {
-      return;
-    }
-    // 面板高度实时跟随（对齐 ZCode ResizablePanel 每 pointermove 改高）；
-    // fit + PTY resize 的 300ms 节流在 TerminalSessionView（resizing prop）
-    const containerHeight =
-      sectionRef.current?.parentElement?.clientHeight ?? 0;
-    setHeight(
-      clampTerminalHeight(
-        drag.startHeight + (drag.startY - event.clientY),
-        containerHeight,
-      ),
-    );
-  }
-
-  function onHandlePointerUp() {
-    dragRef.current = null;
-    setDragging(false);
+  function closePanel(restoreFocus: boolean) {
+    close();
+    if (restoreFocus) restoreLauncherFocus?.();
   }
 
   /** 手动关闭和自然退出都删除页签并释放对应 PTY。 */
-  function closeTab(tabId: string) {
+  function closeTab(tabId: string, restoreFocus = false) {
     if (!terminal.isActive()) return;
     void terminal
       .closeTab(tabId)
       .catch((error: unknown) => logger.warn("PTY 释放失败", { tabId, error }));
-    if (!terminal.tabs.getState().tabs.length) close();
+    const remaining = terminal.tabs.getState();
+    if (remaining.tabs.length === 0) {
+      closePanel(restoreFocus);
+    } else if (restoreFocus && remaining.activeTabId) {
+      chipRefsRef.current.get(remaining.activeTabId)?.focus();
+    }
   }
 
   /** 左右方向键 roving：激活相邻页签并把焦点移过去（环形）。 */
@@ -236,33 +221,37 @@ export function TerminalPanel({
 
   return (
     <>
-      {/* 拖拽手柄：hover 显细横条（ZCode AnimatedTerminalPanel 顶部
-          h-1 手柄同款），pointer 拖拽改面板高 */}
-      <div
-        role="separator"
-        aria-label="调整终端面板高度"
-        aria-orientation="horizontal"
-        hidden={!visible}
-        className="group relative h-1 w-full shrink-0 cursor-row-resize"
-        onPointerDown={onHandlePointerDown}
-        onPointerMove={onHandlePointerMove}
-        onPointerUp={onHandlePointerUp}
-        onPointerCancel={onHandlePointerUp}
-      >
-        <span
-          aria-hidden={true}
-          className={`absolute inset-x-0 top-0 h-0.5 rounded-full bg-transparent transition-colors group-hover:bg-line-strong ${
-            dragging ? "bg-line-strong" : ""
-          }`}
+      {visible && (
+        <ColumnResizer
+          label="调整终端面板高度"
+          axis="y"
+          growDirection="start"
+          minPx={TERMINAL_MIN_HEIGHT_PX}
+          maxPx={TERMINAL_MIN_HEIGHT_PX}
+          defaultWidthPx={TERMINAL_MIN_HEIGHT_PX}
+          paneRef={sectionRef}
+          readBounds={() => {
+            const available = sectionRef.current?.parentElement?.clientHeight ?? 0;
+            return {
+              min: TERMINAL_MIN_HEIGHT_PX,
+              max: Math.floor(clampTerminalHeight(available, available)),
+            };
+          }}
+          readWidth={() => sectionRef.current?.offsetHeight || height || TERMINAL_MIN_HEIGHT_PX}
+          onPreviewWidth={setHeight}
+          onReset={() => setHeight(null)}
+          onDraggingChange={setDragging}
         />
-      </div>
+      )}
       <section
         ref={sectionRef}
         data-testid="terminal-panel"
         aria-label="终端"
         hidden={!visible}
         className="flex shrink-0 flex-col gap-2 overflow-hidden border-t border-line bg-base p-3 pb-2"
-        style={{ height: height ?? "30%" }}
+        style={{
+          height: `clamp(${TERMINAL_MIN_HEIGHT_PX}px, ${height === null ? "30%" : `${height}px`}, ${TERMINAL_MAX_RATIO * 100}%)`,
+        }}
       >
         {/* 工具栏三段：标题 + 活动 shell 名 | 页签条 | Plus + 关闭 */}
         <IconHoverProvider placement="bottom">
@@ -277,6 +266,7 @@ export function TerminalPanel({
             </span>
           )}
           <div
+            ref={tabListRef}
             role="tablist"
             aria-label="终端页签"
             className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
@@ -289,7 +279,7 @@ export function TerminalPanel({
                   active={tab.id === activeTabId}
                   onActivate={() => terminal.selectTab(tab.id)}
                   onArrow={(delta) => activateNeighborTab(tab.id, delta)}
-                  onClose={() => closeTab(tab.id)}
+                  onClose={(restoreFocus) => closeTab(tab.id, restoreFocus)}
                   refCallback={(element) => {
                     if (element === null) {
                       chipRefsRef.current.delete(tab.id);
@@ -317,7 +307,7 @@ export function TerminalPanel({
               data-testid="terminal-close-button"
               aria-label="关闭终端"
               data-hint="关闭终端"
-              onClick={close}
+              onClick={(event) => closePanel(event.detail === 0)}
               className="flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink"
             >
               <XIcon className="ui-icon-16" strokeWidth={2} />
@@ -336,6 +326,7 @@ export function TerminalPanel({
             visible={visible && tab.id === activeTabId}
             project={tab.project}
             resizing={dragging}
+            shouldFocusOnShow={shouldFocusSession}
             onExit={() => closeTab(tab.id)}
           />
         ))}
