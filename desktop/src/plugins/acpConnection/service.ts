@@ -24,6 +24,7 @@ export interface AcpConnectionService {
   probe(id: string): Promise<AcpProbeResult>;
   createTransport(
     options: AcpTransportLaunchOptions,
+    purpose?: "diagnostic",
   ): Promise<AcpTransport | null>;
   createConnection(
     transport: AcpTransport,

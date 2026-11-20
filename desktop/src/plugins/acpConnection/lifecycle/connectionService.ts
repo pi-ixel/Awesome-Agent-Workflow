@@ -10,6 +10,7 @@ import type {
 import { AcpConnection } from "../channels/AcpConnection.ts";
 import { SharedConnectionPool } from "../pool/SharedConnectionPool.ts";
 import { createTauriStdioTransport } from "../protocol/transport/tauriStdioTransport.ts";
+import { AcpClosedError } from "../protocol/errors.ts";
 import { budgetedTransport } from "./budgetedTransport.ts";
 
 export class DesktopAcpConnection implements AcpConnectionService {
@@ -17,9 +18,11 @@ export class DesktopAcpConnection implements AcpConnectionService {
   private readonly releasing = new Map<AcpConnectionPort, Promise<void>>();
   private readonly pools = new Set<SharedConnectionPool>();
   private readonly transports = new Set<AcpTransport>();
+  private readonly diagnosticTransports = new Set<AcpTransport>();
   private readonly unbudgeted = new Set<AcpConnection>();
   private readonly starting = new Set<Promise<AcpTransport | null>>();
   private opening = 0;
+  private isDiagnosticOpening = false;
   private stopping?: Promise<void>;
   constructor(
     private readonly host: HostService,
@@ -43,18 +46,24 @@ export class DesktopAcpConnection implements AcpConnectionService {
   }
   async createTransport(
     options: AcpTransportLaunchOptions,
+    purpose?: "diagnostic",
   ): Promise<AcpTransport | null> {
     if (this.stopping) throw new Error("ACP base is stopping");
-    // 手工探查借用空闲槽；业务池自身的并行启动不能等待自己释放槽。
-    if (this.physicalCount >= ACP_CONNECTION_POOL_SIZE && options.isolated) {
-      for (const pool of this.pools) await pool.reclaimIdle();
-    }
-    if (this.stopping) throw new Error("ACP base is stopping");
-    if (this.physicalCount >= ACP_CONNECTION_POOL_SIZE)
+    const isDiagnostic = purpose === "diagnostic";
+    const transports = isDiagnostic
+      ? this.diagnosticTransports
+      : this.transports;
+    if (isDiagnostic) {
+      if (this.isDiagnosticOpening || transports.size > 0)
+        throw new Error("ACP 诊断连接正在使用或尚未退出，请稍后重试");
+      this.isDiagnosticOpening = true;
+    } else {
+      if (this.physicalCount >= ACP_CONNECTION_POOL_SIZE)
       throw new Error(
         "ACP 连接额度已满（最多 4 条），请等待运行中的会话结束后重试",
       );
-    this.opening++;
+      this.opening++;
+    }
     const task = Promise.resolve()
       .then(async () => {
         const raw = this.host.isNative()
@@ -63,10 +72,10 @@ export class DesktopAcpConnection implements AcpConnectionService {
         if (!raw) return null;
         const binding: { transport?: AcpTransport } = {};
         const transport = budgetedTransport(raw, () => {
-          if (binding.transport) this.transports.delete(binding.transport);
+          if (binding.transport) transports.delete(binding.transport);
         });
         binding.transport = transport;
-        if (!transport.isClosed) this.transports.add(transport);
+        if (!transport.isClosed) transports.add(transport);
         if (this.stopping) {
           await transport.kill();
           await transport.dispose?.();
@@ -75,7 +84,8 @@ export class DesktopAcpConnection implements AcpConnectionService {
         return transport;
       })
       .finally(() => {
-        this.opening--;
+        if (isDiagnostic) this.isDiagnosticOpening = false;
+        else this.opening--;
         this.starting.delete(task);
       });
     this.starting.add(task);
@@ -87,7 +97,10 @@ export class DesktopAcpConnection implements AcpConnectionService {
   }
   createConnection(transport: AcpTransport, capacity: number): AcpConnection {
     if (this.stopping) throw new Error("ACP base is stopping");
-    const isBudgeted = this.transports.has(transport);
+    if (transport.isClosed) throw new AcpClosedError("ACP 进程已退出");
+    const isBudgeted =
+      this.transports.has(transport) ||
+      this.diagnosticTransports.has(transport);
     if (!isBudgeted && this.physicalCount >= ACP_CONNECTION_POOL_SIZE)
       throw new Error("ACP 连接额度已满（最多 4 条）");
     const connection = new AcpConnection(
@@ -151,10 +164,12 @@ export class DesktopAcpConnection implements AcpConnectionService {
         ),
       );
       const transportResults = await Promise.allSettled(
-        [...this.transports].map(async (transport) => {
-          await transport.kill();
-          await transport.dispose?.();
-        }),
+        [...this.transports, ...this.diagnosticTransports].map(
+          async (transport) => {
+            await transport.kill();
+            await transport.dispose?.();
+          },
+        ),
       );
       this.pools.clear();
       this.connections.clear();

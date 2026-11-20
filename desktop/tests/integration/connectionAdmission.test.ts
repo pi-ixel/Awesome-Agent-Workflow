@@ -12,7 +12,7 @@ function fixture() {
     peers.push(peer);
     expect(
       peers.filter(({ client }) => !client.isClosed).length,
-    ).toBeLessThanOrEqual(4);
+    ).toBeLessThanOrEqual(5);
     return Promise.resolve(peer.client);
   });
   const base = new DesktopAcpConnection(
@@ -70,29 +70,70 @@ it("启动中和已返回但尚未绑定连接的传输都计入总额度", asyn
   expect(peers.filter(({ client }) => !client.isClosed)).toHaveLength(4);
 });
 
-it("Agent 探查借用空闲槽，所有槽有租约时不会越过四条限制", async () => {
+it("四条会话连接均有租约时仍可启动一条诊断连接", async () => {
   const { base, peers, open, connect } = fixture();
   const pool = base.createPool(connect);
   await pool.warm();
   const leases = Array.from({ length: 4 }, () => pool.openChannel());
-  await expect(
-    base.createTransport({ command: ["probe"], isolated: true }),
-  ).rejects.toThrow("额度已满");
-  expect(open).toHaveBeenCalledTimes(4);
-  await leases[0]!.release(() => Promise.resolve());
-  const probe = await base.createTransport({
-    command: ["probe"],
-    isolated: true,
-  });
+  const probe = await base.createTransport(
+    {
+      command: ["probe"],
+      isolated: true,
+    },
+    "diagnostic",
+  );
   expect(probe).not.toBeNull();
   const probeConnection = base.createConnection(probe!, 1);
-  expect(peers.filter(({ client }) => !client.isClosed)).toHaveLength(4);
-  await pool.warm();
+  expect(peers.filter(({ client }) => !client.isClosed)).toHaveLength(5);
+  await expect(base.createTransport({ command: ["session"] })).rejects.toThrow(
+    "额度已满",
+  );
+  await expect(
+    base.createTransport({ command: ["probe"] }, "diagnostic"),
+  ).rejects.toThrow("ACP 诊断连接正在使用");
   expect(open).toHaveBeenCalledTimes(5);
   await base.releaseConnection(probeConnection);
-  await pool.warm();
+  const next = await base.createTransport({ command: ["probe"] }, "diagnostic");
+  expect(next).not.toBeNull();
+  await next!.close();
+  await Promise.all(
+    leases.map((lease) => lease.release(() => Promise.resolve())),
+  );
   expect(pool.size).toBe(4);
   expect(peers.filter(({ client }) => !client.isClosed)).toHaveLength(4);
+});
+
+it("诊断启动中与退出未确认时仍占用诊断名额", async () => {
+  const { base, open, peers } = fixture();
+  let finish!: (transport: AcpTransport) => void;
+  open.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const pending = base.createTransport({ command: ["probe"] }, "diagnostic");
+  await expect(
+    base.createTransport({ command: ["probe"] }, "diagnostic"),
+  ).rejects.toThrow("ACP 诊断连接正在使用");
+  const normal = await base.createTransport({ command: ["agent"] });
+  expect(normal).not.toBeNull();
+  const peer = standardAcpPeer();
+  peers.push(peer);
+  finish(peer.client);
+  const transport = (await pending)!;
+  const kill = vi
+    .spyOn(peer.client, "kill")
+    .mockRejectedValue(new Error("退出未确认"));
+  await expect(transport.kill()).rejects.toThrow("退出未确认");
+  await expect(
+    base.createTransport({ command: ["probe"] }, "diagnostic"),
+  ).rejects.toThrow("尚未退出");
+  kill.mockRestore();
+  await transport.kill();
+  await expect(
+    base.createTransport({ command: ["probe"] }, "diagnostic"),
+  ).resolves.not.toBeNull();
 });
 
 it("未确认退出的裸传输仍占额度，不能因未创建协议连接而绕过", async () => {

@@ -11,6 +11,7 @@ interface ProtocolProbeState extends AgentProbeSnapshot {
 
 export const createProtocolProbeStore = () =>
   createStore<ProtocolProbeState>()((set) => ({
+    isBusy: false,
     phase: "idle",
     step: null,
     probingAgentId: null,
@@ -37,10 +38,17 @@ export const createProtocolProbeStore = () =>
       }));
     },
     cancel: () => {
-      set({ phase: "idle", step: null, probingAgentId: null, result: null });
+      set({
+        isBusy: false,
+        phase: "idle",
+        step: null,
+        probingAgentId: null,
+        result: null,
+      });
     },
     reset: () => {
       set({
+        isBusy: false,
         phase: "idle",
         step: null,
         probingAgentId: null,

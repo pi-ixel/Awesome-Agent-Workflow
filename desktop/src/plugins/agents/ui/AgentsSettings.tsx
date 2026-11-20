@@ -131,6 +131,10 @@ function AgentListCard({
   const [testStep, setTestStep] = useState("");
 
   const phase = useStore(service.probeState, (state) => state.phase);
+  const isDiagnosticBusy = useStore(
+    service.probeState,
+    (state) => state.isBusy,
+  );
   const step = useStore(service.probeState, (state) => state.step);
   const probingAgentId = useStore(
     service.probeState,
@@ -377,7 +381,9 @@ function AgentListCard({
               <ActionButton
                 tone="secondary"
                 type="button"
-                disabled={testingId !== null || phase === "probing"}
+                disabled={
+                  testingId !== null || isDiagnosticBusy || phase === "probing"
+                }
                 onClick={() => {
                   void testConnection(row.key);
                 }}
@@ -390,6 +396,7 @@ function AgentListCard({
                 type="button"
                 disabled={
                   phase === "probing" ||
+                  isDiagnosticBusy ||
                   testingId !== null ||
                   workspacePath === null
                 }
@@ -412,6 +419,7 @@ function AgentListCard({
                 type="button"
                 disabled={
                   phase === "probing" ||
+                  isDiagnosticBusy ||
                   testingId !== null ||
                   workspacePath === null
                 }
@@ -766,6 +774,10 @@ function ProtocolReportCard({
 }: Omit<AgentSettingsViewProps, "switchAgent">) {
   const result = useStore(service.probeState, (state) => state.result);
   const phase = useStore(service.probeState, (state) => state.phase);
+  const isDiagnosticBusy = useStore(
+    service.probeState,
+    (state) => state.isBusy,
+  );
   const step = useStore(service.probeState, (state) => state.step);
   const probingAgentId = useStore(
     service.probeState,
@@ -807,7 +819,9 @@ function ProtocolReportCard({
           <ActionButton
             tone="secondary"
             type="button"
-            disabled={phase === "probing" || workspacePath === null}
+            disabled={
+              isDiagnosticBusy || phase === "probing" || workspacePath === null
+            }
             onClick={() => {
               if (workspacePath !== null)
                 probeAgent(
