@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BrowserSpace } from "../../../contracts/browser/types.ts";
 import {
   ArrowLeftIcon,
@@ -125,7 +125,8 @@ function BrowserPanelSession({
   useEffect(() => {
     activeTabIdRef.current = activeTabId;
   }, [activeTabId]);
-  useEffect(() => {
+  // Reset stale picking before the active tab can receive input.
+  useLayoutEffect(() => {
     const previous = previousPageRef.current;
     const changed = previous.key !== pageKey;
     if (!changed && !agentActive) return;

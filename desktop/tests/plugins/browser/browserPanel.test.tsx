@@ -475,8 +475,11 @@ describe("TD-08-M04 元素拾取", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "拾取元素" })).toBeEnabled(),
     );
-    fireEvent.click(screen.getByRole("button", { name: "拾取元素" }));
-    await screen.findByRole("button", { name: "取消拾取" });
+    await act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "拾取元素" }));
+      return Promise.resolve();
+    });
+    expect(screen.getByRole("button", { name: "取消拾取" })).toBeInTheDocument();
 
     await act(async () => {
       for (const listener of listeners) listener(browserElement);
