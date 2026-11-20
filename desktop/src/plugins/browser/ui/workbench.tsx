@@ -55,6 +55,13 @@ export function apply(ctx: Context): void {
             ctx.project.conversation.foreground.runtime,
             (state) => state.runtime.toolInventoryKnown,
           );
+          const mcpFailures = useStore(
+            ctx.project.conversation.foreground.runtime,
+            (state) =>
+              state.runtime.mcpFailuresKnown
+                ? state.runtime.mcpFailures
+                : undefined,
+          );
           const sessionId = activeSessionId ?? `manual:${project}`;
           return (
             <div className="flex h-full min-h-0 flex-col">
@@ -65,7 +72,12 @@ export function apply(ctx: Context): void {
                   workspacePath={project}
                   agentKey={agentKey}
                   sessionId={activeSessionId}
-                  runtime={{ lastSessionId, toolNames, toolInventoryKnown }}
+                  runtime={{
+                    lastSessionId,
+                    toolNames,
+                    toolInventoryKnown,
+                    mcpFailures,
+                  }}
                 />
               )}
               <div className="min-h-0 flex-1">

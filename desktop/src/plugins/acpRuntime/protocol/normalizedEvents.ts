@@ -70,6 +70,7 @@ export interface RuntimeSnapshot {
   readonly toolInventoryKnown: boolean;
   readonly skillSources: readonly { source: string; count: number }[];
   readonly mcpServers: readonly McpServerEntry[];
+  readonly mcpFailuresKnown?: boolean;
   readonly mcpFailures: readonly {
     readonly name: string;
     readonly error: string;

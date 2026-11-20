@@ -13,8 +13,8 @@ export function resolveConfiguredAgent(
   adapters = agentAdapters,
 ): AgentAdapter | null {
   return (
-    resolveAgentAdapter(id, state.agents, state.discoveredAgents, adapters)?.adapter ??
-    null
+    resolveAgentAdapter(id, state.agents, state.discoveredAgents, adapters)
+      ?.adapter ?? null
   );
 }
 
@@ -38,8 +38,13 @@ export function agentSelectionKey(
   agentId = state.activeAgentId,
 ): string {
   const adapter = resolveConfiguredAgent(state, agentId, adapters);
-  return JSON.stringify([
-    agentId,
-    adapter ? buildAgentLaunch(adapter, state, toolPaths, null) : undefined,
-  ]);
+  if (!adapter) return JSON.stringify([agentId, null]);
+  const { command, cwd, extraEnv } = buildAgentLaunch(
+    adapter,
+    state,
+    toolPaths,
+    null,
+  );
+  // 会话目录沿用同一身份。宿主启动策略由连接池自己的配置键区分。
+  return JSON.stringify([agentId, { command, cwd, extraEnv }]);
 }

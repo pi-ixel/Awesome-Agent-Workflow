@@ -61,6 +61,7 @@ export type {
   TransportExitHandler,
   AcpTransport,
   AcpTransportLaunchOptions,
+  AcpProxyPolicy,
 } from "./process/transportTypes.ts";
 
 /** 一次外部命令执行的结果（exit code 与标准输出/错误）。 */
@@ -131,6 +132,7 @@ export interface AcpProcessLaunch {
   readonly args: readonly string[];
   readonly cwd: string | null;
   readonly extraEnv: Readonly<Record<string, string>> | null;
+  readonly proxyPolicy?: import("./process/transportTypes.ts").AcpProxyPolicy;
   readonly isolated: boolean;
 }
 

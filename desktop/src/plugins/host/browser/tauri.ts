@@ -15,6 +15,7 @@ import type {
   BrowserEvidence,
   BrowserHost,
   BrowserMcpEndpoint,
+  BrowserMcpRegistration,
   BrowserMcpStatus,
   BrowserRestoreScope,
   BrowserRestoreSnapshot,
@@ -186,6 +187,8 @@ export function createBrowserHost(
       nativeInvoke<BrowserMcpEndpoint>("browser_mcp_create"),
     mcpStatus: (sessionId) =>
       nativeInvoke<BrowserMcpStatus>("browser_mcp_status", { sessionId }),
+    mcpRegistration: (sessionId) =>
+      nativeInvoke<BrowserMcpRegistration | null>("browser_mcp_registration", { sessionId }),
     bindMcpEndpoint: (endpointId, sessionId) =>
       nativeInvoke<BrowserMcpEndpoint>("browser_mcp_bind", {
         endpointId,

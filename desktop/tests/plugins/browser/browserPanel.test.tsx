@@ -43,6 +43,7 @@ function host(): BrowserHost {
     snapshot: vi.fn().mockImplementation(() => Promise.resolve(spaceWithTab())),
     createMcpEndpoint: vi.fn(),
     mcpStatus: vi.fn().mockResolvedValue("not_bound"),
+    mcpRegistration: vi.fn().mockResolvedValue(null),
     bindMcpEndpoint: vi.fn(),
     revokeMcpEndpoint: vi.fn(),
     setMcpCapabilities: vi.fn(),

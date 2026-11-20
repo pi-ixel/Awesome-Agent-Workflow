@@ -34,6 +34,11 @@ export interface BrowserMcpEndpoint {
   imageCapable: boolean;
 }
 
+export interface BrowserMcpRegistration {
+  readonly endpointName: string;
+  readonly handshakeComplete: boolean;
+}
+
 export interface BrowserEvidence {
   artifactId: string;
   sessionId: string;
@@ -102,6 +107,7 @@ export interface BrowserHost {
   snapshot(sessionId: string): Promise<BrowserSpace>;
   createMcpEndpoint(): Promise<BrowserMcpEndpoint>;
   mcpStatus(sessionId: string): Promise<BrowserMcpStatus>;
+  mcpRegistration(sessionId: string): Promise<BrowserMcpRegistration | null>;
   bindMcpEndpoint(
     endpointId: string,
     sessionId: string,

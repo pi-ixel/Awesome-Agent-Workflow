@@ -338,6 +338,7 @@ export async function createTauriStdioTransport(
       args,
       cwd: options.cwd ?? null,
       extraEnv: options.extraEnv ?? null,
+      ...(options.proxyPolicy && { proxyPolicy: options.proxyPolicy }),
       isolated: options.isolated ?? false,
     });
   } catch (error) {

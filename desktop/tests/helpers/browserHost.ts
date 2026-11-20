@@ -95,6 +95,7 @@ export function createTestBrowserHost(): TestBrowserHost {
             : "not_bound",
       );
     },
+    mcpRegistration: () => Promise.resolve(null),
     bindMcpEndpoint: (endpointId, sessionId) => {
       const endpoint = endpoints.get(endpointId);
       if (!endpoint || endpoint.revoked)

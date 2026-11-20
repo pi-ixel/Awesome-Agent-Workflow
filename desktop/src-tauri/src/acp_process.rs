@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as AsyncMutex;
 use tauri::Emitter;
 
@@ -345,6 +345,12 @@ pub fn cmd_script_tail(script: &str, args: &[String]) -> String {
 }
 
 /// 拉起 ACP agent 子进程并注册进进程表。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AcpProxyPolicy {
+    PythonHttpxLoopback,
+}
+
 #[tauri::command]
 pub async fn acp_spawn(
     app: tauri::AppHandle,
@@ -352,6 +358,7 @@ pub async fn acp_spawn(
     args: Vec<String>,
     cwd: Option<String>,
     extra_env: Option<HashMap<String, String>>,
+    proxy_policy: Option<AcpProxyPolicy>,
     webview: tauri::Webview,
 ) -> Result<AcpSpawnResult, String> {
     if webview.label() != "main" {
@@ -402,6 +409,14 @@ pub async fn acp_spawn(
             command.env(key, value);
         }
     }
+    #[cfg(windows)]
+    if matches!(proxy_policy, Some(AcpProxyPolicy::PythonHttpxLoopback))
+        && let Err(code) = crate::acp_proxy::apply_python_httpx_loopback(&mut command, extra_env.as_ref())
+    {
+        crate::diagnostics::log("warn", "acp-native", "读取 iCode 有效代理配置失败", serde_json::json!({ "code": code }));
+    }
+    #[cfg(not(windows))]
+    let _ = proxy_policy;
     // Windows：chrys 是控制台程序，不加该 flag 会闪出黑窗
     #[cfg(target_os = "windows")]
     {

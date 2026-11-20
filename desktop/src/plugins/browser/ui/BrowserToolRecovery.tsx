@@ -7,6 +7,9 @@ import { needsBrowserToolRecovery } from "../../../shared/browser/toolAvailabili
 type BrowserMcpStatus = Awaited<
   ReturnType<HostService["browser"]["mcpStatus"]>
 >;
+type BrowserMcpRegistration = Awaited<
+  ReturnType<HostService["browser"]["mcpRegistration"]>
+>;
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
 import { ActionButton, DangerButton } from "../../../shared/ui/controls.tsx";
 
@@ -22,6 +25,10 @@ export interface BrowserToolRecoveryProps {
     readonly lastSessionId: string | null;
     readonly toolNames: readonly string[];
     readonly toolInventoryKnown?: boolean;
+    readonly mcpFailures?: readonly {
+      readonly name: string;
+      readonly error: string;
+    }[];
   };
 }
 
@@ -44,6 +51,7 @@ function BrowserToolRecoverySession({
 }: BrowserToolRecoveryProps) {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [mcpStatus, setMcpStatus] = useState<BrowserMcpStatus | null>(null);
+  const [registration, setRegistration] = useState<BrowserMcpRegistration>(null);
   const [confirming, setConfirming] = useState(false);
   const [recovering, setRecovering] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,10 +86,17 @@ function BrowserToolRecoverySession({
 
   useEffect(() => {
     let active = true;
-    void host
-      .mcpStatus(sessionId)
-      .then((actual) => {
-        if (active) setMcpStatus(actual);
+    void Promise.all([
+      host.mcpStatus(sessionId),
+      runtime.mcpFailures
+        ? host.mcpRegistration(sessionId)
+        : Promise.resolve(null),
+    ])
+      .then(([status, current]) => {
+        if (active) {
+          setMcpStatus(status);
+          setRegistration(current);
+        }
       })
       .catch((cause) => {
         if (active) setError(String(cause));
@@ -89,16 +104,40 @@ function BrowserToolRecoverySession({
     return () => {
       active = false;
     };
-  }, [enabled, host, runtime.toolNames, sessionId]);
+  }, [
+    enabled,
+    host,
+    recovering,
+    runtime.mcpFailures,
+    runtime.toolNames,
+    sessionId,
+  ]);
 
   const runtimeKnown = runtime.lastSessionId === sessionId;
-  const needsRecovery = needsBrowserToolRecovery({
-    enabled,
-    mcpStatus,
-    runtimeKnown,
-    toolInventoryKnown: runtime.toolInventoryKnown,
-    toolNames: runtime.toolNames,
-  });
+  const connectionFailure =
+    runtimeKnown && mcpStatus === "active" && registration
+      ? runtime.mcpFailures?.find(
+          ({ name }) => name === registration.endpointName,
+        )
+      : undefined;
+  const isHandshaking =
+    runtimeKnown &&
+    enabled === true &&
+    mcpStatus === "active" &&
+    registration?.handshakeComplete === false &&
+    !connectionFailure &&
+    !recovering;
+  const needsRecovery =
+    !isHandshaking &&
+    ((enabled === true && !!connectionFailure) ||
+      needsBrowserToolRecovery({
+        enabled,
+        mcpStatus,
+        runtimeKnown,
+        toolInventoryKnown: runtime.toolInventoryKnown,
+        toolNames: runtime.toolNames,
+      }));
+  const isReconnectingBrowser = recovering && runtime.mcpFailures !== undefined;
 
   return (
     <>
@@ -114,7 +153,8 @@ function BrowserToolRecoverySession({
                 当前会话无法使用浏览器工具，开启后仍需确认重连。
               </p>
             </div>
-            <ActionButton tone="secondary"
+            <ActionButton
+              tone="secondary"
               type="button"
               className="shrink-0 px-3 py-1.5"
               onClick={() => {
@@ -132,6 +172,14 @@ function BrowserToolRecoverySession({
           </div>
         </section>
       )}
+      {isHandshaking && (
+        <p
+          role="status"
+          className="shrink-0 border-b border-line px-3 py-2 text-xs text-ink-mute"
+        >
+          正在连接本地浏览器工具…
+        </p>
+      )}
       {needsRecovery && (
         <section
           role="status"
@@ -139,12 +187,23 @@ function BrowserToolRecoverySession({
         >
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="font-medium">当前会话尚未注册浏览器工具</p>
+              <p className="font-medium">
+                {isReconnectingBrowser
+                  ? "正在连接本地浏览器工具…"
+                  : connectionFailure
+                    ? "本地浏览器工具连接失败"
+                    : "当前会话尚未注册浏览器工具"}
+              </p>
               <p className="mt-0.5 text-ink-mute">
-                需要重连当前会话；工具注册以重连后的真实运行时为准。
+                {isReconnectingBrowser
+                  ? "正在为当前会话重新注册浏览器工具。"
+                  : connectionFailure
+                    ? describeConnectionFailure(connectionFailure.error)
+                    : "需要重连当前会话；工具注册以重连后的真实运行时为准。"}
               </p>
             </div>
-            <ActionButton tone="secondary"
+            <ActionButton
+              tone="secondary"
               type="button"
               className="shrink-0 px-3 py-1.5"
               onClick={() => setConfirming(true)}
@@ -175,7 +234,8 @@ function BrowserToolRecoverySession({
                   重连会停止同一连接上的任务。未完成消息不会自动重发，消息队列保持暂停。
                 </p>
                 <div className="flex justify-end gap-2">
-                  <ActionButton tone="secondary"
+                  <ActionButton
+                    tone="secondary"
                     type="button"
                     className="min-h-9 px-4 text-sm"
                     disabled={recovering}
@@ -206,4 +266,16 @@ function BrowserToolRecoverySession({
         : null}
     </>
   );
+}
+
+function describeConnectionFailure(error: string): string {
+  const response = /\b(?:error|status(?: code)?)\s+['"]?([45]\d{2})\b/i.exec(
+    error,
+  );
+  if (response)
+    return `连接本地 MCP 服务时收到 HTTP ${response[1]}。检查代理设置后可重试连接。`;
+  if (/timeout|timed? out|did not complete within/i.test(error)) {
+    return "等待本地 MCP 服务响应超时。检查代理设置后可重试连接。";
+  }
+  return "Agent 无法完成本地 MCP 服务握手。";
 }
