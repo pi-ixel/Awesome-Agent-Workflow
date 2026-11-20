@@ -91,10 +91,7 @@ it("polls for new over-limit storage with the settings page unopened", async () 
     .fn()
     .mockResolvedValueOnce([row])
     .mockResolvedValue([{ ...row, bytes: 101 * bytes }]);
-  const { Monitor } = createStorageSettings(
-    { storage } as unknown as DiagnosticsReader,
-    vi.fn(),
-  );
+  const { Monitor } = createStorageSettings({ storage }, vi.fn());
   const view = render(<Monitor />);
   try {
     await act(async () => vi.advanceTimersByTimeAsync(0));
