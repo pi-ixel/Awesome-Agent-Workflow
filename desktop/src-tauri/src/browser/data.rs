@@ -498,13 +498,16 @@ pub async fn browser_clear_session_data(
     state: State<'_, BrowserHost>,
     session_id: String,
 ) -> Result<String, String> {
-    clear_session_partition(app, &state, session_id).await
+    let workspace_id = state.runtime.lock().map_err(|_| "BROWSER_LOCK_FAILED")?
+        .spaces.get(&session_id).map(|space| space.workspace_id.clone());
+    clear_session_partition(app, &state, session_id, workspace_id).await
 }
 
 async fn clear_session_partition(
     app: AppHandle,
     state: &BrowserHost,
     session_id: String,
+    workspace_id: Option<String>,
 ) -> Result<String, String> {
     let _lease = begin_cleanup(state, &session_id)?;
     let partition = active_webview(&app, &state, &session_id)?;
@@ -570,6 +573,9 @@ async fn clear_session_partition(
     }
     super::download::cancel_native_pending(&state, &session_id);
     super::evidence::clear_session_evidence(&app, &session_id)?;
+    if let Some(workspace_id) = workspace_id.as_deref() {
+        super::restore::clear(&app, Some(workspace_id), Some(&session_id), false)?;
+    }
     tauri::Emitter::emit(
         &app,
         "aaw://browser-page",
@@ -634,7 +640,7 @@ pub struct CleanupResult {
     pub items: Vec<CleanupItem>,
 }
 
-fn known_partition_ids(
+pub(crate) fn known_partition_ids(
     app: &AppHandle,
     host: &BrowserHost,
 ) -> Result<Vec<PartitionRecord>, String> {
@@ -674,13 +680,14 @@ async fn clear_partitions(
         } else {
             let task_app = app.clone();
             let session_id = partition.session_id.clone();
+            let workspace_id = partition.workspace_id.clone();
             let (sender, receiver) = tokio::sync::oneshot::channel();
             if app
                 .run_on_main_thread(move || {
                     tauri::async_runtime::spawn(async move {
                         let host = task_app.state::<BrowserHost>();
                         let result =
-                            clear_session_partition(task_app.clone(), &host, session_id).await;
+                            clear_session_partition(task_app.clone(), &host, session_id, Some(workspace_id)).await;
                         let _ = sender.send(result);
                     });
                 })
@@ -726,7 +733,12 @@ pub async fn browser_clear_workspace_data(
         .into_iter()
         .filter(|partition| partition.workspace_id == workspace_id)
         .collect();
-    Ok(clear_partitions(app, task_id, partitions).await)
+    let mut result = clear_partitions(app.clone(), task_id, partitions).await;
+    if result.status == "completed" || result.items.is_empty() {
+        super::restore::clear(&app, Some(&workspace_id), None, false)?;
+        result.status = "completed".into();
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -736,7 +748,12 @@ pub async fn browser_clear_all_data(
     task_id: String,
 ) -> Result<CleanupResult, String> {
     let partitions = known_partition_ids(&app, &state)?;
-    Ok(clear_partitions(app, task_id, partitions).await)
+    let mut result = clear_partitions(app.clone(), task_id, partitions).await;
+    if result.status == "completed" || result.items.is_empty() {
+        super::restore::clear(&app, None, None, false)?;
+        result.status = "completed".into();
+    }
+    Ok(result)
 }
 
 #[tauri::command]

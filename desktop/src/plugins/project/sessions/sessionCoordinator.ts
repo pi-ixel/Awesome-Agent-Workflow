@@ -2473,6 +2473,10 @@ export function createSessionCoordinator({
           await indexes.deletions.save({ ...target, phase });
         }
         await cleanup();
+        const browser = getBrowser();
+        if (browser.isAvailable()) {
+          await browser.forgetRestore({ workspaceId: target.workspacePath, sessionId: target.sessionId });
+        }
         const agent = sessionAgentId(target.agentKey);
         if (agent !== null)
           await deleteContextUsage({

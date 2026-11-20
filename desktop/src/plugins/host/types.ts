@@ -265,6 +265,8 @@ export type DiagnosticsCommand =
   | "diagnostics_snapshot"
   | "diagnostics_storage_list"
   | "diagnostics_storage_remove"
+  | "browser_restore_list"
+  | "browser_restore_remove"
   | "diagnostics_probe_request"
   | "diagnostics_probe_take"
   | "diagnostics_resources"

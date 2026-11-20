@@ -14,6 +14,10 @@ import { browserElement } from "../../helpers/browserElement.ts";
 
 function host(): BrowserHost {
   return {
+    readRestore: vi.fn().mockResolvedValue({ epoch: "", revision: null, urls: [] }),
+    saveRestore: vi.fn(),
+    forgetRestore: vi.fn().mockResolvedValue(undefined),
+    migrateLegacyRestores: () => () => {},
     isAvailable: () => true,
     agentControlEnabled: vi.fn().mockResolvedValue(true),
     setAgentControl: vi
@@ -110,6 +114,48 @@ function spaceWithTab(): BrowserSpace {
     ],
   };
 }
+
+describe("浏览器标签恢复存储", () => {
+  it("WebView 配额已满且恢复存储不可用时，浏览器仍可操作", async () => {
+    const write = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("QuotaExceededError", "QuotaExceededError");
+    });
+    const fake = host();
+    fake.createSpace = vi.fn().mockResolvedValue(spaceWithTab());
+    fake.readRestore = vi.fn().mockRejectedValue(new Error("磁盘不可访问"));
+    try {
+      render(<BrowserPanel host={fake} workspaceId="workspace" sessionId="session-a" visible />);
+      expect(await screen.findByText(/无法读取浏览器标签恢复数据/)).toBeVisible();
+      expect(screen.getByRole("textbox", { name: "地址栏" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "新建标签页" })).toBeEnabled();
+      expect(write).not.toHaveBeenCalled();
+    } finally {
+      write.mockRestore();
+    }
+  });
+
+  it("恢复期间的空浏览器状态不会覆盖原快照", async () => {
+    const fake = host();
+    const live = spaceWithTab();
+    const tab = live.tabs[0]!;
+    fake.createSpace = vi.fn().mockResolvedValue({ ...live, tabs: [] });
+    fake.readRestore = vi.fn().mockResolvedValue({ epoch: "", revision: "old", urls: [tab.committedUrl] });
+    let resolveTab!: (value: typeof tab) => void;
+    const createTab = vi.fn().mockImplementation(() => new Promise<typeof tab>((resolve) => { resolveTab = resolve; }));
+    const saveRestore = vi.fn().mockResolvedValue({ epoch: "", revision: "new", urls: [tab.committedUrl] });
+    fake.createTab = createTab;
+    fake.saveRestore = saveRestore;
+    render(<BrowserPanel host={fake} workspaceId="workspace" sessionId="session-a" visible />);
+    await waitFor(() => expect(createTab).toHaveBeenCalledOnce());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
+    expect(saveRestore).not.toHaveBeenCalled();
+    resolveTab(tab);
+    await waitFor(() => expect(saveRestore).toHaveBeenCalledWith(
+      { workspaceId: "workspace", sessionId: "session-a" },
+      { epoch: "", revision: "old", enabled: true, urls: [tab.committedUrl] },
+    ));
+  });
+});
 
 describe("TD-024-U02 活动驱动浏览器控件", () => {
   it("无活动时用户直接操作且不存在静态接管开关", async () => {

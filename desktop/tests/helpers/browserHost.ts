@@ -27,6 +27,10 @@ export function createTestBrowserHost(): TestBrowserHost {
   const approvalDecisions: ApprovalDecision[] = [];
   const endpoints = new Map<string, BrowserMcpEndpoint>();
   return {
+    readRestore: () => Promise.resolve({ epoch: "", revision: null, urls: [] }),
+    saveRestore: (_scope, update) => Promise.resolve({ ...update, revision: update.enabled ? "saved" : null }),
+    forgetRestore: () => Promise.resolve(),
+    migrateLegacyRestores: () => () => {},
     isAvailable: () => true,
     agentControlEnabled: () => Promise.resolve(controlEnabled),
     setAgentControl: (enabled) => {

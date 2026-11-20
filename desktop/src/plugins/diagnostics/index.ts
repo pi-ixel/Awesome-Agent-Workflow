@@ -27,6 +27,14 @@ export function apply(ctx: Context, { logSink, capture }: DiagnosticsOptions = {
   ctx.provide(name, diagnostics.service);
   if (capture && ctx.host.diagnostics.isNative()) {
     const host = ctx.host.diagnostics;
+    ctx.effect(() => diagnostics.service.registerStorage({
+      id: "browser.restore",
+      label: "浏览器标签恢复",
+      risk: "清理后，下次启动时将无法恢复这批标签。已打开的标签继续可用。",
+      exact: true,
+      list: () => host.request("browser_restore_list"),
+      remove: ({ key, revision }) => host.request("browser_restore_remove", { key, revision }),
+    }), "diagnostics:browser-restore");
     let logWriteError: string | undefined;
     ctx.effect(() => diagnostics.service.registerStorage({
       id: "updates.settings",

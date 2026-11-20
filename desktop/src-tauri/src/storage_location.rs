@@ -155,6 +155,7 @@ fn managed_paths(
         "configuration",
         "session-snapshots",
         "conversation",
+        "browser-restore",
         "statistics",
         "trash",
         "storage-thresholds.json",

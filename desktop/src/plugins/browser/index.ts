@@ -5,7 +5,7 @@ export const inject = ["host"];
 
 export function apply(ctx: Context): void {
   ctx.provide(name, { host: ctx.host.browser });
-  ctx.effect(() => () => {}, "browser:resources");
+  ctx.effect(() => ctx.host.browser.migrateLegacyRestores(), "browser:resources");
 }
 
 export async function installWorkbench(ctx: Context): Promise<void> {
