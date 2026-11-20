@@ -13,6 +13,7 @@ import type { LogEntry } from "../../shared/logging/types.ts";
 import type { LoggerFactory } from "../../shared/logging/logger.ts";
 
 import type { SsoLoginPollWire } from "./adapters/ssoTypes.ts";
+import type { AcpProxyPolicy } from "./process/transportTypes.ts";
 
 export type {
   FileEntry,
@@ -132,7 +133,7 @@ export interface AcpProcessLaunch {
   readonly args: readonly string[];
   readonly cwd: string | null;
   readonly extraEnv: Readonly<Record<string, string>> | null;
-  readonly proxyPolicy?: import("./process/transportTypes.ts").AcpProxyPolicy;
+  readonly proxyPolicy?: AcpProxyPolicy;
   readonly isolated: boolean;
 }
 
