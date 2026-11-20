@@ -393,8 +393,24 @@ pub fn log(level: &str, channel: &str, message: &str, context: Value) {
         }],
     );
 }
+pub(crate) fn is_diagnostics_view(label: &str) -> bool {
+    matches!(label, "main" | "diagnostics")
+}
+
+fn require_main_view(label: &str, error: &str) -> Result<(), String> {
+    if label == "main" {
+        Ok(())
+    } else {
+        Err(error.into())
+    }
+}
+
+// 主窗口可以挂载浏览器子视图。权限校验应识别实际发起 IPC 的视图。
 #[tauri::command]
-pub fn diagnostics_append(window: tauri::WebviewWindow, entries: Vec<Input>) -> Result<(), String> {
+pub fn diagnostics_append(webview: tauri::Webview, entries: Vec<Input>) -> Result<(), String> {
+    if !is_diagnostics_view(webview.label()) {
+        return Err("无权写入诊断日志".into());
+    }
     if entries.len() > 100
         || serde_json::to_vec(&entries)
             .map_err(|e| e.to_string())?
@@ -403,7 +419,7 @@ pub fn diagnostics_append(window: tauri::WebviewWindow, entries: Vec<Input>) -> 
     {
         return Err("日志批次过大".into());
     }
-    enqueue(window.label().into(), entries)
+    enqueue(webview.label().into(), entries)
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -414,13 +430,8 @@ pub struct AcpRawInput {
     at: u64,
 }
 #[tauri::command]
-pub fn diagnostics_acp_append(
-    window: tauri::WebviewWindow,
-    record: AcpRawInput,
-) -> Result<(), String> {
-    if window.label() != "main" {
-        return Err("只有主窗口可以记录 ACP 原文".into());
-    }
+pub fn diagnostics_acp_append(webview: tauri::Webview, record: AcpRawInput) -> Result<(), String> {
+    require_main_view(webview.label(), "只有主窗口可以记录 ACP 原文")?;
     if record.line.len() > 32 * 1024 * 1024 || !["in", "out"].contains(&record.direction.as_str()) {
         return Err("ACP 原文过大或方向无效".into());
     }
@@ -436,7 +447,7 @@ pub fn diagnostics_acp_append(
         .map_err(|_| "ACP 原文待写数据超过 64MB".to_string())?;
     service
         .sender
-        .try_send(WriteRequest::Raw(window.label().into(), record))
+        .try_send(WriteRequest::Raw(webview.label().into(), record))
         .map_err(|_| {
             service
                 .raw_pending_bytes
@@ -569,10 +580,8 @@ fn storage_log_name(name: &str) -> bool {
 }
 
 #[tauri::command]
-pub fn diagnostics_storage_list(window: tauri::WebviewWindow) -> Result<Value, String> {
-    if window.label() != "main" {
-        return Err("只有主窗口可以管理日志存储".into());
-    }
+pub fn diagnostics_storage_list(webview: tauri::Webview) -> Result<Value, String> {
+    require_main_view(webview.label(), "只有主窗口可以管理日志存储")?;
     let service = service()?;
     let store = service.store.lock().map_err(|e| e.to_string())?;
     let mut rows = Vec::new();
@@ -609,13 +618,11 @@ fn log_revision(meta: &fs::Metadata) -> Result<String, String> {
 
 #[tauri::command]
 pub fn diagnostics_storage_remove(
-    window: tauri::WebviewWindow,
+    webview: tauri::Webview,
     key: String,
     revision: String,
 ) -> Result<bool, String> {
-    if window.label() != "main" {
-        return Err("只有主窗口可以管理日志存储".into());
-    }
+    require_main_view(webview.label(), "只有主窗口可以管理日志存储")?;
     if !storage_log_name(&key) {
         return Err("无效的日志文件名".into());
     }
@@ -652,14 +659,17 @@ pub fn diagnostics_status(app: tauri::AppHandle) -> Result<Value, String> {
 }
 #[tauri::command]
 pub fn diagnostics_snapshot(
-    window: tauri::WebviewWindow,
+    webview: tauri::Webview,
     snapshot: Option<Value>,
 ) -> Result<Value, String> {
+    if !is_diagnostics_view(webview.label()) {
+        return Err("无权读取运行状态".into());
+    }
+    if snapshot.is_some() {
+        require_main_view(webview.label(), "只有主窗口可以发布运行状态")?;
+    }
     let service = service()?;
     if let Some(value) = snapshot {
-        if window.label() != "main" {
-            return Err("只有主窗口可以发布运行状态".into());
-        }
         if serde_json::to_vec(&value).map_err(|e| e.to_string())?.len() > 512 * 1024 {
             return Err("状态快照过大".into());
         }
@@ -694,10 +704,8 @@ fn enqueue_probe(queue: &mut VecDeque<String>, id: String) -> Result<(), String>
 }
 
 #[tauri::command]
-pub fn diagnostics_probe_take(window: tauri::WebviewWindow) -> Result<Vec<String>, String> {
-    if window.label() != "main" {
-        return Err("只有主窗口可以执行连接测试".into());
-    }
+pub fn diagnostics_probe_take(webview: tauri::Webview) -> Result<Vec<String>, String> {
+    require_main_view(webview.label(), "只有主窗口可以执行连接测试")?;
     let service = service()?;
     let mut queue = service.probes.lock().map_err(|e| e.to_string())?;
     Ok(queue.drain(..).collect())
@@ -762,6 +770,20 @@ pub async fn diagnostics_open(app: tauri::AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diagnosis_permissions_use_only_the_calling_view_label() {
+        assert!(is_diagnostics_view("main"));
+        assert!(is_diagnostics_view("diagnostics"));
+        assert!(require_main_view("main", "拒绝").is_ok());
+        assert_eq!(require_main_view("diagnostics", "拒绝"), Err("拒绝".into()));
+
+        for label in ["browser-test", "main-child", "diagnostics-child", ""] {
+            assert!(!is_diagnostics_view(label));
+            assert_eq!(require_main_view(label, "拒绝"), Err("拒绝".into()));
+        }
+    }
+
     #[test]
     fn probe_queue_is_bounded_and_deduplicated() {
         let mut queue = VecDeque::new();
