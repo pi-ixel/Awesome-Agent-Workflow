@@ -8,7 +8,7 @@ import type {
   SessionListStatus,
 } from "./indexTypes.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
-import { setManualTitle, displayTitleOf } from "./sessionTitles.ts";
+import { agentSessionTitle, setManualTitle, displayTitleOf } from "./sessionTitles.ts";
 import {
   sessionTitleOf,
   type SessionStoreState,
@@ -40,8 +40,10 @@ export function sessionListEntries(
     Object.entries(store.sessionsByPath).find(
       ([path]) => pathKey(path) === pathKey(runtime.workspacePath),
     )?.[1] ?? [];
-  const cachedTitle = (id: string): string | undefined =>
-    cachedSessions.find((entry) => entry.id === id)?.title;
+  const cachedTitle = (id: string): string | undefined => {
+    const entry = cachedSessions.find((cached) => cached.id === id);
+    return agentSessionTitle(entry?.nativeTitle ?? entry?.title);
+  };
   const cachedUpdatedAt = (id: string): string | null | undefined =>
     cachedSessions.find((entry) => entry.id === id)?.updatedAt;
   const entries: SessionSummary[] = [];
@@ -49,16 +51,12 @@ export function sessionListEntries(
     const listedSelf = listed.find(
       (info) => info.sessionId === activeSessionId,
     );
-    const listedSelfTitle = listedSelf?.title;
+    const cached = cachedTitle(activeSessionId);
     entries.push({
       id: activeSessionId,
       title:
-        typeof listedSelfTitle === "string" && listedSelfTitle.trim().length > 0
-          ? listedSelfTitle
-          : cachedTitle(activeSessionId) &&
-              cachedTitle(activeSessionId) !== "会话"
-            ? cachedTitle(activeSessionId)!
-            : sessionTitleOf(store.items),
+        agentSessionTitle(listedSelf?.title) ??
+        (cached && cached !== "会话" ? cached : sessionTitleOf(store.items)),
       // 排序语义对齐 ZCode：updatedAt = 会话最后活动时间（chrys 权威
       // 优先，本地缓存次之）。打开/切换会话**不**盖当前时刻——否则每次
       // 载入历史会话它都会跳到列表顶部。全新会话（无任何时间来源，首条
@@ -75,9 +73,10 @@ export function sessionListEntries(
     }
     entries.push({
       id: info.sessionId,
-      title: info.title?.trim()
-        ? info.title
-        : (cachedTitle(info.sessionId) ?? sessionListTitleOf(info)),
+      title:
+        agentSessionTitle(info.title) ??
+        cachedTitle(info.sessionId) ??
+        sessionListTitleOf(info),
       updatedAt: info.updatedAt ?? null,
     });
   }
@@ -120,10 +119,6 @@ function hhmmOf(iso: string): string {
 
 /** 历史会话的兜底标题（agent 未提供 title 时不露出 UUID）。 */
 function sessionListTitleOf(info: SessionInfo): string {
-  const title = info.title;
-  if (typeof title === "string" && title.trim().length > 0) {
-    return title;
-  }
   const hhmm = typeof info.updatedAt === "string" ? hhmmOf(info.updatedAt) : "";
   return hhmm === "" ? "会话" : `会话 · ${hhmm}`;
 }

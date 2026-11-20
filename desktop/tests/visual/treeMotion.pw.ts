@@ -158,6 +158,61 @@ test("项目树在切换外观时保留展开、当前会话和行内操作的�
   await expect(session).toHaveAttribute("aria-current", "true");
 });
 
+test("侧栏右侧在运行圈与操作间切换，并跟随信息流颜色和字号", async ({ page, context }) => {
+  await page.goto("/tests/visual/uiScaleFixture.html");
+  const view = await context.newPage();
+  await view.setViewportSize({ width: 820, height: 680 });
+  await view.goto("/tests/visual/treeMotionFixture.html?sessions&running");
+  const tree = view.getByRole("main", { name: "项目与会话" });
+  const session = tree.getByRole("button", { name: /整理部署手册/ });
+  const feed = view.getByRole("status", { name: "工作中" });
+  const pinned = tree.getByRole("list", { name: "置顶任务" });
+  await expect(pinned.getByRole("img", { name: "运行中" })).toBeVisible();
+  await expect(session).toHaveCount(2);
+  const projectSession = session.last();
+  const row = projectSession.locator("..");
+  const running = row.getByRole("img", { name: "运行中" });
+  const star = row.getByRole("button", { name: "星标会话" });
+  const font = page.getByRole("spinbutton", { name: "界面字号" });
+  for (const [theme, px] of [["暖白", 12], ["暗夜", 20], ["暖白", 14]] as const) {
+    await page.getByRole("button", { name: theme, exact: true }).click();
+    await font.fill(String(px));
+    await font.press("Enter");
+    await expect(view.locator("html")).toHaveCSS("--ui-font-size", `${px}px`);
+    await expect(running).toBeVisible();
+    const feedColor = await feed.locator("span").evaluate((el) => getComputedStyle(el).borderLeftColor);
+    await expect(running.locator("span")).toHaveCSS("border-left-color", feedColor);
+    expect((await running.boundingBox())!.width).toBeCloseTo(16 * px / 14, 1);
+    const rowBox = (await row.boundingBox())!;
+    const ringBox = (await running.boundingBox())!;
+    expect(rowBox.x + rowBox.width - ringBox.x - ringBox.width).toBeLessThan(12);
+  }
+
+  await expect(star).toHaveCSS("opacity", "0");
+  await projectSession.hover();
+  await expect(running).toBeHidden();
+  await expect(star).toHaveCSS("opacity", "1");
+  await expect(feed).toBeVisible();
+  await projectSession.click();
+  await feed.hover();
+  await expect(running).toBeVisible();
+  await expect(star).toHaveCSS("opacity", "0");
+  await view.keyboard.press("Tab");
+  await expect(star).toBeFocused();
+  await expect(star).toHaveCSS("opacity", "1");
+  await expect(running).toBeHidden();
+
+  await tree.getByRole("button", { name: "切换视角" }).click();
+  await view.getByRole("menuitemradio", { name: "最近会话" }).click();
+  await feed.hover();
+  const recent = session.first().locator("..");
+  const recentRunning = recent.getByRole("img", { name: "运行中" });
+  await expect(recentRunning).toBeVisible();
+  await session.first().hover();
+  await expect(recentRunning).toBeHidden();
+  await expect(recent.getByRole("button", { name: "星标会话" })).toHaveCSS("opacity", "1");
+});
+
 test("最近会话列表在行内重命名期间切换外观，保留草稿、选区和焦点", async ({
   page,
   context,

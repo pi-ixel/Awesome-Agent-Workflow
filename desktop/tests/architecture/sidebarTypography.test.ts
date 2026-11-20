@@ -71,3 +71,14 @@ it("共享侧栏标题跟随界面字号并保持常规字体", () => {
     /text-ui-(?:sm|caption)|font-mono|font-(?:medium|bold)|font-size/,
   );
 });
+
+it("项目侧栏和信息流通过同一运行指示器管理尺寸和颜色", () => {
+  for (const file of ["ui/ProjectTree.tsx", "conversation/ui/ConversationTurnView.tsx"]) {
+    const source = readFileSync(`src/plugins/project/${file}`, "utf8");
+    expect(source, file).toContain("SessionRunningIndicator.tsx");
+    expect(source, file).toMatch(/<SessionRunningIndicator(?:\s+surface="conversation")?\s*\/>/);
+    expect(source, file).not.toMatch(/<Spinner\b/);
+  }
+  const indicator = readFileSync("src/plugins/project/ui/SessionRunningIndicator.tsx", "utf8");
+  expect(indicator).toContain('<Spinner className="ui-icon-16 shrink-0 text-ink-mute" />');
+});

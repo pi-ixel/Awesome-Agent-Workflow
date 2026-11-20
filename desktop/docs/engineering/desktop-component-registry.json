@@ -730,8 +730,13 @@
         "SessionsView",
         "TreeSection"
       ],
-      "编辑输入": ["SessionRenameInput"],
-      "图标与内容标识": ["SessionRunningIcon"]
+      "编辑输入": ["SessionRenameInput"]
+    },
+    "targets": []
+  },
+  "plugins/project/ui/SessionRunningIndicator.tsx": {
+    "definitions": {
+      "状态与统计": ["SessionRunningIndicator"]
     },
     "targets": []
   },

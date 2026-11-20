@@ -100,6 +100,11 @@ import {
 import { resolveAutoPermission } from "../interactions/permissionPolicy.ts";
 import { attachBrowserApprovals } from "../interactions/browserApprovalBridge.ts";
 import { browserObservationUrl } from "../../../shared/urlPrivacy.ts";
+import {
+  browserContextUnavailable,
+  browserPageContextPrefix,
+  browserUnavailablePrompt,
+} from "../../../shared/browser/promptContext.ts";
 import { browserToolsUnavailable } from "../../../shared/browser/toolAvailability.ts";
 import { asRecord } from "../../../shared/valueGuards.ts";
 
@@ -1805,7 +1810,7 @@ export function createSessionCoordinator({
             return [
               {
                 type: "text" as const,
-                text: "AAW 内嵌浏览器工具当前不可用。不得改用系统默认浏览器；请指导用户在 AAW 中开启“Agent 浏览器控制”，并在浏览器面板确认“重连并恢复浏览器工具”。",
+                text: browserUnavailablePrompt,
               },
             ];
           }
@@ -1820,11 +1825,11 @@ export function createSessionCoordinator({
             return [
               {
                 type: "text" as const,
-                text: `当前浏览器页面上下文（只读，不构成操作授权）：URL=${url}；状态=${tab.lifecycle}`,
+                text: `${browserPageContextPrefix}：URL=${url}；状态=${tab.lifecycle}`,
               },
             ];
           } catch {
-            return [{ type: "text" as const, text: "当前页面上下文不可用" }];
+            return [{ type: "text" as const, text: browserContextUnavailable }];
           }
         },
         project: { id: pathKey(workspacePath), path: workspacePath },

@@ -15,8 +15,10 @@ import {
 } from "../../src/plugins/project/ui/bindings/projectView.tsx";
 import type { ProjectPage } from "../../src/plugins/project/ui/bindings/projectPage.ts";
 import type { ProjectService } from "../../src/plugins/project/service.ts";
+import { sessionPinKey } from "../../src/plugins/project/sessions/sessionPin.ts";
+import { ConversationTurnView } from "../../src/plugins/project/conversation/ui/ConversationTurnView.tsx";
 
-export function renderProjectTree(root: Root) {
+export function renderProjectTree(root: Root, { running = false } = {}) {
   const values = new Map<string, string>();
   const storage = {
     getItem: (key: string) => values.get(key) ?? null,
@@ -29,6 +31,9 @@ export function renderProjectTree(root: Root) {
   const workspace = createWorkspaceStore(storage, () => true);
   workspace.store.setState({
     recentWorkspaces: [{ path, lastOpenedAt: "2026-10-20T10:00:00Z" }],
+    ...(running
+      ? { pinnedSessions: [sessionPinKey(path, "notes", agentKey)] }
+      : {}),
   });
   const sidebar = createProjectSidebarState(storage);
   sidebar.store.setState({ treeViewMode: "projects" });
@@ -51,6 +56,16 @@ export function renderProjectTree(root: Root) {
       ],
     },
   });
+  if (running) {
+    indexes.activity.getState().update({
+      agentKey,
+      project: path,
+      sessionId: "notes",
+      status: "running",
+      unread: false,
+      pending: 0,
+    });
+  }
   const publisher = indexes.groups.register();
   publisher.publish(path, [
     {
@@ -132,6 +147,14 @@ export function renderProjectTree(root: Root) {
       >
         <ProjectTree project={project} />
       </main>
+      {running && (
+        <section aria-label="信息流" className="fixed right-4 top-4">
+          <ConversationTurnView
+            turn={{ id: "running", history: [], running: true }}
+            renderItem={() => null}
+          />
+        </section>
+      )}
     </ProjectViewContext.Provider>,
   );
 }

@@ -75,7 +75,7 @@ const params = new URLSearchParams(location.search);
 if (params.has("sessions")) {
   bindSecondaryWindowAppearance(document.documentElement);
   const { renderProjectTree } = await import("./projectTreeFixture.tsx");
-  renderProjectTree(root);
+  renderProjectTree(root, { running: params.has("running") });
 } else {
   root.render(<Fixture />);
 }
