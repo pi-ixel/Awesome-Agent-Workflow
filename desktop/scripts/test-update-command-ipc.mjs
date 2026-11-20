@@ -1,6 +1,6 @@
 // Exercise real Windows WebView2 -> Tauri command dispatch. The unprepared
 // request catches stack exhaustion while IPC constructs the update future.
-// Optional isolated fixtures cover native window routing, controls and NSIS handoff.
+// Optional isolated fixtures cover native window routing, diagnostics and NSIS handoff.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash, generateKeyPairSync, randomUUID, sign } from "node:crypto";
@@ -13,7 +13,9 @@ import { setTimeout as delay } from "node:timers/promises";
 if (process.platform !== "win32")
   throw new Error("Windows-only IPC smoke test");
 const handoff = process.argv[2] === "--isolated-handoff";
-const isolated = handoff || process.argv[2] === "--isolated-window";
+const diagnostics = process.argv[2] === "--isolated-diagnostics";
+const isolated =
+  handoff || diagnostics || process.argv[2] === "--isolated-window";
 const root = path.resolve("src-tauri/target/update-ipc-tests");
 await fs.mkdir(root, { recursive: true });
 const fixture = isolated ? await prepareIsolatedWindow(handoff) : undefined;
@@ -180,8 +182,8 @@ try {
   console.log(
     "PASS: real update_install IPC rejects an unprepared update and keeps Desktop alive",
   );
-  const invoke = (command) =>
-    `window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)}, { label: 'main' })`;
+  const invoke = (command, args = { label: "main" }) =>
+    `window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)}, ${JSON.stringify(args)})`;
   const click = (name) =>
     `document.querySelector('[data-testid="window-control-${name}"]').click()`;
   const dialog = `document.querySelector('[role="dialog"][aria-label="关闭确认"]')`;
@@ -233,6 +235,94 @@ try {
     console.log(
       "PASS: signed update confirmed in Desktop, old process exited, NSIS replaced the app, and restarted Desktop loaded the workspace",
     );
+  } else if (diagnostics) {
+    const sessionId = randomUUID();
+    const call = (command, args) => evaluate(invoke(command, args));
+    await call("plugin:window|show");
+    await waitFor("Workbench window controls", () =>
+      evaluate(
+        "Boolean(document.querySelector('[data-testid=\"desktop-window-controls\"]'))",
+      ),
+    );
+    await call("browser_create_space", {
+      windowId: "main",
+      workspaceId: sessionId,
+      sessionId,
+    });
+    try {
+      await call("browser_create_tab", {
+        sessionId,
+        url: `${fixture.origin}/favicon.ico`,
+        bounds: { x: 0, y: 0, width: 320, height: 240 },
+      });
+      await call("diagnostics_append", {
+        entries: [
+          { level: "info", channel: "smoke", message: "诊断回归", context: {} },
+        ],
+      });
+      await call("diagnostics_acp_append", {
+        record: {
+          line: "{}",
+          connectionId: sessionId,
+          direction: "in",
+          at: Date.now(),
+        },
+      });
+      await call("diagnostics_flush");
+      assert.ok(Array.isArray(await call("diagnostics_probe_take")));
+      assert.ok(await call("diagnostics_snapshot", { snapshot: { connections: [] } }));
+      const rows = await call("diagnostics_storage_list");
+      assert.ok(rows.length > 0);
+      const { key } = rows[0];
+      assert.equal(
+        await call("diagnostics_storage_remove", { key, revision: "stale" }),
+        false,
+      );
+
+      await call("diagnostics_open");
+      const diagnosticSocket = await connectPage((url) => url.includes("diagnostics=1"));
+      try {
+        const read = (expression) => evaluateOn(diagnosticSocket, expression);
+        const directList = invoke("diagnostics_storage_list", {});
+        assert.equal(
+          await read(`${directList}.then(() => 'unexpected success', String)`),
+          "只有主窗口可以管理日志存储",
+        );
+        assert.ok(await read(invoke("diagnostics_snapshot", {})));
+        const storageTab = `[...document.querySelectorAll('button')].find(button => button.textContent.trim() === '存储')`;
+        const logCategory = `[...document.querySelectorAll('[aria-label="Desktop 存储"] button[aria-controls]')].find(button => button.textContent.includes('诊断日志'))`;
+        await waitFor("diagnostics Storage tab", () => read(`Boolean(${storageTab})`));
+        await read(`${storageTab}.click()`);
+        await waitFor("diagnostics log category via primary Webview", async () => {
+          const errors = await read(
+            `Array.from(document.querySelectorAll('[aria-label="Desktop 存储"] [role="alert"]'), alert => alert.textContent)`,
+          );
+          assert.deepEqual(
+            errors.filter((message) => /诊断日志|WebviewWindow|主窗口未返回/.test(message)),
+            [],
+          );
+          return read(`Boolean(${logCategory})`);
+        });
+        const logDetails = `document.getElementById((${logCategory}).getAttribute('aria-controls'))`;
+        const action = (label) => `[...${logDetails}.querySelectorAll('button')].find(button => button.textContent.trim() === ${JSON.stringify(label)})`;
+        await read(`${logCategory}.click()`);
+        await waitFor("diagnostics log selection", () => read(`!(${action("全选")}).disabled`));
+        await read(`${action("全选")}.click()`);
+        await waitFor("diagnostics cleanup action", () => read(`!(${action("清理")}).disabled`));
+        await read(`${action("清理")}.click()`);
+        const confirmation = `document.querySelector('[role="alertdialog"][aria-label="确认清理"]')`;
+        await waitFor("diagnostics cleanup preview", () => read(`Boolean(${confirmation}?.textContent.includes('清理 · 诊断日志'))`));
+        await read(`[...${confirmation}.querySelectorAll('button')].find(button => button.textContent.trim() === '确认清理').click()`);
+        const listed = async () => (await call("diagnostics_storage_list")).some((row) => row.key === key);
+        await waitFor("confirmed cleanup removed the isolated log", async () => !(await listed()));
+      } finally {
+        diagnosticSocket.close();
+      }
+    } finally {
+      await call("browser_close_session", { sessionId });
+    }
+    assert.ok(Array.isArray(await call("diagnostics_storage_list")));
+    console.log("PASS: diagnostics writes, snapshot, probe, storage and cleanup with a native browser child");
   } else if (fixture) {
     const maximized = (expected) =>
       `(${invoke("plugin:window|is_maximized")}).then(value =>
@@ -366,6 +456,7 @@ async function waitFor(label, read) {
 }
 
 async function prepareIsolatedWindow(handoff) {
+  const devOrigin = process.env.AAW_CORDIS_SMOKE_DEV_ORIGIN ?? "http://localhost:1420";
   const identifier = `com.aaw.cordis-smoke.${randomUUID()}`;
   assert.ok(process.env.LOCALAPPDATA, "LOCALAPPDATA is required");
   const dataRoot = await fs.realpath(process.env.LOCALAPPDATA);
@@ -400,7 +491,7 @@ async function prepareIsolatedWindow(handoff) {
   const server = http.createServer(async (request, response) => {
     try {
       const incoming = new URL(request.url, "http://fixture");
-      const url = new URL("http://localhost:1420");
+      const url = new URL(devOrigin);
       url.pathname = incoming.pathname;
       url.search = incoming.search;
       const upstream = await fetch(url, { redirect: "error" });
@@ -453,11 +544,11 @@ async function prepareIsolatedWindow(handoff) {
   try {
     assert.ok(
       (
-        await fetch("http://localhost:1420", {
+        await fetch(devOrigin, {
           signal: AbortSignal.timeout(3000),
         })
       ).ok,
-      "Start the Desktop development server on port 1420 first",
+      `Start the Desktop development server at ${devOrigin} first`,
     );
     await fs.mkdir(dataDirectory);
     ownsData = true;
