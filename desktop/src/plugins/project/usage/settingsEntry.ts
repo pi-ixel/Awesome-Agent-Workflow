@@ -14,6 +14,6 @@ export function createUsageSettingsEntry(
     order: 25,
     Icon: BarChart3Icon,
     HeaderAction: () => createElement(UsageAgentFilter, { agents, filter }),
-    View: () => createElement(UsageSettings, { filter }),
+    View: ({ active }) => createElement(UsageSettings, { filter, active }),
   };
 }

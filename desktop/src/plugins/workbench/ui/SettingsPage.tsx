@@ -7,7 +7,7 @@ import {
   useWorkbenchLayout,
   useWorkbenchUiValue,
 } from "./bindings/layoutView.ts";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { nativeConfigurationStatus } from "../../host/service.ts";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
@@ -18,6 +18,7 @@ import {
   useWorkbenchAppearance,
   useWorkbenchEntries,
 } from "./bindings/react.ts";
+import type { WorkbenchContributions } from "../types.ts";
 
 const settingsGroups = [
   { id: "basic", label: "基础设置" },
@@ -65,6 +66,7 @@ function ResetConfirm({
 
 function SettingsPage() {
   const initialTab = useWorkbenchUiValue((state) => state.settingsInitialTab);
+  const tabRequest = useWorkbenchUiValue((state) => state.settingsTabRequest);
   const workbenchLayout = useWorkbenchLayout();
   return (
     <ModalShell
@@ -72,25 +74,74 @@ function SettingsPage() {
       size="settings"
       onDismiss={() => readWorkbenchUi(workbenchLayout).closeOverlay()}
     >
-      <SettingsContent key={initialTab} initialTab={initialTab} />
+      <SettingsContent initialTab={initialTab} tabRequest={tabRequest} />
     </ModalShell>
   );
 }
 
-function SettingsContent({ initialTab }: { readonly initialTab: string }) {
-  const workbenchLayout = useWorkbenchLayout();
-  const tabs = [...useWorkbenchEntries("settings")].sort(
-    (left, right) => (left.order ?? 100) - (right.order ?? 100),
+const SettingsPanel = memo(function SettingsPanel({
+  tab,
+  active,
+  visited,
+}: {
+  readonly tab: WorkbenchContributions["settings"];
+  readonly active: boolean;
+  readonly visited: boolean;
+}) {
+  return (
+    <div
+      id={`settings-panel-${tab.id}`}
+      role="tabpanel"
+      aria-labelledby={`settings-tab-${tab.id}`}
+      hidden={!active}
+      className={tab.layoutClass}
+    >
+      {visited && <tab.View active={active} />}
+    </div>
   );
-  const [selectedTab, setActiveTab] = useState(initialTab);
+});
+
+function SettingsContent({
+  initialTab,
+  tabRequest,
+}: {
+  readonly initialTab: string;
+  readonly tabRequest: number;
+}) {
+  const workbenchLayout = useWorkbenchLayout();
+  const entries = useWorkbenchEntries("settings");
+  const tabs = useMemo(
+    () =>
+      [...entries].sort(
+        (left, right) => (left.order ?? 100) - (right.order ?? 100),
+      ),
+    [entries],
+  );
+  const [selection, setSelection] = useState({
+    initialTab,
+    tabRequest,
+    selected: initialTab,
+  });
+  const hasNewRequest =
+    selection.initialTab !== initialTab || selection.tabRequest !== tabRequest;
+  const selectedTab = hasNewRequest ? initialTab : selection.selected;
+  if (hasNewRequest)
+    setSelection({ initialTab, tabRequest, selected: initialTab });
   const activeEntry = tabs.find((tab) => tab.id === selectedTab) ?? tabs[0];
   const activeTab = activeEntry?.id;
+  const [visited, setVisited] = useState(() => new Set<string>());
+  if (activeTab !== undefined && !visited.has(activeTab)) {
+    setVisited(new Set(visited).add(activeTab));
+  }
   const HeaderAction = activeEntry?.HeaderAction;
   const [isResetConfirmOpen, setResetConfirmOpen] = useState(false);
   const resetTrigger = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const focusRequest = useWorkbenchUiValue((state) => state.settingsFocus);
   const handledFocus = useRef<typeof focusRequest>(null);
+  useEffect(() => {
+    if (contentRef.current) contentRef.current.scrollTop = 0;
+  }, [initialTab, tabRequest]);
   useEffect(() => {
     if (!focusRequest || handledFocus.current === focusRequest) return;
     const row = document.getElementById(focusRequest.elementId);
@@ -201,7 +252,11 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
                         aria-controls={`settings-panel-${tab.id}`}
                         tabIndex={isActive ? 0 : -1}
                         onClick={() => {
-                          setActiveTab(tab.id);
+                          setSelection({
+                            initialTab,
+                            tabRequest,
+                            selected: tab.id,
+                          });
                           if (contentRef.current)
                             contentRef.current.scrollTop = 0;
                         }}
@@ -228,16 +283,12 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
         >
           <div className="mx-auto w-full max-w-[880px] px-6 pb-6 max-[880px]:px-4">
             {tabs.map((tab) => (
-              <div
+              <SettingsPanel
                 key={tab.id}
-                id={`settings-panel-${tab.id}`}
-                role="tabpanel"
-                aria-labelledby={`settings-tab-${tab.id}`}
-                hidden={activeTab !== tab.id}
-                className={tab.layoutClass}
-              >
-                <tab.View active={activeTab === tab.id} />
-              </div>
+                tab={tab}
+                active={activeTab === tab.id}
+                visited={visited.has(tab.id)}
+              />
             ))}
           </div>
         </div>

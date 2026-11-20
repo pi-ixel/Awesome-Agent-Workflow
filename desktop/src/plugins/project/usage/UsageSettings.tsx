@@ -1,6 +1,7 @@
 import { TextLink } from "../../../shared/ui/TextLink.tsx";
 import { observeAppearance } from "../../../shared/ui/observeAppearance.ts";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
 import { MetricStrip } from "../../../shared/ui/MetricStrip.tsx";
@@ -161,7 +162,15 @@ export function UsageAgentFilter({
   );
 }
 
-export function UsageSettings({ filter }: { filter: AgentFilter }) {
+const usageRefreshMs = 60_000;
+
+export function UsageSettings({
+  filter,
+  active = true,
+}: {
+  readonly filter: AgentFilter;
+  readonly active?: boolean;
+}) {
   const agent = useStore(filter, (state) => state.agent);
   const [range, setRange] = useState(7);
   const [displayRange, setDisplayRange] = useState(7);
@@ -173,33 +182,61 @@ export function UsageSettings({ filter }: { filter: AgentFilter }) {
   const [failure, setFailure] = useState<{ agent: string; message: string }>();
   const snapshot = response?.agent === agent ? response.snapshot : undefined;
   const queryError = failure?.agent === agent ? failure.message : "";
-  const { revision, error } = useStore(usageState);
+  const { revision, error } = useStore(
+    usageState,
+    useShallow((state) => ({
+      revision: active ? state.revision : 0,
+      error: state.error,
+    })),
+  );
+  const lastRead = useRef<{
+    agent: string;
+    range: number;
+    revision: typeof revision;
+    refresh: number;
+    at: number;
+  }>(undefined);
   useEffect(() => {
-    let active = true;
+    if (!active) return;
+    const previous = lastRead.current;
+    if (
+      previous?.agent === agent &&
+      previous.range === range &&
+      previous.revision === revision &&
+      previous.refresh === refresh &&
+      Date.now() - previous.at < usageRefreshMs
+    )
+      return;
+    let current = true;
     void queryUsage("", agent, range).then(
       (next) => {
-        if (!active) return;
+        if (!current) return;
+        lastRead.current = { agent, range, revision, refresh, at: Date.now() };
         setResponse({ agent, snapshot: next });
         setDisplayRange(range);
         setFailure(undefined);
       },
       (reason: unknown) => {
-        if (!active) return;
+        if (!current) return;
         setFailure({ agent, message: String(reason) });
       },
     );
     return () => {
-      active = false;
+      current = false;
     };
-  }, [agent, range, refresh, revision]);
+  }, [active, agent, range, refresh, revision]);
   useEffect(() => {
+    if (!active) return;
     const timer = window.setInterval(
       () => setRefresh((value) => value + 1),
-      60_000,
+      usageRefreshMs,
     );
     return () => window.clearInterval(timer);
-  }, []);
-  const usage = snapshot && summarizeUsage(snapshot, displayRange);
+  }, [active]);
+  const usage = useMemo(
+    () => snapshot && summarizeUsage(snapshot, displayRange),
+    [snapshot, displayRange],
+  );
   const rangeTotal =
     usage?.trend.reduce((total, day) => total + day.tokens, 0n) ?? 0n;
   let angle = 0;

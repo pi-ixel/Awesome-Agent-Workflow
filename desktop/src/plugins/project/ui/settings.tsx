@@ -194,7 +194,13 @@ function ArchiveSettings({
   );
 }
 
-function ToolSettings({ skills }: { readonly skills?: SkillsSettingsView }) {
+function ToolSettings({
+  skills,
+  active,
+}: {
+  readonly skills?: SkillsSettingsView;
+  readonly active: boolean;
+}) {
   const SkillsInstaller = skills?.Installer;
   const SkillsSource = skills?.Source;
   const language = useWorkbenchLanguage();
@@ -205,7 +211,7 @@ function ToolSettings({ skills }: { readonly skills?: SkillsSettingsView }) {
         {SkillsSource && <SkillsSource />}
       </SettingCard>
 
-      {SkillsInstaller && <SkillsInstaller />}
+      {SkillsInstaller && <SkillsInstaller active={active} />}
     </>
   );
 }
@@ -222,12 +228,12 @@ export function createProjectSettings(
       order: 30,
       label: "工具路径",
       Icon: TerminalIcon,
-      View: function ToolSettingsView() {
+      View: function ToolSettingsView({ active }) {
         const skills = useRegisteredSnapshot(
           skillsSettings,
           (state) => state?.view,
         );
-        return <ToolSettings skills={skills} />;
+        return <ToolSettings skills={skills} active={active} />;
       },
       layoutClass: spaced,
     },

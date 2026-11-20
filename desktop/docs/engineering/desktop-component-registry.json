@@ -1058,7 +1058,7 @@
   "plugins/workbench/ui/SettingsPage.tsx": {
     "definitions": {
       "提示与确认": ["ResetConfirm"],
-      "布局与操纵": ["SettingsContent", "SettingsPage"]
+      "布局与操纵": ["SettingsContent", "SettingsPage", "SettingsPanel"]
     },
     "targets": []
   },

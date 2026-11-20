@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -53,6 +54,7 @@ it("shows a non-modal storage reminder and opens management only on request", as
   );
 
   await screen.findByText("存储超阈值");
+  expect(reader.storage).toHaveBeenCalledExactlyOnceWith({ action: "usage" });
   expect(screen.getByText("101.0/100 MiB")).toBeTruthy();
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(openSettings).not.toHaveBeenCalled();
@@ -72,6 +74,56 @@ it("shows a non-modal storage reminder and opens management only on request", as
   } finally {
     localStorage.removeItem(reminderKey);
   }
+});
+
+it("polls for new over-limit storage with the settings page unopened", async () => {
+  vi.useFakeTimers();
+  const bytes = 1024 ** 2;
+  const row = {
+    id: "diagnostics.logs",
+    label: "诊断日志",
+    bytes,
+    count: 1,
+    protected: 0,
+    cleanable: true,
+  };
+  const storage = vi
+    .fn()
+    .mockResolvedValueOnce([row])
+    .mockResolvedValue([{ ...row, bytes: 101 * bytes }]);
+  const { Monitor } = createStorageSettings(
+    { storage } as unknown as DiagnosticsReader,
+    vi.fn(),
+  );
+  const view = render(<Monitor />);
+  try {
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(screen.queryByText("存储超阈值")).not.toBeInTheDocument();
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(screen.getByText("存储超阈值")).toBeInTheDocument();
+    expect(storage.mock.calls).toEqual([
+      [{ action: "usage" }],
+      [{ action: "usage" }],
+    ]);
+  } finally {
+    view.unmount();
+    vi.useRealTimers();
+  }
+});
+
+it("keeps storage details cached and defers a changed revision until visible", async () => {
+  const request = vi.fn().mockResolvedValue([]);
+  const view = render(<StorageView request={request} active={false} />);
+  expect(request).not.toHaveBeenCalled();
+  view.rerender(<StorageView request={request} />);
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+  view.rerender(<StorageView request={request} active={false} />);
+  view.rerender(<StorageView request={request} />);
+  expect(request).toHaveBeenCalledTimes(1);
+  view.rerender(<StorageView request={request} active={false} revision={1} />);
+  expect(request).toHaveBeenCalledTimes(1);
+  view.rerender(<StorageView request={request} revision={1} />);
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
 });
 
 it("clears the storage reminder when cleanup completes without waiting for polling", async () => {
