@@ -580,12 +580,11 @@ async fn call_tool(
                 .ok_or("MISSING_ARGUMENT")?;
             let webview = find_webview(app, &host, session_id, tab_id)?;
             match name {
-                "browser_back" => webview.eval("history.back()"),
-                "browser_forward" => webview.eval("history.forward()"),
-                "browser_reload" => webview.reload(),
-                _ => webview.eval("window.stop()"),
+                "browser_back" => super::host::navigate_history(&webview, true).await?,
+                "browser_forward" => super::host::navigate_history(&webview, false).await?,
+                "browser_reload" => webview.reload().map_err(|error| error.to_string())?,
+                _ => webview.eval("window.stop()").map_err(|error| error.to_string())?,
             }
-            .map_err(|error| error.to_string())?;
             let tab = host
                 .runtime
                 .lock()
@@ -754,13 +753,12 @@ async fn call_tool(
             find_webview(app, &host, session_id, tab_id)?
                 .navigate(url.parse().map_err(|_| "INVALID_URL")?)
                 .map_err(|error| error.to_string())?;
-            let mut runtime = host.runtime.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+            let runtime = host.runtime.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
             let tab = runtime
                 .spaces
-                .get_mut(session_id)
-                .and_then(|space| space.tabs.get_mut(tab_id))
+                .get(session_id)
+                .and_then(|space| space.tabs.get(tab_id))
                 .ok_or("ACCESS_DENIED")?;
-            tab.committed_url = Some(url);
             Ok(
                 json!({"content":[{"type":"text","text":serde_json::to_string(&tab).map_err(|error| error.to_string())?}],"structuredContent":tab.clone()}),
             )

@@ -141,6 +141,8 @@ it("TD-032-B01 关闭开关后的标准 ACP 会话无 MCP 且提示禁止系统�
 }) => {
   let root: Context | undefined;
   const peers: ReturnType<typeof standardAcpPeer>[] = [];
+  const closeBrowserSession = vi.fn<Context["host"]["browser"]["closeSession"]>();
+  closeBrowserSession.mockResolvedValue([]);
   const runtime = createDesktopRuntime(
     undefined,
     undefined,
@@ -153,6 +155,9 @@ it("TD-032-B01 关闭开关后的标准 ACP 会话无 MCP 且提示禁止系统�
         return Promise.resolve(peer.client);
       });
       vi.spyOn(context.host.browser, "isAvailable").mockReturnValue(true);
+      vi.spyOn(context.host.browser, "closeSession").mockImplementation(
+        closeBrowserSession,
+      );
       vi.spyOn(context.host.browser, "agentControlEnabled").mockResolvedValue(
         false,
       );
@@ -200,6 +205,8 @@ it("TD-032-B01 关闭开关后的标准 ACP 会话无 MCP 且提示禁止系统�
         block.text.includes("不得改用系统默认浏览器"),
     ),
   ).toBe(true);
+  await runtime.shutdown();
+  expect(closeBrowserSession).toHaveBeenCalledExactlyOnceWith(sessionId);
 });
 
 it("TD-032-A05 旧运行时残留工具名不能掩盖端点已撤销", async () => {

@@ -13,6 +13,8 @@ pub mod native_dialog;
 pub mod runtime;
 pub mod security;
 pub mod tool;
+#[cfg(windows)]
+mod webview2;
 
 #[cfg(test)]
 mod tests;

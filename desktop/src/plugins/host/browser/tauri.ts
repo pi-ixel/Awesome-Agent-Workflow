@@ -3,6 +3,7 @@ import type {
   BrowserPopup,
   BrowserSpace,
   BrowserZoomEvent,
+  BrowserPageEvent,
   BrowserTab,
 } from "../../../contracts/browser/types.ts";
 import type { NativeInvoke } from "../adapters/invoke.ts";
@@ -266,7 +267,7 @@ export function createBrowserHost(
         (event) => receive(event.payload),
       ),
     onPage: (receive) =>
-      listenBrowserEvent<{ sessionId: string; tabId: string; event: string }>(
+      listenBrowserEvent<BrowserPageEvent>(
         "aaw://browser-page",
         (event) => receive(event.payload),
       ),

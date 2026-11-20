@@ -2,12 +2,13 @@ use super::model::{
     BrowserRequest, BrowserSpace, ControlLease, Controller, PageSource, RequestStatus, Tab,
     TabLifecycle,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Default)]
 pub struct BrowserRuntime {
     pub spaces: BTreeMap<String, BrowserSpace>,
     pub requests: BTreeMap<String, BrowserRequest>,
+    pub(super) active_turns: BTreeSet<String>,
 }
 
 impl BrowserRuntime {
@@ -191,6 +192,7 @@ impl BrowserRuntime {
             generation: 1,
             lifecycle: TabLifecycle::Ready,
             committed_url: Some(url.into()),
+            navigation: Default::default(),
             control: ControlLease {
                 controller,
                 generation: 1,
@@ -232,6 +234,7 @@ impl BrowserRuntime {
             }
             tab.generation += 1;
             tab.lifecycle = TabLifecycle::Ready;
+            tab.navigation = Default::default();
             tab.clone()
         };
         for request in self.requests.values_mut() {

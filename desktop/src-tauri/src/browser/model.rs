@@ -42,6 +42,14 @@ pub struct ControlLease {
     pub owner_session_id: String,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TabNavigation {
+    pub can_go_back: bool,
+    pub can_go_forward: bool,
+    pub is_loading: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Tab {
@@ -50,6 +58,8 @@ pub struct Tab {
     pub generation: u64,
     pub lifecycle: TabLifecycle,
     pub committed_url: Option<String>,
+    #[serde(default)]
+    pub navigation: TabNavigation,
     pub control: ControlLease,
 }
 

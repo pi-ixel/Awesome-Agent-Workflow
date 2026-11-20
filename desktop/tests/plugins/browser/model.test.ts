@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  applyBrowserNavigation,
   browserObservationUrl,
   calculateBrowserBounds,
   changeBrowserPageZoom,
-  createBrowserNavigationState,
   normalizeBrowserNavigationTarget,
 } from "../../../src/plugins/browser/domain/model.ts";
 
@@ -18,37 +16,14 @@ describe("TD-02-U01/U09 导航准入与历史", () => {
     },
   );
 
-  it("导航、后退、前进和停止保持真实历史状态", () => {
-    const initial = createBrowserNavigationState();
-    const second = applyBrowserNavigation(initial, {
-      type: "navigate",
-      url: "https://a.test",
-    });
-    const third = applyBrowserNavigation(second, {
-      type: "navigate",
-      url: "https://b.test",
-    });
-    expect(third).toMatchObject({
-      entries: ["https://a.test", "https://b.test"],
-      index: 1,
-      loading: true,
-    });
-    expect(applyBrowserNavigation(third, { type: "back" }).index).toBe(0);
-    expect(applyBrowserNavigation(third, { type: "back" }).entries).toEqual([
-      "https://a.test",
-      "https://b.test",
-    ]);
-    expect(applyBrowserNavigation(third, { type: "stop" }).loading).toBe(false);
-  });
 });
 
 describe("TD-02-U02/U08 布局与缩放", () => {
-  it("页面缩放与预览缩放独立", () => {
-    const state = createBrowserNavigationState();
-    const zoomed = changeBrowserPageZoom(state, "in");
-    expect(zoomed.pageZoom).toBe(1.1);
-    expect(zoomed.previewScale).toBe(1);
-    expect(changeBrowserPageZoom(zoomed, "reset").pageZoom).toBe(1);
+  it("页面缩放保留上下限并能恢复默认值", () => {
+    expect(changeBrowserPageZoom(1, "in")).toBe(1.1);
+    expect(changeBrowserPageZoom(0.25, "out")).toBe(0.25);
+    expect(changeBrowserPageZoom(3, "in")).toBe(3);
+    expect(changeBrowserPageZoom(1.1, "reset")).toBe(1);
   });
 
   it("布局换算拒绝零尺寸并使用当前 DPI", () => {

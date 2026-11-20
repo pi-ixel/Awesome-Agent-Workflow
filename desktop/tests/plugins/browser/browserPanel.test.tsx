@@ -9,7 +9,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { BrowserPanel } from "../../../src/plugins/browser/ui/BrowserPanel.tsx";
 import type { BrowserHost } from "../../../src/plugins/host/browser/types.ts";
-import type { BrowserSpace } from "../../../src/contracts/browser/types.ts";
+import type { BrowserPageEvent, BrowserSpace } from "../../../src/contracts/browser/types.ts";
 import { browserElement } from "../../helpers/browserElement.ts";
 
 function host(): BrowserHost {
@@ -36,7 +36,7 @@ function host(): BrowserHost {
     setBounds: vi.fn().mockResolvedValue(undefined),
     setVisible: vi.fn().mockResolvedValue(undefined),
     setZoom: vi.fn(),
-    snapshot: vi.fn(),
+    snapshot: vi.fn().mockImplementation(() => Promise.resolve(spaceWithTab())),
     createMcpEndpoint: vi.fn(),
     mcpStatus: vi.fn().mockResolvedValue("not_bound"),
     bindMcpEndpoint: vi.fn(),
@@ -230,51 +230,122 @@ describe("TD-008 图标按钮与交互动效", () => {
   });
 });
 
-describe("TD-08-I01 页面加载状态投影", () => {
-  it("原生 Started 和 Finished 事件驱动加载状态结束", async () => {
+describe("原生导航和标签状态投影", () => {
+  it("右栏平移时持续同步原生页面的位置", async () => {
     const fake = host();
     fake.createSpace = vi.fn().mockResolvedValue(spaceWithTab());
-    fake.snapshot = vi.fn().mockResolvedValue(spaceWithTab());
-    const listeners: ((event: {
-      sessionId: string;
-      tabId: string;
-      event: string;
-    }) => void)[] = [];
-    fake.onPage = vi.fn(
-      (
-        listener: (event: {
-          sessionId: string;
-          tabId: string;
-          event: string;
-        }) => void,
-      ) => {
-        listeners.push(listener);
-        return Promise.resolve(() => {});
-      },
+    const setBounds = vi.spyOn(fake, "setBounds");
+    const { container } = render(
+      <div data-edge-drawer>
+        <BrowserPanel host={fake} sessionId="session-a" visible />
+      </div>,
     );
-    render(<BrowserPanel host={fake} sessionId="session-a" visible />);
-    await screen.findByText("https://local.test");
-    await waitFor(() => expect(listeners.length).toBeGreaterThan(0));
-    await act(async () => {
-      listeners.at(-1)?.({
-        sessionId: "session-a",
-        tabId: "tab-1",
-        event: "Started",
-      });
-      await Promise.resolve();
-    });
-    expect(await screen.findByText("加载中")).toBeInTheDocument();
-    await act(async () => {
-      listeners.at(-1)?.({
-        sessionId: "session-a",
-        tabId: "tab-1",
-        event: "Finished",
-      });
-      await Promise.resolve();
-    });
+    await screen.findByRole("button", { name: "https://local.test" });
+    const drawer = container.querySelector("[data-edge-drawer]");
+    const viewport = container.querySelector("[data-browser-viewport]");
+    if (!drawer || !viewport) throw new Error("Browser drawer is missing");
+    let left = 100;
+    vi.spyOn(viewport, "getBoundingClientRect").mockImplementation(
+      () => new DOMRect(left, 40, 400, 300),
+    );
+    const signalTransition = (type: string) => {
+      const event = new Event(type);
+      Object.defineProperty(event, "propertyName", { value: "translate" });
+      fireEvent(drawer, event);
+    };
+    signalTransition("transitionrun");
     await waitFor(() =>
-      expect(screen.queryByText("加载中")).not.toBeInTheDocument(),
+      expect(setBounds).toHaveBeenLastCalledWith("session-a", "tab-1", {
+        x: 100,
+        y: 40,
+        width: 400,
+        height: 300,
+      }),
     );
+    left = 240;
+    await waitFor(() =>
+      expect(setBounds).toHaveBeenLastCalledWith("session-a", "tab-1", {
+        x: 240,
+        y: 40,
+        width: 400,
+        height: 300,
+      }),
+    );
+    signalTransition("transitionend");
+  });
+
+  it("隔离地址草稿和加载状态，前进后退只使用原生历史", async () => {
+    const fake = host();
+    const first = {
+      ...spaceWithTab().tabs[0]!,
+      navigation: {
+        canGoBack: false,
+        canGoForward: false,
+        isLoading: false,
+      },
+    };
+    const second = {
+      ...first,
+      tabId: "tab-2",
+      committedUrl: "https://other.test",
+    };
+    let snapshot = { ...spaceWithTab(), tabs: [first, second] };
+    fake.createSpace = vi.fn().mockResolvedValue(snapshot);
+    fake.snapshot = vi.fn().mockImplementation(() => Promise.resolve(snapshot));
+    fake.back = vi.fn().mockRejectedValue(new Error("HISTORY_FAILED"));
+    let onPage: ((event: BrowserPageEvent) => void) | undefined;
+    fake.onPage = vi.fn((receive: (event: BrowserPageEvent) => void) => {
+      onPage = receive;
+      return Promise.resolve(() => {});
+    });
+    const emit = async (tabId: string, event: string) => {
+      await act(() => {
+        onPage?.({ sessionId: "session-a", tabId, tabGeneration: 1, event });
+        return Promise.resolve();
+      });
+    };
+    render(<BrowserPanel host={fake} sessionId="session-a" visible />);
+    const input = await screen.findByRole("textbox", { name: "地址栏" });
+    await waitFor(() => expect(input).toHaveValue("https://local.test"));
+    const back = screen.getByRole("button", { name: "后退" });
+    expect(back).toBeDisabled();
+
+    snapshot = {
+      ...snapshot,
+      tabs: [
+        {
+          ...first,
+          committedUrl: "https://local.test/redirected",
+          navigation: {
+            canGoBack: true,
+            canGoForward: false,
+            isLoading: true,
+          },
+        },
+        second,
+      ],
+    };
+    await emit("tab-1", "HistoryChanged");
+    expect(input).toHaveValue("https://local.test/redirected");
+    expect(back).toBeEnabled();
+    expect(screen.getByText("加载中")).toBeInTheDocument();
+    fireEvent.click(back);
+    await screen.findByText(/HISTORY_FAILED/);
+    expect(back).toBeEnabled();
+
+    fireEvent.change(input, { target: { value: "https://typed.test" } });
+    await emit("tab-2", "Finished");
+    expect(input).toHaveValue("https://typed.test");
+    expect(screen.getByText("加载中")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "https://other.test" }));
+    expect(input).toHaveValue("https://other.test");
+    expect(back).toBeDisabled();
+    expect(screen.queryByText("加载中")).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "https://local.test/redirected" }),
+    );
+    expect(input).toHaveValue("https://typed.test");
+    expect(screen.getByText("加载中")).toBeInTheDocument();
   });
 });
 
@@ -404,8 +475,11 @@ describe("TD-08-M04 元素拾取", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "拾取元素" })).toBeEnabled(),
     );
-    fireEvent.click(screen.getByRole("button", { name: "拾取元素" }));
-    await screen.findByRole("button", { name: "取消拾取" });
+    await act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "拾取元素" }));
+      return Promise.resolve();
+    });
+    expect(screen.getByRole("button", { name: "取消拾取" })).toBeInTheDocument();
 
     await act(async () => {
       for (const listener of listeners) listener(browserElement);

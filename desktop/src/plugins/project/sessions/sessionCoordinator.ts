@@ -133,10 +133,10 @@ export interface ProjectSessionDependencies {
 export async function disposeBrowserSession(
   browser: HostService["browser"],
   sessionId: string,
-  endpointId: string,
+  endpointId?: string,
 ): Promise<void> {
   await browser.closeSession(sessionId);
-  await browser.revokeMcpEndpoint(endpointId);
+  if (endpointId) await browser.revokeMcpEndpoint(endpointId);
 }
 
 export function createSessionCoordinator({
@@ -567,10 +567,22 @@ export function createSessionCoordinator({
   }
 
   function disposeRuntime(runtime: SessionRuntime): Promise<void> {
+    const sessionId =
+      runtime.session.sessionId ?? runtime.store.getState().activeSessionId;
     return runtime.close({
       release: releaseSessionResources,
       force: exitForce,
       onClosing: () => projectFactory.removeSession(runtime),
+      onClosed: async () => {
+        if (!sessionId || runtime.listOnly) return;
+        const browser = getBrowser();
+        if (!browser.isAvailable()) return;
+        const hasOtherOwner = [...projectFactory.sessions()].some(
+          (other) =>
+            (other.session.sessionId ?? other.store.getState().activeSessionId) === sessionId,
+        );
+        if (!hasOtherOwner) await disposeBrowserSession(browser, sessionId);
+      },
     });
   }
 
@@ -1694,6 +1706,7 @@ export function createSessionCoordinator({
       });
     let candidate: SessionRuntime | null = null;
     let releaseBrowserApprovals = () => {};
+    let isBrowserEndpointDisposed = false;
     try {
       const protocol = backgroundAdapter
         ? getProtocol()
@@ -1742,6 +1755,7 @@ export function createSessionCoordinator({
                 browser
                   .bindMcpEndpoint(browserEndpoint.endpointId, sessionId)
                   .then((endpoint) => {
+                    if (isBrowserEndpointDisposed) return;
                     releaseBrowserApprovals();
                     releaseBrowserApprovals = attachBrowserApprovals({
                       browser,
@@ -1760,12 +1774,11 @@ export function createSessionCoordinator({
                   )
                   .then(() => {}),
               onSessionDisposed: () => {
+                isBrowserEndpointDisposed = true;
                 releaseBrowserApprovals();
-                return disposeBrowserSession(
-                  browser,
-                  browserEndpoint.sessionId ?? "",
-                  browserEndpoint.endpointId,
-                );
+                return browser
+                  .revokeMcpEndpoint(browserEndpoint.endpointId)
+                  .then(() => {});
               },
 
               onCancel: (sessionId: string) =>
