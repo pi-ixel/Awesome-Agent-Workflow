@@ -27,10 +27,8 @@ import type {
   BrowserPermission,
 } from "../../../contracts/browser/types.ts";
 import {
-  applyBrowserNavigation,
   calculateBrowserBounds,
   changeBrowserPageZoom,
-  createBrowserNavigationState,
   createBrowserRestorePlan,
   normalizeBrowserNavigationTarget,
 } from "../domain/model.ts";
@@ -63,8 +61,8 @@ function BrowserPanelSession({
   const viewportRef = useRef<HTMLDivElement>(null);
   const [space, setSpace] = useState<BrowserSpace | null>(null);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
-  const [navigation, setNavigation] = useState(createBrowserNavigationState);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [pageZooms, setPageZooms] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
   const [cancelResult, setCancelResult] = useState<{
     tabId: string;
@@ -113,6 +111,10 @@ function BrowserPanelSession({
   const pageKey = activeTab
     ? `${activeTab.tabId}:${activeTab.generation}`
     : null;
+  const draftKey = pageKey ?? "";
+  const draft = drafts[draftKey] ?? activeTab?.committedUrl ?? "";
+  const pageZoom = pageZooms[draftKey] ?? 1;
+  const snapshotRevision = useRef(0);
   const previousPageRef = useRef({
     key: pageKey,
     tabId: activeTab?.tabId ?? null,
@@ -162,23 +164,17 @@ function BrowserPanelSession({
   }, [host, sessionId]);
 
   const refresh = useCallback(async () => {
+    const revision = ++snapshotRevision.current;
     const snapshot = await host.snapshot(sessionId);
+    if (revision !== snapshotRevision.current) return;
+    const liveTabs = snapshot.tabs.filter((tab) => tab.lifecycle !== "closed");
     setSpace(snapshot);
-    if (
-      !snapshot.tabs.some(
-        (tab) => tab.tabId === activeTabId && tab.lifecycle !== "closed",
-      )
-    ) {
-      const nextActiveId = snapshot.tabs.find(
-        (tab) => tab.lifecycle !== "closed",
-      )?.tabId;
-      setActiveTabId(nextActiveId ?? null);
-      setDraft(
-        snapshot.tabs.find((tab) => tab.tabId === nextActiveId)?.committedUrl ??
-          "",
-      );
-    }
-  }, [activeTabId, host, sessionId]);
+    setActiveTabId((id) =>
+      liveTabs.some((tab) => tab.tabId === id)
+        ? id
+        : liveTabs[0]?.tabId ?? null,
+    );
+  }, [host, sessionId]);
 
   useEffect(() => {
     if (!dataOpen) return;
@@ -319,6 +315,7 @@ function BrowserPanelSession({
     void host
       .onActivity((snapshot) => {
         if (!active || snapshot.sessionId !== sessionId) return;
+        ++snapshotRevision.current;
         setSpace(snapshot);
         setCancelResult(null);
       })
@@ -355,7 +352,6 @@ function BrowserPanelSession({
             : current,
         );
         setActiveTabId(tab.tabId);
-        setDraft(tab.committedUrl ?? "");
         setError(null);
       } catch (cause) {
         setError(String(cause));
@@ -370,15 +366,12 @@ function BrowserPanelSession({
     void host
       .onPage((event) => {
         if (!active || event.sessionId !== sessionId) return;
-        if (event.event === "Started" || event.event === "Finished") {
-          if (event.event === "Started") {
-            pickingRef.current = false;
-            setPicking(false);
-          }
-          setNavigation((current) => ({
-            ...current,
-            loading: event.event === "Started",
-          }));
+        if (
+          event.event === "Started" &&
+          previousPageRef.current.key === `${event.tabId}:${event.tabGeneration}`
+        ) {
+          pickingRef.current = false;
+          setPicking(false);
         }
         void refresh().catch((cause) => setError(String(cause)));
       })
@@ -398,14 +391,11 @@ function BrowserPanelSession({
     let unsubscribe = () => {};
     void host
       .onZoom((event) => {
-        if (
-          !active ||
-          event.sessionId !== sessionId ||
-          event.tabId !== activeTab?.tabId ||
-          event.tabGeneration !== activeTab.generation
-        )
-          return;
-        setNavigation((current) => ({ ...current, pageZoom: event.zoom }));
+        if (!active || event.sessionId !== sessionId) return;
+        setPageZooms((current) => ({
+          ...current,
+          [`${event.tabId}:${event.tabGeneration}`]: event.zoom,
+        }));
       })
       .then((release) => {
         unsubscribe = release;
@@ -416,7 +406,7 @@ function BrowserPanelSession({
       active = false;
       unsubscribe();
     };
-  }, [activeTab?.tabId, activeTab?.generation, host, sessionId]);
+  }, [host, sessionId]);
 
   useEffect(() => {
     let active = true;
@@ -442,13 +432,8 @@ function BrowserPanelSession({
     void host
       .onSelect(({ sessionId: owner, tabId }) => {
         if (!active || owner !== sessionId) return;
-        if (
-          space?.tabs.some(
-            (tab) => tab.tabId === tabId && tab.lifecycle !== "closed",
-          )
-        ) {
-          setActiveTabId(tabId);
-        }
+        setActiveTabId(tabId);
+        void refresh().catch((cause) => setError(String(cause)));
       })
       .then((release) => {
         unsubscribe = release;
@@ -459,7 +444,7 @@ function BrowserPanelSession({
       active = false;
       unsubscribe();
     };
-  }, [host, sessionId, space]);
+  }, [host, refresh, sessionId]);
 
   useEffect(() => {
     let active = true;
@@ -509,28 +494,76 @@ function BrowserPanelSession({
     };
   }, [createTab, host, refresh, restoreEnabled, sessionId, workspaceId]);
 
+  const nativeTabId = activeTab?.tabId;
   useEffect(() => {
-    if (!activeTab) return;
+    if (!nativeTabId || !visible) return;
     const element = viewportRef.current;
     if (!element) return;
+    const drawer = element.closest("[data-edge-drawer]");
+    let frame: number | null = null;
+    let isMoving = false;
+    let isSending = false;
+    let isDisposed = false;
+    let lastBounds: ReturnType<typeof bounds> | undefined;
+    const schedule = () => {
+      if (!isDisposed && frame === null)
+        frame = window.requestAnimationFrame(synchronize);
+    };
     const synchronize = () => {
+      frame = null;
+      if (isSending) return;
+      if (isMoving) schedule();
       const rect = element.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
+      const next = calculateBrowserBounds(rect, window.devicePixelRatio || 1);
+      if (
+        lastBounds?.x === next.x &&
+        lastBounds.y === next.y &&
+        lastBounds.width === next.width &&
+        lastBounds.height === next.height
+      ) return;
+      lastBounds = next;
+      isSending = true;
       void host
-        .setBounds(sessionId, activeTab.tabId, bounds())
-        .catch((cause) => setError(String(cause)));
+        .setBounds(sessionId, nativeTabId, next)
+        .catch((cause) => {
+          if (!isDisposed) setError(String(cause));
+        })
+        .finally(() => {
+          isSending = false;
+          schedule();
+        });
     };
-    if (typeof ResizeObserver === "undefined") {
-      synchronize();
-      return;
-    }
-    const observer = new ResizeObserver(synchronize);
-    observer.observe(element);
+    const observeMotion = (event: Event) => {
+      if (
+        event.target !== drawer ||
+        !("propertyName" in event) ||
+        typeof event.propertyName !== "string" ||
+        !["translate", "transform"].includes(event.propertyName)
+      ) return;
+      isMoving = event.type === "transitionrun";
+      schedule();
+    };
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(schedule);
+    observer?.observe(element);
+    drawer?.addEventListener("transitionrun", observeMotion);
+    drawer?.addEventListener("transitionend", observeMotion);
+    drawer?.addEventListener("transitioncancel", observeMotion);
+    window.addEventListener("resize", schedule);
+    document.addEventListener("scroll", schedule, true);
     synchronize();
-    return () => observer.disconnect();
-  }, [activeTab, bounds, host, sessionId]);
-
-  const nativeTabId = activeTab?.tabId;
+    return () => {
+      isDisposed = true;
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      drawer?.removeEventListener("transitionrun", observeMotion);
+      drawer?.removeEventListener("transitionend", observeMotion);
+      drawer?.removeEventListener("transitioncancel", observeMotion);
+      window.removeEventListener("resize", schedule);
+      document.removeEventListener("scroll", schedule, true);
+    };
+  }, [host, nativeTabId, sessionId, visible]);
   const [nativeOccluded, setNativeOccluded] = useState(false);
   useEffect(() => {
     if (!nativeTabId || !visible) return;
@@ -653,23 +686,17 @@ function BrowserPanelSession({
     }
     try {
       if (activeTab) {
-        const tab = await host.navigate(sessionId, activeTab.tabId, target.url);
-        setSpace((current) =>
-          current
-            ? {
-                ...current,
-                tabs: current.tabs.map((item) =>
-                  item.tabId === tab.tabId ? tab : item,
-                ),
-              }
-            : current,
-        );
+        await host.navigate(sessionId, activeTab.tabId, target.url);
+        await refresh();
       } else {
         await createTab(target.url);
       }
-      setNavigation((current) =>
-        applyBrowserNavigation(current, { type: "navigate", url: target.url }),
-      );
+      setDrafts((current) => {
+        if (current[draftKey] !== draft) return current;
+        const next = { ...current };
+        delete next[draftKey];
+        return next;
+      });
       setError(null);
     } catch (cause) {
       setError(String(cause));
@@ -677,10 +704,10 @@ function BrowserPanelSession({
   };
 
   const changeZoom = (direction: "in" | "out" | "reset") => {
-    const next = changeBrowserPageZoom(navigation, direction);
+    const next = changeBrowserPageZoom(pageZoom, direction);
     if (activeTab)
       void host
-        .setZoom(sessionId, activeTab.tabId, next.pageZoom)
+        .setZoom(sessionId, activeTab.tabId, next)
         .catch((cause) => setError(String(cause)));
   };
 
@@ -780,7 +807,7 @@ function BrowserPanelSession({
           data-hint={
             userCanControl ? "后退" : "Agent 正在操作，点击“我来接管”后可操作"
           }
-          disabled={!userCanControl || !activeTab || navigation.index <= 0}
+          disabled={!userCanControl || !activeTab?.navigation?.canGoBack}
           className="rounded shrink-0 p-1 hover:bg-hover disabled:opacity-40"
           onClick={() => {
             if (!userCanControl || !activeTab) return;
@@ -788,9 +815,6 @@ function BrowserPanelSession({
               .back(sessionId, activeTab.tabId)
               .then(refresh)
               .catch((cause) => setError(String(cause)));
-            setNavigation((current) =>
-              applyBrowserNavigation(current, { type: "back" }),
-            );
           }}
         >
           <ArrowLeftIcon className="ui-icon-16" />
@@ -801,11 +825,7 @@ function BrowserPanelSession({
           data-hint={
             userCanControl ? "前进" : "Agent 正在操作，点击“我来接管”后可操作"
           }
-          disabled={
-            !userCanControl ||
-            !activeTab ||
-            navigation.index >= navigation.entries.length - 1
-          }
+          disabled={!userCanControl || !activeTab?.navigation?.canGoForward}
           className="rounded shrink-0 p-1 hover:bg-hover disabled:opacity-40"
           onClick={() => {
             if (!userCanControl || !activeTab) return;
@@ -813,9 +833,6 @@ function BrowserPanelSession({
               .forward(sessionId, activeTab.tabId)
               .then(refresh)
               .catch((cause) => setError(String(cause)));
-            setNavigation((current) =>
-              applyBrowserNavigation(current, { type: "forward" }),
-            );
           }}
         >
           <ArrowRightIcon className="ui-icon-16" />
@@ -849,7 +866,10 @@ function BrowserPanelSession({
             aria-label="地址栏"
             value={draft}
             disabled={!userCanControl}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              const value = event.target.value;
+              setDrafts((current) => ({ ...current, [draftKey]: value }));
+            }}
             placeholder={
               userCanControl ? "输入 HTTP/HTTPS 地址" : "Agent 正在操作"
             }
@@ -857,7 +877,7 @@ function BrowserPanelSession({
           />
         </form>
         <span className="w-8 shrink-0 text-center text-2xs text-ink-muted">
-          {Math.round(navigation.pageZoom * 100)}%
+          {Math.round(pageZoom * 100)}%
         </span>
         <IconButton
           type="button"
@@ -961,10 +981,7 @@ function BrowserPanelSession({
                   type="button"
                   aria-current={tab.tabId === activeTabId ? "page" : undefined}
                   className="min-w-0 items-center px-2 py-1"
-                  onClick={() => {
-                    setActiveTabId(tab.tabId);
-                    setDraft(tab.committedUrl ?? "");
-                  }}
+                  onClick={() => setActiveTabId(tab.tabId)}
                 >
                   <span className="truncate">{tab.committedUrl || "空白页"}</span>
                 </NavigationRow>
@@ -1467,7 +1484,7 @@ function BrowserPanelSession({
               : "未打开页面"}
         </span>
         <span>
-          {navigation.loading
+          {activeTab?.navigation?.isLoading
             ? "加载中"
             : activeTab?.lifecycle === "crashed"
               ? "页面已崩溃"

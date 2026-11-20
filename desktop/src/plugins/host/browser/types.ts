@@ -10,6 +10,7 @@ import type {
   BrowserPopup,
   BrowserSpace,
   BrowserZoomEvent,
+  BrowserPageEvent,
   BrowserTab,
 } from "../../../contracts/browser/types.ts";
 
@@ -186,12 +187,6 @@ export interface BrowserHost {
       permission: BrowserPermission;
     }) => void,
   ): Promise<() => void>;
-  onPage(
-    receive: (event: {
-      sessionId: string;
-      tabId: string;
-      event: string;
-    }) => void,
-  ): Promise<() => void>;
+  onPage(receive: (event: BrowserPageEvent) => void): Promise<() => void>;
   onZoom(receive: (event: BrowserZoomEvent) => void): Promise<() => void>;
 }

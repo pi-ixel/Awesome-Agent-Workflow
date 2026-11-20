@@ -122,6 +122,7 @@ export class SessionRuntime {
   close(options: {
     release: (session: AcpSessionPort, force?: boolean) => Promise<void>;
     onClosing?: () => void;
+    onClosed?: () => Promise<void>;
     force?: boolean;
   }): Promise<void> {
     if (this.closeTask) return this.closeTask;
@@ -156,6 +157,7 @@ export class SessionRuntime {
             "等待会话恢复收尾超时",
           ),
         );
+      await attempt(() => options.onClosed?.());
       await attempt(() => this.detachViews());
       await attempt(() => this.store.getState().setSessionLogTarget(null));
       await attempt(() => this.store.getState().flushSessionLog());
