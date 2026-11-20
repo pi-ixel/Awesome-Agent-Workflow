@@ -100,12 +100,15 @@ function handleCustomKeyEvent(event: KeyboardEvent, term: Terminal, logger: Logg
   return true;
 }
 
-/** 错误对象 → 展示文案（ptyHost 抛的是可读 Error）。 */
+/** 原生 IPC 可能直接返回错误字符串。 */
 function describeError(error: unknown): string {
-  if (error instanceof Error && error.message !== "") {
-    return error.message;
-  }
-  return "终端启动失败";
+  const message =
+    typeof error === "string"
+      ? error
+      : error instanceof Error
+        ? error.message
+        : "";
+  return message.trim() || "终端启动失败";
 }
 
 export function TerminalSessionView({

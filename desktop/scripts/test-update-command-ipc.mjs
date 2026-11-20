@@ -236,30 +236,51 @@ try {
       "PASS: signed update confirmed in Desktop, old process exited, NSIS replaced the app, and restarted Desktop loaded the workspace",
     );
   } else if (diagnostics) {
-    const sessionId = randomUUID();
+    let sessionId = randomUUID();
     const call = (command, args) => evaluate(invoke(command, args));
     await call("plugin:window|show");
-    await waitFor("Workbench window controls", () =>
-      evaluate(
-        "Boolean(document.querySelector('[data-testid=\"desktop-window-controls\"]'))",
-      ),
+    await waitFor(
+      "Workbench window controls",
+      () => evaluate("Boolean(document.querySelector('[data-testid=\"desktop-window-controls\"]'))"),
+      30000,
     );
     await call("browser_create_space", {
       windowId: "main",
       workspaceId: sessionId,
       sessionId,
     });
-    try {
-      await call("browser_create_tab", {
+    const openBrowserTab = () => call("browser_create_tab", {
         sessionId,
         url: `${fixture.origin}/favicon.ico`,
         bounds: { x: 0, y: 0, width: 320, height: 240 },
-      });
-      await call("diagnostics_append", {
-        entries: [
-          { level: "info", channel: "smoke", message: "诊断回归", context: {} },
-        ],
-      });
+    });
+    const terminalRequest = { request: { cols: 80, rows: 24 } };
+    const acpRequest = { program: process.execPath, args: ["-e", "setInterval(() => {}, 1000)"] };
+    const checkTerminal = async () => {
+      const { handle, shell } = await call("pty_spawn", terminalRequest);
+      try {
+        assert.ok(Number.isInteger(handle) && shell);
+      } finally {
+        await call("pty_kill", { handle });
+        await call("pty_release", { handle });
+      }
+    };
+    try {
+      const { tabId } = await openBrowserTab();
+      for (const visible of [true, false]) {
+        await call("browser_set_visible", { sessionId, tabId, visible });
+        await checkTerminal();
+      }
+      const { handle } = await call("acp_spawn", acpRequest);
+      assert.ok(Number.isInteger(handle));
+      await call("acp_kill_tree", { handle });
+      await call("acp_release", { handle });
+      const logBatch = {
+        delivery: { epoch: sessionId, sequence: 1 },
+        entries: [{ level: "info", channel: "ipc-smoke", message: "诊断回归", context: {} }],
+      };
+      await call("diagnostics_append", logBatch);
+      await call("diagnostics_append", logBatch);
       await call("diagnostics_acp_append", {
         record: {
           line: "{}",
@@ -269,6 +290,8 @@ try {
         },
       });
       await call("diagnostics_flush");
+      const persisted = await call("diagnostics_query", { query: { channel: "ipc-smoke" } });
+      assert.equal(persisted.length, 1);
       assert.ok(Array.isArray(await call("diagnostics_probe_take")));
       assert.ok(await call("diagnostics_snapshot", { snapshot: { connections: [] } }));
       const rows = await call("diagnostics_storage_list");
@@ -288,6 +311,15 @@ try {
           await read(`${directList}.then(() => 'unexpected success', String)`),
           "只有主窗口可以管理日志存储",
         );
+        for (const [command, args, error] of [
+          ["pty_spawn", terminalRequest, "只有主窗口可以启动终端"],
+          ["acp_spawn", acpRequest, "只有主窗口可以启动 ACP 进程"],
+          ["force_close", {}, "只有主窗口可以确认退出"],
+        ]) {
+          assert.equal(await read(`${invoke(command, args)}.then(() => 'unexpected success', String)`), error);
+        }
+        assert.equal((await read(invoke("codeagent_credit_quota", {}))).status, "unavailable");
+        assert.equal((await read(invoke("codeagent_token_quota", {}))).status, "unavailable");
         assert.ok(await read(invoke("diagnostics_snapshot", {})));
         const storageTab = `[...document.querySelectorAll('button')].find(button => button.textContent.trim() === '存储')`;
         const logCategory = `[...document.querySelectorAll('[aria-label="Desktop 存储"] button[aria-controls]')].find(button => button.textContent.includes('诊断日志'))`;
@@ -322,7 +354,20 @@ try {
       await call("browser_close_session", { sessionId });
     }
     assert.ok(Array.isArray(await call("diagnostics_storage_list")));
-    console.log("PASS: diagnostics writes, snapshot, probe, storage and cleanup with a native browser child");
+    await checkTerminal();
+    console.log("PASS: diagnostics, PTY and ACP with a native browser child, plus secondary-window denial");
+    sessionId = randomUUID();
+    await call("browser_create_space", { windowId: "main", workspaceId: sessionId, sessionId });
+    await openBrowserTab();
+    // 直接验证原生命令，避免正常退出准备流程先释放子视图。
+    const forceClose = call("force_close").catch((error) => error);
+    await Promise.race([exited, delay(15000)]);
+    if (!ended) {
+      const failure = await forceClose;
+      throw failure instanceof Error ? failure : new Error("Force close did not exit with a browser child");
+    }
+    assert.equal(exitCode, 0);
+    console.log("PASS: native force close with a browser child");
   } else if (fixture) {
     const maximized = (expected) =>
       `(${invoke("plugin:window|is_maximized")}).then(value =>
@@ -446,8 +491,8 @@ try {
   await fixture?.dispose();
 }
 
-async function waitFor(label, read) {
-  const deadline = Date.now() + 12000;
+async function waitFor(label, read, timeoutMs = 12000) {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await read()) return;
     await delay(100);

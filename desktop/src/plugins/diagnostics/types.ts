@@ -1,4 +1,5 @@
 import type { AcpConnectionDiagnostic } from "../acpConnection/types.ts";
+import type { CaptureHealth } from "./capture/captureHealth.ts";
 
 export interface DiagnosticsStatus {
   now: number;
@@ -52,6 +53,9 @@ export interface DiagnosticsSnapshot {
 import type { StorageRequest, StorageResponse } from "./capture/storageRegistry.ts";
 
 export interface DiagnosticsReader {
+  subscribeCaptureHealth?: (
+    listener: (health: CaptureHealth) => void,
+  ) => () => void;
   storage?: (request: StorageRequest) => Promise<StorageResponse>;
   onStorageCleaned?: (listener: () => void) => () => void;
   isNative(): boolean;

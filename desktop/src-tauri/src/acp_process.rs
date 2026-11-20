@@ -352,8 +352,11 @@ pub async fn acp_spawn(
     args: Vec<String>,
     cwd: Option<String>,
     extra_env: Option<HashMap<String, String>>,
-    webview: tauri::WebviewWindow,
+    webview: tauri::Webview,
 ) -> Result<AcpSpawnResult, String> {
+    if webview.label() != "main" {
+        return Err("只有主窗口可以启动 ACP 进程".into());
+    }
     if program.is_empty() {
         return Err("program 不能为空".to_string());
     }

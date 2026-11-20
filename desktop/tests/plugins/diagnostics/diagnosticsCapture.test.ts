@@ -165,6 +165,7 @@ it("增量批量写入，关闭诊断后继续采集；详细日志持续采集"
     context.diagnostics.recordAcpRaw(original, "connection-test", "in");
     await vi.advanceTimersByTimeAsync(250);
     expect(invoke).toHaveBeenCalledWith("diagnostics_acp_append", {
+      delivery: { epoch: expect.any(String) as unknown, sequence: 1 },
       record: {
         line: original,
         connectionId: "connection-test",
@@ -175,7 +176,7 @@ it("增量批量写入，关闭诊断后继续采集；详细日志持续采集"
     vi.mocked(invoke).mockRejectedValueOnce(new Error("native queue full"));
     context.diagnostics.recordAcpRaw("retry-original", "connection-test", "in");
     const draining = context.host.updates.install();
-    await vi.advanceTimersByTimeAsync(50);
+    await vi.advanceTimersByTimeAsync(300);
     await draining;
     const retried = vi
       .mocked(invoke)
@@ -185,6 +186,7 @@ it("增量批量写入，关闭诊断后继续采集；详细日志持续采集"
           JSON.stringify(args).includes("retry-original"),
       );
     expect(retried).toHaveLength(2);
+    expect(retried[0]?.[1]).toEqual(retried[1]?.[1]);
     expect(invoke).toHaveBeenCalledWith("diagnostics_flush");
   } finally {
     const disposing = context.fiber.dispose();
@@ -215,6 +217,7 @@ it("卸载诊断会排空原文、停止采集，并在窗口销毁前落盘最�
     await vi.advanceTimersByTimeAsync(100);
     await disposing;
     expect(invoke).toHaveBeenCalledWith("diagnostics_acp_append", {
+      delivery: { epoch: expect.any(String) as unknown, sequence: 1 },
       record: expect.objectContaining({ line: "pending-on-exit" }) as unknown,
     });
     expect(invoke).toHaveBeenCalledWith("diagnostics_flush");

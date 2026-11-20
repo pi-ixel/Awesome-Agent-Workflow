@@ -294,8 +294,11 @@ pub fn retire_page(label: String) {
 pub async fn pty_spawn(
     app: tauri::AppHandle,
     request: PtySpawnRequest,
-    webview: tauri::WebviewWindow,
+    webview: tauri::Webview,
 ) -> Result<PtySpawnResult, String> {
+    if webview.label() != "main" {
+        return Err("只有主窗口可以启动终端".into());
+    }
     spawn_pty(Arc::new(AppSink(app)), request, webview.label()).await
 }
 

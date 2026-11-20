@@ -65,6 +65,69 @@ struct Service {
     error: Arc<Mutex<Option<String>>>,
     snapshot: Mutex<Value>,
     probes: Mutex<VecDeque<String>>,
+    receipts: Mutex<DeliveryReceipts>,
+}
+
+#[derive(Deserialize)]
+pub struct DeliveryId {
+    epoch: String,
+    sequence: u64,
+}
+
+#[derive(Default)]
+struct DeliveryReceipts {
+    logs: VecDeque<(uuid::Uuid, u64)>,
+    raw: VecDeque<(uuid::Uuid, u64)>,
+}
+
+impl DeliveryReceipts {
+    fn submit(
+        &mut self,
+        is_raw: bool,
+        delivery: DeliveryId,
+        enqueue: impl FnOnce() -> Result<(), String>,
+    ) -> Result<(), String> {
+        let epoch = uuid::Uuid::parse_str(&delivery.epoch).map_err(|_| "无效的采集批次标识")?;
+        if delivery.sequence == 0 {
+            return Err("无效的采集批次序号".into());
+        }
+        let receipts = if is_raw {
+            &mut self.raw
+        } else {
+            &mut self.logs
+        };
+        let previous = receipts.iter().position(|(id, _)| *id == epoch);
+        // 每条发送队列按序处理。忽略已接收批次与迟到的旧批次。
+        if previous.is_some_and(|index| receipts[index].1 >= delivery.sequence) {
+            return Ok(());
+        }
+        enqueue()?;
+        if let Some(index) = previous {
+            receipts.remove(index);
+        }
+        if receipts.len() >= 32 {
+            receipts.pop_front();
+        }
+        receipts.push_back((epoch, delivery.sequence));
+        Ok(())
+    }
+}
+
+fn submit_delivery(
+    service: &Service,
+    is_raw: bool,
+    delivery: Option<DeliveryId>,
+    enqueue: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    if let Some(delivery) = delivery {
+        service
+            .receipts
+            .lock()
+            .map_err(|e| e.to_string())?
+            .submit(is_raw, delivery, enqueue)
+    } else {
+        enqueue()
+    }
 }
 enum WriteRequest {
     Append(String, Vec<Input>),
@@ -270,6 +333,7 @@ pub fn start(app: &tauri::AppHandle) -> Result<(), String> {
             raw_pending_bytes: AtomicU64::new(0),
             snapshot: Mutex::new(Value::Null),
             probes: Mutex::new(VecDeque::new()),
+            receipts: Mutex::new(DeliveryReceipts::default()),
         })
         .map_err(|_| "logger already started")?;
     std::thread::spawn(move || {
@@ -407,7 +471,11 @@ fn require_main_view(label: &str, error: &str) -> Result<(), String> {
 
 // 主窗口可以挂载浏览器子视图。权限校验应识别实际发起 IPC 的视图。
 #[tauri::command]
-pub fn diagnostics_append(webview: tauri::Webview, entries: Vec<Input>) -> Result<(), String> {
+pub fn diagnostics_append(
+    webview: tauri::Webview,
+    entries: Vec<Input>,
+    delivery: Option<DeliveryId>,
+) -> Result<(), String> {
     if !is_diagnostics_view(webview.label()) {
         return Err("无权写入诊断日志".into());
     }
@@ -419,7 +487,9 @@ pub fn diagnostics_append(webview: tauri::Webview, entries: Vec<Input>) -> Resul
     {
         return Err("日志批次过大".into());
     }
-    enqueue(webview.label().into(), entries)
+    submit_delivery(service()?, false, delivery, || {
+        enqueue(webview.label().into(), entries)
+    })
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -430,12 +500,22 @@ pub struct AcpRawInput {
     at: u64,
 }
 #[tauri::command]
-pub fn diagnostics_acp_append(webview: tauri::Webview, record: AcpRawInput) -> Result<(), String> {
+pub fn diagnostics_acp_append(
+    webview: tauri::Webview,
+    record: AcpRawInput,
+    delivery: Option<DeliveryId>,
+) -> Result<(), String> {
     require_main_view(webview.label(), "只有主窗口可以记录 ACP 原文")?;
     if record.line.len() > 32 * 1024 * 1024 || !["in", "out"].contains(&record.direction.as_str()) {
         return Err("ACP 原文过大或方向无效".into());
     }
     let service = service()?;
+    submit_delivery(service, true, delivery, || {
+        enqueue_raw(service, webview.label(), record)
+    })
+}
+
+fn enqueue_raw(service: &Service, label: &str, record: AcpRawInput) -> Result<(), String> {
     let bytes = record.line.len() as u64;
     service
         .raw_pending_bytes
@@ -447,7 +527,7 @@ pub fn diagnostics_acp_append(webview: tauri::Webview, record: AcpRawInput) -> R
         .map_err(|_| "ACP 原文待写数据超过 64MB".to_string())?;
     service
         .sender
-        .try_send(WriteRequest::Raw(webview.label().into(), record))
+        .try_send(WriteRequest::Raw(label.into(), record))
         .map_err(|_| {
             service
                 .raw_pending_bytes
@@ -770,6 +850,34 @@ pub async fn diagnostics_open(app: tauri::AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retries_reuse_the_receipt_and_rejected_batches_can_try_again() {
+        let epoch = uuid::Uuid::new_v4().to_string();
+        let id = |sequence| DeliveryId {
+            epoch: epoch.clone(),
+            sequence,
+        };
+        let mut receipts = DeliveryReceipts::default();
+        let mut accepted = 0;
+        let mut accept = || {
+            accepted += 1;
+            Ok(())
+        };
+
+        assert!(
+            receipts
+                .submit(false, id(1), || Err("队列已满".into()))
+                .is_err()
+        );
+        receipts.submit(false, id(1), &mut accept).unwrap();
+        receipts.submit(false, id(1), &mut accept).unwrap();
+        receipts.submit(false, id(2), &mut accept).unwrap();
+        receipts.submit(false, id(1), &mut accept).unwrap();
+        receipts.submit(true, id(1), &mut accept).unwrap();
+        receipts.submit(true, id(1), &mut accept).unwrap();
+        assert_eq!(accepted, 3);
+    }
 
     #[test]
     fn diagnosis_permissions_use_only_the_calling_view_label() {
