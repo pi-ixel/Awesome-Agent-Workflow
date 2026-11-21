@@ -33,6 +33,7 @@
 pub mod caps;
 pub mod catalog;
 pub mod compat;
+pub mod guide;
 pub mod inject;
 pub mod launcher;
 pub mod limits;
@@ -271,14 +272,32 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {
     // 诊断入口：`AAW_GUIDE_PROBE=1` 启动时自动开一次开发指导窗口。存在的理由
     // 和上面那条一样——"窗口白屏"必须眼见为实，而点按钮这件事没法自动化。
     // 它走的是和用户点按钮完全相同的 `open_guide`，不是另开一条路。
-    if std::env::var("AAW_GUIDE_PROBE").is_ok_and(|value| value == "1") {
+    //
+    // `AAW_GUIDE_PROBE=2` 改成从主窗**发一次真的 IPC**（`invoke('tools_guide_open')`），
+    // 这条才是用户点按钮的真实路径：命令由主线程派发，和这里直接调
+    // `open_guide`（后台线程）走的是两条线程。2026-11-21 的白屏正是这两条
+    // 路的差别——用 =2 才能复现。
+    if let Ok(probe) = std::env::var("AAW_GUIDE_PROBE") {
         let app = app.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(1500));
-            if let Err(error) = launcher::open_guide(&app) {
-                eprintln!("[aaw-guide] 诊断开窗失败：{error}");
-            }
-        });
+        let via_ipc = probe == "2";
+        if via_ipc || probe == "1" {
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(1500));
+                if via_ipc {
+                    let Some(main) = app.get_webview_window("main") else {
+                        eprintln!("[aaw-guide] 没有主窗，无法走 IPC 诊断");
+                        return;
+                    };
+                    let _ = main.eval(
+                        "window.__TAURI_INTERNALS__.invoke('tools_guide_open').catch(function (error) { console.error(error); })",
+                    );
+                    return;
+                }
+                if let Err(error) = guide::open(&app) {
+                    eprintln!("[aaw-guide] 诊断开窗失败：{error}");
+                }
+            });
+        }
     }
     Ok(())
 }
@@ -543,8 +562,11 @@ fn storage_scope(session: &ToolSession, scope: &str) -> Result<String, String> {
 
 // ── 命令 ─────────────────────────────────────────────────────────────────
 
+/// 打开工具的入口。`async` 的理由与 `tools_guide_open` 相同：同步命令跑在
+/// 主线程，而 `open_page_window` / `process_host::open` 都要建窗口——主线程里
+/// 建 WebView2 会把消息循环堵在等自己上，结果是白窗 + 关不掉。
 #[tauri::command]
-pub fn tools_open(app: AppHandle, tool_id: String) -> Result<(), String> {
+pub async fn tools_open(app: AppHandle, tool_id: String) -> Result<(), String> {
     open_tool(&app, &tool_id)
 }
 

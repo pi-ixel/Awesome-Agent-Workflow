@@ -228,7 +228,12 @@ pub fn run() {
             tools::launcher::launcher_capture,
             tools::launcher::launcher_show,
             tools::launcher::launcher_stop,
-            tools::launcher::tools_guide_open,
+            // 开发指导窗口：打开 + 正文读写（默认正文编在二进制里，用户副本在
+            // 数据目录；「恢复默认」是删副本，不是写快照——见 tools/guide.rs）
+            tools::guide::tools_guide_open,
+            tools::guide::tools_guide_load,
+            tools::guide::tools_guide_save,
+            tools::guide::tools_guide_reset,
             codeagent_history::agent_history_evidence,
             codeagent_delete::agent_delete_session,
             codeagent_credit::codeagent_credit_quota,

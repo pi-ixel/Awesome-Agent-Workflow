@@ -10,8 +10,31 @@
   <script src="guide.js" defer></script>
 </head>
 <body>
-  <main id="doc" aria-busy="true">
-    <p class="loading">正在加载开发指导…</p>
-  </main>
+  <header class="bar">
+    <span class="bar-title">工具开发指导</span>
+    <span id="mode" class="badge" hidden>编辑中</span>
+    <span id="badge" class="badge" hidden>已自定义</span>
+    <span id="status" class="status" role="status"></span>
+    <span class="spacer"></span>
+    <button id="edit" type="button" class="ghost" hidden>编辑</button>
+    <button id="reset" type="button" class="ghost" hidden>恢复默认</button>
+  </header>
+  <div id="layout" class="layout">
+    <nav id="toc" class="toc" aria-label="目录">
+      <p class="toc-empty">正文加载后显示目录</p>
+    </nav>
+    <main id="doc" aria-busy="true">
+      <p class="loading">正在加载开发指导…</p>
+    </main>
+  </div>
+  <section id="editor" class="editor" hidden>
+    <textarea id="editor-text" spellcheck="false" aria-label="开发指导正文"></textarea>
+    <div class="editor-bar">
+      <span class="editor-hint">Markdown：<code>##</code> 标题、列表、表格、代码块、行内代码与加粗。保存后只影响这台机器上的你。</span>
+      <span class="spacer"></span>
+      <button id="cancel" type="button" class="ghost">取消</button>
+      <button id="save" type="button">保存</button>
+    </div>
+  </section>
 </body>
 </html>
