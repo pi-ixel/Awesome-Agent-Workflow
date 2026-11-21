@@ -1124,6 +1124,69 @@
       "terminalDock/\"terminal\"/View → (inline)"
     ]
   },
+  "plugins/tools/ui/ToolBuilder.tsx": {
+    "definitions": {
+      "编辑输入": ["NewToolForm"],
+      "状态与统计": ["ViolationList"],
+      "内容与专用绘制": ["ProjectDetail"]
+    },
+    "targets": []
+  },
+  "plugins/tools/ui/ToolManagement.tsx": {
+    "definitions": {
+      "布局与操纵": ["Section"],
+      "内容与专用绘制": ["ToolManagement"]
+    },
+    "targets": []
+  },
+  "plugins/tools/ui/ToolPath.tsx": {
+    "definitions": {
+      "布局与操纵": ["ToolPath"]
+    },
+    "targets": []
+  },
+  "plugins/tools/ui/ToolPreview.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["ToolPreview"]
+    },
+    "targets": []
+  },
+  "plugins/tools/ui/ToolPreviewTab.tsx": {
+    "definitions": {
+      "布局与操纵": ["ToolPreviewTab"]
+    },
+    "targets": []
+  },
+  "plugins/tools/ui/ToolProjects.tsx": {
+    "definitions": {
+      "导航与列表": ["ToolProjectList"]
+    },
+    "targets": []
+  },
+  "plugins/tools/ui/ToolsPanel.tsx": {
+    "definitions": {
+      "提示与确认": ["EmptyLibrary"],
+      "布局与操纵": ["ToolsPanel"]
+    },
+    "targets": []
+  },
+  "plugins/tools/ui/surface.tsx": {
+    "definitions": {
+      "布局与操纵": ["ToolsPanelSurface"]
+    },
+    "targets": []
+  },
+  "plugins/tools/ui/workbench.tsx": {
+    "definitions": {
+      "布局与操纵": ["apply/ToolsView"],
+      "内容与专用绘制": ["apply/panels/previewKind/View"]
+    },
+    "targets": [
+      "apply/panels/\"tools\"/Icon → shared/ui/icons.tsx#WrenchIcon",
+      "apply/panels/\"tools\"/View → plugins/tools/ui/workbench.tsx#apply/ToolsView",
+      "apply/panels/previewKind/View → (inline)"
+    ]
+  },
   "plugins/updates/ui/DesktopUpdate.tsx": {
     "definitions": {
       "命令按钮": ["UpdateButton"],

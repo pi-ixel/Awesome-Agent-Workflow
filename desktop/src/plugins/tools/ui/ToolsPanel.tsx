@@ -6,6 +6,8 @@ import { DangerButton, btnGhost, btnPrimary, btnSecondary } from "../../../share
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
 import type { ContextMenuEntry } from "../../../shared/ui/ContextMenu.tsx";
 import { SquareTerminalIcon, WrenchIcon } from "../../../shared/ui/icons.tsx";
+// 外观由 tools.css 决定，挂共享常量是为了让编辑框守卫识别这两个输入框。
+import { composerFieldClass, fieldSurfaceClass } from "../../../shared/ui/inputStyles.ts";
 import { useMenuController } from "../../../shared/ui/useMenuController.ts";
 import type { HostService } from "../../host/service.ts";
 import type { ProjectService } from "../../project/service.ts";
@@ -403,7 +405,7 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
           {/* 开发指导独立成窗口：内容是全平台通用的规范，不该混在"做某个工具"的流程里。 */}
           <button type="button" className={`${btnGhost} tools-guide`} onClick={() => void openGuide()} disabled={busy}>开发指导 ↗</button>
         </div>
-        <input ref={picker} type="file" multiple accept=".zip,.json,application/zip,application/json" onChange={(event) => void importFiles(event)} hidden />
+        <input ref={picker} type="file" className={fieldSurfaceClass} multiple accept=".zip,.json,application/zip,application/json" onChange={(event) => void importFiles(event)} hidden />
       </header>
       <div className="tools-content min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
         {feedback && (
@@ -430,7 +432,7 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
               onExamples={installExamples}
             />
           )}
-          {tools.length > 0 && <label className="tools-search"><span aria-hidden="true">⌕</span><input aria-label="搜索已安装工具" placeholder="搜索你的工具…" value={search} onChange={(event) => setSearch(event.target.value)} /><span>{tools.length}</span></label>}
+          {tools.length > 0 && <label className="tools-search"><span aria-hidden="true">⌕</span><input className={composerFieldClass} aria-label="搜索已安装工具" placeholder="搜索你的工具…" value={search} onChange={(event) => setSearch(event.target.value)} /><span>{tools.length}</span></label>}
           {/* 紧凑行而不是大卡片：右栏只有 360px 左右，卡片式一屏只能放三个，
               而"打开某个工具"是这一页最高频的动作。一行一个，扫视成本最低。 */}
           <ul aria-label="已安装工具" className="tool-rows">

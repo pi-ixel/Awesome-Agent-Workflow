@@ -2,6 +2,9 @@ import { useStore } from "zustand";
 import { btnGhost, btnPrimary, btnSecondary } from "../../../shared/ui/controls.tsx";
 import { CopyButton } from "../../../shared/ui/CopyButton.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
+// 工具面板的输入框外观由 tools.css 提供（那份规则特异性更高），这里挂上共享
+// 样式常量是为了让「编辑框必须走共享规格」的架构守卫能识别到它们。
+import { settingsTextareaClass } from "../../../shared/ui/inputStyles.ts";
 import { describeViolations } from "../runtime/rules.ts";
 import type { ToolViolation } from "../types.ts";
 import { ToolPath } from "./ToolPath.tsx";
@@ -42,6 +45,7 @@ export function NewToolForm({ workshop, available }: {
       <label className="build-new-label" htmlFor="tool-brief">描述你要的工具</label>
       <textarea
         id="tool-brief"
+        className={settingsTextareaClass}
         aria-label="描述你要的工具"
         value={brief}
         placeholder="描述你要的工具：功能、界面、边界都可以写清楚。例如：把接口返回的 JSON 转成表格，还能导出 Markdown"

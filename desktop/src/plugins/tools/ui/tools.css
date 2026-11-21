@@ -77,10 +77,10 @@
  * 索引由 `toneOf(id)` 决定（见 ui/mark.ts），不再按列表下标——按下标取色
  * 一旦增删工具就整体错位，而且同一个工具在两个窗口里会显示成两种颜色。
  */
-.aaw-tools .tool-symbol { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 10px; background: #6573d51a; color: #8b9cf2; font-size: calc(var(--ui-font-size) + 2px); font-weight: 600; line-height: 1; }
-.aaw-tools .tone-1 { background: #9670ce1f; color: #bd9de9; }
-.aaw-tools .tone-2 { background: #cf89501f; color: #dcaa7c; }
-.aaw-tools .tone-3 { background: #4f97b41f; color: #8fc7dc; }
+.aaw-tools .tool-symbol { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 10px; background: var(--color-tools-symbol-bg); color: var(--color-tools-symbol-ink); font-size: calc(var(--ui-font-size) + 2px); font-weight: 600; line-height: 1; }
+.aaw-tools .tone-1 { background: var(--color-tools-tone-1-bg); color: var(--color-tools-tone-1-ink); }
+.aaw-tools .tone-2 { background: var(--color-tools-tone-2-bg); color: var(--color-tools-tone-2-ink); }
+.aaw-tools .tone-3 { background: var(--color-tools-tone-3-bg); color: var(--color-tools-tone-3-ink); }
 .aaw-tools .tool-actions { flex-basis: 100%; border-top: 1px solid var(--color-line); padding-top: 12px; margin-top: 10px; align-items: center; }
 .aaw-tools .tool-actions > button:first-child { margin-right: auto; padding-inline: 12px; }
 .aaw-tools .tool-actions > button { padding: 6px 7px; font-size: var(--text-xs); line-height: 18px; border-radius: 7px; }
@@ -104,10 +104,10 @@
 .aaw-tools .management-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 18px 24px 28px; }
 .aaw-tools .management-inner { max-width: 900px; min-width: 0; margin-inline: auto; }
 .aaw-tools .management-hero { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 2px 0 18px; }
-.aaw-tools .management-icon { display: grid; place-items: center; width: calc(var(--ui-icon-unit) * 44); height: calc(var(--ui-icon-unit) * 44); border-radius: 13px; color: #97a8f7; background: #7284cf1f; border: 1px solid #7284cf33; font-size: calc(var(--ui-font-size) + 7px); font-weight: 600; line-height: 1; flex: none; }
-.aaw-tools .management-icon.tone-1 { background: #9670ce24; color: #c7abea; border-color: #9670ce3d; }
-.aaw-tools .management-icon.tone-2 { background: #cf895024; color: #e0b48c; border-color: #cf89503d; }
-.aaw-tools .management-icon.tone-3 { background: #4f97b424; color: #9acfe2; border-color: #4f97b43d; }
+.aaw-tools .management-icon { display: grid; place-items: center; width: calc(var(--ui-icon-unit) * 44); height: calc(var(--ui-icon-unit) * 44); border-radius: 13px; color: var(--color-tools-icon-ink); background: var(--color-tools-icon-bg); border: 1px solid var(--color-tools-icon-border); font-size: calc(var(--ui-font-size) + 7px); font-weight: 600; line-height: 1; flex: none; }
+.aaw-tools .management-icon.tone-1 { background: var(--color-tools-icon-1-bg); color: var(--color-tools-icon-1-ink); border-color: var(--color-tools-icon-1-border); }
+.aaw-tools .management-icon.tone-2 { background: var(--color-tools-icon-2-bg); color: var(--color-tools-icon-2-ink); border-color: var(--color-tools-icon-2-border); }
+.aaw-tools .management-icon.tone-3 { background: var(--color-tools-icon-3-bg); color: var(--color-tools-icon-3-ink); border-color: var(--color-tools-icon-3-border); }
 .aaw-tools .management-hero-copy { min-width: 0; flex: 1; }
 .aaw-tools .management-hero h2 { font-size: calc(var(--ui-font-size) + 4px); font-weight: 650; color: var(--color-ink); overflow-wrap: anywhere; }
 .aaw-tools .management-hero p { margin-top: 3px; font-size: var(--text-xs); color: var(--color-ink-subtle); }
@@ -193,11 +193,11 @@
 .aaw-tools .preview-title span { font-size: var(--text-2xs); color: var(--color-ink-subtle); }
 .aaw-tools .preview-actions { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .aaw-tools .preview-actions button { min-height: 30px; padding: 5px 10px; border-radius: 7px; font-size: var(--text-xs); }
-.aaw-tools .preview-actions .preview-install { border: 1px solid var(--color-info); background: var(--color-info); color: white; }
+.aaw-tools .preview-actions .preview-install { border: 1px solid var(--color-info); background: var(--color-info); color: var(--color-tools-install-ink); }
 /* 右栏标签里空间更窄：头部收一点，标题让位给按钮。 */
 .aaw-tools .preview-head.is-embedded { padding: 8px 10px; gap: 8px; }
 .aaw-tools .preview-head.is-embedded .preview-title h2 { font-size: var(--text-md); }
-.aaw-tools .preview-frame { flex: 1 1 auto; min-height: 0; width: 100%; border: 0; background: #171c24; }
+.aaw-tools .preview-frame { flex: 1 1 auto; min-height: 0; width: 100%; border: 0; background: var(--color-tools-preview-bg); }
 .aaw-tools .preview-logs { flex: 0 0 auto; max-height: 42%; display: flex; flex-direction: column; border-top: 1px solid var(--color-line); background: var(--color-surface); }
 .aaw-tools .preview-logs-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; font-size: var(--text-2xs); color: var(--color-ink-subtle); }
 .aaw-tools .preview-logs-head button { font-size: var(--text-2xs); color: var(--color-ink-subtle); background: none; border: 0; cursor: pointer; }
