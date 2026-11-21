@@ -336,6 +336,35 @@
       "gitPanels/\"git\"/View → (inline)"
     ]
   },
+  "plugins/mcp/index.ts": {
+    "definitions": {
+      "布局与操纵": ["apply/View"]
+    },
+    "targets": ["apply/View → (inline)"]
+  },
+  "plugins/mcp/ui/McpEditor.tsx": {
+    "definitions": {
+      "编辑输入": ["Field", "HeadersEditor"],
+      "布局与操纵": ["McpEditor"]
+    },
+    "targets": []
+  },
+  "plugins/mcp/ui/McpView.tsx": {
+    "definitions": {
+      "布局与操纵": ["McpView"],
+      "导航与列表": ["McpServiceCard"]
+    },
+    "targets": []
+  },
+  "plugins/mcp/ui/workbench.tsx": {
+    "definitions": {
+      "布局与操纵": ["McpView", "McpWorkbench"]
+    },
+    "targets": [
+      "default → plugins/mcp/ui/McpView.tsx#McpView",
+      "import → ./McpView.tsx"
+    ]
+  },
   "plugins/project/conversation/ui/AnnotationCards.tsx": {
     "definitions": {
       "提示与确认": ["AnnotationCards"]
@@ -943,6 +972,8 @@
     },
     "targets": [
       "apply/Installer → (inline)",
+      "apply/Sidebar/\"mcp\"/Icon → shared/ui/icons.tsx#GlobeIcon",
+      "apply/Sidebar/\"skills\"/Icon → shared/ui/icons.tsx#SkillIcon",
       "apply/Source → (inline)",
       "apply/sidebar/\"plugin-management\"/Icon → shared/ui/icons.tsx#PuzzleIcon",
       "apply/sidebar/\"plugin-management\"/View → plugins/skills/ui/workbench.tsx#apply/Sidebar",

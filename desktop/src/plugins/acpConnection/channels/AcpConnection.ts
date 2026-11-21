@@ -141,7 +141,7 @@ export class AcpConnection implements AcpConnectionPort {
   constructor(
     private readonly transport: AcpTransport,
     maxConcurrent: number,
-    diagnostics: Pick<JsonRpcConnectionOptions, "logger" | "recordRaw"> = {},
+    diagnostics: Pick<JsonRpcConnectionOptions, "logger" | "recordRaw" | "diagnosticPrivacy"> = {},
     private readonly onDisposed: () => void = () => {},
   ) {
     this.scheduler = new RequestScheduler(maxConcurrent);

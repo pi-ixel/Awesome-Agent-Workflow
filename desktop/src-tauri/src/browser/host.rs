@@ -1036,20 +1036,82 @@ pub fn browser_agent_control_status(state: State<'_, BrowserHost>) -> bool {
     state.agent_control_enabled()
 }
 
+#[derive(Deserialize, Serialize)]
+struct AgentControlPreference {
+    enabled: bool,
+}
+
+impl Default for AgentControlPreference {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn browser_agent_control_preference_survives_readback() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("browser-agent-control.json");
+    let load = || crate::storage_preferences::read_record::<AgentControlPreference>(&path).unwrap();
+    assert!(load().enabled);
+    for enabled in [false, true] {
+        crate::storage_preferences::write_record(&path, &AgentControlPreference { enabled }).unwrap();
+        assert_eq!(load().enabled, enabled);
+    }
+}
+
+static AGENT_CONTROL_WRITER: Mutex<()> = Mutex::new(());
+
+fn agent_control_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(crate::storage_location::data_dir(app)?
+        .join("configuration")
+        .join("browser-agent-control.json"))
+}
+
+pub(crate) fn initialize_agent_control(app: &AppHandle) {
+    let preference = agent_control_path(app)
+        .and_then(|path| crate::storage_preferences::read_record::<AgentControlPreference>(&path));
+    let enabled = match preference {
+        Ok(preference) => preference.enabled,
+        Err(error) => {
+            eprintln!("浏览器 MCP 授权设置无法读取，已保持关闭：{error}");
+            false
+        }
+    };
+    app.state::<BrowserHost>().agent_control.store(enabled, Ordering::Release);
+}
+
 #[tauri::command]
 pub fn browser_set_agent_control(
     app: AppHandle,
+    webview: tauri::Webview,
     state: State<'_, BrowserHost>,
     enabled: bool,
 ) -> Result<bool, String> {
-    state.set_agent_control(enabled)?;
+    if webview.label() != "main" {
+        return Err("只有主窗口可以修改浏览器 MCP 授权".into());
+    }
+    let _writer = AGENT_CONTROL_WRITER.lock().map_err(|_| "浏览器 MCP 授权设置正在使用")?;
+    let change = (|| {
+        if !enabled {
+            state.set_agent_control(false)?;
+        }
+        crate::storage_preferences::write_record(
+            &agent_control_path(&app)?,
+            &AgentControlPreference { enabled },
+        )?;
+        if enabled {
+            state.set_agent_control(true)?;
+        }
+        Ok::<(), String>(())
+    })();
     let actual = state.agent_control_enabled();
     app.emit(
         "aaw://browser-agent-control",
         serde_json::json!({ "enabled": actual }),
     )
     .map_err(|error| error.to_string())?;
-    Ok(actual)
+    change.map(|()| actual)
 }
 
 #[tauri::command]

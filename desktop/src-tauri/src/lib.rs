@@ -5,6 +5,8 @@ mod acp_proxy;
 pub mod browser;
 mod commands;
 mod skill_library;
+mod mcp_management;
+mod config_edit;
 mod codeagent_history;
 mod codeagent_delete;
 mod codeagent_credit;
@@ -41,6 +43,7 @@ pub fn run() {
         .manage(tray::SchedulerLease::default())
         .setup(|app| {
             storage_location::initialize(app.handle()).map_err(std::io::Error::other)?;
+            browser::host::initialize_agent_control(app.handle());
             if let Err(error) = diagnostics::start(app.handle()) {
                 eprintln!("日志服务启动失败: {error}");
             }
@@ -196,6 +199,16 @@ pub fn run() {
             skill_library::skill_library_candidates,
             skill_library::skill_library_change,
             skill_library::skill_library_files,
+            mcp_management::mcp_native_read,
+            mcp_management::mcp_native_read_local,
+            mcp_management::mcp_native_change,
+            mcp_management::mcp_session_profile,
+            mcp_management::mcp_managed_read,
+            mcp_management::mcp_managed_change,
+            mcp_management::mcp_install_preview,
+            mcp_management::mcp_install_commit,
+            mcp_management::mcp_managed_resolve,
+            mcp_management::mcp_test_config,
             commands::read_text_file,
             commands::write_text_file,
             commands::user_data_dir,

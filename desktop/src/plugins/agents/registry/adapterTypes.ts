@@ -1,4 +1,6 @@
 import type { HistoryEvidence } from "../../host/types.ts";
+import type { AgentMcpManagement } from "../../../contracts/mcp/management.ts";
+import type { AcpDiagnosticPrivacy } from "../../../contracts/acp/diagnosticPrivacy.ts";
 import type { SkillProvider } from "../../host/types.ts";
 import type { AcpDialect, AgentDialectHooks } from "../../acpRuntime/types.ts";
 import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
@@ -35,6 +37,8 @@ export interface AgentConfigurationContext {
 }
 
 export interface AgentAdapter {
+  readonly diagnosticPrivacy?: AcpDiagnosticPrivacy;
+  readonly mcpManagement?: AgentMcpManagement;
   readonly deleteSession?: (
     host: HostArchiveFiles & HostCommands,
     launch: AgentLaunch,

@@ -14,6 +14,7 @@ export function apply(ctx: Context, options?: HostOptions): void {
     browser: host.browser,
     openDevelopmentAcpTransport: host.openDevelopmentAcpTransport,
     storage: host.storage,
+    mcp: host.mcp,
     diagnostics: host.diagnostics,
     registerExitDiagnostics: host.registerExitDiagnostics.bind(host),
     commands: host.commands,

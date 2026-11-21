@@ -51,15 +51,26 @@ describe("编辑会话", () => {
     expect(project.sessions.openSessionFromEntry).toHaveBeenCalledWith("D:/project", "s-1", "key-a");
     expect(project.conversation.send).toHaveBeenCalledWith(target, "第一条", undefined, { display: first.display });
     // 重新打开或重连时，登记的提供方继续给这个会话编写工具。
-    expect(editor.sessionTools({ workspacePath: "D:/project", agentKey: "key-a", sessionId: "s-1", agent: null })).toEqual([mcpServer]);
-    expect(editor.sessionTools({ workspacePath: "D:/project", agentKey: "key-a", sessionId: "other", agent: null })).toEqual([]);
+    expect(
+      editor.sessionTools({ ...target, agentId: "chrys", agent: null }),
+    ).toEqual([mcpServer]);
+    expect(
+      editor.sessionTools({
+        ...target,
+        agentId: "chrys",
+        sessionId: "other",
+        agent: null,
+      }),
+    ).toEqual([]);
     expect(editor.has("d1")).toBe(true);
     expect(editor.send("d1", "报错")).toBe(true);
     await editor.end("d1");
     expect(project.conversation.cancel).toHaveBeenCalledWith(target);
     expect(editor.has("d1")).toBe(false);
     expect(editor.send("d1", "x")).toBe(false);
-    expect(editor.sessionTools({ workspacePath: "D:/project", agentKey: "key-a", sessionId: "s-1", agent: null })).toEqual([]);
+    expect(
+      editor.sessionTools({ ...target, agentId: "chrys", agent: null }),
+    ).toEqual([]);
   });
 });
 

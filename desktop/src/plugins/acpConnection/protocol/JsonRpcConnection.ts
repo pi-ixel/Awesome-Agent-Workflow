@@ -36,6 +36,8 @@ import { parseJsonObject } from "./framing.ts";
 import { AcpWriteError } from "../../host/service.ts";
 import type { AcpTransport, TransportExit } from "../../host/types.ts";
 import type { JsonRpcId } from "../../../contracts/acp/protocol.ts";
+import { asRecord } from "../../../shared/valueGuards.ts";
+import type { AcpDiagnosticPrivacy } from "../../../contracts/acp/diagnosticPrivacy.ts";
 
 /** 默认请求超时（对齐 Python 参考的 90s）。 */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 90_000;
@@ -48,12 +50,14 @@ export interface JsonRpcConnectionOptions {
   /** 日志器（channel 建议 "acp"）。 */
   readonly logger?: Logger;
   readonly recordRaw?: AcpRawWriter;
+  readonly diagnosticPrivacy?: AcpDiagnosticPrivacy;
 }
 
 interface PendingRequest {
   readonly owner?: object;
   readonly method: string;
   readonly sessionId?: string;
+  readonly sensitive: boolean;
   timer: ReturnType<typeof setTimeout> | undefined;
   readonly timeoutMs: number | null;
   inputWaits: number;
@@ -94,7 +98,9 @@ export class JsonRpcConnection implements AcpSessionConnection {
   private readonly requestTimeoutMs: number;
   private readonly logger: Logger | undefined;
   private readonly recordRaw: AcpRawWriter | undefined;
+  private readonly diagnosticPrivacy: AcpDiagnosticPrivacy | undefined;
   private closed = false;
+  private sentMcpConfiguration = false;
   private readonly onFailure: ((reason: string) => void) | undefined;
   private transportExit: TransportExit | null = null;
 
@@ -108,6 +114,7 @@ export class JsonRpcConnection implements AcpSessionConnection {
     this.onExit = options.onExit;
     this.onFailure = options.onFailure;
     this.recordRaw = options.recordRaw;
+    this.diagnosticPrivacy = options.diagnosticPrivacy;
     this.requestTimeoutMs =
       options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.logger = (options.logger ?? createLogger("acp")).child({
@@ -118,9 +125,10 @@ export class JsonRpcConnection implements AcpSessionConnection {
       const text = chunk.trim();
       if (text.length > 0) {
         this.logger?.warn("agent stderr 输出", { bytes: chunk.length });
-        this.logger?.debug("agent stderr 摘要", {
-          errorSummary: text.slice(-2000),
-        });
+        if (!this.sentMcpConfiguration)
+          this.logger?.debug("agent stderr 摘要", {
+            errorSummary: text.slice(-2000),
+          });
       }
     });
     transport.onExit((exit) => this.handleTransportExit(exit));
@@ -167,6 +175,8 @@ export class JsonRpcConnection implements AcpSessionConnection {
     if (params !== undefined) {
       payload.params = params;
     }
+    const sensitive = this.isSensitiveRequest(method, params);
+    if (sensitive) this.sentMcpConfiguration = true;
     const timeoutMs =
       options.timeoutMs === undefined
         ? this.requestTimeoutMs
@@ -192,6 +202,7 @@ export class JsonRpcConnection implements AcpSessionConnection {
       this.pending.set(id, {
         method,
         sessionId: context.sessionId,
+        sensitive,
         owner: options.owner,
         timer,
         resolve,
@@ -314,7 +325,29 @@ export class JsonRpcConnection implements AcpSessionConnection {
       this.failChannel(String(error));
       throw error;
     }
-    this.traceRaw(line, "out");
+    const params = asRecord(payload.params);
+    const method = payload.method;
+    if (
+      typeof method === "string" &&
+      this.isSensitiveRequest(method, params ?? undefined)
+    ) {
+      this.traceRaw(
+        JSON.stringify({
+          ...payload,
+          params:
+            method === "session/new" || method === "session/load"
+              ? {
+                  cwd: params?.cwd,
+                  sessionId: params?.sessionId,
+                  mcpServers: "[REDACTED]",
+                }
+              : "[REDACTED]",
+        }),
+        "out",
+      );
+    } else {
+      this.traceRaw(line, "out");
+    }
   }
 
   private traceRaw(line: string, direction: AcpRawDirection): void {
@@ -325,16 +358,60 @@ export class JsonRpcConnection implements AcpSessionConnection {
     }
   }
 
+  private isSensitiveRequest(method: string, params?: Readonly<Record<string, unknown>>): boolean {
+    return this.diagnosticPrivacy?.isSensitiveRequest?.(method) === true ||
+      ((method === "session/new" || method === "session/load") &&
+        Array.isArray(params?.mcpServers) && params.mcpServers.length > 0);
+  }
+
+  private traceNotification(line: string, method: string, message: Readonly<Record<string, unknown>>) {
+    const params = asRecord(message.params);
+    try {
+      const safe = params && this.diagnosticPrivacy?.redactNotification?.(method, params);
+      this.traceRaw(safe && safe !== params ? JSON.stringify({ ...message, params: safe }) : line, "in");
+    } catch {
+      this.traceRaw(JSON.stringify({ method, params: "[REDACTED]" }), "in");
+    }
+  }
+
   private handleLine(line: string): void {
-    this.traceRaw(line, "in");
     const message = parseJsonObject(line);
     if (message === null) {
-      this.logger?.warn("收到非 JSON 对象输出", { line: line.slice(0, 400) });
+      if (!this.sentMcpConfiguration) this.traceRaw(line, "in");
+      this.logger?.warn("收到非 JSON 对象输出", {
+        ...(this.sentMcpConfiguration
+          ? { bytes: line.length }
+          : { line: line.slice(0, 400) }),
+      });
       return;
     }
     const id = message["id"];
     const method = message["method"];
     const hasId = typeof id === "number" || typeof id === "string";
+    const pending =
+      hasId && typeof method !== "string" ? this.pending.get(id) : undefined;
+    if (
+      pending?.sensitive ||
+      (hasId &&
+        !pending &&
+        typeof method !== "string" &&
+        this.sentMcpConfiguration)
+    ) {
+      this.traceRaw(
+        JSON.stringify({
+          jsonrpc: message.jsonrpc,
+          id,
+          ...("error" in message
+            ? { error: "[REDACTED]" }
+            : { result: "[REDACTED]" }),
+        }),
+        "in",
+      );
+    } else if (typeof method === "string") {
+      this.traceNotification(line, method, message);
+    } else {
+      this.traceRaw(line, "in");
+    }
     if (hasId && typeof method === "string") {
       // fire-and-forget 必须自带 .catch：agent 发出请求后立即死亡、
       // 回调迟后答复是常态路径，此时回写必然失败——任何从这里逃逸的
@@ -377,12 +454,16 @@ export class JsonRpcConnection implements AcpSessionConnection {
       const rpcError = isJsonRpcError(error)
         ? error
         : { code: -32603, message: "未知错误结构" };
+      const safeMessage = entry.sensitive
+        ? "Agent 拒绝 MCP 配置请求"
+        : rpcError.message;
+      const safeData = entry.sensitive ? undefined : rpcError.data;
       this.logger?.error("Agent 返回 JSON-RPC 错误", {
         method: entry.method,
         requestId: id,
         code: rpcError.code,
-        message: rpcError.message,
-        data: rpcError.data,
+        message: safeMessage,
+        data: safeData,
         origin: "agent-response",
         connectionClosed: this.closed,
       });
@@ -390,8 +471,8 @@ export class JsonRpcConnection implements AcpSessionConnection {
         new AcpResponseError(
           entry.method,
           rpcError.code,
-          rpcError.message,
-          rpcError.data,
+          safeMessage,
+          safeData,
         ),
       );
       return;

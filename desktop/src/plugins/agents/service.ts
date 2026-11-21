@@ -1,4 +1,5 @@
 import type { HistoryEvidence } from "../host/types.ts";
+import type { AgentExtensionClient } from "../../contracts/mcp/management.ts";
 import type { AcpTransport } from "../host/types.ts";
 import { findAgentAdapter } from "./registry/registry.ts";
 
@@ -83,6 +84,11 @@ export interface AgentsService {
   ): Promise<void>;
   scan(): Promise<void>;
   registerProbeSessions(factory: AgentProbeSessionFactory): () => Promise<void>;
+  runMcpExtension<T>(
+    id: string,
+    toolPaths: object,
+    run: (client: AgentExtensionClient) => Promise<T>,
+  ): Promise<T>;
   testConnection(
     id: string,
     toolPaths: object,

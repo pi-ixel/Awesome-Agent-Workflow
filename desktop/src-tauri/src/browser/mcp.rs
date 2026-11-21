@@ -237,6 +237,9 @@ pub async fn browser_mcp_create(
     let (shutdown, mut stopped) = tokio::sync::oneshot::channel();
     let endpoint = {
         let mut registry = state.mcp.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+        if !state.agent_control_enabled() {
+            return Err("AGENT_CONTROL_DISABLED".into());
+        }
         let endpoint = create_endpoint(&mut registry, port)?;
         registry
             .shutdowns

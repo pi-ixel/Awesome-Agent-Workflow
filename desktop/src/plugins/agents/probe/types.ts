@@ -4,11 +4,13 @@ import type {
 } from "../../../contracts/acp/protocol.ts";
 import type { AcpSessionOptions, AcpSessionPort } from "../../acpRuntime/types.ts";
 import type { AcpTransport } from "../../host/types.ts";
+import type { AcpDiagnosticPrivacy } from "../../../contracts/acp/diagnosticPrivacy.ts";
 
 export type AgentProbeSessionFactory = (
   transport: AcpTransport,
   capacity: number,
   options: AcpSessionOptions,
+  diagnosticPrivacy?: AcpDiagnosticPrivacy,
 ) => {
   openSession(): AcpSessionPort;
   release(force?: boolean): Promise<void>;
