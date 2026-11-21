@@ -479,13 +479,16 @@ fn serve(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
 /// 一条就覆盖全部工具窗口，不必每加一个工具就改权限表。
 pub fn open_tool(app: &AppHandle, tool_id: &str) -> Result<(), String> {
     let label = format!("tool-{tool_id}");
+    let host = app.state::<ToolsHost>();
     if let Some(window) = app.get_webview_window(&label) {
+        // 「停止后台运行」只杀进程、不关窗；之后用户点「打开」会在这里提前
+        // 返回。不重生进程的话，窗口是活的、工具是死的——用户看到的就是
+        // "重新打开了还是不能用"（2026-11-22 真机验收发现）。
+        process_host::respawn(app, &host, tool_id)?;
         window.show().ok();
         window.set_focus().ok();
         return Ok(());
     }
-
-    let host = app.state::<ToolsHost>();
     let dir = host.tool_dir(tool_id)?;
     let manifest = manifest::read(&dir)?;
     // 打开关口在**建窗口之前**：判定放后面就会出现"先闪一个空白窗口、再关掉"，
