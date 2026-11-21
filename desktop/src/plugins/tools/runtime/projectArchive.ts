@@ -147,7 +147,11 @@ export function importToolArchive(bytes: Uint8Array): ToolArchive {
   } catch (error) {
     throw new Error(error instanceof Error ? `无法读取源码 ZIP：${error.message}` : "无法读取源码 ZIP。", { cause: error });
   }
-  const manifests = Object.keys(files).filter((path) => path === "manifest.json" || path.endsWith("/manifest.json"));
+  // 依赖自身的 manifest.json 是普通资源，不能当作另一个工具的入口清单。
+  const manifests = Object.keys(files).filter((path) =>
+    (path === "manifest.json" || path.endsWith("/manifest.json"))
+    && !path.split("/").includes("node_modules"),
+  );
   if (manifests.length !== 1) throw new Error("源码 ZIP 需要唯一的 manifest.json。");
   const prefix = manifests[0]!.slice(0, -"manifest.json".length);
   if (!files[`${prefix}index.html`] || Object.keys(files).some((path) => !path.startsWith(prefix)))
