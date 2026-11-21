@@ -169,7 +169,9 @@ impl LauncherStore {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
-        let temp = self.path.with_extension("json.tmp");
+        // 临时名不能固定：两个并发保存（改固定项 + 改最近项）会互相截断。
+        // `unique_temp` 的理由见 store.rs / guide.rs 同名注释。
+        let temp = super::unique_temp(&self.path);
         std::fs::write(&temp, serde_json::to_vec(&current).map_err(|error| error.to_string())?)
             .map_err(|error| error.to_string())?;
         std::fs::rename(&temp, &self.path).map_err(|error| error.to_string())

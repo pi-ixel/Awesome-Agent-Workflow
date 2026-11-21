@@ -394,7 +394,14 @@ pub fn run() {
 
     // 工具载体的自定义协议。注册必须在 `run` 之前，且用异步版本：
     // 读文件是阻塞 IO，同步版本会卡住 wry 的协议线程。
-    tools::register_protocol(builder)
-        .run(context)
-        .expect("error while running tauri application");
+    let app = tools::register_protocol(builder)
+        .build(context)
+        .expect("error while building tauri application");
+    // 退出兜底：直接退出应用不走逐窗销毁，L3 子进程必须在这里收口（C-10）。
+    // `App::run` 不返回（事件循环结束即进程退出），没有可 expect 的返回值。
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            tools::shutdown_all_processes(app_handle);
+        }
+    });
 }

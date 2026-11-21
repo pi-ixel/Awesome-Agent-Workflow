@@ -30,10 +30,11 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
@@ -49,8 +50,20 @@ use super::ToolsHost;
 pub const PROTOCOL: u32 = 1;
 
 /// 一个跑着的进程工具。
+///
+/// # 三个线程怎么分工（2026-11-22 重构，修死锁）
+///
+/// - **读线程**只读 stdout：要么把响应送进 `pending`，要么把工具的反向请求
+///   （`aaw.call` / `aaw.emit`）转交工作线程。它**绝不**直接处理反向请求——
+///   `aaw.call` 里可能有 `files.open`（阻塞式文件对话框），在读线程上处理会让
+///   stdout 停止排水，管道（64 KB）一旦写满，工具进程就被堵住，读写互相等死。
+/// - **工作线程**处理反向请求。阻塞多久都不影响读线程排水。
+/// - **写线程**独占 stdin。调用方通过 `write_tx` 排队（容量 16，5 秒排不上
+///   就按失败算），而不是拿着 `Mutex<ChildStdin>` 同步写——同步写在管道满时
+///   会永久阻塞，还把锁一起堵死。
 pub struct ProcessHandle {
-    stdin: Mutex<ChildStdin>,
+    /// 写入队列。真正的 `ChildStdin` 由写线程独占持有。
+    write_tx: mpsc::SyncSender<Value>,
     child: Mutex<Child>,
     /// 请求 id → 结果通道。
     pending: Arc<Mutex<HashMap<u64, mpsc::SyncSender<Result<Value, String>>>>>,
@@ -78,7 +91,7 @@ impl ProcessHandle {
             "method": "invoke",
             "params": { "action": action, "input": input },
         });
-        if let Err(error) = write_line(&self.stdin, &line) {
+        if let Err(error) = self.write_line(&line) {
             self.pending.lock().ok().map(|mut map| map.remove(&id));
             return Err(error);
         }
@@ -87,26 +100,66 @@ impl ProcessHandle {
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 self.pending.lock().ok().map(|mut map| map.remove(&id));
                 // 超时直接杀进程：它可能卡在死循环里，留着会一直吃 CPU。
-                if let Ok(mut child) = self.child.lock() {
-                    let _ = child.kill();
-                }
+                self.kill();
                 Err("工具动作执行超时（20 秒），已停止这个进程。".into())
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => Err("工具进程已退出。".into()),
         }
     }
-}
 
-fn write_line(stdin: &Mutex<ChildStdin>, value: &Value) -> Result<(), String> {
-    let mut guard = stdin.lock().map_err(|error| error.to_string())?;
-    let mut line = serde_json::to_vec(value).map_err(|error| error.to_string())?;
-    line.push(b'\n');
-    guard.write_all(&line).map_err(|error| format!("写不进工具进程：{error}"))?;
-    guard.flush().map_err(|error| format!("写不进工具进程：{error}"))
+    /// 把一条 JSON 写进工具进程的 stdin。**不持有 stdin**：写线程才是它的
+    /// 唯一主人，这里只是排队。5 秒排不上队＝工具没有在读输入，按失败算。
+    ///
+    /// 用 `try_send` 加截止时间而不是阻塞写：阻塞写在管道满时会永久挂起，
+    /// 还会把后面的调用一起堵在锁上。
+    fn write_line(&self, value: &Value) -> Result<(), String> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut pending = value.clone();
+        loop {
+            match self.write_tx.try_send(pending) {
+                Ok(()) => return Ok(()),
+                Err(mpsc::TrySendError::Disconnected(_)) => {
+                    return Err("写不进工具进程：工具进程已退出。".into());
+                }
+                Err(mpsc::TrySendError::Full(again)) => {
+                    pending = again;
+                    if Instant::now() >= deadline {
+                        return Err(
+                            "写不进工具进程（5 秒内没有排上队，工具可能已停止读取输入）。".into(),
+                        );
+                    }
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+            }
+        }
+    }
+
+    /// 结束子进程。
+    ///
+    /// **必须显式调用**：std 的 `Child` 没有 Drop 杀进程的语义，而读线程还
+    /// 持有本结构体的 Arc 克隆，指望"对象析构时顺手杀"只会得到孤儿进程。
+    /// 关窗、停止、退出应用都要走到这里（2026-11-22 修过一次全漏）。
+    pub fn kill(&self) {
+        if let Ok(mut child) = self.child.lock() {
+            let _ = child.kill();
+            // 收尸：不 wait 的话句柄与退出码会一直挂着。
+            let _ = child.wait();
+        }
+        if let Ok(mut broken) = self.broken.lock() {
+            if broken.is_none() {
+                *broken = Some("已被宿主停止。".into());
+            }
+        }
+    }
 }
 
 /// 拉起一个进程工具并完成 `initialize`。
-pub fn start(app: &AppHandle, tool_id: &str, dir: &std::path::Path, manifest: &ToolManifest) -> Result<Arc<ProcessHandle>, String> {
+pub fn start(
+    app: &AppHandle,
+    tool_id: &str,
+    dir: &std::path::Path,
+    manifest: &ToolManifest,
+) -> Result<Arc<ProcessHandle>, String> {
     let entry = manifest
         .runtime
         .as_ref()
@@ -133,8 +186,9 @@ pub fn start(app: &AppHandle, tool_id: &str, dir: &std::path::Path, manifest: &T
     let stdin = child.stdin.take().ok_or("拿不到进程 stdin。")?;
     let stdout = child.stdout.take().ok_or("拿不到进程 stdout。")?;
 
+    let (write_tx, write_rx) = mpsc::sync_channel::<Value>(16);
     let handle = Arc::new(ProcessHandle {
-        stdin: Mutex::new(stdin),
+        write_tx,
         child: Mutex::new(child),
         pending: Arc::new(Mutex::new(HashMap::new())),
         seq: AtomicU64::new(0),
@@ -142,11 +196,41 @@ pub fn start(app: &AppHandle, tool_id: &str, dir: &std::path::Path, manifest: &T
         broken: Mutex::new(None),
     });
 
-    // 读线程：响应送 pending，工具的反向请求就地处理。
+    // 写线程：独占 stdin。write_rx 一断（所有发送方都掉了）就退出。
+    // 管道写失败＝进程已死，退出前把"不再接收"留给 send_timeout 的
+    // Disconnected 分支去报，不在后台线程里打转。
+    std::thread::spawn(move || {
+        let mut stdin = stdin;
+        while let Ok(value) = write_rx.recv() {
+            let mut line = match serde_json::to_vec(&value) {
+                Ok(line) => line,
+                Err(_) => continue,
+            };
+            line.push(b'\n');
+            if stdin.write_all(&line).and_then(|()| stdin.flush()).is_err() {
+                break;
+            }
+        }
+    });
+
+    // 读线程：只排水。响应送 pending，反向请求转交工作线程。
     {
         let handle = handle.clone();
-        let app = app.clone();
-        let tool_id = tool_id.to_string();
+        let (worker_tx, worker_rx) =
+            mpsc::sync_channel::<(String, Value, Option<u64>)>(16);
+        let tool_id_log = tool_id.to_string();
+        // 工作线程：处理 `aaw.call` / `aaw.emit`。它阻塞（比如等用户选文件）
+        // 也不影响读线程排水——这正是读写分离的全部意义。
+        {
+            let handle = handle.clone();
+            let app = app.clone();
+            let tool_id = tool_id.to_string();
+            std::thread::spawn(move || {
+                while let Ok((method, params, id)) = worker_rx.recv() {
+                    answer(&app, &tool_id, &handle, id, &method, params);
+                }
+            });
+        }
         std::thread::spawn(move || {
             let reader = BufReader::new(stdout);
             for line in reader.lines() {
@@ -155,17 +239,36 @@ pub fn start(app: &AppHandle, tool_id: &str, dir: &std::path::Path, manifest: &T
                     continue;
                 }
                 let Ok(value) = serde_json::from_str::<Value>(&line) else {
-                    eprintln!("[aaw-tools] {tool_id} 输出了非 JSON 行：{}", &line[..line.len().min(200)]);
+                    eprintln!(
+                        "[aaw-tools] {tool_id_log} 输出了非 JSON 行：{}",
+                        &line[..line.len().min(200)]
+                    );
                     continue;
                 };
                 if let Some(method) = value.get("method").and_then(Value::as_str) {
-                    answer(&app, &tool_id, &handle, value.get("id").and_then(Value::as_u64), method, value.get("params").cloned().unwrap_or(json!({})));
+                    let id = value.get("id").and_then(Value::as_u64);
+                    let job = (
+                        method.to_string(),
+                        value.get("params").cloned().unwrap_or(json!({})),
+                        id,
+                    );
+                    // 一次 try_send，满了就明确拒绝：读循环绝不能等。
+                    if let Err(mpsc::TrySendError::Full(_)) = worker_tx.try_send(job.clone()) {
+                        eprintln!("[aaw-tools] {tool_id_log} 反向请求积压，已丢弃");
+                        if let Some(id) = job.2 {
+                            let _ = handle.write_line(
+                                &json!({ "id": id, "error": "宿主忙，这次反向调用没有执行。" }),
+                            );
+                        }
+                    }
                     continue;
                 }
                 let Some(id) = value.get("id").and_then(Value::as_u64) else { continue };
                 let outcome = match (value.get("result"), value.get("error")) {
                     (Some(result), _) => Ok(result.clone()),
-                    (None, Some(error)) => Err(error.as_str().unwrap_or("工具报告了错误。").to_string()),
+                    (None, Some(error)) => {
+                        Err(error.as_str().unwrap_or("工具报告了错误。").to_string())
+                    }
                     (None, None) => Ok(Value::Null),
                 };
                 let sender = handle.pending.lock().ok().and_then(|mut map| map.remove(&id));
@@ -187,13 +290,15 @@ pub fn start(app: &AppHandle, tool_id: &str, dir: &std::path::Path, manifest: &T
         });
     }
 
-    // initialize：5 秒内必须回来。
+    // initialize：5 秒内必须回来。**任何一条失败路径都要杀进程**——
+    // 返回 Err 并不代表进程会自己退（2026-11-22 之前，初始化被拒的工具会留下
+    // 一个活着但永远用不上的进程）。
     let id = handle.seq.fetch_add(1, Ordering::Relaxed) + 1;
     let (sender, receiver) = mpsc::sync_channel(1);
-    handle.pending.lock().map_err(|error| error.to_string())?.insert(id, sender);
-    write_line(
-        &handle.stdin,
-        &json!({
+    let spawned = handle.pending.lock().map_err(|error| error.to_string())?.insert(id, sender);
+    debug_assert!(spawned.is_none(), "initialize 的请求 id 不应撞车");
+    let write_result =
+        handle.write_line(&json!({
             "id": id,
             "method": "initialize",
             "params": {
@@ -201,8 +306,11 @@ pub fn start(app: &AppHandle, tool_id: &str, dir: &std::path::Path, manifest: &T
                 "capabilities": super::caps_capability_names(),
                 "tool": { "id": tool_id, "name": manifest.name },
             },
-        }),
-    )?;
+        }));
+    if let Err(error) = write_result {
+        handle.kill();
+        return Err(error);
+    }
     match receiver.recv_timeout(LIMITS.init_timeout) {
         Ok(Ok(value)) => {
             let actions = value
@@ -215,11 +323,12 @@ pub fn start(app: &AppHandle, tool_id: &str, dir: &std::path::Path, manifest: &T
             }
             Ok(handle)
         }
-        Ok(Err(error)) => Err(format!("工具拒绝初始化：{error}")),
+        Ok(Err(error)) => {
+            handle.kill();
+            Err(format!("工具拒绝初始化：{error}"))
+        }
         Err(_) => {
-            if let Ok(mut child) = handle.child.lock() {
-                let _ = child.kill();
-            }
+            handle.kill();
             Err("工具进程 5 秒内没有回应 initialize。".into())
         }
     }
@@ -241,7 +350,9 @@ fn answer(
     match method {
         "aaw.emit" => {
             let topic = params.get("topic").and_then(Value::as_str).unwrap_or("");
-            if !topic.is_empty() {
+            // 与页面载体的 bus.emit 同一套规则：字符数，不是字节数
+            // （中文按字节算会凭空多出三倍，合法主题被误拒）。
+            if !topic.is_empty() && topic.chars().count() <= 200 {
                 app.state::<ToolsHost>()
                     .bus()
                     .emit(topic, params.get("payload").cloned().unwrap_or(Value::Null));
@@ -266,14 +377,12 @@ fn answer(
                     "error": payload.get("error").cloned().unwrap_or(Value::Null),
                 },
             });
-            let _ = write_line(&handle.stdin, &reply);
+            let _ = handle.write_line(&reply);
         }
         other => {
             if let Some(id) = id {
-                let _ = write_line(
-                    &handle.stdin,
-                    &json!({ "id": id, "error": format!("宿主不支持这个方法：{other}") }),
-                );
+                let _ = handle
+                    .write_line(&json!({ "id": id, "error": format!("宿主不支持这个方法：{other}") }));
             }
         }
     }
@@ -283,6 +392,11 @@ fn answer(
 pub fn open(app: &AppHandle, tool_id: &str, dir: &std::path::Path, manifest: &ToolManifest) -> Result<(), String> {
     let host = app.state::<ToolsHost>();
     let handle = start(app, tool_id, dir, manifest)?;
+    // 上次打开可能留了残留：窗口没建成（open_page_window 返回 Err）时进程已经
+    // 登记在表里，没人会再来杀它。不清理的话，每重开一次就多一个孤儿进程。
+    if let Some(old) = host.take_process(tool_id) {
+        old.kill();
+    }
     host.insert_process(tool_id, handle)?;
     // 进程工具也可以有界面：页面照常加载，动作走进程。
     super::open_page_window(app, tool_id, dir, manifest, "process")
