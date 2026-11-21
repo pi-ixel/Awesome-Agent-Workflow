@@ -217,7 +217,6 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
   await expect(task).toHaveAttribute("aria-current", "true");
   const nav = collections.getByRole("navigation", { name: "插件管理" });
   const skills = nav.getByRole("button", { name: "技能", exact: true });
-  const trash = nav.getByRole("button", { name: "回收站", exact: true });
   await expect(skills).toHaveAttribute("aria-current", "page");
   const title = "发布准备和回滚预案的完整审查";
   const card = collections.getByRole("article", { name: title });
@@ -236,7 +235,7 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
     await expect(detail).not.toHaveCSS("box-shadow", "none");
     const bounds = (await card.boundingBox())!;
     const actions = (await card
-      .getByRole("button", { name: "更多" })
+      .getByRole("button", { name: `${title} 更多操作` })
       .boundingBox())!;
     expect((await detail.boundingBox())!.width).toBeGreaterThan(140);
     expect(actions.x + actions.width).toBeLessThanOrEqual(
@@ -248,10 +247,10 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "关闭技能详情" }).click();
   await expect(detail).toBeFocused();
-  await trash.press("Enter");
-  await expect(trash).toHaveAttribute("aria-current", "page");
+  await collections.getByRole("combobox", { name: "技能状态" }).click();
+  await collections.getByRole("option", { name: "已停用" }).click();
   await expect(
-    collections.getByRole("button", { name: "选择 旧版发布检查" }),
+    collections.getByRole("switch", { name: "旧版发布检查 启用" }),
   ).toBeVisible();
 });
 

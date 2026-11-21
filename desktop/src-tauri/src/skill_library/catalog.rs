@@ -246,7 +246,8 @@ pub(super) fn list(loc: &Locations, query: &Query) -> Result<Catalog> {
             result.warnings.push(format!("使用记录读取失败 · {e}"));
         }
     }
-    result.trash = changes::trash_items(loc, query.provider, &mut result.warnings)?;
+    result.trash =
+        changes::trash_items(loc, query.provider, &result.sources, &mut result.warnings)?;
     Ok(result)
 }
 

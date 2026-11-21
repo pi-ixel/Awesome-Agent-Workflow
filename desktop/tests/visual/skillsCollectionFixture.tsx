@@ -10,7 +10,7 @@ import type {
   SkillCatalog,
 } from "../../src/plugins/host/types.ts";
 
-export async function createSkillsCollection() {
+export async function createSkillsCollection(isPreview = false) {
   const ctx = new Context();
   const skills = createTestSkills();
   const { workbench, Wrapper } = skillsWorkbenchFixture(skills);
@@ -40,7 +40,7 @@ export async function createSkillsCollection() {
       modifiedAt: Date.UTC(2026, 10, 19, 6, 30),
     });
   };
-  const catalog: SkillCatalog = {
+  let catalog: SkillCatalog = {
     profile: null,
     profiles: [],
     sources: [
@@ -58,7 +58,8 @@ export async function createSkillsCollection() {
         name,
         source,
         path: source + "/review",
-        description: "审查发布准备",
+        description:
+          "审查发布准备、核对安装包和离线发布说明，并逐项验证升级路径和生产环境回滚预案。",
         realPath: source + "/review",
         preview,
         status: "正常",
@@ -72,12 +73,76 @@ export async function createSkillsCollection() {
       {
         id: "old",
         name: "旧版发布检查",
+        source,
+        project,
         path: source + "/old",
         description: "已替换",
         kind: "directory",
       },
     ],
     warnings: [],
+  };
+  const sample = catalog.entries[0]!;
+  if (isPreview) {
+    catalog.entries.push(
+      ...[
+        ["代码审查", "核查改动、风险与回归测试。"],
+        ["架构盘点", "梳理当前模块边界、入口、状态所有权与链路依赖。"],
+        ["接口文档", "生成和验证接口示例。"],
+        ["测试补齐", "从异常路径、历史数据和用户操作中补齐测试。"],
+        ["发布说明", "按版本归纳变更与升级步骤。"],
+      ].map(([name, description], index) => {
+        const path = source + "/example-" + index;
+        return {
+          ...sample,
+          name: name!,
+          description: description!,
+          path,
+          realPath: path,
+        };
+      }),
+    );
+  }
+  const change: NativeSkillLibrary["change"] = (_query, action) => {
+    if (action.type === "delete") {
+      const entry = catalog.entries.find(
+        (item) => item.path === action.items[0]?.path,
+      );
+      if (entry)
+        catalog = {
+          ...catalog,
+          entries: catalog.entries.filter((item) => item !== entry),
+          trash: [...catalog.trash, { ...entry, id: entry.path, project }],
+        };
+      return Promise.resolve(["已停用"]);
+    }
+    if (action.type === "restore") {
+      const entry = catalog.trash.find((item) => item.id === action.ids[0]);
+      if (entry)
+        catalog = {
+          ...catalog,
+          entries: [
+            ...catalog.entries,
+            { ...sample, ...entry, source, realPath: entry.path },
+          ],
+          trash: catalog.trash.filter((item) => item !== entry),
+        };
+      return Promise.resolve(["已恢复"]);
+    }
+    if (action.type === "deletePermanent") {
+      catalog = {
+        ...catalog,
+        entries: catalog.entries.filter(
+          (item) => item.path !== action.item.path,
+        ),
+      };
+    } else if (action.type === "purge") {
+      catalog = {
+        ...catalog,
+        trash: catalog.trash.filter((item) => !action.ids.includes(item.id)),
+      };
+    }
+    return Promise.resolve(["已永久删除"]);
   };
 
   ctx.provide("workbench", workbench);
@@ -104,7 +169,7 @@ export async function createSkillsCollection() {
       library: {
         list: () => Promise.resolve(catalog),
         candidates: () => Promise.resolve([]),
-        change: () => Promise.resolve([]),
+        change,
         files,
       },
     },
@@ -120,8 +185,19 @@ export async function createSkillsCollection() {
   return function SkillsCollection() {
     return (
       <Wrapper>
-        <View project={project} />
-        <WorkArea project={project} />
+        {isPreview ? (
+          <div className="grid min-h-screen bg-base md:grid-cols-[10rem_minmax(0,1fr)]">
+            <aside className="border-line bg-sidebar md:border-r">
+              <View project={project} />
+            </aside>
+            <WorkArea project={project} />
+          </div>
+        ) : (
+          <>
+            <View project={project} />
+            <WorkArea project={project} />
+          </>
+        )}
       </Wrapper>
     );
   };

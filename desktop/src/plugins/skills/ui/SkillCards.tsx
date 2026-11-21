@@ -1,11 +1,11 @@
 import { type ReactNode } from "react";
 import type { NativeSkill } from "../../host/types.ts";
 import { pathName } from "../../../shared/panelPaths.ts";
-import { ActionButton, DangerButton, focusVisibleRing } from "../../../shared/ui/controls.tsx";
+import { ActionButton, ToggleSwitch } from "../../../shared/ui/controls.tsx";
+import { CapabilityCard } from "../../../shared/ui/CapabilityCard.tsx";
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
 import { useMenuController } from "../../../shared/ui/useMenuController.ts";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
-import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { useFeedback } from "../../../shared/ui/feedback.ts";
 import {
   CopyIcon,
@@ -58,7 +58,7 @@ export function SkillGroup({
           {entries.length} 项
         </span>
       </h2>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(21.5rem,100%),1fr))] gap-3">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(14rem,100%),1fr))] gap-2.5">
         {children}
       </div>
     </section>
@@ -66,19 +66,18 @@ export function SkillGroup({
 }
 export interface Actions {
   open: (skill: NativeSkill) => void;
-  remove: (skill: NativeSkill) => void;
+  remove: (skill: NativeSkill, opener: HTMLButtonElement) => void;
+  toggle: (skill: NativeSkill) => void;
   busy: boolean;
 }
+
 export function ActionsRow({
   skill,
   actions,
-  onDetail,
 }: {
   skill: NativeSkill;
   actions: Actions;
-  onDetail?: (button: HTMLButtonElement) => void;
 }) {
-  const { menu, open, dismiss } = useMenuController();
   const notify = useFeedback();
   async function copyPath() {
     try {
@@ -96,176 +95,109 @@ export function ActionsRow({
       });
     }
   }
-  const openLabel = skill.kind === "inline" ? "定位配置" : "打开目录";
-  const glyphSize = "ui-icon-16";
-  const openIcon = <FolderGlyph className={glyphSize} isExpanded={false} />;
-  const copyIcon = <CopyIcon className={glyphSize} />;
-  const removeIcon = <TrashIcon className={glyphSize} />;
-  if (onDetail) {
-    const iconButton = `flex min-w-7 items-center justify-center rounded-md py-1.5 focus-visible:ring-inset disabled:opacity-50 ${focusVisibleRing}`;
-    return (
-      <div className="flex shrink-0 items-center gap-0.5 pr-2 text-ink-mute">
-        <IconButton
-          aria-label="移入回收站"
-          data-hint="移入回收站"
-          className={iconButton + " hover:bg-danger-bg hover:text-danger-ink"}
-          disabled={actions.busy}
-          onClick={() => actions.remove(skill)}
-        >
-          {removeIcon}
-        </IconButton>
-        <IconButton
-          aria-label="更多"
-          data-hint="更多"
-          aria-haspopup="menu"
-          aria-expanded={!!menu && !menu.closing}
-          className={iconButton + " hover:bg-hover hover:text-ink"}
-          onClick={(event) => {
-            const anchor = event.currentTarget;
-            if (menu && !menu.closing) {
-              dismiss();
-              return;
-            }
-            open(
-              "actions",
-              skill.name + " 的操作",
-              [
-                {
-                  id: "detail",
-                  label: "详情",
-                  icon: <FileIcon className={glyphSize} />,
-                  onSelect: () => onDetail(anchor),
-                },
-                {
-                  id: "open",
-                  label: "打开目录",
-                  icon: openIcon,
-                  onSelect: () => actions.open(skill),
-                },
-                {
-                  id: "copy",
-                  label: "复制路径",
-                  icon: copyIcon,
-                  onSelect: () => void copyPath(),
-                },
-              ],
-              { trigger: anchor },
-            );
-          }}
-        >
-          <EllipsisIcon className={glyphSize} />
-        </IconButton>
-        {menu && (
-          <ContextMenu
-            entries={menu.entries}
-            placement={menu.placement}
-            trigger={menu.trigger}
-            label={menu.label}
-            closing={menu.closing}
-            onDismiss={dismiss}
-          />
-        )}
-      </div>
-    );
-  }
-  const button =
-    "flex items-center gap-2.5 px-2 py-1.5 text-left";
+  const button = "flex items-center gap-2.5 px-2 py-1.5 text-left";
   return (
     <div className="flex shrink-0 flex-wrap gap-1 border-t border-line pt-2 text-ui-sm sm:flex-col">
-      <ActionButton tone="ghost" className={button} onClick={() => void copyPath()}>
-        {copyIcon}复制路径
-      </ActionButton>
-      <ActionButton tone="ghost" className={button} onClick={() => actions.open(skill)}>
-        {openIcon}
-        {openLabel}
-      </ActionButton>
-      <DangerButton
+      <ActionButton
+        tone="ghost"
         className={button}
-        disabled={actions.busy}
-        onClick={() => actions.remove(skill)}
+        onClick={() => void copyPath()}
       >
-        {removeIcon}
-        移入回收站
-      </DangerButton>
+        <CopyIcon className="ui-icon-16" />
+        复制路径
+      </ActionButton>
+      {!skill.disabledId && (
+        <ActionButton
+          tone="ghost"
+          className={button}
+          onClick={() => actions.open(skill)}
+        >
+          <FolderGlyph className="ui-icon-16" isExpanded={false} />
+          {skill.kind === "inline" ? "定位配置" : "打开目录"}
+        </ActionButton>
+      )}
     </div>
   );
 }
-function SkillCardIcon() {
-  return (
-    <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-line text-ink-mute">
-      <SkillIcon className="ui-icon-16" />
-    </span>
-  );
-}
 
-export function SelectableSkillCard({
-  name,
-  description,
-  selected,
-  onToggle,
-}: {
-  name: string;
-  description: string;
-  selected: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <NavigationRow
-      layout="compound"
-      type="button"
-      aria-label={`选择 ${name}`}
-      aria-pressed={selected}
-      data-hint={description?.trim() || undefined}
-      onClick={onToggle}
-      className="flex min-h-[50px] min-w-0 items-center gap-2 overflow-hidden rounded-2xl border border-line bg-surface px-3.5 text-left transition-colors hover:border-line-strong aria-pressed:border-ink aria-pressed:bg-selected aria-pressed:ring-1 aria-pressed:ring-inset aria-pressed:ring-ink focus-visible:ring-focus-ring!"
-    >
-      <SkillCardIcon />
-      <span className="min-w-0 flex-1 truncate text-ui-base font-semibold">
-        {name}
-      </span>
-    </NavigationRow>
-  );
-}
 export function SkillCard({
   skill,
   actions,
   onDetail,
-  reviewLabel,
+  status,
 }: {
   skill: NativeSkill;
   actions: Actions;
   onDetail: (button: HTMLButtonElement) => void;
-  reviewLabel?: string;
+  status?: string;
 }) {
-  const needsReview = !["正常", "配置内定义"].includes(skill.status);
+  const { menu, open, dismiss } = useMenuController();
   return (
-    <article
-      aria-label={skill.name}
-      data-hint={skill.description || undefined}
-      className="flex min-h-[50px] min-w-0 items-stretch overflow-hidden rounded-xl border border-line bg-surface transition-colors hover:border-line-strong focus-within:border-line-strong"
-    >
-      <div className="flex min-w-0 flex-1 items-stretch">
-        <NavigationRow
-          layout="compound"
-          className="items-center gap-2 px-3.5 py-1.5 leading-tight hover:bg-surface-hover"
-          aria-label={`查看 ${skill.name} 详情`}
-          onClick={(event) => onDetail(event.currentTarget)}
-        >
-          <SkillCardIcon />
-          <span className="line-clamp-2 min-w-0 flex-1 break-words text-ui-base font-semibold">
-            {skill.name}
-          </span>
-          {needsReview && (
-            <span
-              className="max-w-[45%] shrink-0 truncate text-ui-xs text-danger-ink"
-              data-hint={reviewLabel ? skill.status : undefined}
-            >
-              {reviewLabel ?? "待检查"}
-            </span>
+    <CapabilityCard
+      name={skill.name}
+      description={skill.description}
+      status={status}
+      icon={<SkillIcon className="ui-icon-16" />}
+      onDetail={onDetail}
+      actions={
+        <>
+          <ToggleSwitch
+            appearance="neutral"
+            label={skill.name + " 启用"}
+            checked={!skill.disabledId}
+            disabled={actions.busy || !!skill.unavailable}
+            onChange={() => actions.toggle(skill)}
+          />
+          <IconButton
+            aria-label={skill.name + " 更多操作"}
+            data-hint="更多操作"
+            aria-haspopup="menu"
+            aria-expanded={!!menu && !menu.closing}
+            className="rounded-md text-ink-mute hover:bg-hover hover:text-ink"
+            disabled={actions.busy}
+            onClick={(event) => {
+              const anchor = event.currentTarget;
+              if (menu && !menu.closing) {
+                dismiss();
+                return;
+              }
+              open(
+                "actions",
+                skill.name + " 的操作",
+                [
+                  {
+                    id: "detail",
+                    label: "查看详情",
+                    icon: <FileIcon className="ui-icon-16" />,
+                    onSelect: () => onDetail(anchor),
+                  },
+                  {
+                    id: "remove",
+                    label: "删除",
+                    icon: <TrashIcon className="ui-icon-16" />,
+                    danger: true,
+                    disabled: !!skill.unavailable,
+                    onSelect: () => actions.remove(skill, anchor),
+                  },
+                ],
+                { trigger: anchor },
+              );
+            }}
+          >
+            <EllipsisIcon className="ui-icon-16" />
+          </IconButton>
+          {menu && (
+            <ContextMenu
+              entries={menu.entries}
+              placement={menu.placement}
+              trigger={menu.trigger}
+              label={menu.label}
+              closing={menu.closing}
+              onDismiss={dismiss}
+            />
           )}
-        </NavigationRow>
-      </div>
-      <ActionsRow skill={skill} actions={actions} onDetail={onDetail} />
-    </article>
+        </>
+      }
+    />
   );
 }

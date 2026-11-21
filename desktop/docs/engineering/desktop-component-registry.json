@@ -897,9 +897,7 @@
   "plugins/skills/ui/SkillCards.tsx": {
     "definitions": {
       "命令按钮": ["ActionsRow"],
-      "选择控件": ["SelectableSkillCard"],
       "布局与操纵": ["SkillCard"],
-      "图标与内容标识": ["SkillCardIcon"],
       "导航与列表": ["SkillGroup"]
     },
     "targets": []
@@ -945,8 +943,6 @@
     },
     "targets": [
       "apply/Installer → (inline)",
-      "apply/Sidebar/Icon → shared/ui/icons.tsx#SkillIcon",
-      "apply/Sidebar/Icon → shared/ui/icons.tsx#TrashIcon",
       "apply/Source → (inline)",
       "apply/sidebar/\"plugin-management\"/Icon → shared/ui/icons.tsx#PuzzleIcon",
       "apply/sidebar/\"plugin-management\"/View → plugins/skills/ui/workbench.tsx#apply/Sidebar",
@@ -1376,6 +1372,12 @@
   "shared/ui/ConfirmIconAction.tsx": {
     "definitions": {
       "提示与确认": ["ConfirmIconAction"]
+    },
+    "targets": []
+  },
+  "shared/ui/CapabilityCard.tsx": {
+    "definitions": {
+      "布局与操纵": ["CapabilityCard"]
     },
     "targets": []
   },

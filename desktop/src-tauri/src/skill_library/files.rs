@@ -10,6 +10,7 @@ pub struct Selection {
     source: PathBuf,
     path: PathBuf,
     real_path: PathBuf,
+    disabled_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -117,6 +118,10 @@ fn is_link(meta: &fs::Metadata) -> bool {
     meta.file_type().is_symlink()
 }
 
+pub(super) fn is_link_metadata(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|meta| is_link(&meta))
+}
+
 fn checked_metadata(path: &Path, directory: bool) -> Result<fs::Metadata> {
     let info = fs::symlink_metadata(path)?;
     if is_link(&info) {
@@ -194,7 +199,10 @@ pub(super) fn browse(
     skill: &Selection,
     request: Request,
 ) -> Result<Response> {
-    let root = skill_root(loc, query, skill)?;
+    let root = match &skill.disabled_id {
+        Some(id) => changes::disabled_root(loc, query, id)?,
+        None => skill_root(loc, query, skill)?,
+    };
     let (relative, directory) = match request {
         Request::Directory { path } => (path, true),
         Request::Read { path } => (path, false),
