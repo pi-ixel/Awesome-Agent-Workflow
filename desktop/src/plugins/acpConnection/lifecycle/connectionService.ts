@@ -1,4 +1,5 @@
 import type { AcpConnectionPort } from "../types.ts";
+import type { AcpDiagnosticPrivacy } from "../../../contracts/acp/diagnosticPrivacy.ts";
 import { ACP_CONNECTION_POOL_SIZE } from "../types.ts";
 import type { AcpConnectionService } from "../service.ts";
 import type { HostService } from "../../host/service.ts";
@@ -95,7 +96,7 @@ export class DesktopAcpConnection implements AcpConnectionService {
   private get physicalCount(): number {
     return this.transports.size + this.unbudgeted.size + this.opening;
   }
-  createConnection(transport: AcpTransport, capacity: number): AcpConnection {
+  createConnection(transport: AcpTransport, capacity: number, diagnosticPrivacy?: AcpDiagnosticPrivacy): AcpConnection {
     if (this.stopping) throw new Error("ACP base is stopping");
     if (transport.isClosed) throw new AcpClosedError("ACP 进程已退出");
     const isBudgeted =
@@ -106,7 +107,7 @@ export class DesktopAcpConnection implements AcpConnectionService {
     const connection = new AcpConnection(
       transport,
       capacity,
-      this.logging,
+      { ...this.logging, diagnosticPrivacy },
       () => {
         this.connections.delete(connection);
         this.unbudgeted.delete(connection);

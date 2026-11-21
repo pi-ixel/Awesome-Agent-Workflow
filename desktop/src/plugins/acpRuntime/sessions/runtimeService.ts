@@ -45,9 +45,9 @@ export class DesktopAcpRuntime {
     };
   }
 
-  createProbeLease: AgentProbeSessionFactory = (transport, capacity, options) => {
+  createProbeLease: AgentProbeSessionFactory = (transport, capacity, options, diagnosticPrivacy) => {
     if (this.stopping) throw new Error("ACP runtime is stopping");
-    const connection = this.base.createConnection(transport, capacity);
+    const connection = this.base.createConnection(transport, capacity, diagnosticPrivacy);
     return {
       openSession: () => createAcpSession(connection, options, this.logger),
       release: (force) => this.base.releaseConnection(connection, force),

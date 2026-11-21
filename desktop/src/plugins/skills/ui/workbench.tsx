@@ -1,7 +1,8 @@
 import type { Context } from "cordis";
+import type { ComponentType } from "react";
 import { SkillLibrary } from "./SkillLibrary.tsx";
-import { useStore } from "zustand";
-import { PuzzleIcon, SkillIcon } from "../../../shared/ui/icons.tsx";
+import { createStore, useStore } from "zustand";
+import { GlobeIcon, PuzzleIcon, SkillIcon } from "../../../shared/ui/icons.tsx";
 import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { knownWorkspacePaths } from "../../project/service.ts";
 import type { SkillsSettingsView } from "../types.ts";
@@ -34,13 +35,47 @@ export function apply(ctx: Context): void {
   ctx.provide("skillsUi", view);
   ctx.inject(["project", "agents", "host"], (ctx) => {
     const { project, agents, host } = ctx;
+    const navigation = createStore<{
+      page: "skills" | "mcp";
+      McpPage: ComponentType | null;
+    }>(() => ({ page: "skills", McpPage: null }));
+    ctx.inject(["mcp"], (ctx) => {
+      const { mcp } = ctx;
+      ctx.effect(() => {
+        navigation.setState({ McpPage: mcp.View });
+        return () =>
+          navigation.setState(({ page }) => ({
+            page: page === "mcp" ? "skills" : page,
+            McpPage: null,
+          }));
+      }, "skills:mcp-page");
+    });
     function Sidebar() {
+      const { page, McpPage } = useStore(navigation);
       return (
         <nav aria-label="插件管理" className="space-y-1 p-3">
-          <NavigationRow aria-current="page" className="font-semibold text-ink">
-            <SkillIcon className="ui-icon-16" />
-            技能
-          </NavigationRow>
+          {(
+            [
+              { label: "技能", Icon: SkillIcon, id: "skills" },
+              { label: "MCP", Icon: GlobeIcon, id: "mcp" },
+            ] as const
+          )
+            .filter(({ id }) => id !== "mcp" || McpPage)
+            .map(({ label, Icon, id }) => (
+              <NavigationRow
+                key={label}
+                aria-current={page === id ? "page" : undefined}
+                onClick={() => navigation.setState({ page: id })}
+                className={
+                  page === id
+                    ? "font-semibold text-ink"
+                    : "text-ink-mute hover:text-ink"
+                }
+              >
+                <Icon className="ui-icon-16" />
+                {label}
+              </NavigationRow>
+            ))}
         </nav>
       );
     }
@@ -54,8 +89,10 @@ export function apply(ctx: Context): void {
         Icon: PuzzleIcon,
         View: Sidebar,
         WorkArea: function SkillsWorkArea() {
+          const { page, McpPage } = useStore(navigation);
           const configuration = useStore(agents.configuration);
           const adapter = agents.resolve(configuration.activeAgentId);
+          if (page === "mcp" && McpPage) return <McpPage />;
           if (!adapter?.skillLibrary) {
             return (
               <section

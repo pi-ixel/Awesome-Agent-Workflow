@@ -199,7 +199,7 @@ describe("会话生命周期", () => {
     expect(newRequest?.params.mcpServers).toEqual([]);
   });
 
-  it("创建和恢复会话均传递 HTTP MCP 配置", async () => {
+  it("创建和恢复会话合并默认和附加 MCP，并保留同名默认项", async () => {
     const mcpServers = [
       {
         type: "http" as const,
@@ -208,13 +208,20 @@ describe("会话生命周期", () => {
         headers: [{ name: "Authorization", value: "Bearer example" }],
       },
     ];
+    const extra = {
+      type: "http" as const,
+      name: "project-tools",
+      url: "http://127.0.0.1:1234/mcp",
+      headers: [],
+    };
+    const attached = [extra, { ...extra, name: "knowledge" }];
     const { session, agent } = makeSession({ mcpServers });
     await session.initialize();
-    await session.newSession("D:/work");
-    await session.loadSession("echo-1", "D:/work");
+    await session.newSession("D:/work", { mcpServers: attached });
+    await session.loadSession("echo-1", "D:/work", { mcpServers: attached });
     for (const method of ["session/new", "session/load"]) {
       const request = agent.receivedRequests.find((r) => r.method === method);
-      expect(request?.params.mcpServers).toEqual(mcpServers);
+      expect(request?.params.mcpServers).toEqual([...mcpServers, extra]);
     }
   });
 

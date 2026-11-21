@@ -54,6 +54,17 @@
     "专用渲染依赖 · @codemirror/search",
     "专用渲染依赖 · @codemirror/view"
   ],
+  "plugins/mcp/ui/McpView.tsx": ["McpView · <input>"],
+  "plugins/mcp/ui/McpEditor.tsx": [
+    "HeadersEditor · <input>",
+    "HeadersEditor · <input>",
+    "McpEditor · <input>",
+    "McpEditor · <input>",
+    "McpEditor · <input>",
+    "McpEditor · <input>",
+    "McpEditor · <textarea>",
+    "McpEditor · <textarea>"
+  ],
   "plugins/project/conversation/ui/AnnotationCards.tsx": [
     "AnnotationCards · <textarea>"
   ],

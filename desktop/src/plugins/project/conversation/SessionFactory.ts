@@ -1,4 +1,4 @@
-import type { McpServer } from "../../../contracts/acp/protocol.ts";
+import type { SessionToolsResolution } from "../sessions/sessionTools.ts";
 import type { HistoryEvidence } from "../../host/types.ts";
 import { withDeadline } from "../../../shared/asyncDeadline.ts";
 import {
@@ -40,7 +40,7 @@ export class SessionFactory {
     private readonly tools: (
       runtime: SessionRuntime,
       sessionId: string | null,
-    ) => Promise<readonly McpServer[]> = () => Promise.resolve([]),
+    ) => Promise<SessionToolsResolution> = () => Promise.resolve({ servers: [], establish: () => {} }),
   ) {
     this.logger = loggerFactory("session-factory");
   }
@@ -59,15 +59,14 @@ export class SessionFactory {
     const task = Promise.resolve()
       .then(async () => {
         this.assertCurrent(runtime, session);
-        const mcpServers = await this.tools(runtime, null);
+        const { servers: mcpServers, establish } = await this.tools(runtime, null);
         this.assertCurrent(runtime, session);
-        return session.newSession(
+        const result = await session.newSession(
           runtime.cwd ?? runtime.workspacePath,
           mcpServers.length ? { mcpServers } : undefined,
         );
-      })
-      .then((result) => {
         this.assertCurrent(runtime, session);
+        establish(result.sessionId);
         return result;
       })
       .finally(() => {
@@ -205,7 +204,7 @@ export class SessionFactory {
         store.handleEvent(event);
       }
       store.sealStreamingItems();
-      const mcpServers = await this.tools(runtime, sessionId);
+      const { servers: mcpServers, establish } = await this.tools(runtime, sessionId);
       check();
       await session.loadSession(
         sessionId,
@@ -213,6 +212,7 @@ export class SessionFactory {
         mcpServers.length ? { mcpServers } : undefined,
       );
       check();
+      establish(sessionId);
       unsubscribe();
       unsubscribe = undefined;
       store.sealStreamingItems();

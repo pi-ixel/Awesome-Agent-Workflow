@@ -4,6 +4,7 @@ import type {
   ConfigurationScope,
 } from "../../configuration/types.ts";
 import type { AgentsService } from "../service.ts";
+import type { AgentExtensionClient } from "../../../contracts/mcp/management.ts";
 import type { AgentProtocolCheckOptions } from "../types.ts";
 import type { AgentProbeSessionFactory } from "../probe/types.ts";
 import type {
@@ -110,6 +111,7 @@ export class DesktopAgents implements AgentsService {
       scan: this.scan.bind(this),
       registerProbeSessions: this.registerProbeSessions.bind(this),
       testConnection: this.testConnection.bind(this),
+      runMcpExtension: this.runMcpExtension.bind(this),
       runProtocolCheck: this.runProtocolCheck.bind(this),
       shutdown: this.shutdown.bind(this),
     };
@@ -306,7 +308,46 @@ export class DesktopAgents implements AgentsService {
       testAgentConnection(adapter, { ...resources, executablePath: executable, onStep }),
     );
   }
-  async runProtocolCheck(id: string, options: AgentProtocolCheckOptions): Promise<void> {
+  runMcpExtension<T>(
+    id: string,
+    toolPaths: object,
+    run: (client: AgentExtensionClient) => Promise<T>,
+  ): Promise<T> {
+    const adapter = this.resolve(id);
+    if (!adapter?.mcpManagement)
+      return Promise.reject(new Error("此 Agent 暂未提供 MCP 管理"));
+    return this.withProbe(async (resources) => {
+      const launch = this.buildLaunch(adapter, toolPaths, null);
+      const transport = await resources.createTransport(launch, adapter);
+      if (!transport) throw new Error("无法启动 Agent");
+      const lease = resources.createLease(
+        transport,
+        adapter.maxConcurrentRequests ?? 1,
+        {
+          clientInfo: adapter.clientInfo,
+          requestTimeoutMs: 15_000,
+        },
+        adapter.diagnosticPrivacy,
+      );
+      try {
+        const session = lease.openSession();
+        const handshake = await session.initialize();
+        const request = session.requestAgentExtension?.bind(session);
+        if (!request) throw new Error("当前 ACP 连接不支持扩展请求");
+        return await run({
+          capabilities: handshake.agentCapabilities,
+          request: (method, params) => request(method, params, 15_000),
+        });
+      } finally {
+        await lease.release();
+      }
+    });
+  }
+
+  async runProtocolCheck(
+    id: string,
+    options: AgentProtocolCheckOptions,
+  ): Promise<void> {
     if (this.lifecycle.signal.aborted) return;
     const adapter = this.resolve(id);
     const report = this.probeReports.getState();

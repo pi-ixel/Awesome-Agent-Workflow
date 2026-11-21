@@ -175,20 +175,25 @@ export function createSessionCoordinator({
   const toolsFor = async (
     runtime: SessionRuntime,
     sessionId: string | null,
+    session = runtime.session,
   ) => {
+    const explicit = runtime.openTools?.(session.agentInfo) ?? [];
+    const resolved = await sessionTools.resolve({
+      workspacePath: runtime.workspacePath,
+      agentKey: runtime.agentKey,
+      agentId: runtime.adapter.id,
+      sessionId,
+      agent: session.agentInfo,
+      requestExtension: session.requestAgentExtension?.bind(session),
+    });
     const tools = [
-      ...(runtime.openTools?.(runtime.session.agentInfo) ?? []),
-      ...(await sessionTools.resolve({
-        workspacePath: runtime.workspacePath,
-        agentKey: runtime.agentKey,
-        sessionId,
-        agent: runtime.session.agentInfo,
-      })),
+      ...explicit,
+      ...resolved.servers,
     ];
-    return tools.filter(
+    return { ...resolved, servers: tools.filter(
       (tool, index) =>
         tools.findIndex((other) => other.name === tool.name) === index,
-    );
+    ) };
   };
   /** 会话原始事件的订阅方（按会话）。 */
   const eventWatchers = new Map<
@@ -646,22 +651,12 @@ export function createSessionCoordinator({
       release: releaseSessionResources,
       recoverConnection: recoverSessionResources,
       restore: async (session, options) => {
-        const tools = [
-          ...(runtime.openTools?.(session.agentInfo) ?? []),
-          ...(await sessionTools.resolve({
-            workspacePath: runtime.workspacePath,
-            agentKey: runtime.agentKey,
-            sessionId: options.sessionId,
-            agent: session.agentInfo,
-          })),
-        ];
-        return getProtocol().restore(session, {
+        const resolved = await toolsFor(runtime, options.sessionId, session);
+        await getProtocol().restore(session, {
           ...options,
-          mcpServers: tools.filter(
-            (tool, index) =>
-              tools.findIndex((other) => other.name === tool.name) === index,
-          ),
+          mcpServers: resolved.servers,
         });
+        if (options.isCurrent()) resolved.establish(options.sessionId);
       },
       prepare: (retained, isCurrent) =>
         prepareRuntime(

@@ -163,6 +163,11 @@ export type SessionSetupOptions = SessionRequestOptions & {
 
 /** One normalized ACP session. The runtime owns the underlying channel. */
 export interface AcpSessionPort {
+  requestAgentExtension?(
+    method: string,
+    params?: Readonly<Record<string, unknown>>,
+    timeoutMs?: number,
+  ): Promise<unknown>;
   readonly sessionId: string | null;
   readonly configOptions: readonly SessionConfigOption[];
   readonly models: NewSessionResult["models"];

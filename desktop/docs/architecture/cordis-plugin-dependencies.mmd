@@ -13,6 +13,7 @@ flowchart TB
     terminal["terminal<br/>终端"]
     workflow["workflow<br/>AAW 工作流"]
     skills["skills<br/>技能"]
+    mcp["mcp<br/>MCP 配置与注入"]
     account["account<br/>账户"]
     updates["updates<br/>更新"]
     browser["browser<br/>内嵌浏览器"]
@@ -69,6 +70,10 @@ flowchart TB
   skills --> agents
   skills --> configuration
   skills --> diagnostics
+  mcp --> host
+  mcp --> agents
+  mcp --> project
+  mcp --> diagnostics
   account --> host
   account --> configuration
   account --> diagnostics
@@ -97,6 +102,7 @@ flowchart TB
   workflow -. "UI 注册" .-> workbench
   skills -. "UI 注册" .-> workbench
   skills -. "技能页读取项目目录" .-> project
+  skills -. "插件管理显示 MCP 页" .-> mcp
   account -. "UI 注册" .-> workbench
   updates -. "UI 注册" .-> workbench
   browser -. "UI 注册" .-> workbench
@@ -123,5 +129,5 @@ flowchart TB
   classDef external fill:#eeeeee,stroke:#666666,color:#222222
   class host,configuration,diagnostics,workbench base
   class agents,acpConnection,acpRuntime runtime
-  class project,documents,git,terminal,workflow,skills,account,updates,browser,scheduledTasks product
+  class project,documents,git,terminal,workflow,skills,mcp,account,updates,browser,scheduledTasks product
   class rust external

@@ -13,15 +13,24 @@ import type { Logger } from "../../../shared/logging/logger.ts";
 export interface SessionToolContext {
   readonly workspacePath: string;
   readonly agentKey: string;
+  readonly agentId: string;
   /** 新建会话时为 null。 */
   readonly sessionId: string | null;
   /** Agent 握手时声明的信息与能力（按它选择工具的连接方式）。 */
   readonly agent: AcpSessionPort["agentInfo"];
+  readonly requestExtension?: AcpSessionPort["requestAgentExtension"];
+  /** 仅在这一代 ACP 会话建立后通知，使用 Agent 返回或恢复的会话标识。 */
+  readonly onEstablished?: (listener: (sessionId: string) => void) => void;
 }
 
 export type SessionToolProvider = (
   context: SessionToolContext,
 ) => readonly McpServer[] | Promise<readonly McpServer[]>;
+
+export interface SessionToolsResolution {
+  readonly servers: readonly McpServer[];
+  readonly establish: (sessionId: string) => void;
+}
 
 export function createSessionTools(logger: Logger) {
   const providers = new Set<SessionToolProvider>();
@@ -34,11 +43,14 @@ export function createSessionTools(logger: Logger) {
       };
     },
     /** 汇总各提供方给这个会话的工具；某一方出错只记日志，不影响会话打开。 */
-    async resolve(context: SessionToolContext): Promise<readonly McpServer[]> {
+    async resolve(context: SessionToolContext): Promise<SessionToolsResolution> {
       const tools: McpServer[] = [];
+      const observers: ((sessionId: string) => void)[] = [];
       for (const provider of [...providers]) {
         try {
-          tools.push(...(await provider(context)));
+          const pending: typeof observers = [];
+          tools.push(...(await provider({ ...context, onEstablished: (listener) => { pending.push(listener); } })));
+          observers.push(...pending);
         } catch (error) {
           logger.warn("会话附加工具获取失败", {
             sessionId: context.sessionId,
@@ -46,7 +58,15 @@ export function createSessionTools(logger: Logger) {
           });
         }
       }
-      return tools;
+      return { servers: tools, establish(sessionId) {
+        for (const notify of observers.splice(0)) {
+          try {
+            notify(sessionId);
+          } catch {
+            logger.warn("会话附加工具状态发布失败", { sessionId });
+          }
+        }
+      } };
     },
   };
 }

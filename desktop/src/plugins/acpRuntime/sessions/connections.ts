@@ -85,6 +85,7 @@ export class RuntimeConnections implements AcpProtocolResources {
           connection = this.base.createConnection(
             transport,
             adapter.maxConcurrentRequests ?? 1,
+            adapter.diagnosticPrivacy,
           );
         } catch (error) {
           const cleanup = async () => {
