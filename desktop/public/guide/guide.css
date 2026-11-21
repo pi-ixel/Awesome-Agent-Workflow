@@ -98,3 +98,7 @@ blockquote {
 hr { border: 0; border-top: 1px solid var(--line); margin: 28px 0; }
 
 .loading { color: var(--muted); }
+
+/* 失败态要一眼看出来：红色 + 一条说明，与"正在加载"的灰色文字区分开。 */
+.error { color: #e5534b; font-weight: 500; }
+.hint { color: var(--muted); font-size: 13px; }

@@ -110,21 +110,40 @@
     return html.join("\n");
   }
 
-  fetch("guide.md", { cache: "no-store" })
+  // 8 秒还没拿到正文就主动放弃。没有这一步时，请求一旦挂住（宿主刚重启、
+  // dev server 正在换端口），窗口会永远停在"正在加载"，用户无法判断是慢还是坏。
+  var controller = new AbortController();
+  var timer = setTimeout(function () { controller.abort(); }, 8000);
+
+  fetch("guide.md", { cache: "no-store", signal: controller.signal })
     .then(function (response) {
-      if (!response.ok) throw new Error("读不到 guide.md（" + response.status + "）");
+      clearTimeout(timer);
+      if (!response.ok) throw new Error("读不到 guide.md（HTTP " + response.status + "）");
       return response.text();
     })
     .then(function (markdown) {
       doc.innerHTML = render(markdown);
       doc.removeAttribute("aria-busy");
       // 页面底色跟随宿主主题：启动器与主窗都这么做，文档窗口不该例外。
-      try {
-        var theme = new URLSearchParams(location.search).get("theme");
-        if (theme === "warm") document.documentElement.dataset.theme = "warm";
-      } catch (_) { /* 没有主题参数就用默认深色 */ }
+      // 主题由 Rust 侧用 `initialization_script` 写进 `window.__aawGuideTheme`，
+      // 不走 query——`WebviewUrl::App` 收的是 `PathBuf`，拼 query 会被转义成
+      // `%3F` 而 404（窗口白屏）。query 这条只作为旧链接的兜底保留。
+      var theme = window.__aawGuideTheme;
+      if (!theme) {
+        try {
+          theme = new URLSearchParams(location.search).get("theme");
+        } catch (_) { theme = null; }
+      }
+      if (theme === "warm") document.documentElement.dataset.theme = "warm";
     })
     .catch(function (error) {
-      doc.innerHTML = '<p class="loading">' + escapeHtml(String(error.message || error)) + "</p>";
+      clearTimeout(timer);
+      // 失败必须和"还在加载"看起来不一样：否则一张白窗口，用户分不清是慢、
+      // 是坏了、还是已经放弃了。这里把原因原样显示出来，并给一条能动手的建议。
+      var reason = error && error.name === "AbortError"
+        ? "8 秒内没有响应"
+        : String((error && error.message) || error);
+      doc.innerHTML = '<p class="error">开发指导没能加载：' + escapeHtml(reason) + "</p>" +
+        '<p class="hint">关掉这个窗口重开一次通常就好；如果反复如此，说明宿主刚重启过或这次构建里缺了文档。</p>';
     });
 })();
