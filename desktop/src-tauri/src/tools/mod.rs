@@ -240,6 +240,12 @@ fn valid_tool_id(id: &str) -> bool {
 
 /// 在 `setup` 里调一次：确定数据根与工具根，并在 dev 期按环境变量自动开窗。
 pub fn initialize(app: &AppHandle) -> Result<(), String> {
+    // 开发指导窗口的未保存标记。建在初始化里而不是建窗时：窗口事件可能在任何时候到达，
+    // 状态必须先于窗口存在。窗口本身的存活不在这里记账——直接问系统（`IsWindow`），
+    // 因为 Tauri 的窗口表在窗口销毁后仍留着条目，自记账两次都被实测证伪了。
+    if app.try_state::<guide::GuideDirty>().is_none() {
+        app.manage(guide::GuideDirty::default());
+    }
     let host = app.state::<ToolsHost>();
     let data_root = std::env::var_os("AAW_TOOLS_TAURI_DATA_ROOT")
         .map(PathBuf::from)

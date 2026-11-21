@@ -58,7 +58,7 @@ body {
   border-bottom: 1px solid var(--line);
 }
 
-.bar-title { font-weight: 600; }
+.bar-title { font-weight: 600; white-space: nowrap; }
 
 .badge {
   font-size: 12px;
@@ -67,9 +67,19 @@ body {
   border: 1px solid currentColor;
   border-radius: 999px;
   padding: 0 8px;
+  white-space: nowrap;
 }
 
-.status { font-size: 12px; color: var(--muted); }
+/* 状态可能是长句（保存失败的原始原因）。让它占剩余宽度并被截断，
+ * 而不是把右边的按钮挤成竖排——窄窗口下这一点尤其明显。 */
+.status {
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .spacer { flex: 1 1 auto; }
 
@@ -83,7 +93,11 @@ button {
   border-radius: 7px;
   padding: 4px 12px;
   cursor: pointer;
+  white-space: nowrap;
 }
+
+/* 按钮不参与压缩：窗口窄到 720 时，宁可状态文字被截断，也不能让按钮变形。 */
+.bar > button, .editor-bar > button { flex: 0 0 auto; }
 
 button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 button:disabled { opacity: 0.45; cursor: default; }
@@ -152,6 +166,11 @@ h4 { font-size: 14px; margin: 18px 0 6px; color: var(--muted); }
 p { margin: 10px 0; }
 a { color: var(--accent); }
 
+/* 正文里的长串（URL、哈希、一长串没有空格的标识符）必须能在容器内断开。
+ * 没有这条，一个 200 字符的链接就会把整个正文顶出横向滚动条——目录还在，
+ * 右边内容却要拖着看，是很明显但很容易漏的排版事故。 */
+p, li, td, th, blockquote { overflow-wrap: anywhere; }
+
 code {
   font: 12.5px/1.5 ui-monospace, Consolas, "Cascadia Mono", monospace;
   background: var(--code);
@@ -170,12 +189,22 @@ pre {
 
 pre code { background: none; border: 0; padding: 0; }
 
-table {
-  width: 100%;
-  border-collapse: collapse;
+/* 表格单独一层横向滚动容器：列多时在**表格内部**左右滚，
+ * 而不是把整页顶宽。`width: auto` 让内容决定宽度、`min-width: 100%`
+ * 保证列少时仍然铺满正文。 */
+.table-wrap {
   margin: 14px 0;
+  overflow-x: auto;
+}
+
+table {
+  width: auto;
+  min-width: 100%;
+  border-collapse: collapse;
   font-size: 13px;
 }
+
+.table-wrap table { margin: 0; }
 
 th, td {
   border: 1px solid var(--line);
@@ -231,8 +260,40 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 28px 0; }
   border-top: 1px solid var(--line);
 }
 
-.editor-hint { font-size: 12px; color: var(--muted); }
+/* 提示是一整句话，窄窗口下会和按钮抢位置。让它在自己的格子里截断，
+ * 完整内容留在 title 里（`flash()` 会写上）。 */
+.editor-hint {
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .editor-hint code { font-size: 11px; }
+
+/* ── 页内确认条 ────────────────────────────────────────────────────────── */
+
+/* 固定在底部居中，不占布局。`window.confirm` 在 WebView2 里不弹框
+ * （实测直接返回 true），危险操作要靠这一条真正拦一下。 */
+.ask {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(640px, calc(100vw - 48px));
+  padding: 12px 16px;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  z-index: 20;
+}
+
+.ask-text { font-size: 13px; }
 
 /* 窗口最小宽 720：到这一步目录收窄但**不消失**——用户抱怨过"没有侧边导航"，
  * 在小窗口里把导航藏起来等于把这个抱怨换个条件重现。 */
