@@ -127,3 +127,35 @@ it("hands violations back to the agent as repair instructions", () => {
   expect(text).toContain("改法：");
   expect(describeViolations(problems)).toContain("R3");
 });
+
+it("R10 only reminds when a build tool ships without src/", () => {
+  // 平台不做源码要求：只带 app.js 产物完全合法，R10 是一条提醒而不是门槛。
+  const shipped = tool({ build: { out: "app.js" } });
+  const problems = runToolRules(shipped);
+  expect(ids(problems)).toContain("R10");
+  expect(splitViolations(problems).blocking).toEqual([]);
+
+  // 带了 src/ 就没有这条提醒。
+  expect(ids(runToolRules(tool({ build: { out: "app.js" }, sourceFiles: { "src/main.js": "export {}" } }))))
+    .not.toContain("R10");
+});
+
+it("R11 blocks a process carrier only when the package comes from the AI wish flow", () => {
+  const processTool = tool({
+    runtime: { kind: "process", entry: "bin/run.exe" },
+    html: "",
+  });
+  // 人工路径允许 L3：进程入口要人写、人审，但不禁止。
+  expect(ids(runToolRules(processTool))).not.toContain("R11");
+  const ai = runToolRules(processTool, { generatedBy: "ai" });
+  expect(ids(ai)).toContain("R11");
+  expect(splitViolations(ai).blocking.map((item) => item.ruleId)).toContain("R11");
+});
+
+it("a process tool is not asked to implement actions in html", () => {
+  // L3 的动作在 initialize 的返回里声明，不在页面里。拿 R3 去判它等于
+  // 要求一个没有界面的后台进程写网页。
+  const processTool = tool({ runtime: { kind: "process", entry: "bin/run.exe" }, html: "" });
+  expect(ids(runToolRules(processTool))).not.toContain("R3");
+  expect(splitViolations(runToolRules(processTool)).blocking).toEqual([]);
+});

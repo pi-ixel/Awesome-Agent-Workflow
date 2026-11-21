@@ -7,6 +7,18 @@
  */
 export const sourceFileLimit = { files: 512, bytes: 4 * 1024 * 1024 } as const;
 
+/**
+ * `bin/` 里的东西是 L3 的运行时（可执行文件 + 它自己的依赖）。
+ *
+ * 它**不进清单**，理由和 `node_modules` 一样，但它更硬：
+ * - 二进制没法用 UTF-8 文本承载；
+ * - 它的体积归"工具包大小"管（导入时单列显示），不该占 `sourceFiles` 的
+ *   512 个 / 4 MB 额度。
+ */
+export function isRuntimeBinPath(path: string): boolean {
+  return path === "bin" || path.startsWith("bin/");
+}
+
 export function safeSourcePath(path: string): boolean {
   // 320 而不是 200：`node_modules` 里嵌套包名 + 目录经常超过 200 字符
   // （`node_modules/@babel/plugin-transform-xxx/lib/helpers/yyy.js` 这种）。
@@ -25,7 +37,7 @@ export function readSourceFiles(value: unknown): Readonly<Record<string, string>
   const paths = new Set<string>();
   let bytes = 0;
   for (const [path, source] of entries) {
-    if (!safeSourcePath(path) || paths.has(path.toLowerCase()) || ["manifest.json", "index.html"].includes(path.toLowerCase()) || typeof source !== "string") return undefined;
+    if (!safeSourcePath(path) || paths.has(path.toLowerCase()) || ["manifest.json", "index.html"].includes(path.toLowerCase()) || isRuntimeBinPath(path) || typeof source !== "string") return undefined;
     paths.add(path.toLowerCase());
     bytes += new TextEncoder().encode(source).length;
     if (bytes > sourceFileLimit.bytes) return undefined;
