@@ -92,6 +92,41 @@ export interface ToolBackground {
   readonly schedule?: boolean;
 }
 
+/**
+ * L2 打包页的构建声明。
+ *
+ * 三个键的地位**不一样**，这一点必须写死，否则平台又会越权：
+ * - `out` 是运行时的唯一依据，宿主只认它；它必须存在，否则装不上。
+ * - `entry` / `command` 是作者元数据（"我是怎么构建的"），平台**不读取、
+ *   不校验对应文件是否存在**。`src/` 带不带是作者的自由（见 `04 §5`）。
+ */
+export interface ToolBuild {
+  /** 作者记录的源码入口，例如 `src/main.js`。平台不读它。 */
+  readonly entry?: string;
+  /** 构建产物，例如 `app.js`。运行只认这个文件。 */
+  readonly out: string;
+  /** 作者记录的构建命令，例如 `npm run bundle`。平台不执行它。 */
+  readonly command?: string;
+}
+
+/**
+ * L3 进程载体的声明。
+ *
+ * 只有四条满足其一时才该用：原生模块、非 HTTP 协议、不受对话框约束的文件
+ * 系统、真正无窗口的常驻进程。它不是"更强大的 L2"，而是**放弃沙箱**：
+ * 一旦声明，用户账户下的文件与网络权限都归这个进程。
+ */
+export interface ToolRuntime {
+  readonly kind: "process";
+  /** 可执行文件，必须在 `bin/` 内，例如 `bin/run.exe`。 */
+  readonly entry: string;
+  /** NDJSON over stdio 的协议代际。宿主只接受自己支持的那个。 */
+  readonly protocol?: number;
+}
+
+/** 宿主支持的进程协议代际。与 Rust 侧 `process_host::PROTOCOL` 保持一致。 */
+export const toolProcessProtocol = 1;
+
 export interface ToolPackage {
   readonly schemaVersion: 1;
   readonly id: string;
@@ -119,23 +154,42 @@ export interface ToolPackage {
   /** 后台意图：常驻理由、是否需要定时。声明后才允许窗口关闭后继续运行。 */
   readonly background?: ToolBackground;
   /**
-   * 工具自带的 Node 侧桥接脚本（相对工具目录的路径，`preload.js`）。
+   * L2 构建声明。有它就是"打包页工具"：`index.html` 引 `app.js`，
+   * `app.js` 是作者用 esbuild 之类的工具打出来的。
    *
-   * 声明之后，运行时会先注入宿主的 `aaw*` 能力，再执行这个脚本。它跑在
-   * **有完整 Node 的 preload 上下文**里，所以可以直接 `require` 工具目录下
-   * 的 `node_modules`。界面层仍然拿不到 Node（`nodeIntegration: false`），
-   * 只能拿到作者通过 `contextBridge` 主动暴露的那几个接口。
-   *
-   * 省略即"纯页面工具"，和以前完全一样。
+   * 平台不执行 `command`、不读 `entry`——它只检查 `out` 在不在工具目录里。
    */
-  readonly preload?: string;
+  readonly build?: ToolBuild;
+  /**
+   * L3 进程声明。有它就**没有沙箱**，导入时必须单独一屏让用户确认。
+   *
+   * AI 许愿链路不得产出它（红线 R11）：进程入口必须人工写、人工审。
+   */
+  readonly runtime?: ToolRuntime;
   /**
    * 作者附加的 UTF-8 文本文件。
    *
-   * 注意：这个字段只承载**文本**。二进制资源、`node_modules` 这类东西不进
-   * 清单，它们躺在工具目录里（安装时落盘），运行时直接从目录加载。
+   * 注意：这个字段只承载**文本**。二进制资源、`node_modules`、`bin/` 这类
+   * 东西不进清单，它们躺在工具目录里（安装时落盘），运行时直接从目录加载。
    */
   readonly sourceFiles?: Readonly<Record<string, string>>;
+}
+
+/**
+ * 一个工具的载体。
+ *
+ * - `L1` 单页：只有 `index.html`；
+ * - `L2` 打包页：有 `build.out`，仍然是同一个 WebView2；
+ * - `L3` 进程：有 `runtime.kind === "process"`，作者自带运行时。
+ *
+ * L1 与 L2 算同一级：同一个引擎、同一套 `window.aaw*`、同一套动作语义。
+ * 把它俩当成两种运行时，会让工具中心、启动器、校验器全部多一个没收益的分支。
+ */
+export type ToolCarrierLevel = "L1" | "L2" | "L3";
+
+export function readToolCarrier(tool: Pick<ToolPackage, "build" | "runtime">): ToolCarrierLevel {
+  if (tool.runtime?.kind === "process") return "L3";
+  return tool.build ? "L2" : "L1";
 }
 
 /** 工具被判定为不可用时的记录。保留条目本身，只标记原因——绝不静默丢弃。 */

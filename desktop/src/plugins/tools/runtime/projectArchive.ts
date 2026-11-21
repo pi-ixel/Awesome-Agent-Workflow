@@ -1,7 +1,7 @@
 import { strToU8, unzipSync, zipSync } from "fflate";
 import type { ToolPackage } from "../types.ts";
 import { parseToolPackage, toolPackageLimit, validateToolPackageText } from "./package.ts";
-import { safeSourcePath } from "./sourceFiles.ts";
+import { isRuntimeBinPath, safeSourcePath } from "./sourceFiles.ts";
 
 /**
  * 源码 ZIP 的上限。
@@ -56,24 +56,45 @@ export function toolProjectFiles(tool: ToolPackage): Record<string, string> {
     "README.md": `# ${tool.name}
 
 ${author}${source}
-这是 AAW 工具的源码。单文件工具不需要 Node；要带依赖的话见下面「带依赖的工具」。
+这是 AAW 工具的源码。单文件工具不需要任何构建；要带依赖的话见下面「带依赖的工具」。
 
 - \`manifest.json\`：工具身份、AI 动作、设置声明、能力声明
 - \`index.html\`：界面入口
-- \`preload.js\`：可选，工具自己的 Node 侧桥接（manifest 里用 \`"preload": "preload.js"\` 声明）
-- \`node_modules/\`：可选，随包分发的依赖
+- \`app.js\`：可选，L2 的构建产物（清单里用 \`"build": { "out": "app.js" }\` 声明）
+- \`src/\`：可选，你的源码。平台不读它，带不带由你决定
+- \`bin/\`：可选，L3 的运行时（清单里用 \`"runtime": { "kind": "process", … }\` 声明）
 
 把目录交给 AI 继续改时，先让它读 \`manifest.json\` 与 \`index.html\`。
 
 ## 带依赖的工具
 
-1. 在工具目录里 \`npm install <包名>\`，会生成 \`node_modules/\`。
-2. 写一个 \`preload.js\`，里面直接 \`require("包名")\`——它跑在有完整 Node 的上下文里。
-3. 在 \`manifest.json\` 里写 \`"preload": "preload.js"\`。
-4. 用 \`aawBridge.expose("services", { … })\` 把接口交给页面，页面用 \`window.services\` 调用。
+**优先用 L2：把纯 JS 依赖打进一个 app.js。**
 
-注意：\`require\` 只在 \`preload.js\` 里可用，页面本身没有 Node。原生模块（\`.node\`）
-不能随包分发——它绑定操作系统、CPU 架构和 Electron 版本，换台机器就崩。
+1. 在工具目录里 \`npm install <包名>\`。
+2. 源码写在 \`src/main.js\`，然后打一次包：
+
+   \`\`\`bash
+   npx esbuild src/main.js --bundle --format=esm --minify --outfile=app.js
+   \`\`\`
+
+3. \`manifest.json\` 里写 \`"build": { "entry": "src/main.js", "out": "app.js", "command": "npm run bundle" }\`。
+4. \`index.html\` 里用 \`<script type="module" src="./app.js"></script>\` 引进去。
+
+运行只认 \`build.out\`。\`src/\` 带不带随你——平台不读它，也不会因此降低任何能力。
+SQLite 这类需要原生库的东西，在 L2 里改用 WASM 版（\`sql.js\`）。
+
+## 真的需要进程时（L3）
+
+原生模块（\`.node\`）、SSH / TCP / 数据库直连、要遍历监听整个文件系统、要真正
+无窗口的常驻进程——只有这四类才该用 L3。把运行时与它的依赖放进 \`bin/\`：
+
+\`\`\`json
+"runtime": { "kind": "process", "entry": "bin/run.exe", "protocol": 1 }
+\`\`\`
+
+进程用 NDJSON over stdio 与宿主通信。**这条路会放弃沙箱**：进程拥有你账户下的
+文件与网络权限。\`bin/\` 不计入 4 MB 源码限额，但导入时平台会把它的真实体积
+单独列出来给用户看。
 
 ## 改完怎么装回去
 
@@ -117,6 +138,13 @@ export interface ToolArchive {
   readonly tool: ToolPackage;
   /** 相对工具根目录的路径 → 原始字节；含 `manifest.json` 与 `index.html`。 */
   readonly files: Readonly<Record<string, Uint8Array>>;
+  /**
+   * `bin/` 下所有文件的总字节数。
+   *
+   * 它**不计入** 4 MB 的源码限额（那是清单的额度），但导入界面必须把它单独
+   * 显示出来——"装完才发现 80 MB"是设计稿 §2.5.4 明令要避免的事。
+   */
+  readonly binBytes: number;
 }
 
 export function exportToolProject(tool: ToolPackage, extra: Readonly<Record<string, Uint8Array>> = {}): Uint8Array {
@@ -171,12 +199,30 @@ export function importToolArchive(bytes: Uint8Array): ToolArchive {
   // 由调用方写到工具目录。用"能否按 UTF-8 严格解码"来分类，不猜扩展名。
   // `node_modules/**` 是例外：它虽然也是文本，但属于依赖而不是作者源码，
   // 一律只落盘（理由见 isDependencyPath）。
+  // 构建产物（`build.out`）也**不进清单**：它常常是几百 KB 到几 MB，而清单存在
+  // `preferences.json` 里，塞进去等于让每次唤起启动器都读一个大文件。运行只认
+  // 磁盘上的那份（协议层从工具目录直接读），所以它只要落盘就够了。
+  const declaredOut = (() => {
+    const build = manifest && typeof manifest === "object" && !Array.isArray(manifest)
+      ? (manifest as Record<string, unknown>).build
+      : undefined;
+    const out = build && typeof build === "object" && !Array.isArray(build)
+      ? (build as Record<string, unknown>).out
+      : undefined;
+    return typeof out === "string" ? out.replace(/^\.\//, "") : undefined;
+  })();
   const text: Record<string, string> = {};
   const relative: Record<string, Uint8Array> = {};
+  let binBytes = 0;
   for (const [path, data] of Object.entries(files)) {
     const name = path.slice(prefix.length);
     relative[name] = data;
-    if (name === "manifest.json" || name === "index.html" || isDependencyPath(name)) continue;
+    if (isRuntimeBinPath(name)) {
+      // L3 运行时：只落盘。体积单独统计，导入界面拿它提示真实占用。
+      binBytes += data.byteLength;
+      continue;
+    }
+    if (name === "manifest.json" || name === "index.html" || isDependencyPath(name) || name === declaredOut) continue;
     try { text[name] = decoder.decode(data); } catch { /* 二进制：只落盘，不进清单 */ }
   }
   const tool = parseToolPackage(JSON.stringify({
@@ -184,7 +230,7 @@ export function importToolArchive(bytes: Uint8Array): ToolArchive {
     html: decode(`${prefix}index.html`),
     sourceFiles: Object.keys(text).length ? text : undefined,
   }));
-  return { tool, files: relative };
+  return { tool, files: relative, binBytes };
 }
 
 /** 老接口：只要清单、不要文件字节。 */
@@ -198,13 +244,13 @@ export function importToolProject(bytes: Uint8Array): ToolPackage {
  * 返回 `files` 时表示"这个包带了需要落盘的文件"（ZIP 里除清单与页面之外的
  * 东西），调用方应当先写到工具目录再安装，否则运行时找不到 `node_modules`。
  */
-export async function readToolUpload(file: File): Promise<{ readonly tool: ToolPackage; readonly files?: Readonly<Record<string, Uint8Array>> }> {
+export async function readToolUpload(file: File): Promise<{ readonly tool: ToolPackage; readonly files?: Readonly<Record<string, Uint8Array>>; readonly binBytes?: number }> {
   if (file.name.toLowerCase().endsWith(".zip")) {
     if (file.size > toolArchiveLimit) throw new Error(`源码 ZIP 不能超过 ${Math.round(toolArchiveLimit / 1024 / 1024)} MB。`);
     const archive = importToolArchive(new Uint8Array(await file.arrayBuffer()));
     // 全部文件都交出去（含 manifest.json 与 index.html）：工具目录要能独立成为
     // 一个完整项目，作者装完可以直接在那个目录里继续改。
-    return { tool: archive.tool, files: archive.files };
+    return { tool: archive.tool, files: archive.files, binBytes: archive.binBytes };
   }
   if (file.size > toolPackageLimit) throw new Error(`工具包不能超过 ${Math.round(toolPackageLimit / 1024 / 1024)} MB。`);
   return { tool: parseToolPackage(await file.text()) };

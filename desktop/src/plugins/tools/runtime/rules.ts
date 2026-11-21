@@ -10,7 +10,7 @@
  */
 import type { ToolPackage, ToolViolation } from "../types.ts";
 
-export const ruleIds = ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9"] as const;
+export const ruleIds = ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10", "R11"] as const;
 export type RuleId = (typeof ruleIds)[number];
 
 /**
@@ -47,7 +47,17 @@ export const ruleGuidance: Readonly<Record<RuleId, {
   R6: { level: "warn", rule: "需要留存的数据走 window.aawStore", fix: "await aawStore.set(k, v) / get(k)；localStorage 重启即清空" },
   R7: { level: "warn", rule: "不得写死 ≥800px 的宽度", fix: "用 width:100% + max-width，避免窄窗口横向溢出" },
   R8: { level: "warn", rule: "联网的工具应该声明 permissions.network", fix: "不声明也能跑（默认允许），但用户看不到「这个工具会联网」；补上 \"permissions\": { \"network\": true }，或写 hosts 限定域名" },
-  R9: { level: "block", rule: "不得改动或夹带平台框架与关键契约文件", fix: "工具包只保留 manifest.json、index.html、preload.js 与你自己写的源码（preload.js 是你的文件，保留）；AGENTS.md / README.md / runtime.mjs 这些平台文件不该出现在包里，出现就删" },
+  R9: { level: "block", rule: "不得改动或夹带平台框架与关键契约文件", fix: "工具包只保留 manifest.json、index.html、构建产物 app.js 或 bin/ 里的运行时，以及你自己写的源码；AGENTS.md / README.md / runtime 框架这些平台文件不该出现在包里，出现就删" },
+  R10: {
+    level: "warn",
+    rule: "声明了 build 却没带 src/，别人拿到只有产物没法读",
+    fix: "想让人读懂就把 src/ 一起带上；不想公开实现就不带——这只是提醒，平台不拦。运行只认 build.out",
+  },
+  R11: {
+    level: "block",
+    rule: "AI 许愿生成的工具不得声明进程载体（runtime.kind = process）",
+    fix: "许愿链路只产出 L1/L2；确实需要进程、原生模块或非 HTTP 协议时找人工接手，由人写 manifest 与 bin/、人审可执行文件",
+  },
 };
 
 /** 手册里每条红线的一句话摘要，供提示文案与测试共用。 */
@@ -114,6 +124,14 @@ function violation(
 export interface ToolRuleOptions {
   /** 升级前该工具项目里记录的 id；与当前 id 不同即视为改名。 */
   readonly previousId?: string;
+  /**
+   * 这个包是谁产出的。`"ai"` 时 R11 生效——许愿链路只能产出 L1/L2。
+   *
+   * 为什么默认是 `"manual"`：人在「开发工具」里自己写 manifest 是正当入口，
+   * 默认拦下来会让所有老项目突然变红。AI 路径由 `workshop.ts` 显式传 `"ai"`，
+   * 责任边界才清楚。
+   */
+  readonly generatedBy?: "ai" | "manual";
 }
 
 /**
@@ -141,9 +159,13 @@ export function runToolRules(tool: ToolPackage, options: ToolRuleOptions = {}): 
       "index.html"));
 
   // R3 · 清单声明了动作却没挂实现，AI 一调用就报"工具未实现动作"。
+  //
+  // L3 是例外：进程工具的动作在 `initialize` 的返回里声明，不在 html 里。
+  // 拿"html 里有没有 aawActions"去判它，等于要求一个没有界面的后台进程写网页。
+  const isProcessTool = tool.runtime?.kind === "process";
   const declaresAction = (tool.actions?.length ?? 0) > 0;
   const implementsAction = /\baawActions\b/.test(html);
-  if (declaresAction && !implementsAction)
+  if (declaresAction && !implementsAction && !isProcessTool)
     problems.push(violation("R3", "block",
       `清单声明了 ${tool.actions?.length} 个动作，但 html 里没有给 window.aawActions 赋值。`,
       "在 <script> 末尾写 window.aawActions = { <动作id>: async (input) => ... }，并让界面按钮调用同一个函数。",
@@ -152,7 +174,7 @@ export function runToolRules(tool: ToolPackage, options: ToolRuleOptions = {}): 
     problems.push(violation("R3", "warn",
       "html 里实现了 aawActions，但清单没有声明 actions，AI 无法调用这个工具。",
       "把每个动作补进清单的 actions：{ id, description, inputSchema }。"));
-  if (!declaresAction && !implementsAction)
+  if (!declaresAction && !implementsAction && !isProcessTool)
     problems.push(violation("R3", "warn",
       "这个工具没有声明任何动作，只能人工点击使用，AI 用不了它。",
       "至少暴露一个动作，让界面按钮与 AI 走同一个函数。"));
@@ -218,6 +240,29 @@ export function runToolRules(tool: ToolPackage, options: ToolRuleOptions = {}): 
       "html 里引用了本机绝对路径或 file:// 地址。工具包是要分享出去的，换台机器这些地址就不存在了。",
       "改用相对/内联资源，或通过 aawFiles.open 让用户当场选文件，不要写死 C:\\Users\\… 之类的路径。",
       "index.html"));
+
+  // R10 · 声明了 build 却没带 src/：只是提醒，不拦。
+  //
+  // 这一条从 block 降成 warn 是设计第二版最重要的一处修改。写成 block 等于
+  // "不交源码就不能发布"——平台越权，且会把企业里"能用但不公开"的适配器、
+  // 临时脚本、带公司逻辑的胶水整批挡在门外。运行只认 build.out，src/ 只是
+  // 一个普通的可选目录，和 app.css、icon.png 同级。
+  if (tool.build && !Object.keys(tool.sourceFiles ?? {}).some((path) => path.startsWith("src/")))
+    problems.push(violation("R10", "warn",
+      "这个工具声明了 build，但包里没有 src/。别人拿到只有 app.js 产物，没法读、没法改。",
+      "想让人读懂就把源码放在 src/ 一起分发；不想公开实现就不带——这条只是提醒，不影响安装与运行。",
+      "build"));
+
+  // R11 · AI 许愿链路不得产出进程工具。
+  //
+  // 许愿链路看不到用户机器上的可执行文件，也无法判断"这个 exe 到底做什么"。
+  // 一旦它开始生成 runtime，用户点一次「开始做」就可能得到一个能读全盘的进程。
+  // 所以不是"提醒作者小心"，是**这条链路根本不给这个出口**。
+  if (options.generatedBy === "ai" && tool.runtime !== undefined)
+    problems.push(violation("R11", "block",
+      "AI 许愿生成的工具不能声明进程载体（runtime.kind = process）。",
+      "改用 L1 单页或 L2 打包页（build）。确实需要进程、原生模块或非 HTTP 协议时，找人工接手：由人写 manifest 与 bin/，并人工审阅包里的可执行文件。",
+      "manifest.runtime"));
 
   return problems;
 }

@@ -24,7 +24,7 @@ const baseEntry = (entry: string) => entry.split(".")[0] ?? entry;
 describe("工具运行契约", () => {
   it("契约版本是显式常量，改动必须是有意识的决定", () => {
     // 这个断言故意写死：升契约版本时你会看到它失败，从而必须来改这一行。
-    expect(toolContractVersion).toBe(1);
+    expect(toolContractVersion).toBe(2);
   });
 
   it("能力表与 preload 实际暴露的 window 入口完全一致", () => {
@@ -57,20 +57,20 @@ describe("工具运行契约", () => {
   });
 
   it("快照：能力表（改动会在这里显形）", () => {
-    expect(toolCapabilities.map((item) => `${item.name}|${item.entry}|${item.direction}|${item.since}`)).toMatchInlineSnapshot(`
+    expect(toolCapabilities.map((item) => `${item.name}|${item.entry}|${item.direction}|${item.since}|${item.carrier}`)).toMatchInlineSnapshot(`
       [
-        "settings|aawSettings|down|1",
-        "store|aawStore|down|1",
-        "sharedStore|aawStore.scope|down|1",
-        "files|aawFiles|down|1",
-        "clipboard|aawClipboard|down|1",
-        "actions|aawActions|up|1",
-        "system|aawSystem|down|1",
-        "secrets|aawSecrets|down|1",
-        "lifecycle|aawLifecycle|down|1",
-        "context|aawContext|down|1",
-        "bus|aawBus|down|1",
-        "network||none|1",
+        "settings|aawSettings|down|1|both",
+        "store|aawStore|down|1|both",
+        "sharedStore|aawStore.scope|down|1|both",
+        "files|aawFiles|down|1|both",
+        "clipboard|aawClipboard|down|1|both",
+        "actions|aawActions|up|1|both",
+        "system|aawSystem|down|1|both",
+        "secrets|aawSecrets|down|1|both",
+        "lifecycle|aawLifecycle|down|1|both",
+        "context|aawContext|down|1|both",
+        "bus|aawBus|down|1|both",
+        "network||none|1|both",
       ]
     `);
   });

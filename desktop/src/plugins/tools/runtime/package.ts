@@ -1,4 +1,5 @@
-import type { ToolAction, ToolBackground, ToolPackage, ToolPermissions, ToolRequires, ToolViolation } from "../types.ts";
+import type { ToolAction, ToolBackground, ToolBuild, ToolPackage, ToolPermissions, ToolRequires, ToolRuntime, ToolViolation } from "../types.ts";
+import { toolProcessProtocol } from "../types.ts";
 import { readSettingsSchema } from "./settings.ts";
 import { readSourceFiles, safeSourcePath } from "./sourceFiles.ts";
 /**
@@ -11,11 +12,13 @@ import { readSourceFiles, safeSourcePath } from "./sourceFiles.ts";
  * 标题变成 "Error"，日志里什么都没有。改动这里时务必同步检查
  * `runtime.mjs` / `cli.mjs` 从 `package-contract.mjs` 引用的每一个名字。
  */
-export { readNetworkRule } from "../types.ts";
+export { readNetworkRule, readToolCarrier, toolProcessProtocol } from "../types.ts";
 export { resolveToolSettings, toolSettingsScript } from "./settings.ts";
 export {
+  capabilityAvailableIn,
   capabilitiesAt,
   capabilityEntries,
+  hostOwnedCapabilities,
   readCapability,
   toolCapabilities,
   toolContractVersion,
@@ -200,6 +203,70 @@ function checkSetting(item: unknown, index: number, seen: Set<string>): ToolViol
   return problems;
 }
 
+/**
+ * `build` 的形状校验。
+ *
+ * 这里**只校验形状**：`out` 必须是被声明的、安全的相对路径。它到底在不在
+ * 工具目录里，要等有目录上下文时才能查（`project.ts` 的工程校验），清单文本
+ * 校验器没有那个上下文，不能凭空判死。
+ *
+ * `entry` / `command` 只挡类型，**不校验文件是否存在**——它们是作者元数据，
+ * 不是运行时依据。这条差别是上一版设计最大的错误来源（要求交 `src/` = 平台越权）。
+ */
+function checkBuild(value: unknown): { problems: ToolViolation[]; build?: ToolBuild } {
+  const where = "build";
+  const record = objectOf(value);
+  if (!record)
+    return { problems: [fail("FIELD", "build 必须是对象。", '例如 { "out": "app.js", "entry": "src/main.js" }；不需要构建就删掉这个字段。', where)] };
+  const problems: ToolViolation[] = [];
+  const out = typeof record.out === "string" ? record.out.trim() : "";
+  if (!out)
+    problems.push(fail("FIELD", "build.out 必填：指向构建产物，例如 \"app.js\"。", "运行只认这个文件；缺了它装不上。", `${where}.out`));
+  else if (!safeSourcePath(out) || ["manifest.json", "index.html"].includes(out.toLowerCase()))
+    problems.push(fail("FIELD", `build.out 必须是工具目录内的安全相对路径，现在是 ${JSON.stringify(out)}。`, '例如 "app.js" 或 "dist/app.js"；不要写绝对路径，也不要指向 manifest.json / index.html。', `${where}.out`));
+  for (const field of ["entry", "command"] as const) {
+    const item = record[field];
+    if (item !== undefined && (typeof item !== "string" || item.length > 300))
+      problems.push(fail("FIELD", `build.${field} 必须是字符串（不超过 300 字）。`, "它是写给人看的元数据，平台不执行、也不检查对应文件；不写就删掉这一项。", `${where}.${field}`));
+  }
+  if (problems.length) return { problems };
+  return {
+    problems,
+    build: {
+      out,
+      ...(typeof record.entry === "string" && record.entry.trim() ? { entry: record.entry.trim() } : {}),
+      ...(typeof record.command === "string" && record.command.trim() ? { command: record.command.trim() } : {}),
+    },
+  };
+}
+
+/**
+ * `runtime` 的形状校验。
+ *
+ * 三条硬要求，缺一条都会让 L3 变成纯负资产（设计稿 §2.5.4）：
+ * 1. 只认 `kind: "process"`——不发明"L4"；
+ * 2. `entry` 必须在 `bin/` 内，否则就和"作者自带的运行时"这个前提对不上；
+ * 3. `protocol` 必须是宿主支持的那一代，不能"乐观放行"。
+ */
+function checkRuntime(value: unknown): { problems: ToolViolation[]; runtime?: ToolRuntime } {
+  const where = "runtime";
+  const record = objectOf(value);
+  if (!record)
+    return { problems: [fail("FIELD", "runtime 必须是对象。", '例如 { "kind": "process", "entry": "bin/run.exe", "protocol": 1 }；不需要进程就删掉这个字段。', where)] };
+  const problems: ToolViolation[] = [];
+  if (record.kind !== "process")
+    problems.push(fail("FIELD", `runtime.kind 目前只支持 "process"，现在是 ${JSON.stringify(record.kind)}。`, '写 "process"；想要"更快的页面"不要走这里，改用 build。', `${where}.kind`));
+  const entry = typeof record.entry === "string" ? record.entry.trim() : "";
+  if (!entry)
+    problems.push(fail("FIELD", "runtime.entry 必填：指向 bin/ 里的可执行文件。", '例如 "bin/run.exe"。', `${where}.entry`));
+  else if (!safeSourcePath(entry) || !entry.startsWith("bin/"))
+    problems.push(fail("FIELD", `runtime.entry 必须是 bin/ 内的安全相对路径，现在是 ${JSON.stringify(entry)}。`, '把运行时与依赖放进工具目录的 bin/ 下，然后写 "bin/run.exe"。', `${where}.entry`));
+  if (record.protocol !== undefined && record.protocol !== toolProcessProtocol)
+    problems.push(fail("FIELD", `runtime.protocol 必须是 ${toolProcessProtocol}，现在是 ${JSON.stringify(record.protocol)}。`, "协议代际由宿主定义；不确定就删掉这一项，默认就是当前代际。", `${where}.protocol`));
+  if (problems.length) return { problems };
+  return { problems, runtime: { kind: "process", entry, protocol: toolProcessProtocol } };
+}
+
 function checkAction(item: unknown, index: number, seen: Set<string>): ToolViolation[] {
   const where = `actions[${index}]`;
   const action = objectOf(item);
@@ -240,8 +307,11 @@ export function validateToolPackage(value: unknown): ToolValidation {
     problems.push(fail("FIELD", "name 必填，不超过 60 字。", "写用户看到的工具名，例如「JSON 格式化」。", "name"));
   if (typeof tool.version !== "string" || !/^\d+\.\d+\.\d+$/.test(tool.version) || tool.version.length > 30)
     problems.push(fail("FIELD", "version 必须是 1.0.0 这样的三段数字。", "改动后递增，例如 \"1.0.1\"。", "version"));
-  if (typeof tool.html !== "string" || !tool.html.trim())
-    problems.push(fail("FIELD", "html 必填：没有任何内容。", "把完整的单页 HTML（含内联 <style> 与 <script>）放进 html 字段。", "html"));
+  // L3 允许没有界面：纯后台工具（监听、定时同步）本来就不需要窗口。
+  // 除它之外，`html` 仍是必填——工具中心要能预览、用户要能看到东西。
+  const isProcessTool = objectOf(tool.runtime)?.kind === "process";
+  if (typeof tool.html !== "string" || (!tool.html.trim() && !isProcessTool))
+    problems.push(fail("FIELD", isProcessTool ? "html 必须是字符串。" : "html 必填：没有任何内容。", isProcessTool ? "进程工具可以留空字符串，表示没有界面。" : "把完整的单页 HTML（含内联 <style> 与 <script>）放进 html 字段。", "html"));
 
   const settingsSchema = tool.settingsSchema;
   if (settingsSchema !== undefined) {
@@ -257,15 +327,37 @@ export function validateToolPackage(value: unknown): ToolValidation {
 
   const sourceFiles = tool.sourceFiles;
   if (sourceFiles !== undefined && !readSourceFiles(sourceFiles))
-    problems.push(fail("FIELD", "sourceFiles 必须是 路径 → UTF-8 文本 的对象（最多 512 个文件、合计 4 MB、路径安全）。", "路径不要以点或空格结尾，也不要出现 manifest.json / index.html；二进制文件与 node_modules 请直接放进工具目录，不要写进清单。", "sourceFiles"));
+    problems.push(fail("FIELD", "sourceFiles 必须是 路径 → UTF-8 文本 的对象（最多 512 个文件、合计 4 MB、路径安全，且不含 bin/）。", "路径不要以点或空格结尾，也不要出现 manifest.json / index.html；二进制文件、node_modules 与 bin/ 里的运行时请直接放进工具目录，不要写进清单。", "sourceFiles"));
 
-  const preload = tool.preload;
-  if (preload !== undefined) {
-    if (typeof preload !== "string" || !preload.trim())
-      problems.push(fail("FIELD", "preload 必须是相对路径字符串，例如 \"preload.js\"。", "不需要 Node 能力就删掉这个字段。", "preload"));
-    else if (!safeSourcePath(preload) || preload.toLowerCase() === "index.html" || preload.toLowerCase() === "manifest.json")
-      problems.push(fail("FIELD", `preload 不是合法的工具内相对路径：${JSON.stringify(preload)}。`, "只能写工具目录内的 .js 文件，例如 \"preload.js\" 或 \"bridge/main.js\"。", "preload"));
+  // 第 2 代契约移除了 preload：它背后是"工具窗口里有一整个 Node"，而这既是
+  // P2（4 MB 限额管包大小、不管权限）的根源，也是平台体积的根源。出现即 block，
+  // 并把两条替代路径直接写进修法，别让作者自己去猜。
+  if (tool.preload !== undefined)
+    problems.push(fail(
+      "FIELD",
+      "preload 已在第 2 代工具契约里移除：工具页面不再有 Node 侧桥接层，靠它 require 的包在新宿主里跑不起来。",
+      '纯 JS / WASM 依赖改用 build（npx esbuild src/main.js --bundle --format=esm --outfile=app.js）；确实需要原生模块、非 HTTP 协议或真正的常驻进程时改用 runtime + bin/；都不需要就删掉这个字段。',
+      "preload",
+    ));
+
+  let checkedBuild: ToolBuild | undefined;
+  if (tool.build !== undefined) {
+    const result = checkBuild(tool.build);
+    problems.push(...result.problems);
+    checkedBuild = result.build;
   }
+
+  let checkedRuntime: ToolRuntime | undefined;
+  if (tool.runtime !== undefined) {
+    const result = checkRuntime(tool.runtime);
+    problems.push(...result.problems);
+    checkedRuntime = result.runtime;
+  }
+
+  // L2 与 L3 是两条互斥的替代路径：一个说"页面里跑构建产物"，一个说"另起进程"。
+  // 同时声明不会让工具更强，只会让"它到底跑在哪"变成猜谜。
+  if (tool.build !== undefined && tool.runtime !== undefined)
+    problems.push(fail("FIELD", "build 与 runtime 不能同时声明。", "L2 是页面里加载 app.js；L3 是另起进程。二选一：纯 JS 依赖用 build，需要进程/原生模块用 runtime。", "runtime"));
 
   if (tool.icon !== undefined && readToolIcon(tool.icon) === undefined) {
     const count = typeof tool.icon === "string" ? [...tool.icon.trim()].length : 0;
@@ -371,7 +463,8 @@ export function validateToolPackage(value: unknown): ToolValidation {
       ...(tool.requires === undefined ? {} : { requires: normalizeRequires(tool.requires) }),
       ...(tool.needsSelection === true ? { needsSelection: true as const } : {}),
       ...(normalizeBackground(tool.background) === undefined ? {} : { background: normalizeBackground(tool.background)! }),
-      ...(typeof preload === "string" && preload.trim() ? { preload: preload.trim() } : {}),
+      ...(checkedBuild === undefined ? {} : { build: checkedBuild }),
+      ...(checkedRuntime === undefined ? {} : { runtime: checkedRuntime }),
       ...(tool.sourceFiles === undefined ? {} : { sourceFiles: readSourceFiles(tool.sourceFiles) }),
     } satisfies ToolPackage,
   };

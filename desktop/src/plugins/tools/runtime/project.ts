@@ -16,7 +16,7 @@ import { toolIdPattern, toolOwnerSegment, validateToolPackage, validateToolPacka
 // 老调用方从 project.ts 取这个函数；真源在 package.ts（构建时会 bundle 给 mjs 侧）。
 export { toolOwnerSegment } from "./package.ts";
 import { safeSourcePath } from "./sourceFiles.ts";
-import { runToolRules, splitViolations } from "./rules.ts";
+import { runToolRules, splitViolations, type ToolRuleOptions } from "./rules.ts";
 import { toolGuide } from "./guide.ts";
 
 /** 工具项目需要的最小宿主能力（便于测试时注入假实现）。 */
@@ -233,7 +233,7 @@ export type ToolProjectRead =
  * AI 写东西时通常把界面写在 index.html、清单里不放 html（字符串里嵌整页 HTML
  * 太容易转义出错）。所以这里以文件为准，只有 manifest 自带 html 时才用它的。
  */
-export async function readToolProject(io: ToolProjectIO, dir: string): Promise<ToolProjectRead> {
+export async function readToolProject(io: ToolProjectIO, dir: string, options: ToolRuleOptions = {}): Promise<ToolProjectRead> {
   const manifestPath = joinPath(dir, toolProjectFileNames.manifest);
   let text: string;
   try {
@@ -259,6 +259,7 @@ export async function readToolProject(io: ToolProjectIO, dir: string): Promise<T
   if (!validated.ok) return { ok: false, violations: validated.violations };
   const problems = runToolRules(validated.tool, {
     previousId: (manifest as Record<string, unknown>).id as string | undefined,
+    ...options,
   });
   return { ok: true, tool: validated.tool, violations: problems };
 }
@@ -352,8 +353,8 @@ export async function renameToolProject(
 }
 
 /** 校验一个项目目录，拆成"必须修 / 建议"。安装按钮只看 `ready`。 */
-export async function checkToolProject(io: ToolProjectIO, dir: string): Promise<ToolProjectCheck> {
-  const read = await readToolProject(io, dir);
+export async function checkToolProject(io: ToolProjectIO, dir: string, options: ToolRuleOptions = {}): Promise<ToolProjectCheck> {
+  const read = await readToolProject(io, dir, options);
   if (!read.ok) {
     const split = splitViolations(read.violations);
     return { blocking: split.blocking, warnings: split.warnings, ready: false };

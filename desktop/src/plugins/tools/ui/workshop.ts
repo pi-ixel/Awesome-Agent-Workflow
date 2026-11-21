@@ -156,7 +156,7 @@ const errorText = (error: unknown) => error instanceof Error ? error.message : S
  * 工具的内容指纹：只收影响运行行为的字段。
  *
  * `author` / `source` 是描述性元数据，改了不该提示"项目与已安装的不一致"；
- * 动作、设置、权限、preload 这些改了行为就变了，必须算进去。
+ * 动作、设置、权限、build / runtime 这些改了行为就变了，必须算进去。
  */
 export function contentSignature(tool: ToolPackage): string {
   return JSON.stringify({
@@ -170,7 +170,8 @@ export function contentSignature(tool: ToolPackage): string {
     requires: tool.requires ?? null,
     needsSelection: tool.needsSelection ?? null,
     background: tool.background ?? null,
-    preload: tool.preload ?? null,
+    build: tool.build ?? null,
+    runtime: tool.runtime ?? null,
     sourceFiles: tool.sourceFiles ?? null,
   });
 }
@@ -278,7 +279,9 @@ export function createWorkshop(deps: {
   }
 
   async function readCheck(dir: string): Promise<ToolProjectCheck> {
-    const result = await checkToolProject(io, dir);
+    // 这个项目是许愿链路产出的：R11 从第一次校验就生效，不等到装的时候才拦。
+    // 手动用「导入文件夹」进来的项目不走这里（那是人工路径，允许 L3）。
+    const result = await checkToolProject(io, dir, { generatedBy: "ai" });
     // 读盘期间用户可能已经切到别的项目：这时的结果不再属于"当前项目"，
     // 写进状态会让卡片拿着 A 的校验结论去描述 B（比如给一个坏项目标"可以验收"）。
     const current = store.getState().project?.dir;

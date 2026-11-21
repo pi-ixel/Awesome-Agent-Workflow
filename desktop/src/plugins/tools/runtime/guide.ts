@@ -8,6 +8,7 @@
  * 精简版，红线表由 `rules.ts` 生成，保证两边编号永远一致。
  */
 import { platformFrameworkFiles, ruleGuidance, ruleIds, type RuleId } from "./rules.ts";
+import { toolContractVersion } from "./contract.ts";
 import type { ToolViolation } from "../types.ts";
 
 export interface ToolGuideContext {
@@ -99,66 +100,119 @@ function guideBody(context: ToolGuideContext): string {
 | 文件与小批处理 | 打开一个文本、清洗内容、再存成新文件；把一批文本合并导出 |
 | 个人留存 | 待办清单、随手记、常用配置、最近用过的输入（走 \`aawStore\`） |
 
-它能读写系统剪切板、读写用户亲手选的文件、把数据留到下次打开、按声明联网访问 http/https，在你声明之后还能常驻后台与弹提醒。需要第三方库时，把依赖放进工具目录、写一个 \`preload.js\` 就能用（见下面「带依赖的工具」）。**不能**读任意本地路径、不能调用摄像头或录屏——平台把这些挡在沙箱外面，是为了让一个 ZIP 能在别人机器上直接装、直接跑。
+它能读写系统剪切板、读写用户亲手选的文件、把数据留到下次打开、按声明联网访问 http/https，在你声明之后还能常驻后台与弹提醒。需要第三方库时，把纯 JS 依赖打进一个 \`app.js\`（见下面「带依赖的工具」）。**不能**读任意本地路径、不能调用摄像头或录屏——平台把这些挡在沙箱外面，是为了让一个 ZIP 能在别人机器上直接装、直接跑。
 
-技术上的边界：默认形态是自包含的 \`index.html\`（HTML/CSS/JS 都在里面），\`manifest.json\` 描述身份、动作、设置与能力。**要带依赖时可以多一个 \`preload.js\` 与 \`node_modules/\`**——Node 只在 \`preload.js\` 里可用，页面本身拿不到。不是多页面站点，不是后台守护进程。**必须至少声明并实现一个动作**（红线 R3）：界面上的按钮和 \`aawActions\` 里的函数是同一件事，人和 AI 走同一条路。
+技术上的边界：默认形态是自包含的 \`index.html\`（HTML/CSS/JS 都在里面），\`manifest.json\` 描述身份、动作、设置与能力。**要带纯 JS 依赖时多一个 \`app.js\` 构建产物**（源码放 \`src/\`，带不带随你）；**确实需要进程、原生模块或非 HTTP 协议时**才用 \`bin/\` 自带运行时，那条路会放弃沙箱。不是多页面站点。**必须至少声明并实现一个动作**（红线 R3）：界面上的按钮和 \`aawActions\` 里的函数是同一件事，人和 AI 走同一条路。
 
 ## 项目结构
 
 - \`manifest.json\`：身份、动作、设置、能力声明（**你主要编辑它**；\`html\` 字段留空）
 - \`index.html\`：界面入口，运行时**以它为准**（**你主要编辑它**；界面只写这一处，不要同时写进清单的 html 字段）
-- \`preload.js\`：可选，工具自己的 Node 侧桥接；需要在 \`manifest.json\` 里写 \`"preload": "preload.js"\`
-- \`node_modules/\`：可选，随包分发的依赖（只有 \`preload.js\` 能用）
+- \`app.js\`：可选，L2 的构建产物。清单里写 \`"build": { "out": "app.js" }\`
+- \`src/\`：可选，你的源码。平台不读它、不校验它，带不带由你决定
+- \`bin/\`：可选，L3 的运行时（可执行文件 + 它自己的依赖）。清单里写 \`"runtime": { "kind": "process", … }\`
 - \`NOTES.md\`：可选，写设计取舍
 - \`AGENTS.md\`：本文件，平台生成；你没有它也不许自己新建（见下节 R9）
 
 ## 带依赖的工具
 
-需要 npm 上的纯 JS 库（比如 \`ssh2\`、\`exceljs\`）时：
+### 先用 L2：把纯 JS 依赖打进 app.js（推荐）
 
-1. 在工具目录里 \`npm install exceljs\`，会多出 \`node_modules/\`。
-2. 写 \`preload.js\`，里面直接 \`require("exceljs")\`——它跑在有完整 Node 的上下文里，Node 会从 \`preload.js\` 所在目录往上找 \`node_modules\`，不需要写任何路径。
-3. \`manifest.json\` 里写 \`"preload": "preload.js"\`。
-4. 用 \`aawBridge.expose("services", { … })\` 把接口交给页面，页面用 \`window.services\` 调用。
+需要 npm 上的纯 JS 库（\`exceljs\`、\`marked\`、\`sql.js\` 这类）时：
+
+1. 在工具目录里 \`npm install exceljs\`。
+2. 源码写在 \`src/main.js\`，然后打一次包：
+
+\`\`\`bash
+npx esbuild src/main.js --bundle --format=esm --minify --outfile=app.js
+\`\`\`
+
+3. \`manifest.json\` 里写：
+
+\`\`\`json
+"build": { "entry": "src/main.js", "out": "app.js", "command": "npm run bundle" }
+\`\`\`
+
+4. \`index.html\` 里用 \`<script type="module" src="./app.js"></script>\` 引进去。
+
+**三个键的地位不一样，别记混**：\`out\` 是运行时的唯一依据（它必须存在，否则装不上）；\`entry\` / \`command\` 只是"我是怎么构建的"的作者备注，平台不读取、不执行、也不检查对应文件在不在。
 
 \`\`\`js
-// preload.js
-const ExcelJS = require("exceljs");
+// src/main.js
+import ExcelJS from "exceljs";
 
-aawBridge.expose("services", {
-  /** 生成一份 xlsx，返回 ArrayBuffer 给页面直接存盘。 */
-  async buildSheet(rows) {
-    const book = new ExcelJS.Workbook();
-    const sheet = book.addWorksheet("导出");
-    sheet.addRows(rows);
-    return book.xlsx.writeBuffer();
-  },
-});
+export async function buildSheet(rows) {
+  const book = new ExcelJS.Workbook();
+  const sheet = book.addWorksheet("导出");
+  sheet.addRows(rows);
+  return book.xlsx.writeBuffer();
+}
 \`\`\`
 
-\`\`\`html
-<!-- index.html -->
-<script>
-  const bytes = await window.services.buildSheet([["姓名", "部门"], ["张三", "平台组"]]);
-  await aawFiles.save("导出.xlsx", bytes);
-</script>
+**L2 能覆盖什么**：Excel / CSV、Markdown 渲染、加密与签名（\`crypto.subtle\`）、
+SQLite（\`sql.js\` 的 WASM 版）、图像处理（canvas + WASM）、重计算（Web Worker）、
+HTTP 请求（\`fetch\`）。**代价**：作者要会跑一条命令。脚手架可以预置
+\`npm run bundle\`；AI 生成时也会把这条命令写好。
+
+\`src/\` 带不带是你的自由：愿意公开就把源码放在里面，不愿意就只发 \`app.js\`——
+红 R10 只会给一条提醒，不影响安装与运行。
+
+### 真的需要进程时：L3（\`bin/\`）
+
+只有下面四条满足其一才允许用：
+
+1. 要用**原生模块**（\`.node\` 文件）；
+2. 要**非 HTTP 协议**：TCP / UDP / SSH / 数据库直连；
+3. 要**不受对话框约束的文件系统**：遍历、监听、批量改写；
+4. 要**真正无窗口的常驻进程**（普通工具的 \`keepAlive\` 只是"窗口隐藏"）。
+
+\`\`\`
+<工具目录>/
+├── manifest.json
+├── index.html          ← 可选。纯后台工具可以没有
+└── bin/
+    ├── run.exe         ← 你自带的运行时 + 依赖，平台不认识它是什么
+    └── ...
 \`\`\`
 
-**两条硬限制**：
+\`\`\`json
+"runtime": { "kind": "process", "entry": "bin/run.exe", "protocol": 1 }
+\`\`\`
 
-- 页面里没有 Node。\`require\` 只在 \`preload.js\` 里存在；\`aawBridge\` 也只在 \`preload.js\` 里可用（平台注入），页面拿到的只是你 expose 出来的对象——暴露什么由你决定，别把整个 \`fs\` 直接交出去。
-- **原生模块（\`.node\`）不能随包传。** 它绑定操作系统、CPU 架构和 Electron 版本，换台机器必崩。遇到只有原生模块才能做的事，改用纯 JS 等价物，或明确告诉用户这个能力平台暂不支持。
+进程用 **NDJSON over stdio** 与宿主通信（一行一条 JSON，和 MCP / LSP 同一个形态，
+\`echo '{...}' | ./bin/run\` 就能手工调试）：
+
+| 方向 | 方法 | 参数 | 返回 |
+|---|---|---|---|
+| 宿主→工具 | \`initialize\` | \`{ protocol, capabilities }\` | \`{ protocol, actions: [...] }\` |
+| 宿主→工具 | \`invoke\` | \`{ action, input }\` | \`{ ok: true, value }\` 或 \`{ ok: false, error }\` |
+| 宿主→工具 | \`event\` | \`{ topic, payload }\` | 无（通知） |
+| 宿主→工具 | \`shutdown\` | — | 进程自行退出 |
+| 工具→宿主 | \`aaw.call\` | \`{ cap, fn, args }\` | \`{ ok, value }\` |
+| 工具→宿主 | \`aaw.emit\` | \`{ topic, payload }\` | 无 |
+
+**动作语义与页面载体完全一致**：20 秒超时、返回 ≤ 512 KB、同一输入重复调用结果相同。
+所以工具中心、启动器、AI 调用、导出校验对你用哪种载体一无所知。
+
+**三条硬限制，缺一条它就变成纯负资产**：
+
+- **显式声明**：\`runtime.kind === "process"\`，导入时单独一屏告诉用户"这个工具会启动独立进程，拥有你账户下的文件与网络权限"，并点名包里所有可执行文件。
+- **体积单列**：\`bin/\` 不计入 4 MB 源码限额，但导入时会把真实体积显示出来。
+- **AI 不许生成 L3**（红线 R11）：许愿链路只产出 L1/L2；进程入口必须人工写、人工审。
+
+L3 里 \`store\` / \`sharedStore\` / \`secrets\` / \`settings\` 这四项**必须走宿主**
+（\`aaw.call("store", …)\`）——数据的所有权在平台，自己写等于卸载时清不掉。
 
 ## 什么是内核、哪些不许改（R9）
 
 工具由两部分组成：**你写的工具自己**，和平台提供的**内核**。内核指工具运行依赖、但不属于工具包的一切，具体是：
 
-- 工具窗口的 \`aaw-tool://\` 协议、CSP 沙箱、独立内存分区；
+- 工具窗口的 \`aaw-tool://\` 协议、CSP 沙箱、独立 origin；
 - 下面「运行时能力」一节列出的全部 \`window.aaw*\` 注入入口；
 - 平台生成的契约文件：项目里的 \`AGENTS.md\`、导出 ZIP 里的 \`README.md\`；
 - \`manifest.json\` 的字段名、\`schemaVersion\`、\`id\` 规则，以及「界面以 \`index.html\` 文件为准」这些约定。
 
-内核由每台机器上的宿主在运行时提供（桌面端 \`tools-runtime/\` 与 Tauri 侧 \`tools_runtime.rs\`），**严禁修改、伪造或绕过**：
+内核由每台机器上的宿主在运行时提供（桌面端的 Rust 工具载体），**严禁修改、伪造或绕过**：
 
 - 不要覆盖或伪造任何 \`window.aaw*\` 注入；
 - 不要把内核文件复制、改写进工具包，也不要另造同名文件（保留名清单：${frameworkFileList()}）；
@@ -195,14 +249,22 @@ aawBridge.expose("services", {
 - \`icon\`：可选，1–2 个字符（一个 emoji 或字母/汉字），缺省取名称首字。
 - \`settingsSchema\`：可选。\`type\` 只能是 text / number / boolean / select；select 的 \`options\` 是 \`{ "label": "显示名", "value": "值" }\` 数组。
 - \`background\`：可选。声明常驻/定时才写：\`{ "reason": "剪切板历史", "schedule": true }\`（\`schedule\` 省略表示只常驻不定时）。
+- \`build\`：可选，L2 的构建声明：\`{ "entry": "src/main.js", "out": "app.js", "command": "npm run bundle" }\`。**运行只认 \`out\`**；\`entry\` / \`command\` 是给人看的备注，平台不读、不执行、不检查文件是否存在。
+- \`runtime\`：可选，L3 的进程声明：\`{ "kind": "process", "entry": "bin/run.exe", "protocol": 1 }\`。\`entry\` 必须在 \`bin/\` 内。**AI 生成时出现它就装不上（R11）。**
 - \`author\` / \`source\`：可选，作者名与来源链接，分享别人的包时用于判断可信度。
+
+**没有 \`preload\` 这个字段了。** 第 2 代契约删掉了 Node 侧桥接层：出现 \`preload\` 会直接装不上。纯 JS 依赖走 \`build\`，需要进程走 \`runtime\`。
 
 ## 运行时能力
 
+下面每一项在两种载体里都有，只是调用方式不同：页面载体（L1/L2）注入到 \`window\`；
+进程载体（L3）走 \`aaw.call(能力名, 方法, 参数)\`。**动作语义完全一致**——20 秒超时、
+返回 ≤ 512 KB、同一输入结果相同。
+
 **下行**（宿主 → 工具，注入到 \`window\` 上）：
 
-1. \`window.aawSettings\` — 只读设置对象，键是 settingsSchema 的 id。
-2. \`window.aawStore\` — \`await set(k,v) / get(k) / delete(k) / keys()\`，按工具+用户隔离、**跨重启保留**；单值 ≤ 256 KB、整个工具 ≤ 5 MB，超限 \`set\` 会抛错（先清理再写）。\`aawStore.scope("shared")\` 是用户级共享区：多个工具能看到同一份数据，适合"A 工具产出、B 工具消费"。
+1. \`window.aawSettings\` — 只读设置对象，键是 settingsSchema 的 id。**L3 必须走宿主**（\`aaw.call("settings", "read")\`）：设置存在工具中心的库里，自己读那一份用户改不了。
+2. \`window.aawStore\` — \`await set(k,v) / get(k) / delete(k) / keys()\`，按工具+用户隔离、**跨重启保留**；单值 ≤ 256 KB、整个工具 ≤ 5 MB，超限 \`set\` 会抛错（先清理再写）。\`aawStore.scope("shared")\` 是用户级共享区：多个工具能看到同一份数据，适合"A 工具产出、B 工具消费"。**L3 必须走宿主**：自己写文件卸载时清不掉。
 3. \`window.aawFiles\` — \`await open({ accept, multiple, directory, binary })\`：
    - 默认返回 \`{ name, path, size, text }\`，取消返回 \`null\`；
    - \`multiple: true\` 返回数组（最多 32 个）；
@@ -212,19 +274,19 @@ aawBridge.expose("services", {
    - \`onDrop(list => …)\`：用户把文件拖进窗口时触发，每项带 \`token\`，用 \`await aawFiles.read(token)\` 取内容。
 4. \`window.aawClipboard\` — \`readText()\` / \`writeText(text)\`（上限 1 MB）；\`readImage()\` 返回 \`{ png: ArrayBuffer } | null\`；\`writeImage(bytes)\` 写图片。写入不需要用户手势，读取仍要遵守下面的时机规则。
 5. \`window.aawSystem\` — \`info()\` 给 \`{ platform, arch, osVersion, cpus, totalMemory, freeMemory, homedir, tmpdir }\`；\`disk()\` 给 \`{ total, free }\`。**只读白名单**，没有进程列表、没有环境变量全集。
-6. \`window.aawSecrets\` — \`set(k,v) / get(k) / delete(k)\`，走系统加密存储（safeStorage），**不落明文**。API Key、Token 放这里，不要写进 html 或 \`aawStore\`。
+6. \`window.aawSecrets\` — \`set(k,v) / get(k) / delete(k)\`，走系统加密存储（Windows DPAPI / macOS 钥匙串），**不落明文**。API Key、Token 放这里，不要写进 html 或 \`aawStore\`。**L3 必须走宿主**：系统加密只有宿主有。
 7. \`window.aawLifecycle\` — \`notify(title, body)\` 弹系统通知；\`keepAlive({ reason })\` 声明常驻——**声明后**用户关窗只是隐藏、进程继续，可从托盘或工具中心「⋯ → 停止后台运行」彻底停掉；**不声明 keepAlive 的工具，关窗就是退出**。\`schedule(seconds)\` 定时唤醒（至少 60 秒，更小会失败）配 \`onSchedule(cb)\` 收回调。常驻与定时必须在清单 \`background\` 里声明（格式见 manifest 一节），否则视为未申请——\`reason\` 写清楚为什么需要常驻，别把常驻当成用户看不见的事。
 8. \`window.aawContext\` — \`selection\`（唤起时可用的文本，没有就是空串）、\`origin\`（\`hotkey\` / \`launcher\` / \`action\`）、\`probe()\` 主动再取一次。需要它就在清单写 \`"needsSelection": true\`。
 9. \`window.aawBus\` — \`emit(topic, payload)\` / \`on(topic, cb)\`，工具之间在线广播，**不保留历史**（对方不在线就收不到）。
 
 **上行**（工具 → 宿主）：
 
-10. \`window.aawActions\` — \`{ [actionId]: async (input) => 结果 }\`，界面上按钮必须调用同一个函数；8 秒内返回、结果 < 512 KB、幂等（同一输入重复调用结果相同，平台在用户重试时会再次调用）。
+10. \`window.aawActions\` — \`{ [actionId]: async (input) => 结果 }\`，界面上按钮必须调用同一个函数；20 秒内返回、结果 < 512 KB、幂等（同一输入重复调用结果相同，平台在用户重试时会再次调用）。进程载体的动作在 \`initialize\` 的返回里声明，收到 \`invoke\` 时回 \`{ ok, value }\`。
 
 补充规则：
 
-- **联网默认可用**。\`permissions.network\` 是声明给用户看的：写 \`true\`（会联网）、\`false\`（承诺不联网）、\`{ "hosts": ["*.corp.example.com"] }\`（限定域名）；访问自签证书的内网接口再加 \`"insecure": true\`（安装时会提示用户）。会联网的工具请声明，让用户知情。
-- \`requires\`：\`{ "contract": 1, "capabilities": [...] }\` 说明最低要求，不写就宽松放行，导出时平台会自动补上；写了之后，满足不了的宿主会显示说明页而不是白屏。**能力名只能是这十二个**：settings、store、sharedStore、files、clipboard、actions、system、secrets、lifecycle、context、bus、network（与上面各条目的 \`window.aaw*\` 名一一对应）。
+- **联网默认可用**。\`permissions.network\` 是声明给用户看的：写 \`true\`（会联网）、\`false\`（承诺不联网）、\`{ "hosts": ["*.corp.example.com"] }\`（限定域名）；访问自签证书的内网接口再加 \`"insecure": true\`（安装时会提示用户）。会联网的工具请声明，让用户知情。**进程载体不受 CSP 约束**——这是 L3 的真实代价，导入时会明说。
+- \`requires\`：\`{ "contract": ${toolContractVersion}, "capabilities": [...] }\` 说明最低要求，不写就宽松放行；写了之后，满足不了的宿主会显示说明页而不是白屏。**能力名只能是这十二个**：settings、store、sharedStore、files、clipboard、actions、system、secrets、lifecycle、context、bus、network（前十个与 \`window.aaw*\` 名一一对应；\`network\` 是声明式授权，没有 window 入口）。**当前契约代际是 ${toolContractVersion}。**
 - 分清两种「记住」：\`settingsSchema\` 是用户在工具中心能改的配置（代码里经 \`aawSettings\` 只读）；\`aawStore\` 是工具自己记的状态，用户看不见，不要拿来当设置项（R4）。
 - 密钥的推荐路径：运行时让用户输入一次 → \`aawSecrets.set\` 存下 → 以后 \`aawSecrets.get\`。不要写进 html、清单或 \`aawStore\`（R5）。
 - \`navigator.clipboard\` 也能用，但它要求用户手势、在 AI 执行的动作里拿不到；优先用 \`aawClipboard\`。
@@ -247,7 +309,9 @@ ${ruleTable()}
 ## 自检（提交前逐条过）
 
 - [ ] 交付的功能范围就是用户确认过的，没有私自加减
-- [ ] 没有覆盖或伪造任何 \`window.aaw*\` 注入，也没有把 tools-runtime 框架文件带进工具包
+- [ ] 没有覆盖或伪造任何 \`window.aaw*\` 注入，也没有把内核框架文件带进工具包
+- [ ] 清单里没有 \`preload\` 字段；带依赖时 \`build.out\` 指向的产物确实在目录里
+- [ ] 没有自己造 \`bin/\` 进程（那是人工接手的路径，R11）
 - [ ] 没有任何远程引用（http / https / 协议相对地址）；用相对路径引用自己目录里的文件可以
 - [ ] 界面只写在 \`index.html\`，清单的 \`html\` 字段留空
 - [ ] 每个 action 在 \`aawActions\` 里都有同名函数，界面按钮复用同一函数
@@ -282,7 +346,7 @@ ${toolGuide({ id: "<工具 id>", name: "<工具名>" })}
 
 1. 先问一句"要不要在工具中心新建一个项目"——建项目会自带本规范与预览、安装链路，id 也由平台分配。
 2. 如果用户只是要一段代码，就把 \`manifest.json\` 与 \`index.html\` 一起给出，并在结尾附上红线自检结果。此时 id 没人分配，按 manifest 一节的命名规则自拟，并明确告诉用户把这两个文件放进哪个目录。
-3. 默认不要引入构建步骤：单文件 \`index.html\` 就够了。确实需要第三方库时，走「带依赖的工具」那套（\`preload.js\` + \`node_modules/\`），别让用户为了装一个工具先跑 \`npm run build\`。
+3. 默认不要引入构建步骤：单文件 \`index.html\` 就够了。确实需要第三方库时走 L2：\`npx esbuild src/main.js --bundle --format=esm --minify --outfile=app.js\`，然后在清单里写 \`build.out\`。不要让用户去装 Node 生态、也不要写 \`preload.js\`（那个字段已经删了）。需要进程/原生模块时停下来问人，不要自己造 \`bin/\`。
 `;
 }
 
