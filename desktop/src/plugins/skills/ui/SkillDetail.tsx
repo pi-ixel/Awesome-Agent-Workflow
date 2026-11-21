@@ -93,7 +93,8 @@ export function SkillDetail({
       (other) => other.path !== skill.path && other.realPath === skill.realPath,
     );
   const isInline = skill.kind === "inline";
-  const project = source?.project ? pathName(source.project) : "全局技能";
+  const projectPath = source?.project ?? skill.disabledProject;
+  const project = projectPath ? pathName(projectPath) : "全局技能";
   const kind = isInline
     ? "配置定义"
     : skill.kind === "package"
@@ -162,7 +163,7 @@ export function SkillDetail({
             <SkillIcon className="ui-icon-16 shrink-0" />
             <span
               className="min-w-0 truncate"
-              data-hint={source?.project ?? project}
+              data-hint={projectPath ?? project}
             >
               {project}
             </span>
@@ -272,7 +273,7 @@ export function SkillDetail({
               <dl className="divide-y divide-line border-y border-line text-ui-sm [&>div]:grid [&>div]:grid-cols-[auto_minmax(0,1fr)] [&>div]:gap-x-4 [&>div]:py-2 [&_dd]:break-words [&_dd]:text-right [&_dt]:text-ink-mute">
                 <div>
                   <dt>所属项目</dt>
-                  <dd data-hint={source?.project ?? undefined}>{project}</dd>
+                  <dd data-hint={projectPath ?? undefined}>{project}</dd>
                 </div>
                 <div>
                   <dt>来源</dt>
@@ -291,13 +292,16 @@ export function SkillDetail({
                 {!["正常", "配置内定义"].includes(skill.status) && (
                   <div>
                     <dt>状态</dt>
-                    <dd className="text-danger-ink" data-hint={skill.status}>
+                    <dd className={skill.disabledId ? "text-ink-mute" : "text-danger-ink"} data-hint={skill.status}>
                       {skill.statusLabel ?? skill.status}
                     </dd>
                   </div>
                 )}
               </dl>
-              {shared && (
+              {skill.unavailable && (
+                <p className="text-ui-caption text-warn-ink">{skill.unavailable}</p>
+              )}
+              {shared && !skill.disabledId && (
                 <p className="text-ui-caption text-ink-mute">
                   其他来源也引用这个目录。
                 </p>
@@ -309,7 +313,7 @@ export function SkillDetail({
               <p className="select-text break-all rounded-lg border border-line bg-base px-3 py-2 font-mono text-ui-caption leading-relaxed text-ink-soft">
                 {skill.path}
               </p>
-              {skill.isLink && (
+              {skill.isLink && !skill.disabledId && (
                 <p className="break-all font-mono text-ui-caption text-ink-mute">
                   链接目标 {skill.realPath}
                 </p>

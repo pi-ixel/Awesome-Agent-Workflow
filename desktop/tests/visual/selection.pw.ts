@@ -1,19 +1,35 @@
 import { expect, test } from "@playwright/test";
 import { color, ratio } from "./contrast.ts";
 
-test("技能库批量选择和回收站复用选择卡并保持独立选中状态", async ({
+test("技能卡片只滚动溢出的描述，并保持详情键盘入口", async ({
   page,
   context,
 }) => {
   await page.goto("/tests/visual/uiScaleFixture.html");
   const skills = await context.newPage();
-  await skills.setViewportSize({ width: 360, height: 720 });
+  await skills.setViewportSize({ width: 390, height: 780 });
   await skills.goto("/tests/visual/sidebarTypographyFixture.html?collections");
   const library = skills.getByRole("region", { name: "技能管理" });
-  const title = library.getByRole("heading", { name: "技能", exact: true });
-  await library.getByRole("button", { name: "批量选择" }).press("Enter");
-  const card = library.getByRole("button", { name: /^选择 发布准备/ });
-  await card.press("Space");
+  const title = "发布准备和回滚预案的完整审查";
+  const card = library.getByRole("article", { name: title });
+  const detail = card.getByRole("button", { name: "查看 " + title + " 详情" });
+  const desc = detail.getByText(/^审查发布准备/);
+  const offset = () => desc.evaluate((el) => getComputedStyle(el).translate);
+  const short = library.getByRole("article", { name: "旧版发布检查" });
+  await short.hover();
+  await expect(short.getByText("已替换")).toHaveCSS("translate", "none");
+  await expect(short.getByRole("switch")).not.toBeChecked();
+
+  await expect.poll(offset).toBe("none");
+  await card.hover();
+  await expect.poll(offset).not.toBe("none");
+  await library.getByRole("heading", { name: "技能", exact: true }).hover();
+  await expect.poll(offset).toBe("none");
+  await detail.press("Shift");
+  await expect.poll(offset).not.toBe("none");
+  await skills.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(offset).toBe("none");
+
   const font = page.getByRole("spinbutton", { name: "界面字号" });
   for (const [theme, px] of [
     ["暖白", 12],
@@ -23,22 +39,24 @@ test("技能库批量选择和回收站复用选择卡并保持独立选中状�
     await page.getByRole("button", { name: theme, exact: true }).click();
     await font.fill(String(px));
     await font.press("Enter");
-    await expect(card).toHaveAttribute("aria-pressed", "true");
-    await expect(card).toBeFocused();
-    await expect(card).not.toHaveCSS("box-shadow", "none");
-    await expect(card.locator("span").last()).toHaveCSS("font-size", `${px}px`);
-    await expect(title).toHaveCSS("font-size", `${px + 2}px`);
+    await expect(detail.getByText(title)).toHaveCSS(
+      "font-size",
+      String(px) + "px",
+    );
+    await expect(detail).toBeFocused();
+    await expect(card.getByRole("switch")).toBeChecked();
   }
-  await card.press("Space");
-  await expect(card).toHaveAttribute("aria-pressed", "false");
-  await skills
-    .getByRole("navigation", { name: "插件管理" })
-    .getByRole("button", { name: "回收站" })
-    .press("Enter");
-  const recycled = library.getByRole("button", { name: "选择 旧版发布检查" });
-  await expect(recycled).toHaveAttribute("aria-pressed", "false");
-  await recycled.press("Space");
-  await expect(recycled).toHaveAttribute("aria-pressed", "true");
+  await detail.press("Enter");
+  const dialog = skills.getByRole("dialog", { name: "技能详情" });
+  await expect(dialog.getByText(/^审查发布准备、核对安装包/)).toBeVisible();
+  await dialog.getByRole("button", { name: "关闭技能详情" }).click();
+  await expect(detail).toBeFocused();
+  const toggle = card.getByRole("switch");
+  await toggle.press("Space");
+  await expect(toggle).not.toBeChecked();
+  await expect(dialog).toBeHidden();
+  await toggle.press("Space");
+  await expect(toggle).toBeChecked();
 });
 
 test("列表选择的长选项和分组随字号换行，展开时保留活动项、滚动及焦点", async ({
@@ -150,7 +168,9 @@ test("定时任务编辑器实时切换外观时保留星期选择、焦点和�
   await expect(advanced).toBeFocused();
   await expect(advanced).not.toHaveCSS("box-shadow", "none");
 
-  await dialog.getByRole("button", { name: "取消", exact: true }).press("Enter");
+  await dialog
+    .getByRole("button", { name: "取消", exact: true })
+    .press("Enter");
   await tasks.setViewportSize({ width: 320, height: 850 });
   const heading = tasks.getByRole("heading", { level: 1 });
   const run = tasks.getByRole("button", { name: "立即运行" });
@@ -161,7 +181,9 @@ test("定时任务编辑器实时切换外观时保留星期选择、焦点和�
   await expect(heading).toHaveCSS("font-size", "22px");
   await expect(run).toBeFocused();
   const header = heading.locator("xpath=ancestor::header");
-  expect(await header.evaluate((el) => el.scrollWidth)).toBe(await header.evaluate((el) => el.clientWidth));
+  expect(await header.evaluate((el) => el.scrollWidth)).toBe(
+    await header.evaluate((el) => el.clientWidth),
+  );
 });
 
 test("问答单选支持方向键和选中焦点，多选保留独立选项，提交时禁用", async ({

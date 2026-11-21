@@ -190,7 +190,7 @@ fn home_and_project_remain_separate_and_conflicts_skip() {
     let c = catalog::list(&loc, &q).unwrap();
     assert_eq!(c.entries.len(), 2);
     let original = c.entries.iter().find(|e| e.source == global).unwrap();
-    assert!(delete(&loc, &q, original).contains("已移入"));
+    assert!(delete(&loc, &q, original).contains("已停用"));
     check_recycled_description(&loc, &q, original);
     assert!(project.join("alpha/SKILL.md").is_file());
     let from = tmp.path().join("import");
@@ -229,7 +229,7 @@ fn recycles_only_the_selected_skill_in_a_codeagent_package() {
     let item = library.entries.iter().find(|e| e.path == selected).unwrap();
     assert_eq!(item.kind, Kind::Package);
 
-    assert!(delete(&loc, &q, item).contains("已移入"));
+    assert!(delete(&loc, &q, item).contains("已停用"));
     assert!(!selected.exists());
     assert!(sibling.join("SKILL.md").is_file());
     assert!(manifest.is_file());
@@ -245,13 +245,59 @@ fn recycles_only_the_selected_skill_in_a_codeagent_package() {
         .iter()
         .find(|e| e.path == selected)
         .unwrap();
-    assert!(delete(&loc, &q, item).contains("已移入"));
+    assert!(delete(&loc, &q, item).contains("已停用"));
     let trash = catalog::list(&loc, &q).unwrap().trash;
     let purge = action(json!({"type":"purge","ids":[trash[0].id]}));
     assert!(apply(&loc, &q, purge).unwrap()[0].contains("已永久删除"));
     assert!(!selected.exists());
     assert!(sibling.join("SKILL.md").is_file());
     assert!(manifest.is_file());
+    assert!(catalog::list(&loc, &q).unwrap().trash.is_empty());
+}
+
+#[test]
+fn reads_disabled_files_by_record_and_permanently_deletes_only_the_selected_skill() {
+    use super::files::{Request, Selection, browse};
+
+    let (_tmp, loc, q) = setup(Provider::CodeAgent);
+    let root = q.projects[0].join(".agents/skills");
+    let chosen = root.join("chosen");
+    let sibling = root.join("sibling");
+    skill(&chosen, "chosen");
+    skill(&sibling, "sibling");
+    let catalog = catalog::list(&loc, &q).unwrap();
+    let item = catalog.entries.iter().find(|e| e.path == chosen).unwrap();
+    assert!(delete(&loc, &q, item).contains("已停用"));
+    let stopped = catalog::list(&loc, &q).unwrap().trash;
+    let id = &stopped[0].id;
+    let selection: Selection = serde_json::from_value(json!({
+        "source": root, "path": chosen, "realPath": chosen, "disabledId": id
+    }))
+    .unwrap();
+    let request = |name: &str| Request::Read { path: name.into() };
+    let file = browse(&loc, &q, &selection, request("SKILL.md")).unwrap();
+    assert!(
+        serde_json::to_value(file).unwrap()["text"]
+            .as_str()
+            .unwrap()
+            .contains("chosen")
+    );
+    assert!(browse(&loc, &q, &selection, request("../record.json")).is_err());
+    let other = Query {
+        provider: Provider::ICode,
+        ..q.clone()
+    };
+    assert!(browse(&loc, &other, &selection, request("SKILL.md")).is_err());
+    assert!(
+        apply(&loc, &q, action(json!({"type":"restore","ids":[id]}))).unwrap()[0]
+            .contains("已恢复")
+    );
+    let current = catalog::list(&loc, &q).unwrap();
+    let item = current.entries.iter().find(|e| e.path == chosen).unwrap();
+    let destroy = action(json!({"type":"deletePermanent","item":item}));
+    assert!(apply(&loc, &q, destroy).unwrap()[0].contains("已永久删除"));
+    assert!(!chosen.exists());
+    assert!(sibling.join("SKILL.md").is_file());
     assert!(catalog::list(&loc, &q).unwrap().trash.is_empty());
 }
 
@@ -266,7 +312,7 @@ fn inline_delete_restore_preserves_independent_profile_changes() {
     assert_eq!(c.profile.as_deref(), Some("Code.yaml"));
     assert_eq!(c.entries.len(), 2);
     let item = c.entries.iter().find(|e| e.kind == Kind::Inline).unwrap();
-    assert!(delete(&loc, &q, item).contains("已移入"));
+    assert!(delete(&loc, &q, item).contains("已停用"));
     check_recycled_description(&loc, &q, item);
     let text = fs::read_to_string(&path).unwrap() + "other: retained\n";
     fs::write(&path, text).unwrap();
@@ -307,7 +353,7 @@ fn link_recovery_keeps_the_original_target_and_sibling_intact() {
     std::os::unix::fs::symlink(&target, &link).unwrap();
     let item = catalog::list(&loc, &q).unwrap().entries.remove(0);
     assert!(item.is_link);
-    assert!(delete(&loc, &q, &item).contains("已移入"));
+    assert!(delete(&loc, &q, &item).contains("已停用"));
     check_recycled_description(&loc, &q, &item);
     assert!(target.join("SKILL.md").exists() && !present(&link).unwrap());
     let trash = catalog::list(&loc, &q).unwrap().trash;

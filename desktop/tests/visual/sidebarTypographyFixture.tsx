@@ -95,10 +95,11 @@ if (taskEditor) {
 } else if (collections) {
   const { createSkillsCollection } =
     await import("./skillsCollectionFixture.tsx");
-  const SkillsCollection = await createSkillsCollection();
+  const isSkillsPreview = params.has("skill-cards");
+  const SkillsCollection = await createSkillsCollection(isSkillsPreview);
   root.render(
     <main className="min-h-screen min-w-0 bg-sidebar text-ink">
-      <TaskSidebar scheduler={scheduler} />
+      {!isSkillsPreview && <TaskSidebar scheduler={scheduler} />}
       <SkillsCollection />
     </main>,
   );

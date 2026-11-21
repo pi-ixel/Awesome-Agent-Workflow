@@ -27,6 +27,9 @@ export interface NativeSkill {
   statusLabel?: string | null;
   skillFilePath?: string | null;
   usageCount: number | null;
+  disabledId?: string;
+  disabledProject?: string | null;
+  unavailable?: string | null;
 }
 export interface RecycledSkill {
   id: string;
@@ -34,6 +37,11 @@ export interface RecycledSkill {
   path: string;
   name: string;
   kind: SourceKind;
+  source?: string;
+  project?: string | null;
+  preview?: string;
+  isLink?: boolean;
+  unavailable?: string | null;
 }
 export interface SkillCatalog {
   profiles: string[];
@@ -52,6 +60,7 @@ export type SkillAction =
       names: string[];
     }
   | { type: "delete"; items: Pick<NativeSkill, "name" | "path" | "revision">[] }
+  | { type: "deletePermanent"; item: Pick<NativeSkill, "name" | "path" | "revision"> }
   | { type: "restore" | "purge"; ids: string[] };
 export type SkillFileRequest = {
   type: "directory" | "read";
@@ -71,7 +80,7 @@ export interface NativeSkillLibrary {
   change(query: SkillQuery, action: SkillAction): Promise<string[]>;
   files?: (
     query: SkillQuery,
-    skill: Pick<NativeSkill, "source" | "path" | "realPath">,
+    skill: Pick<NativeSkill, "source" | "path" | "realPath" | "disabledId">,
     request: SkillFileRequest,
   ) => Promise<SkillFileResponse>;
 }

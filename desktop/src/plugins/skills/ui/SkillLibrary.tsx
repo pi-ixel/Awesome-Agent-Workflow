@@ -16,20 +16,14 @@ import {
   Listbox,
 } from "../../../shared/ui/controls.tsx";
 import {
-  CheckIcon,
   PlusIcon,
   RefreshIcon,
   SearchIcon,
-  TrashIcon,
 } from "../../../shared/ui/icons.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import { SkillPackageActions } from "./SkillPackageActions.tsx";
-import {
-  SelectableSkillCard,
-  SkillCard,
-  SkillGroup,
-} from "./SkillCards.tsx";
+import { SkillCard, SkillGroup } from "./SkillCards.tsx";
 import { SkillDetail } from "./SkillDetail.tsx";
 import { projectGroups, skillKey } from "./skillGroups.ts";
 import type { SkillPackageManager } from "../types.ts";
@@ -45,17 +39,26 @@ type Props = {
   knownProjects: () => string[];
   pick: (title: string) => Promise<string | null>;
   reveal: (path: string, action: "open-directory" | "reveal") => Promise<void>;
-  trash?: boolean;
 };
-type Pending =
-  { type: "delete"; items: NativeSkill[] } | { type: "purge"; ids: string[] };
+type SkillStatus = "all" | "enabled" | "disabled";
 
-
+function isSharedSkill(skill: NativeSkill, catalog: SkillCatalog): boolean {
+  return (
+    skill.kind !== "inline" &&
+    (/(?:^|\/)\.agents\/skills$/i.test(
+      skill.source.replaceAll("\\", "/").replace(/\/$/, ""),
+    ) ||
+      catalog.entries.some(
+        (other) =>
+          other.path !== skill.path && other.realPath === skill.realPath,
+      ))
+  );
+}
 export function SkillLibrary(props: Props) {
   const [profile, setProfile] = useState<string | null>(null);
   return (
     <LibraryPage
-      key={JSON.stringify([props.provider, profile, !!props.trash])}
+      key={JSON.stringify([props.provider, profile])}
       {...props}
       profile={profile}
       changeProfile={setProfile}
@@ -69,7 +72,7 @@ function LibraryPage(
     changeProfile: (v: string | null) => void;
   },
 ) {
-  const { library, knownProjects, provider, profile, trash = false } = props;
+  const { library, knownProjects, provider, profile } = props;
   const [tick, refresh] = useState(0);
   const scan = useMemo(
     () => ({
@@ -87,13 +90,15 @@ function LibraryPage(
     catalog?: SkillCatalog;
     error?: string;
   }>();
-  const catalog = snapshot?.scan === scan ? snapshot.catalog : undefined;
+  const catalog = snapshot?.catalog;
   const scanError = snapshot?.scan === scan ? snapshot.error : undefined;
   const [search, setSearch] = useState("");
-  const [isBulk, setBulk] = useState(false);
-  const [selected, select] = useState<string[]>([]);
+  const [status, setStatus] = useState<SkillStatus>("all");
   const [detail, setDetail] = useState<NativeSkill | null>(null);
-  const [pending, setPending] = useState<Pending | null>(null);
+  const [pending, setPending] = useState<{
+    skill: NativeSkill;
+    mode: "delete" | "disable";
+  } | null>(null);
   const [batch, setBatch] = useState<{
     from: string;
     names: string[];
@@ -112,7 +117,6 @@ function LibraryPage(
     }
   }, [detail, pending]);
   const rescan = () => {
-    select([]);
     setDetail(null);
     setPending(null);
     refresh((n) => n + 1);
@@ -136,26 +140,33 @@ function LibraryPage(
   const manager = props.packages;
   const destinations = catalog?.sources.filter((s) => s.canImport) ?? [];
   const source = destinations.find((s) => s.path === destination);
-  const visible =
-    catalog?.entries.filter((e) =>
-      [e.name, e.description, e.path].some((s) =>
-        s.toLowerCase().includes(search.trim().toLowerCase()),
+  const disabled: NativeSkill[] = (catalog?.trash ?? []).map((item) => ({
+    name: item.name,
+    path: item.path,
+    source: item.source ?? item.path,
+    description: item.description,
+    preview: item.preview ?? "",
+    realPath: item.path,
+    revision: item.id,
+    isLink: item.isLink ?? false,
+    kind: item.kind,
+    status: "已停用",
+    usageCount: null,
+    disabledId: item.id,
+    disabledProject: item.project,
+    unavailable: item.unavailable,
+  }));
+  const keyword = search.trim().toLowerCase();
+  const visible = [...(catalog?.entries ?? []), ...disabled].filter(
+    (entry) =>
+      (status === "all" || (status === "disabled") === !!entry.disabledId) &&
+      [entry.name, entry.description, entry.path].some((value) =>
+        value.toLowerCase().includes(keyword),
       ),
-    ) ?? [];
+  );
   const groups = catalog
     ? projectGroups(visible, catalog, scan.query.projects)
     : [];
-  const recycled =
-    catalog?.trash.filter((e) =>
-      (e.name + " " + e.path)
-        .toLowerCase()
-        .includes(search.trim().toLowerCase()),
-    ) ?? [];
-  const selectedSkills = visible.filter((e) => selected.includes(skillKey(e)));
-  const toggle = (id: string) =>
-    select((keys) =>
-      keys.includes(id) ? keys.filter((k) => k !== id) : [...keys, id],
-    );
   async function perform(operation: () => Promise<void>) {
     if (gate.current) return;
     gate.current = true;
@@ -208,45 +219,57 @@ function LibraryPage(
           skill.kind === "inline" ? "reveal" : "open-directory",
         )
         .catch((e: unknown) => report([String(e)])),
-    remove: (skill: NativeSkill) =>
-      setPending({ type: "delete", items: [skill] }),
+    remove: (skill: NativeSkill, opener: HTMLButtonElement) => {
+      detailOpener.current = opener;
+      setPending({ skill, mode: "delete" });
+    },
+    toggle: (skill: NativeSkill) => {
+      if (skill.disabledId) {
+        void change({ type: "restore", ids: [skill.disabledId] });
+      } else if (catalog && isSharedSkill(skill, catalog)) {
+        setPending({ skill, mode: "disable" });
+      } else {
+        const { name, path, revision } = skill;
+        void change({ type: "delete", items: [{ name, path, revision }] });
+      }
+    },
   };
   function confirm() {
     if (!pending || busy) return;
+    const { skill, mode } = pending;
+    const { name, path, revision, disabledId } = skill;
     setPending(null);
     setDetail(null);
-    if (pending.type === "purge") void change(pending);
-    else
-      void change({
-        type: "delete",
-        items: pending.items.map(({ name, path, revision }) => ({
-          name,
-          path,
-          revision,
-        })),
-      });
+    if (mode === "disable") {
+      void change({ type: "delete", items: [{ name, path, revision }] });
+    } else if (disabledId) {
+      void change({ type: "purge", ids: [disabledId] });
+    } else {
+      void change({ type: "deletePermanent", item: { name, path, revision } });
+    }
   }
-  const count = trash ? recycled.length : visible.length;
+  const count = visible.length;
   return (
     <section
       aria-label="技能管理"
       className="mx-auto w-full max-w-[112rem] space-y-5 px-[clamp(1rem,3vw,3rem)] py-6 text-ui-sm text-ink"
     >
       <PageHeader
-        title={trash ? "回收站" : "技能"}
-        count={catalog && !trash ? `${count} 项` : undefined}
-        actions={<>
-          <IconButton
-            iconSize="rail"
-            className={btnSecondary}
-            disabled={busy || !library}
-            aria-label="刷新"
-            data-hint="刷新"
-            onClick={rescan}
-          >
-            <RefreshIcon className="ui-icon-16" />
-          </IconButton>
-          {!trash && (
+        title="技能"
+        count={catalog ? `${count} 项` : undefined}
+        actions={
+          <>
+            <IconButton
+              iconSize="rail"
+              className={btnSecondary}
+              disabled={busy || !library}
+              aria-label="刷新"
+              data-hint="刷新"
+              onClick={rescan}
+            >
+              <RefreshIcon className="ui-icon-16" />
+            </IconButton>
+
             <ActionButton
               tone="primary"
               className={buttonSize}
@@ -256,8 +279,8 @@ function LibraryPage(
               <PlusIcon className="ui-icon-14" />
               导入技能
             </ActionButton>
-          )}
-        </>}
+          </>
+        }
       />
       <fieldset disabled={busy} className="min-w-0 space-y-6">
         <div className="flex flex-wrap items-center gap-2 border-b border-line pb-4">
@@ -279,86 +302,26 @@ function LibraryPage(
             <input
               aria-label="搜索技能"
               className={`${fieldSurfaceClass} min-h-9 w-44 pl-8 pr-2 text-ui-xs`}
-              placeholder={trash ? "搜索回收条目" : "搜索技能…"}
+              placeholder="搜索技能…"
               value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                select([]);
-              }}
+              onChange={(e) => setSearch(e.target.value)}
             />
           </label>
-          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-            {catalog && (trash || isBulk) && (
-              <div className="flex flex-wrap gap-2">
-                <ActionButton
-                  tone="secondary"
-                  className={buttonSize}
-                  disabled={!count}
-                  onClick={() =>
-                    select(
-                      trash ? recycled.map((e) => e.id) : visible.map(skillKey),
-                    )
-                  }
-                >
-                  全选
-                </ActionButton>
-                {trash && (
-                  <ActionButton
-                    tone="secondary"
-                    className={buttonSize}
-                    disabled={!selected.length}
-                    onClick={() =>
-                      void change({ type: "restore", ids: selected })
-                    }
-                  >
-                    恢复所选
-                  </ActionButton>
-                )}
-                {trash ? (
-                  <ActionButton
-                    tone="danger"
-                    className={buttonSize}
-                    disabled={!selected.length}
-                    onClick={() => setPending({ type: "purge", ids: selected })}
-                  >
-                    永久删除
-                    {selected.length ? `（${selected.length}）` : ""}
-                  </ActionButton>
-                ) : (
-                  <IconButton
-                    iconSize="rail"
-                    aria-label="将所选技能移入回收站"
-                    data-hint={
-                      selectedSkills.length
-                        ? `将 ${selectedSkills.length} 个技能移入回收站`
-                        : "将所选技能移入回收站"
-                    }
-                    disabled={!selectedSkills.length}
-                    className="rounded-md border border-line-strong bg-surface text-ink-mute transition-colors enabled:hover:border-danger-line enabled:hover:bg-danger-bg enabled:hover:text-danger-ink focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-40"
-                    onClick={() =>
-                      setPending({ type: "delete", items: selectedSkills })
-                    }
-                  >
-                    <TrashIcon className="ui-icon-16" />
-                  </IconButton>
-                )}
-              </div>
-            )}
-            {!trash && (
-              <ActionButton
-                tone="secondary"
-                className={buttonSize}
-                aria-pressed={isBulk}
-                onClick={() => {
-                  setBulk(!isBulk);
-                  select([]);
-                }}
-              >
-                <CheckIcon className="ui-icon-14" />
-                {isBulk ? "退出选择" : "批量选择"}
-              </ActionButton>
-            )}
-          </div>
+          <Listbox
+            label="技能状态"
+            className="min-h-9 text-ui-xs"
+            value={status}
+            options={[
+              { value: "all", label: "全部状态" },
+              { value: "enabled", label: "已启用" },
+              { value: "disabled", label: "已停用" },
+            ]}
+            onChange={(value) =>
+              setStatus(
+                value === "disabled" || value === "enabled" ? value : "all",
+              )
+            }
+          />
         </div>
         {!library ? (
           <p>请在 AAW Desktop 中打开技能页。</p>
@@ -393,67 +356,43 @@ function LibraryPage(
                 ))}
               </div>
             )}
-            {trash ? (
-              <>
-                {manager && (
-                  <SkillPackageActions
-                    manager={manager}
-                    storage={props.storage}
-                    report={report}
-                    changed={rescan}
-                  />
-                )}
-                {!count && (
-                  <p className="text-ink-mute">没有匹配的文件或配置回收条目</p>
-                )}
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(min(16.5rem,100%),1fr))] gap-3">
-                  {recycled.map((e) => (
-                    <SelectableSkillCard
-                      key={e.id}
-                      name={e.name}
-                      description={e.description}
-                      selected={selected.includes(e.id)}
-                      onToggle={() => toggle(e.id)}
-                    />
-                  ))}
-                </div>
-              </>
-            ) : (
-              <>
-                {!count && <p className="text-ink-mute">没有匹配的技能</p>}
-                {groups.map((group) => (
-                  <SkillGroup key={group.project ?? ""} {...group}>
-                    {group.entries.map((skill) =>
-                      isBulk ? (
-                        <SelectableSkillCard
-                          key={skillKey(skill)}
-                          name={skill.name}
-                          description={skill.description}
-                          selected={selected.includes(skillKey(skill))}
-                          onToggle={() => toggle(skillKey(skill))}
-                        />
-                      ) : (
-                        <SkillCard
-                          reviewLabel={
-                            props.provider === "codeagent"
-                              ? (skill.statusLabel ?? skill.status)
-                              : undefined
-                          }
-                          key={skillKey(skill)}
-                          skill={skill}
-                          actions={actions}
-                          onDetail={(opener) => {
-                            detailOpener.current = opener;
-                            report([]);
-                            setDetail(skill);
-                          }}
-                        />
-                      ),
-                    )}
-                  </SkillGroup>
-                ))}
-              </>
+            {status === "disabled" && manager && !keyword && (
+              <SkillPackageActions
+                manager={manager}
+                storage={props.storage}
+                report={report}
+                changed={rescan}
+              />
             )}
+            {!count && <p className="text-ink-mute">没有匹配的技能</p>}
+            {groups.map((group) => (
+              <SkillGroup key={group.project ?? ""} {...group}>
+                {group.entries.map((skill) => (
+                  <SkillCard
+                    key={skillKey(skill)}
+                    skill={skill}
+                    actions={actions}
+                    status={
+                      skill.unavailable ??
+                      (!skill.disabledId &&
+                      !["正常", "配置内定义"].includes(skill.status)
+                        ? (skill.statusLabel ?? skill.status)
+                        : !skill.disabledId &&
+                            catalog.sources.find(
+                              (entry) => entry.path === skill.source,
+                            )?.enabled === false
+                          ? "当前配置未加载来源"
+                          : undefined)
+                    }
+                    onDetail={(opener) => {
+                      detailOpener.current = opener;
+                      report([]);
+                      setDetail(skill);
+                    }}
+                  />
+                ))}
+              </SkillGroup>
+            ))}
           </>
         )}
       </fieldset>
@@ -473,36 +412,27 @@ function LibraryPage(
         <ConfirmationDialog
           label="确认技能操作"
           title={
-            pending.type === "purge" ? "永久删除回收条目" : "将技能移入回收站？"
+            pending.mode === "delete" ? "永久删除技能？" : "停用共用技能？"
           }
-          confirmLabel={pending.type === "purge" ? "永久删除" : "移入回收站"}
+          confirmLabel={pending.mode === "delete" ? "永久删除" : "停用"}
           onCancel={() => setPending(null)}
           onConfirm={confirm}
         >
-          {pending.type === "delete" ? (
-            <ul className="max-h-60 space-y-2 overflow-auto">
-              {pending.items.map((e) => (
-                <li key={skillKey(e)}>
-                  <strong className="break-all font-mono">{e.name}</strong>
-                  <p>
-                    {e.isLink
-                      ? "仅移除链接，保留目标。"
-                      : e.kind === "inline"
-                        ? "从配置移除，可恢复定义。"
-                        : "回收技能目录，共用该目录的 Agent 也会受影响。"}
-                    可从回收站恢复。
-                  </p>
-                  <p className="break-all font-mono text-xs text-ink-mute">
-                    {e.path}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p>永久删除所选的 {pending.ids.length} 个条目后将无法恢复。</p>
-          )}
+          <p className="break-all font-semibold">{pending.skill.name}</p>
+          <p>
+            {pending.mode === "disable"
+              ? "共用此目录的 Agent 下次加载时也会停用此技能。已打开的会话可能需要重连。可通过开关恢复。"
+              : pending.skill.isLink
+                ? "仅删除本条链接，保留目标文件。此操作无法恢复。"
+                : pending.skill.kind === "inline"
+                  ? "仅移除这条配置定义。此操作无法恢复。"
+                  : "删除此技能的文件。共用此目录的 Agent 下次加载时也会受影响。此操作无法恢复。"}
+          </p>
+          <p className="break-all font-mono text-xs text-ink-mute">
+            {pending.skill.path}
+          </p>
         </ConfirmationDialog>
-      )}
+      )}{" "}
       {batch && catalog && (
         <ConfirmationDialog
           label="选择导入技能"

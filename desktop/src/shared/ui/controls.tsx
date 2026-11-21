@@ -264,7 +264,7 @@ export function ToggleSwitch({
 }: ToggleSwitchProps) {
   const neutral = appearance === "neutral";
   return (
-    <label className={`flex items-center gap-1.5 ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}>
+    <label className={`relative flex items-center gap-1.5 ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}>
       <input
         type="checkbox"
         role="switch"
