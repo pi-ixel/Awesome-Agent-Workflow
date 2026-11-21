@@ -7,6 +7,7 @@ import {
   toolCapabilities,
   toolContractVersion,
 } from "../../../src/plugins/tools/runtime/contract.ts";
+import { readToolPackageV1 } from "../../../src/plugins/tools/runtime/package.ts";
 
 /**
  * 契约快照测试。
@@ -135,5 +136,69 @@ describe("工具运行契约", () => {
     const base = /pub const BASE_POLICY[^=]*=\s*\[([\s\S]*?)\];/.exec(protocol)?.[1];
     expect(base, "BASE_POLICY 数组没找到").toBeTruthy();
     expect(base).not.toContain("connect-src");
+  });
+
+  /**
+   * v1 冻结读取规则（`readToolPackageV1`）的钉子——「按安装时规则回读」的
+   * 机器强制。将来任何校验收紧都必须先过这道测试：如果收紧让这份夹具读不
+   * 出来了，说明有人动了冻结的 v1 语义——先升 schemaVersion 并给 v1 留旧
+   * 分支，再回来改这里的期望；只收紧现行规则时这里不该有任何变化。
+   */
+  it("readToolPackageV1 的 v1 判定形状是冻结的（夹具快照）", () => {
+    const fixture = {
+      schemaVersion: 1,
+      id: "legacy.pin",
+      name: "存量护栏夹具",
+      version: "0.9.0",
+      icon: "图",
+      html: "<button>旧</button>",
+      actions: [{ id: "run", description: "跑", inputSchema: { type: "object", properties: {} } }],
+      requires: { contract: 1, capabilities: ["store", "files"] },
+      permissions: { network: { hosts: ["*.corp.example.com"] } },
+      sourceFiles: { "src/main.js": "// 作者源码" },
+    };
+    const read = readToolPackageV1(fixture);
+    expect(read, "v1 夹具必须能被冻结规则读出来").toBeDefined();
+    expect(read).toMatchInlineSnapshot(`
+      {
+        "actions": [
+          {
+            "description": "跑",
+            "id": "run",
+            "inputSchema": {
+              "properties": {},
+              "type": "object",
+            },
+          },
+        ],
+        "html": "<button>旧</button>",
+        "icon": "图",
+        "id": "legacy.pin",
+        "name": "存量护栏夹具",
+        "permissions": {
+          "network": {
+            "hosts": [
+              "*.corp.example.com",
+            ],
+          },
+        },
+        "requires": {
+          "capabilities": [
+            "store",
+            "files",
+          ],
+          "contract": 1,
+        },
+        "schemaVersion": 1,
+        "sourceFiles": {
+          "src/main.js": "// 作者源码",
+        },
+        "version": "0.9.0",
+      }
+    `);
+    // 故意带一条"看起来将来可能被收紧"的写法：author 超长带空格。今天的 v1
+    // 规则要求 author 是 1–200 字字符串——它合法；若明天规则想收紧格式，
+    // 这一行就是提醒：收紧要落在现行规则上，v1 分支保持原样。
+    expect(readToolPackageV1({ ...fixture, id: "lenient", author: "  张三  " })?.author).toBe("张三");
   });
 });

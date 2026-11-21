@@ -1,6 +1,7 @@
 import { strToU8, unzipSync, zipSync } from "fflate";
 import type { ToolPackage } from "../types.ts";
 import { parseToolPackage, toolPackageLimit, validateToolPackageText } from "./package.ts";
+import { toolCapabilities, toolContractVersion } from "./contract.ts";
 import { isRuntimeBinPath, safeSourcePath } from "./sourceFiles.ts";
 import { toolLimits } from "./limits.ts";
 
@@ -42,6 +43,58 @@ function isDependencyPath(path: string): boolean {
 }
 
 /**
+ * 导出时值得扫描的文件后缀：只有“可能是代码或页面”的文本才值得读进来扫。
+ * `node_modules` 由调用方排除——依赖不是作者写的，扫它们只会引入误报。
+ */
+const scannableSuffix = /\.(js|mjs|cjs|ts|tsx|jsx|html?|json|txt)$/i;
+
+/**
+ * 扫描文本里实际用到的**下行能力**（设计稿《工具内核与版本闸门》§5.4）。
+ *
+ * 启发式：按 `window.aaw*` 的入口名做子串匹配。可能漏掉动态字符串拼接，
+ * 也可能被注释误伤——所以它**只做补充、不做强制校验**（安装判定仍以作者
+ * 声明的 `requires` 为准）。多声明一条的代价是“旧宿主会拦下并给说明页”，
+ * 漏声明的代价是“旧宿主装上后白屏”：宁严勿漏。
+ *
+ * `actions` 是上行能力（工具提供给宿主，永远可用），`network` 是声明式
+ * 授权（清单 `permissions` 里已有）——两者都不进 `requires`。
+ */
+export function scanUsedCapabilities(texts: readonly string[]): readonly string[] {
+  const text = texts.filter(Boolean).join("\n");
+  if (!text) return [];
+  const used = new Set<string>();
+  for (const capability of toolCapabilities) {
+    if (capability.direction !== "down" || !capability.entry) continue;
+    if (text.includes(capability.entry)) used.add(capability.name);
+  }
+  // `aawStore.scope` 挂在 `aawStore` 上：用 scope 的必然也用 store，但
+  // sharedStore 是独立的能力名，要单独补上。
+  if (text.includes("aawStore.scope")) used.add("sharedStore");
+  return [...used].sort();
+}
+
+/**
+ * 按扫描结果补写 `requires`（设计稿《版本闸门》§5.4：只补充，不删改）。
+ *
+ * - 作者已经写了 `requires`：只并进扫到的能力名，`contract` 保持作者写的
+ *   值——他写低一点可能是刻意的（要兼容旧宿主），补写不能反向收紧。
+ * - 作者没写：按当前契约代际生成一份。旧宿主安装时会看到说明页，而不是
+ *   装上之后白屏。
+ * - 没扫到任何能力：什么都不写。空 `requires` 只会把“没用宿主能力的工具”
+ *   挡在新契约之外，纯亏不赚。
+ */
+export function withScannedRequires(tool: ToolPackage, texts: readonly string[]): ToolPackage {
+  const detected = scanUsedCapabilities(texts);
+  if (!detected.length) return tool;
+  const existing = tool.requires;
+  if (existing) {
+    const capabilities = [...new Set([...(existing.capabilities ?? []), ...detected])];
+    return { ...tool, requires: { ...existing, capabilities } };
+  }
+  return { ...tool, requires: { contract: toolContractVersion, capabilities: detected } };
+}
+
+/**
  * 导出的源码项目里除了工具本体，还要有"怎么改、怎么装回去"。
  *
  * 早先这里生成 `package.json` + `scripts/build.mjs`，要求接收方装 Node 再
@@ -49,8 +102,11 @@ function isDependencyPath(path: string): boolean {
  * 打个包。现在直接写清：改完在工具中心点「导入工具」选中这个 ZIP 即可。
  * 不提「拖回」：拖拽导入从来没被支持过，写了只会让人照做然后发现没反应。
  */
-export function toolProjectFiles(tool: ToolPackage): Record<string, string> {
-  const { html, sourceFiles, ...manifest } = tool;
+export function toolProjectFiles(tool: ToolPackage, extraTexts: readonly string[] = []): Record<string, string> {
+  // 导出前按实际用到的能力补写 `requires`：作者漏声明的包，拿到旧宿主的
+  // 同事安装时就能看到“缺什么、怎么解决”，而不是装上之后白屏。
+  const scanned = withScannedRequires(tool, [tool.html, ...Object.values(tool.sourceFiles ?? {}), ...extraTexts]);
+  const { html, sourceFiles, ...manifest } = scanned;
   const author = tool.author ? `作者：${tool.author}\n` : "";
   const source = tool.source ? `来源：${tool.source}\n` : "";
   const scaffolding = {
@@ -149,7 +205,14 @@ export interface ToolArchive {
 }
 
 export function exportToolProject(tool: ToolPackage, extra: Readonly<Record<string, Uint8Array>> = {}): Uint8Array {
-  const text = Object.fromEntries(Object.entries(toolProjectFiles(tool)).map(([name, source]) => [name, strToU8(source)]));
+  // 目录里的代码文件也扫：L2 的 app.js 构建产物里才是 `aaw*` 调用的真实落点，
+  // 只扫清单会漏掉打包页工具用到的一切能力。
+  const extraTexts = Object.entries(extra)
+    .filter(([name]) => !isDependencyPath(name) && scannableSuffix.test(name))
+    .map(([, bytes]) => {
+      try { return new TextDecoder().decode(bytes); } catch { return ""; }
+    });
+  const text = Object.fromEntries(Object.entries(toolProjectFiles(tool, extraTexts)).map(([name, source]) => [name, strToU8(source)]));
   // 工具目录里的文件（node_modules、图片、wasm…）优先于清单里的同路径文本，
   // 因为磁盘上的那份才是作者实际在用的。
   return zipSync({ ...text, ...extra }, { level: 6 });

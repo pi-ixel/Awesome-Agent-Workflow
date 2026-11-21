@@ -3,7 +3,7 @@ import { createStore } from "zustand";
 import { createSnapshotView } from "../../shared/state/readonlySnapshot.ts";
 import type { InstallOutcome, ToolsService } from "./service.ts";
 import type { PersonalTool, ToolPackage } from "./types.ts";
-import { checkCompatibility, readToolPackage, ToolPackageError, toolContractVersion } from "./runtime/package.ts";
+import { checkCompatibility, readToolPackage, readToolPackageV1, ToolPackageError, toolContractVersion } from "./runtime/package.ts";
 import { resolveToolSettings, validateToolSettings } from "./runtime/settings.ts";
 import { createBackupQueue, readToolBackup } from "./runtime/backup.ts";
 import { hostToolIO } from "./runtime/io.ts";
@@ -53,14 +53,23 @@ function readTools(value: unknown): ReadToolsResult {
   for (const entry of value as readonly unknown[]) {
     if (!entry || typeof entry !== "object") continue;
     const fields = entry as Record<string, unknown>;
-    const tool = readToolPackage(fields.package);
+    const candidate = fields.package;
+    const raw = candidate && typeof candidate === "object" && !Array.isArray(candidate)
+      ? candidate as Record<string, unknown>
+      : undefined;
+    // 安装时记录的 schema 代际；旧数据缺字段时视为 1（设计稿 §9 的迁移策略）。
+    const installedSchemaVersion = finiteNumber(fields.installedSchemaVersion)
+      ?? (typeof raw?.schemaVersion === "number" ? raw.schemaVersion : 1);
+    let tool = readToolPackage(fields.package);
+    if (!tool && installedSchemaVersion === 1 && raw) {
+      // 读取问题与运行问题分开（设计稿 §6.4）：清单按**现行规则**读不出来时，
+      // 先用它安装时的 schema 规则回读一次。回读得出来就照常显示——校验规则
+      // 收紧不该让已经装好的工具消失。回读也失败才是真的坏了，才标 broken。
+      tool = readToolPackageV1(raw);
+    }
     if (!tool) {
       // 以前这里是 `continue`：界面上看不见、配置里还躺着，用户感知就是"工具没了"。
       // 现在保留条目 + 标记原因，UI 能显示一张可读、可卸、可重装的说明卡。
-      const candidate = fields.package;
-      const raw = candidate && typeof candidate === "object" && !Array.isArray(candidate)
-        ? candidate as Record<string, unknown>
-        : undefined;
       const id = typeof raw?.id === "string" && raw.id.trim() ? raw.id : "";
       if (!id || ids.has(id)) continue;
       ids.add(id);
@@ -87,6 +96,7 @@ function readTools(value: unknown): ReadToolsResult {
       installedAt: finiteNumber(fields.installedAt),
       updatedAt: finiteNumber(fields.updatedAt),
       dir: text(fields.dir),
+      installedSchemaVersion,
       ...(typeof fields.previousVersion === "string" ? { previousVersion: fields.previousVersion } : {}),
       ...(typeof fields.installedContractVersion === "number"
         ? { installedContractVersion: fields.installedContractVersion }
@@ -183,6 +193,8 @@ export function apply(ctx: Context): void {
             settings: resolveToolSettings(tool, previous?.settings),
             // 记下这一版是"第几代契约"装进来的：将来规则收紧时按它判定，不用现行规则判死。
             installedContractVersion: previous?.installedContractVersion ?? toolContractVersion,
+            // schema 代际跟着包本身走：它就是这个包声明的那一代，回读时按它选规则。
+            installedSchemaVersion: tool.schemaVersion,
           },
         ];
       });

@@ -64,6 +64,33 @@ it("maintains distinct personal libraries and keeps recent use when updating", a
   }
 });
 
+it("records the schema generation at install so future rule changes can read back", async () => {
+  let context: Context | undefined;
+  const runtime = createTestDesktopRuntime(
+    { attachPreloading: () => () => {}, close: () => Promise.resolve() },
+    undefined,
+    (value) => { context = value; },
+  );
+  try {
+    await runtime.ready;
+    if (!context) throw new Error("Missing desktop context");
+    const { account, tools } = context;
+    account.loginAsDev({ name: "Pin", employeeId: "tools-test-schema-pin" });
+    tools.install(makeTool("pinned"));
+    // 「按安装时规则回读」的数据基础（设计稿 §6.4/§9）：schema 代际跟着包走，
+    // 契约代际记安装时刻的宿主。读取时用它选规则（`readToolPackageV1`），
+    // 校验规则收紧不再会让已装好的工具集体标 broken。
+    const entry = tools.state.getState()[0];
+    expect(entry?.installedSchemaVersion).toBe(1);
+    expect(entry?.installedContractVersion).toBe(2);
+    // 覆盖安装新版本：schema 代际跟新包走，契约代际仍是安装时刻的宿主。
+    tools.install({ ...makeTool("pinned"), version: "1.1.0" }, true);
+    expect(tools.state.getState()[0]?.installedSchemaVersion).toBe(1);
+  } finally {
+    await runtime.shutdown();
+  }
+});
+
 it("keeps the previous version on disk so a bad upgrade can be undone", async () => {
   let context: Context | undefined;
   const runtime = createTestDesktopRuntime(

@@ -44,7 +44,11 @@ pub struct Limits {
     pub package_bytes: usize,
     /// 整包 ZIP（源码 + `bin/`）的上限。
     pub archive_bytes: u64,
-    /// 导出源码 ZIP 的上限（base64 解码后的体积）。
+    /// 导出源码 ZIP 写盘的上限（base64 解码后的体积）。
+    ///
+    /// 曾经是 1 MB，与导入的 32 MB 限额不对齐：L3 工具的 `bin/` 轻松超过 1 MB，
+    /// 作者点「导出源码」只会看到一句莫名的「无效的源码导出请求」。现在与
+    /// `archive_bytes` 同值——能导进来的就应该能导出去。
     pub archive_write_bytes: usize,
 
     // ── 用户文件与剪贴板 ────────────────────────────────────────────────
@@ -79,7 +83,8 @@ pub const LIMITS: Limits = Limits {
     source_bytes: 4 * 1024 * 1024,
     package_bytes: 4 * 1024 * 1024,
     archive_bytes: 32 * 1024 * 1024,
-    archive_write_bytes: 1024 * 1024,
+    // 与 archive_bytes 同值：导入导出必须是对称的两扇门（见字段注释）。
+    archive_write_bytes: 32 * 1024 * 1024,
     user_file_bytes: 32 * 1024 * 1024,
     save_bytes: 8 * 1024 * 1024,
     clipboard_text_bytes: 1024 * 1024,
@@ -107,12 +112,20 @@ mod tests {
         assert_eq!(LIMITS.package_bytes, 4 * 1024 * 1024);
     }
 
-    /// 导出 ZIP 的 base64 上限必须刚好装得下 1 MB 的二进制。
+    /// 导出与导入必须是对称的两扇门：能导进来的 ZIP 一定能导出去。
+    ///
+    /// 曾经 `archive_write_bytes` 是 1 MB 而 `archive_bytes` 是 32 MB，L3 工具的
+    /// `bin/` 超过 1 MB 就导不出来；这个测试就是那道对齐的钉子。
     #[test]
-    fn the_archive_base64_cap_covers_the_binary_cap() {
-        // base64 是 4/3 膨胀，再加一点余量给 padding 与 JSON 转义的抖动。
-        let worst_case = LIMITS.archive_write_bytes.div_ceil(3) * 4;
-        assert!(worst_case + 256 < 1_400_000, "上限 {worst_case} 会挡住合法导出");
+    fn the_export_cap_matches_the_import_cap() {
+        assert_eq!(LIMITS.archive_write_bytes as u64, LIMITS.archive_bytes);
+        // 顺带钉住 base64 预检的形状：满额 ZIP 的 base64（4/3 膨胀）必须能
+        // 通过 `tools_write_archive` 的长度预检，而不是被当成异常请求拒绝。
+        let base64_of_full = LIMITS.archive_write_bytes.div_ceil(3) * 4;
+        assert!(
+            base64_of_full > LIMITS.archive_write_bytes / 3 * 4,
+            "base64 预检上限 {base64_of_full} 异常地小，合法导出会被挡住"
+        );
     }
 
     /// 存档上限必须大于 `sourceFiles` 额度的同量级：否则"清单能装下、ZIP 装不下"

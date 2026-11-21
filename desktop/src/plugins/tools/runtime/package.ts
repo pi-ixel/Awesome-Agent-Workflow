@@ -498,3 +498,21 @@ export function readToolPackage(value: unknown): ToolPackage | undefined {
   const result = validateToolPackage(value);
   return result.ok ? result.tool : undefined;
 }
+
+/**
+ * schemaVersion 1 的**冻结读取规则**——「按安装时规则回读」的落点
+ * （设计稿《工具内核与版本闸门》§6.4）。
+ *
+ * 存量工具按**它安装时的 schema 规则**读，而不是按现行规则判死：某天
+ * 校验规则收紧（比如 `icon` 从可选变必填），已经装好的 v1 工具必须还能
+ * 被读出来、照常显示，而不是集体标成 broken。
+ *
+ * 今天 v1 与现行规则是同一份代码——schemaVersion 还没升过代——但这条
+ * 缝必须现在就留出来。纪律：**将来任何规则收紧都加在"现行规则"的分支里，
+ * 这里不许跟着动**。`contract.test.ts` 用夹具钉住了 v1 的判定形状，夹具
+ * 判定变化时测试会红，逼着改动者先决定"这是收紧现行规则，还是动了冻结
+ * 的 v1"——前者请先升 schemaVersion 并给 v1 留旧分支，后者才是合法改动。
+ */
+export function readToolPackageV1(value: unknown): ToolPackage | undefined {
+  return readToolPackage(value);
+}

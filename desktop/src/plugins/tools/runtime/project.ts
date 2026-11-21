@@ -18,7 +18,7 @@ export { toolOwnerSegment } from "./package.ts";
 import { safeSourcePath } from "./sourceFiles.ts";
 import { toolLimits } from "./limits.ts";
 import { runToolRules, splitViolations, type ToolRuleOptions } from "./rules.ts";
-import { toolGuide } from "./guide.ts";
+import { toolGuide, toolGuideFromDoc, type ToolGuideContext } from "./guide.ts";
 
 /** 工具项目需要的最小宿主能力（便于测试时注入假实现）。 */
 export interface ToolProjectIO {
@@ -39,8 +39,16 @@ export interface ToolProjectIO {
   writeBinaryFile?(path: string, base64: string): Promise<void>;
   /** 读二进制文件（base64）；导出带依赖的工具时用。 */
   readBinaryFile?(path: string, limit?: number): Promise<string>;
-  /** 递归列举目录内全部文件（相对路径），**不跳过** `node_modules`。 */
+  /**
+   * 递归列举目录内全部文件（相对路径），**不跳过** `node_modules`。
+   */
   listFiles?(root: string, limit?: number): Promise<readonly string[]>;
+  /**
+   * 当前生效的「工具开发指导」正文：用户在指导窗口改过的副本优先，没有
+   * 副本为随包默认。项目的 `AGENTS.md` 生成时读它——改文档后 AI 读到的
+   * 规范跟着变。省略（浏览器预览 / 测试）或读不到时退回编译模板。
+   */
+  readGuideDoc?(): Promise<string | undefined>;
 }
 
 export interface ToolProjectSummary {
@@ -157,6 +165,62 @@ export async function defaultInstalledToolsDir(io: ToolProjectIO, owner: string 
   return joinPath(base, toolOwnerSegment(owner));
 }
 
+/**
+ * 一个工具项目的 `AGENTS.md` 应该长什么样。
+ *
+ * 「开发指导」窗口里用户改过的正文优先：那是团队自己的规范，AI 每个会话
+ * 读到的应该跟着它走。正文里定位不到项目段落（结构被改坏）时退回编译
+ * 模板——宁可回到默认，也不能把一份残稿直接塞给 AI。
+ */
+export async function projectGuide(io: ToolProjectIO, context: ToolGuideContext): Promise<string> {
+  if (!io.readGuideDoc) return toolGuide(context);
+  try {
+    const doc = await io.readGuideDoc();
+    if (!doc) return toolGuide(context);
+    return toolGuideFromDoc(doc, context) ?? toolGuide(context);
+  } catch {
+    return toolGuide(context);
+  }
+}
+
+/**
+ * 把一个项目的 `AGENTS.md` 刷成当前该有的样子。内容没变就不写——列表
+ * 刷新会带着所有项目跑这里，不能每次都动磁盘。
+ *
+ * manifest 读不出来时跳过：项目本身已经算坏了，`AGENTS.md` 留给修复流程，
+ * 不能在这里用目录名冒充 id 写一份错规范进去。
+ */
+export async function syncToolProjectGuide(io: ToolProjectIO, dir: string): Promise<boolean> {
+  let context: ToolGuideContext;
+  try {
+    const parsed = JSON.parse(await io.readTextFile(joinPath(dir, toolProjectFileNames.manifest))) as Record<string, unknown>;
+    context = {
+      id: typeof parsed.id === "string" && parsed.id ? parsed.id : pathName(dir),
+      name: typeof parsed.name === "string" && parsed.name ? parsed.name : pathName(dir),
+    };
+  } catch {
+    return false;
+  }
+  const desired = await projectGuide(io, context);
+  let current: string | undefined;
+  try { current = await io.readTextFile(joinPath(dir, toolProjectFileNames.guide)); } catch { /* 没有 = 要写 */ }
+  if (current === desired) return false;
+  await io.writeTextFile(joinPath(dir, toolProjectFileNames.guide), desired);
+  return true;
+}
+
+/**
+ * 批量刷新。一个项目失败不影响其余——列表刷新带着它们跑，不能让一张
+ * 坏卡拖垮全部；失败的下次刷新还会再试。
+ */
+export async function syncToolProjectGuides(io: ToolProjectIO, dirs: readonly string[]): Promise<number> {
+  let updated = 0;
+  for (const dir of dirs) {
+    try { if (await syncToolProjectGuide(io, dir)) updated += 1; } catch { /* 跳过，下次刷新再试 */ }
+  }
+  return updated;
+}
+
 export async function listToolProjects(
   io: ToolProjectIO,
   options: { readonly parent?: string; readonly owner?: string } = {},
@@ -218,7 +282,7 @@ export async function createToolProject(
     version: "0.1.0",
     html: "",
   };
-  await io.writeTextFile(joinPath(target.dir, toolProjectFileNames.guide), toolGuide({ id: target.id, name: input.name }));
+  await io.writeTextFile(joinPath(target.dir, toolProjectFileNames.guide), await projectGuide(io, { id: target.id, name: input.name }));
   await io.writeTextFile(joinPath(target.dir, toolProjectFileNames.html), "");
   await io.writeTextFile(joinPath(target.dir, toolProjectFileNames.manifest), JSON.stringify(manifest, null, 2));
   return { dir: target.dir, id: target.id, name: input.name };
@@ -268,7 +332,7 @@ export async function readToolProject(io: ToolProjectIO, dir: string, options: T
 /** 把一份工具包写回目录（迁移与"编辑后保存"共用）。 */
 export async function writeToolProject(io: ToolProjectIO, dir: string, tool: ToolPackage): Promise<void> {
   const { html, ...manifest } = tool;
-  await io.writeTextFile(joinPath(dir, toolProjectFileNames.guide), toolGuide({ id: tool.id, name: tool.name }));
+  await io.writeTextFile(joinPath(dir, toolProjectFileNames.guide), await projectGuide(io, { id: tool.id, name: tool.name }));
   await io.writeTextFile(joinPath(dir, toolProjectFileNames.html), html);
   await io.writeTextFile(joinPath(dir, toolProjectFileNames.manifest), JSON.stringify(manifest, null, 2));
 }
@@ -348,8 +412,9 @@ export async function renameToolProject(
     joinPath(dir, toolProjectFileNames.manifest),
     JSON.stringify({ ...manifest, id: nextId, name }, null, 2),
   );
-  // AGENTS.md 是平台生成的（里面写着 id 与名字），改名后要重新生成。
-  await io.writeTextFile(joinPath(dir, toolProjectFileNames.guide), toolGuide({ id: nextId, name }));
+  // AGENTS.md 是平台生成的（里面写着 id 与名字），改名后要重新生成——
+  // 并按当前开发指导正文生成：用户改过的规范同样要体现在新目录里。
+  await io.writeTextFile(joinPath(dir, toolProjectFileNames.guide), await projectGuide(io, { id: nextId, name }));
   return { dir, id: nextId, name, moved: dir !== input.dir, previousId };
 }
 

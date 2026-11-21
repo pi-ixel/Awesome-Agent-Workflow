@@ -1,6 +1,6 @@
 import { it, expect } from "vitest";
 import { strToU8, unzipSync, zipSync } from "fflate";
-import { exportToolProject, importToolArchive, importToolProject } from "../../../src/plugins/tools/runtime/projectArchive.ts";
+import { exportToolProject, importToolArchive, importToolProject, scanUsedCapabilities, toolProjectFiles, withScannedRequires } from "../../../src/plugins/tools/runtime/projectArchive.ts";
 import { parseToolPackage, toolPackageLimit } from "../../../src/plugins/tools/runtime/package.ts";
 import { resolveToolSettings, toolSettingsScript, validateToolSettings } from "../../../src/plugins/tools/runtime/settings.ts";
 import { sampleTool } from "../../../src/plugins/tools/ui/sample.ts";
@@ -113,4 +113,56 @@ it("does not add an empty sourceFiles field to a package at the byte limit", () 
   const bytes = new TextEncoder().encode(JSON.stringify(base)).length;
   const tool = parseToolPackage(JSON.stringify({ ...base, html: "x".repeat(toolPackageLimit - bytes) }));
   expect(importToolProject(exportToolProject(tool))).toEqual(tool);
+});
+
+it("导出时按实际用到的能力补写 requires（设计稿 §5.4）", () => {
+  const bare = { schemaVersion: 1, id: "scan", name: "扫描", version: "1.0.0", html: "<p>无能力引用</p>" };
+  // 作者漏声明：html 里用了 aawStore 与 aawFiles，导出的 manifest 必须带 requires。
+  const tool = parseToolPackage(JSON.stringify({
+    ...bare,
+    html: "<script>const v = await window.aawStore.get('k'); await window.aawFiles.open();</script>",
+  }));
+  const manifest = JSON.parse(toolProjectFiles(tool)["manifest.json"]!);
+  expect(manifest.requires).toEqual({ contract: 2, capabilities: ["files", "store"] });
+
+  // 作者已声明：只并进扫到的能力名，contract 保持作者写的值（写低一点可能是
+  // 刻意兼容旧宿主，补写不能反向收紧）。
+  const declared = parseToolPackage(JSON.stringify({
+    ...tool, requires: { contract: 1, capabilities: ["bus"] },
+  }));
+  const merged = JSON.parse(toolProjectFiles(declared)["manifest.json"]!);
+  expect(merged.requires).toEqual({ contract: 1, capabilities: ["bus", "files", "store"] });
+
+  // 没扫到任何能力：什么都不写——空 requires 只会把"没用宿主能力的工具"
+  // 挡在新契约之外，纯亏不赚。（sampleTool 的 html 里有 aawSettings，
+  // 不能拿来当"没用到能力"的样本，这里用一份干净清单。）
+  const plain = parseToolPackage(JSON.stringify(bare));
+  expect(JSON.parse(toolProjectFiles(plain)["manifest.json"]!)).not.toHaveProperty("requires");
+});
+
+it("扫描覆盖 aawStore.scope，且跳过 node_modules 与上行能力", () => {
+  expect(scanUsedCapabilities([
+    'window.aawStore.scope("shared").set("k", 1)',
+    "window.aawClipboard.readText()",
+  ])).toEqual(["clipboard", "sharedStore", "store"]);
+  // actions 是上行能力，network 是声明式授权：都不进 requires。
+  expect(scanUsedCapabilities(["window.aawActions.run()", 'fetch("https://x")'])).toEqual([]);
+  expect(scanUsedCapabilities([])).toEqual([]);
+});
+
+it("导出时会扫目录里的 app.js 构建产物，但跳过 node_modules", () => {
+  const tool = parseToolPackage(JSON.stringify({ ...sampleTool, html: "<p>无能力引用</p>" }));
+  const bytes = exportToolProject(tool, {
+    "app.js": new TextEncoder().encode("import{a}from'x';window.aawSecrets.get('k')"),
+    "node_modules/pkg/index.js": new TextEncoder().encode("window.aawLifecycle.notify()"),
+    "logo.bin": new Uint8Array([0, 1, 2]),
+  });
+  const manifest = JSON.parse(new TextDecoder().decode(unzipSync(bytes)["manifest.json"]!));
+  // app.js 里的 secrets 被扫到；node_modules 里的 lifecycle 不算数（依赖不是作者写的）。
+  expect(manifest.requires).toEqual({ contract: 2, capabilities: ["secrets"] });
+});
+
+it("withScannedRequires 不改写没扫到能力的包（引用相等）", () => {
+  const tool = parseToolPackage(JSON.stringify(sampleTool));
+  expect(withScannedRequires(tool, ["完全无关的文本"])).toBe(tool);
 });

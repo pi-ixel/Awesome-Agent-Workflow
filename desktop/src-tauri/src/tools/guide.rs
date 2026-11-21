@@ -349,6 +349,23 @@ pub fn tools_guide_theme(
     Ok(theme_of(&app))
 }
 
+/// 主窗读取「当前生效」的正文：有用户副本读副本，没副本读编译默认。
+///
+/// 工具项目的 `AGENTS.md` 与技能目录的 `SKILL.md` 由前端按这份正文生成——
+/// 用户在指导窗口里改过文档后，AI 读到的规范跟着变，不再只是一份给人看的
+/// 副本。只允许主窗调用：正文是用户内容，工具页面（remote origin）没有
+/// 理由读它；指导窗口自己的读写走 `tools_guide_load/save`。
+#[tauri::command]
+pub fn tools_guide_runtime_text(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    if window.label() != "main" {
+        return Err("只有主窗口可以读取开发指导正文。".into());
+    }
+    Ok(load_from(&data_root(&app)?).text)
+}
+
 /// 页面确认过"可以关"之后真正销毁窗口。`destroy()` 不触发 `CloseRequested`，
 /// 所以不会和上面那道拦截互相打架。
 #[tauri::command]
