@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { expect, it } from "vitest";
 import type { Context } from "cordis";
 import { createTestDesktopRuntime } from "../../helpers/desktopRuntime.ts";
@@ -7,17 +5,16 @@ import { parseToolPackage } from "../../../src/plugins/tools/runtime/package.ts"
 import {
   checkCompatibility,
   currentHostContract,
-  explainIncompatibility,
 } from "../../../src/plugins/tools/runtime/compat.ts";
 
 /**
- * 三道关口的判定逻辑与接线。
+ * 三道关口的判定逻辑。
  *
- * 判定本身是纯函数，直接测；「关口真的挂在链路上」这类事测不了运行时行为
- * （要真开 Electron 窗口），用源码断言兜住——和 `policy.test.ts` 一个路子。
+ * 判定本身是纯函数，直接测。「关口真的挂在链路上」做不到从 vitest 断言了：
+ * P3 之后打开工具走的是 Rust 的 `tools_open`，对应的守卫在
+ * `src-tauri/src/tools/compat.rs`（判定）与 `mod.rs::open_tool`（调用点），
+ * 由那边的 `#[cfg(test)]` 覆盖。这份文件只管"话说不说得清楚"。
  */
-const runtime = readFileSync(resolve(process.cwd(), "tools-runtime/runtime.mjs"), "utf8");
-const main = readFileSync(resolve(process.cwd(), "tools-runtime/main.mjs"), "utf8");
 
 const makeTool = (extra: Record<string, unknown> = {}) => parseToolPackage(JSON.stringify({
   schemaVersion: 1,
@@ -30,7 +27,6 @@ const makeTool = (extra: Record<string, unknown> = {}) => parseToolPackage(JSON.
 
 it("没写 requires 就宽松放行：旧包一个都不用改", () => {
   expect(checkCompatibility(makeTool())).toEqual([]);
-  expect(explainIncompatibility(makeTool())).toBeUndefined();
 });
 
 it("要求更高的契约代际时拦下，并说清当前是第几代", () => {
@@ -70,10 +66,16 @@ it("能力名写错在解析阶段就被挡下，而不是装进去之后才白�
   expect(problems[0]?.hint).toContain("能力表");
 });
 
-it("explainIncompatibility 给出面向用户的 reason 与 hint", () => {
-  const problem = explainIncompatibility(makeTool({ requires: { contract: 9 } }));
-  expect(problem?.reason).toContain("第 9 代");
-  expect(problem?.hint).toBeTruthy();
+it("依赖了已移除的能力时，说的是「平台变了」而不是「你少了配置」", () => {
+  const problems = checkCompatibility(
+    makeTool({ requires: { capabilities: ["telepathy"] } }),
+    { contract: 2, capabilities: [] },
+  );
+  expect(problems[0]?.message).toContain("已不支持");
+  expect(problems[0]?.message).toContain("telepathy");
+  // 改法要具体到可执行：要么换版本，要么改代码，不能只说"不兼容"。
+  expect(problems[0]?.hint).toContain("改法");
+  expect(problems[0]?.hint).toContain("telepathy");
 });
 
 it("安装关口真的挂在 install 上：不兼容的包装不进去", async () => {
@@ -93,24 +95,4 @@ it("安装关口真的挂在 install 上：不兼容的包装不进去", async (
   // 兼容的照常装。
   tools.install(makeTool({ requires: { capabilities: ["files"] } }));
   expect(tools.state.getState()).toHaveLength(1);
-});
-
-it("打开关口在创建窗口之前就问，且给的是说明页而不是白屏", () => {
-  expect(runtime).toContain("explainIncompatibility");
-  expect(runtime).toContain("incompatiblePage");
-  // 先判定、后 new BrowserWindow：顺序反了就会先闪一个空白窗口。
-  const loadStart = runtime.indexOf("export async function loadTool(");
-  expect(loadStart).toBeGreaterThan(0);
-  expect(runtime.indexOf("explainIncompatibility(tool)", loadStart))
-    .toBeLessThan(runtime.indexOf("new BrowserWindow({", loadStart));
-  // 动作跑在隐藏窗口里，没有说明页可看，必须直接报清楚。
-  expect(runtime).toContain("if (problem) throw new Error");
-});
-
-it("关窗只是隐藏的工具留了「彻底停止」的出口", () => {
-  expect(main).toContain("--aaw-stop=");
-  expect(main).toContain("keptAlive.get(toolId)");
-  // 托盘菜单要跟着在跑的工具变，否则用户只看到一次性快照。
-  expect(main).toContain("彻底停止「");
-  expect(main).toContain("tools.running()");
 });

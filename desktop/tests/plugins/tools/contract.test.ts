@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -7,16 +7,40 @@ import {
   toolCapabilities,
   toolContractVersion,
 } from "../../../src/plugins/tools/runtime/contract.ts";
-import * as packageContract from "../../../src/plugins/tools/runtime/package.ts";
 
 /**
  * 契约快照测试。
  *
  * 这是"事前守门"，比版本闸门更重要：闸门是事后拦用户，这个测试是事前拦开发。
- * 谁改了 `tool-preload.cjs` 的暴露面、却没同步能力表或契约版本，这里直接失败。
+ *
+ * # P3 之后它守的东西变了
+ *
+ * 以前对照物是 Electron 的 `tool-preload.cjs`（一份 JS，能直接读字符串比对）。
+ * 现在载体的实现是 Rust：`inject.rs` 往页面里挂 `window.aaw*`。所以这里读
+ * `inject.rs`——**跨语言的同一条缝**，比同语言的更值得钉住，因为改 Rust 的人
+ * 不一定会想到 TS 里还有一张能力表。
+ *
+ * 判据仍是"声明的能力 = 实际暴露的入口"。谁加了能力却没进表（或反过来），这里
+ * 直接失败。
  */
-const preload = readFileSync(resolve(process.cwd(), "tools-runtime/tool-preload.cjs"), "utf8");
-const runtime = readFileSync(resolve(process.cwd(), "tools-runtime/runtime.mjs"), "utf8");
+const read = (path: string) => readFileSync(resolve(process.cwd(), "src-tauri/src/tools", path), "utf8");
+
+/** 去掉测试模块再扫：那里会出现 `"window.aawActions ="` 这样的字符串字面量。 */
+const withoutTests = (source: string) => source.split("\n#[cfg(test)]")[0] ?? source;
+
+/**
+ * 去掉 `//` 注释行。
+ *
+ * 注入脚本的注释里大量出现"不走 `__TAURI_INTERNALS__.invoke`"这类反面说明——
+ * 那是解释，不是实现。断言"页面里没有内网入口"时连注释一起扫，只会逼着人把
+ * 有用的注释删掉。
+ */
+const withoutComments = (source: string) =>
+  source.split("\n").filter((line) => !line.trimStart().startsWith("//")).join("\n");
+
+const inject = withoutTests(read("inject.rs"));
+const injectCode = withoutComments(inject);
+const protocol = read("protocol.rs");
 
 /** `aawStore.scope` 归一到 `aawStore`：同一次 expose 里的附加入口。 */
 const baseEntry = (entry: string) => entry.split(".")[0] ?? entry;
@@ -27,14 +51,22 @@ describe("工具运行契约", () => {
     expect(toolContractVersion).toBe(2);
   });
 
-  it("能力表与 preload 实际暴露的 window 入口完全一致", () => {
-    const exposed = [...preload.matchAll(/expose\("(aaw[A-Za-z]+)"/g)]
+  it("能力表与 Rust 注入脚本实际挂的 window 入口完全一致", () => {
+    const exposed = [...inject.matchAll(/window\.(aaw[A-Za-z]+)\s*=/g)]
       .map((match) => match[1])
       .filter((name): name is string => typeof name === "string");
-    const declared = capabilityEntries()
-      .filter((item) => item.entry)
-      .map((item) => baseEntry(item.entry));
+    // 正则没匹配到东西等于这条测试永远为真，先确认它真的在扫。
+    expect(exposed.length).toBeGreaterThan(0);
+    // `capabilityEntries()` 只返回"下行且真有入口"的那些，上行与纯声明性能力
+    // （`actions` / `network`）本来就不该出现在注入脚本里。
+    const declared = capabilityEntries().map((item) => baseEntry(item.entry));
     expect([...new Set(exposed)].sort()).toEqual([...new Set(declared)].sort());
+  });
+
+  it("上行能力不出现在注入脚本里", () => {
+    // `aawActions` 是作者定义、宿主调用，注入它就等于给页面一个能覆盖的钩子。
+    for (const capability of toolCapabilities.filter((item) => item.direction === "up"))
+      expect(injectCode, `${capability.entry} 不该被注入`).not.toContain(`window.${baseEntry(capability.entry)} =`);
   });
 
   it("每个能力都写清了 since 与 summary", () => {
@@ -75,45 +107,33 @@ describe("工具运行契约", () => {
     `);
   });
 
-  it("运行时仍保留不可变的 CSP 基底（只有 connect-src 可参数化）", () => {
-    expect(runtime).toContain("basePolicy");
-    expect(runtime).toContain(`default-src 'none'`);
-    expect(runtime).toContain(`script-src 'unsafe-inline'`);
-    expect(runtime).toContain(`form-action 'none'`);
-    expect(runtime).toContain(`base-uri 'none'`);
+  it("设置与唤起上下文是同步可读的值，不是 Promise", () => {
+    // 工具的第一行代码就要读设置。给成 Promise 会让所有存量工具的第一行
+    // 拿到 `undefined`，而且错得无声无息。
+    expect(inject).toContain("window.aawSettings = Object.freeze(");
+    expect(inject).toContain("window.aawContext = Object.freeze(");
+    expect(inject).not.toMatch(/window\.aawSettings\s*=\s*(?:call\(|Promise|fetch\()/);
   });
 
-  it("运行时不再把 settings 拼进 HTML（走 preload 注入）", () => {
-    expect(runtime).not.toContain("toolSettingsScript");
-    expect(runtime).toContain("additionalArguments");
-    expect(preload).toContain("tool:settings:sync");
-    expect(preload).toContain("sendSync");
+  it("能力通道只走同源 fetch，页面里没有任何 Tauri 内网入口", () => {
+    // 工具页面是 remote origin，Tauri IPC 一律被 ACL 拦。真有人把
+    // `__TAURI_INTERNALS__` 注进去，工具就能绕过能力表直接调命令。
+    expect(injectCode).toContain('fetch("/__aaw/call/" + command');
+    expect(injectCode).toContain("x-aaw-token");
+    expect(injectCode).not.toContain("__TAURI_INTERNALS__");
+    expect(injectCode).not.toContain("plugin:event");
   });
 
-  /**
-   * 运行时（`*.mjs`）与渲染层（`*.ts`）之间只有一条缝：`package.ts` 被 esbuild
-   * 打成 `package-contract.mjs`，运行时按名字从里面取。
-   *
-   * 这条缝没有任何类型检查兜着——`package.ts` 少写一行 `export`，`npm run tools:build`
-   * 照样成功，要到真机启动才炸，而且炸在顶层 import 上：窗口标题变成 "Error"、
-   * 日志一个字都没有、stderr 又没地方可去。这一例就是那个场景的回归测试
-   * （`readNetworkRule` 当时定义在 `types.ts` 却没有被转发出来）。
-   */
-  it("运行时从契约产物取的每个名字，bundle 入口都真的导出", () => {
-    const sourceDir = resolve(process.cwd(), "tools-runtime");
-    const imported = new Set<string>();
-    for (const name of readdirSync(sourceDir)) {
-      if (!name.endsWith(".mjs")) continue;
-      const source = readFileSync(resolve(sourceDir, name), "utf8");
-      for (const match of source.matchAll(/import\s*\{([^}]+)\}\s*from\s*"\.\/package-contract\.mjs"/g)) {
-        for (const item of (match[1] ?? "").split(",")) {
-          const local = item.trim().split(/\s+as\s+/)[0]?.trim();
-          if (local) imported.add(local);
-        }
-      }
-    }
-    // 正则没匹配到东西等于这条测试永远为真，先确认它真的在扫。
-    expect(imported.size).toBeGreaterThan(0);
-    expect([...imported].filter((name) => !(name in packageContract))).toEqual([]);
+  it("CSP 基底写在 Rust 里，且只有 connect-src 随声明变化", () => {
+    expect(protocol).toContain("pub const BASE_POLICY");
+    expect(protocol).toContain("default-src 'none'");
+    expect(protocol).toContain("form-action 'none'");
+    expect(protocol).toContain("base-uri 'none'");
+    expect(protocol).toContain("object-src 'none'");
+    // connect-src 不能进 BASE_POLICY 那个数组：它是唯一按工具声明拼出来的指令。
+    // 只取数组字面量本身，别把下面 `policy_for` 的注释也算进来。
+    const base = /pub const BASE_POLICY[^=]*=\s*\[([\s\S]*?)\];/.exec(protocol)?.[1];
+    expect(base, "BASE_POLICY 数组没找到").toBeTruthy();
+    expect(base).not.toContain("connect-src");
   });
 });

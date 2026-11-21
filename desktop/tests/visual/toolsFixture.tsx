@@ -46,8 +46,8 @@ const service: ToolsService = {
 };
 const host = {
   isNative: () => !new URLSearchParams(location.search).has("web"),
-  openToolsElectron: async () => {},
-  stopToolsElectron: async () => {},
+  openTool: async () => {},
+  stopTool: async () => {},
   openToolsGuide: async () => {},
 } as unknown as HostService;
 // `?stalled` 摆出"AI 修不动了"的交接态：360px 下两个按钮加一段说明会不会挤，

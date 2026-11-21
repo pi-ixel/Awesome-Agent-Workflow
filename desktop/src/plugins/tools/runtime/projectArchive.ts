@@ -2,6 +2,7 @@ import { strToU8, unzipSync, zipSync } from "fflate";
 import type { ToolPackage } from "../types.ts";
 import { parseToolPackage, toolPackageLimit, validateToolPackageText } from "./package.ts";
 import { isRuntimeBinPath, safeSourcePath } from "./sourceFiles.ts";
+import { toolLimits } from "./limits.ts";
 
 /**
  * 源码 ZIP 的上限。
@@ -10,7 +11,7 @@ import { isRuntimeBinPath, safeSourcePath } from "./sourceFiles.ts";
  * 之后，一个带 `ssh2` 的包大约是 90 个文件、2 MB；带前端构建产物的包通常是
  * 几十到几百个文件。再往上（几百 MB）就不该用"发个 ZIP"这种方式分发了。
  */
-export const toolArchiveLimit = 32 * 1024 * 1024;
+export const toolArchiveLimit = toolLimits.archiveBytes;
 export const toolArchiveEntries = 4000;
 
 /** 压缩包里与工具无关的系统垃圾：macOS 的 `__MACOSX/`、`.DS_Store`、`Thumbs.db`。 */

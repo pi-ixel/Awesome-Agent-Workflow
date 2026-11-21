@@ -142,11 +142,11 @@ jobs:
       - name: Build workflow engine sidecar
         run: npm run workflow:build:debug
 
-      - name: Build Electron tools runtime
-        run: npm run tools:build
-
-      - name: Smoke test Electron tool actions
-        run: npm run tools:test
+      # 工具运行时的构建/冒烟测试随 P3 一起删了：工具窗口现在跑在应用自己的
+      # WebView2 里，没有独立的 Electron 进程可以单独起。工具侧的检查现在分两处，
+      # 都是普通的前端测试与 Rust 测试：
+      #   - `npx vitest run tests/plugins/tools`（契约、校验、归档、启动器页面）
+      #   - `cargo test --lib`（能力通道、进程载体、兼容关口、体积常量）
 
       - name: Workflow engine tests
         run: cargo test --manifest-path workflow-engine-rs/Cargo.toml --locked --no-fail-fast -- --skip real_icode

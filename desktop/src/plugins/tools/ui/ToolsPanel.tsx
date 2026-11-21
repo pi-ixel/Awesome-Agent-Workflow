@@ -157,7 +157,7 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
     setFeedback(undefined);
     try {
       if (!host.isNative()) throw new Error("请在 AAW 桌面版中停止后台工具。");
-      await host.stopToolsElectron(id);
+      await host.stopTool(id);
       // 本来就没在跑时结果也是"不在后台运行"，说同一句话不算骗人。
       setFeedback({ text: "已停止该工具的后台运行。" });
     } catch (error) {
@@ -165,13 +165,13 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
     } finally { setBusy(false); }
   }
 
-  async function openElectron(id?: string) {
+  async function openTool(id?: string) {
     if (busy) return;
     setBusy(true);
     setFeedback(undefined);
     try {
-      if (!host.isNative()) throw new Error("请在 AAW 桌面版中打开 Electron 插件窗口。");
-      await host.openToolsElectron(id);
+      if (!host.isNative()) throw new Error("请在 AAW 桌面版中打开工具。");
+      await host.openTool(id);
     } catch (error) {
       setFeedback({ text: errorText(error), error: true });
     } finally { setBusy(false); }
@@ -356,7 +356,7 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
     run(() => service.remove(id));
     // 卸载之后它的窗口不该继续活着（常驻工具尤其如此）：走同一个停止通道顺手关掉。
     // 失败不影响卸载本身，最多是那个窗口留到用户自己关。
-    if (host.isNative()) void host.stopToolsElectron(id).catch(() => {});
+    if (host.isNative()) void host.stopTool(id).catch(() => {});
     if (!files) return;
     const note = await workshop.purge(id);
     setFeedback({ text: `已卸载。${note.text}`, ...(note.error ? { error: true as const } : {}) });
@@ -364,13 +364,13 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
 
   if (managed) return <ToolManagement key={`${managed.package.id}:${JSON.stringify(managed.settings)}:${JSON.stringify(managed.package.settingsSchema)}`} entry={managed} busy={busy} feedback={feedback}
     onBack={() => { setView({ kind: "library" }); setFeedback(undefined); }}
-    onOpen={() => void openElectron(managed.package.id)} onExport={() => void exportTool(managed.package, managed.dir)}
+    onOpen={() => void openTool(managed.package.id)} onExport={() => void exportTool(managed.package, managed.dir)}
     onRollback={() => void rollbackTool(managed.package.id)}
     onSave={(values) => { try { service.saveSettings(managed.package.id, values); setFeedback({ text: "设置已保存，重新打开插件后生效。" }); return true; } catch (error) { setFeedback({ text: errorText(error), error: true }); return false; } }}
     onRemove={() => {
       run(() => { service.remove(managed.package.id); setView({ kind: "library" }); });
       // 管理页也是卸载入口，同样要把它的窗口关掉——常驻工具不关就还在后台跑。
-      if (host.isNative()) void host.stopToolsElectron(managed.package.id).catch(() => {});
+      if (host.isNative()) void host.stopTool(managed.package.id).catch(() => {});
     }}
     onUpdate={(file) => { void (async () => { try {
       const upload = await readToolUpload(file);
@@ -394,7 +394,7 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
         <div className="flex flex-wrap items-center gap-3">
           <span className="flex ui-icon-40 shrink-0 items-center justify-center rounded-xl border border-info/20 bg-info/10 text-info"><WrenchIcon className="ui-icon-20" /></span>
           <div className="tools-title mr-auto"><h2 className="text-ui-xl font-semibold text-ink">工具中心</h2><p className="mt-1 text-ui-sm text-ink-subtle">描述你的需求，AI 做一个能用的小工具</p></div>
-          {host.isNative() && <button type="button" className={btnSecondary} onClick={() => void openElectron()}>打开启动器 ↗</button>}
+          {host.isNative() && <button type="button" className={btnSecondary} onClick={() => void openTool()}>打开启动器 ↗</button>}
           <button type="button" className={btnSecondary} aria-haspopup="menu" aria-expanded={cardMenu.menu?.id === ":import"} disabled={busy} onClick={openImportMenu}>导入工具</button>
         </div>
         <div className="tools-tabs mt-4 flex flex-wrap items-center gap-2">
@@ -475,7 +475,7 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
                   </div>
                 ) : (
                   <div className="tool-row-actions">
-                    <button type="button" className="tool-row-open" aria-label={`打开 ${tool.name}`} disabled={busy || broken !== undefined} data-hint={broken?.hint} onClick={() => void openElectron(tool.id)}>打开</button>
+                    <button type="button" className="tool-row-open" aria-label={`打开 ${tool.name}`} disabled={busy || broken !== undefined} data-hint={broken?.hint} onClick={() => void openTool(tool.id)}>打开</button>
                     <button type="button" className="tool-row-more" aria-label={`更多操作：${tool.name}`} aria-haspopup="menu" aria-expanded={cardMenu.menu?.id === tool.id} onClick={(event) => openCardMenu(event, tool)}>⋯</button>
                   </div>
                 )}

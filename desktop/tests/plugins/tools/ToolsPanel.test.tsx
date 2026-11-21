@@ -57,13 +57,13 @@ function expandSection(name: RegExp) {
   if (head.getAttribute("aria-expanded") === "false") fireEvent.click(head);
 }
 
-it("opens Electron directly, routes Manage separately, saves settings and exports source ZIP", async () => {
+it("opens the tool directly, routes Manage separately, saves settings and exports source ZIP", async () => {
   const state = createStore<readonly PersonalTool[]>(() => [{ package: sampleTool, settings: { indent: 2 } }]);
   const service = { state, install: vi.fn(), rollback: vi.fn(), setSource: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn((_id: string, values: ToolSettings) => state.setState([{ package: sampleTool, settings: values }], true)) } satisfies ToolsService;
   const open = vi.fn().mockResolvedValue(undefined);
   const write = vi.fn().mockResolvedValue(undefined);
   const stop = vi.fn().mockResolvedValue(undefined);
-  const host = { isNative: () => true, openToolsElectron: open, writeToolArchive: write, stopToolsElectron: stop,
+  const host = { isNative: () => true, openTool: open, writeToolArchive: write, stopTool: stop,
     dialogs: { saveFile: vi.fn().mockResolvedValue("E:/export.zip") } } as unknown as HostService;
   render(<ToolsPanel service={service} host={host} workshop={fakeWorkshop()} />);
   fireEvent.click(screen.getByRole("button", { name: "打开 JSON 格式化" }));
@@ -194,14 +194,14 @@ it("routes both import kinds through a single menu entry", () => {
 it("marks background tools and offers a real stop from the card menu", async () => {
   const tool = { ...sampleTool, background: { reason: "剪切板历史" } };
   const state = createStore<readonly PersonalTool[]>(() => [{ package: tool }]);
-  const stopToolsElectron = vi.fn(async () => {});
+  const stopTool = vi.fn(async () => {});
   const service = { state, install: vi.fn(), rollback: vi.fn(), setSource: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
-  const host = { isNative: () => true, stopToolsElectron } as unknown as HostService;
+  const host = { isNative: () => true, stopTool } as unknown as HostService;
   render(<ToolsPanel service={service} host={host} workshop={fakeWorkshop()} />);
   expect(screen.getByText("后台")).toBeVisible();
   openCardMenu();
   fireEvent.click(screen.getByRole("menuitem", { name: "停止后台运行" }));
-  await waitFor(() => expect(stopToolsElectron).toHaveBeenCalledExactlyOnceWith(tool.id));
+  await waitFor(() => expect(stopTool).toHaveBeenCalledExactlyOnceWith(tool.id));
   expect(screen.getByRole("status")).toHaveTextContent("已停止该工具的后台运行");
 });
 

@@ -8,12 +8,12 @@
 //! 为什么按工具分文件、整文件原子替换：工具写坏了只毁自己那一份，卸载时删文件即可，
 //! 不会留下孤儿键（与 `tool-storage.mjs` 的注释同一个理由）。
 
+use super::limits::LIMITS;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::PathBuf;
 
 /// 单个工具的总存储上限。
-const TOOL_LIMIT: usize = 5 * 1024 * 1024;
 /// 单个键的上限。
 const KEY_LIMIT: usize = 256 * 1024;
 /// 键名长度上限。
@@ -68,7 +68,10 @@ impl ToolStore {
     }
 
     /// 真正生效的数据根：跟着 `storage-location.json` 的 `active` 走。
-    fn storage_root(&self) -> PathBuf {
+    ///
+    /// `pub` 是因为设置、密钥、启动器目录都要读同一个位置——它们各自拼一遍
+    /// `<active>/configuration/...` 就会出现"存储跟着迁移走了、设置没跟"的裂缝。
+    pub fn storage_root(&self) -> PathBuf {
         let location = self.data_root.join("storage-location.json");
         if let Ok(text) = std::fs::read_to_string(&location) {
             if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
@@ -83,7 +86,7 @@ impl ToolStore {
     }
 
     /// 仓库里现在登录的是谁。读不到就当未登录，由 `owner_segment` 报错。
-    fn owner(&self) -> Result<String, String> {
+    pub fn owner(&self) -> Result<String, String> {
         let path = self.storage_root().join("configuration").join("preferences.json");
         let text = match std::fs::read_to_string(&path) {
             Ok(text) => text,
@@ -103,6 +106,20 @@ impl ToolStore {
         };
         let user_id = auth.get("user").and_then(|user| user.get("id")).and_then(|id| id.as_str());
         owner_segment(user_id)
+    }
+
+    /// 整份 `preferences.json`。
+    ///
+    /// 工具设置、启动器目录、主题都在这一个文件里。读它要能容忍"还没有"：
+    /// 首次启动、刚装完、换台机器，文件都可能不存在。
+    pub fn preferences(&self) -> Result<serde_json::Value, String> {
+        let path = self.storage_root().join("configuration").join("preferences.json");
+        match std::fs::read_to_string(&path) {
+            Ok(text) => serde_json::from_str(&text)
+                .map_err(|_| "偏好配置格式无效，请重启 AAW。".to_string()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(serde_json::json!({})),
+            Err(error) => Err(format!("读不到偏好配置：{error}")),
+        }
     }
 
     fn file(&self, tool_id: &str) -> Result<PathBuf, String> {
@@ -159,7 +176,7 @@ impl ToolStore {
         let mut current = self.read(tool_id)?;
         current.insert(key.to_string(), value);
         let total = serde_json::to_vec(&current).map_err(|error| error.to_string())?.len();
-        if total > TOOL_LIMIT {
+        if total > LIMITS.store_bytes {
             return Err("这个工具的存储已满（上限 5 MB），请先清理。".into());
         }
         self.write(tool_id, &current)?;

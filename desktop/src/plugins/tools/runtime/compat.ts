@@ -22,6 +22,24 @@ export function currentHostContract(): HostContract {
  *
  * `requires` 是可选的：没写就宽松放行，只有作者主动声明了才校验。这样旧包
  * 一个都不用改，新包也能把"我需要什么"说清楚。
+ *
+ * # 这道关只管"能不能装进来"
+ *
+ * 打开工具走的是另一条路：`tools_open` → `src-tauri/src/tools/compat.rs`。
+ * 两处**看起来**在判同一件事，其实是两个时机：
+ *
+ * | 时机 | 谁判 | 为什么不能共用 |
+ * |---|---|---|
+ * | 安装 / 导入 | 这里（前端） | 装之前就要给作者逐条报错，需要 `where` 定位到字段 |
+ * | 打开 | Rust | 窗口由 Rust 建，装完宿主可能已降级，装的那一刻判过不算数 |
+ *
+ * 它们的**规则来源是同一个**：契约代际在 `contract.ts`（Rust 侧是
+ * `CONTRACT_GENERATION`），能力名在同一张表（Rust 侧是 `caps_capability_names()`）。
+ * `contract.test.ts` 与 `limits.test.ts` 钉住了这两处同步。
+ *
+ * 曾经还有第三个入口 `explainIncompatibility()`——给 Electron 的"不兼容说明页"
+ * 用。那个页面随 P3 一起删了，现在打开失败会把 Rust 的说明原样显示在工具中心
+ * 的反馈条上，所以它也删了：留着一个没人调的判定，只会让人以为它还在生效。
  */
 export function checkCompatibility(
   tool: ToolPackage,
@@ -47,17 +65,11 @@ export function checkCompatibility(
       ruleId: "CAPABILITY",
       level: "block",
       where: "requires.capabilities",
-      message: `当前桌面端缺少这个工具需要的能力：${missing.join("、")}。`,
-      hint: "升级桌面端；如果是笔误，改成手册「能力表」里列出的名字（例如 files、clipboard、bus）。",
+      // 措辞要点：先说"依赖了已移除的能力"，而不是"缺少能力"。后者读起来像
+      // 用户这边的配置问题（少了什么设置），前者才指向真实原因——平台变了。
+      message: `这个工具依赖了当前桌面端已不支持的能力：${missing.join("、")}。`,
+      hint: `改法有两条：装一个支持第 ${host.contract} 代契约的版本；或者让作者去掉对 ${missing.join("、")} 的依赖（手册「能力表」里列着现在还能用的名字）。`,
     });
   }
   return problems;
-}
-
-/** 已装工具的运行时判定：打开前先问一句"现在还能跑吗"。 */
-export function explainIncompatibility(tool: ToolPackage): { reason: string; hint: string } | undefined {
-  const problems = checkCompatibility(tool);
-  const first = problems[0];
-  if (!first) return undefined;
-  return { reason: first.message, hint: first.hint };
 }

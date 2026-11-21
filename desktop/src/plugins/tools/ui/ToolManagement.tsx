@@ -7,6 +7,7 @@ import { SquareTerminalIcon } from "../../../shared/ui/icons.tsx";
 import { fieldSurfaceClass, settingsInputClass, settingsNumberInputClass } from "../../../shared/ui/inputStyles.ts";
 import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
 import type { PersonalTool, ToolSettings } from "../types.ts";
+import { readToolCarrier } from "../types.ts";
 import { resolveToolSettings } from "../runtime/settings.ts";
 import { toolProjectFiles } from "../runtime/projectArchive.ts";
 import { toolGlyph, toneOf } from "./mark.ts";
@@ -57,6 +58,13 @@ function Section({ id, title, description, badge, flag, open, onToggle, children
     <div className="mg-panel" id={`${id}-panel`} hidden={!open}>{children}</div>
   </section>;
 }
+
+/** 载体对用户的一句话说明。「Electron 独立窗口」那种说法随 P3 一起作废了。 */
+const CARRIER_LABEL = {
+  L1: "独立窗口（单个 HTML 页面）",
+  L2: "独立窗口（带构建产物）",
+  L3: "独立窗口 + 自带的工具进程",
+} as const;
 
 export function ToolManagement({ entry, onBack, onOpen, onExport, onUpdate, onSave, onRemove, onRollback, busy, feedback }: {
   entry: PersonalTool; onBack: () => void; onOpen: () => void; onExport: () => void; onUpdate: (file: File) => void;
@@ -135,15 +143,16 @@ export function ToolManagement({ entry, onBack, onOpen, onExport, onUpdate, onSa
             open={open.actions} onToggle={() => toggle("actions")}>
             <div className="mg-content">
               {tool.actions?.length ? <ul className="mg-actions-list">{tool.actions.map((action) => {
-                // 安装版里没有 npm：真正的入口是安装目录下 tools-runtime/aaw-tools.cmd。
-                const command = `aaw-tools run ${tool.id} ${action.id}`;
+                // 以前这里显示 `aaw-tools run <工具> <动作>`——那是个随 Electron 一起
+                // 删掉的命令行入口。现在 AI 走宿主的能力通道（`tool_act`），没有一个
+                // 用户能自己在终端敲的等价命令；继续显示它会让人去安装目录找一个
+                // 不存在的文件，所以只标出"动作 id"，复制它用于跟作者对话。
                 return <li key={action.id} className="mg-action">
-                  <div className="mg-action-head"><code>{action.id}</code><CopyButton getText={() => command} label="复制命令" /></div>
+                  <div className="mg-action-head"><code>{action.id}</code><CopyButton getText={() => `${tool.id}.${action.id}`} label="复制动作 ID" /></div>
                   <p>{action.description}</p>
-                  <code className="mg-command">{command}</code>
                 </li>;
-              })}</ul> : <p className="mg-empty">此插件暂未声明动作。声明 actions 后，AI 就能通过 CLI 调用与界面相同的逻辑。</p>}
-              {!!tool.actions?.length && <p className="mg-note">在 AAW 安装目录的 <code>tools-runtime</code> 下执行 <code>aaw-tools.cmd</code>；源码仓库里等价于 <code>npm run tools -- run …</code>。参数走标准输入或 <code>--input-file=&lt;路径&gt;</code>。</p>}
+              })}</ul> : <p className="mg-empty">此插件暂未声明动作。声明 actions 后，AI 就能调用与界面按钮同一个函数。</p>}
+              {!!tool.actions?.length && <p className="mg-note">AI 通过宿主的 <code>tool_act</code> 调用这些动作：同一个工具、同一个函数，和你点的按钮走同一条链。参数与返回值上限 512 KB，20 秒内返回，重复调用结果相同。</p>}
             </div>
           </Section>
 
@@ -151,9 +160,9 @@ export function ToolManagement({ entry, onBack, onOpen, onExport, onUpdate, onSa
             <div className="mg-content">
               <dl className="mg-meta">
                 <div><dt>插件 ID</dt><dd><code>{tool.id}</code></dd></div>
-                <div><dt>运行方式</dt><dd>Electron 独立窗口</dd></div>
+                <div><dt>运行方式</dt><dd>{CARRIER_LABEL[readToolCarrier(tool)]}</dd></div>
                 <div><dt>运行能力</dt><dd>{tool.permissions?.network ? "会联网（http/https）" : "仅本地，不联网"}</dd></div>
-                <div><dt>AI 接口</dt><dd><SquareTerminalIcon className="ui-icon-14" />{tool.actions?.length ? `${tool.actions.length} 个 CLI 动作` : "暂未声明"}</dd></div>
+                <div><dt>AI 接口</dt><dd><SquareTerminalIcon className="ui-icon-14" />{tool.actions?.length ? `${tool.actions.length} 个动作` : "暂未声明"}</dd></div>
                 {tool.author && <div><dt>作者</dt><dd>{tool.author}</dd></div>}
                 {tool.source && <div><dt>来源</dt><dd className="mg-source">{tool.source}</dd></div>}
                 {entry.installedAt && <div><dt>安装于</dt><dd>{new Date(entry.installedAt).toLocaleString("zh-CN")}</dd></div>}

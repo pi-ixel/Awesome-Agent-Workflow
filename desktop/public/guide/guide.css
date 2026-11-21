@@ -1,0 +1,100 @@
+/*
+ * 开发指导窗口的样式。
+ *
+ * 只用系统字体与语义色：这份文档要在任何主题下都读得清，而不是"跟主窗长得一样"。
+ * 深色是默认（与主窗一致），`data-theme="warm"` 时切浅色。
+ */
+:root {
+  color-scheme: dark;
+  --bg: #16181f;
+  --panel: #1d2029;
+  --text: #e6e8ee;
+  --muted: #9aa1b1;
+  --line: #2b2f3c;
+  --accent: #7aa2ff;
+  --code: #101219;
+}
+
+:root[data-theme="warm"] {
+  color-scheme: light;
+  --bg: #f7f8fa;
+  --panel: #ffffff;
+  --text: #22252d;
+  --muted: #656b78;
+  --line: #e2e5ec;
+  --accent: #2f5fd0;
+  --code: #f0f2f6;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.75 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 32px clamp(18px, 5vw, 48px) 64px;
+}
+
+h1 { font-size: 24px; margin: 0 0 20px; letter-spacing: -0.01em; }
+h2 { font-size: 18px; margin: 34px 0 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+h3 { font-size: 15px; margin: 24px 0 8px; }
+h4 { font-size: 14px; margin: 18px 0 6px; color: var(--muted); }
+
+p { margin: 10px 0; }
+a { color: var(--accent); }
+
+code {
+  font: 12.5px/1.5 ui-monospace, Consolas, "Cascadia Mono", monospace;
+  background: var(--code);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+
+pre {
+  background: var(--code);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px;
+  overflow-x: auto;
+}
+
+pre code { background: none; border: 0; padding: 0; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 14px 0;
+  font-size: 13px;
+}
+
+th, td {
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+th { background: var(--panel); font-weight: 600; }
+
+ul, ol { margin: 10px 0; padding-left: 22px; }
+li { margin: 4px 0; }
+
+blockquote {
+  margin: 14px 0;
+  padding: 8px 14px;
+  border-left: 3px solid var(--accent);
+  background: var(--panel);
+  color: var(--muted);
+  border-radius: 0 8px 8px 0;
+}
+
+hr { border: 0; border-top: 1px solid var(--line); margin: 28px 0; }
+
+.loading { color: var(--muted); }

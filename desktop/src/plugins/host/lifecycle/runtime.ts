@@ -46,27 +46,37 @@ export class DesktopHost implements HostService {
   readonly listenLauncher: HostService["listenLauncher"] = (open) => this.resources.listen(async () => {
     if (!isTauriEnv()) return () => {};
     const { listen } = await import("@tauri-apps/api/event");
-    return listen<{ requestId: string; target: string }>("aaw://launcher-open", (event) => { void (async () => {
-      let error: string | undefined;
+    return listen<{ target: string }>("aaw://launcher-open", (event) => { void (async () => {
       try { if (!this.resources.isActive()) throw new Error("主窗口正在关闭。"); await open(event.payload.target); }
-      catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
-      void this.invoke("launcher_reply", { requestId: event.payload.requestId, error }).catch(() => {});
+      catch (cause) {
+        // 启动器此时已经藏起自己、把焦点交回主窗，所以原因要在主窗里说。
+        // 走系统通知而不是弹窗：这条路径上没有现成的模态容器，而"按了快捷键、
+        // 选了一项、结果什么也没发生"正是这个功能最容易被骂的地方。
+        const detail = cause instanceof Error ? cause.message : String(cause);
+        if (this.notifications.isAvailable())
+          void this.notifications.send({ id: Date.now(), title: "这个功能没能打开", body: detail, extra: {} }).catch(() => {});
+        else console.warn("launcher-open", detail);
+      }
     })(); });
   });
-  readonly openToolsElectron: HostService["openToolsElectron"] = (toolId) =>
+  readonly openTool: HostService["openTool"] = (toolId) =>
     this.resources.run(async () => {
+      if (!isTauriEnv()) throw new Error("请在 AAW 桌面版中打开工具。");
+      // 工具设置存在偏好文件里，工具窗口会把它读出来当初始值。不先落盘的话，
+      // 刚在工具中心改过的设置要等下一次刷写才生效，用户看着像"没保存"。
       await flushNativeConfiguration();
-      await this.invoke("tools_open_electron", { toolId });
+      // 不给 id 就是"打开工具列表"——那是启动器的职责，不是某个工具的窗口。
+      await (toolId ? this.invoke("tools_open", { toolId }) : this.invoke("launcher_show"));
     });
-  readonly stopToolsElectron: HostService["stopToolsElectron"] = (toolId) =>
+  readonly stopTool: HostService["stopTool"] = (toolId) =>
     this.resources.run(async () => {
       if (!isTauriEnv()) throw new Error("请在 AAW 桌面版中停止后台工具。");
-      await this.invoke("tools_stop_electron", { toolId });
+      await this.invoke("launcher_stop", { toolId });
     });
   readonly openToolsGuide: HostService["openToolsGuide"] = () =>
     this.resources.run(async () => {
       if (!isTauriEnv()) throw new Error("请在 AAW 桌面版中打开工具开发指导。");
-      await this.invoke("tools_open_guide", {});
+      await this.invoke("tools_guide_open");
     });
   readonly exitGate = createHostExitGate();
   private exitDiagnostics?: ExitDiagnostics;
