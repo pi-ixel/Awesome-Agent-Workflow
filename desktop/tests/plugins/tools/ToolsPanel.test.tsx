@@ -67,7 +67,8 @@ it("opens the tool directly, routes Manage separately, saves settings and export
     dialogs: { saveFile: vi.fn().mockResolvedValue("E:/export.zip") } } as unknown as HostService;
   render(<ToolsPanel service={service} host={host} workshop={fakeWorkshop()} />);
   fireEvent.click(screen.getByRole("button", { name: "打开 JSON 格式化" }));
-  await waitFor(() => expect(open).toHaveBeenCalledWith(sampleTool.id));
+  // openTool 现在带安装记录里的运行副本目录（fakeWorkshop 默认合成一个）。
+  await waitFor(() => expect(open).toHaveBeenCalledWith(sampleTool.id, `E:/AAW/tools/installed/${sampleTool.id}`));
   expect(document.querySelector("iframe")).toBeNull();
   openCardMenu();
   fireEvent.click(screen.getByRole("menuitem", { name: "管理" }));

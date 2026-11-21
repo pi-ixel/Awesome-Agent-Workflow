@@ -312,7 +312,7 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {    // 开发指导窗
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(900));
             let tool_id = std::env::var("AAW_TOOLS_TAURI_PILOT_ID").unwrap_or_else(|_| "pilot".into());
-            if let Err(error) = open_tool(&app, &tool_id) {
+            if let Err(error) = open_tool(&app, &tool_id, None) {
                 eprintln!("[aaw-tools] 打开 pilot 失败：{error}");
             }
         });
@@ -481,9 +481,13 @@ fn serve(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
 
 /// 打开一个工具窗口。
 ///
+/// `hint` 是前端安装记录里的目录（示例工具打开前会当场物化并记录）。解析
+/// 顺序：`hint` 存在且是目录就用它，否则回退 `tools_root/<id>`——后一条是
+/// 兼容路径，不是主路：前端知道自己装的东西在哪，Rust 不该再猜一遍。
+///
 /// `tool-<id>` 这个 label 形状是有意的：`capabilities/tools.json` 用 `tool-*`
 /// 一条就覆盖全部工具窗口，不必每加一个工具就改权限表。
-pub fn open_tool(app: &AppHandle, tool_id: &str) -> Result<(), String> {
+pub fn open_tool(app: &AppHandle, tool_id: &str, hint: Option<&str>) -> Result<(), String> {
     let label = format!("tool-{tool_id}");
     let host = app.state::<ToolsHost>();
     if let Some(window) = app.get_webview_window(&label) {
@@ -495,8 +499,24 @@ pub fn open_tool(app: &AppHandle, tool_id: &str) -> Result<(), String> {
         window.set_focus().ok();
         return Ok(());
     }
-    let dir = host.tool_dir(tool_id)?;
+    let dir = match hint {
+        Some(dir) if std::path::Path::new(dir).is_dir() => std::path::PathBuf::from(dir),
+        // hint 给了但目录不在了：不静默换成 tools_root（那会打开另一份完全
+        // 不同的内容），把矛盾报出来。
+        Some(dir) => return Err(format!("安装记录里的工具目录不存在：{dir}")),
+        None => host.tool_dir(tool_id)?,
+    };
     let manifest = manifest::read(&dir)?;
+    // hint 目录是前端传来的参数，必须验里面的清单确实是自己：装错目录
+    // 时宁可报错，也不能把 A 工具的窗口当成 B 工具打开（能力、存储都挂在
+    // tool_id 上，错配会读到别人的数据）。
+    if manifest.id != tool_id {
+        return Err(format!(
+            "目录 {} 里的清单 id 是「{}」，与要打开的工具「{tool_id}」不一致。",
+            dir.display(),
+            manifest.id
+        ));
+    }
     // 打开关口在**建窗口之前**：判定放后面就会出现"先闪一个空白窗口、再关掉"，
     // 那是用户最难描述的一类故障。判定本身只读清单，不需要窗口。
     compat::check(&manifest)?;
@@ -617,9 +637,20 @@ fn storage_scope(session: &ToolSession, scope: &str) -> Result<String, String> {
 /// 打开工具的入口。`async` 的理由与 `tools_guide_open` 相同：同步命令跑在
 /// 主线程，而 `open_page_window` / `process_host::open` 都要建窗口——主线程里
 /// 建 WebView2 会把消息循环堵在等自己上，结果是白窗 + 关不掉。
+///
+/// `dir` 是前端安装记录里的目录。必须限定主窗调用：工具页面是 remote
+/// origin，能传任意路径的目录参数之后，绝不能让它也够得着这条命令。
 #[tauri::command]
-pub async fn tools_open(app: AppHandle, tool_id: String) -> Result<(), String> {
-    open_tool(&app, &tool_id)
+pub async fn tools_open(
+    window: tauri::WebviewWindow,
+    app: AppHandle,
+    tool_id: String,
+    dir: Option<String>,
+) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("只有主窗口可以打开工具。".into());
+    }
+    open_tool(&app, &tool_id, dir.as_deref())
 }
 
 /// 把导出的源码 ZIP 写到用户选定的路径。
