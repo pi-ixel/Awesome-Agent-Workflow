@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P0 验收台</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --ink: CanvasText;
+    --paper: Canvas;
+    --line: color-mix(in srgb, CanvasText 14%, Canvas);
+    --soft: color-mix(in srgb, CanvasText 5%, Canvas);
+    --softer: color-mix(in srgb, CanvasText 8%, Canvas);
+    --muted: color-mix(in srgb, CanvasText 58%, Canvas);
+    --accent: #4a7ce0;
+    --ok: #2e9e6b;
+    --bad: #d4574a;
+    --wait: #c08a2e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 26px 30px 34px;
+    font: 14px/1.62 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: var(--ink); background: var(--paper);
+  }
+  .wrap { max-width: 60rem; margin: 0 auto; }
+  header { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 22px; }
+  .mark {
+    flex: none; display: grid; place-items: center; width: 44px; height: 44px;
+    border-radius: 13px; font-size: 21px;
+    background: color-mix(in srgb, var(--accent) 18%, Canvas);
+    color: color-mix(in srgb, var(--accent) 88%, CanvasText);
+  }
+  h1 { margin: 0; font-size: 19px; font-weight: 640; letter-spacing: -.01em; }
+  header p { margin: 3px 0 0; font-size: 12.5px; color: var(--muted); }
+  .badges { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .badge {
+    padding: 4px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 550;
+    border: 1px solid var(--line); color: var(--muted); white-space: nowrap;
+  }
+  .badge.hot {
+    border-color: color-mix(in srgb, var(--ok) 42%, Canvas);
+    color: color-mix(in srgb, var(--ok) 86%, CanvasText);
+    background: color-mix(in srgb, var(--ok) 10%, Canvas);
+  }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: 12px; }
+  .card {
+    display: flex; flex-direction: column; gap: 9px;
+    padding: 15px 16px 16px; border: 1px solid var(--line); border-radius: 13px;
+    background: var(--soft);
+  }
+  .card h2 {
+    display: flex; align-items: center; gap: 8px;
+    margin: 0; font-size: 13px; font-weight: 600;
+  }
+  .n {
+    flex: none; display: grid; place-items: center; width: 19px; height: 19px;
+    border-radius: 6px; font-size: 11px; font-weight: 600;
+    background: var(--softer); color: var(--muted);
+  }
+  .dot { margin-left: auto; width: 8px; height: 8px; border-radius: 50%; background: var(--wait); }
+  .dot.ok { background: var(--ok); }
+  .dot.bad { background: var(--bad); }
+  .expect { margin: 0; font-size: 12px; color: var(--muted); }
+  .actual {
+    margin: 0; padding: 8px 10px; border-radius: 8px;
+    background: color-mix(in srgb, CanvasText 4%, Canvas);
+    border: 1px solid var(--line);
+    font: 12px/1.5 ui-monospace, Consolas, "Cascadia Mono", monospace;
+    overflow-wrap: anywhere; white-space: pre-wrap; min-height: 34px;
+  }
+  .actual.ok { color: color-mix(in srgb, var(--ok) 82%, CanvasText); }
+  .actual.bad { color: color-mix(in srgb, var(--bad) 86%, CanvasText); }
+  .row { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+  button {
+    border: 1px solid var(--line); border-radius: 8px; padding: 5px 12px;
+    font: inherit; font-size: 12px; cursor: pointer;
+    background: var(--softer); color: var(--ink);
+  }
+  button:hover { background: color-mix(in srgb, CanvasText 14%, Canvas); }
+  button.primary { border-color: transparent; background: var(--accent); color: #fff; }
+  button.primary:hover { background: color-mix(in srgb, var(--accent) 86%, #fff); }
+  button:disabled { opacity: .55; cursor: default; }
+  .hint { margin-left: auto; font-size: 11px; color: var(--muted); }
+  h3 {
+    margin: 24px 0 9px; font-size: 11.5px; font-weight: 600;
+    letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 6px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 550; color: var(--muted); font-size: 11.5px; }
+  td k { font: 11.5px ui-monospace, Consolas, monospace; color: color-mix(in srgb, var(--accent) 72%, CanvasText); }
+  footer { margin-top: 22px; font-size: 12px; color: var(--muted); }
+  code { font: 11.5px ui-monospace, Consolas, monospace; padding: 1px 5px; border-radius: 5px; background: var(--softer); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="mark" aria-hidden="true">◉</span>
+    <div>
+      <h1>P0 验收台</h1>
+      <p>工具载体从 Electron 换到 Tauri — 这一页只做一件事：把三件最容易翻车的事摆到界面上。</p>
+    </div>
+    <div class="badges">
+      <span class="badge" id="carrier">L1 单页</span>
+      <span class="badge hot" id="score">检查中</span>
+    </div>
+  </header>
+
+  <div class="grid">
+    <section class="card">
+      <h2><span class="n">1</span>协议映射<span class="dot" id="dot-scheme"></span></h2>
+      <p class="expect">期望：`aaw-tool://pilot` 在 Windows 上落成 `http://aaw-tool.pilot/`——工具 id 变成 scheme 的子域，于是每个工具是独立 origin。</p>
+      <p class="actual" id="out-scheme">读取中…</p>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">2</span>注入时机<span class="dot" id="dot-inject"></span></h2>
+      <p class="expect">期望：`aawSettings` 在页面第一行脚本就存在，且是值（不是 Promise）。</p>
+      <p class="actual" id="out-inject">读取中…</p>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">3</span>存储往返<span class="dot" id="dot-store"></span></h2>
+      <p class="expect">期望：`aawStore.set` → 落盘 → `get` 读回同一个值；关掉窗口再打开还在。</p>
+      <p class="actual" id="out-store">读取中…</p>
+      <div class="row">
+        <button class="primary" id="btn-add">计数 +1</button>
+        <button id="btn-reset">清零</button>
+        <button id="btn-keys">列出键</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">4</span>动作调用<span class="dot" id="dot-act"></span></h2>
+      <p class="expect">期望：宿主 → eval → `window.aawActions` → 能力通道回传 → 宿主拿到值。这条链通，AI 才能调工具。</p>
+      <p class="actual" id="out-act">还没调用</p>
+      <div class="row">
+        <button class="primary" id="btn-act">让宿主调一次 stats</button>
+        <span class="hint" id="act-hint"></span>
+      </div>
+    </section>
+  </div>
+
+  <h3>当前注入进来的东西</h3>
+  <table>
+    <tbody id="facts">
+      <tr><th style="width:9rem">aawSettings</th><td id="fact-settings">—</td></tr>
+      <tr><th>aawContext</th><td id="fact-context">—</td></tr>
+      <tr><th>__aawHost</th><td id="fact-host">—</td></tr>
+      <tr><th>通道</th><td id="fact-channel">—</td></tr>
+    </tbody>
+  </table>
+
+  <footer>
+    这一页是 P0 的验收产物，不是工具的范例。它直接用 <code>fetch("/__aaw/call/…")</code>
+    只是为了把第 4 项打出来 —— 真正的工具只该用 <code>window.aaw*</code>，通道是实现细节。
+  </footer>
+</div>
+
+<script>
+  // ── 第 2 项的关键证据 ───────────────────────────────────────────────
+  // 这段脚本比下面所有业务代码都早执行。如果 aawSettings 在这里还不是真值，
+  // 就说明注入时机不对（或者注入根本没发生）。
+  const firstRead = {
+    hasStore: typeof window.aawStore === "object" && window.aawStore !== null,
+    hasSettings: typeof window.aawSettings === "object" && window.aawSettings !== null,
+    settingsIsPromise: !!(window.aawSettings && typeof window.aawSettings.then === "function"),
+    settings: window.aawSettings,
+    host: window.__aawHost || null,
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const results = new Map();
+
+  function mark(key, ok, detail) {
+    results.set(key, ok);
+    const dot = $("dot-" + key);
+    if (dot) dot.className = "dot " + (ok ? "ok" : "bad");
+    const out = $("out-" + key);
+    if (out && detail !== undefined) {
+      out.textContent = detail;
+      out.className = "actual " + (ok ? "ok" : "bad");
+    }
+    // 分母固定 4：第 4 项要人点，不能因为"还没点"就让分母变成 3。
+    const TOTAL = 4;
+    const passed = [...results.values()].filter(Boolean).length;
+    $("score").textContent = `${passed} / ${TOTAL} 通过`;
+    $("score").className = "badge " + (passed === TOTAL ? "hot" : "");
+  }
+
+  function pretty(value) {
+    try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+  }
+
+  // ── 1. 协议映射 ─────────────────────────────────────────────────────
+  (function checkScheme() {
+    const href = window.location.href;
+    // 实测形态：wry 在 Windows 上把 `aaw-tool://pilot` 落成 `http://aaw-tool.pilot/`
+    // ——工具 id 是 scheme 的子域，不是路径的第一段。macOS / Linux 上是 `aaw-tool://pilot/`。
+    const windowsForm = /^http:\/\/aaw-tool\.pilot(:\d+)?\//.test(href);
+    const unixForm = /^aaw-tool:\/\/pilot\//.test(href);
+    const ok = windowsForm || unixForm;
+    const shape = windowsForm ? "Windows 形态（http://aaw-tool.pilot）" : unixForm ? "Unix 形态（aaw-tool://）" : "未知形态";
+    mark("scheme", ok, `${shape}\n${href}`);
+  })();
+
+  // ── 2. 注入时机 ─────────────────────────────────────────────────────
+  (function checkInject() {
+    const ok = firstRead.hasStore && firstRead.hasSettings && !firstRead.settingsIsPromise;
+    const detail = ok
+      ? `首个脚本就读到了：aawSettings = ${pretty(firstRead.settings)}\naawStore = ${firstRead.hasStore ? "可用" : "缺失"} · 是值不是 Promise`
+      : `aawSettings=${firstRead.hasSettings} · aawStore=${firstRead.hasStore} · 是 Promise=${firstRead.settingsIsPromise}`;
+    mark("inject", ok, detail);
+    $("fact-settings").innerHTML = "<k>" + escapeHtml(pretty(firstRead.settings)) + "</k>";
+    $("fact-context").innerHTML = "<k>" + escapeHtml(pretty(window.aawContext)) + "</k>";
+    $("fact-host").innerHTML = "<k>" + escapeHtml(pretty(firstRead.host)) + "</k>";
+    if (firstRead.host && firstRead.host.runtime === "tauri") $("carrier").textContent = "L1 单页 · Tauri 载体";
+    $("fact-channel").innerHTML = "<k>" + escapeHtml((firstRead.host && firstRead.host.channel) || "unknown") + "</k>";
+  })();
+
+  // ── 3. 存储往返 ─────────────────────────────────────────────────────
+  async function readCount() {
+    const value = await window.aawStore.get("count");
+    return typeof value === "number" ? value : 0;
+  }
+
+  async function showStore() {
+    const count = await readCount();
+    const keys = await window.aawStore.keys();
+    mark("store", true, `count = ${count}\n存储键：${keys.length ? keys.join("、") : "（空）"}`);
+    return count;
+  }
+
+  async function bootstrapStore() {
+    try {
+      if (!firstRead.hasStore) throw new Error("aawStore 不存在，注入没生效");
+      // 往返验证用一次临时写入：读回来必须是刚写的那个值，不能是"看起来有值"。
+      const probe = "probe-" + Date.now();
+      await window.aawStore.set("__probe", probe);
+      const back = await window.aawStore.get("__probe");
+      if (back !== probe) throw new Error(`往返不一致：写入 ${probe}，读回 ${back}`);
+      await window.aawStore.delete("__probe");
+
+      if (window.aawSettings && window.aawSettings.autoCount === true) {
+        await window.aawStore.set("count", (await readCount()) + 1);
+      }
+      await showStore();
+    } catch (error) {
+      mark("store", false, "失败：" + ((error && error.message) || error));
+    }
+  }
+
+  $("btn-add").addEventListener("click", async () => {
+    try {
+      const next = (await readCount()) + 1;
+      await window.aawStore.set("count", next);
+      await showStore();
+    } catch (error) {
+      mark("store", false, "写入失败：" + ((error && error.message) || error));
+    }
+  });
+
+  $("btn-reset").addEventListener("click", async () => {
+    try {
+      await window.aawStore.delete("count");
+      await showStore();
+    } catch (error) {
+      mark("store", false, "删除失败：" + ((error && error.message) || error));
+    }
+  });
+
+  $("btn-keys").addEventListener("click", () => void showStore());
+
+  // ── 4. 动作调用 ─────────────────────────────────────────────────────
+  // 这是唯一一处"工具反过来求宿主"的地方：页面请宿主按标准动作链路调一次
+  // `aawActions.stats`，宿主 eval 进本窗口、拿回结果、再交还页面。
+  // 真实的调用方是启动器或 AI（走 Rust 命令 `tool_act`），这里只是借同一扇门验证。
+  //
+  // 注意它走的是能力通道（fetch），不是 Tauri IPC —— 工具页面是 remote origin，
+  // 用 IPC 会被 ACL 拦。这条差别本身就是 P0 想验证的东西之一。
+  async function callHost(command, args) {
+    const response = await fetch("/__aaw/call/" + command, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-aaw-token": window.__aawToken },
+      body: JSON.stringify(args || {}),
+    });
+    const payload = await response.json();
+    if (!payload || payload.ok !== true) throw new Error((payload && payload.error) || "调用失败");
+    return payload.value;
+  }
+
+  $("btn-act").addEventListener("click", async () => {
+    const button = $("btn-act");
+    button.disabled = true;
+    $("act-hint").textContent = "等宿主…";
+    const started = performance.now();
+    try {
+      const value = await callHost("act.invoke", { action: "stats", input: {} });
+      const ms = Math.round(performance.now() - started);
+      mark("act", true, `stats 返回（${ms} ms）：\n${pretty(value)}`);
+      $("act-hint").textContent = "";
+    } catch (error) {
+      mark("act", false, "失败：" + ((error && error.message) || error));
+      $("act-hint").textContent = "";
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  // ── 工具自己的动作表（宿主反向调用它）────────────────────────────────
+  // 与 Electron 版完全一致：挂到 window.aawActions 上就行，不用注册。
+  window.aawActions = {
+    async stats() {
+      const keys = await window.aawStore.keys();
+      const count = await window.aawStore.get("count");
+      return {
+        toolId: (window.__aawHost && window.__aawHost.toolId) || "unknown",
+        runtime: (window.__aawHost && window.__aawHost.runtime) || "unknown",
+        count: typeof count === "number" ? count : 0,
+        keys,
+        greeting: (window.aawSettings && window.aawSettings.greeting) || "",
+        at: new Date().toISOString(),
+      };
+    },
+    async add(input) {
+      const by = Number(input && input.by) || 1;
+      const next = (await readCount()) + by;
+      await window.aawStore.set("count", next);
+      return { count: next };
+    },
+  };
+
+  function escapeHtml(text) {
+    return String(text).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+  }
+
+  void bootstrapStore().catch((error) => mark("store", false, "初始化失败：" + ((error && error.message) || error)));
+</script>
+</body>
+</html>
