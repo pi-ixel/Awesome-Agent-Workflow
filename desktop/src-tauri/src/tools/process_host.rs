@@ -407,6 +407,22 @@ pub fn stop(host: &ToolsHost, tool_id: &str) {
     host.remove_process(tool_id);
 }
 
+/// 窗口还在、进程没了（「停止后台运行」之后用户再点「打开」）时，把进程重新
+/// 拉起来。只有带界面的 L3 会走到这里：纯进程工具没有窗口，「打开」不会提前
+/// 返回，`open()` 会完整走一遍（start + 建窗）。
+pub fn respawn(app: &AppHandle, host: &ToolsHost, tool_id: &str) -> Result<(), String> {
+    if host.process(tool_id).is_some() {
+        return Ok(());
+    }
+    let dir = host.tool_dir(tool_id)?;
+    let manifest = super::manifest::read(&dir)?;
+    if !manifest.is_process() {
+        return Ok(());
+    }
+    let handle = start(app, tool_id, &dir, &manifest)?;
+    host.insert_process(tool_id, handle)
+}
+
 /// 调一个动作。调用方是 `tool_act`（窗口打开时）或工具中心的"运行"。
 pub fn invoke(host: &ToolsHost, tool_id: &str, action: &str, input: Value) -> Result<Value, String> {
     let handle = host.process(tool_id).ok_or_else(|| "这个工具的进程没有在运行。".to_string())?;
