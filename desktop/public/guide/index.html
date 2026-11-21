@@ -36,5 +36,12 @@
       <button id="save" type="button">保存</button>
     </div>
   </section>
+
+  <!-- 页内确认条：不用 window.confirm，它在 WebView2 里不弹框、直接返回 true。 -->
+  <div id="ask" class="ask" role="alertdialog" aria-modal="true" hidden>
+    <span id="ask-text" class="ask-text"></span>
+    <button id="ask-ok" type="button">确定</button>
+    <button id="ask-cancel" type="button" class="ghost">取消</button>
+  </div>
 </body>
 </html>
