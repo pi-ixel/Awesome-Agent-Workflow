@@ -215,6 +215,9 @@ struct EntrySrc {
     label: String,
     #[serde(default)]
     description: String,
+    /// 在会话里选中这个起点后输入框里的提示（ADR 039）：告诉用户这一句话要写什么。
+    #[serde(default)]
+    hint: String,
     start: String,
     #[serde(default)]
     inputs: serde_yaml::Mapping,
@@ -424,6 +427,9 @@ pub struct Entry {
     pub id: String,
     pub label: String,
     pub description: String,
+    /// 在会话里选中这个起点后输入框里的提示（ADR 039）；空着时由应用按输入生成。
+    #[serde(default)]
+    pub hint: String,
     pub start: String,
     pub inputs: Vec<EntryInput>,
 }
@@ -1137,7 +1143,7 @@ pub fn compile(files: &BTreeMap<String, String>) -> Result<Compiled, Vec<Diagnos
                 Err(error) => report.error(MANIFEST, &here, yaml_error(MANIFEST, &error).message),
             }
         }
-        entries.push(Entry { id: entry.id.clone(), label: entry.label.clone(), description: entry.description.clone(), start: entry.start.clone(), inputs });
+        entries.push(Entry { id: entry.id.clone(), label: entry.label.clone(), description: entry.description.clone(), hint: entry.hint.clone(), start: entry.start.clone(), inputs });
     }
 
     // 引用核对：变量是否有来源、结果字段是否声明、比较的取值是否在可选值里。

@@ -124,30 +124,16 @@ it("goes from the library to the workflow and previews its graph and source, wit
   expect(screen.queryByRole("tab", { name: /运行/ })).not.toBeInTheDocument();
 });
 
-it("starts a run from a session request and lands on it in the right panel", async () => {
+it("runs again from the run page through a new session, never a form", async () => {
   const fake = fakeWorkflowService();
-  const started = vi.fn();
-  fake.service.requestPanel({ kind: "launch", launch: { workflowId: "aaw-dev", entry: "dev" } });
-  render(<WorkflowPanel service={fake.service} onRunStarted={started} />);
-  expect(await screen.findByRole("region", { name: "启动 AAW 轻量开发" })).toBeInTheDocument();
-  fireEvent.change(await screen.findByLabelText("本次需求"), { target: { value: "做一件小事" } });
-  fake.setRuns([runSummary({ runId: "run-1", title: "做一件小事" })]);
-  fireEvent.click(screen.getByRole("button", { name: "开始运行" }));
-  await vi.waitFor(() => expect(crumb()).toBe("做一件小事"));
-  expect(started).toHaveBeenCalledWith("run-1");
-  expect(screen.getByRole("navigation", { name: "位置" })).toHaveTextContent(/^运行管理运行详情$/);
-});
-
-it("points back to the template when a workflow cannot run yet", async () => {
-  const fake = fakeWorkflowService();
-  const openWorkflow = vi.fn();
-  fake.setDetail({ ...workflowSummary(), catalogs: {}, files: [], scripts: [{ path: "scripts/check.py", trusted: false }] });
-  fake.service.requestPanel({ kind: "launch", launch: { workflowId: "aaw-dev" } });
-  render(<WorkflowPanel service={fake.service} onOpenWorkflow={openWorkflow} />);
-  expect(await screen.findByText(/1 个脚本还没确认信任/)).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "开始运行" })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "查看工作流" }));
-  expect(openWorkflow).toHaveBeenCalledWith("aaw-dev");
+  const again = vi.fn();
+  fake.setRuns([runSummary({ runId: "r2", title: "中断的运行", status: "stopped" })]);
+  render(<WorkflowPanel service={fake.service} onRunAgain={again} />);
+  await vi.waitFor(() => expect(crumb()).toBe("中断的运行"));
+  fireEvent.click(screen.getByRole("button", { name: "更多" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "再次运行" }));
+  expect(again).toHaveBeenCalledWith("r2");
+  expect(screen.queryByRole("region", { name: /^启动 / })).not.toBeInTheDocument();
 });
 
 it("copies a preset as mine and opens the copy", async () => {

@@ -145,14 +145,30 @@ export function attachNodeSessionHost(deps: NodeHostDeps): () => void {
     if (requirement.result_channel != null && offer === null) throw new Error("RESULT_CHANNEL_OFFER_INVALID");
     const callerTools = standardMcpServers(requirement.mcp_servers);
     const persona = personaOf(requirement.action);
-    const resume = requirement.resume_session_id ?? undefined;
-    const target = await deps.sessions.open({
+    const tools = (agent: Parameters<NonNullable<Parameters<NodeSessionPort["open"]>[0]["tools"]>>[0]) =>
+      [...callerTools, ...(offer ? [resultChannelServer(offer, agentSupportsHttpMcp(agent))] : [])];
+    const open = (resumeSessionId: string | undefined) => deps.sessions.open({
       workspacePath: requirement.cwd,
       title: persona,
-      ...(resume ? { resumeSessionId: resume } : {}),
+      ...(resumeSessionId ? { resumeSessionId } : {}),
       ...(requirement.model ? { model: requirement.model } : {}),
-      tools: (agent) => [...callerTools, ...(offer ? [resultChannelServer(offer, agentSupportsHttpMcp(agent))] : [])],
+      tools,
     });
+    let resume = requirement.resume_session_id ?? undefined;
+    let target: Awaited<ReturnType<typeof open>>;
+    try {
+      target = await open(resume);
+    } catch (error) {
+      // 发起运行的会话接不上（ADR 039 兜底，例如 Agent 不接受同一连接上重新载入）：
+      // 第一步改开新会话执行，当前会话不受影响。宿主换代后的续跑不走这里。
+      if (!requirement.entry_session || !resume) throw error;
+      logger.warn("发起运行的会话接不上，第一步改开新会话", {
+        sessionId: resume,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      resume = undefined;
+      target = await open(undefined);
+    }
     const sessionId = target.sessionId;
     if (!sessionId) throw new Error("ACP_SESSION_ID_MISSING");
     sessions.get(sessionId)?.stop();
@@ -198,6 +214,8 @@ export function attachNodeSessionHost(deps: NodeHostDeps): () => void {
         session.started = resolve;
       });
       if (deps.sessions.send(session.target, message)) {
+        // 任务已进到会话：在会话里发起的那一方据此收起「正在启动工作流」（ADR 039）。
+        deps.onEvent?.({ type: "session-task-sent", runId: session.runId, sessionId });
         await started;
         session.started = null;
         const outcome = await ended;

@@ -388,9 +388,16 @@ impl<H: Host> Runtime<H> {
                 .ok_or("QUESTION_POOL_UNAVAILABLE")?
                 .clone();
             if !self.actors.contains_key(&action.actor) {
-                let saved = self
+                let (saved, entry_session) = match self
                     .journal
-                    .actor_session(&self.id, &self.project, &action.actor)?;
+                    .actor_session(&self.id, &self.project, &action.actor)?
+                {
+                    Some(session) => (Some(session), false),
+                    None => match self.journal.unclaimed_entry_session(&self.id, &self.project)? {
+                        Some(session) => (Some(session), true),
+                        None => (None, false),
+                    },
+                };
                 let schema = request.schema.clone();
                 let results = self
                     .channels
@@ -441,6 +448,7 @@ impl<H: Host> Runtime<H> {
                     mcp_servers: servers,
                     result_channel: Some(result_channel),
                     resume_session_id: saved.clone(),
+                    entry_session,
                     question_tracker: self.question_tracker.clone(),
                 };
                 // 会话还没建好宿主就换代了（如刚启动就刷新界面）：旧宿主的应答不会再来，

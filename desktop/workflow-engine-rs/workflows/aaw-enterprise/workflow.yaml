@@ -10,6 +10,7 @@ entries:
   - id: sr
     label: 从 SR 需求开始
     description: 从原始需求出发，先做 SR 级的需求与设计，再按 AR 拆分推进。
+    hint: 粘贴原始需求，或用 @ 引用需求文档，Enter 开始运行
     start: sr_init
     inputs:
       requirement:
@@ -19,6 +20,7 @@ entries:
   - id: ar
     label: 从单个 AR 开始
     description: 已有 SR 设计，直接针对一个 AR 澄清、设计并开发。
+    hint: 写明 AR 编号与范围，用 @ 引用相关设计文档，Enter 开始运行
     start: ar_init
     inputs:
       requirement:

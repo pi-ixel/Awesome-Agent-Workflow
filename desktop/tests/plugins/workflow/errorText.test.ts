@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { agentErrorMessage, describeError, errorLine, joinHint, serviceExitText } from "../../../src/plugins/workflow/status/errorText.ts";
-import { describeStartError } from "../../../src/plugins/workflow/ui/WorkflowLauncher.tsx";
+import { errorLine as describeStartError } from "../../../src/plugins/workflow/status/errorText.ts";
 import { failureLabel } from "../../../src/plugins/workflow/status/snapshot.ts";
 
 describe("报错说明", () => {

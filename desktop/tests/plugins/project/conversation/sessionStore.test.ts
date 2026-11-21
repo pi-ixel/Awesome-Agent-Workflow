@@ -1562,3 +1562,30 @@ it("drains an image-only queued prompt without adding an empty text block", () =
   expect(promptBlocks).toHaveBeenCalledWith([image]);
   store.clear();
 });
+
+describe("交接中（ADR 039）", () => {
+  it("用户这时再发的内容排队，不抢在扩展的消息前面；扩展自己的消息照常发出", () => {
+    const store = useSessionStore.getState();
+    const prompt = vi.fn(() => new Promise<never>(() => {}));
+    store.bindSession({ prompt, cancel: () => {} });
+    store.setHandoff({ text: "给登录页加验证码", label: "正在启动工作流…" });
+    expect(useSessionStore.getState().enqueuePrompt("顺便看下样式")).toBe(true);
+    expect(prompt).not.toHaveBeenCalled();
+    expect(useSessionStore.getState().queuedPrompts).toHaveLength(1);
+    // 扩展的任务消息走直接发送，不受交接影响。
+    expect(useSessionStore.getState().sendPrompt("任务说明")).toBe(true);
+    expect(prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("交接没成（Agent 空闲）时收起占位，把排着的内容放出去", () => {
+    const store = useSessionStore.getState();
+    const prompt = vi.fn(() => new Promise<never>(() => {}));
+    store.bindSession({ prompt, cancel: () => {} });
+    store.setHandoff({ text: "x", label: "正在启动工作流…" });
+    useSessionStore.getState().enqueuePrompt("排着的话");
+    useSessionStore.getState().setHandoff(null);
+    expect(useSessionStore.getState().handoff).toBeNull();
+    expect(prompt).toHaveBeenCalledTimes(1);
+    expect(useSessionStore.getState().queuedPrompts).toEqual([]);
+  });
+});

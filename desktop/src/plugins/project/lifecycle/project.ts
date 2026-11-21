@@ -1,3 +1,4 @@
+import type { SessionHandoff } from "../conversation/types.ts";
 import type { SendOptions } from "../conversation/sessionStore.ts";
 import { removeSessionDraft } from "../composer/draftStore.ts";
 import {
@@ -247,6 +248,7 @@ export class DesktopProject {
         clear: this.clear.bind(this),
         dismissTurnError: this.dismissTurnError.bind(this),
         reportCommandFailure: this.reportCommandFailure.bind(this),
+        setHandoff: this.setHandoff.bind(this),
         send: this.send.bind(this),
         enqueue: this.enqueue.bind(this),
         steer: this.steer.bind(this),
@@ -759,6 +761,10 @@ export class DesktopProject {
   cancelQuestions(target: SessionTarget, id: string): void {
     const session = this.session(target);
     if (!session.disposed) session.approval.getState().cancelQuestions(id);
+  }
+  setHandoff(target: SessionTarget, handoff: SessionHandoff | null): void {
+    const session = this.session(target);
+    if (!session.disposed) session.store.getState().setHandoff(handoff);
   }
   send(
     target: SessionTarget,

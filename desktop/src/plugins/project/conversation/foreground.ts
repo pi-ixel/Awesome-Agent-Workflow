@@ -39,6 +39,7 @@ export function createProjectForeground(
     recovery: state.recovery,
     connectionFailure: state.connectionFailure,
     queuedPrompts: state.queuedPrompts,
+    handoff: state.handoff ?? null,
     queuePaused: state.queuePaused,
     isAgentRunning: state.isAgentRunning,
     turnState: state.turnState,

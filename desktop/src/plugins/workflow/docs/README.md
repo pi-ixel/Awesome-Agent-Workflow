@@ -21,7 +21,9 @@
   - 功能区：`WorkflowSidebar.tsx` 分类与「用 AI 新建」，`WorkflowWorkspace.tsx` 中间的
     `WorkflowLibrary.tsx` 工作流库、`WorkflowDetailView.tsx` 工作流（流程图 / 源码）、`DraftPage.tsx` AI 草稿；
     两者共用 `templateNavigation.ts` 的导航状态。
-  - 右栏：`WorkflowPanel.tsx` 分运行管理 `RunManager.tsx`、一次运行 `RunView.tsx`（流程图 `FlowStages.tsx`；
-    节点检视器 `NodeDetail.tsx`）与发起页 `LaunchPage.tsx`（`WorkflowLauncher.tsx` 启动表单）。
+  - 右栏：`WorkflowPanel.tsx` 分运行管理 `RunManager.tsx` 与一次运行 `RunView.tsx`（流程图 `FlowStages.tsx`；
+    节点检视器 `NodeDetail.tsx`）。
+  - 发起（ADR 039）：没有表单。`workbench.tsx` 的 `entryCommands` 把每个起点做成「/」菜单的发送对象，
+    `entryInputsOf` 把输入框里的文字交给起点的输入，`entryHint` 给出输入框提示。
   - `WorkflowSessionBanner.tsx` 节点会话回指条，`sessionGroups.ts` 运行 → 侧栏分组。
 - `health/`：工作区健康检查（工作流服务、工作流库、节点 Agent）；`config.ts` 面板布局兼容。

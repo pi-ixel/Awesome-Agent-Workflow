@@ -10,6 +10,7 @@ entries:
   - id: dev
     label: 从需求开始
     description: 输入本次要做的事情，流程会先和你确认需求与边界。
+    hint: 写下本次需求，可以用 @ 引用相关文件，Enter 开始运行
     start: requirement
     inputs:
       requirement:

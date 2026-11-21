@@ -592,6 +592,83 @@ describe("ChatInput slash 命令面板", () => {
     expect(within(panel).getByRole("option", { name: /plain-entry/ })).toHaveTextContent("/plain-entry");
   });
 
+  describe("发送对象（ADR 039）", () => {
+    function selectTarget(submit: ProjectSlashEntry["submit"]) {
+      useWorkspaceStore.setState({ activePath: "D:/dev/demo" });
+      useSessionStore.setState({ agentKey: "agent-a", activeSessionId: "s-1" });
+      const run = vi.fn();
+      const view = setup({
+        extensionGroup: "工作流入口",
+        extensionEntries: [{ id: "wf", label: "AAW 轻量开发", description: "启动", run, submit, placeholder: "本次需求，Enter 开始运行" }],
+      });
+      return { ...view, run };
+    }
+
+    it("选中后显示为输入框里的标签，Enter 把文字交给扩展而不是发给 Agent", async () => {
+      const submit = vi.fn(() => Promise.resolve());
+      const { onSend, run } = selectTarget(submit);
+      const textarea = getTextarea();
+      await userEvent.type(textarea, "/AAW");
+      await userEvent.type(textarea, "{Enter}");
+      expect(run).not.toHaveBeenCalled();
+      expect(screen.getByTestId("composer-send-target")).toHaveTextContent("AAW 轻量开发");
+      expect(textarea).toHaveAttribute("placeholder", "本次需求，Enter 开始运行");
+      await userEvent.type(textarea, "给登录页加验证码{Enter}");
+      await waitFor(() => expect(submit).toHaveBeenCalledWith({
+        session: { workspacePath: "D:/dev/demo", agentKey: "agent-a", sessionId: "s-1" },
+        text: "给登录页加验证码",
+      }));
+      expect(onSend).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.queryByTestId("composer-send-target")).not.toBeInTheDocument());
+      expect(textarea).toHaveValue("");
+    });
+
+    it("预填时可以一并放上发送对象；新会话建好后标签还在，换到别的会话就不带过去", async () => {
+      const submit = vi.fn(() => Promise.resolve());
+      selectTarget(submit);
+      // 刚新建、还没建好的会话。
+      act(() => useSessionStore.setState({ activeSessionId: null }));
+      await waitFor(() => expect(getTextarea()).not.toBeDisabled());
+      let accepted = true;
+      act(() => { accepted = testComposer.prefill("上次的需求", [], { target: "missing" }); });
+      expect(accepted).toBe(false);
+      act(() => { testComposer.prefill("上次的需求", [], { target: "wf" }); });
+      expect(getTextarea()).toHaveValue("上次的需求");
+      expect(screen.getByTestId("composer-send-target")).toHaveTextContent("AAW 轻量开发");
+      // 新会话刚建好：同一份草稿迁到它名下，标签留着。
+      act(() => useSessionStore.setState({ activeSessionId: "s-new" }));
+      expect(screen.getByTestId("composer-send-target")).toBeInTheDocument();
+      act(() => useSessionStore.setState({ activeSessionId: "s-other" }));
+      expect(screen.queryByTestId("composer-send-target")).not.toBeInTheDocument();
+    });
+
+    it("交接中输入框照常可用：这时按 Enter 排队，不直接发给 Agent", async () => {
+      const { onSend, onEnqueue } = setup();
+      act(() => useSessionStore.setState({ handoff: { text: "给登录页加验证码", label: "正在启动工作流…" } }));
+      const textarea = getTextarea();
+      expect(textarea).not.toBeDisabled();
+      await userEvent.type(textarea, "顺便看下样式{Enter}");
+      expect(onSend).not.toHaveBeenCalled();
+      expect(onEnqueue).toHaveBeenCalledWith("顺便看下样式");
+      act(() => useSessionStore.setState({ handoff: null }));
+    });
+
+    it("扩展拒绝时那句话和标签回到输入框，并显示原因；行首退格去掉标签", async () => {
+      const submit = vi.fn(() => Promise.reject(new Error("没能开始：Agent 未配置")));
+      selectTarget(submit);
+      const textarea = getTextarea();
+      await userEvent.type(textarea, "/AAW{Enter}");
+      await userEvent.type(textarea, "做一件事{Enter}");
+      expect(await screen.findByRole("alert")).toHaveTextContent("没能开始：Agent 未配置");
+      expect(textarea).toHaveValue("做一件事");
+      expect(screen.getByTestId("composer-send-target")).toBeInTheDocument();
+      textarea.setSelectionRange(0, 0);
+      await userEvent.keyboard("{Backspace}");
+      expect(screen.queryByTestId("composer-send-target")).not.toBeInTheDocument();
+      expect(textarea).toHaveValue("做一件事");
+    });
+  });
+
   it("行中 / 不触发；顿号行首归一触发", async () => {
     setup();
     const textarea = getTextarea();

@@ -134,6 +134,27 @@ describe("打开节点会话", () => {
   });
 });
 
+describe("在会话里发起的运行（ADR 039）", () => {
+  it("发起的会话接不上时第一步改开新会话；原有角色的会话接不上照常失败", async () => {
+    const h = (current = harness());
+    const open = h.port.open.bind(h.port);
+    h.port.open = (options) => (options.resumeSessionId === "user-session" ? Promise.reject(new Error("Agent 不接受重新载入")) : open(options));
+    const entry = h.send({ kind: "spawn_node_session", requirement: requirement({ resume_session_id: "user-session", entry_session: true }) });
+    expect(await h.responseOf(entry)).toEqual({ result: { sessionId: "s-1" } });
+    expect(h.opened.map((options) => options.resumeSessionId)).toEqual([undefined]);
+    const actor = h.send({ kind: "spawn_node_session", requirement: requirement({ resume_session_id: "user-session" }) });
+    expect(Object.keys(await h.responseOf(actor))).toContain("code");
+  });
+
+  it("任务说明进到会话时告诉发起方：它可以收起「正在启动工作流」", async () => {
+    const h = (current = harness());
+    await h.responseOf(h.send({ kind: "spawn_node_session", requirement: requirement() }));
+    h.send({ kind: "prompt_turn", session_id: "s-1", action: action(), prompt: "做事" });
+    await vi_waitFor(() => h.sent.length === 1);
+    expect(h.projected).toContainEqual({ type: "session-task-sent", runId: "run-1", sessionId: "s-1" });
+  });
+});
+
 describe("一轮工作流轮次", () => {
   it("任务说明作为插件消息发出（收成一行），这一轮结束才应答；运行第一步把用户的要求显示出来", async () => {
     const h = (current = harness());

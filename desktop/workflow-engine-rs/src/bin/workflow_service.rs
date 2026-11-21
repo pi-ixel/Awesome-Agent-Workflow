@@ -433,6 +433,9 @@ impl Service {
         let mut journal = self.open()?;
         journal.create_with_snapshot(&id, &project, &workflow, &snapshot)?;
         journal.set_run_info(&id, &title)?;
+        if let Some(session) = input["entrySession"].as_str().filter(|session| !session.is_empty()) {
+            journal.set_entry_session(&id, session)?;
+        }
         drop(journal);
         self.launch(id.clone(), project, owner, config, false)?;
         Ok(json!({"runId":id}))

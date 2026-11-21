@@ -654,8 +654,8 @@ export function createSessionActions(
       if (get().directSteering || (trimmed.length === 0 && attachments.length === 0)) {
         return false;
       }
-      if (!get().isAgentRunning && !steering.active) {
-        // 空闲态不该走到这（UI 只在运行中入队）：按直接发送兜底
+      if (!get().isAgentRunning && !steering.active && !get().handoff) {
+        // 空闲态不该走到这（UI 只在运行中或交接中入队）：按直接发送兜底
         return get().sendPrompt(trimmed, attachments, options);
       }
       if (

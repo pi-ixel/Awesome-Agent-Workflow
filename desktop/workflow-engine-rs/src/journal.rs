@@ -175,6 +175,8 @@ impl Journal {
         tx.execute_batch("CREATE TABLE IF NOT EXISTS action_awaiting_input (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,since INTEGER NOT NULL,PRIMARY KEY(run_id,site,ordinal),FOREIGN KEY(run_id,site,ordinal) REFERENCES action_records(run_id,site,ordinal));").map_err(err)?;
         // 运行的显示信息：标题（默认取需求首行）与创建时间。只用于呈现。
         tx.execute_batch("CREATE TABLE IF NOT EXISTS run_info (run_id TEXT PRIMARY KEY REFERENCES runs(id),title TEXT NOT NULL,created_at INTEGER NOT NULL);").map_err(err)?;
+        // ADR 039：在会话里发起的运行，第一个 Agent 步骤接着用发起它的会话。
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS run_entry_sessions (run_id TEXT PRIMARY KEY REFERENCES runs(id),session_id TEXT NOT NULL);").map_err(err)?;
         tx.execute_batch("CREATE TABLE IF NOT EXISTS workflow_artifacts (run_id TEXT NOT NULL REFERENCES runs(id),id TEXT NOT NULL,source TEXT NOT NULL,sha256 TEXT NOT NULL,media_type TEXT NOT NULL,content BLOB NOT NULL,PRIMARY KEY(run_id,id));").map_err(err)?;
         // ADR 031：步骤检查点、动作所属步骤、作废 / 人工跳过标记、干预审计、会话重置。
         tx.execute_batch("CREATE TABLE IF NOT EXISTS step_checkpoints (seq INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT NOT NULL REFERENCES runs(id),prefix TEXT NOT NULL,call_path TEXT NOT NULL,phase TEXT NOT NULL,state TEXT NOT NULL,created_at INTEGER NOT NULL,superseded_by INTEGER); CREATE INDEX IF NOT EXISTS step_checkpoints_run ON step_checkpoints(run_id,seq); CREATE TABLE IF NOT EXISTS action_steps (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,checkpoint INTEGER,clock INTEGER NOT NULL,PRIMARY KEY(run_id,site,ordinal),FOREIGN KEY(run_id,site,ordinal) REFERENCES action_records(run_id,site,ordinal)); CREATE TABLE IF NOT EXISTS action_marks (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,mark TEXT NOT NULL,intervention INTEGER NOT NULL,PRIMARY KEY(run_id,site,ordinal),FOREIGN KEY(run_id,site,ordinal) REFERENCES action_records(run_id,site,ordinal)); CREATE TABLE IF NOT EXISTS interventions (id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT NOT NULL REFERENCES runs(id),kind TEXT NOT NULL,detail TEXT NOT NULL,created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS actor_session_resets (run_id TEXT NOT NULL REFERENCES runs(id),actor TEXT NOT NULL,intervention INTEGER NOT NULL,PRIMARY KEY(run_id,actor));").map_err(err)?;
@@ -340,6 +342,21 @@ impl Journal {
     pub fn actor_session(&self, id: &str, project: &str, actor: &str) -> Result<Option<String>> {
         self.load(id, project)?;
         self.db.query_row("SELECT a.session_id FROM actor_sessions a JOIN runs r ON r.id=a.run_id WHERE r.id=?1 AND r.project=?2 AND a.actor=?3 AND NOT EXISTS (SELECT 1 FROM actor_session_resets x WHERE x.run_id=a.run_id AND x.actor=a.actor)",params![id,project,actor],|row|row.get(0)).optional().map_err(err)
+    }
+
+    /// 发起这次运行的会话（ADR 039）。
+    pub fn set_entry_session(&mut self, id: &str, session_id: &str) -> Result<()> {
+        self.db
+            .execute("INSERT OR REPLACE INTO run_entry_sessions(run_id,session_id) VALUES(?1,?2)", params![id, session_id])
+            .map(|_| ())
+            .map_err(err)
+    }
+
+    /// 还没有任何角色会话时，第一个 Agent 步骤接着用发起运行的会话（ADR 039）；
+    /// 一旦有角色占用了会话，入口会话就已经用过了。
+    pub fn unclaimed_entry_session(&self, id: &str, project: &str) -> Result<Option<String>> {
+        self.load(id, project)?;
+        self.db.query_row("SELECT e.session_id FROM run_entry_sessions e WHERE e.run_id=?1 AND NOT EXISTS (SELECT 1 FROM actor_sessions a WHERE a.run_id=e.run_id)",params![id],|row|row.get(0)).optional().map_err(err)
     }
 
     pub fn record_result_candidate(

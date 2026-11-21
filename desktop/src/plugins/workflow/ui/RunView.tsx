@@ -28,7 +28,6 @@ import type {
   CanvasNodeSnapshot,
   CanvasSnapshot,
   WorkflowCatalog,
-  WorkflowLaunchRequest,
   WorkflowService,
 } from "../types.ts";
 import {
@@ -83,11 +82,12 @@ function candidateOf(value: unknown): ResultCandidate | null {
   };
 }
 
-export function RunView({ service, runId, onLaunch, onOpenWorkflow, onOpenSession, onOpenFile }: {
+export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSession, onOpenFile }: {
   service: WorkflowService;
   runId: string;
   /** 「再次运行」：回到启动表单，预选这次运行的工作流与起点。 */
-  onLaunch?: (request: WorkflowLaunchRequest) => void;
+  /** 再次运行：新开一个会话，输入框里放好这个起点和上次的需求（ADR 039）。 */
+  onRunAgain?: () => void;
   /** 到左侧「工作流」功能区看这次运行用的工作流（ADR 038）。 */
   onOpenWorkflow?: (id: string) => void;
   /** 节点会话 → 中央 SessionView（project.sessions.openSessionFromEntry）。 */
@@ -367,7 +367,7 @@ export function RunView({ service, runId, onLaunch, onOpenWorkflow, onOpenSessio
           {snapshot?.run && !snapshot.active && snapshot.hasLease && <button type="button" className={primaryButton} onClick={() => void run(() => service.recover(runId, "Desktop：确认服务进程退出后解除占用"))}>检查并解除占用</button>}
           {snapshot?.run && !snapshot.active && !snapshot.hasLease && snapshot.run.status === "stopped" && withoutAuthorization.length === 0 && <button type="button" className={primaryButton} disabled={busy} onClick={() => void run(() => service.resume(runId))}>继续运行</button>}
           <MoreMenu entries={[
-            ...(onLaunch && summary?.workflowId ? [{ id: "again", label: "再次运行", onSelect: () => onLaunch({ workflowId: summary.workflowId, entry: summary.entry || undefined }) }] : []),
+            ...(onRunAgain && summary?.workflowId ? [{ id: "again", label: "再次运行", onSelect: onRunAgain }] : []),
             ...(onOpenWorkflow && summary?.workflowId ? [{ id: "workflow", label: "查看工作流", onSelect: () => onOpenWorkflow(summary.workflowId) }] : []),
             { id: "refresh", label: "刷新", onSelect: () => void reload() },
           ]} />

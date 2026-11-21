@@ -1,3 +1,4 @@
+import type { SessionHandoff } from "./conversation/types.ts";
 import type { AcpSessionEvent } from "../acpRuntime/events.ts";
 import type {
   PluginSessionOptions,
@@ -55,6 +56,7 @@ export type {
   ProjectExtension,
   ProjectQuickAction,
   ProjectSlashEntry,
+  ProjectSlashSubmission,
   ProjectTreeAction,
 } from "./ui/extension.ts";
 export type {
@@ -227,6 +229,8 @@ export interface ProjectConversation {
   clear(target: ForegroundSessionTarget): void;
   dismissTurnError(target: ForegroundSessionTarget): void;
   reportCommandFailure(target: ForegroundSessionTarget, reason: string): void;
+  /** 交接开始 / 结束（ADR 039）：带着发送对象发出的话，扩展接手前显示在信息流里。 */
+  setHandoff(target: SessionTarget, handoff: SessionHandoff | null): void;
   send(
     target: SessionTarget,
     text: string,

@@ -392,6 +392,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       cwd, workflow: request.workflowId, entry: request.entry, inputs: request.inputs,
       ...(title ? { title } : {}),
       ...(request.autoConfirm ? { autoConfirm: true } : {}),
+      ...(request.entrySession ? { entrySession: request.entrySession } : {}),
       command: [...launch.command],
       ...(launch.agentId ? { agentId: launch.agentId } : {}),
       mcpServers: Array.isArray(launch.mcpServers) ? launch.mcpServers : [],

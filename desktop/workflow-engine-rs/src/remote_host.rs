@@ -422,6 +422,7 @@ mod tests {
             mcp_servers: json!([]),
             result_channel: None,
             resume_session_id: None,
+            entry_session: false,
             question_tracker: Some(crate::session_host::TrackerStartParams {
                 executable: std::path::PathBuf::from("question-tracker.exe"),
                 cwd: std::path::PathBuf::from(r"D:\dev\tmp\project"),
@@ -446,6 +447,7 @@ mod tests {
             mcp_servers: json!([]),
             result_channel: None,
             resume_session_id: None,
+            entry_session: false,
             question_tracker: None,
         }
     }

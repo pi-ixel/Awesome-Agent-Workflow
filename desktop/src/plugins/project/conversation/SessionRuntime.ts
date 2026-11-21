@@ -46,6 +46,21 @@ export interface SessionRuntimeResources {
 
 export class RecoveryCleanupError extends Error {}
 
+/** 载入原会话时回放的消息内容：本地已有这些历史，丢弃；其余（状态类）事件载入后补应用。 */
+const REPLAYED_CONTENT = new Set([
+  "user_message_chunk",
+  "agent_message_chunk",
+  "agent_thought_chunk",
+  "tool_call",
+  "tool_call_update",
+  "plan",
+]);
+
+interface SessionReloadOptions {
+  restore: AcpProtocolResources["restore"];
+  attach: (runtime: SessionRuntime) => () => void;
+}
+
 interface SessionRecoveryOptions {
   immediate: boolean;
   isClosing: () => boolean;
@@ -164,6 +179,63 @@ export class SessionRuntime {
         throw new AggregateError(errors, "Session cleanup failed");
     });
     return this.closeTask;
+  }
+
+  /**
+   * 在同一个连接上重新载入这个会话（ADR 039），让新的 openTools 生效：不结束
+   * Agent 进程、不进入恢复状态，界面上不出现「重连」。载入期间界面与会话断开，
+   * 回放的消息内容丢弃，状态类事件载入后补应用；模型与模式只在值变了时刷新。
+   * 失败时界面照旧接回，原因抛给调用方。
+   */
+  async reload(options: SessionReloadOptions): Promise<void> {
+    const sessionId = this.session.sessionId ?? this.store.getState().activeSessionId;
+    if (this.disposed || this.listOnly) throw new Error("会话已关闭");
+    if (!sessionId) throw new Error("会话还没建好");
+    if (this.recovering || this.recoveryControl?.task) throw new Error("会话正在恢复连接");
+    if (this.store.getState().isAgentRunning) throw new Error("会话正在回复，稍后再试");
+    const state = this.store;
+    const desiredModel = state.getState().currentModelId;
+    const desiredMode = this.session.modes?.currentModeId;
+    const desiredConfig = this.session.configOptions ?? [];
+    const replayState: AcpSessionEvent[] = [];
+    this.detachViews();
+    try {
+      await options.restore(this.session, {
+        sessionId,
+        workspacePath: this.cwd ?? this.workspacePath,
+        modelId: desiredModel,
+        modeId: desiredMode,
+        configuration: desiredConfig,
+        isCurrent: () => !this.disposed,
+        onReplay: (event) => {
+          if (!REPLAYED_CONTENT.has(event.type)) replayState.push(event);
+        },
+      });
+    } finally {
+      this.detachViews = options.attach(this);
+    }
+    for (const event of replayState) {
+      state.getState().handleEvent(event);
+      this.status.getState().handleSessionEvent(event);
+    }
+    const models = this.session.models;
+    const current = state.getState();
+    if (
+      models &&
+      (current.currentModelId !== (models.currentModelId ?? null) ||
+        JSON.stringify(current.availableModels.map((model) => model.modelId)) !==
+          JSON.stringify(models.availableModels.map((model) => model.modelId)))
+    )
+      current.setSessionModels(models.availableModels, models.currentModelId ?? null);
+    const mode = this.session.modes;
+    if (mode && current.approvalMode?.id !== mode.currentModeId)
+      current.setSessionMeta({
+        approvalMode: {
+          id: mode.currentModeId,
+          name: mode.availableModes.find((item) => item.id === mode.currentModeId)?.name ?? mode.currentModeId,
+        },
+      });
+    this.logger.info("会话已在原连接上重新载入", { sessionId });
   }
 
   async stopRecovery(
@@ -312,17 +384,7 @@ export class SessionRuntime {
               configuration: desiredConfig,
               isCurrent: () => !control.stopped && !this.disposed && !options.isClosing(),
               onReplay: (event) => {
-                if (
-                  ![
-                    "user_message_chunk",
-                    "agent_message_chunk",
-                    "agent_thought_chunk",
-                    "tool_call",
-                    "tool_call_update",
-                    "plan",
-                  ].includes(event.type)
-                )
-                  replayState.push(event);
+                if (!REPLAYED_CONTENT.has(event.type)) replayState.push(event);
               },
             });
             if (control.stopped || this.disposed || options.isClosing())

@@ -690,6 +690,39 @@ describe("openRealWorkspace：会话恢复装配", () => {
     expect(fakeSessionControl.loadCalls).toEqual(["sess-old"]);
   });
 
+  it("插件在正开着的会话上装自己的工具：同一连接上悄悄重新载入，不进入恢复、信息流不重复", async () => {
+    const load = vi.spyOn(FakeAcpSession.prototype, "loadSession");
+    const tool = { name: "aaw-result", command: "result.exe", args: [], env: [] };
+    try {
+      fakeSessionControl.listed = [
+        { sessionId: "sess-old", cwd: WORKSPACE, updatedAt: "2026-10-19T09:00:00" },
+      ];
+      await openRealWorkspace(WORKSPACE, { sessionId: "sess-old" });
+      const before = findSessionRuntime(WORKSPACE, useSessionStore.getState().agentKey!, "sess-old")!;
+      const itemsBefore = before.store.getState().items.length;
+      const sessionBefore = before.session;
+      load.mockClear();
+      const recoveries: unknown[] = [];
+      const stop = before.store.subscribe((state) => { if (state.recovery.state !== "idle") recoveries.push(state.recovery); });
+      const target = await openPluginSessionRuntime({ workspacePath: WORKSPACE, resumeSessionId: "sess-old", tools: () => [tool] });
+      stop();
+      expect(target.sessionId).toBe("sess-old");
+      expect(load).toHaveBeenCalledTimes(1);
+      expect((load.mock.calls.at(-1) as unknown[] | undefined)?.[2]).toEqual({ mcpServers: [tool] });
+      // 同一个连接、同一个会话端口：没有重建连接，也没有进入「重连中」。
+      expect(before.session).toBe(sessionBefore);
+      expect(recoveries).toEqual([]);
+      expect(before.store.getState().items.length).toBe(itemsBefore);
+      // 同一份工具再要一次：不再重连。
+      load.mockClear();
+      const runtime = findSessionRuntime(WORKSPACE, target.agentKey, "sess-old")!;
+      await openPluginSessionRuntime({ workspacePath: WORKSPACE, resumeSessionId: "sess-old", tools: runtime.openTools });
+      expect(load).not.toHaveBeenCalled();
+    } finally {
+      load.mockRestore();
+    }
+  });
+
   it("轮次事件：不管谁发的消息，开始与结束都通知订阅方；取消订阅后不再收到", async () => {
     const target = await openPluginSessionRuntime({ workspacePath: WORKSPACE });
     const events: unknown[] = [];

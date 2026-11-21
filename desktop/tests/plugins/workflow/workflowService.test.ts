@@ -114,13 +114,13 @@ describe("createWorkflowService", () => {
     });
     h.service.bindWorkspace("D:/first");
     h.service.focusRun("old");
-    h.service.requestPanel({ kind: "launch", launch: { workflowId: "old-workflow" } });
+    h.service.requestPanel({ kind: "run", project: "D:/first", runId: "old", returnFilters: { query: "", statuses: [], scope: "project", showArchived: false } });
     const pendingOldRefresh = h.service.refresh();
     h.service.bindWorkspace("D:/second");
     await h.service.refresh();
     expect(h.service.runs().map(({ runId }) => runId)).toEqual(["current"]);
     expect(h.service.takeFocusRun()).toBe("");
-    expect(h.service.takePanelRequest()).toBeNull();
+    expect(h.service.takePanelRequest("D:/first")).toBeNull();
     resolveOld([{ runId: "old", status: "completed" }]);
     await pendingOldRefresh;
     expect(h.service.runs().map(({ runId }) => runId)).toEqual(["current"]);

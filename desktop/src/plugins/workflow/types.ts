@@ -371,6 +371,8 @@ export interface WorkflowEntry {
   readonly id: string;
   readonly label: string;
   readonly description: string;
+  /** 在会话里选中这个起点后输入框里的提示（ADR 039）；空着时按输入生成。 */
+  readonly hint?: string;
   readonly inputs: readonly WorkflowEntryInput[];
 }
 
@@ -487,6 +489,8 @@ export interface WorkflowStartRequest {
   readonly title?: string;
   /** 自动放行可选的确认关卡（confirm: ask）；必须确认的仍会停下。 */
   readonly autoConfirm?: boolean;
+  /** 发起运行的会话（ADR 039）：第一个 Agent 步骤接着用它。 */
+  readonly entrySession?: string;
 }
 
 export interface WorkflowPreflightItem {
@@ -503,11 +507,6 @@ export interface WorkflowPreflightReport {
   readonly items: readonly WorkflowPreflightItem[];
 }
 
-/** 外部（会话、项目总览）请求面板打开启动表单。 */
-export interface WorkflowLaunchRequest {
-  readonly workflowId?: string;
-  readonly entry?: string;
-}
 
 /** 运行管理的筛选条件，跨项目打开运行时随返回入口保留。 */
 export interface RunManagerFilters {
@@ -519,7 +518,6 @@ export interface RunManagerFilters {
 }
 
 export type WorkflowPanelRequest =
-  | { readonly kind: "launch"; readonly launch: WorkflowLaunchRequest }
   | { readonly kind: "run"; readonly project: string; readonly runId: string; readonly returnFilters: RunManagerFilters };
 
 export interface WorkflowService {
@@ -614,7 +612,10 @@ export interface WorkflowEntryCommand {
   readonly label: string;
   readonly description: string;
   readonly Icon?: ComponentType<{ readonly className?: string }>;
-  run(this: void): void;
+  /** 在会话里带着这个起点发送：用输入框里的文字发起运行（ADR 039）。 */
+  readonly submit: (this: void, submission: { readonly session: { readonly workspacePath: string; readonly agentKey: string; readonly sessionId: string }; readonly text: string }) => Promise<void>;
+  readonly placeholder?: string;
+  readonly pendingLabel?: string;
 }
 
 /** 项目里一次需要关注的运行（进行中、等你回复）。 */
@@ -640,8 +641,6 @@ export interface WorkflowView {
   readonly status: ReadonlySnapshot<WorkflowProjectStatus>;
   /** 会话输入框「/」菜单里的工作流起点。 */
   readonly entries: ReadonlySnapshot<readonly WorkflowEntryCommand[]>;
-  /** 打开 AAW 面板的启动表单（可预选工作流与起点）。 */
-  readonly openLaunch: (project: string, request?: WorkflowLaunchRequest) => void;
   /** 打开 AAW 面板并切到某次运行。 */
   readonly openRun: (project: string, runId: string) => void;
   /** 节点会话顶部的回指条（不是节点会话时不渲染）。 */

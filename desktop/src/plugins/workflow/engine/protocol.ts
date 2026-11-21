@@ -111,6 +111,8 @@ export interface SpawnRequirementWire {
    * resultChannel.ts 的唯一规则选定一种追加到 MCP 清单。 */
   readonly result_channel?: ResultChannelOfferWire | null;
   readonly resume_session_id: string | null;
+  /** resume_session_id 是发起运行的会话（ADR 039）：接不上时改开新会话。 */
+  readonly entry_session?: boolean;
   /** 问题池 tracker 启动参数（二期-3；仅 agent 节点的运行携带）。 */
   readonly question_tracker?: TrackerStartParamsWire | null;
 }

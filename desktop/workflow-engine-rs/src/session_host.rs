@@ -56,6 +56,10 @@ pub struct SessionRequirement {
     pub result_channel: Option<ResultChannelOffer>,
     /// 恢复既有会话时的 ACP session id。
     pub resume_session_id: Option<String>,
+    /// `resume_session_id` 是发起运行的会话（ADR 039），不是这个角色原有的会话：
+    /// 宿主接不上它时可以改开新会话，引擎按宿主给回的会话 id 关联。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub entry_session: bool,
     /// 问题池 tracker 启动参数（仅 agent 节点的运行携带）：宿主按它确保
     /// tracker 进程已 spawn（幂等）。
     pub question_tracker: Option<TrackerStartParams>,
@@ -178,6 +182,7 @@ mod tests {
             ]),
             result_channel: Some(offer_fixture().offer),
             resume_session_id: Some("sess-1".into()),
+            entry_session: false,
             question_tracker: Some(TrackerStartParams {
                 executable: PathBuf::from("question-tracker.exe"),
                 cwd: PathBuf::from(r"D:\dev\tmp\project"),

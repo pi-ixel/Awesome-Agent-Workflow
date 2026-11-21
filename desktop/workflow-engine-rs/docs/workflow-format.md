@@ -42,6 +42,7 @@ entries:                        # 起点：同一个工作流可以从不同步�
   - id: dev
     label: 从需求开始
     description: 输入本次要做的事情，流程会先和你确认需求与边界。
+    hint: 写下本次需求，Enter 开始运行   # 在会话里选中这个起点后输入框里的提示；需要文件就提示用户用 @ 引用
     start: requirement          # 主流程里的步骤名
     inputs:                     # 启动时要用户填的东西
       requirement:

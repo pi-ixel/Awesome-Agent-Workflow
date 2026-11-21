@@ -1378,6 +1378,25 @@ export function createSessionCoordinator({
         // 用户那边正在恢复这个会话的历史（如刷新后自动打开）：等恢复完再交给插件，
         // 免得插件发的消息插进回放中途，让恢复放弃补回消息的显示方式等本地信息。
         await sessionFactory.settled(existing);
+        // 插件要在这个正开着的会话上装自己的工具（如工作流第一步接着用发起它的
+        // 会话，ADR 039）：工具只在载入时挂上，所以在同一个连接上悄悄重新载入一次——
+        // 不结束进程、不影响共用进程的其他会话，界面上不出现「重连」。
+        if (options.tools && existing.openTools !== options.tools) {
+          const previous = existing.openTools;
+          existing.openTools = options.tools;
+          try {
+            await existing.reload({
+              restore: (session, restoreOptions) =>
+                toolsFor(existing, restoreOptions.sessionId).then((mcpServers) =>
+                  getProtocol().restore(session, { ...restoreOptions, mcpServers }),
+                ),
+              attach: attachProjectSessionViews,
+            });
+          } catch (error) {
+            existing.openTools = previous;
+            throw error;
+          }
+        }
         return { workspacePath, agentKey, sessionId: resumeId };
       }
     }
