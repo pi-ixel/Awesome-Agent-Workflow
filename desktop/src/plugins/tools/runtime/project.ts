@@ -11,6 +11,7 @@
  * 一半按机器，换账号时"列表"和"源码"永远对得上。
  */
 import { joinPath, parentPath, pathKey, pathName } from "../../../shared/panelPaths.ts";
+import { strToU8 } from "fflate";
 import type { ToolPackage, ToolViolation } from "../types.ts";
 import { toolIdPattern, toolOwnerSegment, validateToolPackage, validateToolPackageText } from "./package.ts";
 // 老调用方从 project.ts 取这个函数；真源在 package.ts（构建时会 bundle 给 mjs 侧）。
@@ -538,6 +539,21 @@ function fromBase64(text: string): Uint8Array {
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
   return bytes;
+}
+
+/**
+ * 一个已安装工具的**运行副本**需要的最小文件集：`manifest.json` + `index.html`。
+ *
+ * 示例工具（以及任何没带附件的包）安装时只写配置、不落盘——打开时按这份
+ * 文件集当场物化，再让 Rust 按 `dir` 去读。导出用的 `toolProjectFiles` 会
+ * 附带 README / 跳过平台生成物，那套是给"拿走源码"的；运行副本只要能跑。
+ */
+export function runtimeFiles(tool: ToolPackage): Record<string, Uint8Array> {
+  const { html, ...manifest } = tool;
+  return {
+    "manifest.json": strToU8(JSON.stringify(manifest, null, 2) + "\n"),
+    "index.html": strToU8(html),
+  };
 }
 
 /**

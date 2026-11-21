@@ -171,7 +171,11 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
     setFeedback(undefined);
     try {
       if (!host.isNative()) throw new Error("请在 AAW 桌面版中打开工具。");
-      await host.openTool(id);
+      // 运行副本缺失（示例工具只装配置不落盘 / 目录被移动或清理）时，按安装
+      // 记录当场重建并写回 dir。以前这条链路断在 Rust 侧：tools_open 只会去
+      // tools_root/<id> 找，找不到就报一句路径（2026-11-22 用户截图报）。
+      const dir = id ? await workshop.resolveOpenDir(id) : undefined;
+      await host.openTool(id, dir);
     } catch (error) {
       setFeedback({ text: errorText(error), error: true });
     } finally { setBusy(false); }
@@ -476,7 +480,7 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
                   </div>
                 ) : (
                   <div className="tool-row-actions">
-                    <button type="button" className="tool-row-open" aria-label={`打开 ${tool.name}`} disabled={busy || broken !== undefined} data-hint={broken?.hint} onClick={() => void openTool(tool.id)}>打开</button>
+                    <button type="button" className="tool-row-open" aria-label={`打开 ${tool.name}`} disabled={busy || (broken !== undefined && broken.kind !== "missing-dir")} data-hint={broken?.hint} onClick={() => void openTool(tool.id)}>打开</button>
                     <button type="button" className="tool-row-more" aria-label={`更多操作：${tool.name}`} aria-haspopup="menu" aria-expanded={cardMenu.menu?.id === tool.id} onClick={(event) => openCardMenu(event, tool)}>⋯</button>
                   </div>
                 )}

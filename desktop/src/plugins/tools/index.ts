@@ -114,7 +114,7 @@ export function readTools(value: unknown, missingDirs: ReadonlySet<string> = new
         broken: {
           kind: "missing-dir",
           reason: `工具目录已丢失（${recordedDir}）。它可能已被移动或删除。`,
-          hint: "把目录放回原位可继续使用；或在「⋯」里卸载这条记录后重新安装。",
+          hint: "点「打开」会按安装记录自动重建运行副本；也可以在「⋯」里卸载这条记录后重新安装。",
           at: Date.now(),
         },
       } : {}),

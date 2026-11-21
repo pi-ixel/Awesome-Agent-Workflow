@@ -40,6 +40,7 @@ export function fakeWorkshop(overrides: Partial<WorkshopSnapshot> = {}): Worksho
     select: idle,
     refreshProjects: idle,
     migrateLegacy: () => Promise.resolve({ created: [], skipped: [] }),
+    resolveOpenDir: (id) => Promise.resolve(id ? `E:/AAW/tools/installed/${id}` : undefined),
     purge: () => Promise.resolve({ text: "已清理。" }),
     chooseProjectsRoot: idle,
     resetProjectsRoot: () => {},

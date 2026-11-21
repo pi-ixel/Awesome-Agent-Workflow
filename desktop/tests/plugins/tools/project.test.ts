@@ -1,10 +1,11 @@
 import { expect, it } from "vitest";
 import {
   checkToolProject, createToolProject, listToolProjects, migrateLegacyTools,
-  listToolProjectSummaries, readToolProject, renameToolProject, toolFromProject,
+  listToolProjectSummaries, readToolProject, renameToolProject, runtimeFiles, toolFromProject,
   toolOwnerSegment, toolProjectIdFromBrief, type ToolProjectIO,
 } from "../../../src/plugins/tools/runtime/project.ts";
 import { parseToolPackage } from "../../../src/plugins/tools/runtime/package.ts";
+import { sampleTool } from "../../../src/plugins/tools/ui/sample.ts";
 
 /** 内存版宿主：把路径当字符串、文件当 Map，用来验证落盘逻辑本身。 */
 function memoryIO(initial: Record<string, string> = {}) {
@@ -207,4 +208,14 @@ it("refuses a rename that would collide, and explains why", async () => {
   await expect(renameToolProject(io, { dir: first.dir, id: "two" })).rejects.toThrow("已经有 two");
   await expect(renameToolProject(io, { dir: first.dir, id: "Bad Name" })).rejects.toThrow("目录名");
   await expect(renameToolProject(io, { dir: first.dir, name: "  " })).rejects.toThrow("名字不能为空");
+});
+
+it("runtimeFiles 只含 manifest.json 与 index.html，字段与包严格一致", () => {
+  const files = runtimeFiles(sampleTool);
+  expect(Object.keys(files).sort()).toEqual(["index.html", "manifest.json"]);
+  const manifest = JSON.parse(new TextDecoder().decode(files["manifest.json"]!));
+  expect(manifest).toMatchObject({ schemaVersion: sampleTool.schemaVersion, id: sampleTool.id, name: sampleTool.name, version: sampleTool.version });
+  // html 是运行时文件，不属于清单：混进去会污染校验与导出。
+  expect("html" in manifest).toBe(false);
+  expect(new TextDecoder().decode(files["index.html"]!)).toBe(sampleTool.html);
 });

@@ -219,7 +219,7 @@ pub async fn launcher_open(window: tauri::WebviewWindow, app: AppHandle, id: Str
         let _ = panel.hide();
     }
     if let Some(tool_id) = id.strip_prefix("personal:") {
-        super::open_tool(&app, tool_id)?;
+        super::open_tool(&app, tool_id, None)?;
         let store = store_of(&app)?;
         let owner = catalog::read(&store)?.owner.unwrap_or_else(|| "guest".into());
         LauncherStore::new(&store).touch(&owner, &id).ok();

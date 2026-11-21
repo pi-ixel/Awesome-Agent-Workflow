@@ -21,7 +21,7 @@ import type { ProjectService } from "../../project/service.ts";
 import { briefMessage, repairMessage, toolGuideSkill, toolGuideSkillFromDoc } from "../runtime/guide.ts";
 import {
   checkToolProject, createToolProject, defaultInstalledToolsDir, listToolProjectSummaries,
-  migrateLegacyTools, prepareToolDir, readToolDirFiles, readToolProject, renameToolProject, syncToolProjectGuide,
+  migrateLegacyTools, prepareToolDir, readToolDirFiles, readToolProject, renameToolProject, runtimeFiles, syncToolProjectGuide,
   syncToolProjectGuides, toolProjectFileNames,
   toolProjectIdFromBrief, writeToolFiles,
   type LegacyMigration,
@@ -142,6 +142,15 @@ export interface WorkshopService {
   migrateLegacy(tools: readonly ToolPackage[]): Promise<LegacyMigration>;
   /** 卸载清理：删目录与工具数据。返回给用户看的一句话。 */
   purge(id: string): Promise<WorkshopNote>;
+  /**
+   * 解析「打开」应该用的运行副本目录。
+   *
+   * 安装记录里记着 dir；但示例工具只装配置、从不落盘，而已落盘的目录也
+   * 可能被移动或清理（dev 期仓库目录被 git clean 是真实事故）。三种情况
+   * 统一在这里兜底：按安装记录里的包当场物化一份运行副本，再让 Rust 按
+   * dir 打开。物化成功顺手把 dir 写回安装记录——下次打开直接命中。
+   */
+  resolveOpenDir(id: string): Promise<string | undefined>;
   /** 选一个新的默认项目根目录（设置里持久化；列表与新建都跟着走）。 */
   chooseProjectsRoot(): Promise<void>;
   /** 清掉自定义根目录，回到默认位置。 */
@@ -602,6 +611,27 @@ export function createWorkshop(deps: {
     return outcome;
   }
 
+  /**
+   * 解析「打开」应该用的运行副本目录（接口注释见 WorkshopService）。
+   *
+   * 物化用的是安装记录里的包（配置是唯一现成的事实来源），落点与 ZIP 导入
+   * 一致（`installed/<账号>/<id>`）。`prepareToolDir` 在目录里已有不同 id
+   * 的清单时会报错——那是真正的目录冲突，不能静默覆盖。
+   */
+  async function resolveOpenDir(id: string): Promise<string | undefined> {
+    const entry = tools.state.getState().find((item) => item.package.id === id);
+    if (!entry) return undefined;
+    // 目录在、条目没被标坏：直接用，不动磁盘。 broken（目录丢失）的条目
+    // 也走物化重建——这是自愈，不是报错。
+    if (entry.dir && entry.broken === undefined && await io.pathExists(entry.dir)) return entry.dir;
+    const parent = await defaultInstalledToolsDir(io, deps.owner());
+    const dir = await prepareToolDir(io, { id: entry.package.id, parent });
+    await writeToolFiles(io, dir, runtimeFiles(entry.package));
+    // 写回安装记录：下次打开 pathExists 直接命中，auditMissingDirs 也据实判定。
+    tools.setSource(entry.package.id, dir);
+    return dir;
+  }
+
   return {
     state: view.snapshot,
     setBrief(value) { patch({ brief: value }); },
@@ -768,6 +798,7 @@ export function createWorkshop(deps: {
       return result;
     },
 
+    resolveOpenDir,
     async purge(id) {
       const owner = deps.owner() ?? "";
       // 两个根都扫：自定义根目录下的项目也是这个工具的源码，删工具时不能留下。

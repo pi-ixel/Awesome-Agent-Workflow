@@ -66,14 +66,16 @@ export class DesktopHost implements HostService {
       }
     })(); });
   });
-  readonly openTool: HostService["openTool"] = (toolId) =>
+  readonly openTool: HostService["openTool"] = (toolId, dir) =>
     this.resources.run(async () => {
       if (!isTauriEnv()) throw new Error("请在 AAW 桌面版中打开工具。");
       // 工具设置存在偏好文件里，工具窗口会把它读出来当初始值。不先落盘的话，
       // 刚在工具中心改过的设置要等下一次刷写才生效，用户看着像"没保存"。
       await flushNativeConfiguration();
       // 不给 id 就是"打开工具列表"——那是启动器的职责，不是某个工具的窗口。
-      await (toolId ? this.invoke("tools_open", { toolId }) : this.invoke("launcher_show"));
+      await (toolId
+        ? this.invoke("tools_open", { toolId, ...(dir ? { dir } : {}) })
+        : this.invoke("launcher_show"));
     });
   readonly stopTool: HostService["stopTool"] = (toolId) =>
     this.resources.run(async () => {
