@@ -6,7 +6,7 @@ import { DangerButton, btnGhost, btnPrimary, btnSecondary } from "../../../share
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
 import type { ContextMenuEntry } from "../../../shared/ui/ContextMenu.tsx";
 import { SquareTerminalIcon, WrenchIcon } from "../../../shared/ui/icons.tsx";
-import { useHeaderMenu } from "../../../shared/ui/useHeaderMenu.ts";
+import { useMenuController } from "../../../shared/ui/useMenuController.ts";
 import type { HostService } from "../../host/service.ts";
 import type { ProjectService } from "../../project/service.ts";
 import { exampleTools } from "../runtime/examples.ts";
@@ -92,7 +92,7 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
   const [removing, setRemoving] = useState<{ id: string; files: boolean }>();
   const [feedback, setFeedback] = useState<{ text: string; error?: true }>();
   const [busy, setBusy] = useState(false);
-  const cardMenu = useHeaderMenu();
+  const cardMenu = useMenuController();
   const picker = useRef<HTMLInputElement>(null);
   const active = view.kind === "preview" ? view : undefined;
   const managed = view.kind === "manage" ? tools.find(({ package: tool }) => tool.id === view.id) : undefined;
