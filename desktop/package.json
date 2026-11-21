@@ -24,6 +24,7 @@
     "tools:test": "node scripts/test-tools-runtime.mjs",
     "tools:verify-shortcut": "node scripts/verify-launcher-shortcut.cjs",
     "tools:seed": "node scripts/seed-example-tools.mjs",
+    "tools:pilot": "node scripts/open-tools-pilot.mjs",
     "tools:verify-channel": "node scripts/verify-tools-command-channel.cjs",
     "acp:smoke": "tsx scripts/acp-smoke.ts",
     "test:browser:blackbox": "tsx scripts/browserMcpBlackbox.ts",
