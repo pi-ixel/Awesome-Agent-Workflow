@@ -267,6 +267,19 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {
             }
         });
     }
+
+    // 诊断入口：`AAW_GUIDE_PROBE=1` 启动时自动开一次开发指导窗口。存在的理由
+    // 和上面那条一样——"窗口白屏"必须眼见为实，而点按钮这件事没法自动化。
+    // 它走的是和用户点按钮完全相同的 `open_guide`，不是另开一条路。
+    if std::env::var("AAW_GUIDE_PROBE").is_ok_and(|value| value == "1") {
+        let app = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1500));
+            if let Err(error) = launcher::open_guide(&app) {
+                eprintln!("[aaw-guide] 诊断开窗失败：{error}");
+            }
+        });
+    }
     Ok(())
 }
 

@@ -314,25 +314,48 @@ pub fn tools_guide_open(window: tauri::WebviewWindow, app: AppHandle) -> Result<
     if window.label() != "main" {
         return Err("当前窗口无法打开开发指导。".into());
     }
+    open_guide(&app)
+}
+
+/// 真正建窗的部分。与命令分开，是因为诊断入口（`AAW_GUIDE_PROBE`）没有
+/// 调用方窗口可校验，但它必须走**和用户点按钮完全同一条路**，否则验的不是
+/// 用户会遇到的那个问题。
+pub fn open_guide(app: &AppHandle) -> Result<(), String> {
     const LABEL: &str = "tool-guide";
     if let Some(existing) = app.get_webview_window(LABEL) {
         existing.show().ok();
         existing.set_focus().ok();
         return Ok(());
     }
-    let theme = store_of(&app)
+    let theme = store_of(app)
         .ok()
         .and_then(|store| store.preferences().ok())
         .map(|preferences| catalog::theme_of(&preferences))
         .unwrap_or_else(|| "dark".into());
+    // 主题走 initialization_script 而不是 `?theme=` 查询串。实测两种都能加载
+    // （`Url::join` 会正确解析 query，2026-11-21 用 `AAW_GUIDE_PROBE` 验过
+    // Started/Finished 都是 `.../guide/index.html?theme=dark`），所以这里不是
+    // 修 bug，是选更稳的那个：注入在页面任何脚本之前执行，主题一次到位，
+    // 没有"先深色再闪成浅色"，也不依赖 URL 解析的边界行为。
     tauri::WebviewWindowBuilder::new(
-        &app,
+        app,
         LABEL,
-        tauri::WebviewUrl::App(format!("guide/index.html?theme={theme}").into()),
+        tauri::WebviewUrl::App("guide/index.html".into()),
     )
     .title("工具开发指导")
     .inner_size(980.0, 720.0)
     .min_inner_size(720.0, 460.0)
+    .initialization_script(&format!(
+        "window.__aawGuideTheme = {};",
+        serde_json::Value::String(theme)
+    ))
+    // 加载诊断：白屏时唯一能区分"地址拼错""服务器没响应""脚本报错"的办法。
+    // 只在 debug 构建里吭声，发布版不带这行噪音。
+    .on_page_load(|_, payload| {
+        if cfg!(debug_assertions) {
+            eprintln!("[aaw-guide] {:?} {}", payload.event(), payload.url());
+        }
+    })
     .build()
     .map_err(|error| format!("打开开发指导失败：{error}"))?;
     Ok(())
