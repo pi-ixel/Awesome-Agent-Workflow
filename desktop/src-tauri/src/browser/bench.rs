@@ -256,9 +256,14 @@ async fn measure(app: &AppHandle, url: &str, sessions: usize, shared: bool, sett
         {
             return Err(format!("unexpected browser process data in {session}"));
         }
-        if (shared && !snapshot.profile.eq_ignore_ascii_case(&session_partition(session)))
-            || (!shared && !snapshot.profile.eq_ignore_ascii_case("Default"))
-        {
+        // 独立数据目录的隐式默认 Profile 在部分运行时返回空名称。
+        // 共享模式仍严格要求会话名；进程组与存储隔离另外验证。
+        let profile_matches = if shared {
+            snapshot.profile.eq_ignore_ascii_case(&session_partition(session))
+        } else {
+            snapshot.profile.is_empty() || snapshot.profile.eq_ignore_ascii_case("Default")
+        };
+        if !profile_matches {
             return Err(format!("unexpected actual profile in {session}: {}", snapshot.profile));
         }
         version = snapshot.version;
