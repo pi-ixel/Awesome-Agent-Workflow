@@ -1,6 +1,6 @@
 import { it, expect } from "vitest";
 import { strToU8, unzipSync, zipSync } from "fflate";
-import { exportToolProject, importToolProject } from "../../../src/plugins/tools/runtime/projectArchive.ts";
+import { exportToolProject, importToolArchive, importToolProject } from "../../../src/plugins/tools/runtime/projectArchive.ts";
 import { parseToolPackage, toolPackageLimit } from "../../../src/plugins/tools/runtime/package.ts";
 import { resolveToolSettings, toolSettingsScript, validateToolSettings } from "../../../src/plugins/tools/runtime/settings.ts";
 import { sampleTool } from "../../../src/plugins/tools/ui/sample.ts";
@@ -26,6 +26,25 @@ it("accepts a single outer project folder and edited HTML", () => {
   files["index.html"] = strToU8("<h1>edited</h1>");
   const wrapped = Object.fromEntries(Object.entries(files).map(([path, bytes]) => [`project/${path}`, bytes]));
   expect(importToolProject(zipSync(wrapped)).html).toBe("<h1>edited</h1>");
+});
+
+it.each(["", "project/"])("依赖清单不影响源码包往返，外层目录为 %s", (prefix) => {
+  const dependency = strToU8('{"name":"dependency metadata"}');
+  const path = "node_modules/demo/manifest.json";
+  const files = unzipSync(exportToolProject(sampleTool, { [path]: dependency }));
+  const wrapped = Object.fromEntries(Object.entries(files).map(([name, bytes]) => [`${prefix}${name}`, bytes]));
+  const archive = importToolArchive(zipSync(wrapped));
+  expect(archive.tool.id).toBe(sampleTool.id);
+  expect(archive.tool.html).toBe(sampleTool.html);
+  expect(archive.files[path]).toEqual(dependency);
+  expect(archive.tool.sourceFiles).not.toHaveProperty(path);
+  expect(importToolArchive(exportToolProject(archive.tool, archive.files)).files[path]).toEqual(dependency);
+});
+
+it("不能把依赖目录中的清单作为工具入口", () => {
+  const files = unzipSync(exportToolProject(sampleTool));
+  const nested = Object.fromEntries(Object.entries(files).map(([path, bytes]) => [`node_modules/demo/${path}`, bytes]));
+  expect(() => importToolArchive(zipSync(nested))).toThrow("唯一的 manifest.json");
 });
 
 it("preserves author scaffold files without exporting case-insensitive duplicates", () => {
