@@ -30,7 +30,6 @@ mod storage_preferences;
 mod taskbar_badge;
 mod terminal_pty;
 pub mod tools;
-mod tools_runtime;
 mod tray;
 mod usage_statistics;
 mod visual_guide;
@@ -63,8 +62,8 @@ pub fn run() {
         .manage(browser::host::BrowserHost::default())
         .manage(mcp_management::ProxyHost::default())
         .manage(codeagent_credit::CreditQuota::default())
-        .manage(tools_runtime::LauncherRoutes::default())
         .manage(tools::ToolsHost::default())
+        .manage(tools::launcher::LauncherState::default())
         .manage(workflow_service::WorkflowHost::default())
         .manage(ops_service::OpsHost::default())
         .manage(visual_guide::VisualGuideHost::default())
@@ -79,12 +78,13 @@ pub fn run() {
             }
             storage_location::initialize(app.handle()).map_err(std::io::Error::other)?;
             browser::host::initialize_agent_control(app.handle());
-            tools_runtime::start(app.handle());
             // 新的工具载体（P0）。与 Electron 并存：它只注册协议与状态，
             // 不开任何窗口，除非 `AAW_TOOLS_TAURI_PILOT=1`。
             if let Err(error) = tools::initialize(app.handle()) {
                 eprintln!("工具载体（Tauri）初始化失败: {error}");
             }
+            // 启动器：窗口默认不建，快捷键按下时才建；这里只注册热键。
+            tools::launcher::start(app.handle());
             if let Err(error) = diagnostics::start(app.handle()) {
                 eprintln!("日志服务启动失败: {error}");
             }
@@ -128,6 +128,17 @@ pub fn run() {
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    // 只在按下时响应：松开也触发会让启动器闪一下就消失。
+                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        tools::launcher::on_hotkey(app);
+                    }
+                })
+                .build(),
+        )
         .plugin(
             tauri::plugin::Builder::<tauri::Wry, ()>::new("aawBrowserDialogBridge")
                 .js_init_script(browser::native_dialog::capture_script())
@@ -199,19 +210,25 @@ pub fn run() {
             browser::mcp::browser_mcp_bind,
             browser::mcp::browser_mcp_capabilities,
             browser::mcp::browser_mcp_revoke,
-            tools_runtime::tools_open_electron,
-            tools_runtime::tools_stop_electron,
-            tools_runtime::tools_open_guide,
-            tools_runtime::tools_write_archive,
-            tools_runtime::launcher_reply,
-            // 新的工具载体（P0）。命令名不带 electron 后缀的那一组。
+            // 工具载体。P3 之后这里只有一份实现：没有第二种载体可以对照了。
             tools::tools_open,
+            tools::tools_write_archive,
             tools::tools_host_info,
             tools::tool_store_get,
             tools::tool_store_set,
             tools::tool_store_delete,
             tools::tool_store_keys,
             tools::tool_act,
+            tools::launcher::launcher_entries,
+            tools::launcher::launcher_open,
+            tools::launcher::launcher_hide,
+            tools::launcher::launcher_pin,
+            tools::launcher::launcher_theme,
+            tools::launcher::launcher_shortcut,
+            tools::launcher::launcher_capture,
+            tools::launcher::launcher_show,
+            tools::launcher::launcher_stop,
+            tools::launcher::tools_guide_open,
             codeagent_history::agent_history_evidence,
             codeagent_delete::agent_delete_session,
             codeagent_credit::codeagent_credit_quota,

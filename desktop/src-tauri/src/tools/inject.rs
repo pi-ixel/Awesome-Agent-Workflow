@@ -22,8 +22,9 @@
 //! IPC 命令。完整推理见 `caps.rs` 文件头，这里只留结论。
 //!
 //! 契约名的形状与 Electron 版**逐字一致**：`aawSettings` / `aawContext` /
-//! `aawStore` / `aawActions`。工具作者不需要改一行代码——这正是"契约层不动、
-//! 只换载体"的具体含义。
+//! `aawStore` / `aawFiles` / `aawClipboard` / `aawSystem` / `aawSecrets` /
+//! `aawLifecycle` / `aawBus` / `aawActions`。工具作者不需要改一行代码——这正是
+//! "契约层不动、只换载体"的具体含义。
 
 use serde_json::json;
 
@@ -32,7 +33,7 @@ pub struct InjectContext {
     pub tool_id: String,
     /// 通道令牌：能力请求带它，宿主凭它区分"这个窗口"。
     pub token: String,
-    /// 已经解析好的设置值（含默认值）。
+    /// 已经解析好的设置值（含默认值与用户改过的值）。
     pub settings: serde_json::Map<String, serde_json::Value>,
     /// 唤起上下文：启动器带来的选中文本、来源。
     pub selection: String,
@@ -78,10 +79,35 @@ pub fn script(context: &InjectContext) -> String {
     }});
   }};
 
+  // ── 二进制 ──────────────────────────────────────────────────────────
+  // 通道是 JSON，二进制统一走 base64。转换放在这一层，作者拿到的仍是
+  // ArrayBuffer——与 Electron 版一致，不用为了换宿主改自己的代码。
+  var toBuffer = function (base64) {{
+    if (!base64) return new ArrayBuffer(0);
+    var binary = atob(base64);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
+  }};
+  var toBase64 = function (buffer) {{
+    var bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+    var binary = "";
+    var chunk = 0x8000;
+    for (var i = 0; i < bytes.length; i += chunk)
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    return btoa(binary);
+  }};
+
   // ── 同步可得：设置与唤起上下文 ─────────────────────────────────────
   // 工具的第一行代码就要读它们，所以不能是 Promise。
   window.aawSettings = Object.freeze({settings});
-  window.aawContext = Object.freeze({context_json});
+  var initial = {context_json};
+  window.aawContext = Object.freeze({{
+    selection: typeof initial.selection === "string" ? initial.selection : "",
+    origin: typeof initial.origin === "string" ? initial.origin : "launcher",
+    /** 主动再取一次：剪切板文本或启动器带来的内容，取不到返回空串。 */
+    probe: function () {{ return call("context.probe").then(function (value) {{ return value || ""; }}); }}
+  }});
 
   // ── store：按工具隔离的键值存储 ──────────────────────────────────────
   // toolId 由宿主注入，页面改不了：能力侧从 origin 解析出工具，前端传什么都不作数。
@@ -103,6 +129,148 @@ pub fn script(context: &InjectContext) -> String {
     scope: function (name) {{
       if (name !== "shared") throw new Error('目前只支持 "shared" 作用域。');
       return scoped("shared");
+    }}
+  }};
+
+  // ── files：用户亲手选中的文件 ────────────────────────────────────────
+  // 拖放的内容放在内存里（页面本来就拿不到真实路径），token 是内存映射的键。
+  var dropped = new Map();
+  var tokenSeed = 0;
+  window.aawFiles = {{
+    open: function (options) {{
+      return call("files.open", options || {{}}).then(function (result) {{
+        var fix = function (file) {{
+          if (file && typeof file.bytes === "string") {{
+            var copy = {{}};
+            for (var key in file) if (key !== "bytes") copy[key] = file[key];
+            copy.bytes = toBuffer(file.bytes);
+            return copy;
+          }}
+          return file;
+        }};
+        return Array.isArray(result) ? result.map(fix) : fix(result);
+      }});
+    }},
+    save: function (name, data) {{
+      var binary = typeof data !== "string";
+      return call("files.save", {{ name: name, data: binary ? toBase64(data) : data, binary: binary }});
+    }},
+    read: function (token) {{
+      var entry = dropped.get(token);
+      if (!entry) throw new Error("这个文件不是从拖放里来的。");
+      return Promise.resolve(entry);
+    }},
+    /**
+     * 拖入窗口。回调拿到 `{{ name, size, type, token, isDirectory }}`，
+     * 内容用 `read(token)` 取。
+     *
+     * 与 Electron 版的差别：这里读的是 File 对象本身，不碰磁盘路径。行为对
+     * 作者是等价的（他能拿到内容），而且不再需要"路径 → token"那层映射。
+     */
+    onDrop: function (callback) {{
+      var stop = function (event) {{ event.preventDefault(); }};
+      document.addEventListener("dragover", stop);
+      document.addEventListener("drop", function (event) {{
+        event.preventDefault();
+        var files = Array.prototype.slice.call((event.dataTransfer && event.dataTransfer.files) || []);
+        if (!files.length) return;
+        var list = [];
+        var pending = files.length;
+        files.forEach(function (file) {{
+          var token = "drop-" + (++tokenSeed);
+          var finish = function (text, bytes) {{
+            dropped.set(token, text !== undefined ? {{ name: file.name, size: file.size, text: text }} : {{ name: file.name, size: file.size, bytes: bytes }});
+            list.push({{ name: file.name, size: file.size, type: file.type || "", token: token, isDirectory: false }});
+            pending -= 1;
+            if (pending === 0) {{
+              try {{ Promise.resolve(callback(list)).catch(function () {{}}); }} catch (_) {{}}
+            }}
+          }};
+          var reader = new FileReader();
+          reader.onload = function () {{ finish(undefined, reader.result); }};
+          reader.onerror = function () {{ finish("", undefined); }};
+          reader.readAsArrayBuffer(file);
+        }});
+      }});
+    }}
+  }};
+
+  // ── clipboard ───────────────────────────────────────────────────────
+  window.aawClipboard = {{
+    readText: function () {{ return call("clipboard.readText"); }},
+    writeText: function (text) {{ return call("clipboard.writeText", {{ text: text }}); }},
+    readImage: function () {{
+      return call("clipboard.readImage").then(function (value) {{
+        return value && value.png ? {{ png: toBuffer(value.png) }} : null;
+      }});
+    }},
+    writeImage: function (data) {{
+      return call("clipboard.writeImage", {{ png: toBase64(data) }});
+    }}
+  }};
+
+  // ── system ──────────────────────────────────────────────────────────
+  window.aawSystem = {{
+    info: function () {{ return call("system.info"); }},
+    disk: function () {{ return call("system.disk"); }}
+  }};
+
+  // ── secrets ─────────────────────────────────────────────────────────
+  window.aawSecrets = {{
+    set: function (name, value) {{ return call("secrets.set", {{ name: name, value: value }}); }},
+    get: function (name) {{ return call("secrets.get", {{ name: name }}); }},
+    "delete": function (name) {{ return call("secrets.delete", {{ name: name }}); }}
+  }};
+
+  // ── lifecycle ───────────────────────────────────────────────────────
+  var tickListeners = new Set();
+  // 宿主到点 eval 这个函数（拿不到本闭包，只能挂 window）。
+  window.__aawTick = function () {{
+    tickListeners.forEach(function (fn) {{
+      try {{ fn(); }} catch (_) {{ /* 工具回调抛错不该影响宿主 */ }}
+    }});
+  }};
+  window.aawLifecycle = {{
+    notify: function (title, body) {{ return call("lifecycle.notify", {{ title: title, body: body }}); }},
+    keepAlive: function (options) {{ return call("lifecycle.keepAlive", options || {{}}); }},
+    schedule: function (seconds) {{ return call("lifecycle.schedule", {{ seconds: seconds }}); }},
+    onSchedule: function (callback) {{
+      tickListeners.add(callback);
+      return function () {{ tickListeners.delete(callback); }};
+    }}
+  }};
+
+  // ── bus：工具间在线广播 ──────────────────────────────────────────────
+  // 宿主不支持流式响应，这里用 800 ms 的短轮询。语义仍是"只发给在线工具、
+  // 不保留历史"，只是最多晚 0.8 秒。
+  var busTopics = new Map();
+  var busCursor = 0;
+  var busPumping = false;
+  var busPump = function () {{
+    if (!busPumping) return;
+    call("bus.poll", {{ cursor: busCursor }}).then(function (result) {{
+      busCursor = result.cursor;
+      (result.messages || []).forEach(function (message) {{
+        var set = busTopics.get(message.topic);
+        if (!set) return;
+        set.forEach(function (fn) {{
+          try {{ fn(message.payload); }} catch (_) {{ /* 同上 */ }}
+        }});
+      }});
+    }}).catch(function () {{ /* 窗口正在关闭时会失败，下一轮再说 */ }}).then(function () {{
+      setTimeout(busPump, 800);
+    }});
+  }};
+  window.aawBus = {{
+    emit: function (topic, payload) {{ return call("bus.emit", {{ topic: topic, payload: payload }}); }},
+    on: function (topic, callback) {{
+      if (!busTopics.has(topic)) busTopics.set(topic, new Set());
+      busTopics.get(topic).add(callback);
+      if (!busPumping) {{ busPumping = true; setTimeout(busPump, 0); }}
+      return function () {{
+        var set = busTopics.get(topic);
+        if (set) set.delete(callback);
+      }};
     }}
   }};
 
@@ -149,11 +317,16 @@ mod tests {
     }
 
     #[test]
-    fn exposes_the_same_contract_names_as_electron() {
+    fn exposes_the_whole_contract_surface() {
         let script = script(&ctx());
-        for name in ["aawSettings", "aawContext", "aawStore"] {
+        for name in [
+            "aawSettings", "aawContext", "aawStore", "aawFiles", "aawClipboard",
+            "aawSystem", "aawSecrets", "aawLifecycle", "aawBus",
+        ] {
             assert!(script.contains(&format!("window.{name}")), "缺少 {name}");
         }
+        // `aawActions` 是**上行**能力：作者赋值、宿主读取，注入脚本不定义它。
+        assert!(!script.contains("window.aawActions ="));
     }
 
     #[test]
@@ -172,5 +345,14 @@ mod tests {
         context.settings.insert("evil".into(), json!("</script><img onerror=1>"));
         let script = script(&context);
         assert!(!script.contains("</script>"));
+    }
+
+    #[test]
+    fn bus_is_polled_not_streamed() {
+        // 自定义协议上做不了流式响应，这条差异必须留在测试里，免得以后有人
+        // 以为有个 EventSource 之类的通道在跑。
+        let script = script(&ctx());
+        assert!(script.contains("bus.poll"));
+        assert!(!script.contains("EventSource"));
     }
 }

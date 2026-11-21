@@ -6,9 +6,14 @@ import { join } from "node:path";
  * 启动器小窗是纯静态 HTML + 普通 `<script>`，没有构建期检查，也没有组件测试
  * 能覆盖到它。这里用 jsdom 把真实页面跑起来，锁住三件用户会直接踩到的事：
  * 图标能区分、键盘选中态有标记、设置页不会被"隐藏再唤起"吞掉。
+ *
+ * P3 搬家：页面从 `tools-runtime/` 挪到 `public/launcher/`（Vite 会原样复制到
+ * 产物根），`window.launcher` 那层接口由 `tauri-bridge.js` 接到 Rust 命令。
+ * 页面本身一行没改，所以这份测试除了路径之外也不用改——这就是当初选"薄 shim"
+ * 而不是重写界面的回报。
  */
 // jsdom 下 import.meta.url 不是 file://，按工作目录定位（vitest 从 desktop 根跑）。
-const read = (name: string) => readFileSync(join(process.cwd(), "tools-runtime", name), "utf8");
+const read = (name: string) => readFileSync(join(process.cwd(), "public", "launcher", name), "utf8");
 
 type Entry = {
   id: string; name: string; description?: string; keywords?: string[]; icon?: string;
@@ -22,7 +27,7 @@ const entries: Entry[] = [
 ];
 
 function boot() {
-  const html = read("launcher.html");
+  const html = read("index.html");
   document.body.innerHTML = html.slice(html.indexOf("<body>") + 6, html.indexOf("</body>")).replace(/<script[\s\S]*?<\/script>/g, "");
   let wake = () => {};
   let resolveOpen = () => {};

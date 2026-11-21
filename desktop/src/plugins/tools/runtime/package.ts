@@ -1,5 +1,6 @@
 import type { ToolAction, ToolBackground, ToolBuild, ToolPackage, ToolPermissions, ToolRequires, ToolRuntime, ToolViolation } from "../types.ts";
 import { toolProcessProtocol } from "../types.ts";
+import { toolLimits } from "./limits.ts";
 import { readSettingsSchema } from "./settings.ts";
 import { readSourceFiles, safeSourcePath } from "./sourceFiles.ts";
 /**
@@ -23,14 +24,14 @@ export {
   toolCapabilities,
   toolContractVersion,
 } from "./contract.ts";
-export { checkCompatibility, currentHostContract, explainIncompatibility } from "./compat.ts";
+export { checkCompatibility, currentHostContract } from "./compat.ts";
 
 /**
  * 账号标识转成目录段：只留安全字符，其余换成下划线。
  *
  * 这是**单一真源**：`runtime/project.ts` 用它算源码/运行副本的落点，
- * `tools-runtime/tool-storage.mjs` 通过构建产物 `package-contract.mjs` 拿同一个函数
- * 算 `aawStore` 的落点。以前两边各写一份、靠注释提醒"改一边要改另一边"，结果
+ * Rust 侧的 `caps.rs` 用同一个规则算 `aawStore` 的落点（`storage_owner`）。
+ * 以前两边各写一份、靠注释提醒"改一边要改另一边"，结果
  * 一边改了另一边没跟上——现象是工具数据在 `<账号>/` 里、源码在 `anonymous/` 里，
  * 用户以为东西丢了。
  *
@@ -57,7 +58,7 @@ const hostPattern = /^(\*\.)?[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z
  * 图片、wasm）不进清单，它们躺在工具目录里，所以这个上限不必开到几十 MB——
  * 清单仍然要塞进 `preferences.json`，开太大等于让启动器每次唤起都读一个大文件。
  */
-export const toolPackageLimit = 4 * 1024 * 1024;
+export const toolPackageLimit = toolLimits.packageBytes;
 export const toolIdPattern = /^[a-z0-9][a-z0-9.-]{0,63}$/;
 const settingIdPattern = /^[a-z][a-z0-9.-]{0,63}$/;
 

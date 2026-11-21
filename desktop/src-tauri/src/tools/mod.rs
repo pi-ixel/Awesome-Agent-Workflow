@@ -1,4 +1,4 @@
-//! 工具载体的 Tauri 实现（P0 spike）。
+//! 工具载体的 Tauri 实现。
 //!
 //! # 这一层在验证什么
 //!
@@ -10,55 +10,114 @@
 //!    页面脚本之前，且 `aawSettings` 是同步可读的值而不是 Promise。
 //! 3. **能力调用链** —— `window.aawStore.set` → 命令 → 磁盘 → 回来。
 //!
-//! P0 只搬 `store` 一项能力与动作调用，其余十项留给 P2。刻意如此：一次搬一项，
-//! 每项都能拿 Electron 版做对照（"同一工具在两个载体里行为一致"），比一次性搬完
-//! 再猜哪里不对便宜得多。
+//! # 现在只有这一条链路
 //!
-//! # 与 Electron 并存
+//! P3 删掉了 `tools-runtime/`（Electron 载体）。所以「同一工具在两个载体里行为
+//! 一致」这个对照条件已经不存在，取而代之的是两条：**12 项能力的语义在
+//! `contract.ts` 里只有一份**，以及**动作语义（20 秒 / 512 KB / 幂等）在 L1/L2/L3
+//! 三种载体上完全一样**。改任何一项能力前，先看 `caps.rs` 与 `inject.rs` 是不是
+//! 一起改了——它们是同一件事的两半（下行注入、上行命令面）。
 //!
-//! 这条链路**不替换** `tools-runtime/`。`lib.rs:44` 的 `tools_runtime::start` 照旧
-//! 拉起 Electron，工具中心照旧走旧路。新链路由环境变量 `AAW_TOOLS_TAURI_PILOT=1`
-//! 触发，或由工具中心后续显式调用 `tools_open`。删除是 P3 的事，P0 只证明"能跑"。
+//! 文件的读法：
+//!
+//! | 文件 | 管什么 |
+//! |---|---|
+//! | `protocol.rs` | 把工具目录挂成 origin，每个工具一个 |
+//! | `inject.rs` | 往页面里塞 `window.aaw*` |
+//! | `caps.rs` | 页面 `fetch /__aaw/call/…` 落到哪个 Rust 函数 |
+//! | `catalog.rs` | 从 `preferences.json` 读出工具目录与设置 |
+//! | `native.rs` | 文件、剪贴板、系统信息、DPAPI 密钥、进程间总线 |
+//! | `process_host.rs` | L3 进程载体（NDJSON over stdio） |
+//! | `launcher.rs` | 全局快捷键唤出的启动器窗口 |
 
 pub mod caps;
+pub mod catalog;
+pub mod compat;
 pub mod inject;
+pub mod launcher;
+pub mod limits;
 pub mod manifest;
+pub mod native;
+pub mod process_host;
 pub mod protocol;
 pub mod store;
 
+// 只要 trait 在作用域里，`decode` 才是 `STANDARD` 的方法；别名成 `_`
+// 是为了不让它出现在需要具名引用的地方。
+use base64::Engine as _;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// 宿主当前提供的工具契约代际。
+///
+/// 与前端 `runtime/contract.ts` 的 `toolContractVersion` 是同一个数字，两处
+/// 不一致就会出现"界面说兼容、宿主说不兼容"。第 2 代删掉了 `preload`。
+pub const CONTRACT_GENERATION: u32 = 2;
+
+/// 契约里的十二项能力名。`initialize` 时告诉进程它能拿什么。
+pub fn caps_capability_names() -> Vec<&'static str> {
+    vec![
+        "settings", "store", "sharedStore", "files", "clipboard", "actions",
+        "system", "secrets", "lifecycle", "context", "bus", "network",
+    ]
+}
 
 use tauri::http::{Request, Response};
 use tauri::{AppHandle, Manager};
 
+use limits::LIMITS;
 use manifest::NetworkRule;
 use store::ToolStore;
 
 /// 动作执行的超时。与 Electron 版一致（`runtime.mjs:478` 的 20 秒），
 /// 不因为换了运行时就改语义——作者按 20 秒写的代码不该在新宿主里失效。
-const ACTION_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// 一个打开着的工具窗口的身份。
 ///
 /// 关键设计：**命令通过窗口 label 反查它**，而不是信前端传的 toolId。
 /// 页面主世界里 `__TAURI_INTERNALS__.invoke` 是公开的，作者（或任何注入进来的
 /// 脚本）都能带着任意 `toolId` 调命令；只有"哪个窗口调的"是宿主自己知道的。
-struct ToolSession {
-    tool_id: String,
-    dir: PathBuf,
-    name: String,
-    network: NetworkRule,
+pub(crate) struct ToolSession {
+    pub(crate) tool_id: String,
+    pub(crate) dir: PathBuf,
+    pub(crate) name: String,
+    pub(crate) network: NetworkRule,
     /// 每次建窗随机生成的通道令牌。
     ///
     /// 为什么需要它：能力通道是"同源 fetch"，而**跨子域**的 `no-cors` POST 也
     /// 能发出去（浏览器只挡读响应，不挡发送）。也就是说 `aaw-tool.pilot` 里的
     /// 一段脚本能往 `aaw-tool.notes` 的能力通道塞请求。令牌把这条路封掉——
     /// 令牌只注入到本窗口，页面拿不到别的工具的令牌。
-    token: String,
+    pub(crate) token: String,
+    /// 载体：`page` 或 `process`。诊断与手册自检用。
+    pub(crate) carrier: String,
+    /// `aawLifecycle.keepAlive` 的开关：声明之后关窗只是隐藏。
+    pub(crate) keep_alive: AtomicBool,
+    /// 定时唤醒：`(间隔秒, 下次到点)`。
+    pub(crate) schedule: Mutex<Option<(u64, Instant)>>,
+}
+
+impl ToolSession {
+    pub(crate) fn set_schedule(&self, seconds: u64) {
+        if let Ok(mut slot) = self.schedule.lock() {
+            *slot = Some((seconds, Instant::now() + Duration::from_secs(seconds)));
+        }
+    }
+
+    /// 到点了吗？到点顺手把下一次时间推后。
+    fn due(&self) -> bool {
+        let Ok(mut slot) = self.schedule.lock() else { return false };
+        let Some((seconds, next)) = slot.as_mut() else { return false };
+        if Instant::now() < *next {
+            return false;
+        }
+        *next = Instant::now() + Duration::from_secs(*seconds);
+        true
+    }
 }
 
 /// 宿主状态。
@@ -69,6 +128,10 @@ pub struct ToolsHost {
     pending: Mutex<HashMap<String, mpsc::SyncSender<Result<serde_json::Value, String>>>>,
     data_root: Mutex<Option<PathBuf>>,
     tools_root: Mutex<Option<PathBuf>>,
+    /// 工具间广播。进程内一条总线，页面与进程共用同一份。
+    bus: native::Bus,
+    /// 跑着的 L3 进程工具。
+    processes: Mutex<HashMap<String, Arc<process_host::ProcessHandle>>>,
 }
 
 impl ToolsHost {
@@ -102,6 +165,28 @@ impl ToolsHost {
             .lock()
             .map_err(|error| error.to_string())?
             .remove(request_id))
+    }
+
+    pub fn bus(&self) -> &native::Bus {
+        &self.bus
+    }
+
+    pub(crate) fn insert_process(&self, tool_id: &str, handle: Arc<process_host::ProcessHandle>) -> Result<(), String> {
+        self.processes
+            .lock()
+            .map_err(|error| error.to_string())?
+            .insert(tool_id.to_string(), handle);
+        Ok(())
+    }
+
+    pub(crate) fn process(&self, tool_id: &str) -> Option<Arc<process_host::ProcessHandle>> {
+        self.processes.lock().ok()?.get(tool_id).cloned()
+    }
+
+    pub(crate) fn remove_process(&self, tool_id: &str) {
+        if let Ok(mut map) = self.processes.lock() {
+            map.remove(tool_id);
+        }
     }
 
     fn store(&self) -> Result<ToolStore, String> {
@@ -164,9 +249,13 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {
     let root = resolve_tools_root(&data_root);
     *host.tools_root.lock().map_err(|error| error.to_string())? = Some(root);
 
-    // dev 期自动开窗：`npm run tools:pilot` 会带上这个变量。
-    // 用环境变量而不是前端按钮，是为了让前端一行都不改——架构守卫要求界面上每个
-    // 按钮都登记，P0 阶段为一次验证去改登记表不划算。
+    // 定时唤醒：一个线程扫所有打开了定时的工具窗口，到点 eval 一次。
+    // 5 秒粒度足够（契约最小间隔 60 秒），也不会让低配机多一份常驻负担。
+    start_ticker(app);
+
+    // 自检入口：`npm run tools:pilot` 带上这个变量，起 dev 的同时开一个工具窗口，
+    // 用来确认注入脚本、能力通道、动作调用三件事都还在。正常打开工具走前端
+    // `host.openTool()` → `tools_open`，不经过这里。
     if std::env::var("AAW_TOOLS_TAURI_PILOT").is_ok_and(|value| value == "1") {
         let app = app.clone();
         // setup 阶段建窗口会与主窗口抢初始化顺序，放到事件循环下一拍更稳。
@@ -179,6 +268,31 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {
         });
     }
     Ok(())
+}
+
+/// 每 5 秒扫一遍带定时声明的工具窗口。
+///
+/// 用 eval 而不是事件：工具页面是 remote origin，Tauri 的 emit 到它那里要么被
+/// ACL 拦、要么得给窗口开权限（那是错的方向）。eval 一段"调用页面自己挂的回调"
+/// 只需要窗口句柄，权限面为零。
+fn start_ticker(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(LIMITS.ticker_interval);
+        let due: Vec<String> = match app.state::<ToolsHost>().sessions.lock() {
+            Ok(map) => map
+                .iter()
+                .filter(|(_, session)| session.due())
+                .map(|(label, _)| label.clone())
+                .collect(),
+            Err(_) => continue,
+        };
+        for label in due {
+            if let Some(window) = app.get_webview_window(&label) {
+                let _ = window.eval("window.__aawTick && window.__aawTick()");
+            }
+        }
+    });
 }
 
 /// 工具根目录的解析顺序。抽成函数是为了能被测试直接打。
@@ -226,7 +340,8 @@ fn serve(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
             return protocol::empty(405);
         }
         // 令牌校验：跨子域的 no-cors POST 发得出去，只有令牌能区分"本窗口"。
-        let expected = host.session_of_tool(&tool_id).map(|session| session.token.clone());
+        let session = host.session_of_tool(&tool_id);
+        let expected = session.as_ref().map(|item| item.token.clone());
         let provided = request
             .headers()
             .get("x-aaw-token")
@@ -244,7 +359,7 @@ fn serve(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
             eprintln!("[aaw-tools] 拒绝未授权的能力调用：{tool_id} · {command}");
             return protocol::empty(403);
         }
-        return caps::dispatch(&host, Some(app), &tool_id, command, request.body());
+        return caps::dispatch(&host, Some(app), &tool_id, session.as_deref(), command, request.body());
     }
 
     // ── 静态文件 ──────────────────────────────────────────────────────
@@ -298,24 +413,66 @@ pub fn open_tool(app: &AppHandle, tool_id: &str) -> Result<(), String> {
     let host = app.state::<ToolsHost>();
     let dir = host.tool_dir(tool_id)?;
     let manifest = manifest::read(&dir)?;
+    // 打开关口在**建窗口之前**：判定放后面就会出现"先闪一个空白窗口、再关掉"，
+    // 那是用户最难描述的一类故障。判定本身只读清单，不需要窗口。
+    compat::check(&manifest)?;
+    // L3：先拉进程。进程起不来就不开窗——否则用户会看到一个界面，点任何东西
+    // 都报"工具进程没有在运行"。
+    if manifest.is_process() {
+        return process_host::open(app, tool_id, &dir, &manifest);
+    }
+    open_page_window(app, tool_id, &dir, &manifest, "page")
+}
+
+/// 开一个页面工具窗口（L1/L2，以及带界面的 L3）。
+///
+/// `carrier` 只影响诊断信息与关窗时的回收：动作走哪条链路由 `manifest.runtime`
+/// 决定，不在这里分叉。
+pub(crate) fn open_page_window(
+    app: &AppHandle,
+    tool_id: &str,
+    dir: &Path,
+    manifest: &manifest::ToolManifest,
+    carrier: &str,
+) -> Result<(), String> {
+    let label = format!("tool-{tool_id}");
+    if let Some(window) = app.get_webview_window(&label) {
+        window.show().ok();
+        window.set_focus().ok();
+        return Ok(());
+    }
+
+    let host = app.state::<ToolsHost>();
     let network = manifest.network();
     let token = uuid::Uuid::new_v4().to_string();
-    let session = Arc::new(ToolSession {
-        tool_id: tool_id.to_string(),
-        dir: dir.clone(),
-        name: manifest.name.clone(),
-        network: network.clone(),
-        token: token.clone(),
-    });
 
     // settings 要在建窗口之前算好——注入脚本是常量，不能等页面来问。
-    let settings = manifest.settings_defaults();
+    //
+    // 必须读**用户存过的值**，不能只用清单默认值：在工具中心改过设置的用户，
+    // 打开工具却看到默认值，会以为设置没生效（Electron 版用 sendSync 读的就是
+    // 这份，行为要一致）。
+    let settings = catalog::read(&host.store()?)
+        .ok()
+        .and_then(|library| library.entries.into_iter().find(|entry| entry.tool.id == tool_id))
+        .map(|entry| entry.settings)
+        .unwrap_or_else(|| manifest.settings_defaults());
     let script = inject::script(&inject::InjectContext {
         tool_id: tool_id.to_string(),
-        token,
+        token: token.clone(),
         settings,
         selection: String::new(),
         origin: "launcher".into(),
+    });
+
+    let session = Arc::new(ToolSession {
+        tool_id: tool_id.to_string(),
+        dir: dir.to_path_buf(),
+        name: manifest.name.clone(),
+        network: network.clone(),
+        token,
+        carrier: carrier.to_string(),
+        keep_alive: AtomicBool::new(false),
+        schedule: Mutex::new(None),
     });
 
     let url = tauri::Url::parse(&format!("{}://{}", protocol::SCHEME, tool_id))
@@ -333,17 +490,32 @@ pub fn open_tool(app: &AppHandle, tool_id: &str) -> Result<(), String> {
     host.sessions
         .lock()
         .map_err(|error| error.to_string())?
-        .insert(label.clone(), session);
+        .insert(label.clone(), session.clone());
 
     // 关窗即清账：留着旧 label 会让重新打开的窗口继承一个过期的目录与网络规则。
     let app_handle = app.clone();
     let closing = label.clone();
-    window.on_window_event(move |event| {
-        if matches!(event, tauri::WindowEvent::Destroyed) {
+    window.on_window_event(move |event| match event {
+        // keepAlive：声明过的工具关窗只是隐藏，进程（这里是主程序）继续。
+        // 没有声明的工具保持默认行为——关窗就是关掉，别让用户关不掉。
+        tauri::WindowEvent::CloseRequested { api, .. } => {
+            if session.keep_alive.load(Ordering::Relaxed) {
+                api.prevent_close();
+                if let Some(window) = app_handle.get_webview_window(&closing) {
+                    let _ = window.hide();
+                }
+            }
+        }
+        tauri::WindowEvent::Destroyed => {
             if let Ok(mut map) = app_handle.state::<ToolsHost>().sessions.lock() {
                 map.remove(&closing);
             }
+            // 窗口没了，进程工具也就没有宿主了：留着它就是个孤儿进程。
+            if let Some(tool_id) = closing.strip_prefix("tool-") {
+                app_handle.state::<ToolsHost>().remove_process(tool_id);
+            }
         }
+        _ => {}
     });
 
     window.show().ok();
@@ -361,6 +533,34 @@ fn storage_scope(session: &ToolSession, scope: &str) -> Result<String, String> {
 #[tauri::command]
 pub fn tools_open(app: AppHandle, tool_id: String) -> Result<(), String> {
     open_tool(&app, &tool_id)
+}
+
+/// 把导出的源码 ZIP 写到用户选定的路径。
+///
+/// 三道校验都是在防"页面借参数写到别处"：来源必须是主窗、扩展名必须是
+/// `.zip`、内容必须是合法 ZIP（`PK\x03\x04` 头 + 解出来的 1 MB 上限）。
+/// base64 上限是 1 MB 的 4/3 再加一点余量——先按 base64 长度挡一次，
+/// 免得为了拒绝一个 500 MB 的请求先把它解码进内存。
+#[tauri::command]
+pub fn tools_write_archive(
+    window: tauri::WebviewWindow,
+    path: String,
+    contents: String,
+) -> Result<(), String> {
+    // 先按 base64 长度挡一次：拒绝一个几百 MB 的请求时不该先把它解码进内存。
+    if window.label() != "main" || contents.len() > LIMITS.archive_write_bytes.div_ceil(3) * 4 {
+        return Err("无效的源码导出请求。".into());
+    }
+    if !path.to_lowercase().ends_with(".zip") {
+        return Err("请选择 .zip 文件名。".into());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(contents)
+        .map_err(|_| "无效的 ZIP 数据。")?;
+    if bytes.len() > LIMITS.archive_write_bytes || !bytes.starts_with(b"PK\x03\x04") {
+        return Err("无效的 ZIP 数据。".into());
+    }
+    std::fs::write(&path, bytes).map_err(|error| format!("导出失败：{error}"))
 }
 
 #[tauri::command]
@@ -476,7 +676,7 @@ pub(super) fn run_action(
 
     window.eval(&script).map_err(|error| format!("执行失败：{error}"))?;
 
-    let waited = receiver.recv_timeout(ACTION_TIMEOUT);
+    let waited = receiver.recv_timeout(LIMITS.action_timeout);
     if let Ok(mut map) = host.pending.lock() {
         map.remove(&request_id);
     }
@@ -494,11 +694,17 @@ pub async fn tool_act(
     input: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     // 身份校验放在 await 之前：不是工具窗口就立刻失败，别让调用方等 20 秒。
-    window.state::<ToolsHost>().session(window.label())?;
+    let session = window.state::<ToolsHost>().session(window.label())?;
+    let is_process = session.carrier == "process";
+    let tool_id = session.tool_id.clone();
     // 阻塞等待必须离开 async 线程：一个动作最长 20 秒，占住 worker 会拖慢
     // 其它窗口的 IPC。
     tauri::async_runtime::spawn_blocking(move || {
         let host = window.state::<ToolsHost>();
+        // 同一份动作语义，两种载体：L3 没有可 eval 的 `aawActions`，走 stdio。
+        if is_process {
+            return process_host::invoke(host.inner(), &tool_id, &action, input);
+        }
         run_action(&window, host.inner(), &action, input)
     })
     .await
@@ -526,6 +732,7 @@ pub fn tools_host_info(app: AppHandle) -> Result<serde_json::Value, String> {
                 "toolId": session.tool_id,
                 "dir": session.dir.to_string_lossy(),
                 "name": session.name,
+                "carrier": session.carrier,
             })
         })
         .collect();
@@ -539,6 +746,8 @@ pub fn tools_host_info(app: AppHandle) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
         "toolsRoot": tools_root.to_string_lossy(),
         "protocol": protocol_base,
+        "contractGeneration": CONTRACT_GENERATION,
+        "capabilities": caps_capability_names(),
         "sessions": sessions,
     }))
 }
@@ -559,15 +768,24 @@ mod tests {
         assert!(!valid_tool_id(&"a".repeat(65)));
     }
 
-    #[test]
-    fn shared_scope_maps_to_one_fixed_file() {
-        let session = ToolSession {
+    /// 只用来测纯函数的最小会话。加字段时这里要跟着补——那正是它的作用：
+    /// 强迫新字段先有一个明确的默认值，而不是靠 `..Default::default()` 蒙过去。
+    fn session() -> ToolSession {
+        ToolSession {
             tool_id: "pilot".into(),
             dir: PathBuf::from("/tmp"),
             name: "p".into(),
             network: NetworkRule::default(),
             token: "t".into(),
-        };
+            carrier: "page".into(),
+            keep_alive: AtomicBool::new(false),
+            schedule: Mutex::new(None),
+        }
+    }
+
+    #[test]
+    fn shared_scope_maps_to_one_fixed_file() {
+        let session = session();
         assert_eq!(storage_scope(&session, "").unwrap(), "pilot");
         assert_eq!(storage_scope(&session, "shared").unwrap(), "__shared");
         assert!(storage_scope(&session, "team").is_err());

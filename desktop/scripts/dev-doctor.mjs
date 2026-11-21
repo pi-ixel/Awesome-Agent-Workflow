@@ -4,14 +4,15 @@
  * 为什么需要它：Windows 上没有"进程被谁锁了"的通用查询（sysinternals 的
  * handle.exe 不是默认安装的），而 `tauri dev` 只会抛一句
  * "请求的资源正在使用 / resource busy"——用户拿到这句话完全没法下手。
- * 实际踩过的三种占用：
+ * 实际踩过的两种占用：
  *
  * 1. 上一次 dev 没退干净：`desktop.exe` 或它拉起的 `workflow_service.exe`
  *    还在跑，`cargo`/`copyFile` 动不了 `target/debug`、`workflow-engine-rs/dist`。
  * 2. 上一次的 vite 还占着 1420（beforeDevCommand 失败时子进程常常不跟着退），
  *    下一次直接 `Port 1420 is already in use`。
- * 3. 工具小窗（`tools-runtime/dist/electron.exe`）开着，`npm run tools:build`
- *    往同一个 dist 里复制文件时报 EBUSY。
+ *
+ * 第三条（工具小窗的 electron.exe 占着 dist）随 P3 一起消失了：工具窗口现在跑在
+ * 应用自己的 WebView2 里，不再有独立的 electron.exe 往构建目录写东西。
  *
  * 只认本项目的进程：仓库外的同名进程（比如安装版 AAW Desktop）只报告不杀，
  * 删除别人的正在运行的进程不该由构建脚本来做。
@@ -23,7 +24,7 @@
  * 所有人都以为项目坏了。
  */
 import { spawnSync } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -35,9 +36,8 @@ const devPort = 1420;
 const artifacts = [
   "src-tauri/target/debug/desktop.exe",
   "workflow-engine-rs/dist/workflow_service.exe",
-  "tools-runtime/dist/electron.exe",
 ];
-const watched = ["desktop.exe", "workflow_service.exe", "electron.exe"];
+const watched = ["desktop.exe", "workflow_service.exe"];
 
 const problems = [];
 const notes = [];
@@ -253,7 +253,7 @@ for (const label of survivors) {
     );
 }
 if (!processes.length)
-  report("ok", "没有残留的 desktop / workflow_service / electron 进程");
+  report("ok", "没有残留的 desktop / workflow_service 进程");
 else if (fix && !survivors.length)
   report("fix", `已结束 ${processes.filter(isOurs).length} 个上次残留的进程`);
 
@@ -294,17 +294,7 @@ for (const relative of artifacts) {
   warn(`${relative} 现在写不进去（${state.code}）——${why}。`);
 }
 
-// 5. 最后一条：node_modules 里的 electron 二进制没下载时，tools:build 会找不到 electron。
-try {
-  readFileSync(join(root, "node_modules", "electron", "path.txt"), "utf8");
-  report("ok", "Electron 二进制已就位");
-} catch {
-  warn(
-    "node_modules/electron 缺二进制：ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ node node_modules/electron/install.js",
-  );
-}
-
-// 6. WebView2：窗口创建不出来时，问题在运行时/用户数据目录，不在业务代码。
+// 5. WebView2：窗口创建不出来时，问题在运行时/用户数据目录，不在业务代码。
 const webview = webview2Status();
 if (webview) {
   const override = String(webview.override ?? "").trim();

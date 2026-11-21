@@ -14,7 +14,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { build } from "esbuild";
 
 const desktop = fileURLToPath(new URL("../", import.meta.url));
-const staged = join(desktop, "tools-runtime", "dist");
+// 中间产物放缓存目录。以前借 `tools-runtime/dist` 用，P3 删掉那个目录后
+// 这里就没有理由再依赖它——esbuild 的产物用完即弃，留在仓库里只会误导人。
+const staged = join(desktop, "node_modules", ".cache", "aaw-guide");
 mkdirSync(staged, { recursive: true });
 const entry = join(staged, "skill-entry.mjs");
 await build({
@@ -37,5 +39,10 @@ const skillMd = guide.toolGuideSkill();
 const target = join(dirname(desktop), "skills", "tool-dev", "SKILL.md");
 mkdirSync(dirname(target), { recursive: true });
 writeFileSync(target, skillMd);
-writeFileSync(join(staged, "guide.md"), markdown);
+// 开发指导窗口直接读这份：`public/` 会被 Vite 原样复制到产物根目录，
+// 所以窗口不需要任何后端就能拿到正文。与上面那份同源，不会出现"窗口里说的"
+// 与"AI 读到的"不一致。
+const publicGuide = join(desktop, "public", "guide");
+mkdirSync(publicGuide, { recursive: true });
+writeFileSync(join(publicGuide, "guide.md"), markdown);
 console.log(`skill manual written: ${target} (${skillMd.length} chars)`);

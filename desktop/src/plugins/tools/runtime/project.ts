@@ -16,6 +16,7 @@ import { toolIdPattern, toolOwnerSegment, validateToolPackage, validateToolPacka
 // 老调用方从 project.ts 取这个函数；真源在 package.ts（构建时会 bundle 给 mjs 侧）。
 export { toolOwnerSegment } from "./package.ts";
 import { safeSourcePath } from "./sourceFiles.ts";
+import { toolLimits } from "./limits.ts";
 import { runToolRules, splitViolations, type ToolRuleOptions } from "./rules.ts";
 import { toolGuide } from "./guide.ts";
 
@@ -515,7 +516,7 @@ export async function writeToolFiles(
 export async function readToolDirFiles(
   io: ToolProjectIO,
   dir: string,
-  limit = 32 * 1024 * 1024,
+  limit = toolLimits.archiveBytes,
 ): Promise<{ readonly files: Readonly<Record<string, Uint8Array>>; readonly skipped: readonly string[] }> {
   if (!io.listFiles || !io.readBinaryFile) return { files: {}, skipped: [] };
   let names: readonly string[];

@@ -5,7 +5,9 @@
  * 一起进来的手写模块（`lib/*.js`）不再是"两个文件"的量级。二进制资源不进这个
  * 字段，它们落盘在工具目录里。
  */
-export const sourceFileLimit = { files: 512, bytes: 4 * 1024 * 1024 } as const;
+import { toolLimits } from "./limits.ts";
+
+export const sourceFileLimit = { files: toolLimits.sourceFiles, bytes: toolLimits.sourceBytes } as const;
 
 /**
  * `bin/` 里的东西是 L3 的运行时（可执行文件 + 它自己的依赖）。

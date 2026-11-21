@@ -26,6 +26,7 @@
 
 use std::path::{Path, PathBuf};
 
+use super::limits::LIMITS;
 use tauri::http::{Request, Response, StatusCode};
 
 /// 自定义协议名。改它等于改所有工具的地址，所以是个常量而不是参数。
@@ -36,7 +37,6 @@ pub const SCHEME: &str = "aaw-tool";
 /// 工具页面本身应该小（`index.html` + 若干 js/css），真正的大文件是工具要处理
 /// 的**用户数据**，那些走 `aawFiles` 而不是协议。8 MB 足够覆盖打包后的
 /// `app.js`（含内联 wasm 的情况），又能挡住"用协议当文件服务器读 GB 级文件"。
-const MAX_RESPONSE: u64 = 8 * 1024 * 1024;
 
 /// 工具 id 的形状。与 `package.ts` 的 `toolIdPattern` 一致：
 /// 小写字母数字开头，允许 `.` `-`，最长 64。
@@ -287,7 +287,7 @@ pub fn file_response(path: &Path, body: Vec<u8>, policy: Option<String>) -> Resp
 /// 读文件并检查体积上限。超限当作不存在——返回 404 比返回半个文件更容易查。
 pub fn read_capped(path: &Path) -> Option<Vec<u8>> {
     let meta = std::fs::metadata(path).ok()?;
-    if meta.len() > MAX_RESPONSE {
+    if meta.len() > LIMITS.response_bytes {
         return None;
     }
     std::fs::read(path).ok()

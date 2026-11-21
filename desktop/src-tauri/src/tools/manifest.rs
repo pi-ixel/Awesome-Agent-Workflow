@@ -55,7 +55,7 @@ pub struct ActionDecl {
 /// `rename_all = "camelCase"` 不能省：清单是给前端与作者看的 JSON，字段全是
 /// `settingsSchema`、`settings_schema` 这种驼峰。少了它 serde 会静默给默认值——
 /// P0 第一版的 `aawSettings` 就是空的 `{}`，页面看起来"注入成功"，实际什么都没有。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolManifest {
     pub id: String,
@@ -66,6 +66,10 @@ pub struct ToolManifest {
     pub icon: String,
     #[serde(default)]
     pub author: String,
+    /// 清单里的整页 HTML 快照。项目目录形态下通常是空（界面以 index.html 为准），
+    /// 但 L3 用它判断"这个进程工具到底有没有界面"。
+    #[serde(default)]
+    pub html: String,
     #[serde(default)]
     pub settings_schema: Vec<SettingsField>,
     #[serde(default)]
@@ -79,6 +83,34 @@ pub struct ToolManifest {
     /// 声明了 `runtime.kind == "process"` 就是 L3。P0 不执行它。
     #[serde(default)]
     pub runtime: Option<RuntimeDecl>,
+    /// 需要在唤起时带上选中文本。声明后宿主才注入 `aawContext.selection`。
+    #[serde(default)]
+    pub needs_selection: bool,
+    /// 后台意图：常驻理由与是否定时。常驻必须显式声明，不能由作者偷偷决定。
+    #[serde(default)]
+    pub background: Option<BackgroundDecl>,
+    /// 兼容性声明。**没写就一律放行**——存量工具一个都不该因为这道关而改。
+    #[serde(default)]
+    pub requires: Option<RequiresDecl>,
+}
+
+/// `requires` 段：这个工具要求的最低契约代际，以及它用到的能力名。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequiresDecl {
+    /// 0 表示没写，等价于"任何代际都行"。
+    #[serde(default)]
+    pub contract: u32,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct BackgroundDecl {
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default)]
+    pub schedule: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -118,6 +150,8 @@ pub struct RuntimeDecl {
     pub kind: String,
     #[serde(default)]
     pub entry: String,
+    #[serde(default)]
+    pub protocol: Option<u32>,
 }
 
 impl ToolManifest {
@@ -145,7 +179,7 @@ impl ToolManifest {
         map
     }
 
-    /// 载体判定，只用于诊断显示。
+    /// 载体判定。P2 起不再只用于诊断：L3 要拉起进程，L1/L2 走 WebView2。
     pub fn carrier(&self) -> &'static str {
         match self.runtime.as_ref().map(|item| item.kind.as_str()) {
             Some("process") => "L3 进程",
@@ -153,6 +187,20 @@ impl ToolManifest {
             _ => "L1 单页",
         }
     }
+
+    pub fn is_process(&self) -> bool {
+        self.runtime.as_ref().is_some_and(|item| item.kind == "process")
+    }
+}
+
+/// 从一份清单值解析。目录读取与启动器目录共用，免得两处各写一遍。
+pub fn from_value(value: &serde_json::Value) -> Result<ToolManifest, String> {
+    let mut manifest: ToolManifest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("manifest.json 格式不对：{error}"))?;
+    if manifest.version.is_empty() {
+        manifest.version = "0.0.0".into();
+    }
+    Ok(manifest)
 }
 
 /// 从工具目录读清单。找不到或解析失败都返回人能看懂的错——这个错误会直接
@@ -161,12 +209,7 @@ pub fn read(dir: &Path) -> Result<ToolManifest, String> {
     let path = dir.join("manifest.json");
     let text = std::fs::read_to_string(&path)
         .map_err(|error| format!("读不到 {}：{error}", path.display()))?;
-    let mut manifest: ToolManifest = serde_json::from_str(&text)
+    let value: serde_json::Value = serde_json::from_str(&text)
         .map_err(|error| format!("manifest.json 格式不对：{error}"))?;
-    // 目录名与 id 不一致时以清单为准，但要留痕：工具目录是按 id 建的，
-    // 两者不一致通常意味着作者改了 id 却没重新导出。
-    if manifest.version.is_empty() {
-        manifest.version = "0.0.0".into();
-    }
-    Ok(manifest)
+    from_value(&value)
 }
