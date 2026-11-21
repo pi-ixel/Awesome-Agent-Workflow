@@ -48,7 +48,7 @@ pub mod store;
 use base64::Engine as _;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -184,9 +184,21 @@ impl ToolsHost {
         self.processes.lock().ok()?.get(tool_id).cloned()
     }
 
+    /// 取出一个进程句柄（取出即不在表里）。给"重开前清掉上次残留"用。
+    pub(crate) fn take_process(
+        &self,
+        tool_id: &str,
+    ) -> Option<Arc<process_host::ProcessHandle>> {
+        self.processes.lock().ok()?.remove(tool_id)
+    }
+
     pub(crate) fn remove_process(&self, tool_id: &str) {
-        if let Ok(mut map) = self.processes.lock() {
-            map.remove(tool_id);
+        // 取出来再杀，不能只删表：`Child` 的 Drop 没有"杀进程"语义，而且
+        // 读线程还持有 Arc 克隆，表一删对象根本不会析构——只删表的版本放过
+        // 了大量孤儿进程（2026-11-22 修）。
+        let handle = self.processes.lock().ok().and_then(|mut map| map.remove(tool_id));
+        if let Some(handle) = handle {
+            handle.kill();
         }
     }
 
@@ -238,9 +250,34 @@ fn valid_tool_id(id: &str) -> bool {
         .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '.' || ch == '-')
 }
 
+/// 退出应用时的兜底：把所有 L3 子进程杀干净。
+///
+/// 挂在 `RunEvent::Exit` 上。平时关窗走 `Destroyed` → `remove_process`，
+/// 但"直接退出应用"（任务栏右键关闭、系统关机）不触发逐窗销毁，没有这一步
+/// 每个还在跑的进程工具都会变成孤儿（对应验收清单 C-10）。
+pub fn shutdown_all_processes(app: &tauri::AppHandle) {
+    let host = app.state::<ToolsHost>();
+    let Ok(mut map) = host.processes.lock() else { return };
+    for (_, handle) in map.drain() {
+        handle.kill();
+    }
+}
+
+/// 进程内唯一的临时文件名。
+///
+/// 固定后缀（`json.tmp`、`json.tmp-<pid>`）在两次保存撞上时会互相截断——
+/// pid 只隔离进程，不隔离同一进程里的两个并发线程。所有"写临时文件再改名"
+/// 的落盘（store / secrets / 启动器偏好）一律走这里。
+pub(crate) fn unique_temp(path: &Path) -> PathBuf {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let stem = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("file");
+    let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("json");
+    path.with_file_name(format!("{stem}.{ext}.{}.{}.tmp", std::process::id(), seq))
+}
+
 /// 在 `setup` 里调一次：确定数据根与工具根，并在 dev 期按环境变量自动开窗。
-pub fn initialize(app: &AppHandle) -> Result<(), String> {
-    // 开发指导窗口的未保存标记。建在初始化里而不是建窗时：窗口事件可能在任何时候到达，
+pub fn initialize(app: &AppHandle) -> Result<(), String> {    // 开发指导窗口的未保存标记。建在初始化里而不是建窗时：窗口事件可能在任何时候到达，
     // 状态必须先于窗口存在。窗口本身的存活不在这里记账——直接问系统（`IsWindow`），
     // 因为 Tauri 的窗口表在窗口销毁后仍留着条目，自记账两次都被实测证伪了。
     if app.try_state::<guide::GuideDirty>().is_none() {

@@ -254,7 +254,8 @@ impl SecretStore {
     fn write_all(&self, tool_id: &str, value: &std::collections::BTreeMap<String, String>) -> CapResult<()> {
         std::fs::create_dir_all(&self.root).map_err(|error| format!("建密钥目录失败：{error}"))?;
         let path = self.file(tool_id);
-        let temp = path.with_extension("json.tmp");
+        // 临时名不能固定：页面与 L3 进程同时 set 两个密钥会互相截断。
+        let temp = super::unique_temp(&path);
         let body = serde_json::to_vec(value).map_err(|error| error.to_string())?;
         let mut file = std::fs::File::create(&temp).map_err(|error| format!("写入失败：{error}"))?;
         file.write_all(&body).map_err(|error| format!("写入失败：{error}"))?;

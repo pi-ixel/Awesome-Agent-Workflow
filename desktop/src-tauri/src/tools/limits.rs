@@ -60,6 +60,11 @@ pub struct Limits {
     pub init_timeout: Duration,
     /// 自定义协议单次响应的上限（静态资源）。
     pub response_bytes: u64,
+    /// 一次能力调用的请求体上限（页面 `fetch` 与 L3 的 `aaw.call` 共用）。
+    ///
+    /// 没有它，`clipboard.writeImage` 这类"把请求体整段解码"的能力就成了
+    /// 内存炸弹的入口。8 MB 覆盖一张 4K 截图的 base64 绰绰有余。
+    pub call_body_bytes: usize,
     /// 总线上保留多少条消息供后来的轮询者取。
     pub bus_keep: usize,
     /// 定时唤醒的扫描间隔。
@@ -80,6 +85,7 @@ pub const LIMITS: Limits = Limits {
     clipboard_text_bytes: 1024 * 1024,
     init_timeout: Duration::from_secs(5),
     response_bytes: 8 * 1024 * 1024,
+    call_body_bytes: 8 * 1024 * 1024,
     bus_keep: 200,
     ticker_interval: Duration::from_secs(5),
 };
@@ -127,6 +133,6 @@ mod tests {
         assert!(LIMITS.package_bytes > 0 && LIMITS.archive_bytes > 0);
         assert!(LIMITS.user_file_bytes > 0 && LIMITS.save_bytes > 0);
         assert!(LIMITS.clipboard_text_bytes > 0 && LIMITS.response_bytes > 0);
-        assert!(LIMITS.bus_keep > 0);
+        assert!(LIMITS.call_body_bytes > 0 && LIMITS.bus_keep > 0);
     }
 }

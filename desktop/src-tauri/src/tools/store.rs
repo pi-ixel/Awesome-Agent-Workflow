@@ -12,12 +12,23 @@ use super::limits::LIMITS;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 /// 单个工具的总存储上限。
 /// 单个键的上限。
 const KEY_LIMIT: usize = 256 * 1024;
 /// 键名长度上限。
 const KEY_MAX_CHARS: usize = 200;
+
+/// 共享区在落盘层用的哨兵名。它**不是**合法工具 id（工具 id 不允许下划线开头），
+/// `file()` 要单独放行——否则 shared 作用域在最后一步被拒，作者只会看到一句
+/// 莫名其妙的“无效的工具 id”（2026-11-22 修：此前 shared 作用域完全不可用）。
+pub const SHARED_OWNER: &str = "__shared";
+
+/// 进程级写锁。`set` / `delete` 是“读文件 → 改 → 原子替换”三步，不是原子的：
+/// 同一工具的两个调用方（页面 + L3 进程反向调用，或两个并发能力调用）同时写，
+/// 后写的整份文件会盖掉先写的键。锁住整个读改写，代价只是一次本地互斥。
+static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 /// 工具 id 的形状校验，与 `protocol::valid_tool_id` 同一套。
 fn valid_tool_id(id: &str) -> bool {
@@ -31,6 +42,11 @@ fn valid_tool_id(id: &str) -> bool {
     }
     id.chars()
         .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '.' || ch == '-')
+}
+
+/// 落盘文件名允许的身份：单个工具的 id，或共享区哨兵。
+fn valid_owner(owner: &str) -> bool {
+    owner == SHARED_OWNER || valid_tool_id(owner)
 }
 
 /// 账号标识 → 安全目录名，与 `package.ts:toolOwnerSegment` 逐字一致。
@@ -122,16 +138,16 @@ impl ToolStore {
         }
     }
 
-    fn file(&self, tool_id: &str) -> Result<PathBuf, String> {
-        if !valid_tool_id(tool_id) {
-            return Err("无效的工具 id。".into());
+    fn file(&self, owner: &str) -> Result<PathBuf, String> {
+        if !valid_owner(owner) {
+            return Err("无效的存储归属。".into());
         }
         Ok(self
             .storage_root()
             .join("tools")
             .join("storage")
             .join(self.owner()?)
-            .join(format!("{tool_id}.json")))
+            .join(format!("{owner}.json")))
     }
 
     fn read(&self, tool_id: &str) -> Result<BTreeMap<String, serde_json::Value>, String> {
@@ -152,7 +168,7 @@ impl ToolStore {
             std::fs::create_dir_all(parent).map_err(|error| format!("建目录失败：{error}"))?;
         }
         // 临时文件 + rename：断电或崩溃时不会留下半个 JSON。
-        let temp = path.with_extension(format!("json.tmp-{}", std::process::id()));
+        let temp = super::unique_temp(&path);
         let body = serde_json::to_vec(value).map_err(|error| format!("序列化失败：{error}"))?;
         {
             let mut file = std::fs::File::create(&temp).map_err(|error| format!("写入失败：{error}"))?;
@@ -173,6 +189,7 @@ impl ToolStore {
         if encoded.len() > KEY_LIMIT {
             return Err("单个存储值不能超过 256 KB。".into());
         }
+        let _guard = WRITE_LOCK.lock().map_err(|error| error.to_string())?;
         let mut current = self.read(tool_id)?;
         current.insert(key.to_string(), value);
         let total = serde_json::to_vec(&current).map_err(|error| error.to_string())?.len();
@@ -185,6 +202,7 @@ impl ToolStore {
 
     pub fn delete(&self, tool_id: &str, key: &str) -> Result<bool, String> {
         check_key(key)?;
+        let _guard = WRITE_LOCK.lock().map_err(|error| error.to_string())?;
         let mut current = self.read(tool_id)?;
         if current.remove(key).is_none() {
             return Ok(false);
@@ -284,6 +302,44 @@ mod tests {
         assert!(store.set("pilot", &"k".repeat(201), serde_json::json!(1)).is_err());
         let big = "x".repeat(KEY_LIMIT + 1);
         assert!(store.set("pilot", "big", serde_json::json!(big)).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// shared 作用域必须能走通整条落盘链。曾经 `storage_owner` 映射出的
+    /// `__shared` 在 `file()` 的工具 id 校验处被拒——能力层测了映射、
+    /// 没测落盘，于是"共享存储"从头到尾不可用却没有任何测试变红。
+    #[test]
+    fn shared_scope_round_trips_and_lands_in_its_own_file() {
+        let root = temp_root("shared");
+        login(&root, "u1");
+        let store = ToolStore::new(&root);
+
+        store.set(SHARED_OWNER, "cross-tool", serde_json::json!("hello")).unwrap();
+        assert_eq!(store.get(SHARED_OWNER, "cross-tool").unwrap(), serde_json::json!("hello"));
+        let path = storage_path(&store, SHARED_OWNER).unwrap();
+        assert!(path.ends_with("tools/storage/u1/__shared.json"), "{path:?}");
+        assert!(store.delete(SHARED_OWNER, "cross-tool").unwrap());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 两个调用方并发 set 不得互相丢键：set 是"读 → 改 → 整文件替换"，
+    /// 没有进程级锁时后写的会盖掉先写的（页面 + L3 反向调用真实存在并发）。
+    #[test]
+    fn concurrent_sets_do_not_lose_keys() {
+        let root = temp_root("concurrent");
+        login(&root, "u1");
+        let store = ToolStore::new(&root);
+        std::thread::scope(|scope| {
+            for index in 0..12_u32 {
+                let store = &store;
+                scope.spawn(move || {
+                    let key = format!("key-{index}");
+                    store.set("pilot", &key, serde_json::json!(index)).unwrap();
+                });
+            }
+        });
+        let keys = store.keys("pilot").unwrap();
+        assert_eq!(keys.len(), 12, "并发写入丢了键：实际留下 {keys:?}");
         let _ = std::fs::remove_dir_all(&root);
     }
 

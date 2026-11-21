@@ -59,8 +59,9 @@ use tauri::http::{Response, StatusCode};
 use tauri_plugin_dialog::DialogExt;
 
 use super::catalog;
+use super::limits::LIMITS;
 use super::native::{self, OpenOptions, SecretStore};
-use super::store::ToolStore;
+use super::store::{SHARED_OWNER, ToolStore};
 use super::{ToolSession, ToolsHost};
 
 /// 一次能力调用的结果。错误也走 200：HTTP 状态码表达不了"业务失败"，
@@ -88,10 +89,28 @@ fn fail(message: impl Into<String>) -> Response<Vec<u8>> {
 pub fn storage_owner(tool_id: &str, scope: &str) -> Result<String, String> {
     match scope {
         "" => Ok(tool_id.to_string()),
-        // 共享区是"用户级"的：所有工具读写同一份，落在一个单独文件里。
-        "shared" => Ok("__shared".to_string()),
+        // 共享区是“用户级”的：所有工具读写同一份，落在一个单独文件里。
+        // 哨兵名不是合法工具 id，落盘层（`store.rs`）会单独放行。
+        "shared" => Ok(SHARED_OWNER.to_string()),
         _ => Err("目前只支持 \"shared\" 作用域。".into()),
     }
+}
+
+/// Windows 保留设备名（CON / PRN / AUX / NUL / COM1–9 / LPT1–9），不管后缀。
+fn is_windows_reserved_name(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or("").to_ascii_lowercase();
+    let reserved = ["con", "prn", "aux", "nul"];
+    if reserved.contains(&stem.as_str()) {
+        return true;
+    }
+    let bytes = stem.as_bytes();
+    if bytes.len() == 4
+        && (stem.starts_with("com") || stem.starts_with("lpt"))
+        && bytes[3].is_ascii_digit()
+    {
+        return true;
+    }
+    false
 }
 
 fn text(payload: &Value, key: &str) -> Result<String, String> {
@@ -116,6 +135,10 @@ fn secret_store(host: &ToolsHost) -> Result<SecretStore, String> {
 ///
 /// `tool_id` 由协议层从 origin 解析出来，**不接受请求体里的任何身份字段**。
 ///
+/// 请求体有大小上限（`call_body_bytes`）：`clipboard.writeImage` 这类能力会把
+/// 请求体整段解码，没有上限的请求体就是内存炸弹的入口——页面与 L3 的
+/// `aaw.call` 都从这条路进，所以在这里拦一次就都拦住了。
+///
 /// `app` 只在需要触达某个窗口或系统对话框的能力里用到（`act.invoke`、`files.*`）。
 /// 单元测试给它 `None`，此时那几条能力返回明确错误，而不是 panic。
 ///
@@ -128,6 +151,13 @@ pub(crate) fn dispatch(
     command: &str,
     body: &[u8],
 ) -> Response<Vec<u8>> {
+    if body.len() > LIMITS.call_body_bytes {
+        return fail(format!(
+            "请求体 {} KB 超过 {} KB 上限。",
+            body.len() / 1024,
+            LIMITS.call_body_bytes / 1024
+        ));
+    }
     // 空 body 视为 `{}`：`store.keys()` / `host.info()` 这类无参调用不必凑一个空对象。
     let payload: Value = if body.is_empty() {
         json!({})
@@ -215,6 +245,11 @@ pub(crate) fn dispatch(
             // 文件名带路径分隔符时只取最后一段：保存框自己决定目录，页面不该借
             // 这个参数写到别处去。
             let safe_name = name.rsplit(['/', '\\']).next().unwrap_or("导出.txt");
+            // Windows 保留名不能当文件名：`NUL.png`、`CON.log` 在资源管理器里
+            // 会变成打不开也删不掉的东西，在这里拒掉比让用户去碰注册表强。
+            if is_windows_reserved_name(safe_name) {
+                return Err(format!("{safe_name} 是 Windows 保留名，请换一个文件名。"));
+            }
             let Some(path) = app
                 .dialog()
                 .file()
@@ -308,6 +343,11 @@ pub(crate) fn dispatch(
             if seconds < 60 {
                 return Err("定时唤醒至少 60 秒。".into());
             }
+            // 上限一周。没有上限的话，作者可以一次塞进几万条超短定时，ticker
+            // 每 5 秒扫一遍会把它变成常驻开销。
+            if seconds > 7 * 24 * 3600 {
+                return Err("定时唤醒最长 7 天。".into());
+            }
             need_session()?.set_schedule(seconds);
             Ok(json!(true))
         })(),
@@ -315,7 +355,9 @@ pub(crate) fn dispatch(
         // ── 总线 ────────────────────────────────────────────────────────
         "bus.emit" => (|| {
             let topic = text(&payload, "topic")?;
-            if topic.is_empty() || topic.len() > 200 {
+            // 按**字符**数校验，不是字节：中文一字三字节，按字节算的话 67 个
+            // 汉字就撞上限，而报错文案写的是“字符”，两边必须说的是同一件事。
+            if topic.is_empty() || topic.chars().count() > 200 {
                 return Err("事件主题必须是 1–200 个字符。".into());
             }
             let value = payload.get("payload").cloned().unwrap_or(Value::Null);
@@ -420,9 +462,24 @@ fn encode_png(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
 
 /// PNG → RGBA。只接受 8 位 RGBA / RGB，其余格式明确报错——悄悄当灰度处理
 /// 会得到一张颜色错乱的图，比拒绝更难查。
+///
+/// 尺寸必须在分配**之前**用头部声明值校验：PNG 的宽高是作者随便填的几个字节，
+/// 声明 65535×65535 的 RGBA 要 17 GB 内存，`vec![0; output_buffer_size()]`
+/// 直接分配失败会把整个宿主 abort 掉——几百字节的一个文件，换全部窗口陪葬。
 fn decode_png(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), String> {
+    const MAX_PIXELS: u64 = 4096 * 4096; // 4096² RGBA ≈ 64 MB，覆盖 4K 截图绰绰有余
     let decoder = png::Decoder::new(bytes);
     let mut reader = decoder.read_info().map_err(|error| format!("图片格式不支持：{error}"))?;
+    let declared = reader.info();
+    let pixels = u64::from(declared.width) * u64::from(declared.height);
+    if pixels > MAX_PIXELS {
+        return Err(format!(
+            "图片尺寸 {}×{} 超过上限（最多 {} 像素）。",
+            declared.width,
+            declared.height,
+            MAX_PIXELS
+        ));
+    }
     let mut buffer = vec![0; reader.output_buffer_size()];
     let info = reader.next_frame(&mut buffer).map_err(|error| format!("读不出图片：{error}"))?;
     let data = &buffer[..info.buffer_size()];
@@ -481,6 +538,75 @@ mod tests {
         let (decoded, width, height) = decode_png(&png).unwrap();
         assert_eq!((width, height), (2, 2));
         assert_eq!(decoded, rgba);
+    }
+
+    /// 请求体上限必须在**任何解析/解码**之前生效：`clipboard.writeImage` 会把
+    /// 请求体整段 base64 解码，没有上限的请求体就是内存炸弹的入口。
+    #[test]
+    fn oversized_body_is_rejected_before_any_parsing() {
+        let host = ToolsHost::default();
+        let body = vec![b' '; LIMITS.call_body_bytes + 1];
+        let response = dispatch(&host, None, "pilot", None, "store.get", &body);
+        let text = String::from_utf8(response.body().clone()).unwrap();
+        assert!(text.contains("请求体"), "{text}");
+        assert!(text.contains("超过上限"), "{text}");
+    }
+
+    /// 声明 65535×65535 RGBA 的 PNG 要 17 GB 缓冲。曾经 `decode_png` 拿头部
+    /// 声明值直接 `vec![0; …]`——几百字节的一个文件就能把整个宿主 abort 掉。
+    #[test]
+    fn png_with_absurd_declared_size_is_rejected_without_allocating() {
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        let mut ihdr = Vec::new();
+        ihdr.extend_from_slice(&65535u32.to_be_bytes());
+        ihdr.extend_from_slice(&65535u32.to_be_bytes());
+        ihdr.push(8); // bit depth
+        ihdr.push(6); // RGBA
+        ihdr.push(0); // compression
+        ihdr.push(0); // filter
+        ihdr.push(0); // interlace
+        png.extend_from_slice(&chunk(b"IHDR", &ihdr));
+        png.extend_from_slice(&chunk(b"IDAT", &[]));
+        png.extend_from_slice(&chunk(b"IEND", &[]));
+        let error = decode_png(&png).unwrap_err();
+        assert!(error.contains("超过上限"), "{error}");
+    }
+
+    #[test]
+    fn windows_reserved_names_are_rejected_for_save() {
+        for name in ["NUL.png", "con.log", "COM3.txt", "aux", "lpt1.doc"] {
+            assert!(is_windows_reserved_name(name), "{name} 应被拒绝");
+        }
+        for name in ["notes.txt", "com3x.txt", "console.png", "导出.txt"] {
+            assert!(!is_windows_reserved_name(name), "{name} 不应被拒绝");
+        }
+    }
+
+    // ── 测试用的最小 PNG 构造 ────────────────────────────────────────────
+
+    fn crc32(data: &[u8]) -> u32 {
+        let mut table = [0u32; 256];
+        for (index, item) in table.iter_mut().enumerate() {
+            let mut value = index as u32;
+            for _ in 0..8 {
+                value = if value & 1 != 0 { 0xEDB8_8320 ^ (value >> 1) } else { value >> 1 };
+            }
+            *item = value;
+        }
+        let mut crc = 0xFFFF_FFFFu32;
+        for &byte in data {
+            crc = table[((crc ^ u32::from(byte)) & 0xFF) as usize] ^ (crc >> 8);
+        }
+        crc ^ 0xFFFF_FFFF
+    }
+
+    fn chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
+        let mut out = (data.len() as u32).to_be_bytes().to_vec();
+        let mut payload = kind.to_vec();
+        payload.extend_from_slice(data);
+        out.extend_from_slice(&payload);
+        out.extend_from_slice(&crc32(&payload).to_be_bytes());
+        out
     }
 
 }
