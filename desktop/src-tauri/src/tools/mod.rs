@@ -231,7 +231,13 @@ impl ToolsHost {
         }
         let dir = self.tools_root().join(tool_id);
         if !dir.is_dir() {
-            return Err(format!("找不到工具目录：{}", dir.display()));
+            // 只报路径用户没法动手：目录丢失（被移动/清理）是 dev 期的常态，
+            // 文案必须告诉他两条出路——放回原位，或卸载重装。列表侧会在
+            // 启动时把这类条目标成 broken 卡片，这里是打开时刻的兜底。
+            return Err(format!(
+                "这个工具的目录不存在（{}）。它可能已被移动或删除：把目录放回原位可继续使用，或在工具中心卸载这条记录后重新安装。",
+                dir.display()
+            ));
         }
         Ok(dir)
     }

@@ -147,13 +147,26 @@ button.ghost { background: transparent; }
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
+/* 滚动容器是 main 本身，铺满除目录外的全部宽度——滚动条贴着窗口右缘，
+ * 是用户熟悉的位置。正文列宽由内层 .doc-body 控制：居中 + 可读行宽上限，
+ * 空白对称地留在文字两侧，而不是让滚动条孤零零悬在空白中间
+ * （2026-11-22 用户反馈：最大化之后滚动条离正文很远，看着像坏了）。 */
 main {
   flex: 1 1 auto;
-  width: 100%;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.doc-body {
   max-width: 880px;
   margin: 0 auto;
   padding: 26px clamp(18px, 4vw, 44px) 64px;
-  overflow-y: auto;
+}
+
+/* 宽窗口下列宽跟着放大，别让大屏两侧都是大片空白；上限 1024 仍然
+ * 保住可读行宽（超过 ~70 汉字一行，扫到行尾会丢行）。 */
+@media (min-width: 1440px) {
+  .doc-body { max-width: 1024px; }
 }
 
 /* ── 正文排版 ──────────────────────────────────────────────────────────── */
@@ -300,7 +313,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 28px 0; }
 @media (max-width: 860px) {
   .toc { flex-basis: 178px; font-size: 12.5px; }
   .toc-item { font-size: 12.5px; }
-  main { padding-left: 18px; padding-right: 18px; }
+  .doc-body { padding-left: 18px; padding-right: 18px; }
 }
 
 /* ── 状态 ──────────────────────────────────────────────────────────────── */

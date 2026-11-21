@@ -194,6 +194,12 @@ export function readToolCarrier(tool: Pick<ToolPackage, "build" | "runtime">): T
 
 /** 工具被判定为不可用时的记录。保留条目本身，只标记原因——绝不静默丢弃。 */
 export interface ToolBrokenState {
+  /**
+   * 坏在哪一类：`incompatible` = 包与当前桌面端不兼容（默认）；
+   * `missing-dir` = 安装记录还在、目录没了（被移动/清理）。
+   * 界面标签与恢复建议都跟着它走——目录丢了说"不兼容"会把人带偏。
+   */
+  readonly kind?: "incompatible" | "missing-dir";
   /** 给用户看的一句话。 */
   readonly reason: string;
   /** 怎么恢复：升级桌面端 / 重新导入 / 卸载。 */

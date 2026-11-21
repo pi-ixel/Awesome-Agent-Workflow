@@ -312,12 +312,16 @@
 
   // ── 渲染 / 编辑 / 恢复默认 ──────────────────────────────────────────────
 
+  /**
+   * 渲染结果包一层 .doc-body：main 是铺满的滚动容器（滚动条贴窗口右缘），
+   * 正文列宽与居中由内层控制（见 guide.css 里 .doc-body 的注释）。
+   */
   function applyDoc(payload) {
     state.markdown = payload.text;
     state.edited = payload.edited === true;
     state.dirty = false;
     var parsed = render(state.markdown);
-    doc.innerHTML = parsed.html;
+    doc.innerHTML = '<div class="doc-body">' + parsed.html + "</div>";
     doc.removeAttribute("aria-busy");
     doc.scrollTop = 0;
     buildToc(parsed.toc);
@@ -425,8 +429,8 @@
   function showFailure(error) {
     var timedOut = error && (error.name === "AbortError" || error.name === "TimeoutError");
     var reason = timedOut ? "请求一直没有响应" : describe(error);
-    doc.innerHTML = '<p class="error">开发指导没能加载：' + escapeHtml(reason) + "</p>" +
-      '<p class="hint">关掉这个窗口重开一次通常就好；如果反复如此，说明宿主刚重启过或这次构建里缺了文档。</p>';
+    doc.innerHTML = '<div class="doc-body"><p class="error">开发指导没能加载：' + escapeHtml(reason) + "</p>" +
+      '<p class="hint">关掉这个窗口重开一次通常就好；如果反复如此，说明宿主刚重启过或这次构建里缺了文档。</p></div>';
     doc.removeAttribute("aria-busy");
   }
 
