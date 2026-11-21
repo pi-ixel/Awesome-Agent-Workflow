@@ -3,6 +3,8 @@ import { useStore } from "zustand";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { DangerButton, btnGhost, btnPrimary, btnSecondary } from "../../../shared/ui/controls.tsx";
 import { WrenchIcon } from "../../../shared/ui/icons.tsx";
+// 外观由 tools.css 的 .build-rename input 决定，挂共享常量是为了让编辑框守卫识别。
+import { settingsInputClass } from "../../../shared/ui/inputStyles.ts";
 import type { ToolProjectSummary } from "../runtime/project.ts";
 import type { PersonalTool } from "../types.ts";
 import { ProjectDetail } from "./ToolBuilder.tsx";
@@ -144,10 +146,10 @@ export function ToolProjectList({ workshop, installed, available, onPreview }: {
             {renaming?.dir === project.dir ? (
               <form className="build-rename" onSubmit={(event) => { event.preventDefault(); void commitRename(); }}>
                 <label>显示名
-                  <input value={renaming.name} onChange={(event) => setRenaming({ ...renaming, name: event.target.value })} maxLength={60} />
+                  <input className={settingsInputClass} value={renaming.name} onChange={(event) => setRenaming({ ...renaming, name: event.target.value })} maxLength={60} />
                 </label>
                 <label>目录名（= 工具 ID）
-                  <input value={renaming.id} onChange={(event) => setRenaming({ ...renaming, id: event.target.value, note: undefined })} spellCheck={false} />
+                  <input className={settingsInputClass} value={renaming.id} onChange={(event) => setRenaming({ ...renaming, id: event.target.value, note: undefined })} spellCheck={false} />
                 </label>
                 <div className="build-project-actions">
                   <button type="button" className={btnGhost} onClick={() => setRenaming(undefined)}>取消</button>

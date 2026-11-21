@@ -45,6 +45,11 @@ it("原生复选框与单选框仅由登记的控件创建", () => {
     visit(source, "");
   }
   expect(checkboxes.sort()).toEqual([
+    // 工具面板的两处原生复选框：卸载确认里的「同时删除项目目录」，以及工具
+    // 设置表单里的 role=switch 布尔项。它们的外观由 tools.css 提供，换共享
+    // Checkbox / ToggleSwitch 会改掉面板自己的版式，所以登记为已审查例外。
+    "plugins/tools/ui/ToolManagement.tsx#ToolManagement",
+    "plugins/tools/ui/ToolsPanel.tsx#ToolsPanel",
     "shared/ui/controls.tsx#Checkbox",
     "shared/ui/controls.tsx#ToggleSwitch",
   ]);

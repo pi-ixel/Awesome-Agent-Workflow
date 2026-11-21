@@ -1373,6 +1373,37 @@ html:not(.theme-warm) :is(button, input, textarea, select, [role="combobox"])[cl
   --color-brand-immersive-shadow: rgb(124 58 237 / 22%);
 }
 
+/* 工具面板（plugins/tools）的图标色调。
+   这些值原本是 tools.css 里的固定色：工具行首字图标、管理页的大图标、
+   预览框底色三处各一套紫/橙/蓝。固定值在暖白主题下不会跟着变，所以先
+   把它们收成有名字的变量——要分主题时只改这一处，不必翻遍 tools.css。 */
+:root {
+  --color-tools-symbol-bg: #6573d51a;
+  --color-tools-symbol-ink: #8b9cf2;
+  --color-tools-tone-1-bg: #9670ce1f;
+  --color-tools-tone-1-ink: #bd9de9;
+  --color-tools-tone-2-bg: #cf89501f;
+  --color-tools-tone-2-ink: #dcaa7c;
+  --color-tools-tone-3-bg: #4f97b41f;
+  --color-tools-tone-3-ink: #8fc7dc;
+  --color-tools-icon-ink: #97a8f7;
+  --color-tools-icon-bg: #7284cf1f;
+  --color-tools-icon-border: #7284cf33;
+  --color-tools-icon-1-bg: #9670ce24;
+  --color-tools-icon-1-ink: #c7abea;
+  --color-tools-icon-1-border: #9670ce3d;
+  --color-tools-icon-2-bg: #cf895024;
+  --color-tools-icon-2-ink: #e0b48c;
+  --color-tools-icon-2-border: #cf89503d;
+  --color-tools-icon-3-bg: #4f97b424;
+  --color-tools-icon-3-ink: #9acfe2;
+  --color-tools-icon-3-border: #4f97b43d;
+  --color-tools-preview-bg: #171c24;
+  /* 预览页「安装」按钮坐在 --color-info 的实底上，两套主题都要白字，
+     所以不并入 --color-foreground-inverse（那份在暗色主题是黑字）。 */
+  --color-tools-install-ink: #ffffff;
+}
+
 /* 工作流画布表面、描边与阴影，由根元素主题统一提供。 */
 :root {
   /* 画布的实体层级：托盘是凹进去的纸槽，卡是抬起来的纸片。

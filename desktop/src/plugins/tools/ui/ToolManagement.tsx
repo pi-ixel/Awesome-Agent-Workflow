@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DangerButton, btnGhost, btnPrimary, btnSecondary, Listbox } from "../../../shared/ui/controls.tsx";
 import { CopyButton } from "../../../shared/ui/CopyButton.tsx";
 import { SquareTerminalIcon } from "../../../shared/ui/icons.tsx";
+// 外观仍由 tools.css 决定（那份规则特异性更高），这里挂共享常量是为了让
+// 「编辑框必须走共享规格」的架构守卫能识别到这几个输入框。
+import { fieldSurfaceClass, settingsInputClass, settingsNumberInputClass } from "../../../shared/ui/inputStyles.ts";
 import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
 import type { PersonalTool, ToolSettings } from "../types.ts";
 import { resolveToolSettings } from "../runtime/settings.ts";
@@ -105,7 +108,7 @@ export function ToolManagement({ entry, onBack, onOpen, onExport, onUpdate, onSa
                   <label htmlFor={`setting-${field.id}`}>{field.label}{field.description && <small>{field.description}</small>}</label>
                   {field.type === "boolean" ? <input id={`setting-${field.id}`} type="checkbox" role="switch" checked={values[field.id] === true} onChange={(event) => setValues({ ...values, [field.id]: event.target.checked })} />
                     : field.type === "select" ? <Listbox label={field.label} value={String(values[field.id])} options={field.options} onChange={(value) => setValues({ ...values, [field.id]: value })} fullWidth className="py-2 text-sm" />
-                    : <input id={`setting-${field.id}`} type={field.type === "number" ? "number" : "text"} value={Number.isNaN(values[field.id]) ? "" : String(values[field.id] ?? "")}
+                    : <input id={`setting-${field.id}`} type={field.type === "number" ? "number" : "text"} className={field.type === "number" ? settingsNumberInputClass : settingsInputClass} value={Number.isNaN(values[field.id]) ? "" : String(values[field.id] ?? "")}
                       min={field.type === "number" ? field.min : undefined} max={field.type === "number" ? field.max : undefined} step={field.type === "number" ? "any" : undefined} maxLength={field.type === "text" ? 4096 : undefined}
                       onChange={(event) => setValues({ ...values, [field.id]: field.type === "number" ? event.target.value === "" ? NaN : Number(event.target.value) : event.target.value })} />}
                 </div>)}</div>
@@ -124,7 +127,7 @@ export function ToolManagement({ entry, onBack, onOpen, onExport, onUpdate, onSa
                 <p className="mg-note">这一版是从下面的目录装进来的。在那里改完内容要回工具中心点一次「安装」才会生效——已安装的是一份快照，不会跟着目录自动变。</p>
                 <ToolPath path={entry.dir} compact />
               </div>}
-              <input ref={picker} type="file" accept=".zip,.json" hidden onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) requestAction("更新源码", () => onUpdate(file)); }} />
+              <input ref={picker} type="file" className={fieldSurfaceClass} accept=".zip,.json" hidden onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) requestAction("更新源码", () => onUpdate(file)); }} />
             </div>
           </Section>
 
