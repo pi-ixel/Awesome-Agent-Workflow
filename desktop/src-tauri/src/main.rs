@@ -2,6 +2,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    #[cfg(windows)]
+    if desktop_lib::benchmark_requested() {
+        desktop_lib::run();
+        return;
+    }
     if std::env::args().any(|arg| arg == "--installer-ui") {
         desktop_lib::installer_ui::run();
         return;

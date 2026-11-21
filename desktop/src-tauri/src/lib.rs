@@ -27,9 +27,24 @@ mod workflow_service;
 
 use tauri::{Emitter, Manager};
 
+#[cfg(windows)]
+pub fn benchmark_requested() -> bool {
+    browser::bench::output_path().is_some()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let context = tauri::generate_context!();
+    #[cfg(windows)]
+    let context = {
+        let mut context = context;
+        if benchmark_requested() {
+            for window in &mut context.config_mut().app.windows {
+                window.url = tauri::WebviewUrl::External("about:blank".parse().expect("static benchmark URL"));
+            }
+        }
+        context
+    };
     tauri::Builder::default()
         .manage(panel_files::PanelWatchers::default())
         .manage(browser::host::BrowserHost::default())
@@ -40,6 +55,10 @@ pub fn run() {
         .manage(tray::TrayPreference::default())
         .manage(tray::SchedulerLease::default())
         .setup(|app| {
+            #[cfg(windows)]
+            if browser::bench::start(app.handle()) {
+                return Ok(());
+            }
             storage_location::initialize(app.handle()).map_err(std::io::Error::other)?;
             if let Err(error) = diagnostics::start(app.handle()) {
                 eprintln!("日志服务启动失败: {error}");
@@ -54,6 +73,10 @@ pub fn run() {
             Ok(())
         })
         .on_page_load(|webview, payload| {
+            #[cfg(windows)]
+            if benchmark_requested() && webview.label() == "main" {
+                return;
+            }
             // WebView 刷新不会保证 React 清理；原生监听随页面代次一并释放。
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
                 if webview.label() == "main" {

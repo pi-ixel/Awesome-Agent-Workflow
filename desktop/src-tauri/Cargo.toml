@@ -79,3 +79,9 @@ features = ["rustls-tls"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }
+
+# Windows WebView2 命名 Profile 本地试验，未发布到上游。
+[patch.crates-io]
+tauri = { path = "vendor-webview2-poc/tauri-2.12.4" }
+tauri-runtime = { path = "vendor-webview2-poc/tauri-runtime-2.12.2" }
+tauri-runtime-wry = { path = "vendor-webview2-poc/tauri-runtime-wry-2.12.2" }

@@ -5,7 +5,7 @@ use webview2_com::{
     CoTaskMemPWSTR, HistoryChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
         COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL,
-        ICoreWebView2, ICoreWebView2_19,
+        ICoreWebView2, ICoreWebView2_13, ICoreWebView2_19,
     },
     SourceChangedEventHandler,
 };
@@ -26,6 +26,22 @@ async fn with_core(
         .await
         .map_err(|_| "WEBVIEW_DISPATCH_TIMEOUT")?
         .map_err(|_| "WEBVIEW_DISPATCH_FAILED")?
+}
+
+pub(super) async fn verify_profile_name(webview: &Webview, name: String) -> Result<(), String> {
+    with_core(webview, move |core| {
+        let mut actual = PWSTR::null();
+        unsafe {
+            core.cast::<ICoreWebView2_13>()?.Profile()?.ProfileName(&mut actual)?;
+        }
+        if !CoTaskMemPWSTR::from(actual).to_string().eq_ignore_ascii_case(&name) {
+            return Err(windows_core::Error::new(
+                windows_core::HRESULT(0x80004005_u32 as i32),
+                "WEBVIEW2_PROFILE_MISMATCH",
+            ));
+        }
+        Ok(())
+    }).await
 }
 
 pub(super) async fn register_navigation(

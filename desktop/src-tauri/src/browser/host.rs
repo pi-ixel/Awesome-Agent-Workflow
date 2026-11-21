@@ -458,13 +458,14 @@ async fn create_native_tab(
         .ok_or("SESSION_NOT_FOUND")?;
     let window = app.get_window(&window_id).ok_or("WINDOW_NOT_FOUND")?;
     let label = label_for(session_id, &tab.tab_id);
-    let data_directory = app
-        .path()
-        .data_dir()
-        .map_err(|error| error.to_string())?
-        .join("AAW")
-        .join("browser")
-        .join(session_partition(session_id));
+    let profile = super::profile::SessionProfile::for_session(app, session_id)?;
+    let destination = url.parse::<tauri::Url>().map_err(|_| "INVALID_URL")?;
+    // 命名 Profile 必须先在空白页核验，防止旧运行时回退到默认 Profile。
+    let initial_url = if profile.name.is_some() {
+        tauri::Url::parse("about:blank").map_err(|_| "INVALID_URL")?
+    } else {
+        destination.clone()
+    };
     let popup_app = app.clone();
     let popup_session = session_id.to_owned();
     let popup_tab = tab.tab_id.clone();
@@ -472,11 +473,10 @@ async fn create_native_tab(
     let page_session = session_id.to_owned();
     let page_tab = tab.tab_id.clone();
     let page_generation = tab.generation;
-    let builder = WebviewBuilder::new(
+    let builder = profile.configure(WebviewBuilder::new(
         label.clone(),
-        WebviewUrl::External(url.parse().map_err(|_| "INVALID_URL")?),
-    )
-    .data_directory(data_directory)
+        WebviewUrl::External(initial_url),
+    ))
     .initialization_script(super::native_dialog::restore_script())
     .initialization_script(super::native_dialog::ipc_lockdown_script())
     .initialization_script(control_bridge_script(session_id, &tab.tab_id))
@@ -517,6 +517,7 @@ async fn create_native_tab(
         .map_err(|error| error.to_string())?;
     let setup = async {
         created.hide().map_err(|error| error.to_string())?;
+        profile.verify(&created).await?;
         let (agent_active, manual_takeover) = {
             let runtime = host.runtime.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
             let space = runtime.spaces.get(session_id).ok_or("SESSION_NOT_FOUND")?;
@@ -545,6 +546,9 @@ async fn create_native_tab(
         )?;
         super::download::register_native(app, &created, session_id, &tab.tab_id, tab.generation)?;
         super::evidence::call_cdp(&created, "Page.enable", serde_json::json!({})).await?;
+        if profile.name.is_some() {
+            created.navigate(destination).map_err(|error| error.to_string())?;
+        }
         let runtime = host.runtime.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
         let current = runtime.spaces.get(session_id).and_then(|space| space.tabs.get(&tab.tab_id))
             .filter(|current| current.generation == tab.generation && current.lifecycle == super::model::TabLifecycle::Ready)

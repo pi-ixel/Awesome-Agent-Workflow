@@ -2,28 +2,10 @@ use super::evidence::call_cdp;
 use super::host::{BrowserHost, find_webview};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager, State};
 
-pub fn validate_partition_path(root: &Path, candidate: &Path) -> Result<PathBuf, String> {
-    if candidate.as_os_str().is_empty()
-        || candidate.is_absolute()
-        || candidate
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err("PATH_NOT_ALLOWED".into());
-    }
-    let path = root.join(candidate);
-    if path.exists() {
-        let canonical_root = root.canonicalize().map_err(|_| "PATH_NOT_ALLOWED")?;
-        let canonical_path = path.canonicalize().map_err(|_| "PATH_NOT_ALLOWED")?;
-        if !canonical_path.starts_with(&canonical_root) {
-            return Err("PATH_NOT_ALLOWED".into());
-        }
-    }
-    Ok(path)
-}
+pub use super::profile_path::validate_partition_path;
 
 pub fn cleanup_plan(scope: &str, _owner: &str) -> Vec<String> {
     match scope {
@@ -199,7 +181,11 @@ pub struct DataCatalogEntry {
     pub occupancy: Occupancy,
 }
 
-fn partition_root(app: &AppHandle) -> Result<PathBuf, String> {
+pub(super) fn partition_root(app: &AppHandle) -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    if let Some(root) = super::bench::browser_root() {
+        return root;
+    }
     Ok(app
         .path()
         .data_dir()
@@ -225,9 +211,8 @@ pub fn register_partition(
     workspace_id: &str,
     session_id: &str,
 ) -> Result<PartitionRecord, String> {
-    let root = partition_root(app)?;
     let partition_id = super::host::session_partition(session_id);
-    let directory = validate_partition_path(&root, Path::new(&partition_id))?;
+    let directory = super::profile::SessionProfile::for_session(app, session_id)?.directory;
     let record = PartitionRecord {
         partition_id,
         workspace_id: workspace_id.into(),
@@ -313,7 +298,11 @@ pub fn browser_data_catalog(
                 })
                 .unwrap_or(0);
             DataCatalogEntry {
-                occupancy: directory_occupancy(Path::new(&partition.directory)),
+                occupancy: if super::profile::is_shared_directory(Path::new(&partition.directory)) {
+                    unknown_occupancy("SHARED_WEBVIEW2_ROOT")
+                } else {
+                    directory_occupancy(Path::new(&partition.directory))
+                },
                 partition,
                 active_tab_count,
             }
@@ -384,11 +373,12 @@ impl Drop for PartitionWebview {
     }
 }
 
-fn active_webview(
+async fn active_webview(
     app: &AppHandle,
     host: &BrowserHost,
     session_id: &str,
 ) -> Result<PartitionWebview, String> {
+    let profile = super::profile::SessionProfile::for_session(app, session_id)?;
     let tab_id = host
         .labels
         .lock()
@@ -399,8 +389,10 @@ fn active_webview(
                 .map(str::to_owned)
         });
     if let Some(tab_id) = tab_id {
+        let webview = find_webview(app, host, session_id, &tab_id)?;
+        profile.verify(&webview).await?;
         return Ok(PartitionWebview {
-            webview: find_webview(app, host, session_id, &tab_id)?,
+            webview,
             temporary: false,
         });
     }
@@ -409,23 +401,23 @@ fn active_webview(
     let window = app.get_window("main").ok_or("WINDOW_NOT_FOUND")?;
     let partition = super::host::session_partition(session_id);
     let label = format!("aaw-browser-maintenance-{partition}");
-    let directory = validate_partition_path(&partition_root(app)?, Path::new(&partition))?;
     let webview = window
         .add_child(
-            WebviewBuilder::new(
+            profile.configure(WebviewBuilder::new(
                 label,
                 WebviewUrl::External(tauri::Url::parse("about:blank").map_err(|_| "INVALID_URL")?),
-            )
-            .data_directory(directory),
+            )),
             LogicalPosition::new(0.0, 0.0),
             LogicalSize::new(1.0, 1.0),
         )
         .map_err(|error| error.to_string())?;
-    webview.hide().map_err(|error| error.to_string())?;
-    Ok(PartitionWebview {
+    let temporary = PartitionWebview {
         webview,
         temporary: true,
-    })
+    };
+    temporary.webview.hide().map_err(|error| error.to_string())?;
+    profile.verify(&temporary.webview).await?;
+    Ok(temporary)
 }
 
 #[cfg(windows)]
@@ -510,7 +502,7 @@ async fn clear_session_partition(
     workspace_id: Option<String>,
 ) -> Result<String, String> {
     let _lease = begin_cleanup(state, &session_id)?;
-    let partition = active_webview(&app, &state, &session_id)?;
+    let partition = active_webview(&app, &state, &session_id).await?;
     clear_browsing_data(&partition).await?;
     let labels: Vec<(String, String)> = state
         .labels
@@ -597,7 +589,9 @@ pub async fn browser_clear_site_data(
     if !matches!(origin.scheme(), "http" | "https") {
         return Err("NAVIGATION_DENIED".into());
     }
-    let webview = active_webview(&app, &state, &session_id)?;
+    // 试验模式暂不执行尚未证明作用域的 CDP 清理。
+    ensure_legacy_cdp_cleanup(&app, &session_id)?;
+    let webview = active_webview(&app, &state, &session_id).await?;
     call_cdp(
         &webview,
         "Storage.clearDataForOrigin",
@@ -627,9 +621,17 @@ pub async fn browser_clear_cache(
     session_id: String,
 ) -> Result<String, String> {
     let _lease = begin_cleanup(&state, &session_id)?;
-    let webview = active_webview(&app, &state, &session_id)?;
+    ensure_legacy_cdp_cleanup(&app, &session_id)?;
+    let webview = active_webview(&app, &state, &session_id).await?;
     call_cdp(&webview, "Network.clearBrowserCache", serde_json::json!({})).await?;
     Ok("completed".into())
+}
+
+fn ensure_legacy_cdp_cleanup(app: &AppHandle, session_id: &str) -> Result<(), String> {
+    if super::profile::SessionProfile::for_session(app, session_id)?.name.is_some() {
+        return Err("SHARED_PROFILE_CDP_CLEANUP_UNVERIFIED".into());
+    }
+    Ok(())
 }
 
 #[derive(Clone, Serialize)]
