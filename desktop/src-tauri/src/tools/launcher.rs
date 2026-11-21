@@ -208,8 +208,11 @@ pub fn launcher_entries(window: tauri::WebviewWindow, app: AppHandle) -> Result<
     entries_of(&app)
 }
 
+/// 从启动器打开条目。`async` 的理由同 `tools_guide_open`：`personal:*`
+/// 条目会走到 `open_tool` 建窗口，同步命令在主线程建 WebView2 会把消息循环
+/// 堵死（白窗 + 关不掉）。
 #[tauri::command]
-pub fn launcher_open(window: tauri::WebviewWindow, app: AppHandle, id: String) -> Result<(), String> {
+pub async fn launcher_open(window: tauri::WebviewWindow, app: AppHandle, id: String) -> Result<(), String> {
     ensure_launcher(&window)?;
     // 先收起：打开工具之后启动器还挡在前面，用户会以为没反应。
     if let Some(panel) = app.get_webview_window(LABEL) {
@@ -290,8 +293,9 @@ pub fn launcher_capture(window: tauri::WebviewWindow, app: AppHandle, active: bo
     Ok(())
 }
 
+/// 显示启动器。`async`：首次调用会建启动器窗口，理由同 `tools_guide_open`。
 #[tauri::command]
-pub fn launcher_show(app: AppHandle) -> Result<(), String> {
+pub async fn launcher_show(app: AppHandle) -> Result<(), String> {
     show(&app, false)
 }
 
@@ -301,63 +305,6 @@ pub fn launcher_stop(window: tauri::WebviewWindow, app: AppHandle, tool_id: Stri
         return Err("无效的停止请求。".into());
     }
     super::process_host::stop(&app.state::<ToolsHost>(), &tool_id);
-    Ok(())
-}
-
-/// 打开「工具开发指导」窗口。
-///
-/// 正文是 `public/guide/guide.md`——与写进工具项目 `AGENTS.md`、用户技能目录的
-/// 是同一段文字（构建期从 `runtime/guide.ts` 生成）。所以人看到的和 AI 读到的
-/// 不会互相矛盾，这也是它从 Electron 搬过来时唯一需要保持的东西。
-#[tauri::command]
-pub fn tools_guide_open(window: tauri::WebviewWindow, app: AppHandle) -> Result<(), String> {
-    if window.label() != "main" {
-        return Err("当前窗口无法打开开发指导。".into());
-    }
-    open_guide(&app)
-}
-
-/// 真正建窗的部分。与命令分开，是因为诊断入口（`AAW_GUIDE_PROBE`）没有
-/// 调用方窗口可校验，但它必须走**和用户点按钮完全同一条路**，否则验的不是
-/// 用户会遇到的那个问题。
-pub fn open_guide(app: &AppHandle) -> Result<(), String> {
-    const LABEL: &str = "tool-guide";
-    if let Some(existing) = app.get_webview_window(LABEL) {
-        existing.show().ok();
-        existing.set_focus().ok();
-        return Ok(());
-    }
-    let theme = store_of(app)
-        .ok()
-        .and_then(|store| store.preferences().ok())
-        .map(|preferences| catalog::theme_of(&preferences))
-        .unwrap_or_else(|| "dark".into());
-    // 主题走 initialization_script 而不是 `?theme=` 查询串。实测两种都能加载
-    // （`Url::join` 会正确解析 query，2026-11-21 用 `AAW_GUIDE_PROBE` 验过
-    // Started/Finished 都是 `.../guide/index.html?theme=dark`），所以这里不是
-    // 修 bug，是选更稳的那个：注入在页面任何脚本之前执行，主题一次到位，
-    // 没有"先深色再闪成浅色"，也不依赖 URL 解析的边界行为。
-    tauri::WebviewWindowBuilder::new(
-        app,
-        LABEL,
-        tauri::WebviewUrl::App("guide/index.html".into()),
-    )
-    .title("工具开发指导")
-    .inner_size(980.0, 720.0)
-    .min_inner_size(720.0, 460.0)
-    .initialization_script(&format!(
-        "window.__aawGuideTheme = {};",
-        serde_json::Value::String(theme)
-    ))
-    // 加载诊断：白屏时唯一能区分"地址拼错""服务器没响应""脚本报错"的办法。
-    // 只在 debug 构建里吭声，发布版不带这行噪音。
-    .on_page_load(|_, payload| {
-        if cfg!(debug_assertions) {
-            eprintln!("[aaw-guide] {:?} {}", payload.event(), payload.url());
-        }
-    })
-    .build()
-    .map_err(|error| format!("打开开发指导失败：{error}"))?;
     Ok(())
 }
 
