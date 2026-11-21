@@ -18,10 +18,11 @@ import { createSnapshotView } from "../../../shared/state/readonlySnapshot.ts";
 import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
 import type { HostService } from "../../host/service.ts";
 import type { ProjectService } from "../../project/service.ts";
-import { briefMessage, repairMessage, toolGuideSkill } from "../runtime/guide.ts";
+import { briefMessage, repairMessage, toolGuideSkill, toolGuideSkillFromDoc } from "../runtime/guide.ts";
 import {
   checkToolProject, createToolProject, defaultInstalledToolsDir, listToolProjectSummaries,
-  migrateLegacyTools, prepareToolDir, readToolDirFiles, readToolProject, renameToolProject, toolProjectFileNames,
+  migrateLegacyTools, prepareToolDir, readToolDirFiles, readToolProject, renameToolProject, syncToolProjectGuide,
+  syncToolProjectGuides, toolProjectFileNames,
   toolProjectIdFromBrief, writeToolFiles,
   type LegacyMigration,
   type ToolProjectCheck,
@@ -188,12 +189,14 @@ export const projectIO = hostToolIO;
  * 把同一份开发规范写进 AI 技能目录（普通会话里让 AI 做工具也认得契约）。
  *
  * 平台默认行为，不需要用户点按钮；正文与项目里的 `AGENTS.md` 同源（`guide.ts`）。
- * 单独导出成纯函数是为了能直接单测，调用方负责 catch——技能目录写不了不该
- * 打断工具中心。
+ * 正文优先取用户在指导窗口里改过的副本：改文档后，普通会话里的 AI 也按
+ * 改过的规范做工具，与项目里的 AGENTS.md 走同一条传播链。单独导出成纯函数
+ * 是为了能直接单测，调用方负责 catch——技能目录写不了不该打断工具中心。
  */
 export async function syncToolGuide(io: ToolProjectIO): Promise<void> {
   const dir = await io.userDataDir("chrys", "skills");
-  await io.writeTextFile(`${dir}/tool-dev/SKILL.md`, toolGuideSkill());
+  const doc = io.readGuideDoc ? await io.readGuideDoc().catch(() => undefined) : undefined;
+  await io.writeTextFile(`${dir}/tool-dev/SKILL.md`, doc ? toolGuideSkillFromDoc(doc) : toolGuideSkill());
 }
 
 /** 安装结果的用户话术：说清"新装/更新"、版本从哪到哪、版本号有没有动。 */
@@ -458,6 +461,10 @@ export function createWorkshop(deps: {
         return true;
       });
       patch({ projects: orderProjects(projects) });
+      // 改过开发指导后，存量项目的 AGENTS.md 也要跟着变：列表刷新顺手把每个
+      // 项目的 AGENTS.md 刷成当前该有的样子（内容没变不写盘）。失败静默——
+      // 下次刷新还会再试，不该让文档同步打断列表本身。
+      void syncToolProjectGuides(io, projects.map((entry) => entry.dir));
       // 列表是磁盘的镜像，所以它同时是"当前项目是否还活着"的判据。
       // 目录被删/移之后，卡片以前会一直挂着（状态只能进入、不能退出）；
       // 现在刷新一次就自动收起并说明——不依赖用户去点任何按钮。
@@ -724,6 +731,10 @@ export function createWorkshop(deps: {
           patch({ note: { text: `这个目录里没有 manifest.json：${dir}。项目可能已被移动或删除，先刷新列表确认它还在。`, error: true } });
           return;
         }
+        // 会话开始前把 AGENTS.md 刷成当前文档的样子：AI 每个会话都读它，
+        // 用户改过开发指导后从这里开始生效。同步失败不拦会话——编译模板
+        // 兕底的那份即使旧一点，也比开不起来会话强。
+        try { await syncToolProjectGuide(io, dir); } catch { /* 不打断开会话 */ }
         patch({ busy: true });
         // select 自己会清掉上一个项目的提示；这里不再补一句 note: null——
         // 那会连本次读盘的失败原因一起擦掉，用户只看到"没反应"。

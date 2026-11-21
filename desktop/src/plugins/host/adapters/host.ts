@@ -124,6 +124,11 @@ export function createTauriHost(invoke: NativeInvoke = defaultInvoke): HostRunti
     async userDataDir(namespace, directory) {
       return invoke<string>("user_data_dir", { namespace, directory });
     },
+    async readGuideDoc() {
+      // Rust 侧保证永远有正文可回（有副本读副本，没副本读编译默认），失败才抛错；
+      // 上层（projectGuide）会退回编译模板，不让一次 IPC 抖动打断 AGENTS.md 生成。
+      return invoke<string>("tools_guide_runtime_text");
+    },
     async toolPurge(input) {
       return invoke<ToolPurgeReport>("tool_purge", {
         toolId: input.toolId,

@@ -48,6 +48,48 @@ ${guideBody(context)}
 `;
 }
 
+/** `guideBody` 正文的第一句。从人读版里定位"写进 AGENTS.md 的那段"从哪开始。 */
+export const GUIDE_BODY_ANCHOR = "你在一个 AAW 个人工具项目里工作";
+
+/**
+ * 从一份开发指导正文（指导窗口显示的那份）里提取"写进 AGENTS.md 的那段"。
+ *
+ * 人读版的结构是：给人看的开头几节 → `## 在项目里工作时` → `guideBody()`。
+ * 后者以 `GUIDE_BODY_ANCHOR` 开头——从它截到结尾，就是一份与 AI 版同源的
+ * 正文（占位符还是通用形态）。用户改过文档后，改到这段里的内容会跟着
+ * 进 AGENTS.md；开头那些"怎么用指导窗口"的段落只属于窗口，不进 AGENTS.md。
+ *
+ * 定位不到锚点（用户删了那句、或结构大改）返回 undefined——调用方退回
+ * 编译模板，绝不把一份被改坏的人读版直接塞给 AI。
+ */
+export function guideBodyFromDoc(doc: string): string | undefined {
+  const index = doc.indexOf(GUIDE_BODY_ANCHOR);
+  if (index < 0) return undefined;
+  const body = doc.slice(index).trimEnd();
+  // 完整正文有几千字；短于这个数只能是截断或残稿，不能当规范用。
+  return body.length >= 200 ? body : undefined;
+}
+
+/** 把通用正文里的占位符换成具体项目。`split/join` 而不是正则：占位符是字面量。 */
+function applyGuideContext(body: string, context: ToolGuideContext): string {
+  return body.split("<工具 id>").join(context.id).split("<工具名>").join(context.name);
+}
+
+/**
+ * 按一份开发指导正文生成项目的 AGENTS.md。
+ *
+ * 有正文且能定位到项目段落 → 用它（用户改过的规范跟着生效）；
+ * 否则返回 undefined，调用方退回编译模板（`toolGuide`）。
+ */
+export function toolGuideFromDoc(doc: string, context: ToolGuideContext): string | undefined {
+  const body = guideBodyFromDoc(doc);
+  if (body === undefined) return undefined;
+  // 尾部的两个换行与编译模板（`toolGuide`）逐字对齐：默认文档走这条链
+  // 时产出的 AGENTS.md 必须和模板一字不差，否则"没改过文档"也会表现为
+  // "所有项目的 AGENTS.md 都变了"。
+  return `# ${context.name} · AAW 工具项目\n\n${applyGuideContext(body, context)}\n\n`;
+}
+
 /**
  * 人读版：工具中心里那份「开发指导」窗口的正文。
  *
@@ -327,20 +369,20 @@ ${ruleTable()}
 }
 
 /**
- * 装进 agent 技能目录的 `SKILL.md`。
+ * 装进 agent 技能目录的 `SKILL.md` 的公共骨架：frontmatter + 正文 + 尾段。
  *
- * 项目里的 `AGENTS.md` 只在那个工具项目内生效；用户在**普通会话**里让 AI
- * 顺手做个工具时，AI 看不到规范，产出的包往往装不上。把同一份正文加个
- * frontmatter 写进 `chrys/skills/tool-dev/SKILL.md`，全局会话才认得这套契约。
+ * 正文来源有两个：编译模板（`toolGuideSkill`）与用户改过的开发指导副本
+ * （`toolGuideSkillFromDoc`）——骨架共用，两边只有正文不同，不会出现
+ * "同一个技能文件两种格式"。
  */
-export function toolGuideSkill(): string {
+function skillDocument(body: string): string {
   return `---
 name: tool-dev
 version: "1.0.0"
 description: 在 AAW 平台上开发个人工具的完整规范。当用户说"我想要一个能……的工具"、需要新建或修改工具项目、或工具校验失败需要修复时使用。包含动手前先与需求方对齐的方法论、工具能做什么（文本处理、剪切板、文件、留存、联网等场景）、项目结构、清单字段、能力入口与联网声明、什么是内核与严禁修改的约束（R9）、红线与交付前自检。
 ---
 
-${toolGuide({ id: "<工具 id>", name: "<工具名>" })}
+${body}
 
 ## 在普通会话里被要求做工具时
 
@@ -348,6 +390,25 @@ ${toolGuide({ id: "<工具 id>", name: "<工具名>" })}
 2. 如果用户只是要一段代码，就把 \`manifest.json\` 与 \`index.html\` 一起给出，并在结尾附上红线自检结果。此时 id 没人分配，按 manifest 一节的命名规则自拟，并明确告诉用户把这两个文件放进哪个目录。
 3. 默认不要引入构建步骤：单文件 \`index.html\` 就够了。确实需要第三方库时走 L2：\`npx esbuild src/main.js --bundle --format=esm --minify --outfile=app.js\`，然后在清单里写 \`build.out\`。不要让用户去装 Node 生态、也不要写 \`preload.js\`（那个字段已经删了）。需要进程/原生模块时停下来问人，不要自己造 \`bin/\`。
 `;
+}
+
+/** 占位上下文：技能目录面向"还没建项目的会话"，id 与名字保持通用形态。 */
+const genericGuideContext: ToolGuideContext = { id: "<工具 id>", name: "<工具名>" };
+
+/** 编译模板版。 */
+export function toolGuideSkill(): string {
+  return skillDocument(toolGuide(genericGuideContext));
+}
+
+/**
+ * 按一份开发指导正文生成技能目录的 `SKILL.md`。
+ *
+ * 用户改过指导窗口的正文后，普通会话里 AI 做工具也该按改过的规范来——
+ * 与 AGENTS.md 同一条传播链，同一个回退（定位不到项目段落就退编译模板）。
+ */
+export function toolGuideSkillFromDoc(doc: string): string {
+  const body = toolGuideFromDoc(doc, genericGuideContext) ?? toolGuide(genericGuideContext);
+  return skillDocument(body);
 }
 
 /** 用户描述需求后发给会话的第一条消息：用户原话 + 落点指引，不夹带技术细节。 */

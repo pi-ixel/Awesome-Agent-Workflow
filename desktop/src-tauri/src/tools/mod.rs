@@ -618,9 +618,12 @@ pub async fn tools_open(app: AppHandle, tool_id: String) -> Result<(), String> {
 
 /// 把导出的源码 ZIP 写到用户选定的路径。
 ///
-/// 三道校验都是在防"页面借参数写到别处"：来源必须是主窗、扩展名必须是
-/// `.zip`、内容必须是合法 ZIP（`PK\x03\x04` 头 + 解出来的 1 MB 上限）。
-/// base64 上限是 1 MB 的 4/3 再加一点余量——先按 base64 长度挡一次，
+/// 写盘限额（`archive_write_bytes`）与导入的整包限额（`archive_bytes`）同为
+/// 32 MB——能导进来的就应该能导出去；曾经这里只有 1 MB，L3 工具的 `bin/`
+/// 一超限就报一句莫名的「无效的源码导出请求」。
+///
+/// 其余校验防的是"页面借参数写到别处"：来源必须是主窗、扩展名必须是
+/// `.zip`、内容必须是合法 ZIP（`PK\x03\x04` 头）。base64 先按长度挡一次，
 /// 免得为了拒绝一个 500 MB 的请求先把它解码进内存。
 #[tauri::command]
 pub fn tools_write_archive(
@@ -628,9 +631,17 @@ pub fn tools_write_archive(
     path: String,
     contents: String,
 ) -> Result<(), String> {
+    let cap = LIMITS.archive_write_bytes.div_ceil(3) * 4;
     // 先按 base64 长度挡一次：拒绝一个几百 MB 的请求时不该先把它解码进内存。
-    if window.label() != "main" || contents.len() > LIMITS.archive_write_bytes.div_ceil(3) * 4 {
+    // 超限要说出上限是多少——"无效的请求"会让作者以为自己的包坏了。
+    if window.label() != "main" {
         return Err("无效的源码导出请求。".into());
+    }
+    if contents.len() > cap {
+        return Err(format!(
+            "导出的 ZIP 超过 {} MB 上限，没有写出。可以把依赖目录（node_modules）从导出里排除后重试。",
+            LIMITS.archive_write_bytes / 1024 / 1024
+        ));
     }
     if !path.to_lowercase().ends_with(".zip") {
         return Err("请选择 .zip 文件名。".into());
@@ -638,7 +649,13 @@ pub fn tools_write_archive(
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(contents)
         .map_err(|_| "无效的 ZIP 数据。")?;
-    if bytes.len() > LIMITS.archive_write_bytes || !bytes.starts_with(b"PK\x03\x04") {
+    if bytes.len() > LIMITS.archive_write_bytes {
+        return Err(format!(
+            "导出的 ZIP 解压后超过 {} MB 上限，没有写出。",
+            LIMITS.archive_write_bytes / 1024 / 1024
+        ));
+    }
+    if !bytes.starts_with(b"PK\x03\x04") {
         return Err("无效的 ZIP 数据。".into());
     }
     std::fs::write(&path, bytes).map_err(|error| format!("导出失败：{error}"))

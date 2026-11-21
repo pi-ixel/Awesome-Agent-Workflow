@@ -135,6 +135,13 @@ export interface HostRuntime {
   /** Resolve a namespaced user data directory; both arguments are single safe segments. */
   userDataDir(namespace: string, directory: string): Promise<string>;
   /**
+   * 当前生效的「工具开发指导」正文：用户在指导窗口改过的副本优先，没有
+   * 副本返回随包默认。工具项目的 `AGENTS.md` 与技能目录的 `SKILL.md` 生成
+   * 时读它——改文档后 AI 读到的规范要跟着变。浏览器预览模式没有这条通道
+   * （可选能力，缺省时前端退回编译进二进制的模板）。
+   */
+  readGuideDoc?(): Promise<string>;
+  /**
    * 卸载清理：删除工具的项目目录与 `aawStore` 数据文件。
    *
    * 传进来的目录不会被无条件删除——宿主先确认其中的 manifest.json 属于该
@@ -354,6 +361,8 @@ export type SkillFiles = Pick<
   | "userDataDir" | "listDirNames" | "pathExists" | "copyDir" | "writeTextFile" | "toolPurge" | "moveToolPath"
   // 工具带依赖之后要落二进制（node_modules / 图片 / wasm）并整树导出
   | "writeBinaryFile" | "readBinaryFile" | "listToolFiles"
+  // 开发指导正文：用户改过的规范要贯通到 AGENTS.md 与技能目录
+  | "readGuideDoc"
 > & { readonly library?: NativeSkillLibrary };
 
 /**

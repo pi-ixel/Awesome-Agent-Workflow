@@ -241,6 +241,15 @@ export interface PersonalTool {
    */
   readonly installedContractVersion?: number;
   /**
+   * 这份清单是按第几代 schema 规则读进来的。
+   *
+   * 与 `installedContractVersion` 分工：契约管"宿主少了什么能力"（**运行
+   * 问题**，按当前能力表判）；这里管"校验规则收紧后清单还读不读得出"
+   * （**读取问题**，按安装时的规则回读）。旧数据缺字段时视为 1——
+   * schemaVersion 1 的规则从发布起冻结，不会误判（见 `readToolPackageV1`）。
+   */
+  readonly installedSchemaVersion?: number;
+  /**
    * 判定为不可用时的原因。
    *
    * 有它就说明条目还在、只是跑不了——界面要显示一张说明卡（可看原因、可卸载、

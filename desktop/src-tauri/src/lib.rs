@@ -207,6 +207,7 @@ pub fn run() {
             tools::guide::tools_guide_theme,
             tools::guide::tools_guide_close,
             tools::guide::tools_guide_open_url,
+            tools::guide::tools_guide_runtime_text,
             codeagent_history::agent_history_evidence,
             codeagent_delete::agent_delete_session,
             codeagent_credit::codeagent_credit_quota,

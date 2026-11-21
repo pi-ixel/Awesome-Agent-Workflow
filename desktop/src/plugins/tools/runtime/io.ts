@@ -24,6 +24,8 @@ export function hostToolIO(host: HostService): ToolProjectIO {
     ...(host.skills.listToolFiles
       ? { listFiles: (root, limit) => host.skills.listToolFiles!(root, limit) }
       : {}),
+    // 开发指导正文：桌面宿主才提供；缺省时 AGENTS.md 退回编译模板。
+    ...(host.skills.readGuideDoc ? { readGuideDoc: () => host.skills.readGuideDoc!() } : {}),
   };
 }
 
