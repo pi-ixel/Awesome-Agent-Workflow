@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 import type { Context } from "cordis";
 import { createTestDesktopRuntime } from "../../helpers/desktopRuntime.ts";
 import { parseToolPackage } from "../../../src/plugins/tools/runtime/package.ts";
+import { readTools } from "../../../src/plugins/tools/index.ts";
 import * as backupRuntime from "../../../src/plugins/tools/runtime/backup.ts";
 
 const makeTool = (id: string) => parseToolPackage(JSON.stringify({
@@ -161,4 +162,30 @@ it.each(["queue", "read"])("does not roll back another account when login change
     vi.restoreAllMocks();
     await runtime.shutdown();
   }
+});
+
+it("marks entries whose directory disappeared as broken without dropping them", () => {
+  // dev 期的真实事故：安装目录在仓库里，一次 git clean 就没了，但配置里
+  // 的安装记录还在——用户看到列表正常、点「打开」报一句只有路径的错误。
+  // 现在列表阶段就把它标成 broken 卡片（2026-11-22 用户反馈）。
+  const raw = [
+    { package: JSON.parse(JSON.stringify(makeTool("gone"))), dir: "E:/tools/gone", installedAt: 1, lastOpened: 2 },
+    { package: JSON.parse(JSON.stringify(makeTool("here"))), dir: "E:/tools/here" },
+    { package: JSON.parse(JSON.stringify(makeTool("nodir"))) },
+  ];
+  const { tools, broken } = readTools(raw, new Set(["E:/tools/gone"]));
+  expect(broken).toBe(1);
+  // 条目仍然在列表里：可读、可卸载，只是跑不了。
+  const gone = tools.find((entry) => entry.package.id === "gone");
+  expect(gone?.broken).toMatchObject({ kind: "missing-dir" });
+  expect(gone?.broken?.reason).toContain("E:/tools/gone");
+  expect(gone?.broken?.hint).toContain("重新安装");
+  expect(gone?.dir).toBe("E:/tools/gone");
+  // 目录没丢的、没记目录的，照常健康。
+  expect(tools.find((entry) => entry.package.id === "here")?.broken).toBeUndefined();
+  expect(tools.find((entry) => entry.package.id === "nodir")?.broken).toBeUndefined();
+  // 不传探测结果（默认空集）时一切照旧：老调用方行为不变。
+  const untouched = readTools(raw);
+  expect(untouched.broken).toBe(0);
+  expect(untouched.tools.every((entry) => entry.broken === undefined)).toBe(true);
 });

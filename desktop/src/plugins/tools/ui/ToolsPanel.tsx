@@ -446,7 +446,8 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
                       卡片，也不能让它无声消失。完整说明挂在 data-hint 上。 */}
                   <span className="tool-row-meta" data-hint={broken ? `${broken.reason}${broken.hint}` : undefined}>
                     {broken ? (
-                      <span className="tool-row-tag is-warn">不兼容</span>
+                      // 标签跟着坏法走：目录丢了说"不兼容"会把人往升级上带偏。
+                      <span className="tool-row-tag is-warn">{broken.kind === "missing-dir" ? "目录丢失" : "不兼容"}</span>
                     ) : (
                       <>
                         v{tool.version}

@@ -45,7 +45,16 @@ function placeholderPackage(raw: Record<string, unknown> | undefined, id: string
   };
 }
 
-function readTools(value: unknown): ReadToolsResult {
+/**
+ * 读配置里的安装条目。
+ *
+ * `missingDirs` 是启动阶段异步探测到的丢失目录（见 `apply()` 里的
+ * `auditMissingDirs`）：读配置是同步的，目录存在性是异步的，两层合成
+ * 一个 broken 标记。配置一变重放这份集合，标记不会因为订阅重置而丢。
+ *
+ * 导出是为了单测：目录丢失的标记是纯逻辑，不值得为它搭一整套假宿主。
+ */
+export function readTools(value: unknown, missingDirs: ReadonlySet<string> = new Set()): ReadToolsResult {
   if (!Array.isArray(value)) return { tools: [], broken: 0 };
   const tools: PersonalTool[] = [];
   const ids = new Set<string>();
@@ -60,6 +69,9 @@ function readTools(value: unknown): ReadToolsResult {
     // 安装时记录的 schema 代际；旧数据缺字段时视为 1（设计稿 §9 的迁移策略）。
     const installedSchemaVersion = finiteNumber(fields.installedSchemaVersion)
       ?? (typeof raw?.schemaVersion === "number" ? raw.schemaVersion : 1);
+    const recordedDir = text(fields.dir);
+    // 目录丢失是启动阶段异步探测的结果；读配置时先把已知丢目录的条目标出来。
+    const dirMissing = recordedDir !== undefined && missingDirs.has(recordedDir);
     let tool = readToolPackage(fields.package);
     if (!tool && installedSchemaVersion === 1 && raw) {
       // 读取问题与运行问题分开（设计稿 §6.4）：清单按**现行规则**读不出来时，
@@ -89,14 +101,23 @@ function readTools(value: unknown): ReadToolsResult {
     }
     if (ids.has(tool.id)) continue;
     ids.add(tool.id);
+    broken += dirMissing ? 1 : 0;
     tools.push({
       package: tool,
       settings: resolveToolSettings(tool, fields.settings),
       lastOpened: finiteNumber(fields.lastOpened),
       installedAt: finiteNumber(fields.installedAt),
       updatedAt: finiteNumber(fields.updatedAt),
-      dir: text(fields.dir),
+      dir: recordedDir,
       installedSchemaVersion,
+      ...(dirMissing ? {
+        broken: {
+          kind: "missing-dir",
+          reason: `工具目录已丢失（${recordedDir}）。它可能已被移动或删除。`,
+          hint: "把目录放回原位可继续使用；或在「⋯」里卸载这条记录后重新安装。",
+          at: Date.now(),
+        },
+      } : {}),
       ...(typeof fields.previousVersion === "string" ? { previousVersion: fields.previousVersion } : {}),
       ...(typeof fields.installedContractVersion === "number"
         ? { installedContractVersion: fields.installedContractVersion }
@@ -121,15 +142,50 @@ export function apply(ctx: Context): void {
     const user = account.getState().currentUser;
     return user ? `user:${user.id}` : undefined;
   };
+  // 目录丢失探测的结果。放在 readCurrent 之前声明：createStore 会立即调用
+  // 它，声明在后会撞 TDZ。
+  const missingDirs = new Set<string>();
   function readCurrent() {
     const key = userKey();
     if (!key) return [];
     try {
-      return readTools(scope.read()?.[key]).tools;
+      return readTools(scope.read()?.[key], missingDirs).tools;
     } catch (error) {
       if (error instanceof SyntaxError) return [];
       throw error;
     }
+  }
+
+  /**
+   * 目录存在性探测：安装记录里记着 dir，但目录可能被移动、删除（dev 期
+   * 尤其常见——安装目录在仓库里，一次 `git clean` 就没）。只读探测，结果
+   * 记进 `missingDirs` 并重放 store；**不写配置、不删条目**，与存量护栏
+   * 同一纪律：宁可显示一张跑不了的卡片，也不无声消失。
+   */
+  async function auditMissingDirs(): Promise<void> {
+    const key = userKey();
+    if (!key) return;
+    let raw: unknown;
+    try {
+      raw = scope.read()?.[key];
+    } catch {
+      return;
+    }
+    if (!Array.isArray(raw)) return;
+    const next = new Set<string>();
+    for (const entry of raw as readonly unknown[]) {
+      const dir = entry && typeof entry === "object"
+        ? text((entry as Record<string, unknown>).dir)
+        : undefined;
+      if (!dir || next.has(dir)) continue;
+      try {
+        if (!await io.pathExists(dir)) next.add(dir);
+      } catch { /* 探测失败不当成丢失，下次启动再试 */ }
+    }
+    if (next.size === missingDirs.size && [...next].every((dir) => missingDirs.has(dir))) return;
+    missingDirs.clear();
+    for (const dir of next) missingDirs.add(dir);
+    store.setState(readCurrent(), true);
   }
 
   const store = createStore<readonly PersonalTool[]>(readCurrent);
@@ -240,10 +296,13 @@ export function apply(ctx: Context): void {
 
   ctx.effect(() => {
     auditBroken();
+    void auditMissingDirs();
     const offState = account.subscribe((next, previous) => {
       if (next.currentUser?.id !== previous.currentUser?.id) {
+        missingDirs.clear();
         store.setState(readCurrent(), true);
         auditBroken();
+        void auditMissingDirs();
       }
     });
     const offConfig = scope.subscribe(() => store.setState(readCurrent(), true));
