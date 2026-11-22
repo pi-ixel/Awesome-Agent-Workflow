@@ -274,6 +274,12 @@ export function apply(ctx: Context): void {
           tool: entry.package,
           files: materializeToolFiles(entry.package),
         });
+        // 写副本是异步的：期间换了账号就把这份丢掉。留着它没有人会引用（这个账号
+        // 的配置已经不在这里了），下次同账号启动还会再落一份，白占一份体积。
+        if (owner() !== current) {
+          await staged.discard();
+          return;
+        }
         repairs.push({ id: entry.package.id, dir: staged.dir });
       } catch { /* 下次启动再试；坏标记会继续告诉用户怎么恢复 */ }
     }
