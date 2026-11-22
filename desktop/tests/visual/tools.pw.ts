@@ -83,7 +83,8 @@ test("long source dir never causes a horizontal scrollbar in management", async 
   await page.goto("/tests/visual/toolsFixture.html");
   await selectToolAction(page, "JSON 格式化", "管理");
   await page.getByRole("button", { name: /源码与开发/ }).click();
-  await expect(page.locator(".mg-source-dir .tool-path code")).toHaveAttribute("data-hint", /json-formatter/);
+  await expect(page.locator(".mg-source-dir .tool-path code")).toHaveAttribute("data-hint", /\/tools\/projects\/.*\/json-formatter$/);
+  await expect(page.locator(".mg-source-dir").getByRole("button", { name: "复制路径" })).toBeVisible();
   expect(await page.locator(".management-scroll").evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: "node_modules/.cache/tools-management-source-360.png" });
@@ -152,8 +153,10 @@ test("loading example tools fills the library", async ({ page }) => {
   await page.goto("/tests/visual/toolsFixture.html?empty");
   await page.getByRole("button", { name: "载入示例工具", exact: true }).click();
   const rows = page.getByRole("list", { name: "已安装工具" });
+  await expect(rows.getByRole("listitem")).toHaveCount(2);
   await expect(rows.getByText("JSON 格式化")).toBeVisible();
   await expect(rows.getByText("随手记")).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("已载入 2 个示例工具");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: "node_modules/.cache/tools-examples-1100.png" });
 });

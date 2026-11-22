@@ -21,8 +21,9 @@ const entries: PersonalTool[] = params.has("empty") ? [] : [
     { id: "sort", label: "排序方式", type: "select", default: "original", options: [{ value: "original", label: "保持原序" }, { value: "alpha", label: "按名称排序" }] },
     { id: "copy", label: "处理后自动复制", type: "boolean", default: false },
   ] },
-    // 真实安装都会记下来源目录。特意用一条长路径：它曾把管理页撑出横向滚动条。
-    dir: "C:/Users/14993/AppData/Roaming/tools/projects/anonymous/json-formatter" },
+    // 从开发项目安装时，管理页显示开发来源，工具窗口使用独立运行副本。
+    dir: "E:/AAW/tools/installed/visual-owner/json-formatter/versions/1.0.0",
+    sourceDir: "E:/AAW/tools/projects/visual-owner/long-source-directory-without-any-break-points/json-formatter" },
   { package: { ...sampleTool, id: "legacy-tool", name: "未声明设置的工具", settingsSchema: [] } },
   // 再多几个：紧凑列表的价值就在于"一屏能看七八个"，只有三个工具看不出密度。
   ...["Markdown 导出", "CSV 拆分", "时间戳转换", "正则测试", "颜色取值", "URL 解析"].map((name, at) => ({
@@ -66,7 +67,7 @@ const otherProjects = [
   { dir: "E:/AAW/tools/projects/u1/markdown-export", dirName: "markdown-export", id: "markdown-export", name: "Markdown 导出", version: "0.3.1", hasHtml: true, network: false },
   { dir: "E:/AAW/tools/projects/u1/timestamp", dirName: "timestamp", id: "timestamp", name: "时间戳转换", version: "", hasHtml: false, network: false },
 ];
-const workshop = fakeWorkshop(params.has("stalled") ? {
+const workshopFixture = fakeWorkshop(params.has("stalled") ? {
   project: { dir: jsonTable.dir, id: jsonTable.id, name: jsonTable.name },
   stalled: true,
   note: { text: "还有 2 个问题，AI 试了 3 轮也没修好。", error: true },
@@ -97,6 +98,11 @@ const workshop = fakeWorkshop(params.has("stalled") ? {
   projects: [...otherProjects],
   check: null,
 } : {});
+const workshop = {
+  ...workshopFixture,
+  // 工具中心通过工坊安装示例。夹具让该入口更新真实渲染所用的服务状态。
+  installArchive: (tool) => service.install(tool),
+} satisfies typeof workshopFixture;
 createRoot(document.getElementById("root")!).render(
   // 和真实应用一样挂进外壳里（`ToolsPanelSurface` 就是 workbench.tsx 里那个）。
   // 以前夹具直接把面板塞进 <main>：父级是 block，面板必然满宽，于是「面板在
