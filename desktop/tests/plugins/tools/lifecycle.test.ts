@@ -20,6 +20,7 @@ import { createStore } from "zustand";
 import { createTestDesktopRuntime } from "../../helpers/desktopRuntime.ts";
 import { createDemoHost } from "../../../src/plugins/host/adapters/host.ts";
 import type { DemoHost } from "../../../src/plugins/host/adapters/host.ts";
+import { desktopManagedStorage } from "../../../src/plugins/host/service.ts";
 import type { ProjectService } from "../../../src/plugins/project/service.ts";
 import { parseToolPackage } from "../../../src/plugins/tools/runtime/package.ts";
 import { runtimeFiles } from "../../../src/plugins/tools/runtime/project.ts";
@@ -525,7 +526,7 @@ describe("工具模块的状态转换", () => {
     expect(await app.exists(joinPath(backupRoot, "notes", "previous.json"))).toBe(true);
 
     // 用户点「卸载」并勾上"同时删除项目目录与工具数据"：先删记录，再清磁盘。
-    app.tools().remove("notes");
+    await app.tools().remove("notes");
     const note = await workshop.purge("notes");
     expect(note.error).toBeUndefined();
     expect(note.text).toContain("已删除");
@@ -725,7 +726,7 @@ describe("工具模块的状态转换（长序列与并发）", () => {
     await expectConsistent(app);
 
     // 卸载时钟：记录、版本目录、文件全清；记事的当前目录与上一版目录都还在。
-    app.tools().remove("clock");
+    await app.tools().remove("clock");
     const note = await workshop.purge("clock");
     expect(note.error).toBeUndefined();
     expect(app.tools().state.getState().map((entry) => entry.package.id)).toEqual(["notes"]);
@@ -775,7 +776,7 @@ describe("工具模块的状态转换（长序列与并发）", () => {
     // 不回退成"只有重启才能清"：又崩一次，这次直接卸载，也要清干净。
     const again = joinPath(installedRoot, "notes", "versions", ".staging-again");
     await app.backend.writeTextFile(joinPath(again, "index.html"), "<p>又写了一半</p>");
-    app.tools().remove("notes");
+    await app.tools().remove("notes");
     const note = await app.workshopOf().purge("notes");
     expect(note.error).toBeUndefined();
     expect(await app.versionDirs("notes")).toEqual([]);
@@ -794,7 +795,7 @@ describe("工具模块的状态转换（长序列与并发）", () => {
     expect(await app.exists(joinPath(backupRoot, "notes", "previous.json"))).toBe(true);
 
     // 卸载：记录、版本目录、上一版清单一起清掉。
-    app.tools().remove("notes");
+    await app.tools().remove("notes");
     expect((await app.workshopOf().purge("notes")).error).toBeUndefined();
     expect(await app.exists(joinPath(backupRoot, "notes", "previous.json"))).toBe(false);
 
@@ -1006,7 +1007,7 @@ describe("工具模块的状态转换（跨进程与降级）", () => {
     expect(app.tools().state.getState()[0]?.broken?.kind).toBe("missing-dir");
 
     // 用户看到"目录丢失"的说明卡，选择卸载：不能因为目录已经不在就报错。
-    app.tools().remove("notes");
+    await app.tools().remove("notes");
     const note = await app.workshopOf().purge("notes");
     expect(note.error).toBeUndefined();
     expect(app.tools().state.getState()).toEqual([]);
@@ -1044,7 +1045,7 @@ describe("工具模块的状态转换（并发与降级）", () => {
 
     // 这时候用户点「卸载」并勾上"同时删除文件"：先删记录，再清磁盘。
     // 清理会排在这次安装后面——两个动作同时改同一个工具的目录，必须一前一后。
-    app.tools().remove("notes");
+    await app.tools().remove("notes");
     const purging = app.workshopOf().purge("notes");
 
     // 放行那次写盘：安装会继续走完自己的提交，然后才轮到卸载。
@@ -1105,7 +1106,7 @@ describe("工具模块的状态转换（并发与降级）", () => {
     expect(app.tools().state.getState()[0]?.broken?.kind).toBe("missing-dir");
 
     // 用户卸载（勾"同时删除文件"）后重新导入同一个版本。
-    app.tools().remove("notes");
+    await app.tools().remove("notes");
     const note = await app.workshopOf().purge("notes");
     expect(note.error).toBeUndefined();
     await app.workshopOf().installArchive(tool, files);
@@ -1724,5 +1725,55 @@ describe("工具模块的状态转换（历史脏数据的降级）", () => {
     await app.restart();
     expect(app.tools().state.getState()[0]?.package.version).toBe("1.0.0");
     await expectConsistent(app);
+  });
+});
+
+/**
+ * 第七轮：配置落盘失败。
+ *
+ * 前面几轮的"失败"都发生在**写文件**那一步（写一半 → 暂存目录丢掉）。这一轮是
+ * 另一种失败：文件全写好了，写**配置**的时候磁盘满 / 文件被占。`setItem` 只是把
+ * 值塞进 in-flight 队列，真正的写是另一次异步动作，所以 `install()` 返回不代表
+ * 配置已经在磁盘上。不处理的话，面板报"已更新"、重启却回到旧版，而新版目录已经
+ * 没人指向，启动回收顺手删掉——更新无声消失。
+ */
+describe("工具模块的状态转换（第七轮：配置落盘失败）", () => {
+  function breakDisk(reason: string) {
+    // 只有 native 宿主才有"配置落盘"这一步；测试跑在浏览器宿主上，要显式打开。
+    vi.spyOn(desktopManagedStorage, "available").mockReturnValue(true);
+    vi.spyOn(desktopManagedStorage, "flush").mockResolvedValue(undefined);
+    vi.spyOn(desktopManagedStorage, "configurationError").mockReturnValue(reason);
+  }
+
+  it("更新时配置没写进去：整体算没生效，三层仍停在旧版本，孤儿副本当场收掉", async () => {
+    const app = await device();
+    const workshop = app.workshopOf();
+    const v1 = packageOf("1.0.0", "<p>v1</p>");
+    await workshop.installArchive(v1, runtimeFiles(v1));
+
+    breakDisk("磁盘已满");
+    const v2 = packageOf("1.1.0", "<p>v2</p>");
+    await expect(workshop.installArchive(v2, runtimeFiles(v2))).rejects.toThrow("没有保存成功");
+
+    // 界面、配置、磁盘三层都还在 v1：不能出现"卡片说 v2、目录里只有 v1"。
+    expect(app.tools().state.getState()[0]?.package.version).toBe("1.0.0");
+    expect(app.savedEntries()[0]?.package.version).toBe("1.0.0");
+    await expectConsistent(app);
+    // 写好了却没人指向的那份新副本当场收掉——"磁盘满导致的失败"不该再多占几十 MB。
+    expect(await app.versionDirs("notes")).toEqual(["1.0.0"]);
+  });
+
+  it("卸载时配置没写进去：记录放回去并说清楚，不会出现「卡片没了、盘上还在」", async () => {
+    const app = await device();
+    const tool = packageOf("1.0.0", "<p>页面</p>");
+    await app.workshopOf().installArchive(tool, runtimeFiles(tool));
+
+    breakDisk("配置文件被占用");
+    const note = await app.workshopOf().purge("notes");
+    expect(note.error).toBe(true);
+    expect(note.text).toContain("安装记录没删掉");
+    // 记录还在（文件已经删了，重启后再点一次即可）——绝不能无声消失。
+    expect(app.tools().state.getState()).toHaveLength(1);
+    expect(app.savedEntries()).toHaveLength(1);
   });
 });
