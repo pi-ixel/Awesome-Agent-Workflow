@@ -294,8 +294,12 @@ async fn verify_profile_lifecycle(
         "reopen" => {
             let a = open_session(app, A, url).await?;
             let b = open_session(app, B, url).await?;
-            check_markers(&a, Some(1)).await?;
-            check_markers(&b, Some(2)).await?;
+            check_markers(&a, Some(1))
+                .await
+                .map_err(|error| format!("restart A: {error}"))?;
+            check_markers(&b, Some(2))
+                .await
+                .map_err(|error| format!("restart B: {error}"))?;
             let a_profile = snapshot(&a).await?;
             let b_profile = snapshot(&b).await?;
             if a_profile.profile != session_partition(A)
@@ -329,10 +333,22 @@ async fn verify_profile_lifecycle(
 
             super::data::browser_clear_site_data(app.clone(), app.state(), A.into(), url.into())
                 .await?;
-            check_markers(&a, None).await?;
-            check_markers(&b, Some(2)).await?;
+            let (_, after_site_clear) = open_tab(app, A, url).await?;
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                check_markers(&b, Some(2))
+                    .await
+                    .map_err(|error| format!("site clear B: {error}"))?;
+                match check_markers(&after_site_clear, None).await {
+                    Ok(()) => break,
+                    Err(_) if tokio::time::Instant::now() < deadline => {
+                        tokio::time::sleep(Duration::from_millis(350)).await;
+                    }
+                    Err(error) => return Err(format!("site clear A: {error}")),
+                }
+            }
 
-            set_markers(&a, 1).await?;
+            set_markers(&after_site_clear, 1).await?;
             close_session(app, A).await?;
             super::data::browser_clear_session_data(app.clone(), app.state(), A.into()).await?;
             let (_, cleared) = open_tab(app, A, url).await?;
@@ -371,7 +387,9 @@ async fn check_markers(view: &Webview, expected: Option<usize>) -> Result<(), St
     .await?;
     let expected = expected.map(|v| v.to_string());
     if values != json!([expected, expected, expected]) {
-        return Err(format!("session data not isolated: {values}"));
+        return Err(format!(
+            "expected session markers {expected:?}, observed {values}"
+        ));
     }
     Ok(())
 }

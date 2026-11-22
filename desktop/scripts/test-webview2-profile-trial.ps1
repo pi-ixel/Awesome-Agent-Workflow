@@ -35,10 +35,19 @@ function Invoke-WebViewCase {
 }
 
 $acceptance = Join-Path $data 'lifecycle'
-Invoke-WebViewCase 'legacy' 'legacy' $acceptance $false 3 | Out-Null
-Invoke-WebViewCase 'seed' 'seed' $acceptance $true 3 | Out-Null
-Invoke-WebViewCase 'reopen' 'reopen' $acceptance $false 3 | Out-Null
-Invoke-WebViewCase 'reject' 'reject' (Join-Path $data 'rejected') $true 1 | Out-Null
+$acceptanceErrors = @()
+try {
+    Invoke-WebViewCase 'legacy' 'legacy' $acceptance $false 3 | Out-Null
+    Invoke-WebViewCase 'seed' 'seed' $acceptance $true 3 | Out-Null
+    Invoke-WebViewCase 'reopen' 'reopen' $acceptance $false 3 | Out-Null
+} catch {
+    $acceptanceErrors += $_.Exception.Message
+}
+try {
+    Invoke-WebViewCase 'reject' 'reject' (Join-Path $data 'rejected') $true 1 | Out-Null
+} catch {
+    $acceptanceErrors += $_.Exception.Message
+}
 
 $rows = @(
     foreach ($round in 1..3) {
@@ -86,4 +95,8 @@ $summary | Format-Table -AutoSize
 ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
 if ($summary[0].afterProcesses -gt $summary[0].beforeProcesses -or $summary[0].changePct -gt 10 -or $summary[1].changePct -gt -30) {
     throw 'WebView2 memory acceptance thresholds were not met'
+}
+
+if ($acceptanceErrors.Count) {
+    throw ($acceptanceErrors -join ' | ')
 }
