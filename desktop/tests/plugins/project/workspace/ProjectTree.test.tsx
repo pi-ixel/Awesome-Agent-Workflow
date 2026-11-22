@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ProjectTree } from "../../../../src/plugins/project/ui/ProjectTree.tsx";
 import { useProject } from "../../../../src/plugins/project/ui/bindings/projectView.tsx";
 import type { ProjectExtension } from "../../../../src/plugins/project/service.ts";
+import { setRecentExclusions } from "../../../../src/plugins/project/workspace/workspaceStore.ts";
 import { createTestWorkspace } from "../../../helpers/workspace.ts";
 const useWorkspaceStore = createTestWorkspace();
 
@@ -687,6 +688,97 @@ describe("异步列表状态", () => {
     expect(screen.getByText("获取会话失败：连接超时")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
     expect(screen.queryByText("暂无历史会话")).not.toBeInTheDocument();
+  });
+});
+
+describe("ProjectTree 工具项目分区（Z-21）", () => {
+  const TOOL_ROOT = "C:/users/u/appdata/roaming/tools/projects";
+  const TOOL = `${TOOL_ROOT}/owner-1/quick-notes`;
+  const TOOL_OTHER = `${TOOL_ROOT}/owner-1/json-formatter`;
+
+  /** 工具项目目录被排除出最近列表；目录里的会话按路径回填进目录。 */
+  function seedToolSessions(): void {
+    setRecentExclusions([TOOL_ROOT]);
+    useWorkspaceStore.setState({
+      recentWorkspaces: [{ path: PATH, lastOpenedAt: "2026-10-20T10:00:00Z" }],
+      pinnedPaths: [],
+    });
+    indexes.catalog.setState({
+      sessionsByPath: {
+        [PATH]: [{ id: "s-1", title: "项目会话", updatedAt: null }],
+        [TOOL]: [
+          { id: "t-1", title: "工具会话", updatedAt: "2026-10-22T10:00:00Z" },
+        ],
+        [TOOL_OTHER]: [
+          { id: "t-2", title: "旧工具会话", updatedAt: "2026-10-21T10:00:00Z" },
+        ],
+      },
+    });
+  }
+
+  it("有会话记录的排除路径在「工具项目」分区渲染，会话可点；不进「项目」分区", () => {
+    seedToolSessions();
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
+    const section = screen.getByLabelText("工具项目");
+    expect(getByHint(section, TOOL)).toBeInTheDocument();
+    expect(getByHint(section, TOOL_OTHER)).toBeInTheDocument();
+    expect(
+      within(section).getByRole("button", { name: "工具会话" }),
+    ).toBeEnabled();
+    // 正常项目仍在「项目」分区；工具路径不在那里重复出现
+    expect(getByHint(screen.getByLabelText("项目"), PATH)).toBeInTheDocument();
+    expect(queryByHint(screen.getByLabelText("项目"), TOOL)).not.toBeInTheDocument();
+    setRecentExclusions([]);
+  });
+
+  it("排序 = 最新会话 updatedAt 倒序（刚动过的工具在前）", () => {
+    seedToolSessions();
+    const { container } = render(<ProjectTree />, { wrapper: fixture.Wrapper });
+    const rows = getAllByHint(container.querySelector('[aria-label="工具项目"]')!, /quick-notes|json-formatter/)
+      .map((el) => el.getAttribute("data-hint"));
+    expect(rows).toEqual([TOOL, TOOL_OTHER]);
+    setRecentExclusions([]);
+  });
+
+  it("没有被排除的会话路径时分区不渲染", () => {
+    setRecentExclusions([TOOL_ROOT]);
+    useWorkspaceStore.setState({
+      recentWorkspaces: [{ path: PATH, lastOpenedAt: "2026-10-20T10:00:00Z" }],
+    });
+    indexes.catalog.setState({
+      sessionsByPath: { [PATH]: [{ id: "s-1", title: "项目会话", updatedAt: null }] },
+    });
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
+    expect(screen.queryByLabelText("工具项目")).not.toBeInTheDocument();
+    setRecentExclusions([]);
+  });
+
+  it("排除前缀未注册（启动早期）时按普通路径处理，不出分区", () => {
+    useWorkspaceStore.setState({ recentWorkspaces: [] });
+    indexes.catalog.setState({
+      sessionsByPath: {
+        [TOOL]: [{ id: "t-1", title: "工具会话", updatedAt: null }],
+      },
+    });
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
+    expect(screen.queryByLabelText("工具项目")).not.toBeInTheDocument();
+    setRecentExclusions([]);
+  });
+
+  it("只有工具会话、没有普通项目时，不再显示「还没有项目」指引", () => {
+    setRecentExclusions([TOOL_ROOT]);
+    useWorkspaceStore.setState({ recentWorkspaces: [], pinnedPaths: [] });
+    indexes.catalog.setState({
+      sessionsByPath: {
+        [TOOL]: [{ id: "t-1", title: "工具会话", updatedAt: null }],
+      },
+    });
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
+    expect(screen.getByLabelText("工具项目")).toBeInTheDocument();
+    expect(
+      screen.queryByText("还没有项目，点分组标题行的 ＋ 添加"),
+    ).not.toBeInTheDocument();
+    setRecentExclusions([]);
   });
 });
 

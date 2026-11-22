@@ -57,6 +57,18 @@ function excludedFromRecent(path: string): boolean {
   return recentExclusions.some((prefix) => key === prefix || key.startsWith(`${prefix}/`));
 }
 
+/**
+ * 「不进入最近项目」的判定（导出给侧栏树用）。
+ *
+ * 工具项目的目录被排除出最近列表后，它们上面的会话在项目树里就没有了
+ * 落点——用户点「继续开发」新开的会话在侧栏完全不可见，只能看到时间上
+ * 巧合的其他项目会话行，点了就切进错误的会话。树据此把「有会话记录且
+ * 被排除」的路径渲染成「工具项目」分区，会话重新可见（Z-21）。
+ */
+export function isExcludedFromRecent(path: string): boolean {
+  return excludedFromRecent(path);
+}
+
 /** localStorage 持久化键（带版本号，形状变更时升版本）。 */
 const STORAGE_KEY = "aaw-desktop/workspace/v1";
 

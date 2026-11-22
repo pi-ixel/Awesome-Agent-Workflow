@@ -7,6 +7,7 @@ import { TextLink } from "../../../shared/ui/TextLink.tsx";
 import { TreeBranch, treeChevronClass } from "../../../shared/ui/TreeMotion.tsx";
 import { useSessionValue } from "./bindings/conversationView.ts";
 import { useWorkspaceCommands, useWorkspaceValue } from "./bindings/workspaceView.ts";
+import { isExcludedFromRecent } from "../workspace/workspaceStore.ts";
 import { useProject, useProjectNavigation, useProjectPageValue, useProjectSidebarValue, useProjectExtension } from "./bindings/projectView.tsx";
 import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
 import { parseSessionPinKey } from "../sessions/sessionPin.ts";
@@ -1324,6 +1325,32 @@ function ProjectsView({
   );
   const knownProjects = [...pinned, ...recentOnly];
 
+  /**
+   * 工具项目分区（Z-21）：被「不进入最近项目」排除、但**已有会话记录**的
+   * 路径。工具项目目录被排除出最近列表（防 AI 生成物挤占 8 条位），于是
+   * 「继续开发 / 开始做」新开的会话在项目树里没有落点——用户只能看到
+   * 时间上巧合的其他项目会话行，点进去是错误的会话，再问 AI 当前目录
+   * 才发现对不上。这里把这类路径渲染成节点：数据来自会话目录（catalog
+   * 已经按路径持有列表），不新增管道、不触发额外预加载。会话在「继续
+   * 开发」的那一刻由运行时回填，分区随之出现；重启后列表按需重建。
+   *
+   * 排序 = 各路径最新会话的 updatedAt 倒序（刚动过的工具排前面，与
+   * 工具中心列表的「最近动过在前」同一取向）。已在置顶 / 最近里出现的
+   * 路径不重复渲染（理论上不会发生——排除路径进不了最近列表，防御
+   * 自定义根目录恰好嵌在排除前缀下的配置）。
+   */
+  const knownKeys = new Set(knownProjects.map((entry) => pathKey(entry.path)));
+  const latestUpdatedAt = (path: string): string => {
+    const list = sessionsByPath[path] ?? [];
+    return list.reduce(
+      (acc, entry) => ((entry.updatedAt ?? "") > acc ? (entry.updatedAt ?? "") : acc),
+      "",
+    );
+  };
+  const toolProjectPaths = Object.keys(sessionsByPath)
+    .filter((path) => isExcludedFromRecent(path) && !knownKeys.has(pathKey(path)))
+    .sort((left, right) => latestUpdatedAt(right).localeCompare(latestUpdatedAt(left)));
+
   function renderProject(path: string, isPinned: boolean): React.ReactNode {
     const sessions =
       sessionsByPath[path] ??
@@ -1395,8 +1422,15 @@ function ProjectsView({
           : recentOnly.map((entry) => renderProject(entry.path, false))}
       </TreeSection>
 
+      {/* 工具项目分区：只在有工具会话可显示时渲染（空分区不存在） */}
+      {toolProjectPaths.length > 0 ? (
+        <TreeSection title="工具项目">
+          {toolProjectPaths.map((path) => renderProject(path, false))}
+        </TreeSection>
+      ) : null}
+
       {/* 冷启动空态：分组头自带的【+】是唯一添加入口，树体补一行指引 */}
-      {knownProjects.length === 0 ? (
+      {knownProjects.length === 0 && toolProjectPaths.length === 0 ? (
         <p className="px-2.5 py-2 text-ui-base leading-relaxed text-ink-subtlest">
           还没有项目，点分组标题行的 ＋ 添加
         </p>
