@@ -378,6 +378,8 @@ pub struct ToolPurgeReport {
     pub removed_dirs: Vec<String>,
     pub skipped_dirs: Vec<String>,
     pub removed_data: bool,
+    /// `backups/<账号>/<id>` 是否删掉了（只含一份 `previous.json`）。
+    pub removed_backup: bool,
 }
 
 /// 判断一个目录是不是某工具的项目目录：必须有 manifest.json 且其中的 id 与
@@ -419,6 +421,7 @@ pub fn tool_purge(
         removed_dirs: Vec::new(),
         skipped_dirs: Vec::new(),
         removed_data: false,
+        removed_backup: false,
     };
     for raw in project_dirs {
         let dir = std::path::Path::new(&raw);
@@ -441,6 +444,20 @@ pub fn tool_purge(
                 }
             }
         }
+        // 上一版清单（`backups/<账号>/<id>/previous.json`）在卸载后不会再被
+        // 任何记录引用。以前它永远留在盘上：用户看不到，也没有入口删。
+        //
+        // 分区由 location 按账号解析——以前这类路径一律手拼，工具目录迁到别的
+        // 盘（或账号家在自定义位置）之后就会删错地方。只删整个 `<id>` 目录：
+        // 那下面按设计只有这一份清单。
+        if let Ok(data) = host.data_root() {
+            if let Ok(base) = crate::tools::location::tool_partition(&data, &owner, "backups") {
+                let dir = base.join(&tool_id);
+                if dir.is_dir() {
+                    report.removed_backup = std::fs::remove_dir_all(&dir).is_ok();
+                }
+            }
+        }
     }
     // 卸载后运行目录登记不再有意义：清掉，避免下次重装同名工具时协议层
     // 还查到指向旧目录的悬空项。
@@ -448,6 +465,158 @@ pub fn tool_purge(
         host.clear_runtime_dir(&tool_id);
     }
     Ok(report)
+}
+
+/// 回收孤儿版本副本的结果。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolPruneReport {
+    /// 真删掉了的目录。
+    pub removed: Vec<String>,
+    /// 被记录引用或正被窗口/进程使用，因此保留的目录。
+    pub kept: Vec<String>,
+    /// 该删但没删掉（被占用、权限不足）。下次还会再试。
+    pub skipped: Vec<String>,
+}
+
+/// 回收一个工具的孤儿版本副本。
+///
+/// 「孤儿」= `installed/<账号>/<id>/versions/` 下，既没有被安装记录的
+/// `dir` / `previousDir` / `sourceDir` 引用，也没有窗口或进程正在用的目录。
+///
+/// 为什么要由宿主判断：只有这里同时看得到两样东西——preferences 里的安装
+/// 记录，和窗口/进程表。放前端算，等于让一个看不见窗口的进程决定"能不能
+/// 删"，再由宿主照单执行。删除不可逆，判断和动作必须在同一侧、同一时刻。
+///
+/// 边界刻意收窄：只扫 `versions/` 的直接子目录（别处的路径一概不碰）；
+/// 跳过 `.staging-*`（那是"安装失败清理"自己的活）与符号链接；记录读不出来
+/// 时一个都不删——"解析失败"不等于"没人引用"。
+#[tauri::command]
+pub fn tool_prune_versions(
+    app: tauri::AppHandle,
+    tool_id: String,
+    owner: String,
+) -> Result<ToolPruneReport, String> {
+    use std::path::PathBuf;
+    fn valid_id(part: &str) -> bool {
+        !part.is_empty()
+            && part.len() <= 64
+            && part
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || c == b'.' || c == b'-' || c == b'_')
+    }
+    if !valid_id(&tool_id) || !valid_id(&owner) {
+        return Err("工具 ID 或账号标识不合法".into());
+    }
+    let host = tauri::Manager::try_state::<crate::tools::ToolsHost>(&app)
+        .ok_or("工具宿主未初始化。")?;
+    let store = host.store()?;
+    // 路径按传入的 owner 拼。它必须就是宿主当前的账号——否则会在换账号那一
+    // 瞬间，以新账号的身份去扫另一个人名下的目录。
+    if store.owner()? != owner {
+        return Err("账号已切换，已取消清理。".into());
+    }
+    let data = host.data_root()?;
+    let versions = crate::tools::location::tool_partition(&data, &owner, "installed")?
+        .join(&tool_id)
+        .join("versions");
+    let mut keep: Vec<PathBuf> = referenced_version_dirs(&store, &owner, &tool_id)?;
+    keep.extend(host.busy_dirs(&tool_id));
+    Ok(prune_versions_at(&versions, &keep))
+}
+
+/// 回收动作本身：只认 `versions/` 的直接子目录，`keep` 里有的原样保留。
+///
+/// 与命令分开是为了能单测。"不删谁"比"IPC 走通没有"更容易写错，而
+/// `AppHandle` 在单测里造不出来。
+fn prune_versions_at(
+    versions: &std::path::Path,
+    keep: &[std::path::PathBuf],
+) -> ToolPruneReport {
+    let mut report = ToolPruneReport::default();
+    if !versions.is_dir() {
+        return report;
+    }
+    let Ok(entries) = std::fs::read_dir(versions) else {
+        return report;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(kind) = entry.file_type() else { continue };
+        // 符号链接 / junction 不碰：Windows 上删链接会连带删掉它指向的地方。
+        if !kind.is_dir() || kind.is_symlink() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        // 暂存目录归 `tool_drop_staging`，这里不插手——两条通道各自清各自的。
+        if name.starts_with(".staging-") {
+            continue;
+        }
+        if keep.iter().any(|dir| same_path(dir, &path)) {
+            report.kept.push(crate::panel_files::display_path(&path));
+            continue;
+        }
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => report.removed.push(crate::panel_files::display_path(&path)),
+            // 被占用（窗口正开着它、杀毒还没放手）就留给下次：回收是后台
+            // 清洁，不该让安装结果因为这一步变成失败。
+            Err(_) => report.skipped.push(crate::panel_files::display_path(&path)),
+        }
+    }
+    report
+}
+
+/// 安装记录里属于这个工具的三个目录：当前运行副本、上一版副本、开发来源。
+///
+/// 三个都要排除。`sourceDir` 尤其不能漏：它可能被用户指到 `versions/` 下的
+/// 某一版（"就把这份当源码改"），删了等于删他的工作副本。
+fn referenced_version_dirs(
+    store: &crate::tools::store::ToolStore,
+    owner: &str,
+    tool_id: &str,
+) -> Result<Vec<std::path::PathBuf>, String> {
+    let preferences = store.preferences()?;
+    let library = match preferences.get("aaw-desktop.personal-tools.v1") {
+        // 正常形态是 JSON 字符串（前端 stringify 后写进去），老版本也可能是对象。
+        Some(serde_json::Value::String(text)) => serde_json::from_str(text)
+            .map_err(|error| format!("工具清单读不出来：{error}"))?,
+        Some(other) => other.clone(),
+        // 没有任何工具记录：这个 id 名下的目录确实没人引用。
+        None => return Ok(Vec::new()),
+    };
+    let Some(items) = library
+        .get(format!("user:{owner}"))
+        .and_then(serde_json::Value::as_array)
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(entry) = items.iter().find(|item| {
+        item.pointer("/package/id").and_then(serde_json::Value::as_str) == Some(tool_id)
+    }) else {
+        return Ok(Vec::new());
+    };
+    let mut dirs = Vec::new();
+    for field in ["dir", "previousDir", "sourceDir"] {
+        if let Some(path) = entry.get(field).and_then(serde_json::Value::as_str) {
+            dirs.push(std::path::PathBuf::from(path));
+        }
+    }
+    Ok(dirs)
+}
+
+/// 两个路径是不是同一个目录。Windows 上大小写不敏感，一边还可能是短路径。
+fn same_path(left: &std::path::Path, right: &std::path::Path) -> bool {
+    let normalize = |path: &std::path::Path| {
+        std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    };
+    let (left, right) = (normalize(left), normalize(right));
+    if cfg!(windows) {
+        left.to_string_lossy()
+            .as_ref()
+            .eq_ignore_ascii_case(right.to_string_lossy().as_ref())
+    } else {
+        left == right
+    }
 }
 
 /// 移动一个文件或目录（改名、换位置都用它）。
@@ -800,6 +969,103 @@ mod tests {
         // 两个目录必须同根：由同一个配置根拼出，不能各自解析
         let root = skills.trim_end_matches("/skills");
         assert_eq!(sessions.trim_end_matches("/sessions"), root);
+    }
+
+    // ── 孤儿版本副本回收 ────────────────────────────────────────────────
+    //
+    // 这组测试守的是"删错东西"：回收是不可逆的，规则写宽一次，用户就没有
+    // 那一版了。所以每条都明确断言"谁必须还在"。
+
+    fn make_version(versions: &std::path::Path, name: &str) -> std::path::PathBuf {
+        let dir = versions.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("manifest.json"), "{}").unwrap();
+        dir
+    }
+
+    #[test]
+    fn prune_keeps_referenced_and_running_dirs() {
+        let root = temp_dir("prune-keep");
+        let versions = root.join("versions");
+        // 当前运行副本 / 上一版副本 / 开发来源 / 正在被窗口加载的那一版
+        let current = make_version(&versions, "1.2.0");
+        let previous = make_version(&versions, "1.1.0");
+        let source = make_version(&versions, "dev-snapshot");
+        let open_in_window = make_version(&versions, "1.1.5");
+        let orphan = make_version(&versions, "1.0.0");
+        let staging = make_version(&versions, ".staging-crash");
+
+        let keep = vec![
+            current.clone(),
+            previous.clone(),
+            source.clone(),
+            open_in_window.clone(),
+        ];
+        let report = prune_versions_at(&versions, &keep);
+
+        assert!(current.is_dir() && previous.is_dir() && source.is_dir());
+        assert!(open_in_window.is_dir(), "窗口还开着这一版，不能删");
+        assert!(!orphan.exists(), "没有任何记录指向它，应当回收");
+        assert!(staging.is_dir(), "暂存目录归另一条通道，这里不能碰");
+        assert_eq!(report.removed.len(), 1);
+        assert_eq!(report.kept.len(), 4);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn prune_keeps_versions_parent_absent() {
+        // 还没装过（或已卸载）：目录不存在时报空报告，不能把"没有目录"当错误。
+        let root = temp_dir("prune-missing");
+        let report = prune_versions_at(&root.join("versions"), &[]);
+        assert!(report.removed.is_empty() && report.kept.is_empty());
+    }
+
+    #[test]
+    fn prune_reads_three_dirs_from_double_encoded_library() {
+        let root = temp_dir("prune-refs");
+        let config = root.join("configuration");
+        std::fs::create_dir_all(&config).unwrap();
+        let library = serde_json::json!({
+            "user:alice": [{
+                "package": { "id": "notes", "name": "Notes", "version": "1.2.0" },
+                "dir": "C:\\tools\\versions\\1.2.0",
+                "previousDir": "C:\\tools\\versions\\1.1.0",
+                "sourceDir": "C:\\work\\notes"
+            }]
+        });
+        let prefs = serde_json::json!({
+            // 账号与工具库都以 **JSON 字符串** 落盘（前端 stringify 后写入）。
+            // 当对象取字段会永远拿不到——那会让回收把三份都在用的目录全删掉。
+            "aaw-desktop.auth.v1": serde_json::json!({ "user": { "id": "alice" } }).to_string(),
+            "aaw-desktop.personal-tools.v1": library.to_string()
+        });
+        std::fs::write(config.join("preferences.json"), prefs.to_string()).unwrap();
+
+        let store = crate::tools::store::ToolStore::new(&root);
+        let dirs = referenced_version_dirs(&store, "alice", "notes").unwrap();
+        assert_eq!(dirs.len(), 3, "dir / previousDir / sourceDir 三个都要排除");
+        assert!(dirs.iter().any(|dir| dir.ends_with("1.2.0")));
+        assert!(dirs.iter().any(|dir| dir.ends_with("1.1.0")));
+        assert!(dirs.iter().any(|dir| dir.ends_with("notes")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn prune_refuses_when_library_is_unreadable() {
+        // 关键安全属性：解析失败 ≠ 没人引用。读不出记录必须报错，让调用方
+        // 一个都不删；如果这里退化成空表，下面整片目录会被当孤儿清掉。
+        let root = temp_dir("prune-broken");
+        let config = root.join("configuration");
+        std::fs::create_dir_all(&config).unwrap();
+        let prefs = serde_json::json!({
+            "aaw-desktop.auth.v1": serde_json::json!({ "user": { "id": "alice" } }).to_string(),
+            "aaw-desktop.personal-tools.v1": "{ not json"
+        });
+        std::fs::write(config.join("preferences.json"), prefs.to_string()).unwrap();
+
+        let store = crate::tools::store::ToolStore::new(&root);
+        assert!(referenced_version_dirs(&store, "alice", "notes").is_err());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
 
