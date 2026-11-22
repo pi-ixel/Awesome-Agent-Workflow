@@ -60,7 +60,10 @@ export type SkillAction =
       names: string[];
     }
   | { type: "delete"; items: Pick<NativeSkill, "name" | "path" | "revision">[] }
-  | { type: "deletePermanent"; item: Pick<NativeSkill, "name" | "path" | "revision"> }
+  | {
+      type: "deletePermanent";
+      item: Pick<NativeSkill, "name" | "path" | "revision">;
+    }
   | { type: "restore" | "purge"; ids: string[] };
 export type SkillFileRequest = {
   type: "directory" | "read";
@@ -82,6 +85,20 @@ export interface NativeSkillLibrary {
   candidates(from: string): Promise<string[]>;
   list(query: SkillQuery): Promise<SkillCatalog>;
   change(query: SkillQuery, action: SkillAction): Promise<string[]>;
+  toggle?(
+    query: SkillQuery,
+    action:
+      | { type: "enable"; id: string }
+      | ({
+          type: "disable";
+          name: string;
+          revision: string;
+        } & SkillDirectorySelection),
+  ): Promise<{
+    message: string;
+    entry: NativeSkill | null;
+    stopped: RecycledSkill | null;
+  }>;
   sizes?: (
     query: SkillQuery,
     skills: SkillDirectorySelection[],

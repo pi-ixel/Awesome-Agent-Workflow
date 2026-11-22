@@ -127,12 +127,14 @@ export function SkillCard({
   onDetail,
   metadata,
   status,
+  isToggling = false,
 }: {
   skill: NativeSkill;
   actions: Actions;
   onDetail: (button: HTMLButtonElement) => void;
   metadata: string;
   status?: string;
+  isToggling?: boolean;
 }) {
   const { menu, open, dismiss } = useMenuController();
   return (
@@ -145,10 +147,10 @@ export function SkillCard({
       onDetail={onDetail}
       toggle={
         <ToggleSwitch
-          appearance="neutral"
           label={skill.name + " 启用"}
           checked={!skill.disabledId}
-          disabled={actions.busy || !!skill.unavailable}
+          disabled={(actions.busy && !isToggling) || !!skill.unavailable}
+          pending={isToggling}
           onChange={() => actions.toggle(skill)}
         />
       }

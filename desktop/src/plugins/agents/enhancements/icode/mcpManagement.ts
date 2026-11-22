@@ -23,6 +23,7 @@ async function request(
 
 const native: NativeMcpManagement = {
   defaultProfile: "Code",
+  editableTransports: ["stdio", "http"],
   nativeHost: (host) => host.native("chrys"),
 };
 

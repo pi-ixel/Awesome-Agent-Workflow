@@ -252,7 +252,7 @@ pub(super) fn list(loc: &Locations, query: &Query) -> Result<Catalog> {
 }
 
 // 绝对路径事件只计入对应目录。名称事件计入每个匹配的技能条目。
-fn usage(path: &Path, entries: &mut [Entry]) -> Result<()> {
+pub(super) fn usage(path: &Path, entries: &mut [Entry]) -> Result<()> {
     use std::collections::HashMap;
     use std::io::{BufRead, BufReader};
     let file = match fs::File::open(path) {

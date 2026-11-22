@@ -3,6 +3,7 @@ import type {
   LocalMcpProfile,
   ManagedMcpDefinition,
   McpImportPlan,
+  McpInspection,
   McpChange,
   McpManagementHost,
   NativeMcpDraft,
@@ -55,6 +56,8 @@ export function createMcpManagement(
   }
   let extensionQueue: Promise<unknown> = Promise.resolve();
   let mutationQueue: Promise<unknown> = Promise.resolve();
+  let inspectionWrites: Promise<unknown> = Promise.resolve();
+  const inspections = new Map<string, Promise<McpInspection>>();
   const nativeReads = new Map<
     string,
     {
@@ -151,6 +154,7 @@ export function createMcpManagement(
       agent,
       requestExtension,
       onEstablished,
+      onDispose,
     } = context;
     const provider = agents.resolve(agentId)?.mcpManagement?.injection;
     if (!provider || !agent) return [];
@@ -165,6 +169,9 @@ export function createMcpManagement(
         publish(resolutionKey(agentKey, workspacePath, id), value),
       );
     let revision: string | null = null;
+    const generation = crypto.randomUUID();
+    let expired = false;
+    const retire = () => host.retireManaged?.(generation) ?? Promise.resolve();
     const resolve = async () => {
       const managed = await host.managedRead(agentId);
       revision = managed.revision;
@@ -187,7 +194,13 @@ export function createMcpManagement(
           sessionId,
         });
       }
-      return host.managedResolve(agentId, excluded);
+      const resolved = await host.managedResolve(agentId, excluded, generation);
+      if (expired) {
+        await retire();
+        throw new Error("Desktop MCP 配置读取已超时");
+      }
+      onDispose?.(retire);
+      return resolved;
     };
     try {
       const result = await withDeadline(resolve(), 6_000, "读取 MCP 配置超时");
@@ -206,6 +219,7 @@ export function createMcpManagement(
         })),
       }));
     } catch (error) {
+      expired = true;
       logger?.warn("当前会话的 Desktop MCP 配置未能注入", {
         agentId,
         sessionId,
@@ -223,6 +237,36 @@ export function createMcpManagement(
   return {
     host,
     resolutions,
+    inspectCached(
+      key: string,
+      fresh: boolean,
+      run: () => Promise<McpInspection>,
+    ) {
+      const store = host.inspection;
+      if (!store) return run();
+      const previous = inspections.get(key);
+      if (previous) return previous;
+      const task = (async () => {
+        const cached = await store.read([key]).catch(() => undefined);
+        const last = cached?.[key];
+        if (!fresh && last) return last;
+        const check = await run();
+        const result =
+          !check.ok && check.tools === undefined && last?.tools !== undefined
+            ? { ...check, tools: last.tools }
+            : check;
+        const write = inspectionWrites.then(() => store.save(key, result));
+        inspectionWrites = write.catch(() => undefined);
+        await write.catch(() => logger?.warn("MCP 检测结果未能保存"));
+        return result;
+      })();
+      inspections.set(key, task);
+      const clear = () => {
+        if (inspections.get(key) === task) inspections.delete(key);
+      };
+      void task.then(clear, clear);
+      return task;
+    },
     sessionTools,
     readNative,
     nativeRead,
@@ -239,10 +283,11 @@ export function createMcpManagement(
           if (managed?.entries.some((entry) => entry.name === name))
             throw new Error(duplicateNameMessage);
         }
-        await nativeAdapter(agentId)
+        const receipt = await nativeAdapter(agentId)
           .nativeHost(host)
           .change(profile, revision, change);
         nativeReads.clear();
+        return receipt;
       });
     },
     managedChange(
@@ -258,7 +303,7 @@ export function createMcpManagement(
           (await nativeNames(agentId, selector)).includes(name)
         )
           throw new Error(duplicateNameMessage);
-        await host.managedChange(agentId, revision, change);
+        return host.managedChange(agentId, revision, change);
       });
     },
     async previewInstall(
@@ -278,6 +323,8 @@ export function createMcpManagement(
       );
     },
     async test(agentId: string, target: McpTestTarget) {
+      if (target.source === "managed" && host.inspection)
+        return host.inspection.probe(target.draft);
       const started = performance.now();
       const testHttp = adapter(agentId).testHttp;
       if (!testHttp) throw new Error("此 Agent 暂未提供 MCP 连接测试");

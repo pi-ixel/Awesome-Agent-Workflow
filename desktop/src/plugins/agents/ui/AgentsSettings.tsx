@@ -716,7 +716,6 @@ function AgentListCard({
             </p>
           </div>
           <ToggleSwitch
-            appearance="neutral"
             label="支持自定义回答"
             checked={supportsCustomAnswers}
             onChange={setSupportsCustomAnswers}

@@ -12,6 +12,8 @@ pub struct Profile {
 #[serde(rename_all = "camelCase")]
 pub struct Entry {
     name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
     transport: String,
     enabled: bool,
     url: Option<String>,
@@ -19,6 +21,8 @@ pub struct Entry {
     cwd: Option<String>,
     args_count: usize,
     secret_keys: Vec<String>,
+    connection_revision: String,
+    redacted_config: serde_json::Value,
 }
 
 #[derive(Serialize)]
@@ -310,8 +314,20 @@ fn entries(data: &Value) -> Result<Vec<Entry>> {
                 "env"
             };
             let enabled = profile_bool(entry.get("enabled").unwrap_or(&entry["enable"]), true);
+            let mut connection = entry.clone();
+            if let Some(values) = connection.as_mapping_mut() {
+                for key in ["name", "description", "enabled", "enable"] {
+                    values.remove(key);
+                }
+            }
+            let connection_revision = revision(
+                serde_yaml::to_string(&connection)
+                    .map_err(|_| "无法识别原生 MCP 配置版本")?
+                    .as_bytes(),
+            );
             Ok(Entry {
                 name,
+                description: text(entry, "description"),
                 transport,
                 enabled,
                 url: entry["url"].as_str().and_then(display_url),
@@ -323,9 +339,54 @@ fn entries(data: &Value) -> Result<Vec<Entry>> {
                     .flat_map(|map| map.keys().filter_map(Value::as_str))
                     .map(str::to_owned)
                     .collect(),
+                connection_revision,
+                redacted_config: redacted_config(entry),
             })
         })
         .collect()
+}
+
+fn redacted_config(entry: &Value) -> serde_json::Value {
+    let mut output = serde_json::Map::new();
+    if let Some(values) = entry.as_mapping() {
+        for (key, value) in values {
+            let Some(key) = key.as_str() else { continue };
+            let safe = match key {
+                "name" | "transport" | "description" => value
+                    .as_str()
+                    .map_or(serde_json::Value::Null, |text| text.into()),
+                "enabled"
+                | "enable"
+                | "verify_ssl"
+                | "bypass_proxy"
+                | "resolve_header_templates"
+                | "load_prompts" => serde_json::Value::Bool(profile_bool(value, true)),
+                "url" => value
+                    .as_str()
+                    .and_then(display_url)
+                    .unwrap_or("***".into())
+                    .into(),
+                "env" | "headers" => serde_json::Value::Object(
+                    mappings(entry, key)
+                        .into_iter()
+                        .flat_map(|map| map.keys().filter_map(Value::as_str))
+                        .map(|name| (name.into(), "***".into()))
+                        .collect(),
+                ),
+                "args" => serde_json::Value::Array(
+                    value
+                        .as_sequence()
+                        .into_iter()
+                        .flatten()
+                        .map(|_| "***".into())
+                        .collect(),
+                ),
+                _ => "***".into(),
+            };
+            output.insert(key.into(), safe);
+        }
+    }
+    serde_json::Value::Object(output)
 }
 
 pub fn read_snapshot(root: &Path, profile: &Profile) -> Result<Option<Snapshot>> {
@@ -489,7 +550,7 @@ fn edit(data: &mut Value, action: Change<Draft>) -> Result<()> {
     }
 }
 
-pub fn change(root: &Path, profile: Profile, expected: &str, change: Change<Draft>) -> Result<()> {
+pub fn change(root: &Path, profile: Profile, expected: &str, change: Change<Draft>) -> Result<String> {
     let _lock = lock(root, ".profiles.lock")?;
     let Source {
         path,
@@ -502,7 +563,8 @@ pub fn change(root: &Path, profile: Profile, expected: &str, change: Change<Draf
     edit(&mut data, change)?;
     let original = std::str::from_utf8(&bytes).map_err(|_| "Profile 必须使用 UTF-8")?;
     let patched = crate::config_edit::replace_section(original, "tools", &data)?;
-    write(&path, Some(&bytes), patched.as_bytes())
+    write(&path, Some(&bytes), patched.as_bytes())?;
+    Ok(revision(patched.as_bytes()))
 }
 
 pub fn session_profile(root: &Path, id: &str) -> Result<Option<String>> {

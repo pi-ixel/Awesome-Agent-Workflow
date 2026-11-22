@@ -163,6 +163,21 @@ const PUBLISHED_TOOLS: &[&str] = &[
 
 fn description(name: &str) -> &'static str {
     match name {
+        "browser_open" => "为当前会话打开浏览器标签，可以指定起始地址",
+        "browser_request_control" => "请求获得指定标签的 Agent 控制权",
+        "browser_handoff" => "将指定标签交给用户控制",
+        "browser_list_tabs" => "列出当前会话的标签与页面状态",
+        "browser_dialogs" => "查看当前会话中等待处理的网页对话框",
+        "browser_handle_dialog" => "确认或取消指定的网页对话框",
+        "browser_snapshot" => "读取页面结构与可交互元素",
+        "browser_navigate" => "在指定标签打开目标地址",
+        "browser_click" => "点击指定页面元素",
+        "browser_fill" => "为页面输入控件填写内容",
+        "browser_scroll" => "滚动指定标签的页面视口",
+        "browser_press" => "向指定标签发送按键",
+        "browser_screenshot" => "截取指定标签的页面视口",
+        "browser_set_visibility" => "切换浏览器面板的可见状态",
+        "browser_diagnostics" => "读取指定标签的浏览器诊断信息",
         "browser_capabilities" => "读取当前实例有效工具、限制和恢复文档",
         "browser_execute_script" => {
             "执行受限页面脚本；缺少 approvalId 时创建审批并等待决策，批准后在同一调用内执行，超时返回 APPROVAL_REQUIRED，需携带同一 approvalId 重试"
@@ -181,7 +196,7 @@ fn description(name: &str) -> &'static str {
         "browser_stop" => "停止当前页面加载",
         "browser_wait" => "在有界时间内等待元素或固定时长",
         "browser_locate" => "严格定位唯一且可操作的页面元素",
-        _ => "执行 AAW 内嵌浏览器契约动作",
+        _ => "",
     }
 }
 
@@ -202,7 +217,9 @@ pub fn tool_definitions() -> Value {
                     required.push(json!(field.name));
                 }
             }
-            json!({"name":name,"description":description(name),"inputSchema":{
+            let read_only = matches!(*name, "browser_list_tabs" | "browser_dialogs" | "browser_snapshot"
+                | "browser_screenshot" | "browser_diagnostics" | "browser_capabilities" | "browser_wait" | "browser_locate");
+            json!({"name":name,"description":description(name),"annotations":{"readOnlyHint":read_only},"inputSchema":{
                 "type":"object","properties":properties,"required":required,"additionalProperties":false
             }})
         })

@@ -153,6 +153,17 @@ export function normalizeChrysRuntime(
       next.toolInventoryKnown = true;
     }
     next.mcpServers = details.mcpServers;
+    const serverTools = asRecord(
+      asRecord(incoming.runtimeDetails)?.["mcp_tools"],
+    );
+    next.mcpToolsByServer = serverTools
+      ? Object.fromEntries(
+          Object.entries(serverTools).map(([name, tools]) => [
+            name,
+            asStringList(tools) ?? [],
+          ]),
+        )
+      : undefined;
     next.mcpFailuresKnown = details.mcpFailuresKnown;
     next.mcpFailures = details.mcpFailures;
     next.skillSources = details.skillSources;

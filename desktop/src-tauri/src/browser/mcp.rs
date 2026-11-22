@@ -80,7 +80,9 @@ pub fn bind_endpoint(
     }
     if endpoint.session_id.is_none() {
         endpoint.session_id = Some(session_id.into());
-        registry.current_endpoints.insert(session_id.into(), endpoint_id.into());
+        registry
+            .current_endpoints
+            .insert(session_id.into(), endpoint_id.into());
     }
     Ok(endpoint.clone())
 }
@@ -134,6 +136,8 @@ pub fn browser_mcp_status(
 pub struct McpRegistration {
     endpoint_name: String,
     handshake_complete: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    has_enabled_tools: Option<bool>,
 }
 
 fn current_registration(registry: &McpRegistry, session_id: &str) -> Option<McpRegistration> {
@@ -142,6 +146,7 @@ fn current_registration(registry: &McpRegistry, session_id: &str) -> Option<McpR
     (!endpoint.revoked).then(|| McpRegistration {
         endpoint_name: endpoint.name.clone(),
         handshake_complete: registry.ready_endpoints.contains(endpoint_id),
+        has_enabled_tools: None,
     })
 }
 
@@ -160,18 +165,35 @@ fn registration_tracks_the_replacement_endpoint_and_its_handshake() {
     assert_eq!(current.endpoint_name, replacement.name);
     assert!(!current.handshake_complete);
     complete_handshake(&mut registry, &replacement.endpoint_id).unwrap();
-    assert!(current_registration(&registry, "session").unwrap().handshake_complete);
+    assert!(
+        current_registration(&registry, "session")
+            .unwrap()
+            .handshake_complete
+    );
     revoke_endpoint(&mut registry, &replacement.endpoint_id).unwrap();
     assert!(current_registration(&registry, "session").is_none());
 }
 
 #[tauri::command]
-pub fn browser_mcp_registration(
+pub async fn browser_mcp_registration(
+    app: AppHandle,
     session_id: String,
     state: State<'_, BrowserHost>,
 ) -> Result<Option<McpRegistration>, String> {
-    let registry = state.mcp.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
-    Ok(current_registration(&registry, &session_id))
+    let result = {
+        let registry = state.mcp.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+        current_registration(&registry, &session_id)
+    };
+    if let Some(mut registration) = result {
+        if let Ok(definitions) = permitted_definitions(&app).await {
+            registration.has_enabled_tools = definitions["tools"]
+                .as_array()
+                .map(|tools| !tools.is_empty());
+        }
+        Ok(Some(registration))
+    } else {
+        Ok(None)
+    }
 }
 
 pub fn complete_handshake(registry: &mut McpRegistry, endpoint_id: &str) -> Result<(), String> {
@@ -208,7 +230,10 @@ pub fn revoke_endpoint(
     }
     let endpoint = endpoint.clone();
     if let Some(session_id) = &endpoint.session_id
-        && registry.current_endpoints.get(session_id).is_some_and(|current| current == endpoint_id)
+        && registry
+            .current_endpoints
+            .get(session_id)
+            .is_some_and(|current| current == endpoint_id)
     {
         registry.current_endpoints.remove(session_id);
     }
@@ -489,9 +514,10 @@ async fn handle_rpc(app: &AppHandle, endpoint: McpEndpoint, request: Value) -> V
             Err(code) => rpc_error(id, -32002, &code),
         },
         "notifications/initialized" => json!({"jsonrpc":"2.0","id":id,"result":{}}),
-        "tools/list" => {
-            json!({"jsonrpc":"2.0","id":id,"result":super::tool::tool_definitions()})
-        }
+        "tools/list" => match permitted_definitions(app).await {
+            Ok(result) => json!({"jsonrpc":"2.0","id":id,"result":result}),
+            Err(error) => rpc_error(id, -32002, &error),
+        },
         "tools/call" => {
             let params = request.get("params").cloned().unwrap_or(Value::Null);
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
@@ -508,6 +534,26 @@ async fn handle_rpc(app: &AppHandle, endpoint: McpEndpoint, request: Value) -> V
     }
 }
 
+async fn disabled_tools(app: &AppHandle) -> Result<Vec<String>, String> {
+    let root = crate::storage_location::data_dir(app)?;
+    tokio::task::spawn_blocking(move || crate::mcp_management::inspection::browser_disabled(&root))
+        .await
+        .map_err(|_| "无法读取浏览器工具权限".to_owned())?
+}
+
+async fn permitted_definitions(app: &AppHandle) -> Result<Value, String> {
+    let disabled = disabled_tools(app).await?;
+    let mut definitions = super::tool::tool_definitions();
+    if let Some(tools) = definitions["tools"].as_array_mut() {
+        tools.retain(|tool| {
+            tool["name"]
+                .as_str()
+                .is_some_and(|name| !disabled.iter().any(|value| value == name))
+        });
+    }
+    Ok(definitions)
+}
+
 async fn call_tool(
     app: &AppHandle,
     endpoint: &McpEndpoint,
@@ -515,6 +561,9 @@ async fn call_tool(
     arguments: Value,
     runtime_meta: Option<&Value>,
 ) -> Result<Value, String> {
+    if disabled_tools(app).await?.iter().any(|tool| tool == name) {
+        return Err("此浏览器工具已关闭".into());
+    }
     super::tool::validate_tool_arguments(name, &arguments)?;
     let host = app.state::<BrowserHost>();
     let session_id = endpoint.session_id.as_deref().ok_or("ENDPOINT_NOT_BOUND")?;
@@ -562,7 +611,7 @@ async fn call_tool(
     }
     match name {
         "browser_capabilities" => {
-            let definitions = super::tool::tool_definitions();
+            let definitions = permitted_definitions(app).await?;
             let names: Vec<_> = definitions["tools"]
                 .as_array()
                 .into_iter()
@@ -640,7 +689,9 @@ async fn call_tool(
                 "browser_back" => super::host::navigate_history(&webview, true).await?,
                 "browser_forward" => super::host::navigate_history(&webview, false).await?,
                 "browser_reload" => webview.reload().map_err(|error| error.to_string())?,
-                _ => webview.eval("window.stop()").map_err(|error| error.to_string())?,
+                _ => webview
+                    .eval("window.stop()")
+                    .map_err(|error| error.to_string())?,
             }
             let tab = host
                 .runtime
@@ -914,7 +965,8 @@ async fn call_tool(
                 Some(id) => id.to_owned(),
                 None => {
                     let approval = {
-                        let mut approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+                        let mut approvals =
+                            host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
                         super::security::require_approval(
                             &mut approvals,
                             session_id,
@@ -937,7 +989,11 @@ async fn call_tool(
             {
                 let approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
                 let approval = super::security::validate_approval(
-                    &approvals, &approval_id, session_id, tab_id, generation,
+                    &approvals,
+                    &approval_id,
+                    session_id,
+                    tab_id,
+                    generation,
                 )?;
                 if approval.action != "submit" {
                     return Err("APPROVAL_INVALIDATED".into());
@@ -1036,7 +1092,8 @@ async fn call_tool(
                 .ok_or("ACCESS_DENIED")?;
             let digest = sha2::Sha256::digest(script.as_bytes());
             let action = format!("script:{digest:x}");
-            let approval_id = if let Some(id) = arguments.get("approvalId").and_then(Value::as_str) {
+            let approval_id = if let Some(id) = arguments.get("approvalId").and_then(Value::as_str)
+            {
                 id.to_owned()
             } else {
                 let approval = {
@@ -1063,7 +1120,11 @@ async fn call_tool(
             {
                 let approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
                 let approval = super::security::validate_approval(
-                    &approvals, &approval_id, session_id, tab_id, generation,
+                    &approvals,
+                    &approval_id,
+                    session_id,
+                    tab_id,
+                    generation,
                 )?;
                 if approval.action != action {
                     return Err("APPROVAL_INVALIDATED".into());
@@ -1102,7 +1163,8 @@ async fn call_tool(
                 .map(|tab| tab.generation)
                 .ok_or("ACCESS_DENIED")?;
             let action = format!("upload:{path}");
-            let approval_id = if let Some(id) = arguments.get("approvalId").and_then(Value::as_str) {
+            let approval_id = if let Some(id) = arguments.get("approvalId").and_then(Value::as_str)
+            {
                 id.to_owned()
             } else {
                 let approval = {
@@ -1129,7 +1191,11 @@ async fn call_tool(
             {
                 let approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
                 let approval = super::security::validate_approval(
-                    &approvals, &approval_id, session_id, tab_id, generation,
+                    &approvals,
+                    &approval_id,
+                    session_id,
+                    tab_id,
+                    generation,
                 )?;
                 if approval.action != action {
                     return Err("APPROVAL_INVALIDATED".into());

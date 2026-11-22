@@ -224,6 +224,11 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
   const detail = card.getByRole("button", { name: `查看 ${title} 详情` });
   const longDescription = card.getByText(/^审查发布准备/);
   const shortCard = collections.getByRole("article", { name: "旧版发布检查" });
+  const skillHeader = collections
+    .getByRole("heading", { name: "技能", exact: true })
+    .locator("xpath=ancestor::header");
+  const skillAction = skillHeader.getByRole("button", { name: "导入技能" });
+  const skillTrack = card.getByRole("switch").locator("+ span");
   await expect(longDescription).toBeVisible();
   const clipping = longDescription.locator("..");
   await expect(clipping).toHaveCSS("white-space", "nowrap");
@@ -314,12 +319,56 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
   await expect(
     collections.getByRole("switch", { name: "旧版发布检查 启用" }),
   ).toBeVisible();
+  await collections.getByRole("combobox", { name: "技能状态" }).click();
+  await collections.getByRole("option", { name: "全部状态" }).click();
+  const skillHeaderStyle = await skillHeader.evaluate((header) => {
+    const style = getComputedStyle(header);
+    return [
+      style.paddingInlineStart,
+      style.paddingBlockStart,
+      style.borderBottomWidth,
+    ];
+  });
+  const skillActionHeight = (await skillAction.boundingBox())!.height;
+  const skillSwitchStyle = await skillTrack.evaluate((track) => {
+    const style = getComputedStyle(track);
+    return [style.width, style.height, style.backgroundColor];
+  });
   await mcp.click();
   await expect(mcp).toHaveAttribute("aria-current", "page");
   const mcpCard = collections.getByRole("article", { name: "发布服务" });
   const browser = collections.getByRole("article", { name: "AAW 内置浏览器" });
   await expect(browser.getByRole("switch")).toBeEnabled();
-  await expect(browser.getByRole("button")).toHaveCount(0);
+  const mcpHeader = collections
+    .getByRole("heading", { name: "MCP", exact: true })
+    .locator("xpath=ancestor::header");
+  expect(
+    await mcpHeader.evaluate((header) => {
+      const style = getComputedStyle(header);
+      return [
+        style.paddingInlineStart,
+        style.paddingBlockStart,
+        style.borderBottomWidth,
+      ];
+    }),
+  ).toEqual(skillHeaderStyle);
+  const mcpAction = mcpHeader.getByRole("button", { name: "新增 MCP" });
+  expect((await mcpAction.boundingBox())!.height).toBeCloseTo(
+    skillActionHeight,
+    1,
+  );
+  expect(
+    await browser
+      .getByRole("switch")
+      .locator("+ span")
+      .evaluate((track) => {
+        const style = getComputedStyle(track);
+        return [style.width, style.height, style.backgroundColor];
+      }),
+  ).toEqual(skillSwitchStyle);
+  await expect(
+    browser.getByRole("button", { name: "AAW 内置浏览器", exact: true }),
+  ).toBeVisible();
   const plugPath = await mcp.locator("svg path").getAttribute("d");
   expect(plugPath).toBeTruthy();
   await expect(browser.locator("svg path")).toHaveAttribute("d", plugPath!);
@@ -328,22 +377,67 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
       .getByRole("button", { name: "发布服务", exact: true })
       .locator("svg path"),
   ).toHaveAttribute("d", plugPath!);
-  const transport = mcpCard.getByText("Streamable HTTP");
-  const remove = mcpCard.getByRole("button", { name: "发布服务 删除" });
-  const more = mcpCard.getByRole("button", { name: "发布服务 更多操作" });
-  await expect(more).toBeVisible();
-  expect((await transport.boundingBox())!.y).toBeLessThan(
-    (await remove.boundingBox())!.y,
+  await mcpCard.getByRole("button", { name: "发布服务", exact: true }).click();
+  const serviceDetails = collections.getByRole("complementary", {
+    name: "发布服务 详情",
+  });
+  await expect(serviceDetails).toBeVisible();
+  await expect(mcpCard).toBeHidden();
+  await serviceDetails.getByRole("tab", { name: "连接配置" }).click();
+  await expect(
+    serviceDetails.getByText("http://localhost:9000/mcp"),
+  ).toBeVisible();
+  await serviceDetails.getByRole("button", { name: "返回服务列表" }).click();
+  await expect(mcpCard).toBeVisible();
+  await collections.setViewportSize({ width: 1400, height: 900 });
+  await mcpCard.getByRole("button", { name: "发布服务", exact: true }).click();
+  await expect(serviceDetails).toBeVisible();
+  await expect(mcpCard).toBeVisible();
+  const rowBounds = (await mcpCard.boundingBox())!;
+  expect((await serviceDetails.boundingBox())!.x).toBeGreaterThan(
+    rowBounds.x + rowBounds.width,
   );
-  expect((await remove.boundingBox())!.y).toBeCloseTo(
-    (await more.boundingBox())!.y,
-    1,
-  );
-  expect((await mcpCard.boundingBox())!.height).toBeCloseTo(
-    (await browser.boundingBox())!.height,
-    1,
-  );
-  expect((await mcpCard.boundingBox())!.width).toBeGreaterThanOrEqual(256);
+});
+
+test("MCP 导入按钮和表单按钮共用尺寸，窄窗下文字保留内边距", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 670 });
+  await page.goto("/tests/visual/sidebarTypographyFixture.html?collections");
+  await page
+    .getByRole("navigation", { name: "插件管理" })
+    .getByRole("button", { name: "MCP", exact: true })
+    .click();
+  await page.getByRole("button", { name: "导入 JSON", exact: true }).click();
+
+  const dialog = page.getByRole("dialog", { name: "新增 MCP" });
+  const preview = dialog.getByRole("button", { name: "预览导入" });
+  const cancel = dialog.getByRole("button", { name: "取消" });
+  await expect(preview).toBeDisabled();
+  await dialog.getByRole("tab", { name: "表单配置" }).click();
+
+  const properties = [
+    "font-size",
+    "min-height",
+    "padding-inline-start",
+    "padding-inline-end",
+  ] as const;
+  const save = dialog.getByRole("button", { name: "保存", exact: true });
+  const formStyle = await save.evaluate((button, props) => {
+    const style = getComputedStyle(button);
+    return props.map((prop) => style.getPropertyValue(prop));
+  }, properties);
+  expect(parseFloat(formStyle[2]!)).toBeGreaterThan(0);
+
+  await dialog.getByRole("tab", { name: "JSON 导入" }).click();
+  await dialog.getByRole("button", { name: "填入示例" }).click();
+  await expect(preview).toBeEnabled();
+  for (const button of [cancel, preview]) {
+    for (const [index, property] of properties.entries()) {
+      await expect(button).toHaveCSS(property, formStyle[index]!);
+    }
+    await expect(button).toBeInViewport();
+  }
 });
 
 test("技能详情宽屏并列大纲与技能信息，窄屏仍可浏览真实文件区域", async ({
@@ -549,9 +643,19 @@ test("任务、会话状态和差异行随外观更新，保留折叠、阅读�
     for (const kind of ["added", "removed"]) {
       const diffRow = diff.locator(`.bg-diff-${kind}-row`).first();
       const number = diffRow.locator(`.bg-diff-${kind}-gutter`).first();
-      const background = blend(await color(diffRow, "background-color"), await color(diff, "background-color"));
-      expect(ratio(await color(diffRow, "color"), background)).toBeGreaterThanOrEqual(4.5);
-      expect(ratio(await color(number, "color"), await color(number, "background-color"))).toBeGreaterThanOrEqual(4.5);
+      const background = blend(
+        await color(diffRow, "background-color"),
+        await color(diff, "background-color"),
+      );
+      expect(
+        ratio(await color(diffRow, "color"), background),
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        ratio(
+          await color(number, "color"),
+          await color(number, "background-color"),
+        ),
+      ).toBeGreaterThanOrEqual(4.5);
     }
     const connection = detail
       .getByRole("region", { name: "项目状态" })
@@ -611,7 +715,10 @@ test("存储数据行、用量记录和 Markdown 表格在大字号下保持可�
     await expect(diagnostics).toHaveCSS("font-size", size - 2 + "px");
     await expect(diagnostics).toHaveAttribute("aria-expanded", "true");
     await expect(selected).toBeChecked();
-    expect((await checkmark.boundingBox())!.width).toBeCloseTo((16 * size) / 14, 1);
+    expect((await checkmark.boundingBox())!.width).toBeCloseTo(
+      (16 * size) / 14,
+      1,
+    );
     await expect(monthly.getByText("月度", { exact: true })).toHaveCSS(
       "font-size",
       size - 2 + "px",

@@ -1,6 +1,6 @@
 [package]
 name = "desktop"
-version = "0.1.54"
+version = "0.1.55"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2024"
@@ -36,6 +36,9 @@ tokio = { version = "1", features = ["process", "time", "fs", "io-util", "macros
 # 更新与企业 SSO 共用 HTTP 特性；TLS 后端按平台选择。
 notify = "8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "system-proxy"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
 ring = "0.17"
 sha2 = "0.10"
 semver = "1"

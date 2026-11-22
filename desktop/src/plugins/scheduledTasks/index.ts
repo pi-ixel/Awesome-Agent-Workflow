@@ -110,7 +110,7 @@ export async function apply(ctx: Context) {
             footer: error ? createElement("p", { role: "alert", className: "text-ui-caption text-danger-ink" }, error) : undefined,
             footerAlign: "start",
           }, createElement(ToggleSwitch, {
-              appearance: "neutral", label, checked: enabled, disabled: saving,
+              label, checked: enabled, pending: saving,
               onChange: (value) => {
                 setSaving(true);
                 setError("");

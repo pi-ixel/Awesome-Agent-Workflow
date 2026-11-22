@@ -33,6 +33,40 @@ fn action(json: serde_json::Value) -> Action {
     serde_json::from_value(json).unwrap()
 }
 
+#[test]
+fn toggle_returns_only_the_affected_entry_and_rejects_a_stale_revision() {
+    let (_tmp, loc, query) = setup(Provider::CodeAgent);
+    let source = loc.home.join(".cac/skills");
+    let path = source.join("toggle");
+    skill(&path, "toggle");
+    skill(&source.join("other"), "other");
+    let entry = catalog::list(&loc, &query)
+        .unwrap()
+        .entries
+        .into_iter()
+        .find(|entry| entry.name == "toggle")
+        .unwrap();
+    let request = |revision: &str| {
+        serde_json::from_value(json!({
+            "type":"disable","name":entry.name,"path":entry.path,"realPath":entry.real_path,
+            "source":entry.source,"revision":revision
+        }))
+        .unwrap()
+    };
+    assert!(changes::toggle(&loc, &query, request("stale")).is_err());
+    let disabled =
+        serde_json::to_value(changes::toggle(&loc, &query, request(&entry.revision)).unwrap())
+            .unwrap();
+    assert!(!path.exists());
+    assert!(source.join("other/SKILL.md").is_file());
+    assert_eq!(disabled["stopped"]["name"], "toggle");
+    let enable =
+        serde_json::from_value(json!({"type":"enable","id":disabled["stopped"]["id"]})).unwrap();
+    let enabled = serde_json::to_value(changes::toggle(&loc, &query, enable).unwrap()).unwrap();
+    assert_eq!(enabled["entry"]["name"], "toggle");
+    assert!(path.is_dir());
+}
+
 #[cfg(any(windows, unix))]
 fn link_directory(link: &Path, target: &Path) {
     #[cfg(windows)]

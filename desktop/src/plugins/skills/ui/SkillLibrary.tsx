@@ -1,5 +1,6 @@
 import { fieldSurfaceClass } from "../../../shared/ui/SettingsPageParts.tsx";
 import { PageHeader } from "../../../shared/ui/PageHeader.tsx";
+import { useFeedback } from "../../../shared/ui/feedback.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   HostStorage,
@@ -11,7 +12,6 @@ import type {
 } from "../../host/types.ts";
 import {
   ActionButton,
-  btnSecondary,
   Checkbox,
   Listbox,
 } from "../../../shared/ui/controls.tsx";
@@ -20,7 +20,6 @@ import {
   RefreshIcon,
   SearchIcon,
 } from "../../../shared/ui/icons.tsx";
-import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import { SkillPackageActions } from "./SkillPackageActions.tsx";
 import { SkillCard, SkillGroup } from "./SkillCards.tsx";
@@ -88,9 +87,12 @@ function LibraryPage(
   const [snapshot, setSnapshot] = useState<{
     scan: typeof scan;
     catalog?: SkillCatalog;
+    scanned?: SkillCatalog;
     error?: string;
   }>();
   const catalog = snapshot?.catalog;
+  const scanned = snapshot?.scan === scan ? snapshot.scanned : undefined;
+  const notify = useFeedback();
   const scanError = snapshot?.scan === scan ? snapshot.error : undefined;
   const [sizes, setSizes] = useState<{
     scan: typeof scan;
@@ -112,6 +114,11 @@ function LibraryPage(
   const [enable, setEnable] = useState(false);
   const [reports, report] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [changing, setChanging] = useState<ReadonlySet<string>>(new Set());
+  const toggles = useRef(new Set<string>());
+  const [rowSlots, setRowSlots] = useState<ReadonlyMap<string, string>>(
+    new Map(),
+  );
   const gate = useRef(false);
   const detailOpener = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
@@ -132,7 +139,8 @@ function LibraryPage(
         .list(scan.query)
         .then((data) => {
           if (!current) return;
-          setSnapshot({ scan, catalog: data });
+          setRowSlots(new Map());
+          setSnapshot({ scan, catalog: data, scanned: data });
         })
         .catch((e: unknown) => {
           if (current) setSnapshot({ scan, error: String(e) });
@@ -142,16 +150,16 @@ function LibraryPage(
     };
   }, [library, scan]);
   useEffect(() => {
-    if (!library?.sizes || snapshot?.scan !== scan || !catalog) return;
+    if (!library?.sizes || !scanned) return;
     const readSizes = library.sizes;
     const selected = [
-      ...catalog.entries
+      ...scanned.entries
         .filter((entry) => entry.kind !== "inline")
         .map(({ source, path, realPath }) => ({
           key: JSON.stringify([source, path]),
           selection: { source, path, realPath },
         })),
-      ...catalog.trash
+      ...scanned.trash
         .filter((entry) => entry.kind !== "inline" && !entry.unavailable)
         .map(({ id, path, source }) => ({
           key: id,
@@ -177,7 +185,13 @@ function LibraryPage(
           if (typeof result[offset] === "number")
             bytes.set(key, result[offset]);
         });
-        setSizes({ scan, bytes: new Map(bytes) });
+        setSizes((previous) => ({
+          scan,
+          bytes: new Map([
+            ...(previous?.scan === scan ? previous.bytes : []),
+            ...bytes,
+          ]),
+        }));
       }
     }
     void loadSizes().catch(() => {
@@ -186,12 +200,12 @@ function LibraryPage(
     return () => {
       current = false;
     };
-  }, [catalog, library, scan, snapshot]);
+  }, [scanned, library, scan]);
   const manager = props.packages;
   const sources = new Map(catalog?.sources.map((entry) => [entry.path, entry]));
   const destinations = catalog?.sources.filter((s) => s.canImport) ?? [];
   const source = destinations.find((s) => s.path === destination);
-  const disabled: NativeSkill[] = (catalog?.trash ?? []).map((item) => ({
+  const toDisabled = (item: SkillCatalog["trash"][number]): NativeSkill => ({
     name: item.name,
     path: item.path,
     source: item.source ?? item.path,
@@ -206,15 +220,30 @@ function LibraryPage(
     disabledId: item.id,
     disabledProject: item.project,
     unavailable: item.unavailable,
-  }));
-  const keyword = search.trim().toLowerCase();
-  const visible = [...(catalog?.entries ?? []), ...disabled].filter(
-    (entry) =>
-      (status === "all" || (status === "disabled") === !!entry.disabledId) &&
-      [entry.name, entry.description, entry.path].some((value) =>
-        value.toLowerCase().includes(keyword),
-      ),
+  });
+  const disabled = (catalog?.trash ?? []).map(toDisabled);
+  const slots = new Map(
+    [
+      ...(scanned?.entries ?? []),
+      ...(scanned?.trash ?? []).map(toDisabled),
+    ].map((skill, index) => [skillKey(skill), index]),
   );
+  const slot = (skill: NativeSkill) =>
+    rowSlots.get(skillKey(skill)) ?? skillKey(skill);
+  const keyword = search.trim().toLowerCase();
+  const visible = [...(catalog?.entries ?? []), ...disabled]
+    .filter(
+      (entry) =>
+        (status === "all" || (status === "disabled") === !!entry.disabledId) &&
+        [entry.name, entry.description, entry.path].some((value) =>
+          value.toLowerCase().includes(keyword),
+        ),
+    )
+    .sort(
+      (left, right) =>
+        (slots.get(slot(left)) ?? Infinity) -
+        (slots.get(slot(right)) ?? Infinity),
+    );
   const groups = catalog
     ? projectGroups(visible, catalog, scan.query.projects)
     : [];
@@ -246,6 +275,104 @@ function LibraryPage(
       }
     });
   }
+  async function toggleSkill(skill: NativeSkill) {
+    if (!library || !catalog) return;
+    const { source, path, realPath, name, revision, disabledId } = skill;
+    if (!library.toggle) {
+      await change(
+        disabledId
+          ? { type: "restore", ids: [disabledId] }
+          : { type: "delete", items: [{ name, path, revision }] },
+      );
+      return;
+    }
+    const key = skillKey(skill);
+    if (toggles.current.has(key)) return;
+    toggles.current.add(key);
+    setChanging(new Set(toggles.current));
+    const query = { ...scan.query, profile: catalog.profile };
+    try {
+      const result = await library.toggle(
+        query,
+        disabledId
+          ? { type: "enable", id: disabledId }
+          : { type: "disable", source, path, realPath, name, revision },
+      );
+      const next =
+        result.entry ?? (result.stopped ? toDisabled(result.stopped) : null);
+      if (notify)
+        notify({ message: result.message, variant: next ? "ok" : "warn" });
+      else if (!next) report([result.message]);
+      if (!next) return;
+      setRowSlots(
+        (previous) =>
+          new Map([...previous, [skillKey(next), previous.get(key) ?? key]]),
+      );
+      setSnapshot((previous) => {
+        if (!previous?.catalog || previous.scan !== scan) return previous;
+        const current = previous.catalog;
+        return {
+          ...previous,
+          catalog: {
+            ...current,
+            entries: [
+              ...current.entries.filter((entry) => skillKey(entry) !== key),
+              ...(result.entry ? [result.entry] : []),
+            ],
+            trash: [
+              ...current.trash.filter((entry) => entry.id !== disabledId),
+              ...(result.stopped ? [result.stopped] : []),
+            ],
+          },
+        };
+      });
+      if (library.sizes && next.kind !== "inline") {
+        const target = {
+          source: next.source,
+          path: next.path,
+          realPath: next.realPath,
+          disabledId: next.disabledId,
+        };
+        const sizeKey =
+          next.disabledId ?? JSON.stringify([next.source, next.path]);
+        const oldSize =
+          sizes?.scan === scan
+            ? sizes.bytes.get(disabledId ?? JSON.stringify([source, path]))
+            : undefined;
+        if (oldSize !== undefined)
+          setSizes((previous) => ({
+            scan,
+            bytes: new Map([
+              ...(previous?.scan === scan ? previous.bytes : []),
+              [sizeKey, oldSize],
+            ]),
+          }));
+        void library
+          .sizes(query, [target])
+          .then(([bytes]) => {
+            if (typeof bytes === "number")
+              setSizes((previous) =>
+                !previous || previous.scan === scan
+                  ? {
+                      scan,
+                      bytes: new Map([
+                        ...(previous?.bytes ?? []),
+                        [sizeKey, bytes],
+                      ]),
+                    }
+                  : previous,
+              );
+          })
+          .catch(() => undefined);
+      }
+    } catch (error) {
+      if (notify) notify({ message: String(error), variant: "danger" });
+      else report([String(error)]);
+    } finally {
+      toggles.current.delete(key);
+      setChanging(new Set(toggles.current));
+    }
+  }
   const importSkills = () =>
     void perform(async () => {
       const from = await props.pick("选择技能目录或包含多个技能的目录");
@@ -276,12 +403,11 @@ function LibraryPage(
     },
     toggle: (skill: NativeSkill) => {
       if (skill.disabledId) {
-        void change({ type: "restore", ids: [skill.disabledId] });
+        void toggleSkill(skill);
       } else if (catalog && isSharedSkill(skill, catalog)) {
         setPending({ skill, mode: "disable" });
       } else {
-        const { name, path, revision } = skill;
-        void change({ type: "delete", items: [{ name, path, revision }] });
+        void toggleSkill(skill);
       }
     },
   };
@@ -292,38 +418,38 @@ function LibraryPage(
     setPending(null);
     setDetail(null);
     if (mode === "disable") {
-      void change({ type: "delete", items: [{ name, path, revision }] });
+      void toggleSkill(skill);
     } else if (disabledId) {
       void change({ type: "purge", ids: [disabledId] });
     } else {
       void change({ type: "deletePermanent", item: { name, path, revision } });
     }
   }
-  const count = visible.length;
   return (
-    <section
-      aria-label="技能管理"
-      className="mx-auto w-full max-w-[112rem] space-y-5 px-[clamp(1rem,3vw,3rem)] py-6 text-ui-sm text-ink"
-    >
+    <section aria-label="技能管理" className="w-full text-ui-sm text-ink">
       <PageHeader
         title="技能"
-        count={catalog ? `${count} 项` : undefined}
+        bordered
+        count={
+          catalog
+            ? `${catalog.entries.length + catalog.trash.length} 项 · ${catalog.entries.length} 已启用`
+            : undefined
+        }
         actions={
           <>
-            <IconButton
-              iconSize="rail"
-              className={btnSecondary}
+            <ActionButton
+              tone="secondary"
+              size="compact"
               disabled={busy || !library}
-              aria-label="刷新"
-              data-hint="刷新"
               onClick={rescan}
             >
-              <RefreshIcon className="ui-icon-16" />
-            </IconButton>
+              <RefreshIcon className="ui-icon-14" />
+              刷新
+            </ActionButton>
 
             <ActionButton
               tone="primary"
-              className={buttonSize}
+              size="compact"
               disabled={busy || !destinations.length}
               onClick={importSkills}
             >
@@ -333,7 +459,10 @@ function LibraryPage(
           </>
         }
       />
-      <fieldset disabled={busy} className="min-w-0 space-y-6">
+      <fieldset
+        disabled={busy}
+        className="mx-auto w-full min-w-0 max-w-[112rem] space-y-6 px-[clamp(1rem,3vw,3rem)] py-4"
+      >
         <div className="flex flex-wrap items-center gap-2 border-b border-line pb-4">
           {!!catalog?.profiles.length && (
             <Listbox
@@ -415,7 +544,7 @@ function LibraryPage(
                 changed={rescan}
               />
             )}
-            {!count && <p className="text-ink-mute">没有匹配的技能</p>}
+            {!visible.length && <p className="text-ink-mute">没有匹配的技能</p>}
             {groups.map((group) => (
               <SkillGroup key={group.project ?? ""} {...group}>
                 {group.entries.map((skill) => {
@@ -429,9 +558,13 @@ function LibraryPage(
                       : undefined;
                   return (
                     <SkillCard
-                      key={skillKey(skill)}
+                      key={slot(skill)}
                       skill={skill}
-                      actions={actions}
+                      isToggling={changing.has(skillKey(skill))}
+                      actions={{
+                        ...actions,
+                        busy: busy || changing.has(skillKey(skill)),
+                      }}
                       metadata={[
                         origin?.label ??
                           (skill.kind === "inline"

@@ -1,5 +1,8 @@
+pub(crate) mod inspection;
 mod managed;
 mod native;
+mod proxy;
+pub use proxy::ProxyHost;
 #[cfg(test)]
 mod tests;
 
@@ -249,7 +252,7 @@ pub async fn mcp_native_change(
     profile: native::Profile,
     revision: String,
     change: Change<native::Draft>,
-) -> Result<()> {
+) -> Result<String> {
     main_only(&webview)?;
     blocking(move || native::change(&provider.directory("agents")?, profile, &revision, change))
         .await
@@ -283,7 +286,7 @@ pub async fn mcp_managed_change(
     agent_id: String,
     revision: String,
     change: Change<managed::Definition>,
-) -> Result<()> {
+) -> Result<String> {
     main_only(&webview)?;
     let root = crate::storage_location::data_dir(&app)?;
     blocking(move || managed::change(&root, &agent_id, &revision, change)).await
@@ -320,10 +323,149 @@ pub async fn mcp_managed_resolve(
     webview: Webview,
     agent_id: String,
     excluded: Vec<String>,
+    generation: String,
+    proxy: tauri::State<'_, ProxyHost>,
 ) -> Result<managed::Resolved> {
     main_only(&webview)?;
+    uuid::Uuid::parse_str(&generation).map_err(|_| "会话连接代次无效")?;
     let root = crate::storage_location::data_dir(&app)?;
-    blocking(move || managed::resolve(&root, &agent_id, &excluded)).await
+    let mut resolved = blocking({
+        let root = root.clone();
+        let agent_id = agent_id.clone();
+        move || managed::resolve(&root, &agent_id, &excluded)
+    })
+    .await?;
+    proxy
+        .provision(root, agent_id, generation, &mut resolved)
+        .await?;
+    Ok(resolved)
+}
+
+#[tauri::command]
+pub fn mcp_managed_retire(
+    webview: Webview,
+    proxy: tauri::State<'_, ProxyHost>,
+    generation: String,
+) -> Result<()> {
+    main_only(&webview)?;
+    proxy.retire(Some(&generation));
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn mcp_managed_inspect(
+    webview: Webview,
+    draft: managed::Definition,
+) -> Result<inspection::Inspection> {
+    main_only(&webview)?;
+    let started = std::time::Instant::now();
+    let result = async {
+        let config = blocking(move || managed::connection(&draft)).await?;
+        tokio::time::timeout(std::time::Duration::from_secs(20), proxy::inspect(config))
+            .await
+            .map_err(|_| "MCP 检测超时")?
+    }
+    .await;
+    Ok(inspection_result(started, result))
+}
+
+fn inspection_result(
+    started: std::time::Instant,
+    result: Result<Vec<inspection::Tool>>,
+) -> inspection::Inspection {
+    inspection::Inspection {
+        ok: result.is_ok(),
+        message: result
+            .as_ref()
+            .err()
+            .cloned()
+            .unwrap_or_else(|| "检测成功".into()),
+        checked_at: chrono::Utc::now().timestamp_millis(),
+        duration_ms: started.elapsed().as_millis().min(u32::MAX as u128) as u32,
+        tools: result.ok(),
+    }
+}
+
+#[tauri::command]
+pub async fn mcp_browser_inspect(
+    app: AppHandle,
+    webview: Webview,
+    browser: tauri::State<'_, crate::browser::host::BrowserHost>,
+) -> Result<inspection::Inspection> {
+    main_only(&webview)?;
+    let started = std::time::Instant::now();
+    let endpoint = crate::browser::mcp::browser_mcp_create(app, browser.clone()).await?;
+    let config = HttpConfig {
+        name: endpoint.name,
+        url: endpoint.url,
+        headers: BTreeMap::from([("Authorization".into(), format!("Bearer {}", endpoint.token))]),
+        options: BTreeMap::new(),
+    };
+    let result = tokio::time::timeout(std::time::Duration::from_secs(10), proxy::inspect(config))
+        .await
+        .unwrap_or_else(|_| Err("浏览器 MCP 检测超时".into()));
+    let _ = crate::browser::mcp::browser_mcp_revoke(endpoint.endpoint_id, browser);
+    Ok(inspection_result(started, result))
+}
+
+#[tauri::command]
+pub async fn mcp_inspection_read(
+    app: AppHandle,
+    webview: Webview,
+    keys: Vec<String>,
+) -> Result<BTreeMap<String, inspection::Inspection>> {
+    main_only(&webview)?;
+    let root = crate::storage_location::data_dir(&app)?;
+    blocking(move || inspection::read_results(&root, &keys)).await
+}
+
+#[tauri::command]
+pub async fn mcp_inspection_save(
+    app: AppHandle,
+    webview: Webview,
+    key: String,
+    result: inspection::Inspection,
+) -> Result<()> {
+    main_only(&webview)?;
+    let root = crate::storage_location::data_dir(&app)?;
+    blocking(move || inspection::save_result(&root, key, result)).await
+}
+
+#[tauri::command]
+pub async fn mcp_browser_tools(
+    app: AppHandle,
+    webview: Webview,
+) -> Result<inspection::BrowserTools> {
+    main_only(&webview)?;
+    let root = crate::storage_location::data_dir(&app)?;
+    blocking(move || inspection::browser_tools(&root)).await
+}
+
+#[tauri::command]
+pub async fn mcp_browser_set_tools(
+    app: AppHandle,
+    webview: Webview,
+    tools: Vec<String>,
+    enabled: bool,
+) -> Result<Vec<String>> {
+    main_only(&webview)?;
+    let root = crate::storage_location::data_dir(&app)?;
+    blocking(move || inspection::set_browser_tools(&root, tools, enabled)).await
+}
+
+#[tauri::command]
+pub async fn mcp_managed_set_tools(
+    app: AppHandle,
+    webview: Webview,
+    agent_id: String,
+    name: String,
+    revision: String,
+    tools: Vec<String>,
+    enabled: bool,
+) -> Result<String> {
+    main_only(&webview)?;
+    let root = crate::storage_location::data_dir(&app)?;
+    blocking(move || managed::set_tools(&root, &agent_id, &name, &revision, tools, enabled)).await
 }
 
 #[tauri::command]

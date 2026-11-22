@@ -59,15 +59,24 @@ export class SessionFactory {
     const task = Promise.resolve()
       .then(async () => {
         this.assertCurrent(runtime, session);
-        const { servers: mcpServers, establish } = await this.tools(runtime, null);
-        this.assertCurrent(runtime, session);
-        const result = await session.newSession(
-          runtime.cwd ?? runtime.workspacePath,
-          mcpServers.length ? { mcpServers } : undefined,
-        );
-        this.assertCurrent(runtime, session);
-        establish(result.sessionId);
-        return result;
+        const {
+          servers: mcpServers,
+          establish,
+          dispose,
+        } = await this.tools(runtime, null);
+        try {
+          this.assertCurrent(runtime, session);
+          const result = await session.newSession(
+            runtime.cwd ?? runtime.workspacePath,
+            mcpServers.length ? { mcpServers } : undefined,
+          );
+          this.assertCurrent(runtime, session);
+          establish(result.sessionId);
+          return result;
+        } catch (error) {
+          await dispose?.();
+          throw error;
+        }
       })
       .finally(() => {
         if (this.creating.get(runtime) === task) this.creating.delete(runtime);
@@ -204,15 +213,24 @@ export class SessionFactory {
         store.handleEvent(event);
       }
       store.sealStreamingItems();
-      const { servers: mcpServers, establish } = await this.tools(runtime, sessionId);
-      check();
-      await session.loadSession(
-        sessionId,
-        runtime.cwd ?? workspacePath,
-        mcpServers.length ? { mcpServers } : undefined,
-      );
-      check();
-      establish(sessionId);
+      const {
+        servers: mcpServers,
+        establish,
+        dispose,
+      } = await this.tools(runtime, sessionId);
+      try {
+        check();
+        await session.loadSession(
+          sessionId,
+          runtime.cwd ?? workspacePath,
+          mcpServers.length ? { mcpServers } : undefined,
+        );
+        check();
+        establish(sessionId);
+      } catch (error) {
+        await dispose?.();
+        throw error;
+      }
       unsubscribe();
       unsubscribe = undefined;
       store.sealStreamingItems();
