@@ -386,3 +386,29 @@ it("keeps project actions usable before the first check lands", () => {
   // 还没读盘不能断言"没有 index.html"——那会让用户以为 AI 什么都没写。
   expect(screen.queryByText("还没有 index.html")).toBeNull();
 });
+
+/**
+ * 带文件删除的卸载是"先清磁盘、成功后才撤记录"。
+ *
+ * 顺序反过来的话（先 remove 再 purge），清理失败（目录被占用、权限不足）会让卡片
+ * 从列表里消失、几十上百 MB 却留在盘上——用户连重试的入口都没有了。
+ */
+it("keeps the tool listed when file cleanup fails during uninstall", async () => {
+  const state = createStore<readonly PersonalTool[]>(() => [{ package: sampleTool }]);
+  const service = { state, install: vi.fn(), rollback: vi.fn(), setRunDir: vi.fn(), setSourceDir: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
+  const host = { isNative: () => true, stopTool: vi.fn().mockResolvedValue(undefined) } as unknown as HostService;
+  const purge = vi.fn().mockResolvedValue({ text: "清理失败：目录被占用", error: true });
+  render(<ToolsPanel service={service} host={host} workshop={{ ...fakeWorkshop(), purge }} />);
+
+  openCardMenu();
+  fireEvent.click(screen.getByRole("menuitem", { name: "卸载" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: /同时删除项目目录与工具数据/ }));
+  fireEvent.click(screen.getByRole("button", { name: "卸载" }));
+
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("清理失败：目录被占用"));
+  expect(purge).toHaveBeenCalledWith(sampleTool.id);
+  // 记录不能先撤：撤了列表就空了，用户没地方重试。
+  expect(service.remove).not.toHaveBeenCalled();
+  expect(screen.getByRole("list", { name: "已安装工具" })).toBeVisible();
+  expect(screen.getByText("JSON 格式化")).toBeVisible();
+});
