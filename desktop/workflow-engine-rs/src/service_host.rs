@@ -2,8 +2,10 @@
 //! 会话、消息与交互都归 Desktop 的会话宿主，本文件不持有会话或交互状态。
 use crate::{
     Action,
-    journal::Journal,
+    journal::{Journal, TurnFactKind},
     runtime::Host,
+    session_board::SessionBoard,
+    session_host::SessionState,
 };
 use serde_json::{Value, json};
 use std::{
@@ -13,12 +15,27 @@ use std::{
 
 pub type EventSink = Arc<dyn Fn(Value) -> Result<(), String> + Send + Sync>;
 
+/// 把一份会话状态记进轮次记录，新记下的事实推给界面与通知（ADR 040）。轮次记录
+/// 只经这里写入（「说明发出了」除外，那是运行线程知道的事实）。
+pub fn record_session_state(database: &std::path::Path, sink: &EventSink, session_id: &str, state: &SessionState) -> Result<(), String> {
+    for fact in Journal::open(database)?.record_session_state(session_id, state)? {
+        let event = match fact.kind {
+            TurnFactKind::Started { turn } => json!({"type":"turn-started","siteId":fact.site,"ordinal":fact.ordinal,"turn":turn}),
+            TurnFactKind::Ended { turn, outcome, awaiting } => json!({"type":"turn-ended","siteId":fact.site,"ordinal":fact.ordinal,"turn":turn,"outcome":outcome.as_str(),"awaiting":awaiting}),
+        };
+        let _ = sink(json!({"type":"engine-event","runId":fact.run_id,"project":fact.project,"event":event}));
+    }
+    Ok(())
+}
+
 pub struct ServiceHost {
     run_id: String,
     project: String,
     owner: String,
     database: PathBuf,
     sink: EventSink,
+    /// 宿主报告的会话状态：记「说明发出了」之后补记一次最新那份（报告可能先到）。
+    board: Option<Arc<SessionBoard>>,
 }
 
 impl ServiceHost {
@@ -35,7 +52,12 @@ impl ServiceHost {
             owner,
             database,
             sink,
+            board: None,
         }
+    }
+    pub fn with_board(mut self, board: Arc<SessionBoard>) -> Self {
+        self.board = Some(board);
+        self
     }
     fn publish(&self, value: Value) -> Result<(), String> {
         (self.sink)(value)
@@ -110,18 +132,13 @@ impl Host for ServiceHost {
             other => other,
         }
     }
-    fn awaiting_input(&self, action: &Action, waiting: bool) -> Result<(), String> {
-        Journal::open(&self.database)?.set_awaiting_input(
-            &self.run_id,
-            &self.project,
-            &self.owner,
-            action,
-            waiting,
-        )?;
-        // 任一带 runId 的引擎事件都会让 Desktop 刷新该运行的快照。
-        self.action_changed(action, if waiting { "awaiting_input" } else { "running" })
-    }
-    fn input_round_completed(&self, action: &Action) -> Result<(), String> {
-        self.action_changed(action, "input_round_completed")
+    fn turn_prompted(&self, action: &Action, session_id: &str, turn: u64) -> Result<(), String> {
+        Journal::open(&self.database)?.record_prompted(&self.run_id, &self.project, &self.owner, action, session_id, turn)?;
+        // 这一轮的开始、甚至结束可能比「说明发出了」先报到（那时还不算这一步的，
+        // 没记）：按最新那份补记一次。记录是幂等的，重复没关系。
+        if let Some(state) = self.board.as_ref().and_then(|board| board.state(session_id)) {
+            record_session_state(&self.database, &self.sink, session_id, &state)?;
+        }
+        Ok(())
     }
 }

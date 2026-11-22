@@ -243,6 +243,9 @@ fn text_kind() -> String {
 struct StageSrc {
     id: String,
     label: String,
+    /// 这个阶段在做什么（ADR 041：进 Agent 的开场白）。
+    #[serde(default)]
+    description: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -396,9 +399,12 @@ struct NodeSrc {
     /// 给审查的人看：一句话说明这一步为什么存在（只用于界面呈现）。
     #[serde(default)]
     why: Option<String>,
-    /// 给审查的人看：一句话说明这一步最后交出什么（只用于界面呈现）。
+    /// 给审查的人看：一句话说明这一步最后交出什么（也进 Agent 的开场白）。
     #[serde(default)]
     delivers: Option<String>,
+    /// 这一步要读的运行变量（ADR 041）：`变量名: 一句用途`。开场白只写名字和用途。
+    #[serde(default)]
+    reads: serde_yaml::Mapping,
 }
 
 #[derive(Debug, Deserialize)]
@@ -881,6 +887,27 @@ pub fn compile(files: &BTreeMap<String, String>) -> Result<Compiled, Vec<Diagnos
                 .map(|(k, v)| (k.clone(), lower_value(lower_text, report, file, &field("scope"), v)))
                 .collect();
             check_labels(report, file, &field("labels"), &src.labels, src.result.as_ref());
+            let mut reads = Vec::new();
+            for (name, purpose) in &src.reads {
+                let name = name.as_str().unwrap_or_default().trim().to_owned();
+                let here: Vec<Seg> = field("reads").into_iter().chain([Seg::Key(name.clone())]).collect();
+                if kind != "agent" {
+                    report.error(file, &here, "只有 Agent 节点能写 reads");
+                    continue;
+                }
+                let valid = !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_');
+                if !valid {
+                    report.error(file, &here, "reads 的键是运行变量名，如 design");
+                    continue;
+                }
+                // 按 `vars.名字` 登记引用：没在 vars 声明、也没被任何去向 set 过时提醒。
+                lower_text(report, file, &here, &format!("vars.{name}"));
+                let purpose = purpose.as_str().map(str::trim).unwrap_or_default().to_owned();
+                if purpose.is_empty() {
+                    report.warn(file, &here, "写一句用途：这一步读它做什么（Agent 据此决定要不要取）");
+                }
+                reads.push(crate::graph::ReadHint { name, purpose });
+            }
             let why = src.why.as_deref().map(str::trim).filter(|w| !w.is_empty());
             if why.is_none() && kind != "flow" {
                 report.warn(file, &field("why"), "写一句 why：这一步为什么存在（审查工作流的人在节点详情里看到它）");
@@ -919,6 +946,7 @@ pub fn compile(files: &BTreeMap<String, String>) -> Result<Compiled, Vec<Diagnos
                     prompt: src.prompt.trim_end().to_owned(),
                     knowledge: String::new(),
                     knowledge_files: src.knowledge.clone(),
+                    reads,
                     schema,
                     script: src.script.clone(),
                     script_sha256: None,
@@ -1177,7 +1205,7 @@ pub fn compile(files: &BTreeMap<String, String>) -> Result<Compiled, Vec<Diagnos
         }
     }
 
-    let stages = manifest.stages.iter().map(|s| Stage { id: s.id.clone(), label: s.label.clone() }).collect();
+    let stages = manifest.stages.iter().map(|s| Stage { id: s.id.clone(), label: s.label.clone(), description: s.description.trim().to_owned() }).collect();
     let vars = manifest
         .vars
         .iter()
@@ -1186,6 +1214,7 @@ pub fn compile(files: &BTreeMap<String, String>) -> Result<Compiled, Vec<Diagnos
     let definition = Definition {
         id: manifest.id.clone(),
         name: manifest.name.clone(),
+        description: manifest.description.trim().to_owned(),
         entry: manifest.entries.first().map(|e| e.start.clone()).unwrap_or_default(),
         initial_vars: vars,
         flows: subflows,
@@ -1273,6 +1302,48 @@ mod tests {
         assert_eq!(compiled.definition.phases["ask"].routes[0].when, Some(json!({"eq":[{"path":"/latest/ask/status"},"ready"]})));
         assert_eq!(compiled.meta.entries[0].inputs[0].name, "requirement");
         assert!(compiled.warnings.is_empty(), "{:?}", compiled.warnings);
+    }
+
+    /// ADR 041：工作流与阶段的说明、步骤的必读清单进定义（Agent 的开场白据此拼）；
+    /// 必读的名字没有来源时提醒作者。
+    #[test]
+    fn work_order_fields_reach_the_definition_and_unknown_reads_are_flagged() {
+        let manifest = format!("{MANIFEST_OK}description: 小需求从设计到交付
+stages:
+  - {{id: design, label: 设计, description: 把需求落成方案}}
+vars:
+  design: null
+");
+        let flow = "label: 主流程
+entry: ask
+steps:
+  ask:
+    stage: design
+    agent:
+      label: 确认
+      why: 先把需求说清楚
+      delivers: 确认过的需求
+      prompt: 确认需求
+      reads:
+        design: 对照设计
+        plan: 看任务计划
+      result:
+        status: [ready]
+    next:
+      - to: $complete
+        explain: 需求已确认
+        when: ask.status == \"ready\"
+      - to: $blocked
+        explain: 需求没能确认
+";
+        let compiled = compile(&files(&[("workflow.yaml", &manifest), ("flows/main.yaml", flow)])).unwrap();
+        assert_eq!(compiled.definition.description, "小需求从设计到交付");
+        assert_eq!(compiled.definition.stages[0].description, "把需求落成方案");
+        let reads = &compiled.definition.nodes["ask"].reads;
+        assert_eq!(reads.iter().map(|r| (r.name.as_str(), r.purpose.as_str())).collect::<Vec<_>>(), [("design", "对照设计"), ("plan", "看任务计划")]);
+        let rendered: Vec<String> = compiled.warnings.iter().map(Diagnostic::render).collect();
+        assert!(rendered.iter().any(|m| m.contains("plan") && m.contains("reads")), "{rendered:?}");
+        assert!(!rendered.iter().any(|m| m.contains("「design」")), "{rendered:?}");
     }
 
     /// 审查用的呈现（why / delivers / explain / 要求原文）进节点目录；没写 why、带条件的去向没写 explain 时提醒。

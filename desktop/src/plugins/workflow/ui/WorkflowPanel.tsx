@@ -10,7 +10,7 @@
  */
 import { RunManager } from "./RunManager.tsx";
 import { describeError, serviceExitText, type ErrorText } from "../status/errorText.ts";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RunManagerFilters, RunSummary, WorkflowPanelRequest, WorkflowService } from "../types.ts";
 import { RunView } from "./RunView.tsx";
 import "./workflowPanel.css";
@@ -62,6 +62,8 @@ export function WorkflowPanel({ service, project, onOpenSession, onOpenProjectRu
   const setRoute = (next: Route) => setNav((current) => ({ ...current, route: next }));
   const [runFilters, setRunFilters] = useState(initial.filters ?? DEFAULT_RUN_FILTERS);
   const [error, setError] = useState<ErrorText | null>(null);
+  /** 正显示着的「服务意外退出」提示；重新连上时只收起它。 */
+  const exitError = useRef<ErrorText | null>(null);
   // 运行列表变化时重画（运行管理每次从服务取最新列表）。
   const [, setVersion] = useState(0);
   const go = (next: Route) => setNav({ route: next, touched: true });
@@ -95,7 +97,14 @@ export function WorkflowPanel({ service, project, onOpenSession, onOpenProjectRu
         const request = service.takePanelRequest(project);
         if (request) apply(routeOfPanelRequest(request));
       } else if (event.type === "service-exit") {
-        setError(serviceExitText(event.code, event.stderrTail, "重试"));
+        const exit = serviceExitText(event.code, event.stderrTail, "重试");
+        exitError.current = exit;
+        setError(exit);
+      } else if (event.type === "service-reconnected") {
+        // 引擎已经自动重启并连上：收起退出提示（换成别的报错了就不动）。
+        const exit = exitError.current;
+        exitError.current = null;
+        if (exit) setError((current) => (current === exit ? null : current));
       }
       setVersion((v) => v + 1);
     });

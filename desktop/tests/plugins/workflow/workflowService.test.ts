@@ -5,8 +5,9 @@ import { emptyCanvasSnapshot } from "../../../src/plugins/workflow/status/snapsh
 import { createNodePlans, type NodePlans } from "../../../src/plugins/workflow/status/nodePlans.ts";
 
 /**
- * 引擎线 WorkflowService 的行为面：bindWorkspace 作用域、事件驱动的
- * 去抖刷新、站点身份解析、reconcile 的 executed 分派、只读会话流缓冲。
+ * 引擎线 WorkflowService 的行为面：bindWorkspace 作用域、引擎推来的运行状态
+ * （ADR 040：按版本号直接替换，快照只在版本更新时重取）、引擎退出后的对齐、
+ * 站点身份解析、reconcile 的 executed 分派、只读会话流缓冲。
  * 引擎客户端以桩驱动（request 记录方法与参数；emit 手动泵事件）。
  */
 function harness(options: { plans?: NodePlans } = {}) {
@@ -45,6 +46,25 @@ function harness(options: { plans?: NodePlans } = {}) {
   };
 }
 
+/** 引擎推来的一次运行的新状态（workflow_service.rs `run_changed`）。 */
+function runChanged(runId: string, version: number, run: Record<string, unknown>): WorkflowEvent {
+  return {
+    type: "run-changed",
+    runId,
+    project: "D:/project",
+    version,
+    run: { runId, name: "AAW dev", args: null, result: null, failure: null, ...run },
+    links: { runId, workflowName: "AAW dev", status: run.status, active: run.active, stopping: run.stopping, links: [
+      { sessionId: "s-1", actorName: "设计", nodes: [{ siteId: "ask#1", ordinal: 1, status: "running", label: "设计", turn: "cancelled" }] },
+    ] },
+  };
+}
+
+/** 某个版本的快照应答。 */
+function snapshotAt(version: number) {
+  return { version, run: { runId: "run-1", name: "AAW dev", status: "running", args: null, result: null, failure: null }, active: true, hasLease: false, retries: [], nodes: [], actors: [] };
+}
+
 describe("createWorkflowService", () => {
   it("selects the launch configuration using the run being resumed", async () => {
     const h = harness();
@@ -79,27 +99,133 @@ describe("createWorkflowService", () => {
     h.dispose();
   });
 
-  it("debounces engine events into snapshot and list refreshes", async () => {
+  it("applies pushed run state directly, without fetching the run list again (ADR 040)", async () => {
+    const h = harness();
+    h.respondWith((method) => (method === "list" || method === "session-links" ? [] : null));
+    h.service.bindWorkspace("D:/project");
+    await vi.waitFor(() => expect(h.requests.some((r) => r.method === "session-links")).toBe(true));
+    const before = h.requests.length;
+    const changed: string[] = [];
+    h.service.subscribe((event) => { if (event.type === "runs-changed") changed.push(event.type); });
+    h.emit(runChanged("run-1", 5, { status: "running", active: true, stopping: true }));
+    expect(h.service.runs().map((run) => [run.runId, run.status, run.stopping])).toEqual([["run-1", "running", true]]);
+    expect(h.service.sessionLinks().runs).toMatchObject([{ runId: "run-1", stopping: true, links: [{ sessionId: "s-1", nodes: [{ siteId: "ask#1", turn: "cancelled" }] }] }]);
+    expect(changed).toHaveLength(1);
+    // 乱序到达的旧版本不覆盖新的。
+    h.emit(runChanged("run-1", 4, { status: "stopped", active: false }));
+    expect(h.service.runs()[0]?.status).toBe("running");
+    h.emit(runChanged("run-1", 6, { status: "stopped", active: false }));
+    expect(h.service.runs()[0]?.status).toBe("stopped");
+    // 其他项目的运行进其他项目的分组。
+    h.emit({ ...runChanged("run-9", 1, { status: "running", active: true }), project: "D:/other" });
+    expect(h.service.otherSessionLinks()).toMatchObject([{ project: "D:/other", runs: [{ runId: "run-9" }] }]);
+    expect(h.service.runs().map((run) => run.runId)).toEqual(["run-1"]);
+    h.emit({ type: "run-removed", runId: "run-1" });
+    expect(h.service.runs()).toEqual([]);
+    await Promise.resolve();
+    expect(h.requests.slice(before).filter((r) => r.method === "list" || r.method === "session-links")).toEqual([]);
+    h.dispose();
+  });
+
+  it("refetches a held snapshot only when the pushed version is newer, one request at a time", async () => {
+    const h = harness();
+    let version = 1;
+    const answers: Array<() => void> = [];
+    h.respondWith((method) => {
+      if (method !== "snapshot") return [];
+      const answered = version;
+      return new Promise((resolve) => answers.push(() => resolve(snapshotAt(answered))));
+    });
+    h.service.bindWorkspace("D:/project");
+    const store = h.service.snapshot("run-1");
+    store.subscribe(() => {});
+    const snapshots = () => h.requests.filter((r) => r.method === "snapshot").length;
+    await vi.waitFor(() => expect(snapshots()).toBe(1));
+    answers.shift()!();
+    await vi.waitFor(() => expect(store.getState().version).toBe(1));
+    // 推来的版本不比快照新：不取。
+    h.emit(runChanged("run-1", 1, { status: "running", active: true }));
+    await Promise.resolve();
+    expect(snapshots()).toBe(1);
+    // 新版本：取；取的途中又来两次，只在取完后再取一次。
+    version = 2;
+    h.emit(runChanged("run-1", 2, { status: "running", active: true }));
+    await vi.waitFor(() => expect(snapshots()).toBe(2));
+    version = 4;
+    h.emit(runChanged("run-1", 3, { status: "running", active: true }));
+    h.emit(runChanged("run-1", 4, { status: "running", active: true }));
+    await Promise.resolve();
+    expect(snapshots()).toBe(2);
+    answers.shift()!();
+    await vi.waitFor(() => expect(snapshots()).toBe(3));
+    answers.shift()!();
+    await vi.waitFor(() => expect(store.getState().version).toBe(4));
+    h.dispose();
+  });
+
+  it("shows 正在停止 in a held snapshot at once, without waiting for a refetch", async () => {
+    const h = harness();
+    h.respondWith((method) => (method === "snapshot" ? snapshotAt(3) : []));
+    h.service.bindWorkspace("D:/project");
+    const store = h.service.snapshot("run-1");
+    store.subscribe(() => {});
+    await vi.waitFor(() => expect(store.getState().version).toBe(3));
+    const fetched = h.requests.filter((r) => r.method === "snapshot").length;
+    // 叫停只改服务内存，版本号不变：直接换进快照，不重取。
+    h.emit(runChanged("run-1", 3, { status: "running", active: true, stopping: true }));
+    expect(store.getState().run?.stopping).toBe(true);
+    expect(store.getState().active).toBe(true);
+    h.emit(runChanged("run-1", 3, { status: "stopped", active: false }));
+    expect(store.getState().active).toBe(false);
+    await Promise.resolve();
+    expect(h.requests.filter((r) => r.method === "snapshot")).toHaveLength(fetched);
+    h.dispose();
+  });
+
+  it("marks runs as no longer executing when the engine exits, then reconnects and realigns", async () => {
     vi.useFakeTimers();
     try {
       const h = harness();
-      h.respondWith((method) => (method === "list" ? [] : null));
+      h.respondWith((method) => (method === "snapshot" ? snapshotAt(1) : method === "list" ? [{ runId: "run-1", status: "stopped", active: false }] : []));
       h.service.bindWorkspace("D:/project");
-      // 打开快照流即取一次（占位快照的首次拉取）
-      h.service.snapshot("run-1");
+      const store = h.service.snapshot("run-1");
+      store.subscribe(() => {});
+      const events: unknown[] = [];
+      h.service.subscribe((event) => events.push(event));
       await vi.advanceTimersByTimeAsync(1);
-      const baseline = h.requests.filter((r) => r.method === "snapshot" && r.params.runId === "run-1").length;
-      expect(baseline).toBe(1);
-      h.emit({ type: "run-settled", runId: "run-1" });
-      h.emit({ type: "run-starting", runId: "run-1" });
-      // 去抖窗口内的连续事件只安排一次刷新
-      expect(h.requests.filter((r) => r.method === "snapshot" && r.params.runId === "run-1")).toHaveLength(baseline);
-      await vi.advanceTimersByTimeAsync(250);
-      expect(h.requests.filter((r) => r.method === "snapshot" && r.params.runId === "run-1")).toHaveLength(baseline + 1);
+      h.emit(runChanged("run-1", 2, { status: "running", active: true }));
+      expect(h.service.sessionLinks().runs[0]?.active).toBe(true);
+      await vi.advanceTimersByTimeAsync(1);
+      const before = h.requests.length;
+      h.emit({ type: "service-exit", runId: "", code: 1 });
+      // 立刻：不在执行（不停在「运行中」）。
+      expect(h.service.sessionLinks().runs[0]?.active).toBe(false);
+      expect(h.service.runs()[0]?.active).toBe(false);
+      expect(store.getState().active).toBe(false);
+      // 稍后：拉起引擎、拉全量对齐。
+      await vi.advanceTimersByTimeAsync(400);
+      const after = h.requests.slice(before).map((r) => r.method);
+      expect(after).toEqual(expect.arrayContaining(["list", "session-links", "snapshot"]));
+      expect(h.service.runs()[0]?.status).toBe("stopped");
+      // 重新连上之后告诉界面（收起退出提示）。
+      await vi.waitFor(() => expect(events).toContainEqual({ type: "service-reconnected", runId: "" }));
       h.dispose();
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps a pushed row when a full fetch that started earlier comes back older", async () => {
+    const h = harness();
+    let answer!: (rows: unknown[]) => void;
+    h.respondWith((method) => (method === "list" ? new Promise((resolve) => { answer = resolve; }) : []));
+    h.service.bindWorkspace("D:/project");
+    await vi.waitFor(() => expect(h.requests.some((r) => r.method === "list")).toBe(true));
+    h.emit(runChanged("run-1", 8, { status: "running", active: true }));
+    answer([{ runId: "run-1", status: "stopped", active: false, version: 7 }]);
+    await vi.waitFor(() => expect(h.requests.some((r) => r.method === "session-links")).toBe(true));
+    expect(h.service.runs()[0]?.status).toBe("running");
+    h.dispose();
   });
 
   it("ignores an in-flight run list from the previously selected project", async () => {
@@ -146,7 +272,7 @@ describe("createWorkflowService", () => {
     unbind();
     unbind = h.service.bindWorkspace("D:/project");
     status = "completed";
-    h.emit({ type: "engine-event", runId: "run-1" });
+    h.emit(runChanged("run-1", 2, { status: "completed", active: false }));
     await vi.waitFor(() => expect(store.getState().run?.status).toBe("completed"));
     expect(seen.at(-1)).toBe("completed");
     unbind();
@@ -166,7 +292,7 @@ describe("createWorkflowService", () => {
     await vi.waitFor(() => expect(store.getState().runId).toBe("run-1"));
     h.service.bindWorkspace("D:/other");
     const before = h.requests.length;
-    h.emit({ type: "engine-event", runId: "run-1" });
+    h.emit({ ...runChanged("run-1", 2, { status: "running", active: true }), project: "D:/project" });
     // 切项目后的列表刷新也会发请求（list / session-links）：只等快照刷新本身。
     await vi.waitFor(() => expect(h.requests.slice(before).some((r) => r.method === "snapshot")).toBe(true));
     const refresh = h.requests.slice(before).find((r) => r.method === "snapshot");
@@ -188,7 +314,7 @@ describe("createWorkflowService", () => {
     store.subscribe(() => {})();
     store.subscribe(() => {});
     status = "completed";
-    h.emit({ type: "engine-event", runId: "run-1" });
+    h.emit(runChanged("run-1", 2, { status: "completed", active: false }));
     await vi.waitFor(() => expect(store.getState().run?.status).toBe("completed"));
     h.dispose();
   });
@@ -378,7 +504,7 @@ describe("session links for the sidebar groups", () => {
       if (method === "session-links") {
         return [
           { runId: "run-1", workflowName: "AAW dev", status: "running", active: true, links: [
-            { sessionId: "s-1", actorName: "设计", nodes: [{ siteId: "ask#2", ordinal: 1, status: "completed", label: "设计" }, { siteId: "ask#4", ordinal: 2, status: "running", label: "设计修正", awaitingInput: true }] },
+            { sessionId: "s-1", actorName: "设计", nodes: [{ siteId: "ask#2", ordinal: 1, status: "completed", label: "设计" }, { siteId: "ask#4", ordinal: 2, status: "running", label: "设计修正", turn: "completed", submitted: "yes" }] },
             { sessionId: "", actorName: "无会话" },
           ] },
           { runId: "" },
@@ -395,8 +521,8 @@ describe("session links for the sidebar groups", () => {
     expect(links.runs[0]).toEqual({
       runId: "run-1", workflowName: "AAW dev", title: "AAW dev", status: "running", active: true,
       links: [{ sessionId: "s-1", actorName: "设计", nodes: [
-        { siteId: "ask#2", ordinal: 1, status: "completed", label: "设计", awaitingInput: false },
-        { siteId: "ask#4", ordinal: 2, status: "running", label: "设计修正", awaitingInput: true },
+        { siteId: "ask#2", ordinal: 1, status: "completed", label: "设计" },
+        { siteId: "ask#4", ordinal: 2, status: "running", label: "设计修正", turn: "completed" },
       ] }],
     });
     // 切项目：旧项目的关联立即清掉。

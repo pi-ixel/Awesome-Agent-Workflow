@@ -129,10 +129,13 @@ export function SessionStatusOverlay({
       items: state?.items ?? NO_ACTIVITIES,
     })),
   );
-  const activities =
-    !!project && !!extensionStatus.project && pathKey(project) === pathKey(extensionStatus.project)
-      ? extensionStatus.items
-      : NO_ACTIVITIES;
+  const activeSessionId = useSessionValue((state) => (matchingSession ? state.activeSessionId : null));
+  const activities = useMemo(() => {
+    if (!project || !extensionStatus.project || pathKey(project) !== pathKey(extensionStatus.project)) return NO_ACTIVITIES;
+    // 当前会话本身属于某项活动时，会话横幅已经在说它，状态卡不再重复。
+    const others = activeSessionId ? extensionStatus.items.filter((item) => !item.sessionIds?.includes(activeSessionId)) : extensionStatus.items;
+    return others.length === extensionStatus.items.length ? extensionStatus.items : others;
+  }, [project, extensionStatus, activeSessionId]);
   const leadRun = activities[0] ?? null;
   const hasContent =
     enabled &&

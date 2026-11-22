@@ -24,6 +24,8 @@ export interface ProjectActivity {
   readonly summary: string;
   /** 打开它的按钮的无障碍名称。 */
   readonly openLabel: string;
+  /** 它自己的会话：在这些会话里由它的会话横幅说明，状态卡不再重复列出。 */
+  readonly sessionIds?: readonly string[];
 }
 
 export interface ProjectActivities {
@@ -86,7 +88,7 @@ export interface ProjectExtension {
   readonly treeAction: ProjectTreeAction;
   /** 项目总览里的区块（可不提供）。 */
   readonly Overview?: ComponentType<{ readonly project: string }>;
-  /** 会话顶部的横幅（不是插件自己的会话时不渲染）。 */
+  /** 输入框卡片最上面一行，排在排队消息上面（不是插件自己的会话时不渲染）。 */
   readonly SessionBanner: ComponentType<{ readonly project: string; readonly sessionId: string }>;
 }
 

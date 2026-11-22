@@ -1064,14 +1064,6 @@ export function SessionView({
         className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-base"
       >
         <ArchiveNotice openSettings={openArchiveSettings} />
-        <ScopedErrorBoundary
-          scope="工作流节点信息"
-          resetKey={`${contextPath ?? "none"}:${activeSessionId ?? ""}`}
-        >
-          {ExtensionSessionBanner && contextPath && activeSessionId && (
-            <ExtensionSessionBanner project={contextPath} sessionId={activeSessionId} />
-          )}
-        </ScopedErrorBoundary>
         {isDraftPreparing ? (
           <div
             role={draftError ? "alert" : "status"}
@@ -1305,6 +1297,14 @@ export function SessionView({
                     </SessionDock>
                     <ChatInput
                       queue={<QueueDock />}
+                      header={ExtensionSessionBanner && contextPath && activeSessionId ? (
+                        <ScopedErrorBoundary
+                          scope="工作流节点信息"
+                          resetKey={`${contextPath}:${activeSessionId}`}
+                        >
+                          <ExtensionSessionBanner project={contextPath} sessionId={activeSessionId} />
+                        </ScopedErrorBoundary>
+                      ) : undefined}
                       fileCandidates={fileCandidates}
                       skillCandidates={skillCandidates}
                       resolveSlashSkills={resolveSlashSkills}

@@ -228,6 +228,23 @@ describe("ChatInput 悬浮形态", () => {
     expect(screen.getByText("—")).toBeInTheDocument();
   });
 
+  it("卡片顶部一行排在排队消息上面，排队消息紧挨输入框", () => {
+    render(
+      <ChatInput
+        header={<div data-testid="composer-header" />}
+        queue={<section data-testid="composer-queue" />}
+        isAgentRunning={false}
+        onSend={vi.fn()}
+        onEnqueue={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    const header = screen.getByTestId("composer-header");
+    const queue = screen.getByTestId("composer-queue");
+    expect(header.compareDocumentPosition(queue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(queue.compareDocumentPosition(getTextarea()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("仅显示 AAW 审批策略，不展示 Agent 模式徽标", () => {
     useSessionStore.setState({
       approvalMode: { id: "manual", name: "手动审批" },

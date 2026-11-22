@@ -154,7 +154,7 @@ fn a_result_submitted_while_the_run_is_stopped_is_kept_and_adopted_on_continue()
     let host = service.child.host.clone();
     let run = service.request("start-flow", json!({"input":{"cwd":cwd,"requirement":"ask","command":command,"mcpServers":[],"definition":waiting_flow()}}))["runId"].as_str().unwrap().to_owned();
     // Agent 问了用户、没交结果：节点在等你回复。
-    service.until(|v| v["event"]["event"]["status"] == "awaiting_input");
+    service.until(|v| v["event"]["event"]["type"] == "turn-ended" && v["event"]["event"]["awaiting"] == true);
     let (session, _) = host.messages().wait_for(Duration::from_secs(5), |t| t.contains("选择 A 还是 B")).unwrap();
     service.request("stop", json!({"runId":run}));
     service.until(|v| v["event"]["type"] == "run-error");
@@ -188,7 +188,7 @@ fn reopening_a_stopped_node_session_after_a_restart_still_takes_results() {
     let mut service = Service::start(&dir, &[("AAW_FAKE_WAIT_FOR_USER", "1")]);
     let host = service.child.host.clone();
     let run = service.request("start-flow", json!({"input":{"cwd":cwd,"requirement":"ask","command":command,"mcpServers":[],"definition":waiting_flow()}}))["runId"].as_str().unwrap().to_owned();
-    service.until(|v| v["event"]["event"]["status"] == "awaiting_input");
+    service.until(|v| v["event"]["event"]["type"] == "turn-ended" && v["event"]["event"]["awaiting"] == true);
     let (session, _) = host.messages().wait_for(Duration::from_secs(5), |t| t.contains("选择 A 还是 B")).unwrap();
     service.request("stop", json!({"runId":run}));
     service.until(|v| v["event"]["type"] == "run-error");
@@ -212,6 +212,42 @@ fn reopening_a_stopped_node_session_after_a_restart_still_takes_results() {
     let again = service.request("session-tools", json!({"cwd":cwd,"sessionId":session}));
     assert_eq!(serde_json::to_value(&offer).unwrap(), again);
     drop(agent);
+    service.shutdown();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+#[ignore = "requires Python; while stopped the user replies and the agent asks again, continue does not prompt"]
+fn a_reply_while_stopped_is_recorded_and_continue_waits_for_the_user_instead_of_prompting() {
+    let dir = std::env::temp_dir().join(format!("aaw-stopped-reply-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&dir).unwrap();
+    let cwd = dir.to_str().unwrap().to_owned();
+    let command = json!(["python", support::fake_agent().to_str().unwrap()]);
+    let mut service = Service::start(&dir, &[("AAW_FAKE_WAIT_FOR_USER", "1")]);
+    let host = service.child.host.clone();
+    let run = service.request("start-flow", json!({"input":{"cwd":cwd,"requirement":"ask","command":command,"mcpServers":[],"definition":waiting_flow()}}))["runId"].as_str().unwrap().to_owned();
+    service.until(|v| v["event"]["event"]["type"] == "turn-ended" && v["event"]["event"]["awaiting"] == true);
+    let (session, _) = host.messages().wait_for(Duration::from_secs(5), |t| t.contains("选择 A 还是 B")).unwrap();
+    service.request("stop", json!({"runId":run}));
+    service.until(|v| v["event"]["type"] == "run-error");
+
+    // 停着时用户在会话里回复，Agent 又停下来问：引擎照样记下这一轮（ADR 040）。
+    assert_eq!(host.chat(&session, "我想再确认需求及边界").unwrap(), "end_turn");
+    let ended = service.until(|v| v["event"]["event"]["type"] == "turn-ended");
+    assert_eq!(ended["event"]["event"]["awaiting"], true, "{ended}");
+    let snapshot = service.request("snapshot", json!({"cwd":cwd,"runId":run}));
+    assert_eq!(snapshot["nodes"][0]["turn"], "completed", "{snapshot}");
+
+    // 继续运行：最近一轮正常结束、没交结果，就是在等你回复——什么也不发。
+    service.request("resume", json!({"cwd":cwd,"runId":run,"command":command,"mcpServers":[]}));
+    // 等它接回会话、看过会话状态（期间若要发说明，模拟宿主就会记一次）。
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(host.prompt_turns(), 1, "不打断、不重发说明");
+    // 你回复、Agent 交了结果：往下走。
+    host.user_turn(&session, "选 A，做吧", Duration::from_secs(10)).unwrap();
+    let settled = service.until(|v| v["event"]["type"] == "run-settled" || v["event"]["type"] == "run-error");
+    assert_eq!(settled["event"]["settlement"]["status"], "completed", "{settled}");
+    assert_eq!(host.prompt_turns(), 1);
     service.shutdown();
     let _ = std::fs::remove_dir_all(dir);
 }

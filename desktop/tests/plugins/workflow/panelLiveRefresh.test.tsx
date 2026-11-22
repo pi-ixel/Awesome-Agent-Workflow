@@ -66,7 +66,8 @@ it("面板在导航重绑后仍随引擎事件刷新到节点二", async () => {
   current = snapshot("design", [node("ask#1", "requirement", "completed"), node("ask#2", "design", "running")]);
   act(() => {
     for (const listener of pump) {
-      listener({ type: "engine-event", runId: "run-1", event: { type: "action-changed", siteId: "ask#1", ordinal: 1, status: "completed" } });
+      // 引擎推来这次运行的新版本（ADR 040）：比面板手里的快照新，重取。
+      listener({ type: "run-changed", runId: "run-1", project: "D:/project", version: 2, run, links: { runId: "run-1", status: "running", active: true, links: [] } });
     }
   });
   await vi.waitFor(() => expect(phase("设计")).toContain("运行中"));

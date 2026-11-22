@@ -23,7 +23,7 @@ import {
 import { manualTitleOf } from "../../src/plugins/project/sessions/sessionTitles.ts";
 import { AcpResponseError } from "../../src/plugins/acpRuntime/service.ts";
 import { FakeAcpSession } from "../fixtures/fakeAcpSession.ts";
-import { attachSessionPreloading, findSessionRuntime, openPluginSessionRuntime, registerSessionTools, watchSessionTurns } from "../helpers/projectCoordinatorFixture.ts";
+import { attachSessionPreloading, findSessionRuntime, openPluginSessionRuntime, pluginSessionReady, registerSessionTools, watchSessionTurns } from "../helpers/projectCoordinatorFixture.ts";
 import { sessionActivityKey } from "../../src/plugins/project/sessions/sessionActivityStore.ts";
 import {
   hasRunningSessions,
@@ -723,10 +723,49 @@ describe("openRealWorkspace：会话恢复装配", () => {
     }
   });
 
+  it("插件接回正在回复的会话：工具没变就不碰它；变了就排在这一轮之后换，不打断、不失败（ADR 040）", async () => {
+    const load = vi.spyOn(FakeAcpSession.prototype, "loadSession");
+    let finish!: () => void;
+    const prompt = vi.spyOn(FakeAcpSession.prototype, "prompt").mockImplementation(
+      () => new Promise((resolve) => { finish = () => resolve({ stopReason: "end_turn" }); }),
+    );
+    const first = { name: "aaw-result", command: "result.exe", args: ["--port", "1"], env: [] };
+    const second = { ...first, args: ["--port", "2"] };
+    try {
+      fakeSessionControl.listed = [{ sessionId: "sess-old", cwd: WORKSPACE, updatedAt: "2026-10-19T09:00:00" }];
+      const target = await openPluginSessionRuntime({ workspacePath: WORKSPACE, resumeSessionId: "sess-old", tools: () => [first] });
+      const runtime = findSessionRuntime(WORKSPACE, target.agentKey, "sess-old")!;
+      // 用户在会话里说话，Agent 正在回复。
+      expect(runtime.store.getState().sendPrompt("你好")).toBe(true);
+      await vi.waitFor(() => expect(runtime.store.getState().isAgentRunning).toBe(true));
+      load.mockClear();
+      // 同样的工具（新的提供函数）：不重新载入，立即就绪。
+      await openPluginSessionRuntime({ workspacePath: WORKSPACE, resumeSessionId: "sess-old", tools: () => [first] });
+      expect(load).not.toHaveBeenCalled();
+      await pluginSessionReady(target);
+      // 工具变了：打开立即返回，换工具排在这一轮之后。
+      await openPluginSessionRuntime({ workspacePath: WORKSPACE, resumeSessionId: "sess-old", tools: () => [second] });
+      let ready = false;
+      void pluginSessionReady(target).then(() => { ready = true; });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(load).not.toHaveBeenCalled();
+      expect(ready).toBe(false);
+      expect(runtime.store.getState().isAgentRunning).toBe(true);
+      // 这一轮结束：换上新工具，就绪。
+      finish();
+      await vi.waitFor(() => expect(ready).toBe(true));
+      expect(load).toHaveBeenCalledTimes(1);
+      expect((load.mock.calls.at(-1) as unknown[] | undefined)?.[2]).toEqual({ mcpServers: [second] });
+    } finally {
+      load.mockRestore();
+      prompt.mockRestore();
+    }
+  });
+
   it("轮次事件：不管谁发的消息，开始与结束都通知订阅方；取消订阅后不再收到", async () => {
     const target = await openPluginSessionRuntime({ workspacePath: WORKSPACE });
     const events: unknown[] = [];
-    const stop = watchSessionTurns(target, (event) => events.push(event));
+    const stop = watchSessionTurns(target.sessionId!, (event) => events.push(event));
     const runtime = findSessionRuntime(WORKSPACE, target.agentKey, target.sessionId)!;
     expect(runtime.store.getState().sendPrompt("你好")).toBe(true);
     await vi.waitFor(() => expect(events).toHaveLength(2));

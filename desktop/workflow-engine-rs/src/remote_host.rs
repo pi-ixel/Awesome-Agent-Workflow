@@ -8,20 +8,21 @@
 //! 感知路径里。
 //!
 //! 帧分类见 [`HostFramePayload`]：引擎→宿主的请求帧（spawn / prompt_turn /
-//! wait_turn_ended / cancel_waiting / 问题池中继）与宿主→引擎
-//! 的应答帧。反向请求（permission/question）由对端原生 UI 直答，不经帧。
+//! cancel_waiting / 问题池中继）与宿主→引擎的应答帧。反向请求
+//! （permission/question）由对端原生 UI 直答，不经帧。会话状态不走帧：
+//! 宿主经服务协议 `session-state` 主动报告，落在 [`SessionBoard`]（ADR 040）。
 //!
 //! 截止时间只约束「短帧得到不得到得了对端」（spawn/问题池中继；
-//! 接缝断链的失败必须可观测而不是挂死）。**轮次边界帧（prompt_turn /
-//! wait_turn_ended）没有引擎侧截止**：它们的合法时长就是一轮的真实时长
-//! （模型 + 工具 + 人工审批可远超任何常量），与进程内 `Session::prompt`
-//! 不设限同一语义；退出靠取消——cancel 标志置位时观察者线程把挂起帧
-//! 就地判错唤醒，宿主侧
-//! cancel_waiting 也会应答挂起的 wait 帧。
+//! 接缝断链的失败必须可观测而不是挂死）。**prompt_turn 没有引擎侧截止**：
+//! 会话正忙时宿主要等那一轮结束才发出说明，合法时长没有上限；退出靠
+//! 取消——cancel 标志置位时观察者线程把挂起帧就地判错唤醒。
 //!
 //! 关联 id 在一个运行内单调递增；应答按 id 匹配——错位的应答静默丢弃
 //! 而不是错配。
-use crate::session_host::{NodeSession, SessionHost, SessionRequirement, TurnRequest};
+use crate::{
+    session_board::SessionBoard,
+    session_host::{NodeSession, SessionHost, SessionRequirement, SessionState, TurnRequest},
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -42,20 +43,14 @@ pub enum HostRequest {
     SpawnNodeSession {
         requirement: SessionRequirement,
     },
-    /// 驱动一轮标准工作流轮次；应答即本轮结束（turn_ended）。
+    /// 在会话里发出工作流的说明；这一轮开始时应答 `{"turn": 轮次编号}`。
     PromptTurn {
         session_id: String,
         action: crate::Action,
         prompt: String,
     },
-    /// 等待下一个轮次边界：轮次间的用户消息由对端原生会话流驱动新轮次，
-    /// 宿主在该轮次结束（turn_ended）时才应答本帧；无消息时挂起等待。
-    /// cancel_waiting 帧到达时以 RUN_CANCELLED 应答唤醒。
-    WaitTurnEnded {
-        session_id: String,
-    },
-    /// 服务协议 stop / 服务收尾：唤醒等待输入与挂起交互（无应答；
-    /// 对端对挂起的 wait 帧以错误应答唤醒）。
+    /// 服务协议 stop / 服务收尾：停下这次运行会话里进行中的一轮、收掉
+    /// tracker（无应答）。
     CancelWaiting,
     /// 问题池 tracker 启动（二期-3 §9 第 4 条）：载荷即需求单的 tracker
     /// 启动参数（路径/cwd/home/runId 作用域）——宿主按它 spawn 并完成
@@ -100,6 +95,9 @@ pub enum HostFramePayload {
 struct RemoteSession {
     session_id: String,
     link: Arc<RemoteLink>,
+    board: Arc<SessionBoard>,
+    /// 接上会话时宿主的换代次数：之后宿主换代，等待以 HOST_RESET 醒来。
+    generation: u64,
 }
 
 impl NodeSession for RemoteSession {
@@ -115,7 +113,7 @@ impl NodeSession for RemoteSession {
         &mut self,
         request: &TurnRequest,
         cancel: Arc<AtomicBool>,
-    ) -> Result<(), String> {
+    ) -> Result<u64, String> {
         let response = self.link.request_until_turn_boundary(
             &HostRequest::PromptTurn {
                 session_id: self.session_id.clone(),
@@ -123,19 +121,13 @@ impl NodeSession for RemoteSession {
                 prompt: request.prompt.clone(),
             },
             &cancel,
-            "ACP_TURN_CANCELLED_OUTCOME_UNKNOWN",
-        )?;
-        require_ok(&response)
-    }
-    fn wait_turn_ended(&mut self, cancel: Arc<AtomicBool>) -> Result<(), String> {
-        let response = self.link.request_until_turn_boundary(
-            &HostRequest::WaitTurnEnded {
-                session_id: self.session_id.clone(),
-            },
-            &cancel,
             "RUN_CANCELLED",
         )?;
-        require_ok(&response)
+        require_ok(&response)?;
+        response.result["turn"].as_u64().filter(|turn| *turn > 0).ok_or_else(|| "HOST_FRAME_INVALID".into())
+    }
+    fn wait_state(&mut self, after: u64, cancel: Arc<AtomicBool>) -> Result<SessionState, String> {
+        self.board.wait(&self.session_id, after, self.generation, &cancel)
     }
 }
 
@@ -163,7 +155,7 @@ struct RemoteLink {
     next_id: AtomicU64,
     /// 短帧应答等待的截止时间：跨进程接缝的对端可能已死或行丢失——
     /// 超时报 HOST_RESPONSE_TIMEOUT（接缝断链的失败必须可观测）。
-    /// 轮次边界帧（prompt_turn / wait_turn_ended）不用它，见模块注释。
+    /// prompt_turn 不用它，见模块注释。
     response_timeout: Duration,
 }
 
@@ -177,9 +169,8 @@ impl RemoteLink {
         self.request_with(request, Some(self.response_timeout), None)
     }
 
-    /// 轮次边界帧（prompt_turn / wait_turn_ended）：无引擎侧截止——合法
-    /// 时长就是一轮的真实时长；cancel 置位时观察者线程以 `cancel_code`
-    /// 就地判错唤醒（宿主侧 cancel_waiting 的应答路径之外的保底出口）。
+    /// prompt_turn：无引擎侧截止；cancel 置位时观察者线程以 `cancel_code`
+    /// 就地判错唤醒。
     fn request_until_turn_boundary(
         &self,
         request: &HostRequest,
@@ -279,6 +270,8 @@ impl RemoteLink {
 /// 远程宿主：把 `SessionHost` 的全部调用编码成宿主回调帧。
 pub struct RemoteHost {
     link: Arc<RemoteLink>,
+    /// 宿主报告的会话状态（服务内所有运行共用一块）。
+    board: Arc<SessionBoard>,
 }
 
 /// 宿主换代（WebView 重载）时挂起请求的应答码：对端持有的会话与轮次
@@ -294,6 +287,7 @@ impl RemoteHost {
     pub fn new(
         send: Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>,
         response_timeout: Duration,
+        board: Arc<SessionBoard>,
     ) -> Self {
         Self {
             link: Arc::new(RemoteLink {
@@ -302,6 +296,7 @@ impl RemoteHost {
                 next_id: AtomicU64::new(1),
                 response_timeout,
             }),
+            board,
         }
     }
 
@@ -347,6 +342,9 @@ impl SessionHost for RemoteHost {
         requirement: &SessionRequirement,
         _cancel: Arc<AtomicBool>,
     ) -> Result<Box<dyn NodeSession>, String> {
+        // 换代次数在发出请求前取：请求途中宿主换代，接上的这个会话之后的
+        // 等待会以 HOST_RESET 醒来，再按会话 id 接一次。
+        let generation = self.board.generation();
         let response = self
             .link
             .request(&HostRequest::SpawnNodeSession {
@@ -361,6 +359,8 @@ impl SessionHost for RemoteHost {
         Ok(Box::new(RemoteSession {
             session_id,
             link: self.link.clone(),
+            board: self.board.clone(),
+            generation,
         }))
     }
     fn cancel_waiting(&self) {
@@ -492,6 +492,7 @@ mod tests {
                 Ok(())
             }),
             Duration::from_secs(5),
+            SessionBoard::new(),
         ));
         let handle = {
             let host = host.clone();
@@ -525,6 +526,7 @@ mod tests {
                 Ok(())
             }),
             Duration::from_secs(5),
+            SessionBoard::new(),
         ));
         // 无主帧先到（无活请求与它匹配）：路由侧丢弃，无副作用。
         host.deliver(response_frame(999, json!({"sessionId":"orphan"})));
@@ -551,6 +553,7 @@ mod tests {
                 Ok(())
             }),
             Duration::from_secs(5),
+            SessionBoard::new(),
         ));
         let handle = {
             let host = host.clone();
@@ -576,7 +579,7 @@ mod tests {
     /// 对端无应答：受控截止时间到点报 HOST_RESPONSE_TIMEOUT（不挂死）。
     #[test]
     fn a_missing_response_times_out_instead_of_hanging() {
-        let host = RemoteHost::new(Box::new(|_| Ok(())), Duration::from_millis(80));
+        let host = RemoteHost::new(Box::new(|_| Ok(())), Duration::from_millis(80), SessionBoard::new());
         let error = match host.spawn_node_session(&requirement(), Arc::new(AtomicBool::new(false)))
         {
             Err(error) => error,
@@ -585,18 +588,20 @@ mod tests {
         assert_eq!(error, "HOST_RESPONSE_TIMEOUT");
     }
 
-    /// wait_turn_ended 的边界语义：引擎只等下一个轮次边界，帧不带任何
-    /// 消息信封——排队/送达内容全部留在对端宿主（二期-2 接缝收口）。
+    /// prompt_turn 应答这一轮的编号；之后这一轮怎么结束从会话状态板读，
+    /// 不再有「等下一轮结束」的帧（ADR 040）。
     #[test]
-    fn wait_turn_ended_is_a_boundary_frame_without_any_message_envelope() {
+    fn prompt_turn_returns_the_turn_and_the_session_reads_the_board() {
         let written = Arc::new(Mutex::new(Vec::<String>::new()));
         let copy = written.clone();
+        let board = SessionBoard::new();
         let host = Arc::new(RemoteHost::new(
             Box::new(move |line: &str| {
                 copy.lock().unwrap().push(line.to_owned());
                 Ok(())
             }),
             Duration::from_secs(5),
+            board.clone(),
         ));
         let handle = {
             let host = host.clone();
@@ -604,38 +609,46 @@ mod tests {
                 let mut session = host
                     .spawn_node_session(&requirement(), Arc::new(AtomicBool::new(false)))
                     .unwrap();
-                session
-                    .wait_turn_ended(Arc::new(AtomicBool::new(false)))
+                let turn = session
+                    .prompt_turn(
+                        &TurnRequest { action: requirement().action, prompt: "说明".into() },
+                        Arc::new(AtomicBool::new(false)),
+                    )
                     .unwrap();
+                let state = session.wait_state(0, Arc::new(AtomicBool::new(false))).unwrap();
+                (turn, state)
             })
         };
-        // spawn（id=1）→ wait（id=2）：等每条请求行写盘（= 已登记）再投
-        // 对应应答，投递节奏跟随请求而不是抢跑。
         let spawn_frame = wait_for_written_line(&written, 1);
         host.deliver(response_frame(spawn_frame.id, json!({"sessionId":"host-s2"})));
-        let wait_frame = wait_for_written_line(&written, 2);
-        match &wait_frame.payload {
-            HostFramePayload::Request(HostRequest::WaitTurnEnded { session_id }) => {
-                assert_eq!(session_id, "host-s2");
-            }
-            other => panic!("expected wait frame, got {other:?}"),
-        }
-        host.deliver(response_frame(wait_frame.id, json!(null)));
-        handle.join().unwrap();
+        let prompt_frame = wait_for_written_line(&written, 2);
+        host.deliver(response_frame(prompt_frame.id, json!({"turn": 41})));
+        let ended = SessionState {
+            seq: 42,
+            running: None,
+            ended: Some(crate::session_host::EndedTurn { turn: 41, outcome: crate::session_host::TurnOutcome::Cancelled, error: None }),
+        };
+        board.report("host-s2", ended.clone());
+        let (turn, state) = handle.join().unwrap();
+        assert_eq!(turn, 41);
+        assert_eq!(state, ended);
+        assert_eq!(written.lock().unwrap().len(), 2, "等会话状态不发帧");
     }
 
-    /// 宿主换代：挂起的轮次请求（无截止时间）以 HOST_RESET 唤醒，而不是
+    /// 宿主换代：挂起的 prompt_turn 与等会话状态都以 HOST_RESET 唤醒，而不是
     /// 永远等一个旧宿主不会再发的应答；之后的新请求照常往返。
     #[test]
-    fn a_host_reset_wakes_pending_turn_requests() {
+    fn a_host_reset_wakes_pending_requests_and_waiters() {
         let written = Arc::new(Mutex::new(Vec::<String>::new()));
         let copy = written.clone();
+        let board = SessionBoard::new();
         let host = Arc::new(RemoteHost::new(
             Box::new(move |line: &str| {
                 copy.lock().unwrap().push(line.to_owned());
                 Ok(())
             }),
             Duration::from_secs(5),
+            board.clone(),
         ));
         let handle = {
             let host = host.clone();
@@ -643,18 +656,24 @@ mod tests {
                 let mut session = host
                     .spawn_node_session(&requirement(), Arc::new(AtomicBool::new(false)))
                     .unwrap();
-                let waited = session.wait_turn_ended(Arc::new(AtomicBool::new(false)));
+                let prompted = session.prompt_turn(
+                    &TurnRequest { action: requirement().action, prompt: "说明".into() },
+                    Arc::new(AtomicBool::new(false)),
+                );
+                let waited = session.wait_state(0, Arc::new(AtomicBool::new(false)));
                 let next = host.spawn_node_session(&requirement(), Arc::new(AtomicBool::new(false)));
-                (waited, next.map(|session| session.session_id().to_owned()))
+                (prompted, waited, next.map(|session| session.session_id().to_owned()))
             })
         };
         let spawn_frame = wait_for_written_line(&written, 1);
         host.deliver(response_frame(spawn_frame.id, json!({"sessionId":"host-s3"})));
         wait_for_written_line(&written, 2);
         host.reset();
+        board.reset();
         let respawn = wait_for_written_line(&written, 3);
         host.deliver(response_frame(respawn.id, json!({"sessionId":"host-s3"})));
-        let (waited, next) = handle.join().unwrap();
+        let (prompted, waited, next) = handle.join().unwrap();
+        assert_eq!(prompted.unwrap_err(), HOST_RESET);
         assert_eq!(waited.unwrap_err(), HOST_RESET);
         assert_eq!(next.unwrap(), "host-s3");
     }
@@ -702,6 +721,7 @@ mod tests {
                 Ok(())
             }),
             Duration::from_secs(5),
+            SessionBoard::new(),
         ));
         let handle_a = {
             let host = host.clone();
@@ -751,6 +771,7 @@ mod tests {
                 Ok(())
             }),
             Duration::from_secs(5),
+            SessionBoard::new(),
         ));
         let params = crate::session_host::TrackerStartParams {
             executable: std::path::PathBuf::from("pool/question-tracker.exe"),
@@ -787,6 +808,7 @@ mod tests {
                 Ok(())
             }),
             Duration::from_secs(5),
+            SessionBoard::new(),
         ));
         let handle = {
             let host = host.clone();
@@ -818,6 +840,7 @@ mod tests {
                 Ok(())
             }),
             Duration::from_secs(5),
+            SessionBoard::new(),
         ));
         let handle = {
             let host = host.clone();

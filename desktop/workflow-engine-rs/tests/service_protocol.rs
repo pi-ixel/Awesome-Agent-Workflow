@@ -286,8 +286,8 @@ fn standard_acp_text_question_accepts_followup_in_same_session() {
         if value["id"] == 1 {
             run = value["result"]["runId"].as_str().unwrap().into();
         }
-        // 这一轮结束、结果还没交：引擎把节点标成「等你回复」。
-        if value["event"]["event"]["status"] == "awaiting_input" {
+        // 这一轮正常结束、结果还没交：引擎报「这一轮结束了，在等你回复」。
+        if value["event"]["event"]["type"] == "turn-ended" && value["event"]["event"]["awaiting"] == true {
             waiting = true;
         }
     }
@@ -301,7 +301,7 @@ fn standard_acp_text_question_accepts_followup_in_same_session() {
     let mut finished = false;
     while !finished {
         let value = rx.recv_timeout(Duration::from_secs(20)).unwrap();
-        if value["event"]["event"]["status"] == "input_round_completed" {
+        if value["event"]["event"]["type"] == "turn-started" {
             assert_eq!(value["event"]["project"], dir.to_str().unwrap());
             assert_eq!(value["event"]["runId"], run);
             completed_input_round = true;
@@ -436,10 +436,11 @@ fn sidecar_serves_real_run_over_desktop_protocol() {
         if value["type"] == "response" && value["id"] == 3 {
             let links = value["result"][0]["links"].as_array().unwrap();
             assert!(!links.is_empty());
-            // 侧栏会话分组需要的节点显示名与等待标记（运行已结束：不在等）。
+            // 侧栏会话分组需要的节点显示名与轮次情况（这一步已做完：不报告轮次）。
             let node = &links[0]["nodes"][0];
             assert!(node["label"].as_str().is_some_and(|label| !label.is_empty()), "{node}");
-            assert_eq!(node["awaitingInput"], false, "{node}");
+            assert!(node["turn"].is_null(), "{node}");
+            assert_eq!(node["submitted"], false, "{node}");
             break;
         }
     }
@@ -1766,7 +1767,7 @@ fn blocked_run_can_be_previewed_and_rewound_over_the_service() {
     std::fs::write(dir.join("job.py"), "import json\nopen('out.txt','w').write('x')\nprint(json.dumps({'ok':False,'files':['out.txt']}))\n").unwrap();
     let definition = json!({"id":"intervene","name":"Intervene","entry":"work",
         "nodes":{"job":{"kind":"python","actor":"job","script":"$input:job","cleanup":[{"path":"/result/files"}]}},
-        "phases":{"work":{"run":["job"],"routes":[{"when":{"path":"/latest/job/ok"},"next":"$complete"},{"next":"$blocked","reason":"not ok"}]}}});
+        "phases":{"work":{"run":["job"],"routes":[{"when":{"path":"/latest/job/ok"},"next":"$complete"},{"next":"$blocked","reason":"not ok","explain":"脚本没成功"}]}}});
     let mut child = Command::new(env!("CARGO_BIN_EXE_workflow_service"))
         .arg(dir.join("journal.sqlite"))
         .env("QUESTION_TRACKER_HOME", dir.join("pool"))
@@ -1813,6 +1814,14 @@ fn blocked_run_can_be_previewed_and_rewound_over_the_service() {
         }
     };
     let snapshot = call(2, "snapshot", json!({"cwd":cwd,"runId":run}));
+    // 流程停下是运行的正式状态，带着停在哪一步之后、走了哪条去向、为什么。
+    assert_eq!(snapshot["result"]["run"]["status"], "blocked", "{snapshot}");
+    assert_eq!(
+        snapshot["result"]["run"]["result"]["stop"],
+        json!({"phase":"work","callPath":[],"route":1,"explain":"脚本没成功"}),
+        "{snapshot}"
+    );
+    assert_eq!(snapshot["result"]["run"]["result"]["reason"], "not ok");
     let checkpoint = snapshot["result"]["checkpoints"][0]["seq"].clone();
     assert_eq!(snapshot["result"]["checkpoints"][0]["current"], true, "{snapshot}");
     assert_eq!(snapshot["result"]["nodes"][0]["checkpoint"], checkpoint);

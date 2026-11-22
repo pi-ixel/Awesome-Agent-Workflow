@@ -1,3 +1,4 @@
+import { nodeActivity } from "./nodeActivity.ts";
 import type { HostNotifications, HostStorage, DesktopWindowHost } from "../../host/types.ts";
 import type { WorkbenchService } from "../../workbench/service.ts";
 import { projectOverviewPageId } from "../../project/service.ts";
@@ -18,12 +19,12 @@ interface NotificationDeps {
   readonly warn: (message: string) => void;
 }
 
-type Notice = { kind: "reply" | "confirm" | "failed" | "completed"; site?: string; ordinal?: number };
+type Notice = { kind: "reply" | "confirm" | "blocked" | "failed" | "completed"; site?: string; ordinal?: number };
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 const storageKey = (runId: string) => `aaw-workflow/notification-state/${encodeURIComponent(runId)}`;
 const noticeKey = (notice: Notice) => notice.kind === "reply" ? `reply:${notice.site}:${notice.ordinal}` : notice.kind;
-/** 等你回复按节点各一条；确认、失败、完成按运行共用一条，新的替换旧的。 */
+/** 等你回复按节点各一条；确认、停下、失败、完成按运行共用一条，新的替换旧的。 */
 const noticeTag = (runId: string, notice: Notice) =>
   notice.kind === "reply" ? `workflow:${runId}:${noticeKey(notice)}` : `workflow:${runId}:run`;
 
@@ -99,15 +100,17 @@ export function attachWorkflowNotifications(deps: NotificationDeps): () => Promi
       if (!snapshot.run) return;
       let sessionId = "";
       if (notice.kind === "reply") {
-        const node = snapshot.nodes.find((item) => item.siteId === notice.site && item.ordinal === notice.ordinal && item.awaitingInput && item.mark === undefined);
+        // 发通知前再核对一次：这一步确实停在「等你回复」（同一个推导，ADR 040）。
+        const node = snapshot.nodes.find((item) => item.siteId === notice.site && item.ordinal === notice.ordinal && item.mark === undefined && nodeActivity(item, snapshot.active, undefined) === "awaiting");
         if (!node || !snapshot.active) return;
         sessionId = snapshot.actors.find((actor) => actor.siteId === node.actorSiteId)?.sessionId ?? "";
         if (!sessionId) return;
       } else if (notice.kind === "confirm" && snapshot.run.status !== "waiting") return;
       else if (notice.kind === "completed" && snapshot.run.status !== "completed") return;
+      else if (notice.kind === "blocked" && snapshot.run.status !== "blocked") return;
       else if (notice.kind === "failed" && (snapshot.active || (snapshot.run.status !== "failed" && !snapshot.run.failure))) return;
       if (disposed || pending.get(tokenKey) !== token || await deps.window.isFocused()) return;
-      const title = notice.kind === "reply" ? "工作流等你回复" : notice.kind === "confirm" ? "工作流等你确认" : notice.kind === "failed" ? "工作流运行失败" : "工作流运行完成";
+      const title = notice.kind === "reply" ? "工作流等你回复" : notice.kind === "confirm" ? "工作流等你确认" : notice.kind === "blocked" ? "工作流停下了，等你处理" : notice.kind === "failed" ? "工作流运行失败" : "工作流运行完成";
       await deps.notifications.send({ id: ++sequence, tag: noticeTag(runId, notice), title, body: `${snapshot.run.title || snapshot.run.name || "工作流"} · 点击查看`, extra: { source: "workflow", kind: notice.kind, project, runId, ...(sessionId ? { sessionId } : {}) } });
     })().catch(() => deps.warn("工作流系统通知不可用"));
   };
@@ -121,7 +124,7 @@ export function attachWorkflowNotifications(deps: NotificationDeps): () => Promi
     const { runId, project } = event as WorkflowEvent & { project: string };
     if (event.type === "run-starting") {
       const seen = states(runId);
-      for (const key of ["confirm", "failed", "completed"]) seen.delete(key);
+      for (const key of ["confirm", "blocked", "failed", "completed"]) seen.delete(key);
       save(runId);
       // 运行重新开始：之前的确认、失败提醒已经过时。
       remove(runId, { kind: "confirm" });
@@ -131,13 +134,14 @@ export function attachWorkflowNotifications(deps: NotificationDeps): () => Promi
       const action = record(event.event);
       if (typeof action?.siteId !== "string" || typeof action.ordinal !== "number") return;
       const notice: Notice = { kind: "reply", site: action.siteId, ordinal: action.ordinal };
-      if (action.status === "input_round_completed") {
+      // 会话里开始了新的一轮（你接着说了）：之前的「等你回复」提醒收起。
+      if (action.type === "turn-started") {
         const key = noticeKey(notice);
         states(runId).delete(key);
         pending.delete(`${runId}\0${key}`);
         save(runId);
         remove(runId, notice);
-      } else if (action.status === "awaiting_input") notify(project, runId, notice);
+      } else if (action.type === "turn-ended" && action.awaiting === true) notify(project, runId, notice);
       return;
     }
     if (event.type === "run-error") { if (event.cancelled !== true) notify(project, runId, { kind: "failed" }); return; }
@@ -146,6 +150,7 @@ export function attachWorkflowNotifications(deps: NotificationDeps): () => Promi
         if (disposed) return;
         const status = deriveCanvasSnapshot(raw).run?.status;
         if (status === "waiting") notify(project, runId, { kind: "confirm" });
+        else if (status === "blocked") notify(project, runId, { kind: "blocked" });
         else if (status === "failed") notify(project, runId, { kind: "failed" });
         else if (status === "completed") notify(project, runId, { kind: "completed" });
       }).catch(() => deps.warn("无法读取工作流通知状态"));

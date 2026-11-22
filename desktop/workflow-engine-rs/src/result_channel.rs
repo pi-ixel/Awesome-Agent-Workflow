@@ -30,10 +30,21 @@ struct State {
     artifact_reader: Option<ArtifactReader>,
     question_pool: Option<Arc<QuestionPool>>,
     pool_tools: Vec<Value>,
+    /// 当前动作的工单与运行变量（ADR 041，`get_workflow_step`）。
+    step: Option<StepView>,
     /// The agent has listed this channel's tools at least once (over either
     /// transport). Without it the agent cannot hold submit_workflow_result,
     /// so a turn that ends with no result is undeliverable, not "waiting".
     tools_listed: bool,
+}
+
+/// `get_workflow_step` 看到的这一步（ADR 041）。
+#[derive(Debug, Clone)]
+pub struct StepView {
+    /// 工单全文（与开场白相同，含交结果的约定）。
+    pub brief: String,
+    /// 动作派发时的运行变量：按名字读取。
+    pub vars: Value,
 }
 
 /// MCP server name the result channel is mounted under.
@@ -116,6 +127,7 @@ impl ResultChannel {
             artifact_reader: None,
             question_pool: None,
             pool_tools: Vec::new(),
+            step: None,
             tools_listed: false,
         }));
         let stop = Arc::new(AtomicBool::new(false));
@@ -169,6 +181,11 @@ impl ResultChannel {
             .lock()
             .map_err(|_| "RESULT_CHANNEL_LOCKED")?
             .artifact_reader = Some(reader);
+        Ok(())
+    }
+    /// 换上当前动作的工单（每次 begin 之后设置）。
+    pub fn set_step(&self, step: StepView) -> Result<(), String> {
+        self.state.lock().map_err(|_| "RESULT_CHANNEL_LOCKED")?.step = Some(step);
         Ok(())
     }
     pub fn begin(&self, schema: Value) -> Result<(), String> {
@@ -441,6 +458,7 @@ fn serve_one(mut stream: TcpStream, secret: &str, state: &Mutex<State>) {
             json!({"tools":tools(&state.schema, &state.pool_tools)})
         }
         Some("list") => read_result(&state, None, None),
+        Some("step") => read_step(&state, &msg["result"]),
         Some("capture_artifact") => artifact_call(&state, "capture", &msg["result"]),
         Some("read_artifact") => artifact_call(&state, "read", &msg["result"]),
         Some("get") => read_result(
@@ -541,10 +559,30 @@ fn read_result(state: &State, site: Option<&str>, ordinal: Option<u32>) -> Value
         Err(error) => json!({"error":error}),
     }
 }
+/// `get_workflow_step`：不带参数返回工单；带 `read` 返回这个运行变量的当前值。
+fn read_step(state: &State, args: &Value) -> Value {
+    if !state.accepting {
+        return json!({"error":"当前没有活动的工作流动作"});
+    }
+    let Some(step) = &state.step else {
+        return json!({"error":"这一步的工单暂时不可用"});
+    };
+    match args.get("read").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()) {
+        None => json!({"value": step.brief}),
+        Some(name) => match step.vars.get(name) {
+            Some(value) => json!({"value": value}),
+            None => {
+                let names: Vec<&str> = step.vars.as_object().map(|v| v.keys().map(String::as_str).collect()).unwrap_or_default();
+                json!({"error": format!("这次运行里没有「{name}」。现有：{}", names.join("、"))})
+            }
+        },
+    }
+}
 fn tools(schema: &Value, pool_tools: &[Value]) -> Value {
     // submit_workflow_result carries the per-node schema, so it goes LAST:
     // the stable tool definitions stay in the shared prefix agents cache.
     let mut list = json!([
+        {"name":"get_workflow_step","description":"查看这一步的工单（在做什么、要读什么、怎么交付）；带 read 参数时按名字读取本次运行里的内容（如设计、任务计划）的当前版本。","inputSchema":{"type":"object","properties":{"read":{"type":"string","description":"要读取的内容名，见工单里列出的名字；不填返回工单"}},"additionalProperties":false}},
         {"name":"list_workflow_results","description":"列出本次运行已完成节点的结果和字段。","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
         {"name":"get_workflow_result","description":"按节点和执行序号读取本次运行中的原始结果。","inputSchema":{"type":"object","properties":{"siteId":{"type":"string"},"ordinal":{"type":"integer"}},"required":["siteId","ordinal"],"additionalProperties":false}},
         {"name":"capture_workflow_artifact","description":"固定本地文件或 HTTP(S) 内容为不可变引用，返回 SHA-256。","inputSchema":{"type":"object","properties":{"reference":{"type":"string"}},"required":["reference"],"additionalProperties":false}},
@@ -619,7 +657,12 @@ fn tool_response(response: Value) -> Value {
     if let Some(error) = response["error"].as_str() {
         json!({"isError":true,"content":[{"type":"text","text":error}]})
     } else {
-        json!({"content":[{"type":"text","text":response["value"].to_string()}]})
+        // 文字原样给（工单），其余按 JSON。
+        let text = match &response["value"] {
+            Value::String(text) => text.clone(),
+            other => other.to_string(),
+        };
+        json!({"content":[{"type":"text","text":text}]})
     }
 }
 
@@ -669,6 +712,9 @@ fn http_rpc(msg: &Value, state: &Mutex<State>) -> Option<Value> {
             } else {
                 response["value"].clone()
             }
+        }
+        Some("tools/call") if msg["params"]["name"] == "get_workflow_step" => {
+            tool_response(read_step(&state, &msg["params"]["arguments"]))
         }
         Some("tools/call") if msg["params"]["name"] == "list_workflow_results" => {
             tool_response(read_result(&state, None, None))
@@ -813,6 +859,9 @@ pub fn serve_mcp(addr: &str, token: &str) -> Result<(), String> {
                     response["value"].clone()
                 }
             }
+            Some("tools/call") if msg["params"]["name"] == "get_workflow_step" => {
+                tool_response(call_bridge(addr, token, "step", msg["params"]["arguments"].clone())?)
+            }
             Some("tools/call") if msg["params"]["name"] == "list_workflow_results" => {
                 tool_response(call_bridge(addr, token, "list", Value::Null)?)
             }
@@ -883,6 +932,30 @@ mod tests {
         let response = http_rpc(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"submit_workflow_result","arguments":{"result":result}}}), &channel.state).unwrap();
         assert_ne!(response["result"]["isError"], true);
         assert_eq!(channel.finish().unwrap(), result);
+    }
+
+    #[test]
+    fn the_step_tool_returns_the_work_order_and_reads_run_contents_by_name() {
+        let channel = ResultChannel::new(json!({"type":"object"})).unwrap();
+        channel.begin(json!({"type":"object"})).unwrap();
+        channel
+            .set_step(StepView { brief: "【这一步】代码检查
+做检查".into(), vars: json!({"design":{"reference":"d.md"},"count":1}) })
+            .unwrap();
+        // HTTP：不带参数给工单原文。
+        let brief = http_rpc(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_workflow_step","arguments":{}}}), &channel.state).unwrap();
+        assert_eq!(brief["result"]["content"][0]["text"], "【这一步】代码检查
+做检查");
+        // stdio 桥：按名字读当前版本。
+        let design = call_bridge(&channel.addr, &channel.token, "step", json!({"read":"design"})).unwrap();
+        assert_eq!(design["value"]["reference"], "d.md");
+        let missing = call_bridge(&channel.addr, &channel.token, "step", json!({"read":"plan"})).unwrap();
+        let error = missing["error"].as_str().unwrap();
+        assert!(error.contains("plan") && error.contains("design"), "{error}");
+        let listed = tools(&json!({"type":"object"}), &[]);
+        assert!(listed.as_array().unwrap().iter().any(|t| t["name"] == "get_workflow_step"));
+        channel.abort();
+        assert!(call_bridge(&channel.addr, &channel.token, "step", json!({})).unwrap().get("error").is_some());
     }
 
     #[test]

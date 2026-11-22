@@ -1,6 +1,6 @@
 # 设计说明：节点会话就是普通会话，工作流只消费事件
 
-状态：已实施（ADR 037）。平台的通用能力见 `project.sessions` 的 `openPluginSession`、`watchTurns`、`watchEvents`、`registerSessionTools`，项目界面扩展位见 `plugins/project/extension.ts`。
+状态：已实施（ADR 037）。宿主请求一节已被 ADR 040 改写：「开始一轮」在这一轮开始时就应答轮次编号，「等下一轮结束 / 开始」删除，改为 Desktop 每次会话变化主动报一份完整的会话状态（`session-state`），引擎照着推进。平台的通用能力见 `project.sessions` 的 `openPluginSession`、`watchTurns`、`watchEvents`、`registerSessionTools`，项目界面扩展位见 `plugins/project/extension.ts`。
 
 ## 1. 一句话
 

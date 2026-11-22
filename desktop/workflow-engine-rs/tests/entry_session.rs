@@ -6,7 +6,7 @@ use aaw_workflow_core::{
     journal::{Journal, RunSnapshot},
     result_channel::ResultChannelOffer,
     runtime::{Host, Runtime, RuntimeConfig},
-    session_host::{NodeSession, SessionHost, SessionRequirement, TrackerStartParams, TurnRequest},
+    session_host::{EndedTurn, NodeSession, SessionHost, SessionRequirement, SessionState, TrackerStartParams, TurnOutcome, TurnRequest},
 };
 use serde_json::{Value, json};
 use std::{
@@ -66,12 +66,13 @@ impl NodeSession for Session {
     fn session_linked(&mut self) -> Result<(), String> {
         Ok(())
     }
-    fn prompt_turn(&mut self, _request: &TurnRequest, _cancel: Arc<AtomicBool>) -> Result<(), String> {
+    fn prompt_turn(&mut self, _request: &TurnRequest, _cancel: Arc<AtomicBool>) -> Result<u64, String> {
         submit(&self.offer, json!({"evidence":"done"}));
-        Ok(())
+        Ok(1)
     }
-    fn wait_turn_ended(&mut self, _cancel: Arc<AtomicBool>) -> Result<(), String> {
-        Err("UNEXPECTED_WAIT".into())
+    /// 说明那一轮正常结束、交了结果。
+    fn wait_state(&mut self, _after: u64, _cancel: Arc<AtomicBool>) -> Result<SessionState, String> {
+        Ok(SessionState { seq: 2, running: None, ended: Some(EndedTurn { turn: 1, outcome: TurnOutcome::Completed, error: None }) })
     }
 }
 

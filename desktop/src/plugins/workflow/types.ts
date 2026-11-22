@@ -7,6 +7,7 @@
  * - **WorkflowView**（文件尾部）：工作流插件给会话区、项目总览提供的入口
  *   与状态（`workflowUi` 服务，project 插件可选注入）。
  */
+import type { SessionActivitySource } from "./status/nodeActivity.ts";
 import type { MessageDisplay } from "../../shared/messageDisplay.ts";
 import type { NodePlanEntry } from "./status/nodePlans.ts";
 import type { ReadonlySnapshot } from "../../shared/state/readonlySnapshot.ts";
@@ -63,9 +64,17 @@ export interface RunSummary {
   /** 毫秒时间戳；createdAt 缺失时为 null。 */
   readonly createdAt: number | null;
   readonly updatedAt: number | null;
+  /** 执行时段（引擎记录）：在执行时这一段从何时起；停着时停在何时。停着的时间不计入等待与用时。 */
+  readonly activeSince?: number | null;
+  readonly stoppedAt?: number | null;
+  readonly spans?: readonly (readonly [number, number | null])[];
   /** 归档时刻（ADR 036）；没归档为 null。 */
   readonly archivedAt?: number | null;
   readonly status: string;
+  /** 引擎正在执行这次运行。 */
+  readonly active?: boolean;
+  /** 已经叫停、执行还没停下来（ADR 040）：显示「正在停止」。 */
+  readonly stopping?: boolean;
   readonly args: { readonly workflowId: string; readonly workflowRevision: string } | null;
   readonly result: unknown;
   readonly failure: { readonly code: string; readonly detail?: unknown } | null;
@@ -187,10 +196,13 @@ export interface CanvasNodeSnapshot {
   readonly sessionId?: string | null;
   readonly result: unknown;
   readonly candidates: readonly unknown[];
-  /** 这一轮已结束但还没有结果，引擎在等用户经会话回复（引擎记录，只在执行中出现）。 */
-  readonly awaitingInput?: boolean;
-  /** 开始等待的时刻（毫秒时间戳）。 */
-  readonly awaitingInputSince?: number;
+  /** 这一步在会话里最近一轮的情况（ADR 040 轮次记录，只在执行中出现）：working /
+   *  completed / cancelled / failed。说法由 status/nodeActivity.ts 统一得出。 */
+  readonly turn?: string;
+  /** 最近一轮结束的时刻（毫秒时间戳；会话从这时空着）。 */
+  readonly turnEndedAt?: number;
+  /** 已经交了结果、还没被采用（只在执行中出现）。 */
+  readonly submitted?: boolean;
   /** 这条记录之后流程又开始执行了别的动作（引擎按派发顺序给出记录）：
    *  这一轮报告的发现已由流程接手，不再是待处置。 */
   readonly followed?: boolean;
@@ -271,6 +283,8 @@ export interface InterventionOutcome {
 /** 画布快照：引擎 run-detail → 插件面板渲染面（status/snapshot.ts 投影）。 */
 export interface CanvasSnapshot {
   readonly runId: string;
+  /** 运行的版本号（ADR 040）：引擎推来的变化比它新才重取快照。 */
+  readonly version?: number;
   readonly run: RunSummary | null;
   readonly catalog: WorkflowCatalog | null;
   readonly execution: CanvasExecution | null;
@@ -326,8 +340,10 @@ export interface RunSessionLinkNode {
   readonly status: string;
   /** 节点显示名（流程定义的 ui.label）。 */
   readonly label: string;
-  /** 这一轮结束仍无结果、引擎在等用户经会话回复。 */
-  readonly awaitingInput: boolean;
+  /** 这一步在会话里最近一轮的情况（同 CanvasNodeSnapshot.turn）。 */
+  readonly turn?: string | null;
+  /** 已经交了结果、还没被采用。 */
+  readonly submitted?: boolean;
 }
 
 export interface RunSessionLink {
@@ -342,9 +358,11 @@ export interface RunSessionLinks {
   readonly workflowName: string;
   /** 运行标题（同 RunSummary.title）。 */
   readonly title: string;
-  /** running | completed | failed | stopped | waiting（引擎 run_status）。 */
+  /** running | completed | failed | blocked | stopped | waiting（引擎 run_status）。 */
   readonly status: string;
   readonly active: boolean;
+  /** 已经叫停、执行还没停下来（ADR 040）。 */
+  readonly stopping?: boolean;
   /** 已归档：侧栏不显示这次运行，组内会话一起隐去（ADR 036）。 */
   readonly archived?: boolean;
   /** 因出错停下（有失败原因），等你处理。 */
@@ -585,6 +603,12 @@ export interface WorkflowService {
   refresh(): Promise<void>;
   /** `run-detail` → 画布快照（每 runId 一个只读快照流）。 */
   snapshot(runId: string): ReadonlySnapshot<CanvasSnapshot>;
+  /**
+   * 会话的实时状态（ADR 040：会话是唯一来源）。节点「在干什么」由
+   * status/nodeActivity.ts 从它和引擎给的事实算出；没有时（测试、浏览器预览）
+   * 退回引擎记下的最近一轮。
+   */
+  readonly sessionActivity?: SessionActivitySource;
   /** 引擎事件订阅（含 host-frame 与会话投影；供面板与宿主消费）。 */
   subscribe(listener: (event: WorkflowEvent) => void): () => void;
   /** 确认未执行，允许重试一次（引擎 authorize-retry）。 */

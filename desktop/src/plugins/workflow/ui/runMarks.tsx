@@ -1,7 +1,6 @@
 /** 运行状态的图标分法：列表行、图标说明和状态筛选共用。 */
 import type { ReactNode } from "react";
 import type { RunSummary } from "../types.ts";
-import { statusLabel } from "../status/snapshot.ts";
 import { CheckIcon, HandIcon, LoaderIcon, SquareIcon, TriangleAlertIcon, XIcon } from "../../../shared/ui/icons.tsx";
 
 export type RunMarkKind = "running" | "waiting" | "blocked" | "failed" | "completed" | "stopped";
@@ -16,13 +15,9 @@ export const RUN_MARKS: readonly { readonly kind: RunMarkKind; readonly label: s
   { kind: "stopped", label: "已停止", icon: <SquareIcon className="ui-icon-10" fill="currentColor" /> },
 ];
 
-function markOf(run: RunSummary, blocked: boolean): RunMarkKind {
-  if (blocked) return "blocked";
-  return run.status === "running" || run.status === "waiting" || run.status === "completed" || run.status === "failed" ? run.status : "stopped";
-}
-
 /** 运行归到哪一种状态图标：列表行、底部说明和状态筛选用同一套分法。 */
-export const runMarkKind = (run: RunSummary): RunMarkKind => markOf(run, statusLabel(run).startsWith("已阻塞"));
+export const runMarkKind = (run: RunSummary): RunMarkKind =>
+  run.status === "running" || run.status === "waiting" || run.status === "blocked" || run.status === "completed" || run.status === "failed" ? run.status : "stopped";
 
 /** 状态筛选的选项：和图标说明同一顺序、同一图标。 */
 export const RUN_MARK_OPTIONS = RUN_MARKS.map((item) => ({

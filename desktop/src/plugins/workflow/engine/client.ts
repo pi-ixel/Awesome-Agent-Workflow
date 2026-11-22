@@ -132,6 +132,10 @@ export class WorkflowClient {
     const { generation } = await this.connect();
     await this.platform.invoke("workflow_service_host_frame_response", { generation, runId, frame });
   }
+  /** 报一份节点会话的状态（ADR 040：会话是唯一来源，引擎照着推进）。 */
+  async reportSession(sessionId: string, state: unknown): Promise<void> {
+    await this.request("session-state", { sessionId, state });
+  }
   hasActiveRuns(): boolean { return this.activeRuns.size > 0; }
 
   // The native service survives WebView reloads; event history alone is insufficient.

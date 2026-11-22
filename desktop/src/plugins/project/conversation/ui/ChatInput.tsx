@@ -185,6 +185,8 @@ function ComposerActionHint({
 
 export interface ChatInputProps {
   readonly queue?: ReactNode;
+  /** 卡片最上面一行（如工作流节点会话的那一条），排在排队消息上面。 */
+  readonly header?: ReactNode;
   readonly fileCandidates?: FileCandidates;
   readonly skillCandidates?: SkillsService["candidates"];
   readonly resolveSlashSkills?: SkillsService["resolveSlashSkills"];
@@ -218,6 +220,7 @@ export interface ChatInputProps {
 
 export function ChatInput({
   queue,
+  header,
   fileCandidates,
   skillCandidates,
   resolveSlashSkills,
@@ -1326,6 +1329,7 @@ export function ChatInput({
         }}
         className={`composer-card @container/composer mx-auto w-full overflow-hidden rounded-2xl border border-line bg-surface transition-[max-width] duration-150 ease-out [--composer-inline-inset:calc(var(--spacing)*4.5_+_var(--ui-icon-unit)*2)] ${widthClass}`}
       >
+        {header}
         {queue}
         {imageSaveFailed && (
           <div role="alert">

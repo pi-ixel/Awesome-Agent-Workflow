@@ -8,12 +8,13 @@
  * - `deriveCanvasSnapshot(runDetail)`：引擎 run-detail（workflow_service.rs
  *   `Service::snapshot` 的 json! 形状）→ types.ts 的 CanvasSnapshot；所有
  *   字段逐个收窄，缺省/坏类型回落空值，绝不让引擎侧的一行坏数据炸掉面板；
- * - `nodeStatus(node, snapshot)`：节点执行记录的一行状态推导（含 D8 验收
+ * - `nodeStatus(node, snapshot, session)`：节点执行记录的一行状态推导（含 D8 验收
  *   修复：revise/findings 决策只对进行中的运行是「需处理」，运行落定后
  *   显示「已完成 · 曾报告发现」——逻辑原样保留）；
  * - `statusLabel` / `failureLabel` / `recordStatus`：运行与记录的文案。
  */
 import { describeError } from "./errorText.ts";
+import { ACTIVITY_NOTE, needsYou, nodeActivity, type NodeActivity, type SessionTurnStatus } from "./nodeActivity.ts";
 import type {
   CanvasExecution,
   CanvasNodeSnapshot,
@@ -38,8 +39,6 @@ const asString = (value: unknown): string | null =>
 
 const asNumber = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
-const awaitingSince = (since: number | null): { awaitingInputSince?: number } =>
-  since === null ? {} : { awaitingInputSince: since };
 
 const asRecordOrNull = (value: unknown): Record<string, unknown> | null =>
   isRecord(value) ? value : null;
@@ -67,8 +66,14 @@ function parseRun(value: unknown, fallbackRunId: string): RunSummary | null {
     inputs: asRecordOrNull(run.inputs) ?? {},
     createdAt: asNumber(run.createdAt),
     updatedAt: asNumber(run.updatedAt),
+    activeSince: asNumber(run.activeSince),
+    stoppedAt: asNumber(run.stoppedAt),
+    spans: asArray(run.spans).flatMap((span) => Array.isArray(span) && typeof span[0] === "number"
+      ? [[span[0], typeof span[1] === "number" ? span[1] : null] as const] : []),
     archivedAt: asNumber(run.archivedAt),
     status: asString(run.status) ?? "",
+    ...(typeof run.active === "boolean" ? { active: run.active } : {}),
+    ...(run.stopping === true ? { stopping: true } : {}),
     args: args === null ? null : {
       workflowId: asString(args.workflowId) ?? "",
       workflowRevision: asString(args.workflowRevision) ?? "",
@@ -243,8 +248,9 @@ function parseNode(value: unknown): CanvasNodeSnapshot | null {
     ...(Object.hasOwn(node, "sessionId") ? { sessionId: asString(node.sessionId) } : {}),
     result: node.result ?? null,
     candidates: asArray(node.candidates),
-    ...(node.awaitingInput === true ? { awaitingInput: true } : {}),
-    ...awaitingSince(asNumber(node.awaitingInputSince)),
+    ...(asString(node.turn) ? { turn: asString(node.turn) as string } : {}),
+    ...optionalNumber("turnEndedAt", node.turnEndedAt),
+    ...(node.submitted === true ? { submitted: true } : {}),
     ...(asNumber(node.checkpoint) === null ? {} : { checkpoint: asNumber(node.checkpoint) as number }),
     ...(asString(node.mark) ? { mark: asString(node.mark) as string } : {}),
     ...optionalNumber("startedAt", node.startedAt),
@@ -335,6 +341,7 @@ export function deriveCanvasSnapshot(runDetail: unknown): CanvasSnapshot {
   const runId = run?.runId ?? "";
   return {
     runId,
+    ...optionalNumber("version", detail?.version),
     run,
     catalog: detail === null ? null : parseCatalog(detail.catalog),
     execution: detail === null ? null : parseExecution(detail.execution),
@@ -479,20 +486,61 @@ export function failureLabel(code: string): string {
   return describeError(code).title;
 }
 
-export function statusLabel(run: RunSummary, catalog?: WorkflowCatalog | null): string {
+/**
+ * 流程停下（`blocked`）的事实，引擎记录（ADR 041 补充）：停在哪一步之后、
+ * 走了哪条去向（`explain`）、作者写的处理办法（`reason`）。没有去向时
+ * （执行次数超限、前置条件不满足）停在这一步之前。
+ */
+export interface RunStop {
+  /** 停在哪个流程阶段（引擎 phase id）。 */
+  readonly phase: string;
+  readonly callPath: readonly string[];
+  /** 这一步的名字（目录里找得到时）。 */
+  readonly step: string | null;
+  /** 走了去向停下的（停在这一步之后）；否则停在这一步之前。 */
+  readonly afterStep: boolean;
+  readonly explain: string | null;
+  readonly reason: string | null;
+}
+
+function phaseLabel(phaseId: string, catalog?: WorkflowCatalog | null): string | null {
+  const flows = catalog?.structure?.flows;
+  const phase = Object.values(flows ?? {}).flatMap((flow) => flow.phases).find((item) => item.id === phaseId);
+  const label = phase?.call
+    ? flows?.[phase.call]?.label
+    : phase && phase.run.length === 1
+      ? catalog?.nodes.find((node) => node.id === phase.run[0])?.label
+      : undefined;
+  return label ?? null;
+}
+
+/** 运行停下的位置与原因；不是 `blocked` 时为 null。 */
+export function runStop(run: RunSummary, catalog?: WorkflowCatalog | null): RunStop | null {
+  if (run.status !== "blocked") return null;
   const result = asRecordOrNull(run.result);
-  if (run.status === "failed" && asString(result?.status) === "blocked") {
-    const stage = asString(result?.stage);
-    const flows = catalog?.structure?.flows;
-    const phase = Object.values(flows ?? {}).flatMap((flow) => flow.phases).find((item) => item.id === stage);
-    const label = phase?.call
-      ? flows?.[phase.call]?.label
-      : phase && phase.run.length === 1
-        ? catalog?.nodes.find((node) => node.id === phase.run[0])?.label
-        : undefined;
-    return label ? `已阻塞 · ${label}` : "已阻塞";
-  }
-  return ({ pending: "等待中", running: "运行中", completed: "已完成", failed: "失败", stopped: "已停止", cancelled: "已取消", waiting: "等你确认" } as Record<string, string>)[run.status] ?? run.status;
+  const stop = asRecordOrNull(result?.stop);
+  const phase = asString(stop?.phase) ?? asString(result?.stage) ?? "";
+  return {
+    phase,
+    callPath: Array.isArray(stop?.callPath) ? stop.callPath.filter((id): id is string => typeof id === "string") : [],
+    step: phase ? phaseLabel(phase, catalog) : null,
+    afterStep: typeof stop?.route === "number",
+    explain: asString(stop?.explain) || null,
+    reason: asString(result?.reason) || null,
+  };
+}
+
+/** 停下的一句话：「在「评审」之后停下：有评审没通过」。 */
+export function stopSentence(stop: RunStop): string {
+  const where = stop.step ? `在「${stop.step}」${stop.afterStep ? "之后" : "之前"}停下` : "流程停下";
+  return stop.explain ? `${where}：${stop.explain}` : where;
+}
+
+/** 运行状态词（列表、侧栏、面板共用一张表）。 */
+export function statusLabel(run: RunSummary, catalog?: WorkflowCatalog | null): string {
+  const stop = runStop(run, catalog);
+  if (stop) return stop.step ? `已阻塞 · ${stop.step}` : "已阻塞";
+  return ({ pending: "等待中", running: "运行中", completed: "已完成", failed: "失败", stopped: "已停止", cancelled: "已取消", waiting: "等你确认", blocked: "已阻塞" } as Record<string, string>)[run.status] ?? run.status;
 }
 
 /** 节点状态推导的结果：状态词 + 可选附注。 */
@@ -503,14 +551,18 @@ export interface NodeStatusView {
   readonly note?: string;
   /** 附注是否需要人注意（呈现为警示色）。 */
   readonly noteAttention?: boolean;
-  /** 运行中但这一轮已结束、在等用户回复（画布据此停掉「正在跑」的动效）。 */
-  readonly awaiting?: boolean;
+  /** 执行中的节点在会话里正在干什么（ADR 040，status/nodeActivity.ts 统一得出）。
+   *  不是「进行中」时画布停掉「正在跑」的动效、换成提醒。 */
+  readonly activity?: NodeActivity;
   /** 最新一轮的轮次号（0 = 未执行）。 */
   readonly count: number;
 }
 
 /** 节点在等用户回复时卡片 / 检视器的附注。 */
-export const AWAITING_INPUT_NOTE = "等你在会话里回复";
+export const AWAITING_INPUT_NOTE = ACTIVITY_NOTE.awaiting;
+
+/** 按会话 id 查会话的实时状态（ADR 040）；查不到时为 undefined。 */
+export type SessionLookup = (sessionId: string | null | undefined) => SessionTurnStatus | undefined;
 
 const view = (state: NodeState, count: number, note?: string, noteAttention?: boolean): NodeStatusView => ({
   state,
@@ -528,6 +580,7 @@ const view = (state: NodeState, count: number, note?: string, noteAttention?: bo
 export function nodeStatus(
   node: Pick<WorkflowCatalogNode, "id">,
   snapshot: CanvasSnapshot | null,
+  session?: SessionLookup,
 ): NodeStatusView {
   if (!snapshot) return view("pending", 0);
   const all = snapshot.nodes.filter((item) => item.siteId === node.id).sort((a, b) => b.ordinal - a.ordinal);
@@ -542,9 +595,10 @@ export function nodeStatus(
   }
   if (latest.status === "running") {
     if (snapshot.active) {
-      // 这一轮已结束、结果还没交，引擎在等用户经会话回复（引擎记录的标记）。
-      return latest.awaitingInput === true
-        ? { ...view("running", latest.ordinal, AWAITING_INPUT_NOTE, true), awaiting: true }
+      // 这一步在会话里正在干什么：会话说了算（ADR 040）。
+      const activity = nodeActivity(latest, true, session?.(latest.sessionId)) ?? "working";
+      return needsYou(activity)
+        ? { ...view("running", latest.ordinal, ACTIVITY_NOTE[activity], true), activity }
         : view("running", latest.ordinal);
     }
     const retry = snapshot.retries?.find((item) => item.siteId === latest.siteId && item.ordinal === latest.ordinal);

@@ -2,7 +2,7 @@
 import type { CanvasNodeSnapshot } from "../types.ts";
 import type { BadgeTone } from "../../../shared/ui/controls.tsx";
 import type { NodeState } from "../status/snapshot.ts";
-import { nodeTiming } from "../status/timing.ts";
+import { nodeTiming, type RunClock } from "../status/timing.ts";
 import { durationPhrase } from "./time.ts";
 
 /** 节点类型的中文标签；不认识的类型统一叫「节点」，不显示内部类型名。 */
@@ -10,11 +10,11 @@ const KIND_BADGE: Record<string, string> = { agent: "Agent", python: "脚本", f
 export const kindBadge = (kind: string): string => KIND_BADGE[kind] ?? "节点";
 
 /** 卡片上的时间：在等你时说等了多久，执行中说已运行多久，结束后（或运行已停下）说用时。没有当前时刻时不显示。 */
-export function cardTime(record: CanvasNodeSnapshot | undefined, now: number | undefined, stopped = false): string {
-  const timing = record && now !== undefined ? nodeTiming(record, now) : null;
+export function cardTime(record: CanvasNodeSnapshot | undefined, clock: number | RunClock | undefined): string {
+  const timing = record && clock !== undefined ? nodeTiming(record, clock) : null;
   if (!timing) return "";
   if (timing.waitingMs !== null) return durationPhrase("等你", timing.waitingMs);
-  return durationPhrase(timing.finished || stopped ? "用时" : "已运行", timing.elapsedMs);
+  return durationPhrase(timing.finished || (typeof clock === "object" && !clock.active) ? "用时" : "已运行", timing.elapsedMs);
 }
 
 /** 项目里的相对路径原样显示；绝对路径只显示文件名，完整路径放在悬停提示里。 */

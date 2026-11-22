@@ -293,12 +293,31 @@ export class SessionFactory {
     if (key === undefined) return create();
     const existing = this.pending.get(key);
     if (existing) return existing as Promise<T>;
-    const task = Promise.resolve()
-      .then(create)
+    // 同步排进这个会话的队：紧接着来的插件打开也会排在它后面。
+    const task = this.exclusive(key, create)
       .finally(() => {
         if (this.pending.get(key) === task) this.pending.delete(key);
       });
     this.pending.set(key, task);
+    return task;
+  }
+
+  private readonly opening = new Map<string, Promise<unknown>>();
+  /**
+   * 同一个会话一次只做一个打开（用户那边恢复、插件那边接回都经这里）：后来的
+   * 等前面的做完，再看会话是不是已经开着、直接沿用。否则两边都以为还没开、各
+   * 建一个运行时，同一个会话出现两份状态（例如刷新后自动恢复上次的会话，同时
+   * 工作流接回同一个节点会话）。
+   */
+  exclusive<T>(key: string, create: () => Promise<T>): Promise<T> {
+    const previous = this.opening.get(key);
+    // 没有排在前面的就立刻开始（同步抛出的错误也变成失败的 Promise）。
+    const task = previous ? previous.then(create) : (async () => create())();
+    const settled = task.then(() => undefined, () => undefined);
+    this.opening.set(key, settled);
+    void settled.then(() => {
+      if (this.opening.get(key) === settled) this.opening.delete(key);
+    });
     return task;
   }
 

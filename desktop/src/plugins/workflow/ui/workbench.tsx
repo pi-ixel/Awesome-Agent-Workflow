@@ -45,7 +45,9 @@ import { WorkflowSidebar } from "./WorkflowSidebar.tsx";
 import { WorkflowWorkspace } from "./WorkflowWorkspace.tsx";
 import { createTemplateNavigation } from "./templateNavigation.ts";
 import { WorkflowSessionBanner } from "./WorkflowSessionBanner.tsx";
-import { AWAITING_CONFIRM_CHIP, AWAITING_INPUT_CHIP, runSessionGroups } from "./sessionGroups.ts";
+import { AWAITING_CONFIRM_CHIP, BLOCKED_CHIP, STOPPING_CHIP, linkActivity, runSessionGroups } from "./sessionGroups.ts";
+import { ACTIVITY_WORD, needsYou, sessionStatusOf } from "../status/nodeActivity.ts";
+import type { SessionLookup } from "../status/snapshot.ts";
 
 const panelId = "aaw";
 const sidebarId = "workflow";
@@ -53,9 +55,9 @@ const sidebarId = "workflow";
 const TASK_HANDOVER_MS = 120_000;
 
 /** 进行中与等你确认的运行 → 会话区 / 总览用的简报（等你处理的排前面）。 */
-export function runBriefs(runs: readonly RunSessionLinks[]): WorkflowRunBrief[] {
+export function runBriefs(runs: readonly RunSessionLinks[], session?: SessionLookup): WorkflowRunBrief[] {
   return runs
-    .filter((run) => !run.archived && (run.active || run.status === "waiting"))
+    .filter((run) => !run.archived && (run.active || run.status === "waiting" || run.status === "blocked"))
     .map((run) => {
       if (!run.active) {
         const last = run.links.flatMap((link) => link.nodes).at(-1);
@@ -64,19 +66,24 @@ export function runBriefs(runs: readonly RunSessionLinks[]): WorkflowRunBrief[] 
           title: run.title || run.workflowName || "工作流",
           workflowName: run.workflowName,
           waiting: true,
-          label: AWAITING_CONFIRM_CHIP,
+          label: run.status === "blocked" ? BLOCKED_CHIP : AWAITING_CONFIRM_CHIP,
           step: last?.label ?? null,
         };
       }
       const running = run.links.flatMap((link) => link.nodes.filter((node) => node.status === "running"));
-      const waiting = running.find((node) => node.awaitingInput);
+      // 说法与会话一致（ADR 040）：要你去会话里做点什么的节点排前面。
+      const attention = run.stopping === true ? undefined : run.links.flatMap((link) => {
+        const activity = linkActivity(link, true, session);
+        const node = link.nodes.find((item) => item.status === "running");
+        return needsYou(activity) && node ? [{ node, activity: activity! }] : [];
+      })[0];
       return {
         runId: run.runId,
         title: run.title || run.workflowName || "工作流",
         workflowName: run.workflowName,
-        waiting: waiting !== undefined,
-        label: waiting ? AWAITING_INPUT_CHIP : "运行中",
-        step: (waiting ?? running[0])?.label ?? null,
+        waiting: attention !== undefined,
+        label: run.stopping === true ? STOPPING_CHIP : attention ? ACTIVITY_WORD[attention.activity] : "运行中",
+        step: (attention?.node ?? running[0])?.label ?? null,
       };
     })
     .sort((a, b) => Number(b.waiting) - Number(a.waiting));
@@ -221,9 +228,15 @@ export function createWorkflowWorkbench(
   const activities = createStore<ProjectActivities>(() => ({ workspacePath: null, items: [] }));
   // 空会话的快捷动作只给进行中的运行；发起走「/」菜单（ADR 038）。
   const quickAction = createStore<ProjectQuickAction | null>(() => null);
+  /** 会话的实时状态（ADR 040）：侧栏、状态卡的说法与会话一致。 */
+  const sessionLookup = (): SessionLookup | undefined => {
+    const state = workflow.sessionActivity?.getState();
+    return state === undefined ? undefined : (sessionId) => sessionStatusOf(state, sessionId);
+  };
   const publishStatus = () => {
     const { workspace, runs } = workflow.sessionLinks();
-    const briefs = runBriefs(runs);
+    const briefs = runBriefs(runs, sessionLookup());
+    const sessionsOf = new Map(runs.map((run) => [run.runId, run.links.map((link) => link.sessionId)]));
     status.setState({ workspacePath: workspace, runs: briefs }, true);
     activities.setState({
       workspacePath: workspace,
@@ -235,6 +248,7 @@ export function createWorkflowWorkbench(
         detail: `${run.workflowName}${run.step ? ` · ${run.step}` : ""}`,
         summary: `${run.title} · ${run.label}${run.step ? ` · ${run.step}` : ""}`,
         openLabel: `查看工作流运行：${run.title}`,
+        sessionIds: sessionsOf.get(run.runId) ?? [],
       })),
     }, true);
     const lead = briefs[0];
@@ -414,6 +428,7 @@ export function createWorkflowWorkbench(
     openWorkflow,
     openNodeSession,
     publishStatus,
+    sessionLookup,
     loadEntries,
     dispose() {
       disposed = true;
@@ -501,13 +516,13 @@ export function apply(ctx: Context): void {
       const { workspace, runs } = workflow.sessionLinks();
       const next = new Set<string>();
       if (workspace !== null) {
-        publisher.publish(workspace, runSessionGroups(runs, (runId) => ui.openRun(workspace, runId), (sessionId) => ui.openNodeSession(sessionId, workspace), (runId) => archiveRun(runId)));
+        publisher.publish(workspace, runSessionGroups(runs, (runId) => ui.openRun(workspace, runId), (sessionId) => ui.openNodeSession(sessionId, workspace), (runId) => archiveRun(runId), ui.sessionLookup()));
         next.add(workspace);
       }
       for (const other of workflow.otherSessionLinks()) {
         if (workspace !== null && pathKey(other.project) === pathKey(workspace)) continue;
         const path = other.project;
-        publisher.publish(path, runSessionGroups(other.runs, (runId) => openRunFromNotification(workbench, ui.openRun, path, runId), (sessionId) => ui.openNodeSession(sessionId, path), (runId) => archiveRun(runId, path)));
+        publisher.publish(path, runSessionGroups(other.runs, (runId) => openRunFromNotification(workbench, ui.openRun, path, runId), (sessionId) => ui.openNodeSession(sessionId, path), (runId) => archiveRun(runId, path), ui.sessionLookup()));
         next.add(path);
       }
       for (const path of published) if (!next.has(path)) publisher.publish(path, []);
@@ -520,8 +535,11 @@ export function apply(ctx: Context): void {
       if (event.type === "runs-changed") publish();
       else if (event.type === "library-changed") ui.loadEntries();
     });
+    // 会话状态一变（工作中、你打断了、出错……）就按同一份重发（ADR 040）。
+    const unsubscribeSessions = workflow.sessionActivity?.subscribe(() => publish()) ?? (() => {});
     return () => {
       unsubscribe();
+      unsubscribeSessions();
       publisher.dispose();
     };
   }, "workflow:session-groups");

@@ -1,6 +1,7 @@
 use aaw_workflow_core::{
     ProcessOutput, Workflow,
-    journal::{Journal, RunSnapshot},
+    session_host::{EndedTurn, SessionState, TurnOutcome},
+    journal::{Journal, RunSnapshot, TurnFactKind},
 };
 use rusqlite::Connection;
 use serde_json::json;
@@ -715,16 +716,20 @@ fn inactive_startup_failure_does_not_overwrite_owned_or_existing_diagnostics() {
     std::fs::remove_file(file).unwrap();
 }
 
-/// 等待用户回复的呈现标记：只在执行中的记录上出现，清除后消失，
-/// 动作完成后残留标记不再算数；不在执行中的动作拒绝标记。
+fn state(seq: u64, running: Option<u64>, ended: Option<(u64, TurnOutcome)>) -> SessionState {
+    SessionState { seq, running, ended: ended.map(|(turn, outcome)| EndedTurn { turn, outcome, error: None }) }
+}
+
+/// 轮次记录（ADR 040）：会话报告照实记进它挂着的那一步，运行停着也记；只算发过
+/// 说明之后的轮次；这一步做完了就不再记。节点上看到的是最近一轮的情况。
 #[test]
-fn awaiting_input_marks_only_an_in_flight_round_and_clears_at_the_boundary() {
+fn session_reports_are_recorded_on_the_step_whether_or_not_the_run_executes() {
     let file = path();
     let mut db = Journal::open(&file).unwrap();
-    db.create("r", "project", &workflow("test".into(), false))
-        .unwrap();
+    db.create("r", "project", &workflow("test".into(), false)).unwrap();
     db.claim("r", "project", "owner").unwrap();
     let action = db.dispatch("r", "project", "owner").unwrap().pop().unwrap();
+    db.link_session("r", "project", "owner", &action.site, action.ordinal, "s").unwrap();
     let node = |db: &Journal| {
         db.nodes("r", "project")
             .unwrap()
@@ -732,52 +737,45 @@ fn awaiting_input_marks_only_an_in_flight_round_and_clears_at_the_boundary() {
             .find(|node| node.site_id == action.site && node.ordinal == action.ordinal)
             .unwrap()
     };
-    assert!(!node(&db).awaiting_input);
-    db.set_awaiting_input("r", "project", "owner", &action, true)
-        .unwrap();
-    let waiting = node(&db);
-    assert!(waiting.awaiting_input);
-    assert!(waiting.awaiting_input_since.is_some());
-    let json = serde_json::to_value(&waiting).unwrap();
-    assert_eq!(json["awaitingInput"], true);
-    // 重复标记幂等；他人租约不可写。
-    db.set_awaiting_input("r", "project", "owner", &action, true)
-        .unwrap();
-    assert_eq!(
-        db.set_awaiting_input("r", "project", "intruder", &action, true)
-            .unwrap_err(),
-        "RUN_LEASE_MISMATCH"
-    );
-    db.set_awaiting_input("r", "project", "owner", &action, false)
-        .unwrap();
-    assert!(!node(&db).awaiting_input);
-    assert!(
-        serde_json::to_value(node(&db)).unwrap().get("awaitingInput").is_none(),
-        "未等待时不输出字段"
-    );
-    // 残留标记：动作完成后不再报告等待，也不能再标记。
-    db.set_awaiting_input("r", "project", "owner", &action, true)
-        .unwrap();
-    db.complete(
-        "r",
-        "project",
-        "owner",
-        &action.site,
-        action.ordinal,
-        json!({"status":"ready","reference":"需求引用","evidence":"已确认"}),
-    )
-    .unwrap();
-    assert!(!node(&db).awaiting_input);
-    assert_eq!(
-        db.set_awaiting_input("r", "project", "owner", &action, true)
-            .unwrap_err(),
-        "ACTION_NOT_IN_FLIGHT"
-    );
+    // 还没发过说明：会话里之前聊的不算这一步的。
+    assert!(db.record_session_state("s", &state(5, None, Some((4, TurnOutcome::Completed)))).unwrap().is_empty());
+    assert_eq!(node(&db).turn, None);
+
+    db.record_prompted("r", "project", "owner", &action, "s", 10).unwrap();
+    assert_eq!(node(&db).turn.as_deref(), Some("working"));
+    // 说明那一轮开始：发说明时已记下，不重复报事实。
+    assert!(db.record_session_state("s", &state(10, Some(10), None)).unwrap().is_empty());
+    let facts = db.record_session_state("s", &state(11, None, Some((10, TurnOutcome::Completed)))).unwrap();
+    assert_eq!(facts.len(), 1);
+    assert_eq!(facts[0].kind, TurnFactKind::Ended { turn: 10, outcome: TurnOutcome::Completed, awaiting: true });
+    assert_eq!((facts[0].run_id.as_str(), facts[0].project.as_str()), ("r", "project"));
+    assert_eq!(node(&db).turn.as_deref(), Some("completed"));
+    // 同一份再来：不重复记。
+    assert!(db.record_session_state("s", &state(11, None, Some((10, TurnOutcome::Completed)))).unwrap().is_empty());
+
+    // 运行停下（释放占用）：你在会话里回复，照样记下。
+    db.release("r", "project", "owner").unwrap();
+    let started = db.record_session_state("s", &state(12, Some(12), Some((10, TurnOutcome::Completed)))).unwrap();
+    assert_eq!(started.iter().map(|fact| fact.kind).collect::<Vec<_>>(), [TurnFactKind::Started { turn: 12 }]);
+    assert_eq!(node(&db).turn.as_deref(), Some("working"));
+    let ended = db.record_session_state("s", &state(13, None, Some((12, TurnOutcome::Cancelled)))).unwrap();
+    assert_eq!(ended[0].kind, TurnFactKind::Ended { turn: 12, outcome: TurnOutcome::Cancelled, awaiting: false });
+    let last = db.last_turn("r", "project", &action.site, action.ordinal).unwrap().unwrap();
+    assert_eq!((last.turn, last.prompted, last.outcome), (12, false, Some(TurnOutcome::Cancelled)));
+    assert!(node(&db).turn_ended_at.is_some());
+
+    // 他人租约不能代记「发了说明」。
+    assert_eq!(db.record_prompted("r", "project", "intruder", &action, "s", 20).unwrap_err(), "RUN_LEASE_MISMATCH");
+    // 这一步做完了：会话里再聊不属于任何一步。
+    db.claim("r", "project", "owner").unwrap();
+    db.complete("r", "project", "owner", &action.site, action.ordinal, json!({"status":"ready","reference":"需求引用","evidence":"已确认"})).unwrap();
+    assert!(db.record_session_state("s", &state(15, None, Some((14, TurnOutcome::Completed)))).unwrap().is_empty());
+    assert_eq!(node(&db).turn, None, "做完的步骤不再报告轮次情况");
     drop(db);
     std::fs::remove_file(file).unwrap();
 }
 
-/// 节点用时（ADR 035）：派发时开始计时，等待回复的时长在等待结束时累计，完成时记结束时间。
+/// 节点用时（ADR 035）：派发时开始计时，两轮之间会话空着的时间算作等你，完成时记结束时间。
 #[test]
 fn node_times_follow_dispatch_waiting_and_completion() {
     let file = path();
@@ -799,11 +797,11 @@ fn node_times_follow_dispatch_waiting_and_completion() {
     assert_eq!(running.waited_ms, 0);
     assert!(serde_json::to_value(&running).unwrap().get("waitedMs").is_none(), "没有等待时不输出");
 
-    db.set_awaiting_input("r", "project", "owner", &action, true)
-        .unwrap();
+    db.link_session("r", "project", "owner", &action.site, action.ordinal, "s").unwrap();
+    db.record_prompted("r", "project", "owner", &action, "s", 1).unwrap();
+    db.record_session_state("s", &state(2, None, Some((1, TurnOutcome::Completed)))).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(30));
-    db.set_awaiting_input("r", "project", "owner", &action, false)
-        .unwrap();
+    db.record_session_state("s", &state(3, Some(3), Some((1, TurnOutcome::Completed)))).unwrap();
     let waited = node(&db).waited_ms;
     assert!(waited >= 20, "等待时长已累计：{waited}");
 
@@ -826,6 +824,76 @@ fn node_times_follow_dispatch_waiting_and_completion() {
     std::fs::remove_file(file).unwrap();
 }
 
+/// 运行停着的时间不算等你（执行时段由租约的取得与释放记下）。
+#[test]
+fn waiting_only_counts_while_the_run_is_executing() {
+    let file = path();
+    let mut db = Journal::open(&file).unwrap();
+    db.create("r", "project", &workflow("test".into(), false)).unwrap();
+    db.claim("r", "project", "owner").unwrap();
+    let action = db.dispatch("r", "project", "owner").unwrap().pop().unwrap();
+    let node = |db: &Journal| {
+        db.nodes("r", "project").unwrap().into_iter()
+            .find(|node| node.site_id == action.site && node.ordinal == action.ordinal).unwrap()
+    };
+    db.link_session("r", "project", "owner", &action.site, action.ordinal, "s").unwrap();
+    db.record_prompted("r", "project", "owner", &action, "s", 1).unwrap();
+    db.record_session_state("s", &state(2, None, Some((1, TurnOutcome::Completed)))).unwrap();
+    let info = db.run_info("r").unwrap();
+    assert!(info.active_since.is_some() && info.stopped_at.is_none(), "执行中：{info:?}");
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    // 停下：这次等待在已结束的执行时段里的部分记进去，之后停着的时间不再长。
+    db.release("r", "project", "owner").unwrap();
+    let stopped = db.run_info("r").unwrap();
+    assert!(stopped.active_since.is_none() && stopped.stopped_at.is_some(), "{stopped:?}");
+    let before = node(&db).waited_ms;
+    assert!(before >= 20, "停下前的等待已计入：{before}");
+    std::thread::sleep(std::time::Duration::from_millis(80));
+    assert_eq!(node(&db).waited_ms, before, "停着的时间不计");
+    // 继续运行后，你接着说了：停着的那段不算进这次等待。
+    db.claim("r", "project", "owner").unwrap();
+    db.record_session_state("s", &state(3, Some(3), Some((1, TurnOutcome::Completed)))).unwrap();
+    let waited = node(&db).waited_ms;
+    assert!(waited >= before && waited < before + 60, "停着的 80ms 不算：{before} → {waited}");
+    drop(db);
+    std::fs::remove_file(file).unwrap();
+}
+
+/// 运行版本号（ADR 040）：任何会改变界面上样子的写入都让它变大，写入方不用记得；
+/// 删除运行后版本号仍在，推送方能看到「删了」。
+#[test]
+fn every_visible_write_bumps_the_run_version() {
+    let file = path();
+    let mut db = Journal::open(&file).unwrap();
+    db.create("r", "project", &workflow("test".into(), false)).unwrap();
+    let mut last = db.run_version("r").unwrap();
+    assert!(last > 0);
+    fn bumped(db: &Journal, last: &mut i64, what: &str) {
+        let now = db.run_version("r").unwrap();
+        assert!(now > *last, "{what} 没让版本号变大");
+        *last = now;
+    }
+    db.claim("r", "project", "owner").unwrap();
+    bumped(&db, &mut last, "占用");
+    let action = db.dispatch("r", "project", "owner").unwrap().pop().unwrap();
+    bumped(&db, &mut last, "派发");
+    db.record_prompted("r", "project", "owner", &action, "s", 1).unwrap();
+    bumped(&db, &mut last, "发出说明");
+    db.link_session("r", "project", "owner", &action.site, action.ordinal, "s").unwrap();
+    bumped(&db, &mut last, "关联会话");
+    db.record_session_state("s", &state(2, None, Some((1, TurnOutcome::Completed)))).unwrap();
+    bumped(&db, &mut last, "一轮结束");
+    db.rename_run("r", "project", "新标题").unwrap();
+    bumped(&db, &mut last, "改标题");
+    db.release("r", "project", "owner").unwrap();
+    bumped(&db, &mut last, "释放");
+    assert!(db.run_versions().unwrap().iter().any(|(run, version)| run == "r" && *version == last));
+    db.delete_run("r", "project").unwrap();
+    bumped(&db, &mut last, "删除");
+    drop(db);
+    std::fs::remove_file(file).unwrap();
+}
+
 /// 运行管理（ADR 036）：改标题、归档可恢复；删除只在没有占用时进行，并清掉所有表里这次运行的记录。
 #[test]
 fn runs_can_be_renamed_archived_and_deleted_without_touching_other_runs() {
@@ -835,7 +903,7 @@ fn runs_can_be_renamed_archived_and_deleted_without_touching_other_runs() {
         db.create(id, "project", &workflow("test".into(), false)).unwrap();
         db.claim(id, "project", "owner").unwrap();
         let action = db.dispatch(id, "project", "owner").unwrap().pop().unwrap();
-        db.set_awaiting_input(id, "project", "owner", &action, true).unwrap();
+        db.record_prompted(id, "project", "owner", &action, "s", 1).unwrap();
         db.complete(id, "project", "owner", &action.site, action.ordinal, json!({"status":"ready","reference":"需求引用","evidence":"已确认"})).unwrap();
     }
 

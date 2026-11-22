@@ -40,6 +40,7 @@ export function projectOperationsFrom(
     backgroundPromptOptions: coordinator.backgroundPromptOptions,
     registerSessionTools: coordinator.registerSessionTools,
     openPluginSession: coordinator.openPluginSessionRuntime,
+    pluginSessionReady: coordinator.pluginSessionReady,
     watchTurns: coordinator.watchSessionTurns,
     watchEvents: coordinator.watchSessionEvents,
     closeProject: coordinator.closeProjectRuntime,

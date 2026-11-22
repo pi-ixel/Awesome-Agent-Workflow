@@ -1,3 +1,5 @@
+import { ACTIVITY_NOTE, ACTIVITY_WORD, needsYou, nodeActivity, type NodeActivity } from "../status/nodeActivity.ts";
+import { useSessionLookup } from "./useSessionLookup.ts";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 /**
  * 一次运行的视图（AAW 面板第三层；外壳与导航见 WorkflowPanel.tsx）。
@@ -33,17 +35,20 @@ import type {
 import {
   gateOf,
   isSettled,
-  mergeStates,
   nodeStatus,
   recordStatus,
+  runStop,
   STATE_LABEL,
   statusLabel,
+  stopSentence,
   type NodeState,
+  type RunStop,
 } from "../status/snapshot.ts";
 import { StatusWord } from "./StatusWord.tsx";
+import { progressStages } from "./runProgress.ts";
 import { FlowStages, type FlowReveal } from "./FlowStages.tsx";
 import { durationPhrase, formatDuration, formatStart, useNow } from "./time.ts";
-import { nodeTiming, runActiveMs, runWaitedMs } from "../status/timing.ts";
+import { nodeTiming, runActiveMs, runClock, runWaitedMs } from "../status/timing.ts";
 import { kindBadge } from "./nodeText.ts";
 import { NodeDetail } from "./NodeDetail.tsx";
 import { DisposePanel } from "./DisposePanel.tsx";
@@ -108,7 +113,6 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
   const [showSummary, setShowSummary] = useState(false);
   const [showRequirement, setShowRequirement] = useState(false);
   const [doneDismissed, setDoneDismissed] = useState(false);
-  const [stream, setStream] = useState<Record<string, string>>({});
   // 节点计划由服务保存；收到计划更新时只需重新读取。
   const [, setPlanVersion] = useState(0);
   const [panelWidth, setPanelWidth] = useState(0);
@@ -116,8 +120,10 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
   const [reveal, setReveal] = useState<FlowReveal | undefined>();
   const store = useMemo(() => (runId === "" ? undefined : service.snapshot(runId)), [service, runId]);
   const snapshot = useRegisteredSnapshot(store, (value) => value ?? null);
+  // 节点在会话里正在干什么：和会话视图读同一份会话状态（ADR 040）。
+  const session = useSessionLookup(service);
 
-  // 服务事件泵：快照由服务刷新，这里只接错误与 Agent 消息节选。
+  // 服务事件泵：快照由服务刷新，这里只接错误与计划更新（Agent 的话在会话里看）。
   useEffect(() => {
     let live = true;
     const unsubscribe = service.subscribe((event) => {
@@ -128,26 +134,14 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
         setError(typeof event.message === "string" && event.message !== "" ? describeError(event.message) : { title: "运行快照刷新失败。", hint: "可以点「刷新」重试。" });
         return;
       }
-      // 用户停止不是失败：节点上已写明「继续运行后接着做这一步」，不再报错。
-      if (event.type === "run-error" && event.runId === runId && event.cancelled !== true) {
-        setError(typeof event.message === "string" && event.message !== "" ? describeError(event.message) : { title: "运行失败。" });
-      }
+      // 运行出错不另存一份：引擎把失败记在运行上（继续运行时清掉），横幅只读那一份（ADR 040）。
       if (event.type === "acp-event") {
         const instance = event.instance as { siteId?: unknown; ordinal?: unknown } | undefined;
         const update = event.event as { type?: unknown; text?: unknown } | undefined;
         const siteId = typeof instance?.siteId === "string" ? instance.siteId : null;
         const ordinal = typeof instance?.ordinal === "number" ? instance.ordinal : null;
         if (event.runId !== runId || siteId === null || ordinal === null) return;
-        if (update?.type === "user_message_chunk" || update?.type === "workflow_context") {
-          const key = `${runId}:${siteId}@${ordinal}`;
-          setStream((previous) => ({ ...previous, [key]: "" }));
-        }
         if (update?.type === "plan") setPlanVersion((version) => version + 1);
-        if (update?.type === "agent_message_chunk" && typeof update.text === "string") {
-          const key = `${runId}:${siteId}@${ordinal}`;
-          const chunk = update.text;
-          setStream((previous) => ({ ...previous, [key]: ((previous[key] ?? "") + chunk).slice(-32000) }));
-        }
       }
     });
     return () => {
@@ -158,8 +152,7 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
 
   // 用时随时间走：每 30 秒刷新一次显示。运行停下后，没结束的节点用时停在停下那一刻。
   const now = useNow(30_000);
-  const stoppedAt = snapshot?.run && !snapshot.active && snapshot.run.updatedAt != null ? snapshot.run.updatedAt : null;
-  const clock = stoppedAt === null ? now : Math.min(now, stoppedAt);
+  const clock = runClock(snapshot, now);
 
   // 画布目录取自运行快照里捕获的定义（运行固定在启动时的定义版本上）；
   // 渲染期派生，快照暂缺目录时保留上一份。
@@ -181,7 +174,6 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
   const [renderedRunId, setRenderedRunId] = useState("");
   if (renderedRunId !== runId) {
     setRenderedRunId(runId);
-    setStream({});
     setDoneDismissed(false);
     clearSelection();
   }
@@ -203,8 +195,7 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
   const node = byId.get(selected);
   const record = selectedRecords.find((item) => item.ordinal === selectedOrdinal) ?? selectedRecords[0];
   const latestRecord = selectedRecords[0];
-  const state = nodeStatus(node ?? { id: "" }, snapshot ? { ...snapshot, nodes: record ? [record] : [] } : null);
-  const live = record ? stream[`${runId}:${record.siteId}@${record.ordinal}`] : undefined;
+  const state = nodeStatus(node ?? { id: "" }, snapshot ? { ...snapshot, nodes: record ? [record] : [] } : null, session);
   const candidates = (latestRecord?.status === "running" || latestRecord?.status === "failed") && !snapshot?.active
     ? (latestRecord.candidates ?? []).map((value) => candidateOf(value)).filter((item): item is ResultCandidate => item !== null)
     : [];
@@ -217,7 +208,7 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
   // 本轮的开始时间与用时；等你回复的时间单独说明。作废的记录不显示用时。
   const timing = record && record.mark !== "superseded" ? nodeTiming(record, clock) : null;
   const recordTime = timing
-    ? `${formatStart(timing.startedAt, now)}开始 · ${durationPhrase(timing.finished || stoppedAt !== null ? "用时" : "已运行", timing.elapsedMs)}${timing.waitedMs >= 60_000 ? `（其中等你 ${formatDuration(timing.waitedMs)}）` : ""}`
+    ? `${formatStart(timing.startedAt, now)}开始 · ${durationPhrase(timing.finished || !clock.active ? "用时" : "已运行", timing.elapsedMs)}${timing.waitedMs >= 60_000 ? `（其中等你 ${formatDuration(timing.waitedMs)}）` : ""}`
     : "";
   // 处置只在运行停着、没有别的进程占用时可做。
   const disposable = !!record && !snapshot?.hasLease && disposeActions(snapshot, record, candidates.length).length > 0;
@@ -298,37 +289,49 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
   }
 
   // ------------------------------------------------------------ 派生呈现
-  const runResult = snapshot?.run ? asRecord(snapshot.run.result) : null;
-  const blockedReason = typeof runResult?.reason === "string" ? runResult.reason : "";
+  // 流程停下是流程层的事实（引擎记录）：横幅写停在哪、为什么、怎么处理；步骤卡片只显示自己的状态。
+  const stop = snapshot?.run ? runStop(snapshot.run, catalog) : null;
   const interrupted = snapshot?.run?.status === "running" && !snapshot.active;
   const runState: NodeState = !snapshot?.run ? "pending"
     : snapshot.active ? "running"
       : interrupted || withoutAuthorization.length > 0 ? "stuck"
-        : runResult?.status === "blocked" || snapshot.run.status === "waiting" ? "blocked"
+        : snapshot.run.status === "blocked" || snapshot.run.status === "waiting" ? "blocked"
           : snapshot.run.status === "completed" ? "done"
             : snapshot.run.status === "failed" ? "failed" : "pending";
-  const runWord = !snapshot?.run ? "" : interrupted ? "已中断" : statusLabel(snapshot.run, catalog);
+  const stopping = snapshot?.active === true && snapshot.run?.stopping === true;
+  const runWord = !snapshot?.run ? "" : stopping ? "正在停止" : interrupted ? "已中断" : statusLabel(snapshot.run, catalog);
   const stages = progressStages(catalog, snapshot);
-  // 一轮结束仍无结果、引擎在等用户经会话回复的节点（引擎记录的标记）。
-  const awaitingRecords = snapshot?.active ? snapshot.nodes.filter((item) => item.status === "running" && item.awaitingInput === true) : [];
+  // 要你去会话里做点什么的节点（等回复、你打断了、出错、等你处理）：说法与会话一致（ADR 040）。
+  const attentionRecords = snapshot?.active && !stopping
+    ? snapshot.nodes.flatMap((item) => {
+      const activity = nodeActivity(item, true, session?.(sessionOf(item, snapshot.actors)));
+      return needsYou(activity) ? [{ item, activity: activity! }] : [];
+    })
+    : [];
+  const awaitingRecords = attentionRecords.map(({ item }) => item);
   const awaitingRecord = awaitingRecords[0];
   const awaiting = awaitingRecord && {
     label: byId.get(awaitingRecord.siteId)?.label ?? awaitingRecord.siteId,
     sessionId: sessionOf(awaitingRecord, snapshot?.actors ?? []),
     more: awaitingRecords.length - 1,
+    activities: attentionRecords.map(({ activity }) => activity),
   };
   const waitingItems = awaitingRecords.map((item) => {
     const label = byId.get(item.siteId)?.label ?? item.siteId;
     const peers = awaitingRecords.filter((other) => (byId.get(other.siteId)?.label ?? other.siteId) === label);
     const position = peers.indexOf(item) + 1;
-    const text = stream[`${runId}:${item.siteId}@${item.ordinal}`]?.trim();
     return {
       record: item,
       label: peers.length > 1 ? `${label}（第 ${position} 个实例）` : label,
       sessionId: sessionOf(item, snapshot?.actors ?? []),
-      excerpt: text ? (text.length > 180 ? `…${text.slice(-180)}` : text) : undefined,
     };
   });
+  const openWaiting = (item: (typeof waitingItems)[number]) => {
+    if (!item.sessionId || !onOpenSession) return;
+    select(item.record.siteId, [...item.record.callPath], item.record.phaseId ?? undefined);
+    setSelectedOrdinal(item.record.ordinal);
+    onOpenSession(item.sessionId);
+  };
   const currentLabel = (() => {
     const focus = awaitingRecord ?? runningRecord ?? stuckRecord;
     return focus ? byId.get(focus.siteId)?.label ?? focus.siteId : "";
@@ -342,13 +345,13 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
     route: gate.label,
     more: gates.length - 1,
   };
-  const banner = bannerOf({ error, snapshot, blockedReason, mismatch, stuckRecord, awaiting, gating });
+  const banner = bannerOf({ error, snapshot, stop, mismatch, stuckRecord, awaiting, gating });
   const summary = snapshot?.run ?? service.runs().find((item) => item.runId === runId) ?? null;
   const runName = summary?.name || catalog?.name || "工作流";
   const runTitle = summary?.title || runName;
   const settled = !snapshot?.active && summary !== null && summary.status !== "running";
   // 只算真正在跑的时间：停着的那段不计（ADR 035 用时）。
-  const activeMs = snapshot ? runActiveMs(snapshot.nodes, now, snapshot.active) : 0;
+  const activeMs = snapshot ? runActiveMs(snapshot.nodes, now, snapshot.active, clock) : 0;
   const elapsed = activeMs > 0 ? formatDuration(activeMs) : "";
   // 其中等你回复的时间；不足 1 分钟不提。
   const waitedTotal = snapshot ? runWaitedMs(snapshot.nodes, clock) : 0;
@@ -363,7 +366,7 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
         <b className="workflow-run-name" data-hint={runTitle}>{runTitle}</b>
         <span className="workflow-run-action">
           {snapshot?.run && <button type="button" className={secondaryButton} onClick={() => setShowSummary(!showSummary)} aria-pressed={showSummary} data-hint="这次运行的概况、各节点做了什么和产出文件">{showSummary ? "返回流程图" : "总结"}</button>}
-          {snapshot?.active && <DangerButton className={dangerSize} onClick={() => setConfirmStop(true)} disabled={confirmStop}>停止</DangerButton>}
+          {snapshot?.active && <DangerButton className={dangerSize} onClick={() => setConfirmStop(true)} disabled={confirmStop || stopping}>停止</DangerButton>}
           {snapshot?.run && !snapshot.active && snapshot.hasLease && <button type="button" className={primaryButton} onClick={() => void run(() => service.recover(runId, "Desktop：确认服务进程退出后解除占用"))}>检查并解除占用</button>}
           {snapshot?.run && !snapshot.active && !snapshot.hasLease && snapshot.run.status === "stopped" && withoutAuthorization.length === 0 && <button type="button" className={primaryButton} disabled={busy} onClick={() => void run(() => service.resume(runId))}>继续运行</button>}
           <MoreMenu entries={[
@@ -380,8 +383,11 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
           {stages.map((stage) => <i key={stage.id} className={`state-${stage.state}`} data-hint={`${stage.label} · ${STATE_LABEL[stage.state]}`} />)}
           <small>{stages.filter((s) => isSettled(s.state)).length}/{stages.length}</small>
         </span>}
-        {currentLabel && (awaiting
-          ? <span className="workflow-current attention">等待回复 · <b>{currentLabel}</b></span>
+        {/* 等回复由下面的横幅说，这里只写停在哪一步。 */}
+        {currentLabel && (awaiting && banner?.action === "open-session"
+          ? <span className="workflow-current">当前 · <b>{currentLabel}</b></span>
+          : awaiting
+          ? <span className="workflow-current attention">{ACTIVITY_WORD[awaiting.activities[0]!]} · <b>{currentLabel}</b></span>
           : <span className="workflow-current">{snapshot?.active ? "当前" : "停在"} · <b>{currentLabel}</b></span>)}
         {summary && <span className="workflow-run-info" data-hint={summary.createdAt != null ? `${formatStart(summary.createdAt, now)}开始` : undefined}>
           {runName}{summary.entryLabel ? ` · ${summary.entryLabel}` : ""}{elapsed ? ` · ${settled ? "用时" : "已运行"} ${elapsed}${waitedText}` : ""}
@@ -400,6 +406,8 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
       onDismiss={banner.action === "dismiss" ? () => setError(null) : undefined}
       actions={banner.action === "dispose" && stuckRecord && !(page === "dispose" && record === stuckRecord)
         ? <button type="button" className={primaryButton} onClick={() => openDispose(stuckRecord)}>去处理</button>
+        : banner.action === "open-session" && waitingItems.length === 1 && waitingItems[0]!.sessionId && onOpenSession
+          ? <button type="button" className={secondaryButton} onClick={() => openWaiting(waitingItems[0]!)}>打开会话</button>
         : banner.action === "confirm" && gate ? <>
           {gateRecord && <button type="button" className={secondaryButton} onClick={() => showRecord(gateRecord)}>查看</button>}
           {gateRecord && <button type="button" className={secondaryButton} onClick={() => openDispose(gateRecord)}>退回…</button>}
@@ -407,10 +415,10 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
         </> : undefined}
     >
       {banner.hint}
-      {banner.action === "open-session" && <div className="workflow-waiting-list" aria-label="等待回复的节点">
+      {banner.action === "open-session" && waitingItems.length > 1 && <div className="workflow-waiting-list" aria-label="等待回复的节点">
         {waitingItems.map((item) => <div className="workflow-waiting-item" key={`${item.record.siteId}@${item.record.ordinal}`}>
-          <div><strong>{item.label}</strong><p>{item.excerpt ?? "请打开会话查看 Agent 的消息；也可能是节点尚未提交结果。"}</p></div>
-          {item.sessionId && onOpenSession && <button type="button" className={secondaryButton} onClick={() => { select(item.record.siteId, [...item.record.callPath], item.record.phaseId ?? undefined); setSelectedOrdinal(item.record.ordinal); onOpenSession(item.sessionId!); }}>打开会话</button>}
+          <strong>{item.label}</strong>
+          {item.sessionId && onOpenSession && <button type="button" className={secondaryButton} onClick={() => openWaiting(item)}>打开会话</button>}
         </div>)}
       </div>}
     </Callout>}
@@ -438,7 +446,7 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
       <div className="workflow-inspector-head">
         <b data-hint={node.label}>{node.label}</b>
         {node.kind !== "agent" && <Badge>{kindBadge(node.kind)}</Badge>}
-        <StatusWord state={state.state} waiting={state.awaiting} />
+        <StatusWord state={state.state} waiting={needsYou(state.activity ?? null)} />
         {<IconButton iconSize="compact" type="button" className={iconButton} onClick={() => { setSelected(""); clearSelection(); }} aria-label="关闭节点详情"><XIcon className="ui-icon-14" /></IconButton>}
       </div>
       {(selectedRecords.length > 1 || (recordSession && onOpenSession)) && <div className="workflow-inspector-actions">
@@ -470,7 +478,6 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
             conditions={conditions}
             executed={record !== undefined}
             running={record?.status === "running" && !!snapshot?.active}
-            live={live}
             plan={record ? service.nodePlan(runId, record.siteId, record.ordinal) : null}
             view={resultView}
             raw={record?.result}
@@ -498,9 +505,10 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
         selected={selected}
         selectedPhase={selectedPhase}
         reveal={reveal}
-        now={clock}
+        now={now}
         planOf={(item) => service.nodePlan(runId, item.siteId, item.ordinal)}
         sessionFor={(item) => sessionOf(item, snapshot?.actors ?? [])}
+        sessionStatus={session}
         onOpenSession={onOpenSession}
         onSelect={select}
       />
@@ -511,13 +519,13 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
 }
 
 /** 横幅（规约 §7.1）：只有一条，首行人话原因，错误码折叠，最多一个主操作。 */
-function bannerOf({ error, snapshot, blockedReason, mismatch, stuckRecord, awaiting, gating }: {
+function bannerOf({ error, snapshot, stop, mismatch, stuckRecord, awaiting, gating }: {
   error: ErrorText | null;
   snapshot: CanvasSnapshot | null;
-  blockedReason: string;
+  stop: RunStop | null;
   mismatch: boolean;
   stuckRecord: CanvasNodeSnapshot | undefined;
-  awaiting: { label: string; sessionId?: string; more: number } | undefined;
+  awaiting: { label: string; sessionId?: string; more: number; activities: readonly NodeActivity[] } | undefined;
   gating: { step: string; route: string | null; more: number } | undefined;
 }): { tone: "danger" | "warn"; title: string; hint?: string; code?: string; detail?: string; action?: "dispose" | "dismiss" | "open-session" | "confirm" } | null {
   const failure = snapshot?.run?.failure;
@@ -541,11 +549,14 @@ function bannerOf({ error, snapshot, blockedReason, mismatch, stuckRecord, await
       action: stuckRecord && !snapshot?.hasLease ? "dispose" : undefined,
     };
   }
-  // 引擎分不清 Agent 是在提问还是忘了提交，所以只陈述事实：轮次结束、结果未交。
+  // Agent 说了什么在会话信息流里看，这里只指个路：哪一步要你、去会话里做什么。
   if (awaiting) {
+    const same = awaiting.activities.every((activity) => activity === awaiting.activities[0]);
     return {
       tone: "warn",
-      title: awaiting.more > 0 ? `${awaiting.more + 1} 个节点这一轮结束后尚未提交结果，请查看会话。` : `「${awaiting.label}」这一轮结束了，还没有提交结果，请查看会话。`,
+      title: awaiting.more > 0
+        ? `${awaiting.more + 1} 个节点${same && awaiting.activities[0] === "awaiting" ? "等你在会话里回复" : "要你在会话里处理"}`
+        : `「${awaiting.label}」${ACTIVITY_NOTE[awaiting.activities[0]!]}`,
       action: "open-session",
     };
   }
@@ -556,36 +567,9 @@ function bannerOf({ error, snapshot, blockedReason, mismatch, stuckRecord, await
       action: "confirm",
     };
   }
-  if (blockedReason) return { tone: "warn", title: blockedReason };
+  if (stop) return { tone: "warn", title: stopSentence(stop), ...(stop.reason ? { hint: stop.reason } : {}) };
   if (mismatch) return { tone: "warn", title: "这次运行使用了其他流程版本，画布不渲染其节点。" };
   return null;
-}
-
-/**
- * 头部进度：每个阶段一段（定义没有阶段时不显示）。与画布条带同一判定：
- * 阶段内全部结束，或运行已走过它（后面的阶段已开始）且其中没有进行中 /
- * 待人处理的节点，才算结束——没被需要的条件节点（修正、整改）不拖住进度。
- */
-function progressStages(catalog: WorkflowCatalog | null, snapshot: CanvasSnapshot | null): { id: string; label: string; state: NodeState }[] {
-  const stages = catalog?.stages ?? [];
-  if (stages.length === 0 || !catalog?.structure) return [];
-  const phases = Object.values(catalog.structure.flows).flatMap((flow) => flow.phases);
-  const perStage = stages.map((stage) => phases.filter((phase) => phase.stage === stage.id)
-    .flatMap((phase) => phase.run.map((site) => nodeStatus({ id: site }, snapshot).state)));
-  const touched = perStage.map((states) => states.some((state) => state !== "pending"));
-  return stages.map((stage, index) => {
-    const states = perStage[index] ?? [];
-    const started = states.filter((state) => state !== "pending");
-    const urgent = mergeStates(started);
-    const passed = touched.slice(index + 1).some(Boolean) || snapshot?.run?.status === "completed";
-    let state: NodeState;
-    if (started.length === 0) state = "pending";
-    else if (!isSettled(urgent)) state = urgent;
-    else if (started.length === states.length || passed) state = urgent;
-    else state = "running";
-    if (state === "running" && !snapshot?.active) state = "pending";
-    return { id: stage.id, label: stage.label, state };
-  });
 }
 
 /** 一轮执行对应的节点会话；兼容只返回角色关联的引擎。 */

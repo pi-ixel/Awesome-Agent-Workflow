@@ -41,6 +41,8 @@ steps:
       delivers: 一份整体设计：需求、方案、接口约定和验收标准
       prompt: 澄清需求并形成完整整体设计，保留来源与必要证据。在 files 中列出这一步新建的文档路径。
       knowledge: [host-tools.md, sr-design-method.md]
+      reads:
+        projectBaseline: 项目基线：已有架构、约束和用户确认（设计的起点）
       does:
         - 需求与事实
         - 方案、契约与验收
@@ -76,6 +78,9 @@ steps:
       delivers: 一份门禁报告：整体设计能否进入拆分，以及发现的问题
       prompt: 独立检查整体设计。
       knowledge: [host-tools.md, sr-gate-method.md]
+      reads:
+        design: 要检查的整体设计
+        projectBaseline: 项目基线（核对约束）
       does:
         - 独立检查
         - 输出结论
@@ -120,6 +125,9 @@ steps:
       role: SR 需求与设计
       prompt: 依据最新整体设计门禁报告，在既有授权内整改；需要用户取舍时在当前会话提问并等待答复，之后继续。
       knowledge: [host-tools.md, sr-design-method.md, repair-policy.md]
+      reads:
+        design: 当前整体设计
+        gateReview: 门禁报告（按它整改）
       does:
         - 处理门禁发现
       result:
@@ -154,6 +162,10 @@ steps:
       role: SR 设计门禁
       prompt: 根据最新设计独立重审全部未解决问题。
       knowledge: [host-tools.md, sr-gate-method.md]
+      reads:
+        design: 整改后的整体设计
+        gateReview: 上一轮门禁报告（重审未解决的问题）
+        projectBaseline: 项目基线（核对约束）
       does:
         - 整改后复核
       result:
@@ -196,6 +208,8 @@ steps:
       delivers: AR 的划分结果：拆成哪几个 AR，或者整体推进
       prompt: 结合 SR 设计和用户意见决定拆分或整体进入；必须明确记录用户确认。
       knowledge: [host-tools.md, ar-scope-method.md]
+      reads:
+        srDesign: SR 整体设计（据此拆分 AR）
       does:
         - 确定 AR 范围
         - 用户确认
@@ -293,6 +307,9 @@ steps:
       delivers: 一份整体交付说明：各模块和任务的完成情况、验证和遗留风险
       prompt: 汇总本次 SR 或 AR 范围内各模块和任务的实际完成情况、验证证据及未解决风险；有未知或阻断时如实报告。
       knowledge: [host-tools.md, dev-completion.md]
+      reads:
+        srDesign: SR 整体设计（从 SR 开始时才有）
+        ars: 本次的 AR 范围（各模块和任务的结果用 list_workflow_results 查看）
       does:
         - 汇总各模块与任务
         - 说明验证和遗留风险

@@ -35,9 +35,7 @@
 
 /* 横幅：只有一条，语义色只做左边线与状态点 */
 .workflow-waiting-item { display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid var(--color-line); border-radius:5px; }
-.workflow-waiting-item>div { flex:1; min-width:0; }
-.workflow-waiting-item strong { font-size:var(--text-ui-sm); }
-.workflow-waiting-item p { margin:2px 0 0; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--color-ink-soft); font-size:var(--text-ui-sm); }
+.workflow-waiting-item strong { flex:1; min-width:0; font-size:var(--text-ui-sm); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
 .workflow-launch-sheet { flex:none; border-bottom:1px solid var(--color-line); background:var(--color-surface); }
 .workflow-preflight { margin:0 0 8px; font-size:var(--text-ui-sm); }
@@ -129,7 +127,6 @@
 .workflow-detail-facts dt { color:var(--color-ink-mute); font-size:var(--text-2xs); }
 .workflow-detail-facts dd { margin:0; min-width:0; overflow-wrap:anywhere; }
 .workflow-detail-text { margin:0; color:var(--color-ink); font-size:var(--text-ui-sm); line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; }
-.workflow-detail-live { margin:0; padding:6px 8px; border-left:2px solid var(--color-line-strong); color:var(--color-ink-soft); font-size:var(--text-ui-sm); line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; }
 
 /* 外壳：首页入口与各自详情页的返回路径。 */
 .workflow-root-nav { flex:none; padding:6px 10px; border-bottom:1px solid var(--color-line); }

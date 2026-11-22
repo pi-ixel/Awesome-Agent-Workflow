@@ -188,7 +188,7 @@ export function createSessionCoordinator({
     string,
     Set<(event: AcpSessionEvent) => void>
   >();
-  /** 会话轮次事件的订阅方（按会话）。 */
+  /** 会话轮次事件的订阅方（按会话 id；会话 id 由 Agent 生成、全局唯一）。 */
   const turnWatchers = new Map<
     string,
     Set<(event: SessionTurnEvent) => void>
@@ -324,15 +324,7 @@ export function createSessionCoordinator({
     const stopState = runtime.store.subscribe((state, previous) => {
         if (state.isAgentRunning !== previous.isAgentRunning) {
           const sessionId = runtime.session.sessionId ?? state.activeSessionId;
-          const watchers = sessionId
-            ? turnWatchers.get(
-                sessionActivityKey(
-                  runtime.workspacePath,
-                  sessionId,
-                  runtime.agentKey,
-                ),
-              )
-            : undefined;
+          const watchers = sessionId ? turnWatchers.get(sessionId) : undefined;
           const event: SessionTurnEvent = state.isAgentRunning
             ? { type: "started" }
             : {
@@ -1351,7 +1343,77 @@ export function createSessionCoordinator({
    * 与用户打开会话走同一套准备连接、建立会话、登记侧栏的流程；不抢前台，
    * 不写项目的连接失败横幅，失败原样交还调用方。
    */
-  async function openPluginSessionRuntime(
+  /** 在同一个连接上重新载入会话，换上它现在的 openTools。 */
+  function reloadTools(runtime: SessionRuntime): Promise<void> {
+    return runtime.reload({
+      restore: (session, restoreOptions) =>
+        toolsFor(runtime, restoreOptions.sessionId).then((mcpServers) =>
+          getProtocol().restore(session, { ...restoreOptions, mcpServers }),
+        ),
+      attach: attachProjectSessionViews,
+    });
+  }
+
+  /** 排队换工具的会话：插件在会话里发消息前等它换好（pluginSessionReady）。 */
+  const toolSwaps = new Map<SessionRuntime, Promise<void>>();
+
+  /** 会话不在回复时立即兑现；否则等这一轮结束。 */
+  function whenIdle(runtime: SessionRuntime): Promise<void> {
+    return new Promise((resolve) => {
+      if (runtime.disposed || !runtime.store.getState().isAgentRunning) return resolve();
+      const stop = runtime.store.subscribe((state) => {
+        if (!runtime.disposed && state.isAgentRunning) return;
+        stop();
+        resolve();
+      });
+    });
+  }
+
+  /**
+   * 会话正在回复时要换工具：像补一句话一样排在这一轮后面——等它结束再重新载入。
+   * 这一轮之后排着的消息先发出去了，就再等那一轮。
+   */
+  function queueToolSwap(runtime: SessionRuntime): void {
+    const swap = (async () => {
+      for (;;) {
+        await whenIdle(runtime);
+        if (runtime.disposed) return;
+        try {
+          await reloadTools(runtime);
+          return;
+        } catch (error) {
+          if (runtime.store.getState().isAgentRunning) continue;
+          logger.warn("会话空下来后换工具失败", {
+            sessionId: runtime.session.sessionId,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+          return;
+        }
+      }
+    })();
+    toolSwaps.set(runtime, swap);
+    void swap.finally(() => {
+      if (toolSwaps.get(runtime) === swap) toolSwaps.delete(runtime);
+    });
+  }
+
+  /** 插件在这个会话里发消息前等它就绪：排着队的换工具做完（ADR 040）。 */
+  function pluginSessionReady(target: SessionTarget): Promise<void> {
+    const runtime = findSessionRuntime(target.workspacePath, target.agentKey, target.sessionId);
+    return (runtime && toolSwaps.get(runtime)) ?? Promise.resolve();
+  }
+
+  /** 插件打开会话；恢复已有会话时与用户那边的打开排在同一个会话的队里（见 SessionFactory.exclusive）。 */
+  function openPluginSessionRuntime(
+    options: PluginSessionOptions,
+  ): Promise<SessionTarget> {
+    const resumeId = options.resumeSessionId;
+    if (!resumeId) return openPluginSessionNow(options);
+    const key = JSON.stringify([selectedAgentKey(), pathKey(options.workspacePath), resumeId]);
+    return sessionFactory.exclusive(key, () => openPluginSessionNow(options));
+  }
+
+  async function openPluginSessionNow(
     options: PluginSessionOptions,
   ): Promise<SessionTarget> {
     const { workspacePath } = options;
@@ -1380,21 +1442,24 @@ export function createSessionCoordinator({
         await sessionFactory.settled(existing);
         // 插件要在这个正开着的会话上装自己的工具（如工作流第一步接着用发起它的
         // 会话，ADR 039）：工具只在载入时挂上，所以在同一个连接上悄悄重新载入一次——
-        // 不结束进程、不影响共用进程的其他会话，界面上不出现「重连」。
-        if (options.tools && existing.openTools !== options.tools) {
+        // 不结束进程、不影响共用进程的其他会话，界面上不出现「重连」。工具实际没变
+        // 就不重新载入；会话正在回复时排在这一轮之后换（ADR 040），不打断、不失败。
+        if (options.tools) {
+          const agent = existing.session.agentInfo;
           const previous = existing.openTools;
+          const same = previous !== undefined && JSON.stringify(previous(agent)) === JSON.stringify(options.tools(agent));
           existing.openTools = options.tools;
-          try {
-            await existing.reload({
-              restore: (session, restoreOptions) =>
-                toolsFor(existing, restoreOptions.sessionId).then((mcpServers) =>
-                  getProtocol().restore(session, { ...restoreOptions, mcpServers }),
-                ),
-              attach: attachProjectSessionViews,
-            });
-          } catch (error) {
-            existing.openTools = previous;
-            throw error;
+          if (!same) {
+            if (existing.store.getState().isAgentRunning) {
+              queueToolSwap(existing);
+            } else {
+              try {
+                await reloadTools(existing);
+              } catch (error) {
+                existing.openTools = previous;
+                throw error;
+              }
+            }
           }
         }
         return { workspacePath, agentKey, sessionId: resumeId };
@@ -1469,17 +1534,13 @@ export function createSessionCoordinator({
     }
   }
 
-  /** 订阅一个会话的轮次事件（会话断线重连、重新打开后照常收到）。 */
+  /** 按会话 id 订阅轮次事件（会话还没打开也行；断线重连、重新打开后照常收到）。 */
   function watchSessionTurns(
-    target: SessionTarget,
+    sessionId: string,
     listener: (event: SessionTurnEvent) => void,
   ): () => void {
-    if (!target.sessionId) return () => {};
-    const key = sessionActivityKey(
-      target.workspacePath,
-      target.sessionId,
-      target.agentKey,
-    );
+    if (!sessionId) return () => {};
+    const key = sessionId;
     const set = turnWatchers.get(key) ?? new Set();
     set.add(listener);
     turnWatchers.set(key, set);
@@ -2742,6 +2803,7 @@ export function createSessionCoordinator({
       sessionTools.register(provider),
     openPluginSessionRuntime,
     watchSessionTurns,
+    pluginSessionReady,
     watchSessionEvents,
     projectFactory,
     dispose,

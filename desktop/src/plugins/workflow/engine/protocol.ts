@@ -53,8 +53,9 @@ export interface WorkflowServiceExit {
  * 宿主回调帧（与引擎 remote_host.rs 的 serde 线格式一一对应）：请求帧是
  * `{"id","request":{kind,…}}`，应答帧同形 `{"id","response":{result|code}}`。
  * kind 的全集见 remote_host.rs `HostRequest`（serde tag="kind" snake_case）：
- * spawn_node_session / prompt_turn / wait_turn_ended / cancel_waiting /
- * start_question_tracker / question_tracker_request。
+ * spawn_node_session / prompt_turn / cancel_waiting / start_question_tracker /
+ * question_tracker_request。会话状态不走帧：宿主经服务协议 `session-state`
+ * 主动报告（ADR 040）。
  * 用户消息从不经过引擎（ADR 023 §2.2 只许可调度文本 prompt_turn 过线）。
  */
 export interface HostRequestFrame {

@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { entryCommands, entryHint, entryInputsOf, runBriefs } from "../../../src/plugins/workflow/ui/workbench.tsx";
+import { runSessionGroups } from "../../../src/plugins/workflow/ui/sessionGroups.ts";
 import { WorkflowIcon } from "../../../src/shared/ui/icons.tsx";
 import { WorkflowSessionBanner } from "../../../src/plugins/workflow/ui/WorkflowSessionBanner.tsx";
 import type { RunSessionLinks, WorkflowEntry } from "../../../src/plugins/workflow/types.ts";
@@ -15,8 +16,8 @@ const links = (overrides: Partial<RunSessionLinks> = {}): RunSessionLinks => ({
   status: "running",
   active: true,
   links: [
-    { sessionId: "s-design", actorName: "设计", nodes: [{ siteId: "design", ordinal: 2, status: "running", label: "设计", awaitingInput: true }] },
-    { sessionId: "s-req", actorName: "需求确认", nodes: [{ siteId: "requirement", ordinal: 1, status: "completed", label: "需求确认", awaitingInput: false }] },
+    { sessionId: "s-design", actorName: "设计", nodes: [{ siteId: "design", ordinal: 2, status: "running", label: "设计", turn: "completed" }] },
+    { sessionId: "s-req", actorName: "需求确认", nodes: [{ siteId: "requirement", ordinal: 1, status: "completed", label: "需求确认" }] },
   ],
   ...overrides,
 });
@@ -74,10 +75,31 @@ it("tells a node session which run and node it belongs to and links back to the 
   render(<WorkflowSessionBanner service={fake.service} project="D:/p" sessionId="s-design" onOpenRun={onOpenRun} />);
   const banner = screen.getByRole("note", { name: "工作流节点会话" });
   expect(banner).toHaveTextContent("给 logo 加底座");
-  expect(banner).toHaveTextContent("设计 · 第 2 轮");
+  expect(banner).toHaveTextContent("设计第 2 轮");
   expect(banner).toHaveTextContent("等你回复");
+  // 和画布同一套染色：等你回复用提醒色。
+  expect(banner).toHaveClass("wf-strip", "tone-alert");
   fireEvent.click(screen.getByRole("button", { name: "查看运行" }));
   expect(onOpenRun).toHaveBeenCalledWith("run-1");
+});
+
+it("the strip speaks only for its own step, never for the whole run (station independence)", () => {
+  const fake = fakeWorkflowService();
+  // 运行停下（阻塞）了，但这个会话的这一步早已做完：工作流条只说「已完成」。
+  const run = links({ active: false, status: "blocked" });
+  fake.service.sessionLinks = () => ({ workspace: "D:/p", runs: [run] });
+  render(<WorkflowSessionBanner service={fake.service} project="D:/p" sessionId="s-req" onOpenRun={() => {}} />);
+  const banner = screen.getByRole("note", { name: "工作流节点会话" });
+  expect(banner).toHaveTextContent("需求确认");
+  expect(banner).toHaveTextContent("已完成");
+  expect(banner).not.toHaveTextContent("阻塞");
+  expect(banner).not.toHaveTextContent(/运行(失败|已)/);
+  expect(banner.querySelector(".wf-pills")).toBeNull();
+  expect(banner).toHaveClass("tone-done");
+});
+
+it("briefs a blocked run as needing the user, in the same word as the run list", () => {
+  expect(runBriefs([links({ runId: "b", active: false, status: "blocked" })])[0]).toMatchObject({ label: "已阻塞", waiting: true });
 });
 
 it("renders nothing for an ordinary session or another project", () => {
@@ -93,4 +115,50 @@ it("briefs a run that stopped at a confirmation gate as needing the user", () =>
   const briefs = runBriefs([links({ runId: "gate", active: false, status: "waiting" }), links({ runId: "idle", active: false, status: "stopped" })]);
   expect(briefs).toHaveLength(1);
   expect(briefs[0]).toMatchObject({ runId: "gate", label: "等你确认", waiting: true, step: "需求确认" });
+});
+
+/**
+ * ADR 040：会话是唯一来源。同一个会话状态，输入框上的工作流条、侧栏分组、状态卡
+ * 说同一个词，而且会话一变它们在同一次更新里跟着变。
+ */
+it("says what the session says, on every surface, the moment the session changes", () => {
+  const fake = fakeWorkflowService();
+  const run = links();
+  fake.service.sessionLinks = () => ({ workspace: "D:/p", runs: [run] });
+  render(<WorkflowSessionBanner service={fake.service} project="D:/p" sessionId="s-design" onOpenRun={() => {}} />);
+  const strip = () => screen.getByRole("note", { name: "工作流节点会话" });
+  const lookup = (sessionId: string | null | undefined) => (sessionId ? fake.service.sessionActivity?.getState().entries[sessionId]?.status : undefined);
+  const sidebar = () => runSessionGroups([run], () => {}, undefined, undefined, lookup)[0]!;
+  const card = () => runBriefs([run], lookup)[0]!;
+  const cases = [
+    ["running", "进行中", "tone-running"],
+    ["cancelled", "你打断了", "tone-wait"],
+    ["failed", "Agent 出错", "tone-alert"],
+    ["waiting", "等你处理", "tone-alert"],
+    ["completed", "等你回复", "tone-alert"],
+  ] as const;
+  for (const [status, word, tone] of cases) {
+    act(() => fake.setSessionStatus("s-design", status));
+    expect(strip()).toHaveTextContent(word);
+    expect(strip()).toHaveClass(tone);
+    // 状态卡说的是整次运行：没有要你做的事时就是「运行中」。
+    expect(card()).toMatchObject(status === "running" ? { label: "运行中", waiting: false } : { label: word, waiting: true });
+    if (status === "running") {
+      expect(sidebar().members[0]).not.toHaveProperty("attention");
+      expect(sidebar()).not.toHaveProperty("attention");
+    } else {
+      expect(sidebar().members[0]).toHaveProperty("attention", word);
+      expect(sidebar()).toHaveProperty("attention", word);
+    }
+  }
+});
+
+it("says 正在停止 while a stop is in flight, not waiting for you", () => {
+  const fake = fakeWorkflowService();
+  const run = links({ stopping: true });
+  fake.service.sessionLinks = () => ({ workspace: "D:/p", runs: [run] });
+  render(<WorkflowSessionBanner service={fake.service} project="D:/p" sessionId="s-design" onOpenRun={() => {}} />);
+  expect(screen.getByRole("note", { name: "工作流节点会话" })).toHaveTextContent("正在停止");
+  expect(runBriefs([run])[0]).toMatchObject({ label: "正在停止", waiting: false });
+  expect(runSessionGroups([run], () => {})[0]).toHaveProperty("attention", "正在停止");
 });
