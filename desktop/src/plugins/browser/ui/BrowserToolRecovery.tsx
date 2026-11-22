@@ -2,7 +2,10 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { HostService } from "../../host/service.ts";
 import type { ProjectService } from "../../project/service.ts";
-import { needsBrowserToolRecovery } from "../../../shared/browser/toolAvailability.ts";
+import {
+  hasBrowserTools,
+  needsBrowserToolRecovery,
+} from "../../../shared/browser/toolAvailability.ts";
 
 type BrowserMcpStatus = Awaited<
   ReturnType<HostService["browser"]["mcpStatus"]>
@@ -51,7 +54,8 @@ function BrowserToolRecoverySession({
 }: BrowserToolRecoveryProps) {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [mcpStatus, setMcpStatus] = useState<BrowserMcpStatus | null>(null);
-  const [registration, setRegistration] = useState<BrowserMcpRegistration>(null);
+  const [registration, setRegistration] =
+    useState<BrowserMcpRegistration>(null);
   const [confirming, setConfirming] = useState(false);
   const [recovering, setRecovering] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,7 +92,8 @@ function BrowserToolRecoverySession({
     let active = true;
     void Promise.all([
       host.mcpStatus(sessionId),
-      runtime.mcpFailures
+      runtime.mcpFailures ||
+      (runtime.toolInventoryKnown && !hasBrowserTools(runtime.toolNames))
         ? host.mcpRegistration(sessionId)
         : Promise.resolve(null),
     ])
@@ -109,6 +114,7 @@ function BrowserToolRecoverySession({
     host,
     recovering,
     runtime.mcpFailures,
+    runtime.toolInventoryKnown,
     runtime.toolNames,
     sessionId,
   ]);
@@ -135,6 +141,7 @@ function BrowserToolRecoverySession({
         mcpStatus,
         runtimeKnown,
         toolInventoryKnown: runtime.toolInventoryKnown,
+        hasEnabledTools: registration?.hasEnabledTools,
         toolNames: runtime.toolNames,
       }));
   const isReconnectingBrowser = recovering && runtime.mcpFailures !== undefined;

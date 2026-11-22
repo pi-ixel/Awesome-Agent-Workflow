@@ -42,6 +42,69 @@ const catalog: SkillCatalog = {
   warnings: [],
 };
 
+it("启停只替换选中的技能，复用所在卡片和目录大小", async () => {
+  const sibling = {
+    ...skill,
+    name: "other",
+    path: root + "/other",
+    realPath: root + "/other",
+  };
+  const stored = {
+    id: "stopped",
+    name: skill.name,
+    description: skill.description,
+    source: skill.source,
+    path: skill.path,
+    kind: skill.kind,
+  };
+  const list = vi
+    .fn()
+    .mockResolvedValue({ ...catalog, entries: [skill, sibling] });
+  const toggle = vi
+    .fn<NonNullable<NativeSkillLibrary["toggle"]>>()
+    .mockResolvedValueOnce({
+      message: "sample · 已停用",
+      stopped: stored,
+      entry: null,
+    })
+    .mockResolvedValueOnce({
+      message: "sample · 已恢复",
+      stopped: null,
+      entry: { ...skill, revision: "r2" },
+    });
+  render(
+    <SkillLibrary
+      library={{
+        list,
+        toggle,
+        candidates: () => Promise.resolve([]),
+        change: () => Promise.resolve([]),
+        sizes: (_query, selections) =>
+          Promise.resolve(selections.map(() => 1024)),
+      }}
+      provider="codeagent"
+      storage={window.localStorage}
+      knownProjects={() => []}
+      pick={() => Promise.resolve(null)}
+      reveal={() => Promise.resolve()}
+    />,
+  );
+  const card = await screen.findByRole("article", { name: "sample" });
+  const other = screen.getByRole("article", { name: "other" });
+  const control = within(card).getByRole("switch");
+  await within(other).findByText(".cac · 1.0 KiB");
+  await userEvent.click(control);
+  await waitFor(() => expect(control).not.toBeChecked());
+  expect(await screen.findByRole("article", { name: "sample" })).toBe(card);
+  expect(screen.getByRole("article", { name: "other" })).toBe(other);
+  expect(within(other).getByText(".cac · 1.0 KiB")).toBeVisible();
+  expect(within(other).getByRole("switch")).toBeEnabled();
+  await userEvent.click(control);
+  await waitFor(() => expect(control).toBeChecked());
+  expect(list).toHaveBeenCalledTimes(1);
+  expect(toggle).toHaveBeenCalledTimes(2);
+});
+
 it("先显示技能卡片，随后补充当前列表的目录大小", async () => {
   let resolveSize!: (bytes: (number | null)[]) => void;
   const sizes = vi
@@ -386,7 +449,9 @@ it("同名技能按来源查看和删除，路径操作在详情工作台", asyn
   );
   const cards = await screen.findAllByRole("article", { name: "sample" });
   const user = userEvent.setup();
-  await user.click(within(cards[1]!).getByRole("switch", { name: "sample 启用" }));
+  await user.click(
+    within(cards[1]!).getByRole("switch", { name: "sample 启用" }),
+  );
   const sharedConfirm = within(
     screen.getByRole("dialog", { name: "确认技能操作" }),
   );
@@ -543,7 +608,9 @@ it("插件包开关只停用当前技能，其他技能保持启用", async () =
     },
   );
   await waitFor(() =>
-    expect(screen.getByRole("switch", { name: "sample 启用" })).not.toBeChecked(),
+    expect(
+      screen.getByRole("switch", { name: "sample 启用" }),
+    ).not.toBeChecked(),
   );
   expect(screen.getByRole("switch", { name: "other 启用" })).toBeChecked();
   expect(screen.queryByRole("dialog")).toBeNull();

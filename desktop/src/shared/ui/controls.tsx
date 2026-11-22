@@ -246,9 +246,9 @@ export function Checkbox({
 }
 
 export interface ToggleSwitchProps {
-  readonly appearance?: "accent" | "neutral";
   readonly checked: boolean;
   readonly disabled?: boolean;
+  readonly pending?: boolean;
   readonly onChange: (next: boolean) => void;
   /** 可访问名称（原生 input 的 aria-label）。 */
   readonly label: string;
@@ -258,42 +258,33 @@ export interface ToggleSwitchProps {
 export function ToggleSwitch({
   checked,
   disabled = false,
+  pending = false,
   onChange,
   label,
-  appearance = "accent",
 }: ToggleSwitchProps) {
-  const neutral = appearance === "neutral";
   return (
-    <label className={`relative flex items-center gap-1.5 ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}>
+    <label
+      className={`relative inline-flex min-h-6 shrink-0 items-center justify-center ${pending ? "cursor-wait opacity-70" : disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+    >
       <input
         type="checkbox"
         role="switch"
         aria-label={label}
         checked={checked}
         disabled={disabled}
+        aria-disabled={pending || undefined}
+        aria-busy={pending || undefined}
         onChange={(event) => {
-          onChange(event.target.checked);
+          if (!pending) onChange(event.target.checked);
         }}
         className="peer sr-only"
       />
       <span
         aria-hidden={true}
-        className={`relative shrink-0 rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring ${neutral ? "h-[calc(18*var(--ui-icon-unit))] w-[calc(32*var(--ui-icon-unit))]" : "h-[calc(14*var(--ui-icon-unit))] w-[calc(28*var(--ui-icon-unit))]"} ${
-          neutral
-            ? checked
-              ? "border-ink bg-ink"
-              : "border-transparent bg-ink/30"
-            : checked
-              ? "border-accent-ink bg-accent-ink"
-              : "border-line-strong bg-raised"
-        }`}
+        className={`relative h-[calc(18*var(--ui-icon-unit))] w-[calc(32*var(--ui-icon-unit))] shrink-0 rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring ${checked ? "border-ink bg-ink" : "border-transparent bg-ink/30"}`}
       >
         <span
-          className={`absolute top-1/2 -translate-y-1/2 rounded-full transition-all ${
-            neutral
-              ? `ui-icon-16 bg-base ${checked ? "left-[calc(14*var(--ui-icon-unit))]" : "left-0"}`
-              : `ui-icon-10 ${checked ? "left-[calc(14*var(--ui-icon-unit))] bg-foreground-inverse" : "left-[calc(3*var(--ui-icon-unit))] bg-ink-mute"}`
-          }`}
+          className={`ui-icon-14 absolute top-1/2 -translate-y-1/2 rounded-full bg-base transition-[left] motion-reduce:transition-none ${checked ? "left-[calc(100%_-_15*var(--ui-icon-unit))]" : "left-[var(--ui-icon-unit)]"}`}
         />
       </span>
     </label>

@@ -5,6 +5,7 @@ export interface BrowserToolAvailability {
   readonly mcpStatus: BrowserMcpStatus | null;
   readonly runtimeKnown: boolean;
   readonly toolInventoryKnown?: boolean;
+  readonly hasEnabledTools?: boolean;
   readonly toolNames: readonly string[];
 }
 
@@ -25,6 +26,7 @@ export function needsBrowserToolRecovery(
   state: BrowserToolAvailability,
 ): boolean {
   if (state.enabled !== true) return false;
+  if (state.hasEnabledTools === false) return false;
   if (state.mcpStatus === "revoked") return true;
   if (!state.runtimeKnown) return false;
   if (state.mcpStatus === "not_bound") return true;
@@ -35,6 +37,7 @@ export function browserToolsUnavailable(
   state: BrowserToolAvailability,
 ): boolean {
   if (state.enabled !== true) return true;
+  if (state.hasEnabledTools === false) return true;
   if (state.mcpStatus !== "active") return true;
   return (
     state.runtimeKnown &&

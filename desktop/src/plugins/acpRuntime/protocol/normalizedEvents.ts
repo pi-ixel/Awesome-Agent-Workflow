@@ -9,8 +9,6 @@ export interface AgentCommandEntry {
   readonly inputHint: string | null;
 }
 
-
-
 /** Optional counters: absence means unknown. Call totals are never context usage. */
 export interface AgentUsageReport {
   readonly sessionId: string;
@@ -70,6 +68,7 @@ export interface RuntimeSnapshot {
   readonly toolInventoryKnown: boolean;
   readonly skillSources: readonly { source: string; count: number }[];
   readonly mcpServers: readonly McpServerEntry[];
+  readonly mcpToolsByServer?: Readonly<Record<string, readonly string[]>>;
   readonly mcpFailuresKnown?: boolean;
   readonly mcpFailures: readonly {
     readonly name: string;

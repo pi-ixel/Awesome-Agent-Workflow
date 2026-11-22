@@ -171,6 +171,8 @@ export function createSessionCoordinator({
   let focusRevision = 0;
   const projectFactory = new ProjectFactory<SessionRuntime>();
   const sessionTools = createSessionTools(logger);
+  const toolDisposals = new WeakMap<AcpSessionPort, Set<() => Promise<void>>>();
+  const disposedToolSessions = new WeakSet<AcpSessionPort>();
   /** 会话的附加工具：打开它的插件给的在前，登记方给的在后；同名只留第一个。 */
   const toolsFor = async (
     runtime: SessionRuntime,
@@ -185,15 +187,24 @@ export function createSessionCoordinator({
       sessionId,
       agent: session.agentInfo,
       requestExtension: session.requestAgentExtension?.bind(session),
+      onDispose: (listener) => {
+        if (disposedToolSessions.has(session)) {
+          void listener().catch(() => undefined);
+          return;
+        }
+        const listeners = toolDisposals.get(session) ?? new Set();
+        listeners.add(listener);
+        toolDisposals.set(session, listeners);
+      },
     });
-    const tools = [
-      ...explicit,
-      ...resolved.servers,
-    ];
-    return { ...resolved, servers: tools.filter(
-      (tool, index) =>
-        tools.findIndex((other) => other.name === tool.name) === index,
-    ) };
+    const tools = [...explicit, ...resolved.servers];
+    return {
+      ...resolved,
+      servers: tools.filter(
+        (tool, index) =>
+          tools.findIndex((other) => other.name === tool.name) === index,
+      ),
+    };
   };
   /** 会话原始事件的订阅方（按会话）。 */
   const eventWatchers = new Map<
@@ -589,7 +600,8 @@ export function createSessionCoordinator({
         if (!browser.isAvailable()) return;
         const hasOtherOwner = [...projectFactory.sessions()].some(
           (other) =>
-            (other.session.sessionId ?? other.store.getState().activeSessionId) === sessionId,
+            (other.session.sessionId ??
+              other.store.getState().activeSessionId) === sessionId,
         );
         if (!hasOtherOwner) await disposeBrowserSession(browser, sessionId);
       },
@@ -652,11 +664,17 @@ export function createSessionCoordinator({
       recoverConnection: recoverSessionResources,
       restore: async (session, options) => {
         const resolved = await toolsFor(runtime, options.sessionId, session);
-        await getProtocol().restore(session, {
-          ...options,
-          mcpServers: resolved.servers,
-        });
-        if (options.isCurrent()) resolved.establish(options.sessionId);
+        try {
+          await getProtocol().restore(session, {
+            ...options,
+            mcpServers: resolved.servers,
+          });
+          if (options.isCurrent()) resolved.establish(options.sessionId);
+          else await resolved.dispose?.();
+        } catch (error) {
+          await resolved.dispose?.();
+          throw error;
+        }
       },
       prepare: (retained, isCurrent) =>
         prepareRuntime(
@@ -1773,13 +1791,6 @@ export function createSessionCoordinator({
                       true,
                   )
                   .then(() => {}),
-              onSessionDisposed: () => {
-                isBrowserEndpointDisposed = true;
-                releaseBrowserApprovals();
-                return browser
-                  .revokeMcpEndpoint(browserEndpoint.endpointId)
-                  .then(() => {});
-              },
 
               onCancel: (sessionId: string) =>
                 browser.cancelWork(sessionId).then(() => {}),
@@ -1789,16 +1800,36 @@ export function createSessionCoordinator({
                 browser.cancelWork(sessionId).then(() => {}),
             }
           : {}),
+        onSessionDisposed: async () => {
+          isBrowserEndpointDisposed = true;
+          releaseBrowserApprovals();
+          if (session) {
+            disposedToolSessions.add(session);
+            const listeners = toolDisposals.get(session);
+            toolDisposals.delete(session);
+            await Promise.allSettled(
+              Array.from(listeners ?? [], (release) => release()),
+            );
+          }
+          if (browserEndpoint) {
+            await browser.revokeMcpEndpoint(browserEndpoint.endpointId);
+          }
+        },
         onPromptContext: async (sessionId: string) => {
           if (!browser.isAvailable()) return [];
           const enabled = await browser.agentControlEnabled();
           const mcpStatus = await browser.mcpStatus(sessionId);
+          const registration =
+            mcpStatus === "active"
+              ? await browser.mcpRegistration(sessionId).catch(() => null)
+              : null;
           const status = statusStore.getState();
           const unavailable = browserToolsUnavailable({
             enabled,
             mcpStatus,
             runtimeKnown: status.lastSessionId === sessionId,
             toolInventoryKnown: status.runtime.toolInventoryKnown,
+            hasEnabledTools: registration?.hasEnabledTools,
             toolNames: status.runtime.toolNames,
           });
           if (unavailable) {
@@ -2470,7 +2501,10 @@ export function createSessionCoordinator({
         await cleanup();
         const browser = getBrowser();
         if (browser.isAvailable()) {
-          await browser.forgetRestore({ workspaceId: target.workspacePath, sessionId: target.sessionId });
+          await browser.forgetRestore({
+            workspaceId: target.workspacePath,
+            sessionId: target.sessionId,
+          });
         }
         const agent = sessionAgentId(target.agentKey);
         if (agent !== null)

@@ -247,6 +247,7 @@ for (const theme of ["暖白", "暗夜"]) {
   test(
     theme + " 下的选择控件覆盖三档字号、选中、禁用和键盘操作",
     async ({ page }) => {
+      await page.emulateMedia({ reducedMotion: "reduce" });
       await page.goto("/tests/visual/uiScaleFixture.html?selection");
       await page.getByRole("button", { name: theme, exact: true }).click();
       const section = page.getByRole("region", { name: "选择控件" });
@@ -290,22 +291,31 @@ for (const theme of ["暖白", "暗夜"]) {
           });
           await toggle.press("Space");
           await expect(toggle).not.toBeChecked();
+          const track = toggle.locator("+ span");
+          const knob = track.locator("span");
+          const off = await knob.boundingBox();
+          const trackBounds = (await track.boundingBox())!;
           await toggle.press("Space");
           await expect(toggle).toBeChecked();
-          const track = toggle.locator("+ span");
-          expect((await track.boundingBox())!.width).toBeCloseTo(
-            ((kind === "neutral" ? 32 : 28) * px) / 14,
-            1,
-          );
+          expect(trackBounds.width).toBeCloseTo((32 * px) / 14, 1);
+          expect(trackBounds.height).toBeCloseTo((18 * px) / 14, 1);
+          expect(off!.width).toBeCloseTo(px, 1);
+          await expect
+            .poll(async () => {
+              const on = (await knob.boundingBox())!;
+              return Math.abs(
+                trackBounds.x +
+                  trackBounds.width -
+                  on.x -
+                  on.width -
+                  (off!.x - trackBounds.x),
+              );
+            })
+            .toBeLessThan(0.15);
           await expect(track).not.toHaveCSS("box-shadow", "none");
           await expect
             .poll(() => color(track, "background-color"))
-            .toEqual(
-              await color(
-                track,
-                kind === "neutral" ? "--color-ink" : "--color-accent-ink",
-              ),
-            );
+            .toEqual(await color(track, "--color-ink"));
           await expect(
             section.getByRole("switch", { name: kind + " 禁用开关" }),
           ).toBeDisabled();

@@ -19,6 +19,7 @@ export function PageHeader({
   description,
   actions,
   size = "page",
+  bordered = false,
   className = "",
 }: {
   readonly title: ReactNode;
@@ -30,6 +31,7 @@ export function PageHeader({
   /** 右侧操作：整页 / 整块的操作放这里。 */
   readonly actions?: ReactNode;
   readonly size?: "page" | "section";
+  readonly bordered?: boolean;
   readonly className?: string;
 }) {
   const titleClass =
@@ -39,19 +41,23 @@ export function PageHeader({
   const Heading = size === "page" ? "h1" : "h2";
   return (
     <header
-      className={`flex flex-wrap items-center gap-x-3 gap-y-2 ${className}`}
+      className={`flex flex-wrap items-center gap-x-3 gap-y-2 ${bordered ? "border-b border-line px-6 py-4" : ""} ${className}`}
     >
       <div className="flex min-w-0 flex-[1_1_12rem] items-center gap-3">
         {leading && <div className="shrink-0">{leading}</div>}
         <div className="min-w-0">
-          <div className="flex min-w-0 items-baseline gap-2">
+          <div
+            className={`flex min-w-0 items-baseline gap-x-2 ${bordered ? "flex-wrap" : ""}`}
+          >
             <Heading
               className={`min-w-0 [overflow-wrap:anywhere] ${titleClass}`}
             >
               {title}
             </Heading>
             {count !== undefined && (
-              <span className="shrink-0 text-ui-sm text-ink-mute tabular-nums">
+              <span
+                className={`text-ui-sm text-ink-mute tabular-nums ${bordered ? "min-w-0" : "shrink-0"}`}
+              >
                 {count}
               </span>
             )}

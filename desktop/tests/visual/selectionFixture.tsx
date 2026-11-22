@@ -54,13 +54,11 @@ export function SelectionFixture({
       {(["accent", "neutral"] as const).map((appearance) => (
         <div key={appearance} className="flex items-center gap-3">
           <ToggleSwitch
-            appearance={appearance}
             label={appearance + " 开关"}
             checked={checked}
             onChange={setChecked}
           />
           <ToggleSwitch
-            appearance={appearance}
             label={appearance + " 禁用开关"}
             checked={checked}
             onChange={setChecked}

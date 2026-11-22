@@ -89,7 +89,6 @@ function SessionSettings({
       <SettingCard label="会话策略">
         <SettingRow label="在消息流中显示任务步骤" desc="显示 Agent 的任务进度">
           <ToggleSwitch
-            appearance="neutral"
             label="在消息流中显示任务步骤"
             checked={messageStreamShowTodos}
             onChange={(value) => preferences?.setMessageStreamShowTodos(value)}
@@ -125,7 +124,6 @@ function SessionSettings({
           footerAlign="start"
         >
           <ToggleSwitch
-            appearance="neutral"
             label="问答自动应答"
             checked={autoAnswerQuestions}
             onChange={(value) => preferences?.setAutoAnswerQuestions(value)}
@@ -161,7 +159,6 @@ function ArchiveSettings({
           footerAlign="start"
         >
           <ToggleSwitch
-            appearance="neutral"
             label="自动归档闲置会话"
             checked={sessionAutoArchiveEnabled}
             onChange={(enabled) => preferences?.setSessionAutoArchive(enabled)}

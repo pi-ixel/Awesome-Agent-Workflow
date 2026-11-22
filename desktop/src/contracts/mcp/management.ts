@@ -5,6 +5,9 @@ export interface McpProfile {
 
 export interface NativeMcpEntry {
   readonly name: string;
+  readonly description?: string;
+  readonly connectionRevision?: string;
+  readonly redactedConfig?: Readonly<Record<string, unknown>>;
   readonly transport: string;
   readonly enabled: boolean;
   readonly url: string | null;
@@ -57,6 +60,7 @@ export interface McpCredentialReference {
 /** 可供市场、导入及同步使用的配置描述。凭据字段只允许引用。 */
 export interface ManagedMcpDefinition {
   readonly name: string;
+  readonly description?: string;
   readonly transport: "http";
   readonly url: string;
   readonly headers: readonly McpCredentialReference[];
@@ -64,6 +68,23 @@ export interface ManagedMcpDefinition {
 
 export interface ManagedMcpEntry extends ManagedMcpDefinition {
   readonly enabled: boolean;
+  readonly connectionRevision?: string;
+  readonly disabledTools?: readonly string[];
+}
+
+export interface McpTool {
+  readonly name: string;
+  readonly description?: string;
+  readonly readOnly?: boolean;
+  readonly inputSchema?: Readonly<Record<string, unknown>>;
+}
+
+export interface McpInspection {
+  readonly ok: boolean;
+  readonly message: string;
+  readonly checkedAt: number;
+  readonly durationMs: number;
+  readonly tools?: readonly McpTool[];
 }
 
 export interface ManagedMcpSnapshot {
@@ -115,7 +136,7 @@ export interface NativeMcpHost {
     profile: McpProfile,
     revision: string,
     change: McpChange<NativeMcpDraft>,
-  ): Promise<void>;
+  ): Promise<string>;
   sessionProfile(sessionId: string): Promise<string | null>;
   testConfig(
     target: Extract<McpTestTarget, { source: "native" }>,
@@ -129,7 +150,7 @@ export interface McpManagementHost {
     agentId: string,
     revision: string,
     change: McpChange<ManagedMcpDefinition>,
-  ): Promise<void>;
+  ): Promise<string>;
   previewInstall(
     agentId: string,
     definitions: readonly ManagedMcpDefinition[],
@@ -142,6 +163,7 @@ export interface McpManagementHost {
   managedResolve(
     agentId: string,
     excluded: readonly string[],
+    generation: string,
   ): Promise<{
     readonly revision: string;
     readonly servers: readonly McpHttpConfig[];
@@ -150,6 +172,30 @@ export interface McpManagementHost {
       readonly reason: string;
     }[];
   }>;
+  retireManaged?(generation: string): Promise<void>;
+  inspection?: {
+    read(
+      keys: readonly string[],
+    ): Promise<Readonly<Record<string, McpInspection>>>;
+    save(key: string, result: McpInspection): Promise<void>;
+    probe(draft: ManagedMcpDefinition): Promise<McpInspection>;
+    browserTools(): Promise<{
+      tools: readonly McpTool[];
+      disabledTools: readonly string[];
+    }>;
+    probeBrowser(): Promise<McpInspection>;
+    setBrowserTools(
+      tools: readonly string[],
+      enabled: boolean,
+    ): Promise<readonly string[]>;
+    setManagedTools(
+      agentId: string,
+      name: string,
+      revision: string,
+      tools: readonly string[],
+      enabled: boolean,
+    ): Promise<string>;
+  };
   testConfig(
     target: Extract<McpTestTarget, { source: "managed" }>,
   ): Promise<McpHttpConfig>;
@@ -165,6 +211,7 @@ export interface AgentExtensionClient {
 
 export interface NativeMcpManagement {
   readonly defaultProfile: string;
+  readonly editableTransports: readonly NativeMcpDraft["transport"][];
   nativeHost(host: McpManagementHost): NativeMcpHost;
 }
 

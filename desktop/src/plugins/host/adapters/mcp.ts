@@ -25,8 +25,26 @@ export function createMcpHost(invoke: NativeInvoke): McpManagementHost {
       invoke("mcp_install_preview", { agentId, definitions, excluded }),
     commitInstall: (plan, excluded) =>
       invoke("mcp_install_commit", { plan, excluded }),
-    managedResolve: (agentId, excluded) =>
-      invoke("mcp_managed_resolve", { agentId, excluded }),
+    managedResolve: (agentId, excluded, generation) =>
+      invoke("mcp_managed_resolve", { agentId, excluded, generation }),
+    retireManaged: (generation) => invoke("mcp_managed_retire", { generation }),
+    inspection: {
+      read: (keys) => invoke("mcp_inspection_read", { keys }),
+      save: (key, result) => invoke("mcp_inspection_save", { key, result }),
+      probe: (draft) => invoke("mcp_managed_inspect", { draft }),
+      browserTools: () => invoke("mcp_browser_tools", {}),
+      probeBrowser: () => invoke("mcp_browser_inspect", {}),
+      setBrowserTools: (tools, enabled) =>
+        invoke("mcp_browser_set_tools", { tools, enabled }),
+      setManagedTools: (agentId, name, revision, tools, enabled) =>
+        invoke("mcp_managed_set_tools", {
+          agentId,
+          name,
+          revision,
+          tools,
+          enabled,
+        }),
+    },
     testConfig: (target) => invoke("mcp_test_config", { target }),
   };
 }

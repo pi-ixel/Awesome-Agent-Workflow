@@ -42,6 +42,18 @@ export function McpWorkbench({
     () => null,
   );
   const capabilities = agents.resolve(agentId)?.mcpManagement;
+  const session = useStore(project.conversation.foreground.session);
+  const runtime = useStore(project.conversation.foreground.runtime);
+  const toolPaths = useStore(
+    project.projects.workspace,
+    (state) => state.toolPaths,
+  );
+  const sessionId =
+    session.isBound &&
+    session.activeSessionId &&
+    session.agentKey === agents.selectionKey(toolPaths, agentId)
+      ? session.activeSessionId
+      : undefined;
   return (
     <Suspense
       fallback={
@@ -55,8 +67,15 @@ export function McpWorkbench({
         activeProfile={profile}
         browser={browser}
         canManageNative={!!capabilities?.native}
+        nativeTransports={capabilities?.native?.editableTransports}
         canManageInjected={!!capabilities?.injection}
         canTest={!!capabilities?.testHttp}
+        sessionId={sessionId}
+        runtime={
+          sessionId && runtime.lastSessionId === sessionId
+            ? runtime.runtime
+            : undefined
+        }
       />
     </Suspense>
   );

@@ -10,10 +10,10 @@ pub(super) const MAX_SIZE_SELECTIONS: usize = 16;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Selection {
-    source: PathBuf,
-    path: PathBuf,
-    real_path: PathBuf,
-    disabled_id: Option<String>,
+    pub(super) source: PathBuf,
+    pub(super) path: PathBuf,
+    pub(super) real_path: PathBuf,
+    pub(super) disabled_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -64,7 +64,11 @@ fn relative_parts(path: &Path) -> Result<Vec<&std::ffi::OsStr>> {
         .collect()
 }
 
-fn skill_root(sources: &[Source], provider: Provider, selected: &Selection) -> Result<PathBuf> {
+pub(super) fn skill_root(
+    sources: &[Source],
+    provider: Provider,
+    selected: &Selection,
+) -> Result<PathBuf> {
     let source = sources
         .iter()
         .find(|source| source.kind != Kind::Inline && source.path == selected.source)

@@ -37,6 +37,7 @@ export interface BrowserMcpEndpoint {
 export interface BrowserMcpRegistration {
   readonly endpointName: string;
   readonly handshakeComplete: boolean;
+  readonly hasEnabledTools?: boolean;
 }
 
 export interface BrowserEvidence {
@@ -64,7 +65,10 @@ export interface BrowserRestoreSnapshot {
 export interface BrowserHost {
   isAvailable(): boolean;
   readRestore(scope: BrowserRestoreScope): Promise<BrowserRestoreSnapshot>;
-  saveRestore(scope: BrowserRestoreScope, update: BrowserRestoreSnapshot & { enabled: boolean }): Promise<BrowserRestoreSnapshot>;
+  saveRestore(
+    scope: BrowserRestoreScope,
+    update: BrowserRestoreSnapshot & { enabled: boolean },
+  ): Promise<BrowserRestoreSnapshot>;
   forgetRestore(scope: BrowserRestoreScope): Promise<void>;
   migrateLegacyRestores(): () => void;
   agentControlEnabled(): Promise<boolean>;

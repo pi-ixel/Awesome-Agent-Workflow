@@ -31,6 +31,132 @@ pub enum Action {
         names: Vec<String>,
     },
 }
+#[derive(Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum Toggle {
+    Enable {
+        id: String,
+    },
+    Disable {
+        source: PathBuf,
+        path: PathBuf,
+        real_path: PathBuf,
+        name: String,
+        revision: String,
+    },
+}
+
+#[derive(Serialize)]
+pub struct ToggleResult {
+    message: String,
+    entry: Option<Entry>,
+    stopped: Option<TrashItem>,
+}
+
+pub(super) fn toggle(loc: &Locations, query: &Query, action: Toggle) -> Result<ToggleResult> {
+    let catalog = catalog::discover_sources(loc, query)?;
+    match action {
+        Toggle::Enable { id } => {
+            let (_, record) = checked_record(loc, query.provider, &id)?;
+            let text = restore_or_purge(loc, query.provider, &catalog.sources, &id, false)?;
+            let entry = if text == "已恢复" {
+                let mut row = if record.kind == Kind::Inline {
+                    profiles::inline_entry(
+                        &record.original,
+                        record
+                            .inline
+                            .as_ref()
+                            .ok_or_else(|| error("缺少配置备份"))?,
+                    )?
+                } else {
+                    let source = catalog
+                        .sources
+                        .iter()
+                        .find(|source| source.path == record.source)
+                        .ok_or_else(|| error("技能来源已变化"))?;
+                    catalog::file_entry(source, &record.original)?
+                };
+                if query.provider == Provider::CodeAgent {
+                    let _ = catalog::usage(
+                        &loc.home.join(".cac/skill-usage.jsonl"),
+                        std::slice::from_mut(&mut row),
+                    );
+                }
+                Some(row)
+            } else {
+                None
+            };
+            Ok(ToggleResult {
+                message: format!("{} · {text}", record.name),
+                entry,
+                stopped: None,
+            })
+        }
+        Toggle::Disable {
+            source,
+            path,
+            real_path,
+            name,
+            revision,
+        } => {
+            let root = catalog
+                .sources
+                .iter()
+                .find(|entry| entry.path == source)
+                .ok_or_else(|| error("技能来源已变化，请刷新列表"))?;
+            let entry = if root.kind == Kind::Inline {
+                catalog
+                    .entries
+                    .iter()
+                    .find(|entry| {
+                        entry.path == path && entry.name == name && entry.revision == revision
+                    })
+                    .ok_or_else(|| error("条目已变化，请刷新"))?
+                    .clone()
+            } else {
+                let selected = files::Selection {
+                    source,
+                    path,
+                    real_path,
+                    disabled_id: None,
+                };
+                files::skill_root(&catalog.sources, query.provider, &selected)?;
+                let entry = catalog::file_entry(root, &selected.path)?;
+                if entry.name != name || entry.revision != revision {
+                    return Err(error("条目已变化，请刷新"));
+                }
+                entry
+            };
+            let id = remove(loc, query, &entry, &catalog.sources)?;
+            let stopped = TrashItem {
+                id,
+                name: entry.name,
+                description: entry.description,
+                path: entry.path,
+                kind: entry.kind,
+                source: entry.source,
+                project: root.project.clone(),
+                preview: if entry.kind == Kind::Inline {
+                    entry.preview
+                } else {
+                    String::new()
+                },
+                is_link: entry.is_link,
+                unavailable: None,
+            };
+            Ok(ToggleResult {
+                message: format!("{} · 已停用", stopped.name),
+                entry: None,
+                stopped: Some(stopped),
+            })
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct TrashItem {

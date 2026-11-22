@@ -100,7 +100,6 @@ export function UpdateSettings({
         </div>
         <SettingRow label="自动检查更新" desc="启动时及每隔一段时间检查">
           <ToggleSwitch
-            appearance="neutral"
             label="自动检查更新"
             checked={preferences.autoCheck}
             onChange={(checked) => {
@@ -150,7 +149,6 @@ export function UpdateSettings({
           desc="发现新版后自动下载，安装前由你确认；关闭不影响当前下载"
         >
           <ToggleSwitch
-            appearance="neutral"
             label="自动下载更新"
             checked={preferences.autoDownload}
             onChange={(checked) => {
@@ -188,7 +186,6 @@ export function UpdateSettings({
             desc={key === "contribute" ? "仅上传已验证的官方安装包" : undefined}
           >
             <ToggleSwitch
-              appearance="neutral"
               label={
                 key === "acceleration"
                   ? "使用服务器加速下载"

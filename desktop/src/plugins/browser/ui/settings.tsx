@@ -25,12 +25,10 @@ export function BrowserAgentControlSettings({
         footerAlign="start"
       >
         <ToggleSwitch
-          appearance="neutral"
           label="Agent 浏览器控制"
           checked={control.enabled === true}
-          disabled={
-            control.pending || control.enabled === null || !control.available
-          }
+          pending={control.pending}
+          disabled={control.enabled === null || !control.available}
           onChange={control.change}
         />
       </SettingRow>

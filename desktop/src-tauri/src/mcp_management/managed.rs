@@ -25,6 +25,8 @@ pub struct Definition {
     transport: String,
     url: String,
     headers: Vec<Credential>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    description: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -35,6 +37,8 @@ struct Entry {
     #[serde(rename = "project", default, skip_serializing_if = "Option::is_none")]
     legacy_project: Option<String>,
     enabled: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    disabled_tools: Vec<String>,
     #[serde(flatten)]
     definition: Definition,
 }
@@ -54,7 +58,15 @@ struct Document {
 #[derive(Serialize)]
 pub struct Snapshot {
     revision: String,
-    entries: Vec<Entry>,
+    entries: Vec<SnapshotEntry>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SnapshotEntry {
+    #[serde(flatten)]
+    entry: Entry,
+    connection_revision: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -83,9 +95,11 @@ pub struct InstallResult {
 
 #[derive(Serialize)]
 pub struct Resolved {
-    revision: String,
-    servers: Vec<HttpConfig>,
+    pub(super) revision: String,
+    pub(super) servers: Vec<HttpConfig>,
     skipped: Vec<Issue>,
+    #[serde(skip_serializing)]
+    pub(super) bindings: BTreeMap<String, String>,
 }
 
 fn read_document(root: &Path) -> Result<(Option<Vec<u8>>, Document)> {
@@ -119,6 +133,9 @@ fn validate(definition: &Definition) -> Result<()> {
     }
     if definition.transport != "http" {
         return Err("当前 AAW 注入支持 Streamable HTTP".into());
+    }
+    if definition.description.len() > 4096 {
+        return Err("MCP 服务说明超过长度限制".into());
     }
     if display_url(&definition.url).is_none() {
         return Err("请输入有效的 HTTP 或 HTTPS 地址，凭据通过请求头引用".into());
@@ -156,11 +173,17 @@ pub fn snapshot(root: &Path, agent: &str) -> Result<Snapshot> {
             .entries
             .into_iter()
             .filter(|entry| entry.is_global_for(agent))
-            .collect(),
+            .map(|entry| {
+                Ok(SnapshotEntry {
+                    connection_revision: definition_binding(&entry.definition)?,
+                    entry,
+                })
+            })
+            .collect::<Result<_>>()?,
     })
 }
 
-pub fn change(root: &Path, agent: &str, expected: &str, action: Change<Definition>) -> Result<()> {
+pub fn change(root: &Path, agent: &str, expected: &str, action: Change<Definition>) -> Result<String> {
     validate_agent(agent)?;
     let target = root.join(STORE);
     let _lock = lock(target.parent().ok_or("配置目录无效")?, ".mcp-servers.lock")?;
@@ -195,6 +218,7 @@ pub fn change(root: &Path, agent: &str, expected: &str, action: Change<Definitio
                     agent_id: agent.into(),
                     legacy_project: None,
                     enabled: true,
+                    disabled_tools: Vec::new(),
                     definition: draft,
                 });
             }
@@ -209,7 +233,8 @@ pub fn change(root: &Path, agent: &str, expected: &str, action: Change<Definitio
         }
     }
     let bytes = serde_json::to_vec_pretty(&data).map_err(|_| "无法编码 AAW MCP 配置")?;
-    write(&target, raw.as_deref(), &bytes)
+    write(&target, raw.as_deref(), &bytes)?;
+    Ok(revision(&bytes))
 }
 
 fn validate_agent(agent: &str) -> Result<()> {
@@ -223,9 +248,6 @@ fn validate_import(agent: &str, definitions: &[Definition]) -> Result<()> {
     validate_agent(agent)?;
     if definitions.len() > 512 {
         return Err("一批最多可提交 512 个 MCP 服务".into());
-    }
-    for definition in definitions {
-        validate(definition)?;
     }
     Ok(())
 }
@@ -246,7 +268,12 @@ fn plan_install(
     let mut accepted = Vec::new();
     let mut skipped = Vec::new();
     for (index, definition) in definitions.iter().enumerate() {
-        if names.insert(&definition.name) {
+        if let Err(reason) = validate(definition) {
+            skipped.push(Issue {
+                name: definition.name.clone(),
+                reason,
+            });
+        } else if names.insert(&definition.name) {
             accepted.push(index);
         } else {
             skipped.push(Issue {
@@ -315,6 +342,7 @@ pub fn commit_install(root: &Path, plan: ImportPlan, excluded: &[String]) -> Res
             agent_id: agent_id.clone(),
             legacy_project: None,
             enabled: true,
+            disabled_tools: Vec::new(),
             definition,
         });
     }
@@ -428,6 +456,7 @@ pub fn resolve(root: &Path, agent: &str, excluded: &[String]) -> Result<Resolved
         revision: revision(raw.as_deref().unwrap_or_default()),
         servers: Vec::new(),
         skipped: Vec::new(),
+        bindings: BTreeMap::new(),
     };
     for (name, entry) in effective {
         if !entry.enabled {
@@ -441,7 +470,12 @@ pub fn resolve(root: &Path, agent: &str, excluded: &[String]) -> Result<Resolved
             continue;
         }
         match connection(&entry.definition) {
-            Ok(config) => result.servers.push(config),
+            Ok(config) => {
+                result
+                    .bindings
+                    .insert(name.into(), definition_binding(&entry.definition)?);
+                result.servers.push(config);
+            }
             Err(reason) => result.skipped.push(Issue {
                 name: name.into(),
                 reason,
@@ -449,4 +483,49 @@ pub fn resolve(root: &Path, agent: &str, excluded: &[String]) -> Result<Resolved
         }
     }
     Ok(result)
+}
+
+pub fn live_policy(root: &Path, agent: &str, name: &str, binding: &str) -> Result<Vec<String>> {
+    let (_, data) = read_document(root)?;
+    let entry = data
+        .entries
+        .iter()
+        .find(|entry| entry.is_global_for(agent) && entry.definition.name == name)
+        .ok_or("MCP 服务已删除或改名")?;
+    if !entry.enabled || definition_binding(&entry.definition)? != binding {
+        return Err("MCP 服务已停用或配置已更改".into());
+    }
+    Ok(entry.disabled_tools.clone())
+}
+
+fn definition_binding(definition: &Definition) -> Result<String> {
+    serde_json::to_vec(&(&definition.url, &definition.headers))
+        .map(|bytes| revision(&bytes))
+        .map_err(|_| "无法识别 MCP 配置版本".into())
+}
+
+pub fn set_tools(
+    root: &Path,
+    agent: &str,
+    name: &str,
+    expected: &str,
+    tools: Vec<String>,
+    enabled: bool,
+) -> Result<String> {
+    super::inspection::validate_tool_names(&tools)?;
+    let path = root.join(STORE);
+    let _lock = lock(path.parent().ok_or("配置目录无效")?, ".mcp-servers.lock")?;
+    let (raw, mut data) = read_document(root)?;
+    if revision(raw.as_deref().unwrap_or_default()) != expected {
+        return Err(CHANGED.into());
+    }
+    let entry = data
+        .entries
+        .iter_mut()
+        .find(|entry| entry.is_global_for(agent) && entry.definition.name == name)
+        .ok_or("找不到 MCP 服务，请刷新后重试")?;
+    super::inspection::update_tools(&mut entry.disabled_tools, tools, enabled)?;
+    let bytes = serde_json::to_vec_pretty(&data).map_err(|_| "无法编码 AAW MCP 配置")?;
+    write(&path, raw.as_deref(), &bytes)?;
+    Ok(revision(&bytes))
 }

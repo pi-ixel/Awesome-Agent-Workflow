@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type {
@@ -6,6 +6,7 @@ import type {
   ManagedMcpSnapshot,
   NativeMcpHost,
   NativeMcpEntry,
+  McpInspection,
 } from "../../../src/contracts/mcp/management.ts";
 import type { AgentsService } from "../../../src/plugins/agents/service.ts";
 import { chrysAgentAdapter } from "../../../src/plugins/agents/enhancements/icode/adapter.ts";
@@ -14,6 +15,7 @@ import {
   resolutionKey,
 } from "../../../src/plugins/mcp/runtime/management.ts";
 import { McpView } from "../../../src/plugins/mcp/ui/McpView.tsx";
+import { parseMcpImport } from "../../../src/plugins/mcp/runtime/importConfig.ts";
 import { McpWorkbench } from "../../../src/plugins/mcp/ui/workbench.tsx";
 import { BrowserAgentControlSettings } from "../../../src/plugins/browser/service.ts";
 import { codeAgentAdapter } from "../../../src/plugins/agents/enhancements/codeagent/adapter.ts";
@@ -22,6 +24,268 @@ import { createTestBrowserHost } from "../../helpers/browserHost.ts";
 import { createStore } from "zustand";
 
 afterEach(cleanup);
+
+it("服务开关逐项更新，连续写入使用新版本，筛选后仍保留原详情", async () => {
+  const user = userEvent.setup();
+  const { service, host, readLocal } = fixture();
+  const [first] = managed.entries;
+  host.managedRead.mockResolvedValue({
+    ...managed,
+    entries: [first!, { ...first!, name: "other-tools" }],
+  });
+  let finishFirst!: (value: string) => void;
+  host.managedChange
+    .mockReturnValueOnce(
+      new Promise<string>((resolve) => {
+        finishFirst = resolve;
+      }),
+    )
+    .mockResolvedValueOnce("second-write");
+  render(
+    <McpView
+      service={service}
+      agentId="chrys"
+      activeProfile={null}
+      browser={createTestBrowserHost()}
+      canManageNative
+      canManageInjected
+      canTest
+    />,
+  );
+  expect(screen.getByText(/会话工具未知/)).toBeVisible();
+  const list = screen.getByRole("list", { name: "MCP 服务" });
+  await user.click(
+    await within(list).findByRole("button", { name: first!.name }),
+  );
+  await user.click(screen.getByRole("combobox", { name: "筛选状态" }));
+  await user.click(screen.getByRole("option", { name: "已启用" }));
+  const detail = screen.getByRole("complementary", {
+    name: first!.name + " 详情",
+  });
+  const firstToggle = within(detail).getByRole("switch");
+  const nextToggle = within(list).getByRole("switch", {
+    name: "other-tools 启用",
+  });
+  await user.click(firstToggle);
+  expect(firstToggle).toHaveAttribute("aria-busy", "true");
+  expect(nextToggle).toBeEnabled();
+  await user.click(nextToggle);
+  expect(host.managedChange).toHaveBeenCalledTimes(1);
+  await act(() => Promise.resolve().then(() => finishFirst("first-write")));
+  expect(host.managedChange).toHaveBeenLastCalledWith("chrys", "first-write", {
+    kind: "toggle",
+    name: "other-tools",
+    enabled: false,
+  });
+  expect(
+    within(list).queryByRole("button", { name: first!.name }),
+  ).not.toBeInTheDocument();
+  expect(firstToggle).not.toBeChecked();
+  expect(detail).toBeInTheDocument();
+  expect(host.managedRead).toHaveBeenCalledTimes(1);
+  expect(readLocal).toHaveBeenCalledTimes(1);
+});
+
+it("表单和 JSON 导入共用弹窗，切换保留草稿，预览后才写入", async () => {
+  const user = userEvent.setup();
+  const { service, host } = fixture();
+  host.previewInstall.mockImplementation((agentId, definitions) =>
+    Promise.resolve({
+      agentId,
+      definitions,
+      revision: "managed-rev",
+      accepted: definitions.map(({ name }) => name),
+      skipped: [],
+    }),
+  );
+  render(
+    <McpView
+      service={service}
+      agentId="chrys"
+      activeProfile={null}
+      browser={createTestBrowserHost()}
+      canManageNative
+      canManageInjected
+      canTest
+    />,
+  );
+  await screen.findByRole("button", { name: "managed-tools" });
+  await user.click(screen.getByRole("button", { name: "导入 JSON" }));
+  const dialog = screen.getByRole("dialog", { name: "新增 MCP" });
+  const editor = within(dialog);
+  const json = editor.getByRole("textbox", { name: /粘贴标准/ });
+  await user.click(editor.getByRole("button", { name: "填入示例" }));
+  const example = (json as HTMLTextAreaElement).value;
+  expect(example).toContain("https://example.com/mcp");
+  await user.click(editor.getByRole("tab", { name: "表单配置" }));
+  const name = editor.getByRole("textbox", { name: "服务名称" });
+  await user.type(name, "form-draft");
+  await user.click(editor.getByRole("tab", { name: "JSON 导入" }));
+  expect(json).toHaveValue(example);
+  await user.click(editor.getByRole("button", { name: "预览导入" }));
+  expect(await editor.findByText(/1 项可导入/)).toBeVisible();
+  expect(host.commitInstall).not.toHaveBeenCalled();
+  await user.click(editor.getByRole("tab", { name: "表单配置" }));
+  expect(editor.getByRole("textbox", { name: "服务名称" })).toHaveValue(
+    "form-draft",
+  );
+  await user.click(editor.getByRole("tab", { name: "JSON 导入" }));
+  await user.click(editor.getByRole("button", { name: "确认导入" }));
+  expect(host.commitInstall).toHaveBeenCalledOnce();
+  expect(dialog).not.toBeInTheDocument();
+});
+
+it("导入解析预览保留可用的 HTTP 条目，跳过不支持的传输和明文请求头", () => {
+  const parsed = parseMcpImport(
+    JSON.stringify({
+      mcpServers: {
+        docs: {
+          type: "http",
+          url: "https://example.test/mcp",
+          headers: { Authorization: "Bearer " + "$" + "{DOCS_TOKEN}" },
+        },
+        local: { command: "local-mcp" },
+        sse: { type: "sse", url: "https://example.test/events" },
+        plain: {
+          url: "https://example.test/plain",
+          headers: { Authorization: "literal" },
+        },
+      },
+    }),
+  );
+  expect(parsed.definitions).toEqual([
+    {
+      name: "docs",
+      transport: "http",
+      url: "https://example.test/mcp",
+      headers: [
+        {
+          name: "Authorization",
+          source: "environment",
+          reference: "DOCS_TOKEN",
+          prefix: "Bearer ",
+        },
+      ],
+    },
+  ]);
+  expect(parsed.skipped.map(({ name }) => name)).toEqual([
+    "local",
+    "sse",
+    "plain",
+  ]);
+});
+
+it("复用已保存的检测结果，展示工具权限并按服务版本提交", async () => {
+  const user = userEvent.setup();
+  const { service, host } = fixture();
+  const checks = new Map<string, McpInspection>();
+  const result: McpInspection = {
+    ok: true,
+    checkedAt: 100,
+    durationMs: 12,
+    message: "检测成功",
+    tools: [{ name: "read_docs" }],
+  };
+  const probe = vi.fn().mockResolvedValue(result);
+  const save = vi.fn((key: string, value: McpInspection) => {
+    checks.set(key, value);
+    return Promise.resolve();
+  });
+  const setManagedTools = vi.fn().mockResolvedValue("tools-rev");
+  Object.assign(host, {
+    inspection: {
+      read: (keys: readonly string[]) =>
+        Promise.resolve(
+          Object.fromEntries(
+            keys.flatMap((key) =>
+              checks.has(key) ? [[key, checks.get(key)]] : [],
+            ),
+          ),
+        ),
+      save,
+      probe,
+      setManagedTools,
+      browserTools: () => Promise.resolve({ tools: [], disabledTools: [] }),
+      probeBrowser: () => Promise.resolve(result),
+    },
+  });
+  const browser = createTestBrowserHost();
+  await browser.setAgentControl(false);
+  const view = (
+    <McpView
+      service={service}
+      agentId="chrys"
+      activeProfile={null}
+      browser={browser}
+      canManageNative
+      canManageInjected
+      canTest
+      runtime={{
+        agentProfile: null,
+        displayName: null,
+        modelProfileId: null,
+        modelName: null,
+        modelProvider: null,
+        maxContextTokens: null,
+        toolNames: [],
+        skillNames: [],
+        skillSources: [],
+        toolInventoryKnown: true,
+        mcpServers: [{ name: "managed-tools", toolCount: 2 }],
+        mcpFailures: [],
+        mcpToolsByServer: {
+          "managed-tools": ["read_docs", "mcp__managed-tools__read_docs"],
+        },
+      }}
+    />
+  );
+  const first = render(view);
+  await user.click(
+    await screen.findByRole("button", { name: "managed-tools" }),
+  );
+  const detail = screen.getByRole("complementary", {
+    name: "managed-tools 详情",
+  });
+  expect(screen.getByText(/1 个会话工具/)).toBeVisible();
+  await user.click(
+    await within(detail).findByRole("switch", { name: "read_docs 启用" }),
+  );
+  expect(setManagedTools).toHaveBeenCalledWith(
+    "chrys",
+    "managed-tools",
+    "managed-rev",
+    ["read_docs"],
+    false,
+  );
+  expect(save).toHaveBeenCalledTimes(1);
+  expect(await screen.findByText(/0 个会话工具/)).toBeVisible();
+  expect(
+    within(detail).getByRole("switch", { name: "read_docs 启用" }),
+  ).not.toBeChecked();
+  probe.mockResolvedValueOnce({
+    ok: false,
+    checkedAt: 101,
+    durationMs: 10,
+    message: "检测失败",
+  } satisfies McpInspection);
+  await user.click(within(detail).getByRole("button", { name: "测试连接" }));
+  expect(
+    await within(detail).findByText(/显示上次检测到的工具清单/),
+  ).toBeVisible();
+  expect(
+    within(detail).getByRole("switch", { name: "read_docs 启用" }),
+  ).toBeEnabled();
+  first.unmount();
+  render(view);
+  await user.click(
+    await screen.findByRole("button", { name: "managed-tools" }),
+  );
+  expect(
+    await screen.findByRole("switch", { name: "read_docs 启用" }),
+  ).toBeVisible();
+  expect(probe).toHaveBeenCalledTimes(2);
+  expect(screen.getByText(/显示上次检测到的工具清单/)).toBeVisible();
+});
 
 const nativeTools: NativeMcpEntry = {
   name: "native-tools",
@@ -73,7 +337,9 @@ function fixture(nativeEntries: readonly NativeMcpEntry[] = []) {
   const readLocal = vi.fn<NativeMcpHost["readLocal"]>(() =>
     Promise.resolve({ profile, snapshot: native }),
   );
-  const changeNative = vi.fn<NativeMcpHost["change"]>(() => Promise.resolve());
+  const changeNative = vi.fn<NativeMcpHost["change"]>(() =>
+    Promise.resolve("native-written"),
+  );
   const host = {
     native: () => ({
       read: readNative,
@@ -84,7 +350,7 @@ function fixture(nativeEntries: readonly NativeMcpEntry[] = []) {
     }),
     managedRead: vi.fn(() => Promise.resolve(managed)),
     managedChange: vi.fn<McpManagementHost["managedChange"]>(() =>
-      Promise.resolve(),
+      Promise.resolve("managed-written"),
     ),
     previewInstall: vi.fn<McpManagementHost["previewInstall"]>(
       (agentId, definitions) =>
@@ -194,7 +460,11 @@ it("uses the archived Profile for a restored session and keeps other Agents isol
     name: "saved-profile",
   });
   expect(first.map(({ name }) => name)).toEqual(["managed-tools"]);
-  expect(host.managedResolve).toHaveBeenLastCalledWith("chrys", ["original"]);
+  expect(host.managedResolve).toHaveBeenLastCalledWith(
+    "chrys",
+    ["original"],
+    expect.any(String),
+  );
   expect(
     await service.sessionTools({
       ...context,
@@ -215,6 +485,7 @@ it("tests the unsaved HTTP draft from the unified card editor and confirms delet
       activeProfile={null}
       browser={createTestBrowserHost()}
       canManageNative
+      nativeTransports={["stdio", "http"]}
       canManageInjected
       canTest
     />,
@@ -296,7 +567,11 @@ it("passes MCP to Agent after native lookup failure and isolates an independent 
     requestExtension: () => Promise.reject(new Error("read failed")),
   });
   expect(fallback.map(({ name }) => name)).toEqual(["managed-tools"]);
-  expect(host.managedResolve).toHaveBeenLastCalledWith("chrys", []);
+  expect(host.managedResolve).toHaveBeenLastCalledWith(
+    "chrys",
+    [],
+    expect.any(String),
+  );
   expect(warn).toHaveBeenCalledWith(expect.stringContaining("交由 Agent"), {
     agentId: "chrys",
     sessionId: null,
@@ -333,6 +608,7 @@ it("mixes native and Desktop cards, filters by configured state, and checks exac
       activeProfile={null}
       browser={createTestBrowserHost()}
       canManageNative
+      nativeTransports={["stdio", "http"]}
       canManageInjected
       canTest
     />,
@@ -343,11 +619,12 @@ it("mixes native and Desktop cards, filters by configured state, and checks exac
   );
   const search = screen.getByRole("searchbox", { name: "搜索 MCP" });
   await user.type(search, "managed");
-  expect(within(grid).getAllByRole("listitem")).toHaveLength(2);
+  expect(within(grid).getAllByRole("article")).toHaveLength(2);
   await user.click(screen.getByRole("combobox", { name: "筛选状态" }));
   await user.click(screen.getByRole("option", { name: "已停用" }));
-  expect(within(grid).getAllByRole("listitem")).toHaveLength(1);
+  expect(within(grid).getAllByRole("article")).toHaveLength(1);
   await user.click(within(grid).getByRole("button", { name: "managed-tools" }));
+  await user.click(screen.getByRole("button", { name: "编辑配置" }));
   const editor = screen.getByRole("dialog", { name: "编辑 MCP" });
   const name = within(editor).getByRole("textbox", { name: "服务名称" });
   await user.clear(name);
@@ -409,6 +686,7 @@ it("reloads an externally changed revision in the existing editor and keeps type
   await user.click(
     await screen.findByRole("button", { name: "managed-tools" }),
   );
+  await user.click(screen.getByRole("button", { name: "编辑配置" }));
   const editor = screen.getByRole("dialog", { name: "编辑 MCP" });
   const name = within(editor).getByRole("textbox", { name: "服务名称" });
   await user.clear(name);
@@ -462,7 +740,7 @@ it("shows the built-in browser as a switch-only card with CodeAgent and mirrors 
         })),
         runtime: createStore(() => ({
           lastSessionId: "front",
-          runtime: { toolNames: [] },
+          runtime: { toolNames: [], mcpServers: [], mcpFailures: [] },
         })),
       },
     },
@@ -479,7 +757,8 @@ it("shows the built-in browser as a switch-only card with CodeAgent and mirrors 
     </>,
   );
   const settings = screen.getByRole("switch", { name: "Agent 浏览器控制" });
-  const mcp = await screen.findByRole("switch", {
+  const list = await screen.findByRole("list", { name: "MCP 服务" });
+  const mcp = await within(list).findByRole("switch", {
     name: "AAW 内置浏览器 启用",
   });
   await vi.waitFor(() => expect(mcp).toBeChecked());

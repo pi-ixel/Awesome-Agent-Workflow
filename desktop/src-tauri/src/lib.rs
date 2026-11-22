@@ -35,6 +35,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(panel_files::PanelWatchers::default())
         .manage(browser::host::BrowserHost::default())
+        .manage(mcp_management::ProxyHost::default())
         .manage(codeagent_credit::CreditQuota::default())
         .manage(workflow_service::WorkflowHost::default())
         .manage(desktop_update::Updates::new(&context.package_info().name))
@@ -62,6 +63,7 @@ pub fn run() {
                 if webview.label() == "main" {
                     webview.state::<panel_files::PanelWatchers>().clear();
                     browser::host::retire_page(webview.app_handle(), "main");
+                    webview.state::<mcp_management::ProxyHost>().retire(None);
                 }
                 acp_process::retire_page(webview.label().to_owned());
                 terminal_pty::retire_page(webview.label().to_owned());
@@ -198,6 +200,7 @@ pub fn run() {
             skill_library::skill_library_list,
             skill_library::skill_library_candidates,
             skill_library::skill_library_change,
+            skill_library::skill_library_toggle,
             skill_library::skill_library_files,
             skill_library::skill_library_sizes,
             mcp_management::mcp_native_read,
@@ -209,6 +212,14 @@ pub fn run() {
             mcp_management::mcp_install_preview,
             mcp_management::mcp_install_commit,
             mcp_management::mcp_managed_resolve,
+            mcp_management::mcp_managed_retire,
+            mcp_management::mcp_managed_inspect,
+            mcp_management::mcp_inspection_read,
+            mcp_management::mcp_inspection_save,
+            mcp_management::mcp_browser_tools,
+            mcp_management::mcp_browser_inspect,
+            mcp_management::mcp_browser_set_tools,
+            mcp_management::mcp_managed_set_tools,
             mcp_management::mcp_test_config,
             commands::read_text_file,
             commands::write_text_file,

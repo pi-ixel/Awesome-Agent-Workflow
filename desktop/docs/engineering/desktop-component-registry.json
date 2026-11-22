@@ -349,10 +349,24 @@
     },
     "targets": []
   },
+  "plugins/mcp/ui/McpImportDialog.tsx": {
+    "definitions": {
+      "布局与操纵": ["McpImportDialog"]
+    },
+    "targets": []
+  },
+  "plugins/mcp/ui/McpServiceDetails.tsx": {
+    "definitions": {
+      "布局与操纵": ["McpServiceDetails"]
+    },
+    "targets": []
+  },
   "plugins/mcp/ui/McpView.tsx": {
     "definitions": {
       "布局与操纵": ["McpView"],
-      "导航与列表": ["McpServiceCard"]
+      "导航与列表": ["McpServiceRow"],
+      "选择控件": ["McpView/browserToggle"],
+      "命令按钮": ["McpView/testButton"]
     },
     "targets": []
   },

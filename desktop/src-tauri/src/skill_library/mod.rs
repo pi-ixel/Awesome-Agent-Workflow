@@ -155,6 +155,25 @@ pub async fn skill_library_candidates(from: PathBuf) -> std::result::Result<Vec<
 }
 static OPERATIONS: Mutex<()> = Mutex::new(());
 #[tauri::command]
+pub async fn skill_library_toggle(
+    app: AppHandle,
+    webview: tauri::Webview,
+    query: Query,
+    action: changes::Toggle,
+) -> std::result::Result<changes::ToggleResult, String> {
+    if webview.label() != "main" {
+        return Err("只有主窗口可以启停技能".into());
+    }
+    let locations = Locations::resolve(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _lock = OPERATIONS.lock().map_err(error)?;
+        changes::toggle(&locations, &query, action)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
+}
+#[tauri::command]
 pub async fn skill_library_list(
     app: AppHandle,
     query: Query,

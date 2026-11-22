@@ -8,6 +8,9 @@ import type {
 } from "../../../contracts/mcp/management.ts";
 import { ActionButton, Listbox } from "../../../shared/ui/controls.tsx";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
+import { SegmentedControl } from "../../../shared/ui/SettingsPageParts.tsx";
+import { mcpTemplates } from "../runtime/importConfig.ts";
+import { McpImportDialog, type McpImporter } from "./McpImportDialog.tsx";
 import {
   settingsInputClass,
   settingsTextareaClass,
@@ -18,6 +21,7 @@ type Editor =
   | {
       source: "native";
       entry: NativeMcpEntry;
+      transports: readonly NativeMcpDraft["transport"][];
       submit: (draft: NativeMcpDraft) => Promise<void>;
       test?: (draft: NativeMcpDraft) => Promise<TestResult>;
     }
@@ -166,15 +170,21 @@ export function McpEditor({
   editor,
   close,
   reload,
+  importer,
+  initialTab = "form",
 }: {
   editor: Editor;
   close: () => void;
   reload: () => Promise<void>;
+  importer?: McpImporter;
+  initialTab?: "form" | "json";
 }) {
   const entry = editor.entry;
   const native = editor.source === "native" ? editor.entry : undefined;
   const form = useRef<HTMLFormElement>(null);
   const [nameEdit, setName] = useState<string>();
+  const [descriptionEdit, setDescription] = useState<string>();
+  const [tab, setTab] = useState<"form" | "json" | "templates">(initialTab);
   const [transportEdit, setTransport] = useState<"stdio" | "http">();
   const [urlEdit, setUrl] = useState<string>();
   const [commandEdit, setCommand] = useState<string>();
@@ -184,14 +194,15 @@ export function McpEditor({
   const [secrets, setSecrets] = useState({ http: "", stdio: "" });
   const [headersEdit, setHeaders] =
     useState<readonly McpCredentialReference[]>();
-  const [pending, setPending] = useState<"save" | "test" | "reload" | null>(
-    null,
-  );
+  const [pending, setPending] = useState<
+    "save" | "test" | "reload" | "import" | null
+  >(null);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [testResult, setTestResult] = useState<TestResult>();
   const [stale, setStale] = useState(false);
   const name = nameEdit ?? entry?.name ?? "";
+  const description = descriptionEdit ?? entry?.description ?? "";
   const transport =
     transportEdit ?? (native?.transport === "stdio" ? "stdio" : "http");
   const url = urlEdit ?? entry?.url ?? "";
@@ -242,6 +253,7 @@ export function McpEditor({
           transport: "http",
           url: url.trim(),
           headers,
+          ...(description.trim() ? { description: description.trim() } : {}),
         };
         if (mode === "test") {
           if (editor.test) setTestResult(await editor.test(draft));
@@ -288,202 +300,286 @@ export function McpEditor({
         onChange={() => setTestResult(undefined)}
         onSubmit={(event) => {
           event.preventDefault();
-          void run("save");
+          if (tab === "form") void run("save");
         }}
       >
         <header className="shrink-0 border-b border-line px-5 py-4">
           <h2 className="text-ui-lg font-semibold">{title}</h2>
         </header>
-        <fieldset
-          disabled={busy}
-          className="grid min-h-0 min-w-0 gap-4 overflow-y-auto px-5 py-4"
-        >
-          <Field label="服务名称">
-            <input
-              className={settingsInputClass}
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              required
+        {importer && (
+          <div className="border-b border-line px-5 py-2">
+            <SegmentedControl
+              tabs
+              groupLabel="新增 MCP 方式"
+              value={tab}
+              options={[
+                { value: "form", label: "表单配置" },
+                { value: "json", label: "JSON 导入" },
+                { value: "templates", label: "推荐模板" },
+              ]}
+              onChange={(value) => {
+                if (!busy) setTab(value);
+              }}
             />
-          </Field>
-          {editor.source === "native" && (
-            <Field label="传输方式">
-              <Listbox
-                label="传输方式"
-                value={transport}
-                fullWidth
-                options={[
-                  { value: "http", label: "Streamable HTTP" },
-                  { value: "stdio", label: "stdio · 本地命令" },
-                ]}
-                onChange={(value) => {
-                  setTransport(value === "stdio" ? "stdio" : "http");
-                  setTestResult(undefined);
-                }}
-              />
-            </Field>
-          )}
-          {transport === "http" ? (
-            <Field label="服务地址">
+          </div>
+        )}
+        {importer && (
+          <McpImportDialog
+            close={close}
+            importer={importer}
+            isActive={tab === "json"}
+            isBusy={pending === "import"}
+            onBusy={(isBusy) => setPending(isBusy ? "import" : null)}
+          />
+        )}
+        {tab === "templates" && (
+          <section
+            role="tabpanel"
+            aria-label="推荐模板"
+            className="min-h-0 space-y-2 overflow-auto px-5 py-4"
+          >
+            {mcpTemplates.map((template) => (
+              <div
+                key={template.name}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line px-3 py-2"
+              >
+                <div>
+                  <p className="text-ui-sm font-semibold">{template.name}</p>
+                  <p className="text-ui-caption text-ink-mute">
+                    {template.description} · Streamable HTTP
+                  </p>
+                </div>
+                <ActionButton
+                  tone="secondary"
+                  size="compact"
+                  onClick={() => {
+                    setName(template.name);
+                    setDescription(template.description);
+                    setUrl(template.url);
+                    setHeaders(template.headers);
+                    setTestResult(undefined);
+                    setTab("form");
+                  }}
+                >
+                  使用模板
+                </ActionButton>
+              </div>
+            ))}
+          </section>
+        )}
+        {tab === "form" && (
+          <fieldset
+            disabled={busy}
+            className="grid min-h-0 min-w-0 gap-4 overflow-y-auto px-5 py-4"
+          >
+            <Field label="服务名称">
               <input
                 className={settingsInputClass}
-                type="url"
-                value={url}
-                required={!isHiddenUrl}
-                placeholder={
-                  isHiddenUrl
-                    ? "原地址已隐藏，留空保留"
-                    : "https://example.com/mcp"
-                }
-                onChange={(event) => setUrl(event.target.value)}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                required
               />
             </Field>
-          ) : (
-            <>
-              <Field label="启动命令">
-                <input
-                  className={settingsInputClass}
-                  value={command}
-                  required
-                  onChange={(event) => setCommand(event.target.value)}
-                />
-              </Field>
-              <Field label="工作目录">
-                <input
-                  className={settingsInputClass}
-                  value={cwd}
-                  placeholder="默认使用会话工作目录"
-                  onChange={(event) => setCwd(event.target.value)}
-                />
-              </Field>
-              {replaceArgs || !native?.argsCount || !isOriginalTransport ? (
-                <Field label="启动参数">
-                  <textarea
-                    className={settingsTextareaClass}
-                    rows={3}
-                    placeholder="每行一个参数"
-                    value={args}
-                    onChange={(event) => {
-                      setReplaceArgs(true);
-                      setArgs(event.target.value);
-                    }}
+            {editor.source === "managed" && (
+              <>
+                <Field label="服务说明">
+                  <input
+                    className={settingsInputClass}
+                    value={description}
+                    maxLength={1024}
+                    onChange={(event) => setDescription(event.target.value)}
                   />
                 </Field>
-              ) : (
-                <div className="flex items-center justify-between gap-2 text-ui-sm text-ink-mute">
-                  <span>已配置 {native?.argsCount} 个启动参数</span>
-                  <ActionButton
-                    tone="secondary"
-                    size="compact"
-                    onClick={() => setReplaceArgs(true)}
-                  >
-                    替换启动参数
-                  </ActionButton>
-                </div>
-              )}
-            </>
-          )}
-          {editor.source === "managed" ? (
-            <HeadersEditor
-              headers={headers}
-              onChange={(value) => {
-                setHeaders(value);
-                setTestResult(undefined);
-              }}
-              disabled={busy}
-            />
-          ) : (
-            <Field
-              label={transport === "http" ? "修改 HTTP 请求头" : "修改环境变量"}
-            >
-              {isOriginalTransport && native?.secretKeys.length ? (
-                <span className="break-all font-normal text-ink-mute">
-                  已配置 {native.secretKeys.join("、")}
-                </span>
-              ) : null}
-              <textarea
-                className={settingsTextareaClass}
-                value={secrets[transport]}
-                autoComplete="off"
-                spellCheck={false}
-                rows={2}
-                onChange={(event) =>
-                  setSecrets({
-                    ...secrets,
-                    [transport]: event.target.value,
-                  })
-                }
-                placeholder={"每行“名称=新值”，只填名称则移除该项。"}
+                <p className="text-ui-sm text-ink-mute">
+                  传输方式 · Streamable HTTP
+                </p>
+              </>
+            )}
+            {editor.source === "native" && (
+              <Field label="传输方式">
+                <Listbox
+                  label="传输方式"
+                  value={transport}
+                  fullWidth
+                  options={[
+                    { value: "http", label: "Streamable HTTP" },
+                    { value: "stdio", label: "stdio · 本地命令" },
+                  ].filter(({ value }) =>
+                    editor.transports.some((transport) => transport === value),
+                  )}
+                  onChange={(value) => {
+                    setTransport(value === "stdio" ? "stdio" : "http");
+                    setTestResult(undefined);
+                  }}
+                />
+              </Field>
+            )}
+            {transport === "http" ? (
+              <Field label="服务地址">
+                <input
+                  className={settingsInputClass}
+                  type="url"
+                  value={url}
+                  required={!isHiddenUrl}
+                  placeholder={
+                    isHiddenUrl
+                      ? "原地址已隐藏，留空保留"
+                      : "https://example.com/mcp"
+                  }
+                  onChange={(event) => setUrl(event.target.value)}
+                />
+              </Field>
+            ) : (
+              <>
+                <Field label="启动命令">
+                  <input
+                    className={settingsInputClass}
+                    value={command}
+                    required
+                    onChange={(event) => setCommand(event.target.value)}
+                  />
+                </Field>
+                <Field label="工作目录">
+                  <input
+                    className={settingsInputClass}
+                    value={cwd}
+                    placeholder="默认使用会话工作目录"
+                    onChange={(event) => setCwd(event.target.value)}
+                  />
+                </Field>
+                {replaceArgs || !native?.argsCount || !isOriginalTransport ? (
+                  <Field label="启动参数">
+                    <textarea
+                      className={settingsTextareaClass}
+                      rows={3}
+                      placeholder="每行一个参数"
+                      value={args}
+                      onChange={(event) => {
+                        setReplaceArgs(true);
+                        setArgs(event.target.value);
+                      }}
+                    />
+                  </Field>
+                ) : (
+                  <div className="flex items-center justify-between gap-2 text-ui-sm text-ink-mute">
+                    <span>已配置 {native?.argsCount} 个启动参数</span>
+                    <ActionButton
+                      tone="secondary"
+                      size="compact"
+                      onClick={() => setReplaceArgs(true)}
+                    >
+                      替换启动参数
+                    </ActionButton>
+                  </div>
+                )}
+              </>
+            )}
+            {editor.source === "managed" ? (
+              <HeadersEditor
+                headers={headers}
+                onChange={(value) => {
+                  setHeaders(value);
+                  setTestResult(undefined);
+                }}
+                disabled={busy}
               />
-            </Field>
-          )}
-          {native && !isOriginalTransport && (
-            <p className="text-ui-sm text-ink-mute">
-              保存后会清理原传输方式的专用配置。
-            </p>
-          )}
-          {notice && (
-            <p role="status" className="text-ui-sm text-ink-mute">
-              {notice}
-            </p>
-          )}
-          {testResult && (
-            <p
-              role="status"
-              className={
-                testResult.ok
-                  ? "text-ui-sm text-ok-ink"
-                  : "text-ui-sm text-danger-ink"
-              }
-            >
-              {testResult.message} · {testResult.durationMs} ms
-            </p>
-          )}
-          {error && (
-            <p role="alert" className="text-ui-sm text-danger-ink">
-              {error}
-            </p>
-          )}
-          {stale && (
+            ) : (
+              <Field
+                label={
+                  transport === "http" ? "修改 HTTP 请求头" : "修改环境变量"
+                }
+              >
+                {isOriginalTransport && native?.secretKeys.length ? (
+                  <span className="break-all font-normal text-ink-mute">
+                    已配置 {native.secretKeys.join("、")}
+                  </span>
+                ) : null}
+                <textarea
+                  className={settingsTextareaClass}
+                  value={secrets[transport]}
+                  autoComplete="off"
+                  spellCheck={false}
+                  rows={2}
+                  onChange={(event) =>
+                    setSecrets({
+                      ...secrets,
+                      [transport]: event.target.value,
+                    })
+                  }
+                  placeholder={"每行“名称=新值”，只填名称则移除该项。"}
+                />
+              </Field>
+            )}
+            {native && !isOriginalTransport && (
+              <p className="text-ui-sm text-ink-mute">
+                保存后会清理原传输方式的专用配置。
+              </p>
+            )}
+            {notice && (
+              <p role="status" className="text-ui-sm text-ink-mute">
+                {notice}
+              </p>
+            )}
+            {testResult && (
+              <p
+                role="status"
+                className={
+                  testResult.ok
+                    ? "text-ui-sm text-ok-ink"
+                    : "text-ui-sm text-danger-ink"
+                }
+              >
+                {testResult.message} · {testResult.durationMs} ms
+              </p>
+            )}
+            {error && (
+              <p role="alert" className="text-ui-sm text-danger-ink">
+                {error}
+              </p>
+            )}
+            {stale && (
+              <ActionButton
+                tone="secondary"
+                size="compact"
+                className="justify-self-start"
+                onClick={() => void reloadConfiguration()}
+              >
+                {pending === "reload" ? "正在重新读取…" : "重新加载配置"}
+              </ActionButton>
+            )}
+          </fieldset>
+        )}
+        {tab === "form" && (
+          <footer className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-line px-5 py-3">
+            {canTest && (
+              <ActionButton
+                tone="secondary"
+                size="compact"
+                className="mr-auto"
+                disabled={busy || stale}
+                onClick={() => void run("test")}
+              >
+                {pending === "test" ? "正在测试…" : "测试连接"}
+              </ActionButton>
+            )}
             <ActionButton
               tone="secondary"
               size="compact"
-              className="justify-self-start"
-              onClick={() => void reloadConfiguration()}
+              onClick={close}
+              disabled={busy}
             >
-              {pending === "reload" ? "正在重新读取…" : "重新加载配置"}
+              取消
             </ActionButton>
-          )}
-        </fieldset>
-        <footer className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-line px-5 py-3">
-          {canTest && (
             <ActionButton
-              tone="secondary"
+              tone="primary"
               size="compact"
-              className="mr-auto"
-              disabled={busy || stale}
-              onClick={() => void run("test")}
+              type="submit"
+              disabled={busy || stale || !name.trim()}
             >
-              {pending === "test" ? "正在测试…" : "测试连接"}
+              {pending === "save" ? "正在保存…" : "保存"}
             </ActionButton>
-          )}
-          <ActionButton
-            tone="secondary"
-            size="compact"
-            onClick={close}
-            disabled={busy}
-          >
-            取消
-          </ActionButton>
-          <ActionButton
-            tone="primary"
-            size="compact"
-            type="submit"
-            disabled={busy || stale || !name.trim()}
-          >
-            {pending === "save" ? "正在保存…" : "保存"}
-          </ActionButton>
-        </footer>
+          </footer>
+        )}
       </form>
     </ModalShell>
   );
