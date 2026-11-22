@@ -171,50 +171,71 @@ pub(super) async fn go(webview: &Webview, back: bool) -> Result<(), String> {
 }
 
 pub(super) fn refresh_memory(webview: Webview, app: AppHandle, session_id: String, tab_id: String) {
-    let _ = webview.with_webview(move |platform| {
-        let controller = platform.controller();
-        let mut visible = BOOL(1);
-        if unsafe { controller.IsVisible(&mut visible) }.is_err() {
-            return;
+    let context = serde_json::json!({"sessionId": session_id, "tabId": tab_id});
+    let mut decision = context.clone();
+    if let Err(error) = webview.with_webview(move |platform| {
+        let result = (|| -> windows_core::Result<()> {
+            let controller = platform.controller();
+            let mut visible = BOOL(1);
+            unsafe { controller.IsVisible(&mut visible)? };
+            let blocker = if visible.as_bool() {
+                Some("visible")
+            } else {
+                memory_blocker(&app.state::<BrowserHost>(), &session_id, &tab_id)
+            };
+            let (target, mode) = if blocker.is_none() {
+                (COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW, "low")
+            } else {
+                (COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL, "normal")
+            };
+            decision["target"] = mode.into();
+            decision["blocker"] = serde_json::json!(blocker);
+            let memory = unsafe { controller.CoreWebView2()? }.cast::<ICoreWebView2_19>()?;
+            let mut current = Default::default();
+            unsafe { memory.MemoryUsageTargetLevel(&mut current)? };
+            if current != target {
+                // Low 保留脚本、网络连接和 MCP 页面引用。
+                unsafe { memory.SetMemoryUsageTargetLevel(target)? };
+                crate::diagnostics::log("debug", "browser", "已设置标签内存模式", decision.clone());
+            }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            decision["reason"] = error.to_string().into();
+            crate::diagnostics::log("warn", "browser", "读取或设置标签内存模式失败", decision);
         }
-        let Ok(core) = (unsafe { controller.CoreWebView2() }) else {
-            return;
-        };
-        let Ok(memory) = core.cast::<ICoreWebView2_19>() else {
-            return;
-        };
-        let host = app.state::<BrowserHost>();
-        let target = if !visible.as_bool() && can_lower_memory(&host, &session_id, &tab_id) {
-            COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW
-        } else {
-            COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL
-        };
-        // 低内存模式保留页面脚本、网络连接和 MCP 引用。
-        let _ = unsafe { memory.SetMemoryUsageTargetLevel(target) };
-    });
+    }) {
+        crate::diagnostics::log(
+            "warn",
+            "browser",
+            "无法调度标签内存评估",
+            serde_json::json!({"tab": context, "reason": error.to_string()}),
+        );
+    }
 }
 
-fn can_lower_memory(host: &BrowserHost, session_id: &str, tab_id: &str) -> bool {
+fn memory_blocker(host: &BrowserHost, session_id: &str, tab_id: &str) -> Option<&'static str> {
     let Ok(runtime) = host.runtime.lock() else {
-        return false;
+        return Some("state_unavailable");
     };
     let Some(space) = runtime.spaces.get(session_id) else {
-        return false;
+        return Some("session_unavailable");
     };
     let Some(tab) = space.tabs.get(tab_id) else {
-        return false;
+        return Some("tab_unavailable");
     };
-    if runtime.active_turns.contains(session_id)
-        || space.agent_active
-        || tab.lifecycle != TabLifecycle::Ready
-        || tab.navigation.is_loading
-        || runtime.requests.values().any(|request| {
-            request.session_id == session_id
-                && request.tab_id == tab_id
-                && request.status == RequestStatus::Pending
-        })
-    {
-        return false;
+    if runtime.active_turns.contains(session_id) || space.agent_active {
+        return Some("active_turn");
+    }
+    if tab.lifecycle != TabLifecycle::Ready || tab.navigation.is_loading {
+        return Some("loading_or_unavailable");
+    }
+    if runtime.requests.values().any(|request| {
+        request.session_id == session_id
+            && request.tab_id == tab_id
+            && request.status == RequestStatus::Pending
+    }) {
+        return Some("pending_request");
     }
     drop(runtime);
     let has_download = host.downloads.lock().map_or(true, |downloads| {
@@ -236,7 +257,15 @@ fn can_lower_memory(host: &BrowserHost, session_id: &str, tab_id: &str) -> bool 
                 && matches!(item.status.as_str(), "pending" | "approved")
         })
     });
-    !has_download && !has_dialog && !has_approval
+    if has_download {
+        Some("download")
+    } else if has_dialog {
+        Some("dialog")
+    } else if has_approval {
+        Some("approval")
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -258,9 +287,12 @@ mod tests {
                 .tab_id
         };
 
-        assert!(!can_lower_memory(&host, "session", &tab_id));
+        assert_eq!(
+            memory_blocker(&host, "session", &tab_id),
+            Some("active_turn")
+        );
         host.cancel_turn_work("session").unwrap();
-        assert!(can_lower_memory(&host, "session", &tab_id));
+        assert_eq!(memory_blocker(&host, "session", &tab_id), None);
 
         let mut runtime = host.runtime.lock().unwrap();
         runtime
@@ -273,6 +305,40 @@ mod tests {
             .navigation
             .is_loading = true;
         drop(runtime);
-        assert!(!can_lower_memory(&host, "session", &tab_id));
+        assert_eq!(
+            memory_blocker(&host, "session", &tab_id),
+            Some("loading_or_unavailable")
+        );
+    }
+
+    #[test]
+    fn resolved_approval_no_longer_blocks_idle_tab_memory_policy() {
+        let host = BrowserHost::default();
+        let tab_id = {
+            let mut runtime = host.runtime.lock().unwrap();
+            runtime
+                .create_space("main", "workspace", "session")
+                .unwrap();
+            runtime
+                .create_tab("session", "https://example.com")
+                .unwrap()
+                .tab_id
+        };
+        let approval = super::super::security::require_approval(
+            &mut host.approvals.lock().unwrap(),
+            "session",
+            &tab_id,
+            "download",
+            1,
+        )
+        .unwrap();
+        assert_eq!(memory_blocker(&host, "session", &tab_id), Some("approval"));
+        super::super::security::decide_approval(
+            &mut host.approvals.lock().unwrap(),
+            &approval.approval_id,
+            false,
+        )
+        .unwrap();
+        assert_eq!(memory_blocker(&host, "session", &tab_id), None);
     }
 }

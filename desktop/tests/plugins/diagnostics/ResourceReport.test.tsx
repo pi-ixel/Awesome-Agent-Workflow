@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it } from "vitest";
 import { ResourceReport } from "../../../src/plugins/diagnostics/ui/ResourceReport.tsx";
 import type { ResourceSnapshot } from "../../../src/plugins/diagnostics/types.ts";
@@ -127,4 +127,68 @@ it("separates exited agents from the current process groups", () => {
   expect(screen.getByRole("group", { name: "历史进程组" })).toHaveTextContent(
     "句柄 9",
   );
+});
+
+it("expands the latest Desktop turn and hides its comparison for a different session", () => {
+  const session = { scope: "workspace+agent", sessionId: "one" };
+  const point = (at: number, main: number, browser: number, other = 0) => {
+    const mib = 1024 ** 2;
+    return {
+      at,
+      memory: {
+        total: (80 + main + browser + other) * mib,
+        executable: 80 * mib,
+        interface: main * mib,
+        browser: browser * mib,
+        other: other * mib,
+      },
+    };
+  };
+  const resources: ResourceSnapshot = {
+    supported: true,
+    error: null,
+    groups: [],
+    history: [],
+    exited: [],
+    desktopMemory: point(60, 100, 90),
+    turnMemory: {
+      session,
+      startedAt: 20,
+      endedAt: 50,
+      before: point(10, 100, 0),
+      peak: point(40, 120, 310, 5),
+      hasOverlap: true,
+    },
+  };
+  const { rerender } = render(
+    <ResourceReport
+      resources={resources}
+      focusedSession={session}
+      connections={[]}
+    />,
+  );
+  const table = screen.getByRole("table");
+  expect(
+    within(table).getByRole("columnheader", { name: /峰值时刻/ }),
+  ).toBeVisible();
+  const browser = within(table).getByRole("row", { name: /内嵌浏览器/ });
+  expect(within(browser).getAllByRole("cell")[1]).toHaveTextContent("310 MiB");
+  expect(within(browser).getAllByRole("cell")[2]).toHaveTextContent("90 MiB");
+  expect(
+    within(table).getByRole("rowheader", { name: "其他 Desktop 子进程" }),
+  ).toBeVisible();
+  expect(screen.getByText(/本轮有其他会话同时运行/)).toBeVisible();
+  fireEvent.click(screen.getByText("工作集明细"));
+  expect(table).not.toBeVisible();
+
+  rerender(
+    <ResourceReport
+      resources={resources}
+      focusedSession={{ ...session, sessionId: "two" }}
+      connections={[]}
+    />,
+  );
+  fireEvent.click(screen.getByText("工作集明细"));
+  expect(screen.queryByRole("columnheader", { name: /峰值时刻/ })).toBeNull();
+  expect(screen.queryByText("其他 Desktop 子进程")).toBeNull();
 });

@@ -2,6 +2,7 @@ import { DiagnosticsWindow } from "../../src/plugins/diagnostics/ui/DiagnosticsW
 import type {
   DiagnosticRecord,
   DiagnosticsReader,
+  DesktopMemoryPoint,
 } from "../../src/plugins/diagnostics/types.ts";
 
 const record: DiagnosticRecord = {
@@ -26,6 +27,26 @@ const rawText = JSON.stringify(
   2,
 );
 
+const showResources = new URLSearchParams(location.search).has("resources");
+const session = { scope: "workspace+agent", sessionId: "example" };
+const point = (
+  age: number,
+  ui: number,
+  browser: number,
+): DesktopMemoryPoint => {
+  const mib = 1024 ** 2;
+  return {
+    at: record.at - age,
+    memory: {
+      total: (90 + ui + browser) * mib,
+      executable: 90 * mib,
+      interface: ui * mib,
+      browser: browser * mib,
+      other: 0,
+    },
+  };
+};
+
 const reader: DiagnosticsReader = {
   isNative: () => true,
   status: () =>
@@ -36,14 +57,47 @@ const reader: DiagnosticsReader = {
       observing: true,
       latestId: record.id,
     }),
-  snapshot: () => Promise.resolve(null),
-  resources: () =>
+  snapshot: () =>
+    Promise.resolve(
+      showResources
+        ? {
+            at: record.at,
+            data: {
+              runtime: [
+                {
+                  diagnosticScope: session.scope,
+                  sessionId: session.sessionId,
+                  isActive: true,
+                },
+              ],
+              memory: [],
+              memorySamplingSupported: true,
+              theme: "light",
+            },
+          }
+        : null,
+    ),
+  resources: (focused) =>
     Promise.resolve({
-      supported: false,
+      supported: showResources,
       groups: [],
       history: [],
       exited: [],
       error: null,
+      ...(focused?.scope === session.scope &&
+      focused.sessionId === session.sessionId
+        ? {
+            desktopMemory: point(0, 600, 640),
+            turnMemory: {
+              session,
+              startedAt: record.at - 26000,
+              endedAt: record.at - 2000,
+              before: point(27000, 810, 0),
+              peak: point(12000, 810, 1148),
+              hasOverlap: true,
+            },
+          }
+        : {}),
     }),
   probeConnection: () => Promise.resolve(),
   query: (filters) =>

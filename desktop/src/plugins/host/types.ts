@@ -273,6 +273,7 @@ export type DiagnosticsCommand =
   | "diagnostics_probe_request"
   | "diagnostics_probe_take"
   | "diagnostics_resources"
+  | "diagnostics_resource_turn"
   | "diagnostics_append"
   | "diagnostics_acp_append"
   | "diagnostics_flush"

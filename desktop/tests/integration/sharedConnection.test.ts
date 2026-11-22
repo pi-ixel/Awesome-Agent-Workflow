@@ -6,9 +6,15 @@ import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 describe("shared ACP connection", () => {
   it("counts ready sessions and executing prompts without counting temporary channels", async () => {
     const peer = standardAcpPeer();
-    const owner = new AcpConnection(peer.client, 1);
+    const markTurn = vi.fn<
+      (mark: { ordinal: number; startedAt: number; endedAt: number | null }) => void
+    >();
+    const owner = new AcpConnection(peer.client, 1, {}, undefined, markTurn);
     const temporary = owner.openChannel();
-    const session = owner.openChannel({ project: { id: "c:/project", path: "C:/Project" } });
+    const session = owner.openChannel({
+      project: { id: "c:/project", path: "C:/Project" },
+      diagnosticScope: "workspace+agent",
+    });
     let finish!: (value: object) => void;
     peer.handlers.set("session/load", () => ({}));
     peer.handlers.set(
@@ -26,6 +32,7 @@ describe("shared ACP connection", () => {
       });
       expect(owner.diagnosticSessions).toEqual([{ id: "s", running: false, state: "ready",
         project: { id: "c:/project", path: "C:/Project" } }]);
+      expect(markTurn).not.toHaveBeenCalled();
       const prompt = session.port.request("session/prompt", {
         sessionId: "s",
         prompt: [],
@@ -34,8 +41,20 @@ describe("shared ACP connection", () => {
         expect(owner.diagnosticSessions[0]?.running).toBe(true),
       );
       await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+      const [start] = markTurn.mock.calls[0]!;
+      expect(start).toMatchObject({
+        session: { scope: "workspace+agent", sessionId: "s" },
+        endedAt: null,
+      });
       finish({ stopReason: "end_turn" });
       await prompt;
+      expect(markTurn).toHaveBeenCalledTimes(2);
+      const [end] = markTurn.mock.calls[1]!;
+      expect(end).toEqual({
+        ...start,
+        endedAt: end.endedAt,
+      });
+      expect(end.endedAt).toBeGreaterThanOrEqual(start.startedAt);
       expect(owner.diagnosticSessions[0]?.running).toBe(false);
       session.close();
       expect(owner.diagnosticSessions).toEqual([]);

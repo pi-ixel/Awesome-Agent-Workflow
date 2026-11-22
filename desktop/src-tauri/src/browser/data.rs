@@ -453,6 +453,8 @@ async fn active_webview(
             LogicalSize::new(1.0, 1.0),
         )
         .map_err(|error| error.to_string())?;
+    #[cfg(windows)]
+    crate::resource_monitor::observe_webview(&webview, true);
     let view = PartitionWebview {
         webview,
         temporary: true,

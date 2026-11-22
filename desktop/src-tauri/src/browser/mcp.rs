@@ -930,6 +930,7 @@ async fn call_tool(
                 }
             }
             drop(runtime);
+            super::host::refresh_tab_memory(app, session_id, tab_id);
             let result = outcome?;
             let text = result.to_string();
             if let Some(code) = result.get("error").and_then(Value::as_str) {
@@ -1015,6 +1016,7 @@ async fn call_tool(
                 &mut *host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?,
                 &approval_id,
             )?;
+            super::host::refresh_tab_memory(app, session_id, tab_id);
             let text = result.to_string();
             Ok(
                 json!({"content":[{"type":"text","text":text}],"structuredContent":{"action":"submit","approvalId":approval_id,"result":result}}),
@@ -1136,6 +1138,7 @@ async fn call_tool(
                 &mut *host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?,
                 &approval_id,
             )?;
+            super::host::refresh_tab_memory(app, session_id, tab_id);
             Ok(
                 json!({"content":[{"type":"text","text":result}],"structuredContent":{"result":result,"restricted":true}}),
             )
@@ -1231,6 +1234,7 @@ async fn call_tool(
                 &mut *host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?,
                 &approval_id,
             )?;
+            super::host::refresh_tab_memory(app, session_id, tab_id);
             Ok(
                 json!({"content":[{"type":"text","text":"文件已绑定到上传控件"}],"structuredContent":{"status":"completed","path":path,"nodeId":node_id}}),
             )
@@ -1278,12 +1282,12 @@ async fn wait_for_page(
     if !timeout_ms.is_finite() || timeout_ms < 0.0 || timeout_ms > 30_000.0 {
         return Err("WAIT_BUDGET_EXCEEDED".into());
     }
+    let webview = find_webview(app, host, session_id, tab_id)?;
     let request_id = random_id(12)?;
     host.runtime
         .lock()
         .map_err(|_| "BROWSER_LOCK_FAILED")?
         .begin_request(&request_id, session_id, tab_id)?;
-    let webview = find_webview(app, host, session_id, tab_id)?;
     let started = tokio::time::Instant::now();
     let budget = Duration::from_millis(timeout_ms as u64);
     loop {
@@ -1305,6 +1309,7 @@ async fn wait_for_page(
                     .lock()
                     .map_err(|_| "BROWSER_LOCK_FAILED")?
                     .complete_observation_request(&request_id)?;
+                super::host::refresh_tab_memory(app, session_id, tab_id);
                 return Ok(
                     json!({"content":[{"type":"text","text":"WAIT_COMPLETED"}],"structuredContent":{"status":"completed","sideEffect":"none","requestId":request_id}}),
                 );
@@ -1313,6 +1318,7 @@ async fn wait_for_page(
                 .lock()
                 .map_err(|_| "BROWSER_LOCK_FAILED")?
                 .timeout_request(&request_id)?;
+            super::host::refresh_tab_memory(app, session_id, tab_id);
             return Ok(
                 json!({"content":[{"type":"text","text":"TIMEOUT"}],"isError":true,"structuredContent":{"status":"failed","sideEffect":"none","error":{"code":"TIMEOUT"},"requestId":request_id}}),
             );
@@ -1321,14 +1327,17 @@ async fn wait_for_page(
             let selector = serde_json::to_string(selector).map_err(|error| error.to_string())?;
             let script =
                 format!("JSON.stringify({{found:document.querySelector({selector})!==null}})");
-            match evaluate(&webview, &script).await {
-                Ok(raw) => {
-                    let result = decode_evaluation(&raw)?;
+            match evaluate(&webview, &script)
+                .await
+                .and_then(|raw| decode_evaluation(&raw))
+            {
+                Ok(result) => {
                     if result["found"].as_bool() == Some(true) {
                         host.runtime
                             .lock()
                             .map_err(|_| "BROWSER_LOCK_FAILED")?
                             .complete_observation_request(&request_id)?;
+                        super::host::refresh_tab_memory(app, session_id, tab_id);
                         return Ok(
                             json!({"content":[{"type":"text","text":"CONDITION_MET"}],"structuredContent":{"status":"completed","sideEffect":"none","requestId":request_id}}),
                         );
@@ -1339,6 +1348,7 @@ async fn wait_for_page(
                         .lock()
                         .map_err(|_| "BROWSER_LOCK_FAILED")?
                         .timeout_request(&request_id)?;
+                    super::host::refresh_tab_memory(app, session_id, tab_id);
                     return Err(error);
                 }
             }

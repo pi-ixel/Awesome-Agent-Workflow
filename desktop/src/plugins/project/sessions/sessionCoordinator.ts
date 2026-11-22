@@ -837,6 +837,7 @@ export function createSessionCoordinator({
       }
       return {
         sessionId: runtime.session.sessionId ?? state.activeSessionId,
+        diagnosticScope: runtime.session.diagnosticScope,
         workspacePath: runtime.workspacePath,
         agentKey: state.agentKey,
         queueSaveError: state.queueSaveError,
@@ -1838,6 +1839,9 @@ export function createSessionCoordinator({
         );
       };
       const sessionOptions: AcpProtocolSessionOptions = {
+        diagnosticScope: encodeURIComponent(
+          JSON.stringify([agentKey, pathKey(workspacePath)]),
+        ),
         mcpServers: browserEndpoint
           ? [
               {
@@ -1929,7 +1933,9 @@ export function createSessionCoordinator({
           if (!browserEndpoint) return [];
           try {
             const space = await browser.snapshot(sessionId);
-            const tab = space.tabs.at(-1);
+            const tab = space.tabs
+              .filter((entry) => entry.lifecycle === "ready")
+              .at(-1);
             if (!tab) return [];
             const url = browserObservationUrl(
               tab.committedUrl ?? "about:blank",
@@ -1937,7 +1943,7 @@ export function createSessionCoordinator({
             return [
               {
                 type: "text" as const,
-                text: `${browserPageContextPrefix}：URL=${url}；状态=${tab.lifecycle}`,
+                text: `${browserPageContextPrefix}：URL=${url}；状态=${tab.lifecycle}。同一查询链优先用 browser_list_tabs 确认可用任务标签，再用 browser_navigate 继续。需要保留原页、并排比较或用户要求新开时使用 browser_open。`,
               },
             ];
           } catch {

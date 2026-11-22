@@ -27,6 +27,8 @@ use windows_sys::Win32::{
     },
 };
 
+mod parallel;
+
 const PAGE: &str =
     "<!doctype html><title>AAW WebView2 bench</title><p>Same local test page for all sessions</p>";
 
@@ -56,7 +58,7 @@ pub(crate) fn start(app: &AppHandle) -> bool {
     };
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let result = tokio::time::timeout(Duration::from_secs(90), run(&app)).await;
+        let result = tokio::time::timeout(Duration::from_secs(120), run(&app)).await;
         let (payload, status) = match result {
             Ok(Ok(values)) => (values, 0),
             Ok(Err(error)) => (json!({"status":"error","error":error}), 1),
@@ -76,16 +78,19 @@ pub(crate) fn start(app: &AppHandle) -> bool {
 async fn run(app: &AppHandle) -> Result<Value, String> {
     let root = browser_root().ok_or("BENCH_ROOT_MISSING")??;
     let phase = std::env::var("AAW_WEBVIEW2_BENCH_PHASE").unwrap_or_else(|_| "perf".into());
-    if phase == "perf" && root.try_exists().map_err(|err| err.to_string())? {
+    let is_parallel = phase == "parallel";
+    if (phase == "perf" || is_parallel) && root.try_exists().map_err(|err| err.to_string())? {
         return Err("benchmark browser directory must not exist yet".into());
     }
     if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_some() {
         return Err("WEBVIEW2_USER_DATA_FOLDER would invalidate this benchmark".into());
     }
-    let sessions = match std::env::var("AAW_WEBVIEW2_BENCH_SESSIONS").as_deref() {
-        Ok("1") => 1,
-        Ok("3") => 3,
-        _ => return Err("AAW_WEBVIEW2_BENCH_SESSIONS must be 1 or 3".into()),
+    let sessions = match (is_parallel, std::env::var("AAW_WEBVIEW2_BENCH_SESSIONS").as_deref()) {
+        (true, Ok("2")) => 2,
+        (true, Ok("4")) => 4,
+        (false, Ok("1")) => 1,
+        (false, Ok("3")) => 3,
+        _ => return Err("并发基准使用 2 或 4 个会话，配置基准使用 1 或 3 个会话".into()),
     };
     let shared = std::env::var("AAW_WEBVIEW2_SHARED_PROFILES").as_deref() == Ok("1");
     let settle = std::env::var("AAW_WEBVIEW2_BENCH_SETTLE_MS")
@@ -96,7 +101,7 @@ async fn run(app: &AppHandle) -> Result<Value, String> {
         return Err("benchmark settle delay must be from 1000 to 20000 ms".into());
     }
 
-    let port: u16 = if phase == "perf" {
+    let port: u16 = if phase == "perf" || is_parallel {
         0
     } else {
         std::env::var("AAW_WEBVIEW2_BENCH_PORT")
@@ -125,6 +130,8 @@ async fn run(app: &AppHandle) -> Result<Value, String> {
                         served_cache
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
                             .to_string()
+                    } else if is_parallel {
+                        parallel::PAGE.to_owned()
                     } else {
                         PAGE.to_owned()
                     };
@@ -138,7 +145,9 @@ async fn run(app: &AppHandle) -> Result<Value, String> {
             });
         }
     });
-    let result = if phase == "perf" {
+    let result = if is_parallel {
+        parallel::measure(app, &url, sessions).await
+    } else if phase == "perf" {
         measure(app, &url, sessions, shared, settle).await
     } else {
         verify_profile_lifecycle(app, &url, &phase, &root).await
