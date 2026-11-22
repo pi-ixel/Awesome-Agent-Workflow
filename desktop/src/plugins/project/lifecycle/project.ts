@@ -1,3 +1,4 @@
+import type { SessionHandoff } from "../conversation/types.ts";
 import type { SendOptions } from "../conversation/sessionStore.ts";
 import { removeSessionDraft } from "../composer/draftStore.ts";
 import {
@@ -78,6 +79,7 @@ export type ProjectOperations = Pick<ProjectWorkspace, "registerProject"> &
     | "openSession"
     | "registerSessionTools"
     | "openPluginSession"
+    | "pluginSessionReady"
     | "watchTurns"
     | "watchEvents"
     | "recoverSession"
@@ -229,7 +231,8 @@ export class DesktopProject {
           this.assertOpen();
           return this.operations.openPluginSession(options);
         },
-        watchTurns: (target, listener) => this.operations.watchTurns(target, listener),
+        pluginSessionReady: (target) => this.operations.pluginSessionReady(target),
+        watchTurns: (sessionId, listener) => this.operations.watchTurns(sessionId, listener),
         watchEvents: (target, listener) => this.operations.watchEvents(target, listener),
         recoverSession: this.recoverSession.bind(this),
         stopRecovery: this.stopRecovery.bind(this),
@@ -247,6 +250,7 @@ export class DesktopProject {
         clear: this.clear.bind(this),
         dismissTurnError: this.dismissTurnError.bind(this),
         reportCommandFailure: this.reportCommandFailure.bind(this),
+        setHandoff: this.setHandoff.bind(this),
         send: this.send.bind(this),
         enqueue: this.enqueue.bind(this),
         steer: this.steer.bind(this),
@@ -759,6 +763,10 @@ export class DesktopProject {
   cancelQuestions(target: SessionTarget, id: string): void {
     const session = this.session(target);
     if (!session.disposed) session.approval.getState().cancelQuestions(id);
+  }
+  setHandoff(target: SessionTarget, handoff: SessionHandoff | null): void {
+    const session = this.session(target);
+    if (!session.disposed) session.store.getState().setHandoff(handoff);
   }
   send(
     target: SessionTarget,

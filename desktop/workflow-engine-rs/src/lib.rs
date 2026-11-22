@@ -17,6 +17,7 @@ pub mod question_pool;
 pub mod remote_host;
 pub mod result_channel;
 pub mod runtime;
+pub mod session_board;
 pub mod session_host;
 pub mod source;
 pub mod service_host;
@@ -173,7 +174,7 @@ impl Workflow {
         if next.graph.terminal.as_deref() == Some("blocked") {
             next.stage = Stage::Blocked;
             next.outcome = Some(
-                json!({"status":"blocked","stage":next.graph.phase,"reason":next.graph.terminal_reason}),
+                json!({"status":"blocked","stage":next.graph.phase,"reason":next.graph.terminal_reason,"stop":next.graph.stop}),
             );
         } else if next.graph.terminal.as_deref() == Some("completed") {
             next.stage = Stage::Completed;
@@ -223,7 +224,7 @@ impl Workflow {
                 next.stage = Stage::Blocked;
                 if !already_blocked {
                     next.outcome = Some(
-                        json!({"status":"blocked","stage":next.graph.phase,"reason":next.graph.terminal_reason}),
+                        json!({"status":"blocked","stage":next.graph.phase,"reason":next.graph.terminal_reason,"stop":next.graph.stop}),
                     );
                 }
             }

@@ -5,7 +5,7 @@
 //!    `{"type":"event","event":{"type":"host-frame","runId":…,"frame":"<线帧
 //!    JSON 字符串>"}}`；模拟宿主解码字符串帧、按 id 回应答——经
 //!    `{"type":"host-frame","runId":…,"frame":"<字符串>"}` 写回 stdin。
-//!    native 模式下一次真实 spawn→prompt_turn→turn_ended→完成收口。
+//!    native 模式下一次真实 spawn→prompt_turn→会话状态报告（ADR 040）→完成收口。
 //! 2. cancel_waiting 不回应答：模拟宿主对 cancel_waiting 帧不回帧（Desktop
 //!    语义），随后继续的请求不报 HOST_RESPONSE_ID_MISMATCH。
 //! 3. 应答截止时间：宿主对应答沉默时运行失败而不是永久挂死
@@ -29,8 +29,8 @@ use std::{
 
 /// 模拟宿主：读引擎 stdout 的 event 信封行，对 host-frame 请求按 id 回应答。
 /// spawn 时真的拉起 fake agent（线格式替身里跑真实 ACP 轮次）；prompt_turn
-/// 时驱动一轮 fake agent 轮次、结束才回帧；cancel_waiting 不回帧（Desktop
-/// 语义）。`stall` 为 true 时对 spawn 沉默（超时路径）。返回（终局事件，
+/// 时驱动一轮 fake agent 轮次，应答轮次编号并经 `session-state` 报这一轮
+/// 怎么结束的（ADR 040）；cancel_waiting 不回帧（Desktop 语义）。`stall` 为 true 时对 spawn 沉默（超时路径）。返回（终局事件，
 /// 是否见过 cancel_waiting 帧）。
 fn host_loop(engine: &mut std::process::Child, stall: bool, start: &Value) -> (Value, bool) {
     let mut stdin = engine.stdin.take().unwrap();
@@ -49,10 +49,8 @@ fn host_loop(engine: &mut std::process::Child, stall: bool, start: &Value) -> (V
     // 会话 id → fake agent：dev 流程多个 actor 各自 spawn（引擎按会话寻址
     // prompt_turn），模拟宿主按 session_id 分发（与 nativeHost 同语义）。
     let mut agents: BTreeMap<String, FakeAgent> = BTreeMap::new();
-    // 挂起的 wait_turn_ended 帧（引擎在等下一个轮次边界）：消息轮次由对端
-    // 原生驱动，桩没有消息来源——挂起直至 cancel_waiting 以错误应答唤醒
-    // （与 Desktop nativeHost 同语义）。
-    let mut pending_waits: BTreeMap<String, u64> = BTreeMap::new();
+    // 会话状态序号（ADR 040）：每次报告加一。
+    let mut seq: u64 = 0;
     // 问题池 tracker（二期-3）：按需求单参数真的拉起 tracker 进程并中继
     // JSON-RPC（与 nativeHost 的 TrackerRelay 同语义；状态文件按 cwd 规则
     // 落盘，测试目录由系统回收）。
@@ -98,21 +96,7 @@ fn host_loop(engine: &mut std::process::Child, stall: bool, start: &Value) -> (V
             }
             if kind == "cancel_waiting" {
                 saw_cancel_waiting = true;
-                // fire-and-forget：不回应答本帧（Desktop 语义）；但挂起的
-                // wait 帧要以错误应答唤醒，否则引擎运行线程永久阻塞。
-                for (_, wait_id) in std::mem::take(&mut pending_waits) {
-                    let response = json!({
-                        "id": wait_id,
-                        "response": {"code": "RUN_CANCELLED"},
-                    });
-                    let line = json!({
-                        "type": "host-frame",
-                        "runId": run_id,
-                        "frame": serde_json::to_string(&response).unwrap(),
-                    });
-                    writeln!(stdin, "{line}").unwrap();
-                    stdin.flush().unwrap();
-                }
+                // fire-and-forget：不回应答本帧（Desktop 语义）。
                 continue;
             }
             let result = match kind {
@@ -145,19 +129,17 @@ fn host_loop(engine: &mut std::process::Child, stall: bool, start: &Value) -> (V
                         .unwrap_or("")
                         .to_owned();
                     let prompt = frame["request"]["prompt"].as_str().unwrap_or("");
+                    seq += 1;
+                    let turn = seq;
                     agents
                         .get_mut(&session_id)
                         .expect("prompt for unknown session")
                         .prompt_turn(prompt);
-                    json!({"result":null})
-                }
-                "wait_turn_ended" => {
-                    let session_id = frame["request"]["session_id"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_owned();
-                    pending_waits.insert(session_id, id);
-                    continue; // 挂起：等原生消息轮次或取消唤醒
+                    // 这一轮正常结束：报会话状态（服务协议请求，应答从事件流里忽略）。
+                    seq += 1;
+                    writeln!(stdin, "{}", json!({"id":format!("state-{seq}"),"method":"session-state","params":{"sessionId":session_id,"state":{"seq":seq,"ended":{"turn":turn,"outcome":"completed"}}}})).unwrap();
+                    stdin.flush().unwrap();
+                    json!({"result":{"turn":turn}})
                 }
                 "start_question_tracker" => {
                     let params = &frame["request"]["params"];

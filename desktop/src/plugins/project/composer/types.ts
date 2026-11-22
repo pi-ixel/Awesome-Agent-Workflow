@@ -11,10 +11,16 @@ export interface PromptHistory {
   get(restored?: readonly string[]): readonly string[];
 }
 
+/** 预填选项。target：同时放上「/」里这个扩展条目作为发送对象（ADR 039，条目 id）。 */
+export interface ComposerPrefillOptions {
+  readonly ifEmpty?: boolean;
+  readonly target?: string;
+}
+
 export type ComposerPrefillListener = (
   text: string,
   attachments: readonly ContentBlock[],
-  options?: { ifEmpty?: boolean },
+  options?: ComposerPrefillOptions,
 ) => boolean | void;
 
 export interface DraftImage {
@@ -37,7 +43,7 @@ export interface ProjectComposer {
   prefill(
     text: string,
     attachments?: readonly ContentBlock[],
-    options?: { ifEmpty?: boolean },
+    options?: ComposerPrefillOptions,
   ): boolean;
   subscribePrefill(listener: ComposerPrefillListener): () => void;
 }

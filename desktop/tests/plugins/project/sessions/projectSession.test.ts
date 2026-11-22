@@ -113,6 +113,27 @@ describe("project and session ownership", () => {
     ).resolves.toBe(2);
   });
 
+  it("opens one session at a time, so a plugin re-attaching it reuses the user-side open instead of a second runtime", async () => {
+    const factory = new SessionFactory(() => Promise.resolve([]));
+    const order: string[] = [];
+    let finish!: () => void;
+    const user = factory.open("agent/project/s-1", () => new Promise<void>((resolve) => {
+      order.push("user:start");
+      finish = () => { order.push("user:end"); resolve(); };
+    }));
+    const plugin = factory.exclusive("agent/project/s-1", () => { order.push("plugin"); return Promise.resolve(); });
+    const other = factory.exclusive("agent/project/s-2", () => { order.push("other"); return Promise.resolve(); });
+    await other;
+    await Promise.resolve();
+    expect(order).toEqual(["user:start", "other"]);
+    finish();
+    await Promise.all([user, plugin]);
+    expect(order).toEqual(["user:start", "other", "user:end", "plugin"]);
+    // 前一个失败不卡住后面的。
+    await expect(factory.exclusive("agent/project/s-1", () => Promise.reject(new Error("load failed")))).rejects.toThrow("load failed");
+    await expect(factory.exclusive("agent/project/s-1", () => Promise.resolve(3))).resolves.toBe(3);
+  });
+
   it("project commands and store actions share one queue consumer", async () => {
     const runtime = session("D:/a");
     const { project, target, shutdown } = await projectFor(runtime);

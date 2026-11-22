@@ -53,8 +53,9 @@ export interface WorkflowServiceExit {
  * 宿主回调帧（与引擎 remote_host.rs 的 serde 线格式一一对应）：请求帧是
  * `{"id","request":{kind,…}}`，应答帧同形 `{"id","response":{result|code}}`。
  * kind 的全集见 remote_host.rs `HostRequest`（serde tag="kind" snake_case）：
- * spawn_node_session / prompt_turn / wait_turn_ended / cancel_waiting /
- * start_question_tracker / question_tracker_request。
+ * spawn_node_session / prompt_turn / cancel_waiting / start_question_tracker /
+ * question_tracker_request。会话状态不走帧：宿主经服务协议 `session-state`
+ * 主动报告（ADR 040）。
  * 用户消息从不经过引擎（ADR 023 §2.2 只许可调度文本 prompt_turn 过线）。
  */
 export interface HostRequestFrame {
@@ -111,6 +112,8 @@ export interface SpawnRequirementWire {
    * resultChannel.ts 的唯一规则选定一种追加到 MCP 清单。 */
   readonly result_channel?: ResultChannelOfferWire | null;
   readonly resume_session_id: string | null;
+  /** resume_session_id 是发起运行的会话（ADR 039）：接不上时改开新会话。 */
+  readonly entry_session?: boolean;
   /** 问题池 tracker 启动参数（二期-3；仅 agent 节点的运行携带）。 */
   readonly question_tracker?: TrackerStartParamsWire | null;
 }

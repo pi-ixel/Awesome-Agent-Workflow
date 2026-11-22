@@ -14,11 +14,16 @@
 - `status/`：`workflowService.ts` 是对外服务（工作流库、启动、继续、核验、重试、停止、
   运行列表、画布快照、会话关联）；`library.ts` 解析工作流库返回；`snapshot.ts` 把引擎
   运行详情投影为画布快照与节点状态。
-- `ui/`：`workbench.tsx` 注册右栏 AAW 面板，经通用扩展位接入项目界面（ADR 037：
-  `projectExtension` 给会话区、状态浮层、项目总览与项目树的入口和状态，`agentSwitchGuard`
-  在切换 Agent 前停下进行中的运行；`workflowUi` 只供插件内部用），并向侧栏发布会话分组（ADR 027）。面板外壳 `WorkflowPanel.tsx` 分三层：
-  `WorkflowLibrary.tsx` 工作流库、`WorkflowDetailView.tsx` 工作流（流程图 / 源码 / 运行 /
-  `WorkflowLauncher.tsx` 启动表单）、`RunView.tsx` 一次运行（流程图 `FlowStages.tsx`，数据整理在
-  `flowModel.ts`、变形动画在 `flowMotion.ts`；节点检视器 `NodeDetail.tsx`）。`WorkflowOverview.tsx` 项目总览区块，
-  `WorkflowSessionBanner.tsx` 节点会话回指条，`sessionGroups.ts` 运行 → 侧栏分组。
+- `ui/`：入口分工见 ADR 038——模板在左侧「工作流」功能区，运行在右栏 AAW 标签页，发起只在会话里。
+  `workbench.tsx` 注册二者，经通用扩展位接入项目界面（ADR 037：`projectExtension` 给会话区、状态浮层与
+  项目树的入口和状态，`agentSwitchGuard` 在切换 Agent 前停下进行中的运行；`workflowUi` 只供插件内部用），
+  并向侧栏发布会话分组（ADR 027）。
+  - 功能区：`WorkflowSidebar.tsx` 分类与「用 AI 新建」，`WorkflowWorkspace.tsx` 中间的
+    `WorkflowLibrary.tsx` 工作流库、`WorkflowDetailView.tsx` 工作流（流程图 / 源码）、`DraftPage.tsx` AI 草稿；
+    两者共用 `templateNavigation.ts` 的导航状态。
+  - 右栏：`WorkflowPanel.tsx` 分运行管理 `RunManager.tsx` 与一次运行 `RunView.tsx`（流程图 `FlowStages.tsx`；
+    节点检视器 `NodeDetail.tsx`）。
+  - 发起（ADR 039）：没有表单。`workbench.tsx` 的 `entryCommands` 把每个起点做成「/」菜单的发送对象，
+    `entryInputsOf` 把输入框里的文字交给起点的输入，`entryHint` 给出输入框提示。
+  - `WorkflowSessionBanner.tsx` 节点会话回指条，`sessionGroups.ts` 运行 → 侧栏分组。
 - `health/`：工作区健康检查（工作流服务、工作流库、节点 Agent）；`config.ts` 面板布局兼容。

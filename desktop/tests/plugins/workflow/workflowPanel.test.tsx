@@ -116,15 +116,19 @@ it("offers 处置 on a failed script instead of marking it complete", async () =
   expect(screen.queryByRole("button", { name: "继续运行" })).toBeNull();
 });
 
-it("shows a business-blocked result as blocked rather than completed", async () => {
-  const blocked: RunSummary = { ...run, status: "failed", result: { status: "blocked", stage: "first", reason: "missing information" } };
+it("a blocked run says where and why it stopped; the step keeps its own status", async () => {
+  const blocked: RunSummary = { ...run, status: "blocked", result: { status: "blocked", stage: "first", reason: "补齐信息后从这一步重跑", stop: { phase: "first", callPath: [], route: 1, explain: "信息不全" } } };
   const fake = fakeWorkflowService();
   fake.setRuns([blocked]);
   fake.setSnapshot("run-1", { runId: "run-1", run: blocked, catalog: flow, execution: null, active: false, hasLease: false, retries: [], actors: [], nodes: [
-    { siteId: "ask#1", phaseId: "first", kind: "ask", ordinal: 1, status: "completed", actorSiteId: "", actorOrdinal: 0, callPath: [], scope: {}, result: { status: "blocked", evidence: "missing information" }, candidates: [] },
+    { siteId: "ask#1", phaseId: "first", kind: "ask", ordinal: 1, status: "completed", actorSiteId: "", actorOrdinal: 0, callPath: [], scope: {}, result: { status: "ready", evidence: "missing information" }, candidates: [] },
   ] });
   render(<WorkflowPanel service={fake.service} />);
-  expect(await findStep("需求确认，已阻塞")).toBeInTheDocument();
+  // 步骤做完了就是已完成；流程停下画在它之后的去向上，横幅写原因与处理办法。
+  expect(await findStep("需求确认，已完成")).toBeInTheDocument();
+  expect(screen.getByText("之后停下：信息不全")).toBeInTheDocument();
+  expect(screen.getByText("在「需求确认」之后停下：信息不全")).toBeInTheDocument();
+  expect(screen.getByText("补齐信息后从这一步重跑")).toBeInTheDocument();
   expect(screen.getByText("已阻塞 · 需求确认")).toBeInTheDocument();
 });
 
@@ -231,4 +235,7 @@ it("shows one service-exit banner with the tail of the diagnostics log", async (
   expect(alerts[0]).toHaveTextContent("点「重试」重新启动服务。");
   expect(alerts[0]).toHaveTextContent("[1] database is locked");
   expect(alerts[0]).not.toHaveTextContent("service-stderr.log");
+  // 引擎已自动重启并连上：提示收起，不再让人点「重试」。
+  act(() => fake.emit({ type: "service-reconnected", runId: "" }));
+  expect(screen.queryByText("工作流服务意外退出（退出码 1）。")).toBeNull();
 });

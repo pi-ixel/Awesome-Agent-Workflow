@@ -1,5 +1,5 @@
 import { IconButton } from "../../../../shared/ui/IconButton.tsx";
-import type { SessionItem } from "../types.ts";
+import type { SessionHandoff, SessionItem } from "../types.ts";
 import type { SkillsService } from "../../../skills/service.ts";
 import type { GitService } from "../../../git/service.ts";
 import type { GitReviewNavigation } from "../../../git/types.ts";
@@ -73,7 +73,7 @@ import {
 } from "react";
 import { chatWidthClassOf, chatWidthOptions } from "./chatWidth.ts";
 import { useProjectPreferences } from "../../ui/preferencesView.tsx";
-import { ActionButton } from "../../../../shared/ui/controls.tsx";
+import { ActionButton, Spinner } from "../../../../shared/ui/controls.tsx";
 import { ScopedErrorBoundary } from "../../../../shared/ui/ErrorBoundary.tsx";
 import {
   ArrowDownIcon,
@@ -160,6 +160,20 @@ const SessionItemView = memo(function SessionItemView({
 
 /** 模块级稳定引用：传入 memo 化的 ConversationTurnView 不因每次渲染
  * 的新箭头函数而击穿 memo。 */
+/** 交接中的那一轮：用户的话照常显示，下面是扩展给的状态（如「正在启动工作流…」）。 */
+function HandoffTurn({ handoff }: { readonly handoff: SessionHandoff }) {
+  const [createdAt] = useState(() => new Date().toISOString());
+  return (
+    <div className="space-y-5" data-testid="session-handoff">
+      {renderSessionItem({ kind: "user", id: "handoff", text: handoff.text, createdAt })}
+      <div role="status" className="flex items-center gap-2 border-b border-line/50 pb-2 text-ui-base text-ink-soft">
+        <Spinner className="ui-icon-16 shrink-0 text-ink-mute" />
+        {handoff.label}
+      </div>
+    </div>
+  );
+}
+
 const renderSessionItem = (item: SessionItem): React.JSX.Element => (
   <SessionItemView item={item} />
 );
@@ -453,8 +467,10 @@ export function SessionView({
     !isDraftPreparing &&
     introActive &&
     (connectionPending || (agentCrashed === null && turnError === null));
+  // 交接中（ADR 039）：那句话已经发出、扩展还没接手，像平常发消息一样显示在信息流末尾。
+  const handoff = useSessionValue((state) => state.handoff ?? null);
   const isCenteredEmpty =
-    showConnectionIntro || (items.length === 0 && pendingCount === 0);
+    showConnectionIntro || (items.length === 0 && pendingCount === 0 && handoff === null);
   // chips 只跟随「可发首条消息」的空态：连接中与项目已关闭不显示
   const showDraftChips =
     isCenteredEmpty &&
@@ -1071,14 +1087,6 @@ export function SessionView({
         className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-base"
       >
         <ArchiveNotice openSettings={openArchiveSettings} />
-        <ScopedErrorBoundary
-          scope="工作流节点信息"
-          resetKey={`${contextPath ?? "none"}:${activeSessionId ?? ""}`}
-        >
-          {ExtensionSessionBanner && contextPath && activeSessionId && (
-            <ExtensionSessionBanner project={contextPath} sessionId={activeSessionId} />
-          )}
-        </ScopedErrorBoundary>
         {isDraftPreparing ? (
           <div
             role={draftError ? "alert" : "status"}
@@ -1316,6 +1324,14 @@ export function SessionView({
                     </SessionDock>
                     <ChatInput
                       queue={<QueueDock />}
+                      header={ExtensionSessionBanner && contextPath && activeSessionId ? (
+                        <ScopedErrorBoundary
+                          scope="工作流节点信息"
+                          resetKey={`${contextPath}:${activeSessionId}`}
+                        >
+                          <ExtensionSessionBanner project={contextPath} sessionId={activeSessionId} />
+                        </ScopedErrorBoundary>
+                      ) : undefined}
                       fileCandidates={fileCandidates}
                       skillCandidates={skillCandidates}
                       resolveSlashSkills={resolveSlashSkills}
@@ -1520,7 +1536,7 @@ export function SessionView({
                       将重新连接 agent 并恢复该项目的会话。
                     </p>
                   </div>
-                ) : items.length === 0 ? (
+                ) : items.length === 0 && handoff === null ? (
                   pendingCount > 0 ? (
                     <p className="py-16 text-center text-sm leading-relaxed text-ink-faint">
                       会话暂无消息，当前有 {pendingCount}{" "}
@@ -1559,6 +1575,11 @@ export function SessionView({
                           />
                         </li>
                       ))}
+                      {handoff && (
+                        <li>
+                          <HandoffTurn handoff={handoff} />
+                        </li>
+                      )}
                       {/* 轮次相位行长在消息流末尾：思考中 / 工具运行中 n / 生成中 */}
                       <TurnStatusRow />
                     </ol>

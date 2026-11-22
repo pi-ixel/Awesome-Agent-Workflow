@@ -12,17 +12,19 @@ use aaw_workflow_core::{
     result_channel::ResultChannelStore,
     runtime::{Runtime, RuntimeConfig},
     service_host::{EventSink, ServiceHost},
-    session_host::SessionHost,
+    session_board::SessionBoard,
+    session_host::{SessionHost, SessionState},
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     io::{BufRead, Write},
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
+        mpsc,
     },
     time::Duration,
 };
@@ -33,12 +35,24 @@ struct Active {
     /// 这次运行的会话宿主：RemoteHost，把宿主请求编码成回调帧交给 Desktop。
     session_host: Arc<dyn SessionHost>,
 }
+type ActiveRuns = Arc<Mutex<BTreeMap<String, Active>>>;
+
+/// 运行在服务里的样子：在执行吗、是不是已经叫停还没停下来。
+fn activity(active: &ActiveRuns, id: &str) -> Result<(bool, bool), String> {
+    let map = active.lock().map_err(|_| "SERVICE_LOCKED")?;
+    Ok(map.get(id).map_or((false, false), |item| (true, item.cancel.load(Ordering::SeqCst))))
+}
 struct Service {
     db: PathBuf,
     /// 工作流库：预置（随应用安装）与用户的（应用数据目录）。
     library: Library,
-    active: Arc<Mutex<BTreeMap<String, Active>>>,
+    active: ActiveRuns,
     sink: EventSink,
+    /// 宿主报告的会话状态（ADR 040）：所有运行共用。
+    board: Arc<SessionBoard>,
+    /// 服务内存里的变化（运行开始、叫停、结束）：数据库触发器看不到，告诉
+    /// 推送线程这次运行要重新推一份。
+    changes: mpsc::Sender<String>,
     /// 宿主应答帧路由：runId → 该运行 RemoteHost 的应答投递闭包
     /// （launch 装配时登记，运行收尾时移除；按关联 id 精确投递）。
     frame_router: Arc<Mutex<BTreeMap<String, HostFrameSink>>>,
@@ -96,14 +110,14 @@ fn flow_input_requirement(w: &Workflow) -> String {
 fn run_status(w: &Workflow, active: bool) -> &'static str {
     match w.stage {
         Stage::Completed => "completed",
-        Stage::Blocked => "failed",
+        Stage::Blocked => "blocked",
         Stage::Waiting => "waiting",
         _ if active => "running",
         _ => "stopped",
     }
 }
 
-fn run_value(id: &str, w: &Workflow, active: bool, info: &RunInfo) -> Value {
+fn run_value(id: &str, w: &Workflow, (active, stopping): (bool, bool), info: &RunInfo) -> Value {
     let definition = &w.graph.definition;
     let source = definition.source.clone().unwrap_or(Value::Null);
     let requirement = flow_input_requirement(w);
@@ -113,6 +127,9 @@ fn run_value(id: &str, w: &Workflow, active: bool, info: &RunInfo) -> Value {
         "name": definition.name,
         "title": title,
         "status": run_status(w, active),
+        "active": active,
+        // 已经叫停、执行线程还没退出（ADR 040）：界面显示「正在停止」。
+        "stopping": active && stopping,
         "workflowId": source["workflowId"].as_str().unwrap_or(definition.id.as_str()),
         "workflowVersion": source["version"],
         "entry": source["entry"],
@@ -122,11 +139,127 @@ fn run_value(id: &str, w: &Workflow, active: bool, info: &RunInfo) -> Value {
         "inputs": w.graph.vars.get("input").cloned().unwrap_or(Value::Null),
         "createdAt": info.created_at,
         "updatedAt": info.updated_at,
+        // 执行时段（停着的时间不计入等待与用时）：在执行时从何时起，停着时停在何时。
+        "activeSince": if active { info.active_since } else { None },
+        "stoppedAt": if active { None } else { info.stopped_at },
+        "spans": info.spans,
         "archivedAt": info.archived_at,
         "args": {"workflowId": definition.id, "workflowRevision": definition.revision_label()},
         "result": w.outcome,
         "failure": w.failure.as_ref().map(|code| json!({"code": code, "detail": w.failure_detail})),
     })
+}
+
+/// 一次运行的会话关联（侧栏分组、输入框上的工作流条用）：按执行顺序列出
+/// 各角色的会话和它做过的步骤。已归档的运行带 archived 标记：Desktop 把它的
+/// 会话从侧栏一起隐去（ADR 036）。
+fn run_links(db: &Journal, id: &str, project: &str, workflow: &Workflow, state: (bool, bool)) -> Result<Value, String> {
+    let info = db.run_info(id)?;
+    let records = db.nodes(id, project)?;
+    let mut actors: BTreeMap<String, Value> = BTreeMap::new();
+    // 侧栏按会话第一次出现的先后排（即执行顺序），不按角色名排。
+    let mut order: Vec<String> = Vec::new();
+    for link in db.session_links(id, project)? {
+        if !actors.contains_key(&link.actor) {
+            order.push(link.actor.clone());
+        }
+        let node = records.iter().find(|n| n.site_id == link.site && n.ordinal == link.ordinal);
+        let definition = workflow.graph.definition.nodes.get(&link.site);
+        let display_actor = definition.map(|n| n.actor.as_str()).unwrap_or(&link.actor);
+        let entry = actors.entry(link.actor.clone()).or_insert_with(|| json!({"sessionId":link.session_id,"actorSiteId":link.actor,"actorOrdinal":1,"actorName":display_actor,"nodes":[]}));
+        // 节点显示名（同画布目录的取法）与这一步在会话里最近一轮的情况（ADR 040）。
+        let label = definition
+            .map(|n| {
+                n.ui.get("label")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| if n.actor.is_empty() { link.site.clone() } else { n.actor.clone() })
+            })
+            .unwrap_or_else(|| link.site.clone());
+        entry["nodes"].as_array_mut().expect("array").push(json!({
+            "siteId": link.site,
+            "ordinal": link.ordinal,
+            "kind": "ask",
+            "status": node.map(|n| n.status.as_str()).unwrap_or("running"),
+            "label": label,
+            "turn": node.and_then(|n| n.turn.clone()),
+            "submitted": node.is_some_and(|n| n.submitted),
+        }));
+    }
+    let summary = run_value(id, workflow, state, &info);
+    Ok(json!({
+        "runId": id,
+        "version": db.run_version(id)?,
+        "workflowId": summary["workflowId"],
+        "workflowName": workflow.graph.definition.name,
+        "title": summary["title"],
+        "status": summary["status"],
+        "active": summary["active"],
+        "stopping": summary["stopping"],
+        "archived": info.archived_at.is_some(),
+        "failed": workflow.failure.is_some(),
+        "revision": workflow.graph.definition.revision_label(),
+        "links": order.iter().filter_map(|actor| actors.remove(actor)).collect::<Vec<_>>(),
+    }))
+}
+
+/// 推送线程（ADR 040）：运行的任何可见变化都推一份完整的新状态给 Desktop。
+///
+/// 数据库里的变化由触发器记进 `run_changes`（写入方不用记得通知）；这里每
+/// 50ms 看一次 `PRAGMA data_version`，有别的连接提交过就比对各运行的版本号。
+/// 服务内存里的变化（运行开始、叫停、结束）经 `nudges` 送来。推送的是运行
+/// 摘要与会话关联本身，Desktop 收到直接替换，不用再回头拉。
+fn pump_changes(db: PathBuf, active: ActiveRuns, sink: EventSink, nudges: mpsc::Receiver<String>) {
+    let Ok(journal) = Journal::open(&db) else {
+        return;
+    };
+    let mut known: BTreeMap<String, i64> = journal.run_versions().unwrap_or_default().into_iter().collect();
+    let mut data_version = journal.data_version().unwrap_or(0);
+    loop {
+        let mut changed = BTreeSet::new();
+        match nudges.recv_timeout(Duration::from_millis(50)) {
+            Ok(run) => {
+                changed.insert(run);
+                while let Ok(run) = nudges.try_recv() {
+                    changed.insert(run);
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+        }
+        if let Ok(version) = journal.data_version()
+            && version != data_version
+        {
+            data_version = version;
+            for (run, version) in journal.run_versions().unwrap_or_default() {
+                if known.get(&run) != Some(&version) {
+                    known.insert(run.clone(), version);
+                    changed.insert(run);
+                }
+            }
+        }
+        for run in changed {
+            let _ = sink(run_changed(&journal, &active, &run));
+        }
+    }
+}
+
+fn run_changed(journal: &Journal, active: &ActiveRuns, id: &str) -> Value {
+    let state = (|| -> Result<Value, String> {
+        let project = journal.project_for_run(id)?;
+        let (_, workflow) = journal.load(id, &project)?;
+        let state = activity(active, id)?;
+        let info = journal.run_info(id)?;
+        Ok(json!({
+            "type": "run-changed",
+            "runId": id,
+            "project": project,
+            "version": journal.run_version(id)?,
+            "run": run_value(id, &workflow, state, &info),
+            "links": run_links(journal, id, &project, &workflow, state)?,
+        }))
+    })();
+    state.unwrap_or_else(|_| json!({"type":"run-removed","runId":id}))
 }
 
 /// 默认标题：需求第一行（截到 40 个字），没有需求时用工作流名称。
@@ -147,11 +280,7 @@ impl Service {
         Journal::open(&self.db)
     }
     fn is_active(&self, id: &str) -> Result<bool, String> {
-        Ok(self
-            .active
-            .lock()
-            .map_err(|_| "SERVICE_LOCKED")?
-            .contains_key(id))
+        Ok(activity(&self.active, id)?.0)
     }
     /// 工作流库里一个工作流的详情：元信息、各起点的画布目录与源码文件。
     fn draft_check(&self, draft_id: &str) -> Result<Value, String> {
@@ -433,6 +562,9 @@ impl Service {
         let mut journal = self.open()?;
         journal.create_with_snapshot(&id, &project, &workflow, &snapshot)?;
         journal.set_run_info(&id, &title)?;
+        if let Some(session) = input["entrySession"].as_str().filter(|session| !session.is_empty()) {
+            journal.set_entry_session(&id, session)?;
+        }
         drop(journal);
         self.launch(id.clone(), project, owner, config, false)?;
         Ok(json!({"runId":id}))
@@ -462,13 +594,10 @@ impl Service {
         resume: bool,
     ) -> Result<(), String> {
         let cancel = Arc::new(AtomicBool::new(false));
-        let host = Arc::new(ServiceHost::new(
-            id.clone(),
-            project.clone(),
-            owner.clone(),
-            self.db.clone(),
-            self.sink.clone(),
-        ));
+        let host = Arc::new(
+            ServiceHost::new(id.clone(), project.clone(), owner.clone(), self.db.clone(), self.sink.clone())
+                .with_board(self.board.clone()),
+        );
         // 会话宿主：RemoteHost 把宿主请求编码成回调帧交给 Desktop；应答帧由
         // main 的 stdin 路由按 runId 与关联 id 投回（每运行一个 RemoteHost）。
         // 引擎→Desktop 的宿主回调帧走与普通事件同一条事件信封
@@ -485,6 +614,7 @@ impl Service {
                 )
             }),
             self.host_response_timeout,
+            self.board.clone(),
         ));
         // 应答帧路由：main 按 runId 解码后调 deliver（按关联 id 从
         // 登记表精确投递到等待中的请求；运行收尾移除）。
@@ -518,6 +648,8 @@ impl Service {
         let frame_router = self.frame_router.clone();
         let remote_hosts = self.remote_hosts.clone();
         let channels = self.channels.clone();
+        let changes = self.changes.clone();
+        let _ = changes.send(id.clone());
         std::thread::spawn(move || {
             let _ = sink(json!({"type":"run-starting","runId":id,"project":project}));
             let result = (|| -> Result<Value, String> {
@@ -574,7 +706,10 @@ impl Service {
             }
             if let Ok(mut hosts) = remote_hosts.lock() {
                 hosts.remove(&id);
-            }            // 运行完成：结果工具不再需要。其余情况（停止、等确认、出错）保留，继续时沿用。
+            }
+            // 不在执行了：数据库里没有这件事，告诉推送线程重推一份。
+            let _ = changes.send(id.clone());
+            // 运行完成：结果工具不再需要。其余情况（停止、等确认、出错）保留，继续时沿用。
             if Journal::open(&db)
                 .and_then(|journal| journal.load(&id, &project))
                 .is_ok_and(|(_, workflow)| workflow.stage == Stage::Completed)
@@ -633,6 +768,7 @@ impl Service {
             self.sink.clone(),
         ));
         let recorded = action.clone();
+        let step = aaw_workflow_core::prompt::step_view(&action)?;
         channel.begin_with_recorder(
             request.schema,
             Some(Arc::new(move |value| {
@@ -640,12 +776,14 @@ impl Service {
                 host.record_result_candidate(&recorded, &Uuid::new_v4().to_string(), value)
             })),
         )?;
+        channel.set_step(step)?;
         serde_json::to_value(channel.offer(&exe)).map_err(|e| e.to_string())
     }
     fn snapshot(&self, id: &str, project: &str) -> Result<Value, String> {
         let db = self.open()?;
         let (_, workflow) = db.load(id, project)?;
-        let active = self.is_active(id)?;
+        let state = activity(&self.active, id)?;
+        let active = state.0;
         let nodes = db.nodes(id, project)?;
         let links = db.session_links(id, project)?;
         let sessions_by_action: BTreeMap<_, _> = links
@@ -672,8 +810,9 @@ impl Service {
                     "sessionId": session_id,
                     "result": node.result,
                     "candidates": candidates,
-                    "awaitingInput": node.awaiting_input,
-                    "awaitingInputSince": node.awaiting_input_since,
+                    "turn": node.turn,
+                    "turnEndedAt": node.turn_ended_at,
+                    "submitted": node.submitted,
                     "checkpoint": node.checkpoint,
                     "mark": node.mark,
                     "startedAt": node.started_at,
@@ -708,52 +847,14 @@ impl Service {
             })
             .collect();
         Ok(
-            json!({"run":run_value(id,&workflow,active,&db.run_info(id)?),"catalog":Some(workflow.graph.definition.catalog()),"execution":{"phase":workflow.graph.phase,"stack":workflow.graph.stack,"calls":workflow.graph.all_calls()},"active":active,"hasLease":db.has_lease(id,project)?,"retries":retries,"nodes":nodes,"actors":actors.into_values().collect::<Vec<_>>(),"checkpoints":db.checkpoints(id,project)?,"gates":workflow.gates(),"autoConfirm":workflow.auto_confirm,"interventions":db.interventions(id,project)?,"artifacts":artifacts}),
+            json!({"version":db.run_version(id)?,"run":run_value(id,&workflow,state,&db.run_info(id)?),"catalog":Some(workflow.graph.definition.catalog()),"execution":{"phase":workflow.graph.phase,"stack":workflow.graph.stack,"calls":workflow.graph.all_calls()},"active":active,"hasLease":db.has_lease(id,project)?,"retries":retries,"nodes":nodes,"actors":actors.into_values().collect::<Vec<_>>(),"checkpoints":db.checkpoints(id,project)?,"gates":workflow.gates(),"autoConfirm":workflow.auto_confirm,"interventions":db.interventions(id,project)?,"artifacts":artifacts}),
         )
     }
     fn links(&self, project: &str) -> Result<Value, String> {
         let db = self.open()?;
         let mut runs = Vec::new();
         for (id, workflow) in db.list_runs(project)? {
-            // 已归档的运行带 archived 标记：Desktop 把它的会话从侧栏一起隐去（ADR 036）。
-            let info = db.run_info(&id)?;
-            let active = self.is_active(&id)?;
-            let records = db.nodes(&id, project)?;
-            let mut actors: BTreeMap<String, Value> = BTreeMap::new();
-            // 侧栏按会话第一次出现的先后排（即执行顺序），不按角色名排。
-            let mut order: Vec<String> = Vec::new();
-            for link in db.session_links(&id, project)? {
-                if !actors.contains_key(&link.actor) {
-                    order.push(link.actor.clone());
-                }
-                let node = records
-                    .iter()
-                    .find(|n| n.site_id == link.site && n.ordinal == link.ordinal);
-                let display_actor = workflow
-                    .graph
-                    .definition
-                    .nodes
-                    .get(&link.site)
-                    .map(|n| n.actor.as_str())
-                    .unwrap_or(&link.actor);
-                let entry=actors.entry(link.actor.clone()).or_insert_with(||json!({"sessionId":link.session_id,"actorSiteId":link.actor,"actorOrdinal":1,"actorName":display_actor,"nodes":[]}));
-                // 侧栏会话分组：节点显示名（同画布目录的取法）与「在等用户回复」标记。
-                let label = workflow
-                    .graph
-                    .definition
-                    .nodes
-                    .get(&link.site)
-                    .map(|n| {
-                        n.ui.get("label")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned)
-                            .unwrap_or_else(|| if n.actor.is_empty() { link.site.clone() } else { n.actor.clone() })
-                    })
-                    .unwrap_or_else(|| link.site.clone());
-                entry["nodes"].as_array_mut().expect("array").push(json!({"siteId":link.site,"ordinal":link.ordinal,"kind":"ask","status":node.map(|n|n.status.as_str()).unwrap_or("running"),"label":label,"awaitingInput":node.is_some_and(|n|n.awaiting_input)}));
-            }
-            let summary = run_value(&id, &workflow, active, &info);
-            runs.push(json!({"runId":id,"workflowId":summary["workflowId"],"workflowName":workflow.graph.definition.name,"title":summary["title"],"status":run_status(&workflow,active),"active":active,"archived":info.archived_at.is_some(),"failed":workflow.failure.is_some(),"revision":workflow.graph.definition.revision_label(),"links":order.iter().filter_map(|actor| actors.remove(actor)).collect::<Vec<_>>()}));
+            runs.push(run_links(&db, &id, project, &workflow, activity(&self.active, &id)?)?);
         }
         Ok(json!(runs))
     }
@@ -899,7 +1000,9 @@ impl Service {
                 let db = self.open()?;
                 let mut runs = Vec::new();
                 for (id, w) in db.list_runs(project)? {
-                    runs.push(run_value(&id, &w, self.is_active(&id)?, &db.run_info(&id)?));
+                    let mut run = run_value(&id, &w, activity(&self.active, &id)?, &db.run_info(&id)?);
+                    run["version"] = json!(db.run_version(&id)?);
+                    runs.push(run);
                 }
                 Ok(json!(runs))
             }
@@ -908,7 +1011,7 @@ impl Service {
                 let db = self.open()?;
                 let mut runs = Vec::new();
                 for (id, project, w) in db.list_all_runs()? {
-                    let mut run = run_value(&id, &w, self.is_active(&id)?, &db.run_info(&id)?);
+                    let mut run = run_value(&id, &w, activity(&self.active, &id)?, &db.run_info(&id)?);
                     run["project"] = json!(project);
                     runs.push(run);
                 }
@@ -952,7 +1055,19 @@ impl Service {
             // WebView 重载后新的节点会话宿主上线：旧宿主持有的会话与轮次
             // 状态已随之消失，挂起请求的应答永远不会来——全部以 HOST_RESET
             // 应答，runtime 按原会话 id 经新宿主重新拉起并续跑。
+            // ADR 040：宿主报告节点会话的状态（每次变化一份完整的）。
+            // 记进轮次记录与推给等着的运行线程分开：记录跟着会话的登记走，运行停着也记。
+            "session-state" => {
+                let session = string(args, "sessionId")?;
+                let state: SessionState = serde_json::from_value(args["state"].clone()).map_err(|_| "INVALID_ARGUMENT")?;
+                if !self.board.report(session, state.clone()) {
+                    return Ok(json!(false));
+                }
+                aaw_workflow_core::service_host::record_session_state(&self.db, &self.sink, session, &state)?;
+                Ok(json!(true))
+            }
             "host-reset" => {
+                self.board.reset();
                 let hosts: Vec<Arc<RemoteHost>> = self
                     .remote_hosts
                     .lock()
@@ -971,6 +1086,8 @@ impl Service {
                 let item = active.get(id).ok_or("RUN_NOT_ACTIVE")?;
                 item.cancel.store(true, Ordering::SeqCst);
                 item.session_host.cancel_waiting();
+                // 「正在停止」也要推出去。
+                let _ = self.changes.send(id.to_owned());
                 Ok(Value::Null)
             }
             "recover" | "authorize-retry" | "reconcile" => self.mutate(args, method),
@@ -1080,11 +1197,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let user = db.parent().map(|dir| dir.join("workflows")).unwrap_or_default();
+    let active: ActiveRuns = Arc::new(Mutex::new(BTreeMap::new()));
+    let (changes, nudges) = mpsc::channel();
+    {
+        let (db, active, sink) = (db.clone(), active.clone(), sink.clone());
+        std::thread::spawn(move || pump_changes(db, active, sink, nudges));
+    }
     let service = Service {
         library: Library { presets, user },
         db,
-        active: Arc::new(Mutex::new(BTreeMap::new())),
+        active,
         sink,
+        board: SessionBoard::new(),
+        changes,
         frame_router,
         remote_hosts: Arc::new(Mutex::new(BTreeMap::new())),
         channels: Arc::new(ResultChannelStore::new()),

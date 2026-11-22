@@ -1,0 +1,42 @@
+# AAW 快速复测（开发用测试工作流，不随应用发布）。
+# 每个检查点都能稳定触发，改完工作流相关代码后照 docs/workflow/flowtest.md 复测。
+# 所有文件只写在项目的 trial/flowtest/ 下，每次运行覆盖。
+format: aaw-workflow/1
+id: aaw-flowtest
+name: AAW 快速复测
+version: 1.0.0
+description: 工作流功能的快速复测：在 trial/flowtest/ 下做两张小卡片、汇总成一份清单，经过评审、整改、复核和脚本检查后交接。每一步的活都很小，重点是把流程的各个环节走一遍。
+root: main
+
+entries:
+  - id: full
+    label: 完整复测
+    description: 走一遍全部环节：会话里提问、等你确认、并行子流程、评审整改复核、脚本检查、交接。
+    hint: 随便写一句话作为这次的主题，Enter 开始
+    start: ask
+    inputs:
+      topic:
+        label: 这次的主题
+        required: true
+        placeholder: 例如「水果」
+  - id: block
+    label: 阻塞复测
+    description: 一步之后流程按设计停下，用来看「已阻塞」在各处的呈现。
+    start: block_probe
+
+stages:
+  - id: prepare
+    label: 准备
+    description: 和你确认这次的标题，定下要做的两张卡片。
+  - id: build
+    label: 制作
+    description: 两张卡片并行制作，再汇总成一份清单。
+  - id: review
+    label: 评审
+    description: 评审清单，有问题就整改，再由同一位评审员复核。
+  - id: finish
+    label: 收尾
+    description: 脚本检查清单格式，然后交接。
+
+vars:
+  reviewRounds: 0

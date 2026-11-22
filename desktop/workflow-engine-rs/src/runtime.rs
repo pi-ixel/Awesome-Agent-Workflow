@@ -8,7 +8,7 @@ use crate::{
     Action, Stage, journal::Journal,
     prompt::agent_request, python_process, question_pool::{QuestionPool, tracker_start_params},
     result_channel::{ResultChannel, ResultChannelStore},
-    session_host::{SessionHost, TrackerStartParams},
+    session_host::{SessionHost, TrackerStartParams, TurnOutcome},
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -35,12 +35,9 @@ pub trait Host: Send + Sync + 'static {
     ) -> Result<(), String> {
         Ok(())
     }
-    /// 一轮结束仍无结果、开始 / 结束等待用户回复（呈现用，失败不影响执行）。
-    fn awaiting_input(&self, _action: &Action, _waiting: bool) -> Result<(), String> {
-        Ok(())
-    }
-    /// 等待回复后的轮次正常结束；宿主重载造成的中断不算一次回复。
-    fn input_round_completed(&self, _action: &Action) -> Result<(), String> {
+    /// 工作流在会话里发出了这一步的说明，那一轮的编号是 `turn`（ADR 040 轮次
+    /// 记录里只有这一项由运行线程写；各轮怎么结束的由服务按会话报告记）。
+    fn turn_prompted(&self, _action: &Action, _session_id: &str, _turn: u64) -> Result<(), String> {
         Ok(())
     }
     /// Query completed outputs in the current run; the host enforces run scope.
@@ -123,8 +120,21 @@ fn reattach_actor(
     Ok(())
 }
 
-/// 准备好的 Agent 动作；最后一项是这一步已经提交、还没采用的结果（继续运行时直接采用）。
-type PreparedAgent = (Action, crate::prompt::AgentRequest, Actor, Option<Value>);
+/// 这一步在会话里从哪接着做（按轮次记录，ADR 040）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Opening {
+    /// 这个会话没收到过这个节点的工单：发开场白（ADR 041）。
+    Fresh,
+    /// 这个会话收到过这个节点的工单（之前的执行），这一次还没发：只发返工提示，
+    /// 带着这是第几次。
+    Rework(u32),
+    /// 发过说明：先看会话此刻怎样再定（见 `drive_agent_step`）。带着轮次记录里
+    /// 最近的一轮（编号、结束方式；还没看到结束时为空）。
+    Resume(u64, Option<TurnOutcome>),
+}
+
+/// 准备好的 Agent 动作；`Option<Value>` 是这一步已经提交、还没采用的结果（继续运行时直接采用）。
+type PreparedAgent = (Action, crate::prompt::AgentRequest, Actor, Option<Value>, Opening);
 type PreparedPython = (
     Action,
     Vec<String>,
@@ -388,9 +398,16 @@ impl<H: Host> Runtime<H> {
                 .ok_or("QUESTION_POOL_UNAVAILABLE")?
                 .clone();
             if !self.actors.contains_key(&action.actor) {
-                let saved = self
+                let (saved, entry_session) = match self
                     .journal
-                    .actor_session(&self.id, &self.project, &action.actor)?;
+                    .actor_session(&self.id, &self.project, &action.actor)?
+                {
+                    Some(session) => (Some(session), false),
+                    None => match self.journal.unclaimed_entry_session(&self.id, &self.project)? {
+                        Some(session) => (Some(session), true),
+                        None => (None, false),
+                    },
+                };
                 let schema = request.schema.clone();
                 let results = self
                     .channels
@@ -441,6 +458,7 @@ impl<H: Host> Runtime<H> {
                     mcp_servers: servers,
                     result_channel: Some(result_channel),
                     resume_session_id: saved.clone(),
+                    entry_session,
                     question_tracker: self.question_tracker.clone(),
                 };
                 // 会话还没建好宿主就换代了（如刚启动就刷新界面）：旧宿主的应答不会再来，
@@ -492,7 +510,16 @@ impl<H: Host> Runtime<H> {
             }
             let actor = self.actors.remove(&action.actor).ok_or("ACTOR_NOT_FOUND")?;
             let adopted = self.submitted_result(&action, &request.schema)?;
-            prepared.push((action, request, actor, adopted));
+            actor.results.set_step(crate::prompt::step_view(&action)?)?;
+            let session_id = actor.process.session_id();
+            let opening = match self.journal.last_turn(&self.id, &self.project, &action.site, action.ordinal)? {
+                Some(turn) if turn.session_id == session_id => Opening::Resume(turn.turn, turn.outcome),
+                _ => match self.journal.prompted_executions(&self.id, &self.project, &action.site, action.ordinal, session_id)? {
+                    0 => Opening::Fresh,
+                    earlier => Opening::Rework(earlier + 1),
+                },
+            };
+            prepared.push((action, request, actor, adopted, opening));
         }
         Ok((prepared, python_actions))
     }
@@ -611,7 +638,7 @@ impl<H: Host> Runtime<H> {
                                     let _ = send.send(Finished::Python(action, result));
                                 });
                             }
-                            for (action, request, mut actor, adopted) in prepared {
+                            for (action, request, mut actor, adopted, opening) in prepared {
                                 let send = send.clone();
                                 let cancel = self.cancel.clone();
                                 let host = self.host.clone();
@@ -624,92 +651,7 @@ impl<H: Host> Runtime<H> {
                                             actor.results.abort();
                                             return Ok(value);
                                         }
-                                        // 一轮的推进以「结果是否已交付」为准；轮次边界只是
-                                        // 核验时机。宿主换代（HOST_RESET）时旧宿主的轮次
-                                        // 信号不会再来：按原会话 id 重新拉起，发一轮续跑
-                                        // 提示，回到同一核验循环。
-                                        let mut prompt = request.workflow_prompt();
-                                        let mut resets = 0usize;
-                                        let mut on_reset = |actor: &mut Actor,
-                                                            error: String|
-                                         -> Result<(), String> {
-                                            if error != crate::remote_host::HOST_RESET {
-                                                return Err(error);
-                                            }
-                                            loop {
-                                                resets += 1;
-                                                if resets > MAX_HOST_RESETS_PER_TURN {
-                                                    return Err("HOST_RESET_LIMIT".into());
-                                                }
-                                                match reattach_actor(
-                                                    &session_host,
-                                                    actor,
-                                                    &action,
-                                                    cancel.clone(),
-                                                ) {
-                                                    Ok(()) => return Ok(()),
-                                                    Err(error)
-                                                        if error
-                                                            == crate::remote_host::HOST_RESET => {}
-                                                    Err(error) => return Err(error),
-                                                }
-                                            }
-                                        };
-                                        'turn: loop {
-                                            if let Err(error) = actor.process.prompt_turn(
-                                                &crate::session_host::TurnRequest {
-                                                    action: action.clone(),
-                                                    prompt: prompt.clone(),
-                                                },
-                                                cancel.clone(),
-                                            ) {
-                                                on_reset(&mut actor, error)?;
-                                                if actor.results.has_result()? {
-                                                    break 'turn actor.results.finish();
-                                                }
-                                                prompt = request.workflow_prompt();
-                                                continue 'turn;
-                                            }
-                                            loop {
-                                                // 轮次边界（turn_ended）后的交付核验：
-                                                // 有结果即收尾；无结果则等下一个边界。
-                                                // ADR 023 二期-2：轮次间的用户消息由宿主
-                                                // 原生会话流直接驱动新轮次，引擎只收
-                                                // turn_ended——排队/送达语义不过引擎。
-                                                if actor.results.has_result()? {
-                                                    break 'turn actor.results.finish();
-                                                }
-                                                // ADR 024 §9-3：一整轮结束仍未列过
-                                                // 结果通道工具 = Agent 手里没有
-                                                // submit_workflow_result，再等多少轮
-                                                // 也交付不了——显式失败交人工核验/
-                                                // 授权重试，绝不冒充「等待用户」。
-                                                if !actor.results.tools_listed()? {
-                                                    return Err(
-                                                        "RESULT_CHANNEL_UNREACHABLE".into(),
-                                                    );
-                                                }
-                                                // 这一轮结束了、结果还没交：在等用户经会话
-                                                // 回复。标记只供呈现（面板「等你回复」），
-                                                // 写入失败不影响执行，边界到达即清除。
-                                                let _ = host.awaiting_input(&action, true);
-                                                let waited = actor
-                                                    .process
-                                                    .wait_turn_ended(cancel.clone());
-                                                let _ = host.awaiting_input(&action, false);
-                                                if waited.is_ok() {
-                                                    let _ = host.input_round_completed(&action);
-                                                }
-                                                if let Err(error) = waited {
-                                                    on_reset(&mut actor, error)?;
-                                                    if actor.results.has_result()? {
-                                                        break 'turn actor.results.finish();
-                                                    }
-                                                    prompt = request.workflow_prompt();
-                                                    continue 'turn;
-                                                }
-                                            }
-                                        }
+                                        drive_agent_step(&*host, &session_host, &mut actor, &action, &request, opening, &cancel)
                                     })();
                                     // 被停止时不作废：运行没结束，结果工具照常收结果（ADR 037）。
                                     if result.is_err()
@@ -821,6 +763,118 @@ impl<H: Host> Runtime<H> {
             return Err(error);
         }
         Ok(())
+    }
+}
+
+/// 在会话里推进一个 Agent 步骤，直到交了结果（ADR 040）。
+///
+/// 会话是唯一来源：Agent 在会话里干什么由宿主报告的会话状态说了算，这里只在
+/// 每一轮结束时看结果交没交。轮次怎么结束的由服务按会话报告记进轮次记录（运行
+/// 停着也记），这里不写；被打断、出错都不让这一步失败。
+///
+/// 接着做（继续运行、宿主换代后接回会话）时先看会话此刻怎样，再决定发不发东西，
+/// 像补一句话一样排在会话当前这一轮后面：
+/// - 正在跑一轮（你在会话里说着话）：等它结束再看；
+/// - 空着、最近一轮正常结束：在等你回复，什么也不发；
+/// - 空着、最近一轮被打断 / 出错 / 没看到结束：发一句「接着做」。
+fn drive_agent_step<H: Host>(
+    host: &H,
+    session_host: &Arc<dyn SessionHost>,
+    actor: &mut Actor,
+    action: &Action,
+    request: &crate::prompt::AgentRequest,
+    opening: Opening,
+    cancel: &Arc<AtomicBool>,
+) -> Result<Value, String> {
+    // 宿主换代（HOST_RESET）时旧宿主的应答与报告不会再来：按原会话 id 经新
+    // 宿主接回同一会话，回到同一循环。
+    let mut resets = 0usize;
+    let mut reattach = |actor: &mut Actor, error: String| -> Result<(), String> {
+        if error != crate::remote_host::HOST_RESET {
+            return Err(error);
+        }
+        loop {
+            resets += 1;
+            if resets > MAX_HOST_RESETS_PER_TURN {
+                return Err("HOST_RESET_LIMIT".into());
+            }
+            match reattach_actor(session_host, actor, action, cancel.clone()) {
+                Ok(()) => return Ok(()),
+                Err(error) if error == crate::remote_host::HOST_RESET => {}
+                Err(error) => return Err(error),
+            }
+        }
+    };
+    let session_id = actor.process.session_id().to_owned();
+    // `latest`：最近知道的一轮（编号、结束方式）；`handled`：结束的轮次里已经
+    // 看过的最大编号；`seen`：看过的会话状态序号；`deciding`：接着做时还没定
+    // 发不发东西。
+    let (mut prompt, mut latest, mut deciding) = match opening {
+        Opening::Fresh => (Some(request.workflow_prompt()), None, false),
+        Opening::Rework(attempt) => (Some(request.rework_prompt(attempt)), None, false),
+        Opening::Resume(turn, outcome) => (None, Some((turn, outcome)), true),
+    };
+    let mut handled = match latest {
+        Some((turn, Some(_))) => turn,
+        Some((turn, None)) => turn.saturating_sub(1),
+        None => 0,
+    };
+    let mut seen = 0u64;
+    // 工作流自己发说明的那一轮起，会话一定装着这次的结果工具（宿主等工具换好才发）；
+    // 在那之前的轮次（例如引擎重启前就在跑的、你在会话里说的那一轮）可能还是旧工具。
+    let mut tools_from: Option<u64> = None;
+    loop {
+        if let Some(text) = prompt.take() {
+            match actor.process.prompt_turn(
+                &crate::session_host::TurnRequest { action: action.clone(), prompt: text.clone() },
+                cancel.clone(),
+            ) {
+                Ok(turn) => {
+                    let _ = host.turn_prompted(action, &session_id, turn);
+                    tools_from.get_or_insert(turn);
+                    latest = Some((turn, None));
+                    handled = handled.max(turn.saturating_sub(1));
+                }
+                Err(error) => {
+                    reattach(actor, error)?;
+                    prompt = Some(text);
+                    continue;
+                }
+            }
+        }
+        let state = match actor.process.wait_state(seen, cancel.clone()) {
+            Ok(state) => state,
+            Err(error) => {
+                reattach(actor, error)?;
+                // 接回之后重新看会话怎样：那一刻 Agent 在干活，那一轮随旧页面断了。
+                deciding = true;
+                continue;
+            }
+        };
+        seen = state.seq;
+        if let Some(ended) = state.ended.clone().filter(|ended| ended.turn > handled) {
+            handled = ended.turn;
+            latest = Some((ended.turn, Some(ended.outcome)));
+            if actor.results.has_result()? {
+                return actor.results.finish();
+            }
+            // ADR 024 §9-3：装着这次结果工具的一整轮正常结束仍未列过它 = Agent 手里
+            // 没有 submit_workflow_result，再等多少轮也交付不了——显式失败交人工核验/
+            // 授权重试，绝不冒充「等你回复」。工具还没换上的轮次不算。
+            let had_tools = tools_from.is_some_and(|first| ended.turn >= first);
+            if had_tools && ended.outcome == TurnOutcome::Completed && !actor.results.tools_listed()? {
+                return Err("RESULT_CHANNEL_UNREACHABLE".into());
+            }
+        }
+        if let Some(turn) = state.running.filter(|turn| latest.is_none_or(|(known, _)| *turn > known)) {
+            latest = Some((turn, None));
+        }
+        if deciding && state.running.is_none() {
+            deciding = false;
+            if !matches!(latest, Some((_, Some(TurnOutcome::Completed)))) {
+                prompt = Some(crate::prompt::CONTINUE_PROMPT.to_owned());
+            }
+        }
     }
 }
 

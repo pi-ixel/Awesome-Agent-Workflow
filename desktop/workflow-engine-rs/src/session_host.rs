@@ -1,9 +1,9 @@
 //! ADR 023（docs/workflow/adr.md；原文 docs/history/skillsplice/023-engine-session-hosting-adr.md）的宿主接缝。
 //! P1 落地 spawn/stop；P2 把用户消息中继与会话事件缓冲划归宿主一侧；P3 把
-//! 权限/问答中继也划归宿主；二期-2（§9 第 2、3 条）把接缝收口为**轮次边界**：
-//! 引擎只收 turn_ended——用户消息直接进宿主原生会话流，排队/送达语义、
-//! 会话事件缓冲与反向请求（permission/question）全部是宿主自己的职责，
-//! 引擎连「消息存在与否」都不感知。
+//! 权限/问答中继也划归宿主；二期-2（§9 第 2、3 条）把接缝收口为轮次边界；
+//! ADR 040 再把轮次边界换成**会话状态**：宿主每次变化报一份完整的会话状态
+//! （在跑哪一轮、上一轮怎么结束的），引擎只照着记录和推进。用户消息直接进
+//! 宿主原生会话流，排队/送达语义、会话事件缓冲与反向请求全部是宿主的职责。
 use crate::Action;
 pub use crate::result_channel::ResultChannelOffer;
 use serde::{Deserialize, Serialize};
@@ -56,6 +56,10 @@ pub struct SessionRequirement {
     pub result_channel: Option<ResultChannelOffer>,
     /// 恢复既有会话时的 ACP session id。
     pub resume_session_id: Option<String>,
+    /// `resume_session_id` 是发起运行的会话（ADR 039），不是这个角色原有的会话：
+    /// 宿主接不上它时可以改开新会话，引擎按宿主给回的会话 id 关联。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub entry_session: bool,
     /// 问题池 tracker 启动参数（仅 agent 节点的运行携带）：宿主按它确保
     /// tracker 进程已 spawn（幂等）。
     pub question_tracker: Option<TrackerStartParams>,
@@ -69,29 +73,78 @@ pub struct TurnRequest {
     pub prompt: String,
 }
 
-/// 一个已建立、可驱动轮次的节点会话（ADR 023 二期-2：轮次边界接缝）。
-/// 引擎对会话的全部感知只有「一轮开始了 / 一轮结束了」：轮次间的用户
-/// 消息由宿主原生会话流直接驱动新轮次，引擎在 [`NodeSession::wait_turn_ended`]
-/// 上等到下一个边界信号——消息的排队、送达、内容与状态机都不过引擎。
+/// 一轮是怎么结束的：宿主的会话里看得到的事实，引擎照着记，不推断（ADR 040）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnOutcome {
+    /// Agent 正常停下（交了结果，或停下来问用户）。
+    Completed,
+    /// 被打断（用户在会话里点了停止、运行被停止）。
+    Cancelled,
+    /// 出错（网络断开、Agent 报错等），用户可以在会话里重试。
+    Failed,
+}
+
+impl TurnOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
+            Self::Failed => "failed",
+        }
+    }
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "completed" => Some(Self::Completed),
+            "cancelled" => Some(Self::Cancelled),
+            "failed" => Some(Self::Failed),
+            _ => None,
+        }
+    }
+}
+
+/// 最近结束的一轮。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EndedTurn {
+    /// 轮次编号：这一轮开始时会话状态的序号。
+    pub turn: u64,
+    pub outcome: TurnOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// 宿主报告的会话状态（ADR 040：会话是唯一来源）。每次报完整的一份，引擎只认
+/// 序号更大的那份，所以漏收、重复、乱序都不影响结果。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionState {
+    /// 宿主给的序号，跨页面重载单调递增。
+    pub seq: u64,
+    /// 正在跑的那一轮的编号；空闲时为空。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub running: Option<u64>,
+    /// 最近结束的一轮；宿主不知道（例如页面刚重载）时为空。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended: Option<EndedTurn>,
+}
+
+/// 一个已建立、可驱动轮次的节点会话。引擎对会话的感知只有宿主报告的会话
+/// 状态（[`SessionState`]）：消息的排队、送达、内容都不过引擎；轮次怎么结束
+/// 的由宿主如实报告，引擎不猜（ADR 040）。
 pub trait NodeSession: Send {
     fn session_id(&self) -> &str;
     /// 引擎已把会话与动作落账（actor_sessions 关联完成）。宿主此刻公开
     /// 会话并回放缓冲的早期事件；未调用前到达的事件由宿主自行缓冲。
     fn session_linked(&mut self) -> Result<(), String>;
-    /// 驱动一轮标准工作流轮次；返回即本轮结束（turn_ended 的进程内形态）。
-    /// 宿主在送出 prompt 前完成自己的会话簿记（记录 workflow_context 类
-    /// 身份标注等）。
+    /// 在会话里发出工作流的说明；这一轮开始即返回它的轮次编号。之后这一轮
+    /// 怎么结束的从 [`NodeSession::wait_state`] 看。
     fn prompt_turn(
         &mut self,
         request: &TurnRequest,
         cancel: Arc<AtomicBool>,
-    ) -> Result<(), String>;
-    /// 等待下一个轮次边界（turn_ended）：无结果时引擎在此阻塞，直到宿主
-    /// 原生会话流中用户消息驱动的新轮次结束。宿主自持消息队列与送达
-    /// 语义（无消息时阻塞等待并自行产生等待输入类呈现）；引擎不感知
-    /// 消息存在与否。取消（进程内 cancel 标志 / 远程 cancel_waiting 帧）
-    /// 以 Err 唤醒。
-    fn wait_turn_ended(&mut self, cancel: Arc<AtomicBool>) -> Result<(), String>;
+    ) -> Result<u64, String>;
+    /// 等会话状态出现比 `after` 更新的一份并返回它。取消以 `RUN_CANCELLED`
+    /// 唤醒；宿主换代以 [`crate::remote_host::HOST_RESET`] 唤醒。
+    fn wait_state(&mut self, after: u64, cancel: Arc<AtomicBool>) -> Result<SessionState, String>;
 }
 
 /// 宿主接口（ADR 023 §2.2）。引擎只依赖此抽象，不感知会话由谁承载：
@@ -178,6 +231,7 @@ mod tests {
             ]),
             result_channel: Some(offer_fixture().offer),
             resume_session_id: Some("sess-1".into()),
+            entry_session: false,
             question_tracker: Some(TrackerStartParams {
                 executable: PathBuf::from("question-tracker.exe"),
                 cwd: PathBuf::from(r"D:\dev\tmp\project"),

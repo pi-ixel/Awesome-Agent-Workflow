@@ -3,8 +3,9 @@
 //! 引擎只认 Desktop 的会话宿主：会话请求编码成回调帧（`host-frame`）写进
 //! stdout，Desktop 按同一关联 id 写回应答。这里用同一线格式扮演 Desktop：
 //! 收到「拉起会话」就真的启动测试 Agent（`tests/fixtures/dev-fake-acp.py`
-//! 或任何标准 ACP Agent），收到「开始一轮」就按 ACP 驱动一轮，轮次结束
-//! 才应答——与 `src/plugins/workflow/sessionHost/nativeSessionHost.ts` 同一语义。
+//! 或任何标准 ACP Agent），收到「发说明」就按 ACP 驱动一轮：这一轮开始时
+//! 应答轮次编号，开始、结束都经服务协议 `session-state` 报会话状态（ADR 040）
+//! ——与 `src/plugins/workflow/sessionHost/nodeSessionHost.ts` 同一语义。
 //!
 //! 用法：把服务进程的 `Command` 交给 [`SimSpawn::sim_spawn`]，得到的
 //! [`SimChild`] 和 `std::process::Child` 用法一样（`stdin` / `stdout` /
@@ -15,7 +16,7 @@
 #![allow(dead_code)]
 
 use aaw_workflow_core::session_host::{
-    NodeSession, SessionHost, SessionRequirement, TrackerStartParams, TurnRequest,
+    EndedTurn, NodeSession, SessionHost, SessionRequirement, SessionState, TrackerStartParams, TurnOutcome, TurnRequest,
 };
 use serde_json::{Value, json};
 use std::{
@@ -33,6 +34,21 @@ use std::{
 };
 
 type Envs = Vec<(OsString, Option<OsString>)>;
+
+/// ACP 的停止原因 → 这一轮怎么结束的。
+fn outcome_of(stop: &Result<String, String>) -> (TurnOutcome, Option<String>) {
+    match stop {
+        Ok(reason) if reason == "end_turn" => (TurnOutcome::Completed, None),
+        Ok(reason) if reason == "cancelled" => (TurnOutcome::Cancelled, None),
+        Ok(reason) => (TurnOutcome::Failed, Some(reason.clone())),
+        Err(error) => (TurnOutcome::Failed, Some(error.clone())),
+    }
+}
+
+/// 会话状态序号：和 Desktop 一样从当前毫秒数乘 1000 起步，跨进程也单调递增。
+fn seq_base() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64 * 1000
+}
 
 fn apply_envs(command: &mut Command, envs: &Envs) {
     for (key, value) in envs {
@@ -343,9 +359,12 @@ struct HostState {
     envs: Envs,
     /// 会话 id →（所属运行, Agent）。
     agents: Mutex<BTreeMap<String, (String, Arc<Agent>)>>,
-    /// 引擎在等下一轮结束的会话：会话 id →（所属运行, 帧 id）。
-    waits: Mutex<BTreeMap<String, (String, u64)>>,
-    waits_changed: Condvar,
+    /// 各会话最近报给引擎的状态。
+    states: Mutex<BTreeMap<String, SessionState>>,
+    states_changed: Condvar,
+    seq: AtomicU64,
+    /// 宿主自己发出的服务协议请求的编号（应答从 stdout 里滤掉）。
+    requests: AtomicU64,
     trackers: Mutex<BTreeMap<String, Arc<Tracker>>>,
     messages: Arc<Messages>,
     /// 引擎发来的「开始一轮」次数（测试断言用）。
@@ -369,6 +388,38 @@ impl HostState {
         };
         let frame = serde_json::to_string(&response).unwrap();
         self.write_line(&json!({"type":"host-frame","runId":run,"frame":frame}).to_string());
+    }
+
+    /// 报一份会话状态（ADR 040）：`running` 为真时开始新的一轮并返回它的编号。
+    fn report(&self, session: &str, running: bool, ended: Option<(u64, Result<String, String>)>) -> u64 {
+        let seq = self.seq.fetch_add(1, Ordering::SeqCst);
+        let state = {
+            let mut states = self.states.lock().unwrap();
+            let previous = states.get(session).cloned().unwrap_or_default();
+            let ended = match ended {
+                Some((turn, stop)) => {
+                    let (outcome, error) = outcome_of(&stop);
+                    Some(EndedTurn { turn, outcome, error })
+                }
+                None => previous.ended,
+            };
+            let state = SessionState { seq, running: running.then_some(seq), ended };
+            states.insert(session.to_owned(), state.clone());
+            state
+        };
+        self.states_changed.notify_all();
+        let id = self.requests.fetch_add(1, Ordering::SeqCst);
+        self.write_line(&json!({"id":format!("host-{id}"),"method":"session-state","params":{"sessionId":session,"state":state}}).to_string());
+        seq
+    }
+
+    /// 这个会话里跑一轮：报开始、跑完、报结束。返回轮次编号与停止原因。
+    fn turn(&self, session: &str, agent: &Agent, text: &str, started: impl FnOnce(u64)) -> (u64, Result<String, String>) {
+        let turn = self.report(session, true, None);
+        started(turn);
+        let stop = agent.prompt(text);
+        self.report(session, false, Some((turn, stop.clone())));
+        (turn, stop)
     }
 
     fn ensure_tracker(&self, run: &str, params: &TrackerStartParams) -> Result<(), String> {
@@ -396,28 +447,14 @@ impl HostState {
         let request = &frame["request"];
         let session = request["session_id"].as_str().unwrap_or("").to_owned();
         let outcome = match request["kind"].as_str().unwrap_or("") {
-            // 停止运行：唤醒挂起的等待、取消进行中的轮次、收掉 tracker；本帧不应答。
+            // 停止运行：取消进行中的轮次、收掉 tracker；本帧不应答。
             "cancel_waiting" => {
-                let woken: Vec<(String, u64)> = {
-                    let mut waits = self.waits.lock().unwrap();
-                    let keys: Vec<String> = waits.iter().filter(|(_, (r, _))| r == run).map(|(k, _)| k.clone()).collect();
-                    keys.into_iter().filter_map(|k| waits.remove(&k)).collect()
-                };
-                for (wait_run, wait_id) in woken {
-                    self.respond(&wait_run, wait_id, Err("RUN_CANCELLED".into()));
-                }
                 for (agent_run, agent) in self.agents.lock().unwrap().values() {
                     if agent_run == run {
                         agent.cancel();
                     }
                 }
                 self.trackers.lock().unwrap().remove(run);
-                return;
-            }
-            // 挂起：等下一轮（用户消息驱动）结束或取消时再应答。
-            "wait_turn_ended" => {
-                self.waits.lock().unwrap().insert(session, (run.to_owned(), id));
-                self.waits_changed.notify_all();
                 return;
             }
             "spawn_node_session" => (|| {
@@ -429,15 +466,21 @@ impl HostState {
                 let agent = Agent::start(&requirement, &self.envs, self.messages.clone())?;
                 let session_id = agent.session_id.clone();
                 self.agents.lock().unwrap().insert(session_id.clone(), (run.to_owned(), Arc::new(agent)));
+                // 接上会话就报一份当前状态（空闲）。
+                self.report(&session_id, false, None);
                 Ok(json!({"sessionId":session_id}))
             })(),
-            "prompt_turn" => self.agent(&session).and_then(|agent| {
-                self.prompt_turns.fetch_add(1, Ordering::SeqCst);
-                match agent.prompt(request["prompt"].as_str().unwrap_or(""))?.as_str() {
-                    "end_turn" => Ok(Value::Null),
-                    _ => Err("ACP_TURN_NOT_COMPLETED".into()),
+            // 这一轮一开始就应答轮次编号；怎么结束的经会话状态报告。
+            "prompt_turn" => match self.agent(&session) {
+                Ok(agent) => {
+                    self.prompt_turns.fetch_add(1, Ordering::SeqCst);
+                    let _ = self.turn(&session, &agent, request["prompt"].as_str().unwrap_or(""), |turn| {
+                        self.respond(run, id, Ok(json!({"turn": turn})));
+                    });
+                    return;
                 }
-            }),
+                Err(error) => Err(error),
+            },
             "start_question_tracker" => serde_json::from_value::<TrackerStartParams>(request["params"].clone())
                 .map_err(|_| "QUESTION_POOL_SPAWN_FAILED".to_owned())
                 .and_then(|params| self.ensure_tracker(run, &params).map(|()| Value::Null)),
@@ -467,29 +510,43 @@ impl HostState {
 pub struct DesktopHost(Arc<HostState>);
 
 impl DesktopHost {
-    /// 用户在节点会话里发一条消息：等引擎进入「等下一轮结束」后发出，
-    /// 这一轮结束时应答引擎（当前 Desktop 的送达语义）。
-    pub fn user_turn(&self, session: &str, text: &str, timeout: Duration) -> Result<(), String> {
+    /// 用户在节点会话里发一条消息：等会话空下来后发出，开始、结束都报给引擎
+    /// （Desktop 的语义：消息进会话原生队列，引擎只看会话状态）。返回停止原因。
+    pub fn user_turn(&self, session: &str, text: &str, timeout: Duration) -> Result<String, String> {
         let deadline = Instant::now() + timeout;
         {
-            let mut waits = self.0.waits.lock().unwrap();
-            while !waits.contains_key(session) {
-                let left = deadline.checked_duration_since(Instant::now()).ok_or("ENGINE_NOT_WAITING")?;
-                waits = self.0.waits_changed.wait_timeout(waits, left).unwrap().0;
+            let mut states = self.0.states.lock().unwrap();
+            while states.get(session).is_none_or(|state| state.running.is_some()) {
+                let left = deadline.checked_duration_since(Instant::now()).ok_or("SESSION_STILL_BUSY")?;
+                states = self.0.states_changed.wait_timeout(states, left).unwrap().0;
             }
         }
         let agent = self.0.agent(session)?;
-        let stop = agent.prompt(text)?;
-        let pending = self.0.waits.lock().unwrap().remove(session);
-        if let Some((run, id)) = pending {
-            self.0.respond(&run, id, if stop == "end_turn" { Ok(Value::Null) } else { Err("ACP_TURN_NOT_COMPLETED".into()) });
+        self.0.turn(session, &agent, text, |_| {}).1
+    }
+
+    /// 用户在会话里点停止：取消进行中的一轮。
+    pub fn cancel_turn(&self, session: &str) -> Result<(), String> {
+        self.0.agent(session)?.cancel();
+        Ok(())
+    }
+
+    /// 等这个会话开始跑一轮。
+    pub fn wait_running(&self, session: &str, timeout: Duration) -> Result<(), String> {
+        let deadline = Instant::now() + timeout;
+        let mut states = self.0.states.lock().unwrap();
+        while states.get(session).is_none_or(|state| state.running.is_none()) {
+            let left = deadline.checked_duration_since(Instant::now()).ok_or("SESSION_NOT_RUNNING")?;
+            states = self.0.states_changed.wait_timeout(states, left).unwrap().0;
         }
         Ok(())
     }
 
-    /// 用户在会话里直接和 Agent 聊一轮（不经过引擎，运行停着时也可以）。
+    /// 用户在会话里直接和 Agent 聊一轮（运行停着时也可以）。会话登记过，就照样
+    /// 报给引擎（ADR 040）。
     pub fn chat(&self, session: &str, text: &str) -> Result<String, String> {
-        self.0.agent(session)?.prompt(text)
+        let agent = self.0.agent(session)?;
+        self.0.turn(session, &agent, text, |_| {}).1
     }
 
     /// 模拟宿主当前持有的会话 id。
@@ -590,8 +647,10 @@ impl SimSpawn for Command {
             engine_in: Mutex::new(Some(engine_in)),
             envs,
             agents: Mutex::new(BTreeMap::new()),
-            waits: Mutex::new(BTreeMap::new()),
-            waits_changed: Condvar::new(),
+            states: Mutex::new(BTreeMap::new()),
+            states_changed: Condvar::new(),
+            seq: AtomicU64::new(seq_base()),
+            requests: AtomicU64::new(1),
             trackers: Mutex::new(BTreeMap::new()),
             messages: Arc::new(Messages::default()),
             prompt_turns: AtomicU64::new(0),
@@ -600,7 +659,12 @@ impl SimSpawn for Command {
         let router = host.clone();
         std::thread::spawn(move || {
             for line in BufReader::new(engine_out).lines().map_while(Result::ok) {
-                let frame = serde_json::from_str::<Value>(&line).ok().filter(|v| v["type"] == "event" && v["event"]["type"] == "host-frame");
+                let parsed = serde_json::from_str::<Value>(&line).ok();
+                // 宿主自己发的 session-state 请求的应答：不是测试要读的。
+                if parsed.as_ref().is_some_and(|v| v["type"] == "response" && v["id"].as_str().is_some_and(|id| id.starts_with("host-"))) {
+                    continue;
+                }
+                let frame = parsed.filter(|v| v["type"] == "event" && v["event"]["type"] == "host-frame");
                 match frame {
                     Some(value) => {
                         let host = router.clone();
@@ -631,7 +695,7 @@ impl SimSpawn for Command {
 // ---------------------------------------------------------------- 进程内宿主
 
 /// 进程内跑 `Runtime` 时的会话宿主：同样启动真实 ACP Agent。没有用户，
-/// 所以「等下一轮结束」只会被取消唤醒。
+/// 所以说明那一轮之后会话状态不会再变，等待只会被取消唤醒。
 pub struct InProcessHost {
     tracker: Mutex<Option<Tracker>>,
     agents: Mutex<BTreeMap<String, Arc<Agent>>>,
@@ -648,22 +712,33 @@ impl InProcessHost {
     }
 }
 
-struct InProcessSession(Arc<Agent>);
+struct InProcessSession {
+    agent: Arc<Agent>,
+    seq: u64,
+    state: SessionState,
+}
 
 impl NodeSession for InProcessSession {
     fn session_id(&self) -> &str {
-        &self.0.session_id
+        &self.agent.session_id
     }
     fn session_linked(&mut self) -> Result<(), String> {
         Ok(())
     }
-    fn prompt_turn(&mut self, request: &TurnRequest, _cancel: Arc<AtomicBool>) -> Result<(), String> {
-        match self.0.prompt(&request.prompt)?.as_str() {
-            "end_turn" => Ok(()),
-            _ => Err("ACP_TURN_NOT_COMPLETED".into()),
-        }
+    /// 一轮跑完才返回（进程内没有并发的报告方），结束情况记进会话状态。
+    fn prompt_turn(&mut self, request: &TurnRequest, _cancel: Arc<AtomicBool>) -> Result<u64, String> {
+        self.seq += 1;
+        let turn = self.seq;
+        let stop = self.agent.prompt(&request.prompt);
+        let (outcome, error) = outcome_of(&stop);
+        self.seq += 1;
+        self.state = SessionState { seq: self.seq, running: None, ended: Some(EndedTurn { turn, outcome, error }) };
+        Ok(turn)
     }
-    fn wait_turn_ended(&mut self, cancel: Arc<AtomicBool>) -> Result<(), String> {
+    fn wait_state(&mut self, after: u64, cancel: Arc<AtomicBool>) -> Result<SessionState, String> {
+        if self.state.seq > after {
+            return Ok(self.state.clone());
+        }
         while !cancel.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(50));
         }
@@ -678,7 +753,7 @@ impl SessionHost for InProcessHost {
         }
         let agent = Arc::new(Agent::start(requirement, &Vec::new(), self.messages.clone())?);
         self.agents.lock().unwrap().insert(agent.session_id.clone(), agent.clone());
-        Ok(Box::new(InProcessSession(agent)))
+        Ok(Box::new(InProcessSession { agent, seq: 0, state: SessionState::default() }))
     }
     fn start_question_tracker(&self, params: &TrackerStartParams) -> Result<(), String> {
         let mut tracker = self.tracker.lock().map_err(|_| "HOST_LOCKED")?;

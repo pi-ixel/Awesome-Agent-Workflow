@@ -37,6 +37,12 @@ export type QueuedPrompt =
 // 会话条目
 // ---------------------------------------------------------------------------
 
+/** 交接中的那句话与状态文字（如「正在启动工作流…」）。 */
+export interface SessionHandoff {
+  readonly text: string;
+  readonly label: string;
+}
+
 export interface UserMessageItem {
   readonly steer?: true;
   /** Exact synthetic wire text, retained only for unambiguous image replay matching. */
@@ -188,6 +194,11 @@ export interface ConversationValues {
    * 本轮抢先正常完成也不续发。取消/出错同样暂停，等待用户手动继续。
    */
   readonly queuedPrompts: readonly QueuedPrompt[];
+  /**
+   * 交接中（ADR 039）：用户带着发送对象发出的话已交给扩展（如启动工作流），扩展
+   * 还没把它的消息送进会话。只在界面上显示，不进会话记录；期间用户再发的内容排队。
+   */
+  readonly handoff?: SessionHandoff | null;
   /** 点击停止或取消/出错后挂起；true 时等待用户 resumeQueue。 */
   readonly queueSaveError?: string | null;
   readonly queuePaused: boolean;

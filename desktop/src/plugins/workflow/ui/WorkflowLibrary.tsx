@@ -1,41 +1,36 @@
 /**
- * 工作流库（AAW 面板第一层）：包含预置和我的工作流。
+ * 工作流库（左侧「工作流」功能区的第一层，ADR 038）：预置或我的工作流的卡片。
  *
- * 库页提供模板详情、导入与发起入口。
+ * 分类由侧栏选；库页提供模板详情、导入与用 AI 新建。发起不在这里，只在会话里。
  */
 import { errorLine } from "../status/errorText.ts";
 import { useEffect, useState } from "react";
 import type { WorkflowDraft, WorkflowFileTransfer, WorkflowImportPreview, WorkflowService, WorkflowSummary } from "../types.ts";
 import { describeDiagnostic } from "../status/library.ts";
-import { ActionButton, Badge, btnPrimary, btnSecondary } from "../../../shared/ui/controls.tsx";
-import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
+import { ActionButton, Badge, btnSecondary } from "../../../shared/ui/controls.tsx";
+import { PageHeader } from "../../../shared/ui/PageHeader.tsx";
 import { Callout } from "../../../shared/ui/Callout.tsx";
 import { ConfirmIconAction } from "../../../shared/ui/ConfirmIconAction.tsx";
-import { ImportIcon, SparklesIcon, TrashIcon, TriangleAlertIcon } from "../../../shared/ui/icons.tsx";
+import { ImportIcon, TrashIcon, TriangleAlertIcon } from "../../../shared/ui/icons.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
 import { EmptyState } from "../../../shared/ui/EmptyState.tsx";
 
-export type LibraryTab = "presets" | "mine";
+import type { LibraryTab } from "./templateNavigation.ts";
+export type { LibraryTab } from "./templateNavigation.ts";
 
-export function WorkflowLibrary({ service, version, hint, transfer, drafts, tab: controlledTab, onTabChange, onNewWithAi, onOpenWorkflow, onLaunch, onOpenDraft, onDiscardDraft }: {
+export function WorkflowLibrary({ service, version, transfer, drafts, tab, onOpenWorkflow, onOpenDraft, onDiscardDraft }: {
   service: WorkflowService;
   /** 库变化（复制、删除）后递增，触发重新读取。 */
   version: number;
-  /** 顶部提示（如「选择要启动的工作流」）。 */
-  hint?: string;
   /** 导入用的打开对话框（ADR 036）。 */
   transfer?: WorkflowFileTransfer;
-  /** 当前页签与切换：由面板持有，进详情再返回时还在原来那一页。 */
-  tab?: LibraryTab;
-  onTabChange?: (tab: LibraryTab) => void;
+  /** 当前分类：由侧栏选。 */
+  tab: LibraryTab;
   onOpenWorkflow: (id: string) => void;
-  onLaunch: (id: string) => void;
   /** 未保存的 AI 草稿（ADR 036）；不给时不显示 AI 编辑入口。 */
   drafts?: readonly WorkflowDraft[];
-  /** 让 AI 新建：由面板先问要求。 */
-  onNewWithAi?: () => void;
   onOpenDraft?: (draftId: string) => void;
   onDiscardDraft?: (draftId: string) => Promise<void>;
 }) {
@@ -46,12 +41,6 @@ export function WorkflowLibrary({ service, version, hint, transfer, drafts, tab:
   const [busy, setBusy] = useState(false);
   /** 正在确认的删除：`draft:<id>` 或 `workflow:<id>`，同一时间只有一个。 */
   const [confirming, setConfirming] = useState("");
-  const [ownTab, setOwnTab] = useState<LibraryTab>("presets");
-  const tab = controlledTab ?? ownTab;
-  const setTab = (next: LibraryTab) => {
-    setOwnTab(next);
-    onTabChange?.(next);
-  };
   const pickImport = async () => {
     setImportError("");
     try {
@@ -95,45 +84,30 @@ export function WorkflowLibrary({ service, version, hint, transfer, drafts, tab:
   const standalone = drafts?.filter((draft) => !draft.base || !mine.some((item) => item.id === draft.base)) ?? [];
 
   return <div className="workflow-library">
-    {hint && <Callout tone="info" role="status" title={hint} />}
     {error !== "" && <Callout tone="danger" className="workflow-callout" title={<>读取工作流库失败：{error}</>} />}
     {importError !== "" && <Callout tone="danger" className="workflow-callout" title={importError} onDismiss={() => setImportError("")} />}
     {importing && <ImportPreviewCard preview={importing.preview} busy={busy} onConfirm={() => void confirmImport()} onCancel={() => setImporting(null)} />}
 
-    <div className="workflow-library-tools">
-      <SegmentedControl<LibraryTab>
-        tabs
-        groupLabel="工作流库"
-        value={tab}
-        onChange={setTab}
-        options={[
-          { value: "presets", label: `预置 ${presets.length}` },
-          { value: "mine", label: `我的 ${mine.length + standalone.length}` },
-        ]}
-      />
-      <div className="workflow-library-actions">
-        {transfer && <IconButton className={`${btnSecondary} workflow-icon-only`} aria-label="导入" data-hint="导入" onClick={() => void pickImport()}><ImportIcon className="ui-icon-16" /></IconButton>}
-        {onNewWithAi && <IconButton className={`${btnPrimary} workflow-icon-only`} aria-label="用 AI 新建" data-hint="用 AI 新建" onClick={onNewWithAi}><SparklesIcon className="ui-icon-16" /></IconButton>}
-      </div>
-    </div>
+    <PageHeader className="workflow-library-tools" title={tab === "presets" ? "预置工作流" : "我的工作流"}
+      actions={transfer && <IconButton className={`${btnSecondary} workflow-icon-only`} aria-label="导入" data-hint="导入" onClick={() => void pickImport()}><ImportIcon className="ui-icon-16" /></IconButton>} />
 
     {tab === "presets" && <section aria-label="预置工作流" className="workflow-tab-panel">
       {items === null && error === "" && <p className="workflow-muted">正在读取…</p>}
-      {items !== null && presets.length === 0 && <EmptyState title="库里没有预置工作流" description="可以从「我的」页签导入一个，或者用 AI 新建。" />}
+      {items !== null && presets.length === 0 && <EmptyState title="库里没有预置工作流" description="可以导入一个，或者用 AI 新建。" />}
       <div className="workflow-cards">
-        {presets.map((item) => <WorkflowCard key={item.id} item={item} onOpen={onOpenWorkflow} onLaunch={onLaunch} />)}
+        {presets.map((item) => <WorkflowCard key={item.id} item={item} onOpen={onOpenWorkflow} />)}
       </div>
     </section>}
 
     {tab === "mine" && <section aria-label="我的工作流" className="workflow-tab-panel">
-      {items !== null && mine.length === 0 && standalone.length === 0 && <EmptyState title="还没有自己的工作流" description="打开一个预置工作流点「复制为我的」，或者点上面的「用 AI 新建」。" />}
+      {items !== null && mine.length === 0 && standalone.length === 0 && <EmptyState title="还没有自己的工作流" description="打开一个预置工作流点「复制为我的」，或者用 AI 新建一个。" />}
       <div className="workflow-cards">
         {standalone.map((draft) => <DraftCard key={draft.draftId} draft={draft}
           confirming={confirming === `draft:${draft.draftId}`}
           setConfirming={(value) => setConfirming(value ? `draft:${draft.draftId}` : "")}
           onOpen={() => onOpenDraft?.(draft.draftId)}
           onDiscard={onDiscardDraft && (() => void onDiscardDraft(draft.draftId))} />)}
-        {mine.map((item) => <WorkflowCard key={item.id} item={item} draft={drafts?.find((draft) => draft.base === item.id)} onOpen={onOpenWorkflow} onLaunch={onLaunch}
+        {mine.map((item) => <WorkflowCard key={item.id} item={item} draft={drafts?.find((draft) => draft.base === item.id)} onOpen={onOpenWorkflow}
           confirming={confirming === `workflow:${item.id}`}
           setConfirming={(value) => setConfirming(value ? `workflow:${item.id}` : "")}
           onDelete={() => void service.deleteWorkflow(item.id).catch((cause: unknown) => setImportError(`删除失败：${errorLine(cause)}`))} />)}
@@ -183,12 +157,11 @@ function DraftCard({ draft, confirming, setConfirming, onOpen, onDiscard }: {
   </article>;
 }
 
-function WorkflowCard({ item, draft, onOpen, onLaunch, confirming = false, setConfirming, onDelete }: {
+function WorkflowCard({ item, draft, onOpen, confirming = false, setConfirming, onDelete }: {
   item: WorkflowSummary;
   /** 这个工作流未保存的 AI 修改（ADR 036）。 */
   draft?: WorkflowDraft;
   onOpen: (id: string) => void;
-  onLaunch: (id: string) => void;
   /** 删除（只给「我的」工作流）。 */
   confirming?: boolean;
   setConfirming?: (value: boolean) => void;
@@ -206,9 +179,6 @@ function WorkflowCard({ item, draft, onOpen, onLaunch, confirming = false, setCo
         : <span className="workflow-card-desc attention">源码有错误，暂时不能运行{firstError ? `：${describeDiagnostic(firstError)}` : ""}</span>}
     </NavigationRow>
     {onDelete && setConfirming && <CardDelete label="删除工作流" confirming={confirming} setConfirming={setConfirming} onConfirm={onDelete} />}
-    {meta && <div className="workflow-template-actions">
-      <ActionButton type="button" tone="secondary" size="compact" onClick={() => onLaunch(item.id)}>运行</ActionButton>
-    </div>}
   </article>;
 }
 

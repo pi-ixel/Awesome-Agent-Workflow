@@ -1,7 +1,7 @@
 /**
  * 检视器正文：按节点处境给内容，原始结果只做折叠兜底。
  * - 未执行：这个节点会做什么（定义里的步骤）、什么时候执行；
- * - 运行中：要做的步骤 + Agent 最近的消息节选（细节去会话里看）；
+ * - 运行中：Agent 的计划，没有计划时是要做的步骤（Agent 说了什么去会话里看）；
  * - 有结果：结论 → 问题 → 产出文件（可打开）→ 其余字段；
  * - 异常处理入口（候选结果、核验）由面板经 children 放进来。
  */
@@ -16,17 +16,14 @@ import { Badge } from "../../../shared/ui/controls.tsx";
 
 const PLAN_MARK: Record<NodePlanEntry["status"], string> = { completed: "已完成", in_progress: "进行中", pending: "待做" };
 
-const LIVE_EXCERPT = 360;
 
-
-export function NodeDetail({ steps, conditions, executed, running, live, plan, view, raw, sessionMissing, onOpenFile, children }: {
+export function NodeDetail({ steps, conditions, executed, running, plan, view, raw, sessionMissing, onOpenFile, children }: {
   steps: readonly string[];
   /** 未执行时才显示「什么时候执行」。 */
   conditions: readonly string[];
   executed: boolean;
   running: boolean;
-  live?: string;
-  /** Agent 经 ACP 发来的计划（ADR 035）；没有时显示定义里的步骤和最近消息。 */
+  /** Agent 经 ACP 发来的计划（ADR 035）；没有时显示定义里的步骤。 */
   plan?: readonly NodePlanEntry[] | null;
   view: ResultView | null;
   raw: unknown;
@@ -34,8 +31,6 @@ export function NodeDetail({ steps, conditions, executed, running, live, plan, v
   onOpenFile?: (path: string) => void;
   children?: ReactNode;
 }) {
-  const text = live?.trim() ?? "";
-  const excerpt = text.length > LIVE_EXCERPT ? `…${text.slice(-LIVE_EXCERPT)}` : text;
   const entries = plan ?? [];
   const done = entries.filter((entry) => entry.status === "completed").length;
   // 节点已结束仍有未完成的条目：如实标出，不替 Agent 补完。
@@ -87,10 +82,6 @@ export function NodeDetail({ steps, conditions, executed, running, live, plan, v
       {conditions.length > 0
         ? <ul className="workflow-detail-list">{conditions.map((condition) => <li key={condition}>{condition}</li>)}</ul>
         : <p className="workflow-muted">没有找到指向这个节点的路线。</p>}
-    </section>}
-    {running && excerpt && <section aria-label="Agent 最近的消息">
-      <h4>Agent 最近的消息（节选）</h4>
-      <p className="workflow-detail-live">{excerpt}</p>
     </section>}
 
     {children}

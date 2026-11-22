@@ -20,7 +20,8 @@ import type {
   WorkflowCatalogNode,
   WorkflowStage,
 } from "../types.ts";
-import { isSettled, mergeStates, nodeStatus, STATE_LABEL, type NodeState, type NodeStatusView } from "../status/snapshot.ts";
+import { isSettled, mergeStates, nodeStatus, runStop, STATE_LABEL, type NodeState, type NodeStatusView, type SessionLookup } from "../status/snapshot.ts";
+import { needsYou, nodeActivity } from "../status/nodeActivity.ts";
 
 /** 看的是哪一层：哪条流程、从哪个入口进、由哪一步调用进来、哪一次执行实例。 */
 export interface FlowFrame {
@@ -53,6 +54,8 @@ export interface FlowStep {
   readonly child?: { readonly frame: FlowFrame; readonly tag: string };
   /** 执行实例链（选中节点时交给详情）。 */
   readonly callPath: readonly string[];
+  /** 流程在这一步之后（或之前）停下：画在这一步的去向上，不改这一步自己的状态。 */
+  readonly stop?: string;
 }
 
 export interface FlowStageView {
@@ -70,6 +73,8 @@ export interface FlowContext {
   readonly structure: HierarchyStructure;
   readonly nodeMap: ReadonlyMap<string, WorkflowCatalogNode>;
   readonly snapshot: CanvasSnapshot | null;
+  /** 会话的实时状态（ADR 040）；不给时退回引擎记下的最近一轮。 */
+  readonly session?: SessionLookup;
 }
 
 type Call = NonNullable<CanvasSnapshot["execution"]>["calls"][number];
@@ -230,7 +235,6 @@ function orderedPhases(ctx: FlowContext, frame: FlowFrame): { phases: HierarchyF
 /** 一层里的状态计算（从前在画布组件里，按当前层写死；现在按层传入）。 */
 function frameState(ctx: FlowContext, frame: FlowFrame) {
   const { snapshot } = ctx;
-  const runResult = snapshot?.run && typeof snapshot.run.result === "object" && snapshot.run.result !== null ? snapshot.run.result as Record<string, unknown> : null;
   const activePhases = new Set([snapshot?.execution?.phase, ...(snapshot?.execution?.stack ?? []).map((f) => f.phase)]);
   const calls = snapshot?.execution?.calls ?? [];
   const isActiveHere = !frame.via || !!frame.instanceId && calls.some((call) => call.id === frame.instanceId && call.status === "running");
@@ -241,7 +245,7 @@ function frameState(ctx: FlowContext, frame: FlowFrame) {
   const siteState = (site: string, phaseId: string): NodeStatusView => {
     const record = latest(site, phaseId);
     if (!snapshot || !record) return nodeStatus({ id: site }, null);
-    return nodeStatus({ id: site }, { ...snapshot, nodes: [record] });
+    return nodeStatus({ id: site }, { ...snapshot, nodes: [record] }, ctx.session);
   };
   const callState = (phase: HierarchyFlowPhase): NodeState => {
     if (!snapshot) return "pending";
@@ -257,12 +261,11 @@ function frameState(ctx: FlowContext, frame: FlowFrame) {
     }
     if (!list.length) return "pending";
     if (list.some((c) => c.status === "failed")) return "failed";
-    if (list.some((c) => c.status === "running")) return snapshot.active ? "running" : runResult?.status === "blocked" ? "blocked" : "stuck";
+    if (list.some((c) => c.status === "running")) return snapshot.active ? "running" : snapshot.run?.status === "blocked" ? "blocked" : "stuck";
     return list.every((c) => c.status === "completed") ? "done" : "pending";
   };
   const actionState = (phase: HierarchyFlowPhase, view: NodeStatusView): NodeState => {
     if (!snapshot) return "pending";
-    if (isActiveHere && runResult?.status === "blocked" && runResult?.stage === (phase.sourcePhaseId ?? phase.id)) return "blocked";
     // 执行位置就在这一步、服务仍在跑：即使记录尚未落账也是「运行中」。
     if (snapshot.active && isActiveHere && activePhases.has(phase.sourcePhaseId ?? phase.id) && !isSettled(view.state)) return "running";
     return view.state;
@@ -270,9 +273,10 @@ function frameState(ctx: FlowContext, frame: FlowFrame) {
   return { instances, latest, siteState, callState, actionState };
 }
 
-/** 子流程调用里有没有要你处理的事：等回复优先，其次是失败。 */
+/** 子流程调用里有没有要你处理的事：会话里要你（ADR 040）优先，其次是失败。 */
 function callNeedsYou(ctx: FlowContext, call: Call): boolean {
-  return (ctx.snapshot?.active === true && ctx.snapshot.nodes.some((n) => n.status === "running" && n.awaitingInput === true && n.callPath?.includes(call.id)))
+  const snapshot = ctx.snapshot;
+  return (snapshot?.active === true && snapshot.nodes.some((n) => n.callPath?.includes(call.id) && needsYou(nodeActivity(n, true, ctx.session?.(n.sessionId)))))
     || call.status === "failed";
 }
 
@@ -282,6 +286,10 @@ export function frameSteps(ctx: FlowContext, frame: FlowFrame, callPath: readonl
   if (!ordered) return [];
   const s = frameState(ctx, frame);
   const gates = ctx.snapshot?.gates ?? [];
+  const stop = ctx.snapshot?.run ? runStop(ctx.snapshot.run) : null;
+  const stopHere = stop && stop.callPath.length === callPath.length && stop.callPath.every((id, index) => callPath[index] === id) ? stop : null;
+  const stopOf = (phaseId: string): { stop?: string } => !stopHere || stopHere.phase !== phaseId ? {}
+    : { stop: stopHere.afterStep ? `之后停下${stopHere.explain ? `：${stopHere.explain}` : ""}` : `没有开始，流程停下${stopHere.reason ? `：${stopHere.reason}` : ""}` };
   const steps: FlowStep[] = [];
   for (const phase of ordered.phases) {
     const phaseId = phase.sourcePhaseId ?? phase.id;
@@ -307,6 +315,7 @@ export function frameSteps(ctx: FlowContext, frame: FlowFrame, callPath: readonl
         confirm,
         child: { frame: { flow: child.id, entry: phase.callEntry || child.entry, via: phase.id, instanceId: pick?.id }, tag },
         callPath,
+        ...stopOf(phaseId),
       });
       continue;
     }
@@ -324,11 +333,12 @@ export function frameSteps(ctx: FlowContext, frame: FlowFrame, callPath: readonl
         label: node.label,
         does: node.steps.join(" · "),
         state: s.actionState(phase, status),
-        attention: status.awaiting || gated,
+        attention: needsYou(status.activity ?? null) || gated,
         status,
         record,
         confirm,
         callPath,
+        ...stopOf(phaseId),
       });
     }
   }

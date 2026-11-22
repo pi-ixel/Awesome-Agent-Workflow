@@ -15,6 +15,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -25,6 +26,7 @@ import type { ReadonlySnapshot } from "../../../../src/shared/state/readonlySnap
 import type { FileCandidates } from "../../../../src/plugins/project/conversation/ui/documentView.ts";
 import type { SkillCatalog } from "../../../../src/plugins/host/types.ts";
 import type { SkillsService } from "../../../../src/plugins/skills/service.ts";
+import type { ProjectSlashEntry } from "../../../../src/plugins/project/ui/extension.ts";
 import { slashSkillCatalog } from "../../../../src/plugins/skills/sources/slashSkillCatalog.ts";
 import {
   createTestSkills,
@@ -59,6 +61,8 @@ function setup(
     fileCandidates?: ReadonlySnapshot<FileCandidates | undefined>;
     resolveSlashSkills?: SkillsService["resolveSlashSkills"];
     skillWorkspace?: string | null;
+    extensionEntries?: readonly ProjectSlashEntry[];
+    extensionGroup?: string;
   } = {},
 ) {
   const onSend = vi.fn();
@@ -89,6 +93,8 @@ function setup(
         resolveSlashSkills={options.resolveSlashSkills}
         skillWorkspace={options.skillWorkspace}
         openDiagnostics={options.openDiagnostics}
+        extensionEntries={options.extensionEntries}
+        extensionGroup={options.extensionGroup}
         isAgentRunning={options.isAgentRunning ?? false}
         onSend={onSend}
         onEnqueue={onEnqueue}
@@ -220,6 +226,23 @@ describe("ChatInput 悬浮形态", () => {
       />,
     );
     expect(screen.getByText("—")).toBeInTheDocument();
+  });
+
+  it("卡片顶部一行排在排队消息上面，排队消息紧挨输入框", () => {
+    render(
+      <ChatInput
+        header={<div data-testid="composer-header" />}
+        queue={<section data-testid="composer-queue" />}
+        isAgentRunning={false}
+        onSend={vi.fn()}
+        onEnqueue={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    const header = screen.getByTestId("composer-header");
+    const queue = screen.getByTestId("composer-queue");
+    expect(header.compareDocumentPosition(queue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(queue.compareDocumentPosition(getTextarea()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("仅显示 AAW 审批策略，不展示 Agent 模式徽标", () => {
@@ -567,6 +590,102 @@ describe("ChatInput slash 命令面板", () => {
     // action 执行后 /token 从草稿移除
     expect(textarea).toHaveValue("");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("扩展条目带图标时和技能行一样显示图标、名称前不加 /", async () => {
+    function MarkIcon({ className }: { readonly className?: string }) {
+      return <svg data-testid="extension-icon" className={className} />;
+    }
+    setup({
+      extensionGroup: "工作流入口",
+      extensionEntries: [
+        { id: "wf", label: "AAW 轻量开发", description: "启动这个工作流", Icon: MarkIcon, run: vi.fn() },
+        { id: "plain", label: "plain-entry", description: "没有图标", run: vi.fn() },
+      ],
+    });
+    await userEvent.type(getTextarea(), "/");
+    const panel = await screen.findByRole("listbox", { name: "命令面板" });
+    const withIcon = within(panel).getByRole("option", { name: /AAW 轻量开发/ });
+    expect(within(withIcon).getByTestId("extension-icon")).toBeInTheDocument();
+    expect(withIcon).not.toHaveTextContent("/AAW 轻量开发");
+    expect(within(panel).getByRole("option", { name: /plain-entry/ })).toHaveTextContent("/plain-entry");
+  });
+
+  describe("发送对象（ADR 039）", () => {
+    function selectTarget(submit: ProjectSlashEntry["submit"]) {
+      useWorkspaceStore.setState({ activePath: "D:/dev/demo" });
+      useSessionStore.setState({ agentKey: "agent-a", activeSessionId: "s-1" });
+      const run = vi.fn();
+      const view = setup({
+        extensionGroup: "工作流入口",
+        extensionEntries: [{ id: "wf", label: "AAW 轻量开发", description: "启动", run, submit, placeholder: "本次需求，Enter 开始运行" }],
+      });
+      return { ...view, run };
+    }
+
+    it("选中后显示为输入框里的标签，Enter 把文字交给扩展而不是发给 Agent", async () => {
+      const submit = vi.fn(() => Promise.resolve());
+      const { onSend, run } = selectTarget(submit);
+      const textarea = getTextarea();
+      await userEvent.type(textarea, "/AAW");
+      await userEvent.type(textarea, "{Enter}");
+      expect(run).not.toHaveBeenCalled();
+      expect(screen.getByTestId("composer-send-target")).toHaveTextContent("AAW 轻量开发");
+      expect(textarea).toHaveAttribute("placeholder", "本次需求，Enter 开始运行");
+      await userEvent.type(textarea, "给登录页加验证码{Enter}");
+      await waitFor(() => expect(submit).toHaveBeenCalledWith({
+        session: { workspacePath: "D:/dev/demo", agentKey: "agent-a", sessionId: "s-1" },
+        text: "给登录页加验证码",
+      }));
+      expect(onSend).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.queryByTestId("composer-send-target")).not.toBeInTheDocument());
+      expect(textarea).toHaveValue("");
+    });
+
+    it("预填时可以一并放上发送对象；新会话建好后标签还在，换到别的会话就不带过去", async () => {
+      const submit = vi.fn(() => Promise.resolve());
+      selectTarget(submit);
+      // 刚新建、还没建好的会话。
+      act(() => useSessionStore.setState({ activeSessionId: null }));
+      await waitFor(() => expect(getTextarea()).not.toBeDisabled());
+      let accepted = true;
+      act(() => { accepted = testComposer.prefill("上次的需求", [], { target: "missing" }); });
+      expect(accepted).toBe(false);
+      act(() => { testComposer.prefill("上次的需求", [], { target: "wf" }); });
+      expect(getTextarea()).toHaveValue("上次的需求");
+      expect(screen.getByTestId("composer-send-target")).toHaveTextContent("AAW 轻量开发");
+      // 新会话刚建好：同一份草稿迁到它名下，标签留着。
+      act(() => useSessionStore.setState({ activeSessionId: "s-new" }));
+      expect(screen.getByTestId("composer-send-target")).toBeInTheDocument();
+      act(() => useSessionStore.setState({ activeSessionId: "s-other" }));
+      expect(screen.queryByTestId("composer-send-target")).not.toBeInTheDocument();
+    });
+
+    it("交接中输入框照常可用：这时按 Enter 排队，不直接发给 Agent", async () => {
+      const { onSend, onEnqueue } = setup();
+      act(() => useSessionStore.setState({ handoff: { text: "给登录页加验证码", label: "正在启动工作流…" } }));
+      const textarea = getTextarea();
+      expect(textarea).not.toBeDisabled();
+      await userEvent.type(textarea, "顺便看下样式{Enter}");
+      expect(onSend).not.toHaveBeenCalled();
+      expect(onEnqueue).toHaveBeenCalledWith("顺便看下样式");
+      act(() => useSessionStore.setState({ handoff: null }));
+    });
+
+    it("扩展拒绝时那句话和标签回到输入框，并显示原因；行首退格去掉标签", async () => {
+      const submit = vi.fn(() => Promise.reject(new Error("没能开始：Agent 未配置")));
+      selectTarget(submit);
+      const textarea = getTextarea();
+      await userEvent.type(textarea, "/AAW{Enter}");
+      await userEvent.type(textarea, "做一件事{Enter}");
+      expect(await screen.findByRole("alert")).toHaveTextContent("没能开始：Agent 未配置");
+      expect(textarea).toHaveValue("做一件事");
+      expect(screen.getByTestId("composer-send-target")).toBeInTheDocument();
+      textarea.setSelectionRange(0, 0);
+      await userEvent.keyboard("{Backspace}");
+      expect(screen.queryByTestId("composer-send-target")).not.toBeInTheDocument();
+      expect(textarea).toHaveValue("做一件事");
+    });
   });
 
   it("行中 / 不触发；顿号行首归一触发", async () => {

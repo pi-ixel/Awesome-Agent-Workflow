@@ -1,11 +1,16 @@
 /**
  * workflow 插件的 workbench 挂载。
  *
- * - panelId "aaw"：launcher（新标签页入口）+ View（AAW 面板）；
+ * 入口分工（ADR 038）：模板在左侧「工作流」功能区，运行在右侧 AAW 标签页，
+ * 发起只在会话里。
+ *
+ * - 侧栏 "workflow"：左侧导航的功能区——侧栏选分类，中间（WorkArea）是工作流
+ *   库、详情与 AI 草稿；
+ * - panelId "aaw"：launcher（新标签页入口）+ View（AAW 面板：运行管理、运行、
+ *   发起页）；
  * - `projectExtension` 服务（ADR 037）：项目界面的通用扩展位——会话输入框的
- *   工作流斜杠命令、空会话的工作流入口、会话状态卡与项目总览里的运行、节点
- *   会话顶部的回指条、项目树上的工作流按钮；`workflowUi` 只供插件内部用
- *   （通知打开运行）；
+ *   工作流斜杠命令、空会话的工作流入口、会话状态卡里的运行、节点会话顶部的
+ *   回指条、项目树上的工作流按钮；`workflowUi` 只供插件内部用（通知打开运行）；
  * - 工作区作用域：订阅 workbench 导航的 contextPath，把当前项目路径经
  *   `service.bindWorkspace` 绑定为引擎请求作用域（list/snapshot 的 cwd）；
  * - 侧栏会话分组：一次运行的节点会话收进一组（ADR 027）；
@@ -15,6 +20,7 @@
 import type { AgentSwitchGuard } from "../../agents/service.ts";
 import { createDraftEditor } from "../editing/draftSessions.ts";
 import type { Context } from "cordis";
+import type { WorkflowEvent } from "../engine/protocol.ts";
 import { createStore } from "zustand/vanilla";
 import type { WorkbenchContributions } from "../../workbench/types.ts";
 import type { WorkbenchService } from "../../workbench/service.ts";
@@ -24,10 +30,9 @@ import { errorLine } from "../status/errorText.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { WorkflowIcon } from "../../../shared/ui/icons.tsx";
 import type { ProjectActivities, ProjectExtension, ProjectQuickAction, ProjectService } from "../../project/service.ts";
-import type { WorkflowDraftEditor, WorkflowFileTransfer,
+import type { WorkflowDraftEditor, WorkflowEntry, WorkflowFileTransfer,
   RunSessionLinks,
   WorkflowEntryCommand,
-  WorkflowLaunchRequest,
   WorkflowProjectStatus,
   WorkflowRunBrief,
   WorkflowService,
@@ -37,17 +42,22 @@ import type { WorkflowDraftEditor, WorkflowFileTransfer,
 import { WorkflowPanel } from "./WorkflowPanel.tsx";
 import { SplitStorageContext } from "./SplitPane.tsx";
 import { WorkflowSidebar } from "./WorkflowSidebar.tsx";
-import { TextLink } from "../../../shared/ui/TextLink.tsx";
-import { WorkflowOverview } from "./WorkflowOverview.tsx";
+import { WorkflowWorkspace } from "./WorkflowWorkspace.tsx";
+import { createTemplateNavigation } from "./templateNavigation.ts";
 import { WorkflowSessionBanner } from "./WorkflowSessionBanner.tsx";
-import { AWAITING_CONFIRM_CHIP, AWAITING_INPUT_CHIP, runSessionGroups } from "./sessionGroups.ts";
+import { AWAITING_CONFIRM_CHIP, BLOCKED_CHIP, STOPPING_CHIP, linkActivity, runSessionGroups } from "./sessionGroups.ts";
+import { ACTIVITY_WORD, needsYou, sessionStatusOf } from "../status/nodeActivity.ts";
+import type { SessionLookup } from "../status/snapshot.ts";
 
 const panelId = "aaw";
+const sidebarId = "workflow";
+/** 等第一步的任务进到会话的上限：超过就不再显示「正在启动工作流」。 */
+const TASK_HANDOVER_MS = 120_000;
 
 /** 进行中与等你确认的运行 → 会话区 / 总览用的简报（等你处理的排前面）。 */
-export function runBriefs(runs: readonly RunSessionLinks[]): WorkflowRunBrief[] {
+export function runBriefs(runs: readonly RunSessionLinks[], session?: SessionLookup): WorkflowRunBrief[] {
   return runs
-    .filter((run) => !run.archived && (run.active || run.status === "waiting"))
+    .filter((run) => !run.archived && (run.active || run.status === "waiting" || run.status === "blocked"))
     .map((run) => {
       if (!run.active) {
         const last = run.links.flatMap((link) => link.nodes).at(-1);
@@ -56,28 +66,60 @@ export function runBriefs(runs: readonly RunSessionLinks[]): WorkflowRunBrief[] 
           title: run.title || run.workflowName || "工作流",
           workflowName: run.workflowName,
           waiting: true,
-          label: AWAITING_CONFIRM_CHIP,
+          label: run.status === "blocked" ? BLOCKED_CHIP : AWAITING_CONFIRM_CHIP,
           step: last?.label ?? null,
         };
       }
       const running = run.links.flatMap((link) => link.nodes.filter((node) => node.status === "running"));
-      const waiting = running.find((node) => node.awaitingInput);
+      // 说法与会话一致（ADR 040）：要你去会话里做点什么的节点排前面。
+      const attention = run.stopping === true ? undefined : run.links.flatMap((link) => {
+        const activity = linkActivity(link, true, session);
+        const node = link.nodes.find((item) => item.status === "running");
+        return needsYou(activity) && node ? [{ node, activity: activity! }] : [];
+      })[0];
       return {
         runId: run.runId,
         title: run.title || run.workflowName || "工作流",
         workflowName: run.workflowName,
-        waiting: waiting !== undefined,
-        label: waiting ? AWAITING_INPUT_CHIP : "运行中",
-        step: (waiting ?? running[0])?.label ?? null,
+        waiting: attention !== undefined,
+        label: run.stopping === true ? STOPPING_CHIP : attention ? ACTIVITY_WORD[attention.activity] : "运行中",
+        step: (attention?.node ?? running[0])?.label ?? null,
       };
     })
     .sort((a, b) => Number(b.waiting) - Number(a.waiting));
 }
 
-/** 工作流库 → 斜杠命令：每个可用工作流的每个起点一条。 */
+/**
+ * 输入框里的一段话怎么交给起点（ADR 039）：整段文字填进第一段文字输入（必填的
+ * 优先），文字里 `@` 引用的文件填进文件输入；起点什么都不要时这段话当运行标题。
+ * 还缺别的必填项就交给引擎报错，原因回到输入框下方。
+ */
+export function entryInputsOf(entry: WorkflowEntry, text: string): { readonly inputs: Record<string, unknown>; readonly title?: string } {
+  if (entry.inputs.length === 0) return { inputs: {}, title: text };
+  const texts = entry.inputs.filter((input) => input.kind === "text");
+  const target = texts.find((input) => input.required) ?? texts[0];
+  const files = [...text.matchAll(/(?:^|\s)@(\S+)/g)].map((match) => match[1]!);
+  const inputs: Record<string, unknown> = {};
+  if (target) inputs[target.name] = text;
+  for (const input of entry.inputs) if (input.kind === "files" && files.length > 0) inputs[input.name] = files;
+  return { inputs };
+}
+
+/** 选中起点后输入框里的提示：工作流写了就用它，否则按起点要的输入生成。 */
+export function entryHint(entry: WorkflowEntry): string {
+  if (entry.hint) return entry.hint;
+  if (entry.inputs.length === 0) return "给这次运行起个标题，Enter 开始运行";
+  const parts = entry.inputs.map((input) => (input.kind === "files" ? `用 @ 引用${input.label}` : input.label));
+  return `${parts.join("，")}，Enter 开始运行`;
+}
+
+/**
+ * 工作流库 → 斜杠命令：每个可用工作流的每个起点一条。都是「发送对象」：选中后
+ * 在输入框里写，Enter 即发起（ADR 039）；没有发起表单。
+ */
 export function entryCommands(
   workflows: readonly WorkflowSummary[],
-  launch: (request: WorkflowLaunchRequest) => void,
+  submit: (workflowId: string, entry: WorkflowEntry) => NonNullable<WorkflowEntryCommand["submit"]>,
 ): WorkflowEntryCommand[] {
   return workflows.flatMap((workflow) => {
     const meta = workflow.meta;
@@ -86,7 +128,10 @@ export function entryCommands(
       id: `workflow:${workflow.id}:${entry.id}`,
       label: meta.entries.length > 1 ? `${meta.name}：${entry.label}` : meta.name,
       description: entry.description || meta.description || "启动这个工作流",
-      run: () => launch({ workflowId: workflow.id, entry: entry.id }),
+      Icon: WorkflowIcon,
+      submit: submit(workflow.id, entry),
+      placeholder: entryHint(entry),
+      pendingLabel: "正在启动工作流…",
     }));
   });
 }
@@ -95,7 +140,6 @@ export function createWorkflowWorkbench(
   workflow: WorkflowService,
   workbench: WorkbenchService,
   project: ProjectService,
-  pickFiles?: () => Promise<readonly string[]>,
   transfer?: WorkflowFileTransfer,
   editor?: WorkflowDraftEditor,
   /** 面板里分屏尺寸等界面偏好的存储（宿主存储）。 */
@@ -148,8 +192,33 @@ export function createWorkflowWorkbench(
     show(projectPath, () => workflow.focusRun(runId));
   }
 
-  function openLaunch(projectPath: string, request: WorkflowLaunchRequest = {}): void {
-    show(projectPath, () => workflow.requestPanel({ kind: "launch", launch: request }));
+  /**
+   * 再次运行（ADR 039）：在这个项目里新开一个会话，输入框里放好这次运行的起点和
+   * 上次的需求，用户过目后 Enter。没有发起表单。
+   */
+  function runAgain(projectPath: string, runId: string): void {
+    if (!active()) return;
+    const run = workflow.allRuns().find((item) => item.runId === runId);
+    if (!run?.workflowId || !run.entry) return;
+    const target = `workflow:${run.workflowId}:${run.entry}`;
+    const text = run.requirement || run.title || run.name;
+    void project.sessions.startNewSession(projectPath).then((started) => {
+      if (!started.ok) {
+        workbench.showToast({ message: started.reason, variant: "warn" });
+        return;
+      }
+      if (!project.drafts.composer.prefill(text, [], { target }))
+        workbench.showToast({ message: "这个工作流已不在库里，没法再次运行", variant: "warn" });
+    });
+  }
+
+  // ------------------------------------------------------------ 功能区（模板）
+  const templates = createTemplateNavigation();
+  /** 运行页「查看工作流」、发起页「查看工作流」→ 左侧功能区里的这个工作流。 */
+  function openWorkflow(id: string): void {
+    if (!active()) return;
+    templates.setState({ route: { kind: "workflow", id }, compose: null });
+    workbench.navigation.getState().openSidebar(sidebarId);
   }
 
   // ------------------------------------------------------------ workflowUi
@@ -157,10 +226,17 @@ export function createWorkflowWorkbench(
   const entries = createStore<readonly WorkflowEntryCommand[]>(() => []);
   // 项目界面的通用扩展位用的同一份状态（ADR 037）。
   const activities = createStore<ProjectActivities>(() => ({ workspacePath: null, items: [] }));
-  const quickAction = createStore<ProjectQuickAction | null>(() => ({ label: "启动工作流", run: (path) => openLaunch(path) }));
+  // 空会话的快捷动作只给进行中的运行；发起走「/」菜单（ADR 038）。
+  const quickAction = createStore<ProjectQuickAction | null>(() => null);
+  /** 会话的实时状态（ADR 040）：侧栏、状态卡的说法与会话一致。 */
+  const sessionLookup = (): SessionLookup | undefined => {
+    const state = workflow.sessionActivity?.getState();
+    return state === undefined ? undefined : (sessionId) => sessionStatusOf(state, sessionId);
+  };
   const publishStatus = () => {
     const { workspace, runs } = workflow.sessionLinks();
-    const briefs = runBriefs(runs);
+    const briefs = runBriefs(runs, sessionLookup());
+    const sessionsOf = new Map(runs.map((run) => [run.runId, run.links.map((link) => link.sessionId)]));
     status.setState({ workspacePath: workspace, runs: briefs }, true);
     activities.setState({
       workspacePath: workspace,
@@ -172,43 +248,107 @@ export function createWorkflowWorkbench(
         detail: `${run.workflowName}${run.step ? ` · ${run.step}` : ""}`,
         summary: `${run.title} · ${run.label}${run.step ? ` · ${run.step}` : ""}`,
         openLabel: `查看工作流运行：${run.title}`,
+        sessionIds: sessionsOf.get(run.runId) ?? [],
       })),
     }, true);
     const lead = briefs[0];
     quickAction.setState(
       lead
         ? { label: lead.waiting ? "回复进行中的工作流" : "查看进行中的工作流", run: (path) => openRun(path, lead.runId) }
-        : { label: "启动工作流", run: (path) => openLaunch(path) },
+        : null,
       true,
     );
   };
+  // 在会话里发起（ADR 039）：先做启动前检查；不通过就把原因交还给输入框，草稿
+  // 保留。只有提醒时先说一次，再发送一次才开始（同表单上的「仍然开始」）。
+  const warned = new Set<string>();
+  const startFromSession = (workflowId: string, entry: WorkflowEntry): NonNullable<WorkflowEntryCommand["submit"]> =>
+    async ({ session, text }) => {
+      if (!active()) throw new Error("工作流服务还没准备好");
+      const request = { workflowId, entry: entry.id, ...entryInputsOf(entry, text), entrySession: session.sessionId };
+      const report = await workflow.preflight(request).catch((cause: unknown) => { throw new Error(errorLine(cause)); });
+      const failed = report.items.find((item) => item.status === "fail");
+      if (failed) throw new Error(`没能开始：${failed.label}，${errorLine(failed.message)}${failed.hint ? `。${failed.hint}` : ""}`);
+      const warnings = report.items.filter((item) => item.status === "warn");
+      const key = `${workflowId}:${entry.id}`;
+      if (warnings.length > 0 && !warned.has(key)) {
+        warned.add(key);
+        throw new Error(`${warnings.map((item) => `${item.label}：${errorLine(item.message)}`).join("；")}。再发送一次仍然开始。`);
+      }
+      warned.delete(key);
+      // 先订阅再启动：第一步的任务可能很快就进到会话。
+      const handover = taskHandover(session.workspacePath, session.sessionId);
+      let runId: string;
+      try {
+        ({ runId } = await workflow.start(request, {
+          ...(report.revision ? { revision: report.revision } : {}),
+          ...(report.configuration ? { configuration: report.configuration } : {}),
+          acceptedWarnings: warnings.map((item) => item.id),
+        }));
+      } catch (cause) {
+        handover.cancel();
+        throw new Error(errorLine(cause), { cause });
+      }
+      // 第一步就在这个会话里跑；右侧打开这次运行。任务进到会话（或运行出错）时这次发送才算完成。
+      openRun(session.workspacePath, runId);
+      await handover.wait(runId);
+    };
+  /**
+   * 等第一步的任务进到会话（ADR 039）：进到发起的会话里就完成；兜底开在了新会话里
+   * 就把它打开到中间；第一步之前运行就出错了，把原因交还给输入框。等太久不再拦着
+   * 用户，运行在右侧照常可看。
+   */
+  function taskHandover(projectPath: string, sessionId: string) {
+    const seen: WorkflowEvent[] = [];
+    let settle: ((event: WorkflowEvent) => void) | null = null;
+    const stop = workflow.subscribe((event) => {
+      if (event.type !== "session-task-sent" && event.type !== "run-error" && event.type !== "run-settled") return;
+      if (settle) settle(event);
+      else seen.push(event);
+    });
+    return {
+      cancel: stop,
+      wait: (runId: string) => new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => finish(() => resolve()), TASK_HANDOVER_MS);
+        const finish = (then: () => void) => {
+          clearTimeout(timer);
+          settle = null;
+          stop();
+          then();
+        };
+        settle = (event) => {
+          if (event.runId !== runId) return;
+          if (event.type === "session-task-sent") {
+            const target = typeof event.sessionId === "string" ? event.sessionId : sessionId;
+            finish(() => {
+              if (target !== sessionId) openNodeSession(target, projectPath);
+              resolve();
+            });
+          } else if (event.type === "run-error") {
+            finish(() => reject(new Error(errorLine(event.message ?? "WORKFLOW_RUN_FAILED"))));
+          } else {
+            finish(() => resolve());
+          }
+        };
+        for (const event of seen.splice(0)) settle?.(event);
+      }),
+    };
+  }
+
   let entriesSeq = 0;
   const loadEntries = () => {
     const seq = ++entriesSeq;
     workflow.workflows()
       .then((list) => {
         if (disposed || seq !== entriesSeq) return;
-        entries.setState(entryCommands(list, (request) => {
-          const path = workbench.navigation.getState().contextPath;
-          if (path) openLaunch(path, request);
-        }), true);
+        entries.setState(entryCommands(list, startFromSession), true);
       })
       .catch(() => {});
   };
   const view: WorkflowView = {
     status,
     entries,
-    openLaunch,
     openRun,
-    Overview: function Overview({ project: projectPath }) {
-      return <WorkflowOverview
-        service={workflow}
-        project={projectPath}
-        onOpenRun={(runId) => openRun(projectPath, runId)}
-        onLaunch={() => openLaunch(projectPath)}
-        onBrowse={() => openLaunch(projectPath, {})}
-      />;
-    },
     SessionBanner: function SessionBanner({ project: projectPath, sessionId }) {
       return <WorkflowSessionBanner
         service={workflow}
@@ -219,31 +359,19 @@ export function createWorkflowWorkbench(
     },
   };
 
+  // 工作流是应用级的：功能区不要求先选项目（ADR 038）。
   const sidebar: WorkbenchContributions["sidebar"] = {
-    id: "workflow",
+    id: sidebarId,
     label: "工作流",
     order: 10,
     Icon: WorkflowIcon,
-    View: function WorkflowSidebarView({ project: projectPath }) {
-      if (projectPath === null) {
-        return (
-          <div className="flex items-start gap-2 px-4 py-2 text-ui-sm text-ink-mute">
-            <span>请先选择项目</span>
-            <TextLink onClick={() => workbench.navigation.getState().openSidebar(null)}>选择项目</TextLink>
-          </div>
-        );
-      }
-      return (
-        <WorkflowSidebar
-          key={pathKey(projectPath)}
-          project={projectPath}
-          service={workflow}
-          onOpenWorkflow={(workflowId) =>
-            show(projectPath, () => workflow.requestPanel({ kind: "detail", workflowId }))
-          }
-          onOpenRun={(runId) => openRun(projectPath, runId)}
-        />
-      );
+    View: function WorkflowSidebarView() {
+      return <WorkflowSidebar service={workflow} navigation={templates} canCompose={editor !== undefined} />;
+    },
+    WorkArea: function WorkflowWorkArea() {
+      return <SplitStorageContext.Provider value={layoutStorage ?? null}>
+        <WorkflowWorkspace service={workflow} navigation={templates} transfer={transfer} editor={editor} />
+      </SplitStorageContext.Provider>;
     },
   };
 
@@ -252,7 +380,7 @@ export function createWorkflowWorkbench(
     keepMounted: true,
     launcher: {
       label: "AAW 工作流",
-      description: "工作流库、发起与查看运行",
+      description: "查看与管理工作流运行",
       searchHint: "aaw workflow",
       Icon: WorkflowIcon,
       open: (projectPath) => show(projectPath),
@@ -270,11 +398,10 @@ export function createWorkflowWorkbench(
               target,
               runId,
             )}
-            pickFiles={pickFiles}
-            transfer={transfer}
-            editor={editor}
             onOpenSession={openNodeSession}
             onOpenFile={(path) => openResultFile(projectPath, path)}
+            onOpenWorkflow={openWorkflow}
+            onRunAgain={(runId) => runAgain(projectPath, runId)}
           />
           </SplitStorageContext.Provider>
         </section>
@@ -288,9 +415,8 @@ export function createWorkflowWorkbench(
     slashGroup: "工作流入口",
     slashEntries: entries,
     quickAction,
-    // 打开右侧 AAW 面板并落在工作流库（与总览区块的「工作流库」按钮同一条链路）。
-    treeAction: { label: "工作流", hint: "打开工作流", Icon: WorkflowIcon, run: (path) => openLaunch(path, {}) },
-    Overview: view.Overview,
+    // 打开右侧 AAW 标签页：这个项目的运行。
+    treeAction: { label: "工作流", hint: "查看工作流运行", Icon: WorkflowIcon, run: (path) => show(path) },
     SessionBanner: view.SessionBanner,
   };
   return {
@@ -299,8 +425,10 @@ export function createWorkflowWorkbench(
     view,
     extension,
     openRun,
+    openWorkflow,
     openNodeSession,
     publishStatus,
+    sessionLookup,
     loadEntries,
     dispose() {
       disposed = true;
@@ -341,7 +469,7 @@ export function apply(ctx: Context): void {
     currentProject: () => workbench.navigation.getState().contextPath ?? null,
   });
   ctx.effect(() => project.sessions.registerSessionTools(draftEditor.sessionTools), "workflow:draft-tools");
-  const ui = createWorkflowWorkbench(workflow, workbench, project, () => host.dialogs.pickFiles("选择附件"), {
+  const ui = createWorkflowWorkbench(workflow, workbench, project, {
     async saveText(defaultName, text) {
       const path = await host.dialogs.saveFile({ defaultPath: defaultName, filters: [{ name: "AAW 工作流", extensions: ["json"] }] });
       if (!path) return false;
@@ -388,13 +516,13 @@ export function apply(ctx: Context): void {
       const { workspace, runs } = workflow.sessionLinks();
       const next = new Set<string>();
       if (workspace !== null) {
-        publisher.publish(workspace, runSessionGroups(runs, (runId) => ui.openRun(workspace, runId), (sessionId) => ui.openNodeSession(sessionId, workspace), (runId) => archiveRun(runId)));
+        publisher.publish(workspace, runSessionGroups(runs, (runId) => ui.openRun(workspace, runId), (sessionId) => ui.openNodeSession(sessionId, workspace), (runId) => archiveRun(runId), ui.sessionLookup()));
         next.add(workspace);
       }
       for (const other of workflow.otherSessionLinks()) {
         if (workspace !== null && pathKey(other.project) === pathKey(workspace)) continue;
         const path = other.project;
-        publisher.publish(path, runSessionGroups(other.runs, (runId) => openRunFromNotification(workbench, ui.openRun, path, runId), (sessionId) => ui.openNodeSession(sessionId, path), (runId) => archiveRun(runId, path)));
+        publisher.publish(path, runSessionGroups(other.runs, (runId) => openRunFromNotification(workbench, ui.openRun, path, runId), (sessionId) => ui.openNodeSession(sessionId, path), (runId) => archiveRun(runId, path), ui.sessionLookup()));
         next.add(path);
       }
       for (const path of published) if (!next.has(path)) publisher.publish(path, []);
@@ -407,8 +535,11 @@ export function apply(ctx: Context): void {
       if (event.type === "runs-changed") publish();
       else if (event.type === "library-changed") ui.loadEntries();
     });
+    // 会话状态一变（工作中、你打断了、出错……）就按同一份重发（ADR 040）。
+    const unsubscribeSessions = workflow.sessionActivity?.subscribe(() => publish()) ?? (() => {});
     return () => {
       unsubscribe();
+      unsubscribeSessions();
       publisher.dispose();
     };
   }, "workflow:session-groups");

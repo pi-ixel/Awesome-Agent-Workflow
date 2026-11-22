@@ -14,6 +14,10 @@ steps:
       delivers: 这个 AR 澄清后的需求、代码事实和你的决定
       prompt: 依据当前 AR 范围澄清需求、代码事实及用户决策，需取得明确确认。
       knowledge: [host-tools.md, ar-scope-method.md]
+      reads:
+        currentAr: 当前 AR 的编号和范围
+        srDesign: SR 整体设计（从 SR 开始时才有）
+        projectBaseline: 项目基线（从 SR 开始时才有）
       does:
         - AR 范围与事实
         - 用户确认
@@ -46,6 +50,10 @@ steps:
       delivers: 模块边界设计和确认过的模块分组
       prompt: 设计当前 AR 的模块边界、交互与分组；确认后输出非空 groups 列表。
       knowledge: [host-tools.md, module-boundary-method.md]
+      reads:
+        currentAr: 当前 AR 的编号和范围
+        arClarification: 澄清确认过的需求和用户决策
+        srDesign: SR 整体设计（从 SR 开始时才有）
       does:
         - 模块边界
         - 模块分组与确认

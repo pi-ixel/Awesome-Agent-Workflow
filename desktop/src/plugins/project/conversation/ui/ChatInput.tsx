@@ -171,6 +171,8 @@ function ComposerActionHint({
 
 export interface ChatInputProps {
   readonly queue?: ReactNode;
+  /** 卡片最上面一行（如工作流节点会话的那一条），排在排队消息上面。 */
+  readonly header?: ReactNode;
   readonly fileCandidates?: FileCandidates;
   readonly skillCandidates?: SkillsService["candidates"];
   readonly resolveSlashSkills?: SkillsService["resolveSlashSkills"];
@@ -204,6 +206,7 @@ export interface ChatInputProps {
 
 export function ChatInput({
   queue,
+  header,
   fileCandidates,
   skillCandidates,
   resolveSlashSkills,
@@ -225,7 +228,7 @@ export function ChatInput({
   const steerAgentId = useSessionValue((state) => state.steerAgentId);
   const steerPhase = useSessionValue((state) => state.steerPhase);
   const awaitingUser = useSessionValue((state) => state.isAwaitingUser);
-  const { clear, retryLastPrompt, removeQueuedPromptById, retryQueueSave } =
+  const { clear, retryLastPrompt, removeQueuedPromptById, retryQueueSave, setHandoff } =
     useSessionCommands();
   const queuedPrompts = useSessionValue((state) => state.queuedPrompts);
   const activeSteerIds = useSessionValue((state) => state.activeSteerIds);
@@ -278,6 +281,14 @@ export function ChatInput({
   }, [imagesByScope, imagesLoaded, imageStorage]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const skillRailRef = useRef<HTMLDivElement | null>(null);
+  // 发送对象（ADR 039）：「/」里选中的扩展条目，带着它发送时内容交给扩展。
+  const [sendTarget, setSendTarget] = useState<SlashItem | null>(null);
+  const [targetBusy, setTargetBusy] = useState(false);
+  const previousSessionIdRef = useRef<string | null>(null);
+  const extensionEntriesRef = useRef(extensionEntries);
+  useEffect(() => {
+    extensionEntriesRef.current = extensionEntries;
+  }, [extensionEntries]);
   const [skillRailWidth, setSkillRailWidth] = useState(0);
   const turnState = useSessionValue((state) => state.turnState);
   const agentKey = useSessionValue((state) => state.agentKey);
@@ -291,7 +302,7 @@ export function ChatInput({
     () => readSkillReferences(draft),
     [draft],
   );
-  const hasSkillReferences = skillReferences.length > 0;
+  const hasSkillReferences = skillReferences.length > 0 || sendTarget !== null;
   // 引用浮在首行，文本域只缩进首行，后续行仍使用完整宽度。
   useLayoutEffect(() => {
     const rail = skillRailRef.current;
@@ -325,7 +336,9 @@ export function ChatInput({
   const agentInteraction = steerAgentId
     ? interactionByAgent[steerAgentId]
     : undefined;
-  const running = isAgentRunning || !!steerPhase;
+  const handoff = useSessionValue((state) => state.handoff ?? null);
+  // 交接中（ADR 039）也按「Agent 在忙」处理：再发的内容排队，等扩展接手后的这一轮结束再发。
+  const running = isAgentRunning || !!steerPhase || handoff !== null;
   const steering =
     running && supportsSteer && agentInteraction?.mode === "steer";
   const steerDisabled =
@@ -479,6 +492,10 @@ export function ChatInput({
   useEffect(() => {
     const previousKey = draftKeyRef.current;
     draftKeyRef.current = draftKey;
+    // 发送对象属于这一份草稿：换了会话就不带过去；新会话刚建好（草稿从「新会话」
+    // 迁到它自己名下）时还是同一份草稿，留着。
+    if (previousKey !== draftKey && previousSessionIdRef.current !== null) setSendTarget(null);
+    previousSessionIdRef.current = activeSessionId;
     if (draftKey === null) {
       return;
     }
@@ -547,6 +564,10 @@ export function ChatInput({
   useEffect(() => {
     return composer?.subscribePrefill((text, attachments, options) => {
       const attachmentScope = draftKeyRef.current ?? "unbound";
+      const target = options?.target
+        ? extensionEntriesRef.current?.find((entry) => entry.id === options.target && entry.submit)
+        : undefined;
+      if (options?.target && !target) return false;
       if (
         options?.ifEmpty &&
         (draftTextRef.current.trim() ||
@@ -605,6 +626,10 @@ export function ChatInput({
         const next = { ...imagesRef.current, [attachmentScope]: combined };
         imagesRef.current = next;
         setImagesByScope(next);
+      }
+      if (target) {
+        setSendTarget({ ...target, group: "", kind: "action" });
+        setAttachmentError(null);
       }
       setDraft((current) =>
         [current, parsed?.text ?? text].filter(Boolean).join("\n\n"),
@@ -779,6 +804,10 @@ export function ChatInput({
         ? `${item.insertText ?? ""} `
         : "";
     const result = replaceSlashToken(draftText, caret, query, replacement);
+    if (item.submit) {
+      setSendTarget(item);
+      setAttachmentError(null);
+    }
     const reference = item.skillReference;
     const references =
       reference &&
@@ -789,7 +818,7 @@ export function ChatInput({
         : skillReferences;
     setDraft(withSkillReferences(result.text, references));
     setSlash(null);
-    if (item.kind === "action") {
+    if (item.kind === "action" && !item.submit) {
       if (item.actionId) runSlashAction(item.actionId);
       else item.run?.();
     }
@@ -830,8 +859,49 @@ export function ChatInput({
     });
   };
 
+  /**
+   * 带着发送对象发送（ADR 039）：和平常发消息一样，那句话立刻显示在信息流里（交接中），
+   * 输入框清空、照常可用；扩展接手后收起，失败时那句话和标签回到输入框并显示原因。
+   */
+  const submitToTarget = (target: SlashItem): void => {
+    const text = draftText.trim();
+    if (!target.submit || targetBusy || disabled || text === "") return;
+    if (images.length) {
+      setAttachmentError(`「${target.label}」不接收图片，可以用 @ 引用文件`);
+      return;
+    }
+    if (activePath === null || agentKey === undefined || activeSessionId === null) {
+      setAttachmentError("会话还在准备，稍等再发送");
+      return;
+    }
+    const scope = draftKeyRef.current;
+    setTargetBusy(true);
+    setAttachmentError(null);
+    if (scope !== null) clearSentDraft(scope);
+    setDraft("");
+    setSendTarget(null);
+    setSlash(null);
+    setMention(null);
+    setHandoff({ text, label: target.pendingLabel ?? "正在处理…" });
+    target
+      .submit({ session: { workspacePath: activePath, agentKey, sessionId: activeSessionId }, text })
+      .then(() => setHandoff(null))
+      .catch((cause: unknown) => {
+        setHandoff(null);
+        if (draftKeyRef.current !== scope) return;
+        setDraft((current) => (current.trim() ? `${text}\n\n${current}` : text));
+        setSendTarget(target);
+        setAttachmentError(cause instanceof Error ? cause.message : String(cause));
+      })
+      .finally(() => setTargetBusy(false));
+  };
+
   const submit = (): void => {
     if (steerDisabled) return;
+    if (sendTarget) {
+      submitToTarget(sendTarget);
+      return;
+    }
     const message = skillPrompt(draftText, skillReferences);
     if (
       !hasContent ||
@@ -922,6 +992,17 @@ export function ChatInput({
     ) {
       event.preventDefault();
       setDraft(withSkillReferences(draftText, skillReferences.slice(0, -1)));
+      return;
+    }
+    if (
+      event.key === "Backspace" &&
+      event.currentTarget.selectionStart === 0 &&
+      event.currentTarget.selectionEnd === 0 &&
+      sendTarget
+    ) {
+      event.preventDefault();
+      setSendTarget(null);
+      setAttachmentError(null);
       return;
     }
     // slash 命令面板开着的导航优先
@@ -1145,14 +1226,16 @@ export function ChatInput({
                     {/* label 上限 40% + 截断、描述 14px（ZCode
                         slashCommandPanelSections.tsx:34/:39） */}
                     <span className="flex max-w-[40%] shrink-0 items-center gap-1.5 text-ui-base font-medium">
-                      {item.skillReference && (
+                      {item.skillReference ? (
                         <SkillIcon className="ui-icon-16 shrink-0" />
-                      )}
+                      ) : item.Icon ? (
+                        <item.Icon className="ui-icon-16 shrink-0" />
+                      ) : null}
                       <span
                         className="truncate"
                         data-hint={item.skillReference?.path}
                       >
-                        {item.skillReference ? item.label : `/${item.label}`}
+                        {item.skillReference || item.Icon ? item.label : `/${item.label}`}
                       </span>
                     </span>
                     <span className="min-w-0 flex-1 truncate text-ui-base text-ink-subtlest">
@@ -1234,6 +1317,7 @@ export function ChatInput({
         }}
         className={`composer-card @container/composer mx-auto w-full overflow-hidden rounded-2xl bg-surface transition-[max-width] duration-150 ease-out [--composer-inline-inset:calc(var(--spacing)*4.5_+_var(--ui-icon-unit)*2)] ${widthClass}`}
       >
+        {header}
         {queue}
         {imageSaveFailed && (
           <div role="alert">
@@ -1362,6 +1446,7 @@ export function ChatInput({
           <SkillReferenceTokens
             references={skillReferences}
             railRef={skillRailRef}
+            target={sendTarget}
           />
           <textarea
             ref={textareaRef}
@@ -1384,7 +1469,7 @@ export function ChatInput({
             aria-expanded={mention !== null}
             disabled={disabled}
             placeholder={
-              isAgentRunning
+              sendTarget?.placeholder ? sendTarget.placeholder : isAgentRunning
                 ? steering
                   ? "输入补充内容…"
                   : "agent 正在处理，输入内容 Enter 加入队列…"

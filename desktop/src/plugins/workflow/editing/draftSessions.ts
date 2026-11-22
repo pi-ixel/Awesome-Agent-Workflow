@@ -28,6 +28,7 @@ export function draftPrompt(kind: "edit" | "new" | "continue", request: string):
     "- 不需要运行工作流本身；",
     "- 结果字段写上 labels，让界面能读懂；会产出文件的节点写 cleanup；对外影响撤不回的节点写 irreversible；",
     "- label、does、why、delivers、去向的 label 和 explain 是写给人看的：用户在应用里审查这个工作流打算怎么运行时，流程图和节点详情显示的就是它们，读的人不了解工作流内部（字段、表达式、节点 id、内部用语）。每个节点都写 why（为什么有这一步）和 delivers（最后交出什么），有分支的步骤每条去向都写 explain（什么情况下走这条）；",
+    "- 每个 Agent 节点开场收到的是一张工单：工作流的 description、所属阶段的 description、节点的 why 和 delivers、prompt、knowledge——这些同时是给执行这一步的 Agent 的权威指引，写清整体在做什么、这一阶段在做什么；运行变量（前面各步的结果）不会附给 Agent，节点要用到哪些就在 reads 里写「名字: 读来做什么」，Agent 按名字自己取；",
     "- 改完后用几句话向用户说明这个工作流现在会怎么做（按步骤说，用用户能懂的话），以及这次改了什么、为什么；不要出现文件名、字段名和节点 id。用户会在应用里看改动前后的流程图，确认后才保存。",
   ].join("\n");
   return pluginMessage({
@@ -63,7 +64,7 @@ export function createDraftEditor(deps: {
       if (!sessionId) throw new Error("ACP_SESSION_ID_MISSING");
       const target = { ...opened, sessionId };
       sessions.set(draft.draftId, { target, tools });
-      await deps.project.sessions.openSessionFromEntry(workspacePath, sessionId, target.agentKey);
+      // 不抢前台：用户留在功能区的草稿页看改动，需要时再从草稿页打开会话（ADR 038）。
       deps.project.conversation.send(target, firstMessage.text, undefined, { display: firstMessage.display });
     },
 

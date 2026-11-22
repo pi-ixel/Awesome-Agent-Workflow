@@ -18,10 +18,10 @@ const runLinks = (overrides: Partial<RunSessionLinks> = {}): RunSessionLinks => 
   status: "running",
   active: true,
   links: [
-    { sessionId: "s-req", actorName: "需求确认", nodes: [{ siteId: "ask#1", ordinal: 1, status: "completed", label: "需求确认", awaitingInput: false }] },
+    { sessionId: "s-req", actorName: "需求确认", nodes: [{ siteId: "ask#1", ordinal: 1, status: "completed", label: "需求确认" }] },
     { sessionId: "s-design", actorName: "设计", nodes: [
-      { siteId: "ask#2", ordinal: 1, status: "completed", label: "设计", awaitingInput: false },
-      { siteId: "ask#4", ordinal: 2, status: "running", label: "设计修正", awaitingInput: true },
+      { siteId: "ask#2", ordinal: 1, status: "completed", label: "设计" },
+      { siteId: "ask#4", ordinal: 2, status: "running", label: "设计修正", turn: "completed" },
     ] },
   ],
   ...overrides,

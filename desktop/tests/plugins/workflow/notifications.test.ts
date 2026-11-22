@@ -10,7 +10,7 @@ function setup() {
   const values = new Map<string, string>();
   let snapshot: unknown = {
     run: { runId: "r1", status: "running", title: "验收运行" }, active: true,
-    nodes: [{ siteId: "ask", ordinal: 1, status: "running", actorSiteId: "actor", awaitingInput: true }],
+    nodes: [{ siteId: "ask", ordinal: 1, status: "running", actorSiteId: "actor", turn: "completed" }],
     actors: [{ siteId: "actor", ordinal: 1, sessionId: "session-1" }],
   };
   const deps = {
@@ -51,7 +51,7 @@ describe("工作流通知", () => {
 
   it("后台等待通知定位原项目的节点会话，重复事件和重载不重复发", async () => {
     const h = setup();
-    const waiting = { event: { siteId: "ask", ordinal: 1, status: "awaiting_input" } };
+    const waiting = { event: { siteId: "ask", ordinal: 1, type: "turn-ended", outcome: "completed", awaiting: true } };
     h.event("engine-event", waiting);
     h.event("engine-event", waiting);
     await vi.waitFor(() => expect(h.deps.notifications.send).toHaveBeenCalledOnce());
@@ -64,7 +64,7 @@ describe("工作流通知", () => {
     h.event("engine-event", waiting);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(h.deps.notifications.send).toHaveBeenCalledOnce();
-    h.event("engine-event", { event: { siteId: "ask", ordinal: 1, status: "input_round_completed" } });
+    h.event("engine-event", { event: { siteId: "ask", ordinal: 1, type: "turn-started", turn: 2 } });
     h.event("engine-event", waiting);
     await vi.waitFor(() => expect(h.deps.notifications.send).toHaveBeenCalledTimes(2));
     await dispose();
@@ -85,7 +85,7 @@ describe("工作流通知", () => {
   it("前台、权限拒绝和用户停止不弹通知", async () => {
     const h = setup();
     h.deps.window.isFocused.mockResolvedValue(true);
-    h.event("engine-event", { event: { siteId: "ask", ordinal: 1, status: "awaiting_input" } });
+    h.event("engine-event", { event: { siteId: "ask", ordinal: 1, type: "turn-ended", outcome: "completed", awaiting: true } });
     h.event("run-error", { cancelled: true });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(h.deps.notifications.send).not.toHaveBeenCalled();
@@ -100,11 +100,11 @@ describe("工作流通知", () => {
 
   it("通知带标记：回复后删掉等待通知，运行重新开始时删掉确认通知", async () => {
     const h = setup();
-    h.event("engine-event", { event: { siteId: "ask", ordinal: 1, status: "awaiting_input" } });
+    h.event("engine-event", { event: { siteId: "ask", ordinal: 1, type: "turn-ended", outcome: "completed", awaiting: true } });
     await vi.waitFor(() => expect(h.deps.notifications.send).toHaveBeenCalledOnce());
     const replyTag = h.deps.notifications.send.mock.calls[0]![0].tag;
     expect(replyTag).toBe("workflow:r1:reply:ask:1");
-    h.event("engine-event", { event: { siteId: "ask", ordinal: 1, status: "input_round_completed" } });
+    h.event("engine-event", { event: { siteId: "ask", ordinal: 1, type: "turn-started", turn: 2 } });
     expect(h.deps.notifications.remove).toHaveBeenCalledWith(replyTag);
 
     h.setSnapshot({ run: { runId: "r1", status: "waiting", title: "验收运行" }, active: false });
@@ -132,13 +132,13 @@ describe("工作流通知", () => {
     h.setSnapshot({
       run: { runId: "r1", status: "running", title: "并行运行" }, active: true,
       nodes: [
-        { siteId: "one", ordinal: 1, status: "running", actorSiteId: "a", awaitingInput: true },
-        { siteId: "two", ordinal: 1, status: "running", actorSiteId: "b", awaitingInput: true },
+        { siteId: "one", ordinal: 1, status: "running", actorSiteId: "a", turn: "completed" },
+        { siteId: "two", ordinal: 1, status: "running", actorSiteId: "b", turn: "completed" },
       ],
       actors: [{ siteId: "a", sessionId: "session-a" }, { siteId: "b", sessionId: "session-b" }],
     });
-    h.event("engine-event", { project: "D:/background", event: { siteId: "one", ordinal: 1, status: "awaiting_input" } });
-    h.event("engine-event", { project: "D:/background", event: { siteId: "two", ordinal: 1, status: "awaiting_input" } });
+    h.event("engine-event", { project: "D:/background", event: { siteId: "one", ordinal: 1, type: "turn-ended", outcome: "completed", awaiting: true } });
+    h.event("engine-event", { project: "D:/background", event: { siteId: "two", ordinal: 1, type: "turn-ended", outcome: "completed", awaiting: true } });
     await vi.waitFor(() => expect(h.deps.notifications.send).toHaveBeenCalledTimes(2));
     expect(h.deps.notifications.send.mock.calls.map(([n]) => n.extra.sessionId).sort()).toEqual(["session-a", "session-b"]);
     expect(h.deps.notifications.send.mock.calls.every(([n]) => n.extra.project === "D:/background")).toBe(true);

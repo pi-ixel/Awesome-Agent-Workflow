@@ -5,21 +5,15 @@
  */
 import type { RunSummary } from "../types.ts";
 
-/** 运行的结果字段里 `status`（引擎 run-detail 的 result）：只有 `blocked` 才需要人处理。 */
-const blockedOf = (run: RunSummary): boolean =>
-  typeof run.result === "object" &&
-  run.result !== null &&
-  (run.result as { readonly status?: unknown }).status === "blocked";
-
 /**
- * 要你处理：等你确认的，以及失败但被阻塞的（卡在门禁 / 关卡上）。
+ * 要你处理：等你确认的，以及流程停下（阻塞）的。
  *
  * 其余状态（已完成、已停止、只是失败）都是「结果」，不需要当下动作——
  * 运行管理把它们和待处理运行分开，才不会让人逐行读徽标。
  */
 export function attentionOf(runs: readonly RunSummary[]): readonly RunSummary[] {
   return runs.filter(
-    (run) => run.status === "waiting" || (run.status === "failed" && blockedOf(run)),
+    (run) => run.status === "waiting" || run.status === "blocked",
   );
 }
 

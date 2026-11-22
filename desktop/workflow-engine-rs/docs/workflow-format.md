@@ -35,13 +35,14 @@ format: aaw-workflow/1          # 必填，固定值
 id: aaw-dev                     # 与目录名一致；字母、数字、下划线、-
 name: AAW 轻量开发
 version: 1.0.0                  # 给人看的版本号
-description: 一段话说明这个工作流适合做什么
+description: 一段话说明这个工作流适合做什么   # 也是每个 Agent 开场白里的「在造什么」
 root: main                      # 主流程文件名，缺省 main
 
 entries:                        # 起点：同一个工作流可以从不同步骤开始
   - id: dev
     label: 从需求开始
     description: 输入本次要做的事情，流程会先和你确认需求与边界。
+    hint: 写下本次需求，Enter 开始运行   # 在会话里选中这个起点后输入框里的提示；需要文件就提示用户用 @ 引用
     start: requirement          # 主流程里的步骤名
     inputs:                     # 启动时要用户填的东西
       requirement:
@@ -50,8 +51,10 @@ entries:                        # 起点：同一个工作流可以从不同步�
         required: true
         placeholder: 用一段话描述这次要完成的事情
 
-stages:                         # 画布分带（只用于显示，不影响执行）
-  - {id: design, label: 需求与设计}
+stages:                         # 画布分带（不影响执行）
+  - id: design
+    label: 需求与设计
+    description: 把需求确认清楚，落成经过检查的设计和测试设计   # 可选：进 Agent 开场白的「当前阶段」
   - {id: task, label: 任务}
 
 vars:                           # 初始变量，去向条件可以读、set 可以改
@@ -141,6 +144,7 @@ steps:
 | `role` | 会话角色；同一流程里 role 相同的节点共用一个会话，它们的 `result` 与 `session_scope` 必须一致。所有节点都用用户当前选中的 Agent |
 | `prompt` | 这一步让 Agent 做什么。长文本用 `\|` 块写 |
 | `knowledge` | `knowledge/` 下的文件名，原文附在提示后面 |
+| `reads` | 这一步要读的运行变量：`名字: 一句用途`，如 `design: 对照设计检查改动是否越界`。开场白里只列名字和用途，Agent 用 `get_workflow_step` 按名字读当前版本。名字没在 `vars` 声明、也没被任何去向 `set` 过会有提醒 |
 | `does` | 画布上的步骤说明 |
 | `result` | 结果字段，见下 |
 | `strict_result` | `true` 时不许交声明之外的字段 |
@@ -153,6 +157,20 @@ steps:
 | `irreversible` | 节点对外的影响撤不回时写明原因，如 `irreversible: 会发布到制品库`；回退越过它时会提醒 |
 
 没写 `cleanup` 的节点回退时不清理任何文件；重做的节点在已有文件上继续即可。
+
+### Agent 的开场白
+
+每个 Agent 节点开场收到一张工单，全部来自这里写的定义：
+
+1. 在造什么：`workflow.yaml` 的 `name`、`description`，加上本次运行的输入；
+2. 在哪个阶段：所属阶段的 `label` 和 `description`；
+3. 这一步是什么：`label`、`why`、`delivers`、`prompt`、`knowledge`；
+4. 需要的东西去哪拿：`reads` 列出的名字和用途——内容不贴进来，也不列运行里的其他变量（工位只看交给它的材料；没写进 `reads` 的步骤就拿不到提示，所以该读的都要写上）；
+5. 怎么交活：`result` 的每个字段（字段名、`labels` 里的显示名、取值、可否省略）。去向条件读哪些字段，就把它们写成必填，或在 `labels` 里写清用途——Agent 照这里填。
+
+运行变量（前面各步交的结果、`set` 写下的东西）不会整块附在提示里：Agent 用结果通道的 `get_workflow_step` 工具按名字读，不带参数时返回这张工单本身。所以 `description`、阶段说明、`why`、`delivers` 写的是给 Agent 的权威指引；`reads` 写清每一项读来做什么，Agent 据此决定要不要取。
+
+同一个会话里同一步再做一次（回退保留成果、检查退回、流程绕回）时，不重发工单，只发一段返工提示：第几次、用户的意见，请 Agent 先用 `get_workflow_step` 看这一步现在的工单。
 
 ### 结果字段
 
@@ -217,7 +235,7 @@ labels:
 - 引用了不存在的步骤、节点、子流程、阶段、知识文件；
 - 去向跳到别的流程文件、没有兜底的去向放在中间、主流程用了 `$return`；
 - 表达式写法错误、名字认不出（会列出能用的名字）、函数不存在或参数个数不对；
-- 结果字段没声明、固定取值比较不可能成立、变量没有来源；
+- 结果字段没声明、固定取值比较不可能成立、变量没有来源（包括 `reads` 里的名字）；
 - 步骤从入口走不到；
 - 并行节点抢同一个会话、共用会话的节点结果格式不一致、`after` 成环。
 

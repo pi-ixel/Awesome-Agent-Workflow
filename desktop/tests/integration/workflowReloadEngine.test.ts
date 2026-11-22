@@ -109,6 +109,7 @@ realEngineTest.each([true, false])("real engine reconnects through the selected 
       appSessions.set(session.sessionId!, session);
       return { workspacePath: options.workspacePath, agentKey: key, sessionId: session.sessionId };
     },
+    ready: () => Promise.resolve(),
     send: (target, message) => {
       void appSessions.get(target.sessionId!)?.prompt(message.text).catch(() => undefined);
       return true;
@@ -125,6 +126,7 @@ realEngineTest.each([true, false])("real engine reconnects through the selected 
       workflow: {
         subscribe: (receive: (event: WorkflowEvent) => void) => { observer = receive; return () => { if (observer === receive) observer = undefined; }; },
         respondHostFrame: (runId: string, frame: string) => { if (current === generation) send({ type: "host-frame", runId, frame }); return Promise.resolve(); },
+        reportSession: async (sessionId: string, state: unknown) => { if (current === generation) await request("session-state", { sessionId, state }); },
       },
       sessions,
       openTrackerTransport: () => {

@@ -170,7 +170,7 @@ describe("App 主布局", () => {
     expect(screen.queryByLabelText("AAW 状态与待办")).not.toBeInTheDocument();
   });
 
-  it("图标栏切换和折叠侧栏时保留内容区，无项目时可返回项目树", async () => {
+  it("图标栏切换和折叠侧栏时保留内容区；无项目时也能打开工作流功能区，再回到项目树", async () => {
     renderDesktopApp(services.workbench);
     const main = screen.getByRole("main");
     const tree = screen.getByLabelText("项目树");
@@ -185,11 +185,13 @@ describe("App 主布局", () => {
     expect(rail.getByRole("button", { name: "设置" })).toBeVisible();
     expect(rail.getByRole("button", { name: "打开账号菜单" })).toBeVisible();
 
+    // 工作流是应用级的：没选项目也直接进功能区（ADR 038）。
     await userEvent.click(workflows);
     expect(workflows).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("main")).toBe(main);
-    expect(within(main).getByText(/从左侧选择或新建一个项目目录/)).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "选择项目" }));
+    expect(within(main).getByRole("region", { name: "工作流" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "工作流分类" })).toBeVisible();
+    await userEvent.click(conversations);
     expect(conversations).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByLabelText("项目树")).toBe(tree);
     expect(within(tree).queryByRole("button", { name: "打开账号菜单" })).not.toBeInTheDocument();
