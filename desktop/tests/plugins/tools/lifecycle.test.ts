@@ -36,7 +36,9 @@ const installedRoot = "%APPDATA%/tools/installed";
 const backupRoot = "%APPDATA%/tools/backups";
 
 /** 一段真实二进制（PNG 头 + 非法 UTF-8 字节）：文本通道装不进来，必须走字节。 */
-const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0x10]);
+const pngBytes = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0x10,
+]);
 const pngBase64 = btoa(String.fromCharCode(...pngBytes));
 
 /** 配置里一条安装记录的形状（只声明本测试会读的字段）。 */
@@ -72,22 +74,30 @@ function readSavedEntries(userKey: string | undefined): readonly SavedEntry[] {
 }
 
 /** 造一个自包含工具包：清单 + 页面都由 html 决定。 */
-function packageOf(version: string, html: string, extra: Partial<ToolPackage> = {}): ToolPackage {
-  return parseToolPackage(JSON.stringify({
-    schemaVersion: 1,
-    id: "notes",
-    name: "随手记",
-    version,
-    html,
-    ...extra,
-  }));
+function packageOf(
+  version: string,
+  html: string,
+  extra: Partial<ToolPackage> = {},
+): ToolPackage {
+  return parseToolPackage(
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "notes",
+      name: "随手记",
+      version,
+      html,
+      ...extra,
+    }),
+  );
 }
 
 /** 工坊构造期只读几个 store（前台会话、工作区、最近项目排除）；装/卸用不到它们。 */
 function fakeProject(): ProjectService {
   return {
     projects: {
-      workspace: createStore<{ activePath: string | null }>(() => ({ activePath: null })),
+      workspace: createStore<{ activePath: string | null }>(() => ({
+        activePath: null,
+      })),
       setRecentExclusions: vi.fn(),
       registerProject: vi.fn(),
       pickDirectory: vi.fn(),
@@ -99,7 +109,10 @@ function fakeProject(): ProjectService {
     conversation: {
       send: vi.fn(),
       foreground: {
-        session: createStore(() => ({ isAgentRunning: false, activeSessionId: "s1" })),
+        session: createStore(() => ({
+          isAgentRunning: false,
+          activeSessionId: "s1",
+        })),
       },
     },
   } as unknown as ProjectService;
@@ -121,9 +134,17 @@ function machine() {
    * 只在写入**之前**等待，所以放行之后那次写入是完整成功的——模拟的是"操作
    * 慢"，不是"操作坏"，两者要分开验。
    */
-  let gate: { readonly match: (path: string) => boolean; readonly wait: Promise<void> } | undefined;
+  let gate:
+    | {
+        readonly match: (path: string) => boolean;
+        readonly wait: Promise<void>;
+      }
+    | undefined;
   /** 每次回收被发起时的参数：验"什么时候扫了一遍"与"带的账号对不对"。 */
-  const pruneCalls: { readonly toolId: string; readonly owner: string | undefined }[] = [];
+  const pruneCalls: {
+    readonly toolId: string;
+    readonly owner: string | undefined;
+  }[] = [];
   /**
    * 目录归谁。真机上这条信息就在路径里（`installed/<账号>/<id>`：`tools_root_dir`
    * 返回的根已经含账号段，前端从不自己拼），而演示宿主是一棵扁平树——它模拟的
@@ -152,7 +173,8 @@ function machine() {
         if (Array.isArray(list)) {
           for (const item of list) {
             const entry = item as Record<string, unknown> | null;
-            const pkg = entry?.["package"] as Record<string, unknown> | undefined;
+            const pkg = entry?.["package"] as
+              Record<string, unknown> | undefined;
             if (pkg?.["id"] !== toolId) continue;
             for (const field of ["dir", "previousDir", "sourceDir"]) {
               const value = entry?.[field];
@@ -207,7 +229,9 @@ function machine() {
     runtime = createTestDesktopRuntime(
       { attachPreloading: () => () => {}, close: () => Promise.resolve() },
       undefined,
-      (value) => { captured = value; },
+      (value) => {
+        captured = value;
+      },
       backend,
     );
     await runtime.ready;
@@ -234,7 +258,9 @@ function machine() {
 
   async function versionDirs(id: string) {
     try {
-      return await backend.listDirNames(joinPath(installedRoot, id, "versions"));
+      return await backend.listDirNames(
+        joinPath(installedRoot, id, "versions"),
+      );
     } catch {
       return [];
     }
@@ -258,10 +284,14 @@ function machine() {
       if (!raw) return undefined;
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       const list = parsed[key];
-      return Array.isArray(list) ? list[0] as Record<string, unknown> : undefined;
+      return Array.isArray(list)
+        ? (list[0] as Record<string, unknown>)
+        : undefined;
     },
     /** 启动一个"进程"。 */
-    async start() { await boot(); },
+    async start() {
+      await boot();
+    },
     /** 关掉整个运行时，再用同一块盘、同一份配置起来——这就是"重启应用"。 */
     async restart() {
       workshop?.dispose();
@@ -276,8 +306,12 @@ function machine() {
     },
     /** 把后台那条"写上一版备份"的队列等干净。 */
     settle,
-    failNextWrite(match: (path: string) => boolean) { failWrite = match; },
-    healWrites() { failWrite = undefined; },
+    failNextWrite(match: (path: string) => boolean) {
+      failWrite = match;
+    },
+    healWrites() {
+      failWrite = undefined;
+    },
     /**
      * 挂住下一次匹配的写盘，返回放行函数。
      *
@@ -286,7 +320,9 @@ function machine() {
      */
     blockNextWrite(match: (path: string) => boolean) {
       let release!: () => void;
-      const wait = new Promise<void>((resolve) => { release = resolve; });
+      const wait = new Promise<void>((resolve) => {
+        release = resolve;
+      });
       gate = { match, wait };
       return release;
     },
@@ -303,20 +339,32 @@ function machine() {
       if (!workshop) throw new Error("运行时未启动");
       return workshop;
     },
-    async exists(path: string) { return backend.pathExists(path); },
-    async text(path: string) { return backend.readTextFile(path); },
+    async exists(path: string) {
+      return backend.pathExists(path);
+    },
+    async text(path: string) {
+      return backend.readTextFile(path);
+    },
     async manifest(dir: string) {
-      return JSON.parse(await backend.readTextFile(joinPath(dir, "manifest.json"))) as Record<string, unknown>;
+      return JSON.parse(
+        await backend.readTextFile(joinPath(dir, "manifest.json")),
+      ) as Record<string, unknown>;
     },
     filesOf,
     versionDirs,
     async stagingLeftovers(id: string) {
-      return (await versionDirs(id)).filter((name) => name.startsWith(".staging-"));
+      return (await versionDirs(id)).filter((name) =>
+        name.startsWith(".staging-"),
+      );
     },
     /** 直接删掉一个版本目录，模拟"安装目录被清理工具扫走了"。 */
-    removeDir(path: string) { backend.removePath(path); },
+    removeDir(path: string) {
+      backend.removePath(path);
+    },
     /** 到目前为止每一次回收的参数（按调用顺序）。 */
-    pruneCalls() { return [...pruneCalls]; },
+    pruneCalls() {
+      return [...pruneCalls];
+    },
   };
   return api;
 }
@@ -333,8 +381,9 @@ async function expectConsistent(app: Device) {
   const entries = app.tools().state.getState();
   const saved = app.savedEntries();
   // 两边的顺序无关：界面按"最近打开 + 名字"排，配置按安装先后存。比对身份要按集合。
-  expect([...saved.map((item) => item.package.id)].sort())
-    .toEqual([...entries.map((item) => item.package.id)].sort());
+  expect([...saved.map((item) => item.package.id)].sort()).toEqual(
+    [...entries.map((item) => item.package.id)].sort(),
+  );
   for (const entry of entries) {
     const record = saved.find((item) => item.package.id === entry.package.id);
     expect(record).toBeDefined();
@@ -344,9 +393,12 @@ async function expectConsistent(app: Device) {
     const dir = entry.dir as string;
     const manifest = await app.manifest(dir);
     expect(manifest["version"]).toBe(entry.package.version);
-    expect(await app.text(joinPath(dir, "index.html"))).toBe(entry.package.html);
+    expect(await app.text(joinPath(dir, "index.html"))).toBe(
+      entry.package.html,
+    );
     // 上一版副本若存在，也必须在盘上——否则界面上那个"退回上一版"点下去必然失败。
-    if (entry.previousDir) expect(await app.exists(entry.previousDir)).toBe(true);
+    if (entry.previousDir)
+      expect(await app.exists(entry.previousDir)).toBe(true);
   }
   for (const id of new Set(entries.map((entry) => entry.package.id))) {
     expect(await app.stagingLeftovers(id)).toEqual([]);
@@ -373,32 +425,65 @@ describe("工具模块的状态转换", () => {
     const workshop = app.workshopOf();
 
     const v1 = packageOf("1.0.0", "<p>v1 页面</p>");
-    const v1Files = { ...runtimeFiles(v1), "notes.txt": new TextEncoder().encode("v1 附件"), "assets/logo.png": pngBytes };
+    const v1Files = {
+      ...runtimeFiles(v1),
+      "notes.txt": new TextEncoder().encode("v1 附件"),
+      "assets/logo.png": pngBytes,
+    };
     await workshop.installArchive(v1, v1Files);
 
     // 装完：界面 v1，配置记着版本目录，磁盘上有页面、文本附件和二进制附件。
     expect(app.tools().state.getState()[0]?.package.version).toBe("1.0.0");
-    expect(app.savedEntries()[0]?.dir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0"));
-    expect(await app.filesOf(joinPath(installedRoot, "notes", "versions", "1.0.0"))).toEqual([
-      "assets/logo.png", "index.html", "manifest.json", "notes.txt",
-    ]);
+    expect(app.savedEntries()[0]?.dir).toBe(
+      joinPath(installedRoot, "notes", "versions", "1.0.0"),
+    );
+    expect(
+      await app.filesOf(joinPath(installedRoot, "notes", "versions", "1.0.0")),
+    ).toEqual(["assets/logo.png", "index.html", "manifest.json", "notes.txt"]);
     // 二进制按字节落盘：读回来必须是原字节，不是"base64 的 base64"。
-    expect(await app.backend.readBinaryFile!(joinPath(installedRoot, "notes", "versions", "1.0.0", "assets/logo.png")))
-      .toBe(pngBase64);
+    expect(
+      await app.backend.readBinaryFile!(
+        joinPath(
+          installedRoot,
+          "notes",
+          "versions",
+          "1.0.0",
+          "assets/logo.png",
+        ),
+      ),
+    ).toBe(pngBase64);
     await expectConsistent(app);
 
     // 更到 v2：页面换掉、旧附件不再提供、新增一个入口文件。
-    const v2 = packageOf("1.1.0", "<p>v2 页面</p>", { build: { out: "dist/app.js" } });
-    const v2Files = { ...runtimeFiles(v2), "dist/app.js": new TextEncoder().encode("console.log('v2')") };
+    const v2 = packageOf("1.1.0", "<p>v2 页面</p>", {
+      build: { out: "dist/app.js" },
+    });
+    const v2Files = {
+      ...runtimeFiles(v2),
+      "dist/app.js": new TextEncoder().encode("console.log('v2')"),
+    };
     const outcome = await workshop.installArchive(v2, v2Files);
-    expect(outcome).toMatchObject({ version: "1.1.0", updated: true, versionChanged: true, previousVersion: "1.0.0" });
+    expect(outcome).toMatchObject({
+      version: "1.1.0",
+      updated: true,
+      versionChanged: true,
+      previousVersion: "1.0.0",
+    });
     const afterUpdate = app.tools().state.getState()[0];
     expect(afterUpdate?.package.version).toBe("1.1.0");
     // 旧版那份副本原封不动留着：退版要靠它，v1 的附件也还在里面。
-    expect(afterUpdate?.previousDir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0"));
-    expect(await app.text(joinPath(afterUpdate?.dir as string, "index.html"))).toBe("<p>v2 页面</p>");
-    expect(await app.filesOf(joinPath(installedRoot, "notes", "versions", "1.0.0"))).toContain("notes.txt");
-    expect(await app.filesOf(afterUpdate?.dir as string)).not.toContain("notes.txt");
+    expect(afterUpdate?.previousDir).toBe(
+      joinPath(installedRoot, "notes", "versions", "1.0.0"),
+    );
+    expect(
+      await app.text(joinPath(afterUpdate?.dir as string, "index.html")),
+    ).toBe("<p>v2 页面</p>");
+    expect(
+      await app.filesOf(joinPath(installedRoot, "notes", "versions", "1.0.0")),
+    ).toContain("notes.txt");
+    expect(await app.filesOf(afterUpdate?.dir as string)).not.toContain(
+      "notes.txt",
+    );
     await expectConsistent(app);
 
     // 退版：切回 v1 那份真跑过的副本，页面、附件、配置一起回去。
@@ -406,18 +491,28 @@ describe("工具模块的状态转换", () => {
     expect(back.error).toBeUndefined();
     expect(back.text).toContain("已退回 随手记 v1.0.0");
     const afterRollback = app.tools().state.getState()[0];
-    expect(afterRollback?.dir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0"));
-    expect(await app.text(joinPath(afterRollback?.dir as string, "index.html"))).toBe("<p>v1 页面</p>");
-    expect(afterRollback?.previousDir).toBe(joinPath(installedRoot, "notes", "versions", "1.1.0"));
+    expect(afterRollback?.dir).toBe(
+      joinPath(installedRoot, "notes", "versions", "1.0.0"),
+    );
+    expect(
+      await app.text(joinPath(afterRollback?.dir as string, "index.html")),
+    ).toBe("<p>v1 页面</p>");
+    expect(afterRollback?.previousDir).toBe(
+      joinPath(installedRoot, "notes", "versions", "1.1.0"),
+    );
     await expectConsistent(app);
 
     // 重启：同一块盘、同一份配置，界面读回来的还是 v1。
     await app.restart();
     const afterRestart = app.tools().state.getState()[0];
     expect(afterRestart?.package.version).toBe("1.0.0");
-    expect(afterRestart?.dir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0"));
+    expect(afterRestart?.dir).toBe(
+      joinPath(installedRoot, "notes", "versions", "1.0.0"),
+    );
     expect(afterRestart?.broken).toBeUndefined();
-    expect(await app.text(joinPath(afterRestart?.dir as string, "index.html"))).toBe("<p>v1 页面</p>");
+    expect(
+      await app.text(joinPath(afterRestart?.dir as string, "index.html")),
+    ).toBe("<p>v1 页面</p>");
     await expectConsistent(app);
   });
 
@@ -425,7 +520,10 @@ describe("工具模块的状态转换", () => {
     const app = await device();
     const workshop = app.workshopOf();
     const v1 = packageOf("1.0.0", "<p>v1 页面</p>");
-    await workshop.installArchive(v1, { ...runtimeFiles(v1), "notes.txt": new TextEncoder().encode("v1 附件") });
+    await workshop.installArchive(v1, {
+      ...runtimeFiles(v1),
+      "notes.txt": new TextEncoder().encode("v1 附件"),
+    });
     const v2 = packageOf("1.1.0", "<p>v2 页面</p>");
     await workshop.installArchive(v2, runtimeFiles(v2));
     await app.settle();
@@ -440,12 +538,17 @@ describe("工具模块的状态转换", () => {
     expect(rebuilt.text).toContain("已退回 随手记 v1.0.0");
     const afterRebuild = app.tools().state.getState()[0];
     expect(afterRebuild?.dir).not.toBe(v1Dir);
-    expect(await app.text(joinPath(afterRebuild?.dir as string, "index.html"))).toBe("<p>v1 页面</p>");
+    expect(
+      await app.text(joinPath(afterRebuild?.dir as string, "index.html")),
+    ).toBe("<p>v1 页面</p>");
     await expectConsistent(app);
 
     // 备份也坏掉、上一版副本也跑不起来：必须明说没有可退回的版本，
     // 当前这一版一个字段都不动（宁可留着现状，也不留一个点不动的按钮）。
-    await app.backend.writeTextFile(joinPath(backupRoot, "notes", "previous.json"), "不是合法清单");
+    await app.backend.writeTextFile(
+      joinPath(backupRoot, "notes", "previous.json"),
+      "不是合法清单",
+    );
     const currentDir = afterRebuild?.dir as string;
     const previousDir = afterRebuild?.previousDir as string;
     app.backend.removePath(joinPath(currentDir, "index.html"));
@@ -469,8 +572,12 @@ describe("工具模块的状态转换", () => {
     const before = JSON.stringify(app.savedEntries());
 
     // ① 包里缺声明的入口：闸门在写盘之前，磁盘上连暂存目录都不该出现。
-    const incomplete = packageOf("1.1.0", "<p>坏包</p>", { build: { out: "dist/app.js" } });
-    await expect(workshop.installArchive(incomplete, runtimeFiles(incomplete))).rejects.toThrow("缺少运行入口");
+    const incomplete = packageOf("1.1.0", "<p>坏包</p>", {
+      build: { out: "dist/app.js" },
+    });
+    await expect(
+      workshop.installArchive(incomplete, runtimeFiles(incomplete)),
+    ).rejects.toThrow("缺少运行入口");
     expect(JSON.stringify(app.savedEntries())).toBe(before);
     expect(await app.versionDirs("notes")).toEqual(["1.0.0"]);
     expect(await app.stagingLeftovers("notes")).toEqual([]);
@@ -478,27 +585,42 @@ describe("工具模块的状态转换", () => {
 
     // ② 写到一半磁盘不可写：暂存目录要清掉，已生效的那份一个字节都不动。
     const v2 = packageOf("1.1.0", "<p>v2 页面</p>");
-    const v2Files = { ...runtimeFiles(v2), "extra.txt": new TextEncoder().encode("附件") };
+    const v2Files = {
+      ...runtimeFiles(v2),
+      "extra.txt": new TextEncoder().encode("附件"),
+    };
     app.failNextWrite((path) => path.endsWith("extra.txt"));
-    await expect(workshop.installArchive(v2, v2Files)).rejects.toThrow("磁盘写不进去");
+    await expect(workshop.installArchive(v2, v2Files)).rejects.toThrow(
+      "磁盘写不进去",
+    );
     app.healWrites();
     expect(JSON.stringify(app.savedEntries())).toBe(before);
     expect(await app.versionDirs("notes")).toEqual(["1.0.0"]);
-    expect(await app.text(joinPath(installedRoot, "notes", "versions", "1.0.0", "index.html"))).toBe("<p>v1 页面</p>");
+    expect(
+      await app.text(
+        joinPath(installedRoot, "notes", "versions", "1.0.0", "index.html"),
+      ),
+    ).toBe("<p>v1 页面</p>");
     expect(await app.stagingLeftovers("notes")).toEqual([]);
     await expectConsistent(app);
 
     // ③ 文件都写好了、配置却没写进去：这一版没人引用，必须清掉，不留孤儿副本。
     const originalSetItem = Storage.prototype.setItem.bind(localStorage);
     let rejectOnce = true;
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key: string, value: string) {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string,
+    ) {
       if (key === configKey && rejectOnce) {
         rejectOnce = false;
         throw new Error("配置写不进去");
       }
       originalSetItem(key, value);
     });
-    await expect(workshop.installArchive(v2, v2Files)).rejects.toThrow("配置写不进去");
+    await expect(workshop.installArchive(v2, v2Files)).rejects.toThrow(
+      "配置写不进去",
+    );
     vi.restoreAllMocks();
     expect(JSON.stringify(app.savedEntries())).toBe(before);
     expect(await app.versionDirs("notes")).toEqual(["1.0.0"]);
@@ -506,9 +628,16 @@ describe("工具模块的状态转换", () => {
 
     // 重试：同一个包、同一份文件，这一次走到头。
     const retried = await workshop.installArchive(v2, v2Files);
-    expect(retried).toMatchObject({ version: "1.1.0", previousVersion: "1.0.0" });
+    expect(retried).toMatchObject({
+      version: "1.1.0",
+      previousVersion: "1.0.0",
+    });
     expect(app.tools().state.getState()[0]?.package.version).toBe("1.1.0");
-    expect(await app.text(joinPath(app.tools().state.getState()[0]?.dir as string, "index.html"))).toBe("<p>v2 页面</p>");
+    expect(
+      await app.text(
+        joinPath(app.tools().state.getState()[0]?.dir as string, "index.html"),
+      ),
+    ).toBe("<p>v2 页面</p>");
     await expectConsistent(app);
   });
 
@@ -516,14 +645,19 @@ describe("工具模块的状态转换", () => {
     const app = await device();
     const workshop = app.workshopOf();
     const v1 = packageOf("1.0.0", "<p>页面</p>");
-    await workshop.installArchive(v1, { ...runtimeFiles(v1), "assets/logo.png": pngBytes });
+    await workshop.installArchive(v1, {
+      ...runtimeFiles(v1),
+      "assets/logo.png": pngBytes,
+    });
     // 更新一次：这会在 backups 下留一份"上一版清单"，卸载时正好一起看。
     const v2 = packageOf("1.1.0", "<p>新页面</p>");
     await workshop.installArchive(v2, runtimeFiles(v2));
     await app.settle();
     const dir = app.tools().state.getState()[0]?.dir as string;
     expect(await app.filesOf(dir)).toContain("manifest.json");
-    expect(await app.exists(joinPath(backupRoot, "notes", "previous.json"))).toBe(true);
+    expect(
+      await app.exists(joinPath(backupRoot, "notes", "previous.json")),
+    ).toBe(true);
 
     // 用户点「卸载」并勾上"同时删除项目目录与工具数据"：先删记录，再清磁盘。
     await app.tools().remove("notes");
@@ -544,7 +678,9 @@ describe("工具模块的状态转换", () => {
 
     // 上一版清单也一起清掉：它只服务于"退回上一版"，记录没了就没有任何路径
     // 能用到它——留着只是用户看不到、也没有入口删的残留。
-    expect(await app.exists(joinPath(backupRoot, "notes", "previous.json"))).toBe(false);
+    expect(
+      await app.exists(joinPath(backupRoot, "notes", "previous.json")),
+    ).toBe(false);
   });
 
   it("重启时发现运行副本被清掉：能凑齐文件就自愈一份，拼不出来的保持坏标记", async () => {
@@ -562,24 +698,40 @@ describe("工具模块的状态转换", () => {
     const healed = app.tools().state.getState()[0];
     expect(healed?.broken).toBeUndefined();
     expect(await app.exists(healed?.dir as string)).toBe(true);
-    expect(await app.text(joinPath(healed?.dir as string, "index.html"))).toBe("<p>自包含</p>");
+    expect(await app.text(joinPath(healed?.dir as string, "index.html"))).toBe(
+      "<p>自包含</p>",
+    );
     expect(app.savedEntries()[0]?.dir).toBe(healed?.dir);
     await expectConsistent(app);
 
     // 反面：声明了 build.out 却只有清单的工具凑不出运行文件——不许造假副本，
     // 界面要留着"目录丢失"，打开时给出重新导入的出路。
     // 注意重启后工坊实例是新的：旧实例绑在已经卸掉的宿主上，调它会报"正在卸载"。
-    const needsBuild = packageOf("2.0.0", "<p>缺产物</p>", { id: "needs-build", build: { out: "dist/app.js" } });
-    await app.workshopOf().installArchive(needsBuild, { ...runtimeFiles(needsBuild), "dist/app.js": new TextEncoder().encode("x") });
-    const needsDir = app.tools().state.getState().find((entry) => entry.package.id === "needs-build")?.dir as string;
+    const needsBuild = packageOf("2.0.0", "<p>缺产物</p>", {
+      id: "needs-build",
+      build: { out: "dist/app.js" },
+    });
+    await app.workshopOf().installArchive(needsBuild, {
+      ...runtimeFiles(needsBuild),
+      "dist/app.js": new TextEncoder().encode("x"),
+    });
+    const needsDir = app
+      .tools()
+      .state.getState()
+      .find((entry) => entry.package.id === "needs-build")?.dir as string;
     app.removeDir(needsDir);
 
     await app.restart();
-    const broken = app.tools().state.getState().find((entry) => entry.package.id === "needs-build");
+    const broken = app
+      .tools()
+      .state.getState()
+      .find((entry) => entry.package.id === "needs-build");
     expect(broken?.broken?.kind).toBe("missing-dir");
     expect(broken?.dir).toBe(needsDir);
     expect(await app.versionDirs("needs-build")).toEqual([]);
-    await expect(app.workshopOf().resolveOpenDir("needs-build")).rejects.toThrow("完整 ZIP");
+    await expect(
+      app.workshopOf().resolveOpenDir("needs-build"),
+    ).rejects.toThrow("完整 ZIP");
     await expectConsistent(app);
   });
 
@@ -589,17 +741,32 @@ describe("工具模块的状态转换", () => {
     // 没有运行目录"的旧记录——旧版本装示例工具只写配置、不落盘（OBS-02 的历史形态）。
     const userKey = app.userKey();
     expect(userKey).toBeDefined();
-    const legacy = { schemaVersion: 1, id: "legacy", name: "旧记录", version: "0.9.0", html: "<p>旧记录页面</p>" };
-    localStorage.setItem(configKey, JSON.stringify({
-      [userKey as string]: [{ package: legacy, settings: {}, installedAt: Date.now() }],
-    }));
+    const legacy = {
+      schemaVersion: 1,
+      id: "legacy",
+      name: "旧记录",
+      version: "0.9.0",
+      html: "<p>旧记录页面</p>",
+    };
+    localStorage.setItem(
+      configKey,
+      JSON.stringify({
+        [userKey as string]: [
+          { package: legacy, settings: {}, installedAt: Date.now() },
+        ],
+      }),
+    );
 
     await app.restart();
     const entry = app.tools().state.getState()[0];
     expect(entry?.broken).toBeUndefined();
-    expect(entry?.dir).toBe(joinPath(installedRoot, "legacy", "versions", "0.9.0"));
+    expect(entry?.dir).toBe(
+      joinPath(installedRoot, "legacy", "versions", "0.9.0"),
+    );
     expect(await app.exists(entry?.dir as string)).toBe(true);
-    expect(await app.text(joinPath(entry?.dir as string, "index.html"))).toBe("<p>旧记录页面</p>");
+    expect(await app.text(joinPath(entry?.dir as string, "index.html"))).toBe(
+      "<p>旧记录页面</p>",
+    );
     expect(app.savedEntries()[0]?.dir).toBe(entry?.dir);
     await expectConsistent(app);
 
@@ -626,7 +793,11 @@ describe("工具模块的状态转换（长序列与并发）", () => {
     const v2Dir = joinPath(installedRoot, "notes", "versions", "1.1.0");
     const v3Dir = joinPath(installedRoot, "notes", "versions", "2.0.0");
 
-    for (const [version, html] of [["1.0.0", "<p>v1</p>"], ["1.1.0", "<p>v2</p>"], ["2.0.0", "<p>v3</p>"]]) {
+    for (const [version, html] of [
+      ["1.0.0", "<p>v1</p>"],
+      ["1.1.0", "<p>v2</p>"],
+      ["2.0.0", "<p>v3</p>"],
+    ]) {
       const tool = packageOf(version as string, html as string);
       await workshop.installArchive(tool, runtimeFiles(tool));
       await expectConsistent(app);
@@ -658,7 +829,11 @@ describe("工具模块的状态转换（长序列与并发）", () => {
     const second = await workshop.rollback("notes");
     expect(second.error).toBeUndefined();
     expect(second.text).toContain("已退回 随手记 v2.0.0");
-    expect(app.tools().state.getState()[0]).toMatchObject({ package: { version: "2.0.0" }, dir: v3Dir, previousDir: v2Dir });
+    expect(app.tools().state.getState()[0]).toMatchObject({
+      package: { version: "2.0.0" },
+      dir: v3Dir,
+      previousDir: v2Dir,
+    });
     await expectConsistent(app);
 
     // v1 在第一次退版时就被回收了：两格（dir / previousDir）里再也到不了它，
@@ -671,21 +846,40 @@ describe("工具模块的状态转换（长序列与并发）", () => {
   it("同版本号重装：换一份新副本，退回能拿回上一份内容，设置不丢", async () => {
     const app = await device();
     const workshop = app.workshopOf();
-    const schema = [{ id: "theme", label: "主题", type: "text" as const, default: "浅色" }];
-    const older = packageOf("1.0.0", "<p>旧页面</p>", { settingsSchema: schema });
+    const schema = [
+      { id: "theme", label: "主题", type: "text" as const, default: "浅色" },
+    ];
+    const older = packageOf("1.0.0", "<p>旧页面</p>", {
+      settingsSchema: schema,
+    });
     await workshop.installArchive(older, runtimeFiles(older));
     app.tools().saveSettings("notes", { theme: "深色" });
-    expect(app.tools().state.getState()[0]?.settings).toEqual({ theme: "深色" });
+    expect(app.tools().state.getState()[0]?.settings).toEqual({
+      theme: "深色",
+    });
 
     // 作者没升版本号就重装（改完 AI 直接再装一次，现实中很常见）。
-    const newer = packageOf("1.0.0", "<p>新页面</p>", { settingsSchema: schema });
+    const newer = packageOf("1.0.0", "<p>新页面</p>", {
+      settingsSchema: schema,
+    });
     const outcome = await workshop.installArchive(newer, runtimeFiles(newer));
     // 同版本不共用目录：宁可多一份 `1.0.0-2`，也不在旧目录上叠盖。
-    expect(outcome).toMatchObject({ version: "1.0.0", updated: true, versionChanged: false, previousVersion: "1.0.0" });
+    expect(outcome).toMatchObject({
+      version: "1.0.0",
+      updated: true,
+      versionChanged: false,
+      previousVersion: "1.0.0",
+    });
     const current = app.tools().state.getState()[0];
-    expect(current?.dir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0-2"));
-    expect(current?.previousDir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0"));
-    expect(await app.text(joinPath(current?.dir as string, "index.html"))).toBe("<p>新页面</p>");
+    expect(current?.dir).toBe(
+      joinPath(installedRoot, "notes", "versions", "1.0.0-2"),
+    );
+    expect(current?.previousDir).toBe(
+      joinPath(installedRoot, "notes", "versions", "1.0.0"),
+    );
+    expect(await app.text(joinPath(current?.dir as string, "index.html"))).toBe(
+      "<p>新页面</p>",
+    );
     // 设置按 id 存、不绑目录：换一版之后用户填过的值还在。
     expect(current?.settings).toEqual({ theme: "深色" });
     await expectConsistent(app);
@@ -694,8 +888,12 @@ describe("工具模块的状态转换（长序列与并发）", () => {
     const back = await workshop.rollback("notes");
     expect(back.error).toBeUndefined();
     const rolled = app.tools().state.getState()[0];
-    expect(rolled?.dir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0"));
-    expect(await app.text(joinPath(rolled?.dir as string, "index.html"))).toBe("<p>旧页面</p>");
+    expect(rolled?.dir).toBe(
+      joinPath(installedRoot, "notes", "versions", "1.0.0"),
+    );
+    expect(await app.text(joinPath(rolled?.dir as string, "index.html"))).toBe(
+      "<p>旧页面</p>",
+    );
     expect(rolled?.settings).toEqual({ theme: "深色" });
     await expectConsistent(app);
   });
@@ -704,46 +902,93 @@ describe("工具模块的状态转换（长序列与并发）", () => {
     const app = await device();
     const workshop = app.workshopOf();
     const notesV1 = packageOf("1.0.0", "<p>记事 v1</p>");
-    const clockV1 = packageOf("1.0.0", "<p>时钟 v1</p>", { id: "clock", name: "时钟" });
+    const clockV1 = packageOf("1.0.0", "<p>时钟 v1</p>", {
+      id: "clock",
+      name: "时钟",
+    });
 
-    await workshop.installArchive(notesV1, { ...runtimeFiles(notesV1), "assets/logo.png": pngBytes });
+    await workshop.installArchive(notesV1, {
+      ...runtimeFiles(notesV1),
+      "assets/logo.png": pngBytes,
+    });
     await workshop.installArchive(clockV1, runtimeFiles(clockV1));
-    const notesDir = app.tools().state.getState().find((entry) => entry.package.id === "notes")?.dir as string;
-    const clockDir = app.tools().state.getState().find((entry) => entry.package.id === "clock")?.dir as string;
-    expect(notesDir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0"));
-    expect(clockDir).toBe(joinPath(installedRoot, "clock", "versions", "1.0.0"));
+    const notesDir = app
+      .tools()
+      .state.getState()
+      .find((entry) => entry.package.id === "notes")?.dir as string;
+    const clockDir = app
+      .tools()
+      .state.getState()
+      .find((entry) => entry.package.id === "clock")?.dir as string;
+    expect(notesDir).toBe(
+      joinPath(installedRoot, "notes", "versions", "1.0.0"),
+    );
+    expect(clockDir).toBe(
+      joinPath(installedRoot, "clock", "versions", "1.0.0"),
+    );
     await expectConsistent(app);
 
     // 更记事：只动 notes 的版本目录，clock 的目录与文件一个字节都不碰。
     const notesV2 = packageOf("1.1.0", "<p>记事 v2</p>");
     await workshop.installArchive(notesV2, runtimeFiles(notesV2));
     await app.settle();
-    const notesNewDir = app.tools().state.getState().find((entry) => entry.package.id === "notes")?.dir as string;
-    expect(notesNewDir).toBe(joinPath(installedRoot, "notes", "versions", "1.1.0"));
-    expect(app.tools().state.getState().find((entry) => entry.package.id === "clock")?.dir).toBe(clockDir);
-    expect(await app.text(joinPath(clockDir, "index.html"))).toBe("<p>时钟 v1</p>");
-    expect(await app.filesOf(clockDir)).toEqual(["index.html", "manifest.json"]);
+    const notesNewDir = app
+      .tools()
+      .state.getState()
+      .find((entry) => entry.package.id === "notes")?.dir as string;
+    expect(notesNewDir).toBe(
+      joinPath(installedRoot, "notes", "versions", "1.1.0"),
+    );
+    expect(
+      app
+        .tools()
+        .state.getState()
+        .find((entry) => entry.package.id === "clock")?.dir,
+    ).toBe(clockDir);
+    expect(await app.text(joinPath(clockDir, "index.html"))).toBe(
+      "<p>时钟 v1</p>",
+    );
+    expect(await app.filesOf(clockDir)).toEqual([
+      "index.html",
+      "manifest.json",
+    ]);
     await expectConsistent(app);
 
     // 卸载时钟：记录、版本目录、文件全清；记事的当前目录与上一版目录都还在。
     await app.tools().remove("clock");
     const note = await workshop.purge("clock");
     expect(note.error).toBeUndefined();
-    expect(app.tools().state.getState().map((entry) => entry.package.id)).toEqual(["notes"]);
+    expect(
+      app
+        .tools()
+        .state.getState()
+        .map((entry) => entry.package.id),
+    ).toEqual(["notes"]);
     expect(await app.versionDirs("clock")).toEqual([]);
     expect(await app.filesOf(joinPath(installedRoot, "clock"))).toEqual([]);
     expect(await app.exists(clockDir)).toBe(false);
     expect(await app.exists(notesNewDir)).toBe(true);
-    expect(await app.exists(joinPath(installedRoot, "notes", "versions", "1.0.0"))).toBe(true);
+    expect(
+      await app.exists(joinPath(installedRoot, "notes", "versions", "1.0.0")),
+    ).toBe(true);
     // 记事那份带图片的旧副本仍然完整（退版要用它）。
-    expect(await app.filesOf(joinPath(installedRoot, "notes", "versions", "1.0.0"))).toContain("assets/logo.png");
+    expect(
+      await app.filesOf(joinPath(installedRoot, "notes", "versions", "1.0.0")),
+    ).toContain("assets/logo.png");
     await expectConsistent(app);
 
     // 重启：只剩记事，仍在 v2 上，配置与磁盘一致。
     await app.restart();
-    expect(app.tools().state.getState().map((entry) => entry.package.id)).toEqual(["notes"]);
+    expect(
+      app
+        .tools()
+        .state.getState()
+        .map((entry) => entry.package.id),
+    ).toEqual(["notes"]);
     expect(app.tools().state.getState()[0]?.dir).toBe(notesNewDir);
-    expect(await app.text(joinPath(notesNewDir, "index.html"))).toBe("<p>记事 v2</p>");
+    expect(await app.text(joinPath(notesNewDir, "index.html"))).toBe(
+      "<p>记事 v2</p>",
+    );
     await expectConsistent(app);
   });
 
@@ -754,15 +999,29 @@ describe("工具模块的状态转换（长序列与并发）", () => {
     await workshop.installArchive(v1, runtimeFiles(v1));
 
     // 模拟"正在装 v2 时进程被结束"：暂存目录已经写了一部分文件，还没来得及改名。
-    const staged = joinPath(installedRoot, "notes", "versions", ".staging-crash");
+    const staged = joinPath(
+      installedRoot,
+      "notes",
+      "versions",
+      ".staging-crash",
+    );
     await app.backend.writeTextFile(
       joinPath(staged, "manifest.json"),
-      JSON.stringify({ schemaVersion: 1, id: "notes", name: "随手记", version: "2.0.0" }, null, 2),
+      JSON.stringify(
+        { schemaVersion: 1, id: "notes", name: "随手记", version: "2.0.0" },
+        null,
+        2,
+      ),
     );
-    await app.backend.writeTextFile(joinPath(staged, "index.html"), "<p>写了一半</p>");
+    await app.backend.writeTextFile(
+      joinPath(staged, "index.html"),
+      "<p>写了一半</p>",
+    );
     expect(await app.exists(staged)).toBe(true);
     // 它没人引用：界面与配置都还指着 v1。
-    expect(app.savedEntries()[0]?.dir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0"));
+    expect(app.savedEntries()[0]?.dir).toBe(
+      joinPath(installedRoot, "notes", "versions", "1.0.0"),
+    );
 
     await app.restart();
     // 重启后：残留暂存目录被收掉，v1 完好，界面没有因此变坏。
@@ -770,12 +1029,24 @@ describe("工具模块的状态转换（长序列与并发）", () => {
     expect(await app.exists(staged)).toBe(false);
     expect(app.tools().state.getState()[0]?.package.version).toBe("1.0.0");
     expect(app.tools().state.getState()[0]?.broken).toBeUndefined();
-    expect(await app.text(joinPath(installedRoot, "notes", "versions", "1.0.0", "index.html"))).toBe("<p>v1</p>");
+    expect(
+      await app.text(
+        joinPath(installedRoot, "notes", "versions", "1.0.0", "index.html"),
+      ),
+    ).toBe("<p>v1</p>");
     await expectConsistent(app);
 
     // 不回退成"只有重启才能清"：又崩一次，这次直接卸载，也要清干净。
-    const again = joinPath(installedRoot, "notes", "versions", ".staging-again");
-    await app.backend.writeTextFile(joinPath(again, "index.html"), "<p>又写了一半</p>");
+    const again = joinPath(
+      installedRoot,
+      "notes",
+      "versions",
+      ".staging-again",
+    );
+    await app.backend.writeTextFile(
+      joinPath(again, "index.html"),
+      "<p>又写了一半</p>",
+    );
     await app.tools().remove("notes");
     const note = await app.workshopOf().purge("notes");
     expect(note.error).toBeUndefined();
@@ -792,12 +1063,16 @@ describe("工具模块的状态转换（长序列与并发）", () => {
     await first.installArchive(v2, runtimeFiles(v2));
     await app.settle();
     // 上一次安装确实留下了一份"上一版清单"（backups/<id>/previous.json）。
-    expect(await app.exists(joinPath(backupRoot, "notes", "previous.json"))).toBe(true);
+    expect(
+      await app.exists(joinPath(backupRoot, "notes", "previous.json")),
+    ).toBe(true);
 
     // 卸载：记录、版本目录、上一版清单一起清掉。
     await app.tools().remove("notes");
     expect((await app.workshopOf().purge("notes")).error).toBeUndefined();
-    expect(await app.exists(joinPath(backupRoot, "notes", "previous.json"))).toBe(false);
+    expect(
+      await app.exists(joinPath(backupRoot, "notes", "previous.json")),
+    ).toBe(false);
 
     // 重新装一版：这是全新的一次安装，跟盘上那份旧清单没有关系。
     const v3 = packageOf("2.0.0", "<p>第二次安装 v3</p>");
@@ -816,7 +1091,9 @@ describe("工具模块的状态转换（长序列与并发）", () => {
     const kept = app.tools().state.getState()[0];
     expect(kept?.package.version).toBe("2.0.0");
     expect(kept?.dir).toBe(fresh?.dir);
-    expect(await app.text(joinPath(kept?.dir as string, "index.html"))).toBe("<p>第二次安装 v3</p>");
+    expect(await app.text(joinPath(kept?.dir as string, "index.html"))).toBe(
+      "<p>第二次安装 v3</p>",
+    );
     await expectConsistent(app);
   });
 
@@ -839,22 +1116,36 @@ describe("工具模块的状态转换（长序列与并发）", () => {
     const afterBurst = app.tools().state.getState();
     expect(afterBurst).toHaveLength(1);
     // 后提交的那次赢：当前 v3，上一版就是先装进去的 v2（不是 v1）。
-    expect(afterBurst[0]).toMatchObject({ package: { version: "2.0.0" }, previousVersion: "1.1.0" });
-    expect(afterBurst[0]?.previousDir).toBe(joinPath(installedRoot, "notes", "versions", "1.1.0"));
+    expect(afterBurst[0]).toMatchObject({
+      package: { version: "2.0.0" },
+      previousVersion: "1.1.0",
+    });
+    expect(afterBurst[0]?.previousDir).toBe(
+      joinPath(installedRoot, "notes", "versions", "1.1.0"),
+    );
     // 只留两格：当前 v3 + 上一版 v2。v1 在 v3 落盘那一刻就再没有任何记录指向它
     // ——退版也退不到它（`previousDir` 已经换成 v2），所以当场回收。
-    expect([...(await app.versionDirs("notes"))].sort()).toEqual(["1.1.0", "2.0.0"]);
+    expect([...(await app.versionDirs("notes"))].sort()).toEqual([
+      "1.1.0",
+      "2.0.0",
+    ]);
     expect(await app.stagingLeftovers("notes")).toEqual([]);
     await expectConsistent(app);
 
     // 连点两下退版：排队执行，第二下退的版本是第一下换下来的那一份（v3），
     // 所以来回切一次又回到 v3——不会出现"两条记录都指向 v1"这种错位。
-    const [first, second2] = await Promise.all([workshop.rollback("notes"), workshop.rollback("notes")]);
+    const [first, second2] = await Promise.all([
+      workshop.rollback("notes"),
+      workshop.rollback("notes"),
+    ]);
     expect(first.text).toContain("已退回 随手记 v1.1.0");
     expect(second2.text).toContain("已退回 随手记 v2.0.0");
     const settled = app.tools().state.getState();
     expect(settled).toHaveLength(1);
-    expect(settled[0]).toMatchObject({ package: { version: "2.0.0" }, dir: joinPath(installedRoot, "notes", "versions", "2.0.0") });
+    expect(settled[0]).toMatchObject({
+      package: { version: "2.0.0" },
+      dir: joinPath(installedRoot, "notes", "versions", "2.0.0"),
+    });
     await expectConsistent(app);
   });
 });
@@ -879,7 +1170,9 @@ describe("工具模块的状态转换（跨进程与降级）", () => {
     await app.restart();
     const beforeRollback = app.tools().state.getState()[0];
     expect(beforeRollback?.package.version).toBe("1.1.0");
-    expect(beforeRollback?.previousDir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0"));
+    expect(beforeRollback?.previousDir).toBe(
+      joinPath(installedRoot, "notes", "versions", "1.0.0"),
+    );
     expect(await app.exists(beforeRollback?.previousDir as string)).toBe(true);
     await expectConsistent(app);
 
@@ -887,15 +1180,21 @@ describe("工具模块的状态转换（跨进程与降级）", () => {
     expect(back.error).toBeUndefined();
     expect(back.text).toContain("已退回 随手记 v1.0.0");
     const rolled = app.tools().state.getState()[0];
-    expect(rolled?.dir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0"));
-    expect(await app.text(joinPath(rolled?.dir as string, "index.html"))).toBe("<p>v1</p>");
+    expect(rolled?.dir).toBe(
+      joinPath(installedRoot, "notes", "versions", "1.0.0"),
+    );
+    expect(await app.text(joinPath(rolled?.dir as string, "index.html"))).toBe(
+      "<p>v1</p>",
+    );
     expect(app.savedRaw()?.["previousVersion"]).toBe("1.1.0");
     await expectConsistent(app);
 
     // 再关一次再开：退版结果不能"重启回到解放前"。
     await app.restart();
     expect(app.tools().state.getState()[0]?.package.version).toBe("1.0.0");
-    expect(app.tools().state.getState()[0]?.dir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0"));
+    expect(app.tools().state.getState()[0]?.dir).toBe(
+      joinPath(installedRoot, "notes", "versions", "1.0.0"),
+    );
     await expectConsistent(app);
   });
 
@@ -936,7 +1235,14 @@ describe("工具模块的状态转换（跨进程与降级）", () => {
     const app = await device();
     const schemaV1 = [
       { id: "theme", label: "主题", type: "text" as const, default: "浅色" },
-      { id: "count", label: "条数", type: "number" as const, default: 2, min: 1, max: 9 },
+      {
+        id: "count",
+        label: "条数",
+        type: "number" as const,
+        default: 2,
+        min: 1,
+        max: 9,
+      },
     ];
     const v1 = packageOf("1.0.0", "<p>v1</p>", { settingsSchema: schemaV1 });
     await app.workshopOf().installArchive(v1, runtimeFiles(v1));
@@ -950,53 +1256,88 @@ describe("工具模块的状态转换（跨进程与降级）", () => {
         label: "模式",
         type: "select" as const,
         default: "auto",
-        options: [{ label: "自动", value: "auto" }, { label: "手动", value: "manual" }],
+        options: [
+          { label: "自动", value: "auto" },
+          { label: "手动", value: "manual" },
+        ],
       },
     ];
     const v2 = packageOf("1.1.0", "<p>v2</p>", { settingsSchema: schemaV2 });
     await app.workshopOf().installArchive(v2, runtimeFiles(v2));
 
     // 界面（store）与配置（磁盘上的安装记录）必须是同一份值。
-    expect(app.tools().state.getState()[0]?.settings).toEqual({ theme: "深色", mode: "auto" });
-    expect(app.savedRaw()?.["settings"]).toEqual({ theme: "深色", mode: "auto" });
+    expect(app.tools().state.getState()[0]?.settings).toEqual({
+      theme: "深色",
+      mode: "auto",
+    });
+    expect(app.savedRaw()?.["settings"]).toEqual({
+      theme: "深色",
+      mode: "auto",
+    });
     await expectConsistent(app);
 
     // 退版回到旧清单：count 按旧默认值回来，mode 被丢掉。
     const back = await app.workshopOf().rollback("notes");
     expect(back.error).toBeUndefined();
-    expect(app.tools().state.getState()[0]?.settings).toEqual({ theme: "深色", count: 2 });
+    expect(app.tools().state.getState()[0]?.settings).toEqual({
+      theme: "深色",
+      count: 2,
+    });
     expect(app.savedRaw()?.["settings"]).toEqual({ theme: "深色", count: 2 });
     await expectConsistent(app);
   });
 
   it("同版本连装三次：目录依次加后缀，上一版只留最近一份", async () => {
     const app = await device();
-    for (const [index, html] of ["<p>第一次</p>", "<p>第二次</p>", "<p>第三次</p>"].entries()) {
+    for (const [index, html] of [
+      "<p>第一次</p>",
+      "<p>第二次</p>",
+      "<p>第三次</p>",
+    ].entries()) {
       const tool = packageOf("1.0.0", html);
       await app.workshopOf().installArchive(tool, runtimeFiles(tool));
       expect(app.tools().state.getState()[0]?.dir).toBe(
-        joinPath(installedRoot, "notes", "versions", index === 0 ? "1.0.0" : `1.0.0-${index + 1}`),
+        joinPath(
+          installedRoot,
+          "notes",
+          "versions",
+          index === 0 ? "1.0.0" : `1.0.0-${index + 1}`,
+        ),
       );
       await expectConsistent(app);
     }
     const latest = app.tools().state.getState()[0];
-    expect(latest?.previousDir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0-2"));
+    expect(latest?.previousDir).toBe(
+      joinPath(installedRoot, "notes", "versions", "1.0.0-2"),
+    );
     expect(latest?.previousVersion).toBe("1.0.0");
-    expect(await app.text(joinPath(latest?.dir as string, "index.html"))).toBe("<p>第三次</p>");
+    expect(await app.text(joinPath(latest?.dir as string, "index.html"))).toBe(
+      "<p>第三次</p>",
+    );
 
     // 退一格：回到第二次那份；再退一格：回到第三次（来回切，不往更早翻）。
     await app.workshopOf().rollback("notes");
-    expect(await app.text(joinPath(app.tools().state.getState()[0]?.dir as string, "index.html"))).toBe("<p>第二次</p>");
+    expect(
+      await app.text(
+        joinPath(app.tools().state.getState()[0]?.dir as string, "index.html"),
+      ),
+    ).toBe("<p>第二次</p>");
     await expectConsistent(app);
     await app.workshopOf().rollback("notes");
-    expect(await app.text(joinPath(app.tools().state.getState()[0]?.dir as string, "index.html"))).toBe("<p>第三次</p>");
+    expect(
+      await app.text(
+        joinPath(app.tools().state.getState()[0]?.dir as string, "index.html"),
+      ),
+    ).toBe("<p>第三次</p>");
     await expectConsistent(app);
   });
 
   it("卸载一个目录已经丢了的工具：不报错、配置清空、重启不复活", async () => {
     const app = await device();
     // 声明了 build.out 的工具凑不出副本，自愈会如实留着"目录丢失"，正好当这个场景。
-    const tool = packageOf("1.0.0", "<p>页面</p>", { build: { out: "dist/app.js" } });
+    const tool = packageOf("1.0.0", "<p>页面</p>", {
+      build: { out: "dist/app.js" },
+    });
     await app.workshopOf().installArchive(tool, {
       ...runtimeFiles(tool),
       "dist/app.js": new TextEncoder().encode("console.log('v1')"),
@@ -1037,7 +1378,9 @@ describe("工具模块的状态转换（并发与降级）", () => {
     const v1Dir = app.tools().state.getState()[0]?.dir as string;
 
     // 更新到 v2：写到一半挂住，模拟"这个大包还在解压、落盘"。
-    const release = app.blockNextWrite((path) => path.includes(".staging-") && path.endsWith("index.html"));
+    const release = app.blockNextWrite(
+      (path) => path.includes(".staging-") && path.endsWith("index.html"),
+    );
     const v2 = packageOf("1.1.0", "<p>v2</p>");
     const updating = app.workshopOf().installArchive(v2, runtimeFiles(v2));
     // 等它真的停在写盘上，而不是还没开始。
@@ -1079,7 +1422,9 @@ describe("工具模块的状态转换（并发与降级）", () => {
     await app.settle();
     app.healWrites();
 
-    expect(await app.exists(joinPath(backupRoot, "notes", "previous.json"))).toBe(false);
+    expect(
+      await app.exists(joinPath(backupRoot, "notes", "previous.json")),
+    ).toBe(false);
     const current = app.tools().state.getState()[0];
     expect(current?.previousDir).toBe(v1Dir);
     expect(current?.previousVersion).toBe("1.0.0");
@@ -1095,8 +1440,13 @@ describe("工具模块的状态转换（并发与降级）", () => {
 
   it("卸载后重装同一版本：不继承上一轮留下的「目录丢失」标记", async () => {
     const app = await device();
-    const tool = packageOf("1.0.0", "<p>页面</p>", { build: { out: "dist/app.js" } });
-    const files = { ...runtimeFiles(tool), "dist/app.js": new TextEncoder().encode("console.log(1)") };
+    const tool = packageOf("1.0.0", "<p>页面</p>", {
+      build: { out: "dist/app.js" },
+    });
+    const files = {
+      ...runtimeFiles(tool),
+      "dist/app.js": new TextEncoder().encode("console.log(1)"),
+    };
     await app.workshopOf().installArchive(tool, files);
     const dir = app.tools().state.getState()[0]?.dir as string;
 
@@ -1138,8 +1488,12 @@ describe("工具模块的状态转换（并发与降级）", () => {
     await app.workshopOf().installArchive(other, runtimeFiles(other));
     const dirB = app.tools().state.getState()[0]?.dir as string;
     expect(dirB).not.toBe(dirA);
-    expect(await app.text(joinPath(dirB, "index.html"))).toBe("<p>B 的页面</p>");
-    expect(await app.text(joinPath(dirA, "index.html"))).toBe("<p>A 的页面</p>");
+    expect(await app.text(joinPath(dirB, "index.html"))).toBe(
+      "<p>B 的页面</p>",
+    );
+    expect(await app.text(joinPath(dirA, "index.html"))).toBe(
+      "<p>A 的页面</p>",
+    );
 
     // 切回第一个人：还是他那一版，目录没被换掉。
     app.loginAs({ name: "生命周期", employeeId: ownerId });
@@ -1166,9 +1520,13 @@ describe("工具模块的状态转换（并发与降级）", () => {
 describe("工具模块的状态转换（账号与事务边界）", () => {
   it("安装进行中换了账号：这一版不会落到别人名下，也不留半份副本", async () => {
     const app = await device();
-    const release = app.blockNextWrite((path) => path.includes(".staging-") && path.endsWith("index.html"));
+    const release = app.blockNextWrite(
+      (path) => path.includes(".staging-") && path.endsWith("index.html"),
+    );
     const tool = packageOf("1.0.0", "<p>A 的页面</p>");
-    const installing = app.workshopOf().installArchive(tool, runtimeFiles(tool));
+    const installing = app
+      .workshopOf()
+      .installArchive(tool, runtimeFiles(tool));
     // 等它真的进到写盘那一步，再换人。
     await app.settle(2);
 
@@ -1209,15 +1567,19 @@ describe("工具模块的状态转换（账号与事务边界）", () => {
     await app.settle();
     const originalExists = app.backend.pathExists.bind(app.backend);
     let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    let armed = true;
-    vi.spyOn(app.backend, "pathExists").mockImplementation(async (path: string) => {
-      if (armed && path.endsWith("/notes/manifest.json")) {
-        armed = false;
-        await gate;
-      }
-      return originalExists(path);
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
     });
+    let armed = true;
+    vi.spyOn(app.backend, "pathExists").mockImplementation(
+      async (path: string) => {
+        if (armed && path.endsWith("/notes/manifest.json")) {
+          armed = false;
+          await gate;
+        }
+        return originalExists(path);
+      },
+    );
     const purging = app.workshopOf().purge("notes");
     for (let spin = 0; armed && spin < 60; spin += 1) await app.settle(1);
     // 没停到预期位置就说明这条用例没测到它想测的时序，别让它"碰巧通过"。
@@ -1232,7 +1594,9 @@ describe("工具模块的状态转换（账号与事务边界）", () => {
     expect(note.error).toBe(true);
     expect(note.text).toContain("账号已切换");
     expect(await app.exists(dirA)).toBe(true);
-    expect(await app.text(joinPath(dirA, "index.html"))).toBe("<p>A 的页面</p>");
+    expect(await app.text(joinPath(dirA, "index.html"))).toBe(
+      "<p>A 的页面</p>",
+    );
     expect(await app.exists(dirB)).toBe(true);
     expect(app.savedEntries()[0]?.dir).toBe(dirB);
     expect(app.tools().state.getState()[0]?.dir).toBe(dirB);
@@ -1251,7 +1615,9 @@ describe("工具模块的状态转换（账号与事务边界）", () => {
     const dir = app.tools().state.getState()[0]?.dir as string;
 
     // 目录被别的进程占着（Windows 上很常见）：清理抛错。
-    vi.spyOn(app.backend, "toolPurge").mockRejectedValueOnce(new Error("目录被占用"));
+    vi.spyOn(app.backend, "toolPurge").mockRejectedValueOnce(
+      new Error("目录被占用"),
+    );
 
     const failed = await app.workshopOf().purge("notes");
     expect(failed.error).toBe(true);
@@ -1285,15 +1651,19 @@ describe("工具模块的状态转换（自愈与账号）", () => {
     app.removeDir(dir);
     const originalExists = app.backend.pathExists.bind(app.backend);
     let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    let armed = true;
-    vi.spyOn(app.backend, "pathExists").mockImplementation(async (path: string) => {
-      if (armed && path === dir) {
-        armed = false;
-        await gate;
-      }
-      return originalExists(path);
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
     });
+    let armed = true;
+    vi.spyOn(app.backend, "pathExists").mockImplementation(
+      async (path: string) => {
+        if (armed && path === dir) {
+          armed = false;
+          await gate;
+        }
+        return originalExists(path);
+      },
+    );
     await app.restart();
     for (let spin = 0; armed && spin < 60; spin += 1) await app.settle(1);
     expect(armed).toBe(false);
@@ -1337,15 +1707,26 @@ describe("工具模块的版本副本回收", () => {
     const entry = app.tools().state.getState()[0];
     // 两格：dir = 1.3.0、previousDir = 1.2.0。1.0.0 / 1.1.0 已经不在任何
     // 入口能到达的范围里——界面只有一个"退回上一版"。
-    expect([...(await app.versionDirs("notes"))].sort()).toEqual(["1.2.0", "1.3.0"]);
-    expect(entry?.dir).toBe(joinPath(installedRoot, "notes", "versions", "1.3.0"));
-    expect(entry?.previousDir).toBe(joinPath(installedRoot, "notes", "versions", "1.2.0"));
+    expect([...(await app.versionDirs("notes"))].sort()).toEqual([
+      "1.2.0",
+      "1.3.0",
+    ]);
+    expect(entry?.dir).toBe(
+      joinPath(installedRoot, "notes", "versions", "1.3.0"),
+    );
+    expect(entry?.previousDir).toBe(
+      joinPath(installedRoot, "notes", "versions", "1.2.0"),
+    );
     await expectConsistent(app);
 
     // 回收是跟着安装发起的，每次安装一次，带的都是发起时的账号。
     const calls = app.pruneCalls().filter((call) => call.toolId === "notes");
     expect(calls).toHaveLength(4);
-    expect(calls.every((call) => call.owner === app.userKey()?.slice("user:".length))).toBe(true);
+    expect(
+      calls.every(
+        (call) => call.owner === app.userKey()?.slice("user:".length),
+      ),
+    ).toBe(true);
   });
 
   it("退版之后：换下来的那份留着（点错了能再退回去），更早的那份才收", async () => {
@@ -1360,13 +1741,19 @@ describe("工具模块的版本副本回收", () => {
     expect(back.error).toBeUndefined();
     expect(app.tools().state.getState()[0]?.package.version).toBe("1.0.0");
     // 退回之后两格是 1.0.0(当前) / 1.1.0(上一版)：一个都不能少。
-    expect([...(await app.versionDirs("notes"))].sort()).toEqual(["1.0.0", "1.1.0"]);
+    expect([...(await app.versionDirs("notes"))].sort()).toEqual([
+      "1.0.0",
+      "1.1.0",
+    ]);
     await expectConsistent(app);
 
     // 从退回的状态再升到 v3：上一版变成 1.0.0，1.1.0 从此没人指向。
     const v3 = packageOf("1.2.0", "<p>v3</p>");
     await workshop.installArchive(v3, runtimeFiles(v3));
-    expect([...(await app.versionDirs("notes"))].sort()).toEqual(["1.0.0", "1.2.0"]);
+    expect([...(await app.versionDirs("notes"))].sort()).toEqual([
+      "1.0.0",
+      "1.2.0",
+    ]);
     await expectConsistent(app);
   });
 
@@ -1382,11 +1769,18 @@ describe("工具模块的版本副本回收", () => {
     const stale = joinPath(installedRoot, "notes", "versions", "0.9.0");
     app.backend.addDir(stale);
     await app.backend.writeTextFile(joinPath(stale, "index.html"), "<p>旧</p>");
-    expect([...(await app.versionDirs("notes"))].sort()).toEqual(["0.9.0", "1.0.0", "1.1.0"]);
+    expect([...(await app.versionDirs("notes"))].sort()).toEqual([
+      "0.9.0",
+      "1.0.0",
+      "1.1.0",
+    ]);
 
     await app.restart();
     // 启动自愈对"目录还在"的条目扫一遍：两格留下，历史遗留收掉。
-    expect([...(await app.versionDirs("notes"))].sort()).toEqual(["1.0.0", "1.1.0"]);
+    expect([...(await app.versionDirs("notes"))].sort()).toEqual([
+      "1.0.0",
+      "1.1.0",
+    ]);
     await expectConsistent(app);
   });
 
@@ -1396,7 +1790,12 @@ describe("工具模块的版本副本回收", () => {
     const v1 = packageOf("1.0.0", "<p>v1</p>");
     await workshop.installArchive(v1, runtimeFiles(v1));
 
-    const crash = joinPath(installedRoot, "notes", "versions", ".staging-crash");
+    const crash = joinPath(
+      installedRoot,
+      "notes",
+      "versions",
+      ".staging-crash",
+    );
     app.backend.addDir(crash);
     await app.backend.writeTextFile(joinPath(crash, "manifest.json"), "{}");
 
@@ -1416,7 +1815,12 @@ describe("工具模块的版本副本回收", () => {
   it("收掉没有安装记录的暂存目录（首次安装中途崩溃）", async () => {
     const app = await device();
     // 只布置磁盘，不装任何工具：这就是"写盘完成前进程被杀"的样子。
-    const orphan = joinPath(installedRoot, "halftool", "versions", ".staging-crash");
+    const orphan = joinPath(
+      installedRoot,
+      "halftool",
+      "versions",
+      ".staging-crash",
+    );
     app.backend.addDir(orphan);
     await app.backend.writeTextFile(joinPath(orphan, "manifest.json"), "{}");
     expect(await app.stagingLeftovers("halftool")).toEqual([".staging-crash"]);
@@ -1452,14 +1856,20 @@ describe("工具模块的状态转换（第六轮：失败与回退的交界）"
     const v3 = packageOf("1.2.0", "<p>v3</p>");
     const originalSetItem = Storage.prototype.setItem.bind(localStorage);
     let rejectOnce = true;
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key: string, value: string) {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string,
+    ) {
       if (key === configKey && rejectOnce) {
         rejectOnce = false;
         throw new Error("配置写不进去");
       }
       originalSetItem(key, value);
     });
-    await expect(workshop.installArchive(v3, runtimeFiles(v3))).rejects.toThrow("配置写不进去");
+    await expect(workshop.installArchive(v3, runtimeFiles(v3))).rejects.toThrow(
+      "配置写不进去",
+    );
     vi.restoreAllMocks();
 
     // 失败的那一版不许占住"上一版"格子：界面与配置都还停在 v2、上一版 v1。
@@ -1480,7 +1890,11 @@ describe("工具模块的状态转换（第六轮：失败与回退的交界）"
     const back = await workshop.rollback("notes");
     expect(back.error).toBeUndefined();
     expect(back.text).toContain("v1.0.0");
-    expect(await app.text(joinPath(app.tools().state.getState()[0]?.dir as string, "index.html"))).toBe("<p>v1</p>");
+    expect(
+      await app.text(
+        joinPath(app.tools().state.getState()[0]?.dir as string, "index.html"),
+      ),
+    ).toBe("<p>v1</p>");
     await expectConsistent(app);
 
     // 重启再对一次：退回的版本、两格目录、配置仍然是同一份。
@@ -1499,8 +1913,9 @@ describe("工具模块的状态转换（第六轮：失败与回退的交界）"
     await workshop.installArchive(v2, runtimeFiles(v2));
     await workshop.rollback("notes");
     // 退回去之后：当前 v1，上一版是 v2 的那份目录（点错了还能再退回来）。
-    expect(app.tools().state.getState()[0]?.previousDir)
-      .toBe(joinPath(installedRoot, "notes", "versions", "2.0.0"));
+    expect(app.tools().state.getState()[0]?.previousDir).toBe(
+      joinPath(installedRoot, "notes", "versions", "2.0.0"),
+    );
     await expectConsistent(app);
 
     // 用户改主意：把 2.0.0 再装一次（同一个版本号，内容其实是新的）。
@@ -1509,17 +1924,30 @@ describe("工具模块的状态转换（第六轮：失败与回退的交界）"
 
     const entry = app.tools().state.getState()[0];
     // 新副本开自己的目录：`2.0.0` 已被上一版占着，就退到 `2.0.0-2`。
-    expect(entry?.dir).toBe(joinPath(installedRoot, "notes", "versions", "2.0.0-2"));
-    expect(await app.text(joinPath(entry?.dir as string, "index.html"))).toBe("<p>v2 第二份</p>");
+    expect(entry?.dir).toBe(
+      joinPath(installedRoot, "notes", "versions", "2.0.0-2"),
+    );
+    expect(await app.text(joinPath(entry?.dir as string, "index.html"))).toBe(
+      "<p>v2 第二份</p>",
+    );
     // 上一版变成刚被换下来的 v1；`2.0.0` 从此没人指向，当场回收（只留两格）。
-    expect(entry?.previousDir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0"));
-    expect([...(await app.versionDirs("notes"))].sort()).toEqual(["1.0.0", "2.0.0-2"]);
+    expect(entry?.previousDir).toBe(
+      joinPath(installedRoot, "notes", "versions", "1.0.0"),
+    );
+    expect([...(await app.versionDirs("notes"))].sort()).toEqual([
+      "1.0.0",
+      "2.0.0-2",
+    ]);
     await expectConsistent(app);
 
     // 再退一格：回到 v1，而不是回到那份已被回收的旧 2.0.0。
     await workshop.rollback("notes");
     expect(app.tools().state.getState()[0]?.package.version).toBe("1.0.0");
-    expect(await app.text(joinPath(app.tools().state.getState()[0]?.dir as string, "index.html"))).toBe("<p>v1</p>");
+    expect(
+      await app.text(
+        joinPath(app.tools().state.getState()[0]?.dir as string, "index.html"),
+      ),
+    ).toBe("<p>v1</p>");
     await expectConsistent(app);
   });
 
@@ -1531,7 +1959,10 @@ describe("工具模块的状态转换（第六轮：失败与回退的交界）"
     await workshop.installArchive(v1, runtimeFiles(v1));
     await workshop.installArchive(v2, runtimeFiles(v2));
     await workshop.rollback("notes");
-    expect([...(await app.versionDirs("notes"))].sort()).toEqual(["1.0.0", "1.1.0"]);
+    expect([...(await app.versionDirs("notes"))].sort()).toEqual([
+      "1.0.0",
+      "1.1.0",
+    ]);
 
     // 卸载不看"当前是哪一版"，两格都必须清掉——否则换下来的那份永久占盘。
     const note = await workshop.purge("notes");
@@ -1539,7 +1970,9 @@ describe("工具模块的状态转换（第六轮：失败与回退的交界）"
     expect(app.tools().state.getState()).toEqual([]);
     expect(await app.versionDirs("notes")).toEqual([]);
     expect(await app.filesOf(joinPath(installedRoot, "notes"))).toEqual([]);
-    expect(await app.exists(joinPath(backupRoot, "notes", "previous.json"))).toBe(false);
+    expect(
+      await app.exists(joinPath(backupRoot, "notes", "previous.json")),
+    ).toBe(false);
 
     await app.restart();
     expect(app.tools().state.getState()).toEqual([]);
@@ -1549,7 +1982,9 @@ describe("工具模块的状态转换（第六轮：失败与回退的交界）"
     const again = packageOf("1.0.0", "<p>重装</p>");
     await app.workshopOf().installArchive(again, runtimeFiles(again));
     const entry = app.tools().state.getState()[0];
-    expect(entry?.dir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0"));
+    expect(entry?.dir).toBe(
+      joinPath(installedRoot, "notes", "versions", "1.0.0"),
+    );
     expect(entry?.previousVersion).toBeUndefined();
     expect(entry?.previousDir).toBeUndefined();
     expect(app.savedEntries()[0]?.previousVersion).toBeUndefined();
@@ -1557,7 +1992,9 @@ describe("工具模块的状态转换（第六轮：失败与回退的交界）"
 
     await app.restart();
     expect(app.tools().state.getState()[0]?.dir).toBe(entry?.dir);
-    expect(await app.text(joinPath(entry?.dir as string, "index.html"))).toBe("<p>重装</p>");
+    expect(await app.text(joinPath(entry?.dir as string, "index.html"))).toBe(
+      "<p>重装</p>",
+    );
     await expectConsistent(app);
   });
 
@@ -1568,7 +2005,9 @@ describe("工具模块的状态转换（第六轮：失败与回退的交界）"
 
     // 第一次就失败（写配置那一步）：磁盘上清干净，配置里也不该有这条。
     app.failNextWrite((path) => path.endsWith("index.html"));
-    await expect(workshop.installArchive(v1, runtimeFiles(v1))).rejects.toThrow("磁盘写不进去");
+    await expect(workshop.installArchive(v1, runtimeFiles(v1))).rejects.toThrow(
+      "磁盘写不进去",
+    );
     app.healWrites();
     expect(app.tools().state.getState()).toEqual([]);
     expect(app.savedEntries()).toEqual([]);
@@ -1582,7 +2021,9 @@ describe("工具模块的状态转换（第六轮：失败与回退的交界）"
     expect(entry?.previousDir).toBeUndefined();
     expect(app.savedEntries()[0]?.previousVersion).toBeUndefined();
     // 失败那次也没留下备份清单：留着会让"卸载→重装"翻出根本不存在的上一版。
-    expect(await app.exists(joinPath(backupRoot, "notes", "previous.json"))).toBe(false);
+    expect(
+      await app.exists(joinPath(backupRoot, "notes", "previous.json")),
+    ).toBe(false);
     await expectConsistent(app);
   });
 
@@ -1595,10 +2036,12 @@ describe("工具模块的状态转换（第六轮：失败与回退的交界）"
     // 第一次尝试：除了入口还带一个附件，写到附件时磁盘满了。
     const v2 = packageOf("1.1.0", "<p>v2</p>");
     app.failNextWrite((path) => path.endsWith("half.txt"));
-    await expect(workshop.installArchive(v2, {
-      ...runtimeFiles(v2),
-      "half.txt": new TextEncoder().encode("写了一半"),
-    })).rejects.toThrow("磁盘写不进去");
+    await expect(
+      workshop.installArchive(v2, {
+        ...runtimeFiles(v2),
+        "half.txt": new TextEncoder().encode("写了一半"),
+      }),
+    ).rejects.toThrow("磁盘写不进去");
     app.healWrites();
     expect(await app.stagingLeftovers("notes")).toEqual([]);
 
@@ -1607,9 +2050,13 @@ describe("工具模块的状态转换（第六轮：失败与回退的交界）"
     const entry = app.tools().state.getState()[0];
     const files = await app.filesOf(entry?.dir as string);
     expect(files).not.toContain("half.txt");
-    expect(await app.text(joinPath(entry?.dir as string, "index.html"))).toBe("<p>v2</p>");
+    expect(await app.text(joinPath(entry?.dir as string, "index.html"))).toBe(
+      "<p>v2</p>",
+    );
     // 旧版那份也不许被这次的失败波及。
-    expect(await app.text(joinPath(entry?.previousDir as string, "index.html"))).toBe("<p>v1</p>");
+    expect(
+      await app.text(joinPath(entry?.previousDir as string, "index.html")),
+    ).toBe("<p>v1</p>");
     await expectConsistent(app);
   });
 
@@ -1621,9 +2068,14 @@ describe("工具模块的状态转换（第六轮：失败与回退的交界）"
     const before = JSON.stringify(app.savedEntries());
 
     const v2 = packageOf("1.1.0", "<p>v2</p>");
-    const v2Files = { ...runtimeFiles(v2), "extra.txt": new TextEncoder().encode("附件") };
+    const v2Files = {
+      ...runtimeFiles(v2),
+      "extra.txt": new TextEncoder().encode("附件"),
+    };
     app.failNextWrite((path) => path.endsWith("extra.txt"));
-    await expect(workshop.installArchive(v2, v2Files)).rejects.toThrow("磁盘写不进去");
+    await expect(workshop.installArchive(v2, v2Files)).rejects.toThrow(
+      "磁盘写不进去",
+    );
     app.healWrites();
     expect(JSON.stringify(app.savedEntries())).toBe(before);
     expect(await app.stagingLeftovers("notes")).toEqual([]);
@@ -1636,10 +2088,17 @@ describe("工具模块的状态转换（第六轮：失败与回退的交界）"
 
     // 重启之后重试：新工坊实例、同一份包，这一次走到头。
     const retried = await app.workshopOf().installArchive(v2, v2Files);
-    expect(retried).toMatchObject({ version: "1.1.0", previousVersion: "1.0.0" });
+    expect(retried).toMatchObject({
+      version: "1.1.0",
+      previousVersion: "1.0.0",
+    });
     const entry = app.tools().state.getState()[0];
-    expect(await app.text(joinPath(entry?.dir as string, "index.html"))).toBe("<p>v2</p>");
-    expect(await app.text(joinPath(entry?.dir as string, "extra.txt"))).toBe("附件");
+    expect(await app.text(joinPath(entry?.dir as string, "index.html"))).toBe(
+      "<p>v2</p>",
+    );
+    expect(await app.text(joinPath(entry?.dir as string, "extra.txt"))).toBe(
+      "附件",
+    );
     await expectConsistent(app);
   });
 
@@ -1651,14 +2110,16 @@ describe("工具模块的状态转换（第六轮：失败与回退的交界）"
 
     // 宿主报"该删但没删掉"（Windows 上被别的程序占着）。这与"这不是它的目录"
     // 是两件事：后者可以撤记录，前者撤了就再没有重试入口。
-    vi.spyOn(app.backend, "toolPurge").mockImplementationOnce((input) => Promise.resolve({
-      removedDirs: [],
-      skippedDirs: [],
-      failedDirs: [...input.projectDirs],
-      removedData: false,
-      removedBackup: false,
-      removedSecrets: false,
-    }));
+    vi.spyOn(app.backend, "toolPurge").mockImplementationOnce((input) =>
+      Promise.resolve({
+        removedDirs: [],
+        skippedDirs: [],
+        failedDirs: [...input.projectDirs],
+        removedData: false,
+        removedBackup: false,
+        removedSecrets: false,
+      }),
+    );
     const failed = await app.workshopOf().purge("notes");
     expect(failed.error).toBe(true);
     expect(failed.text).toContain("没删掉");
@@ -1718,7 +2179,9 @@ describe("工具模块的状态转换（历史脏数据的降级）", () => {
     expect(back.text).toContain("v1.0.0");
     const entry = app.tools().state.getState()[0];
     expect(entry?.package.version).toBe("1.0.0");
-    expect(await app.text(joinPath(entry?.dir as string, "index.html"))).toBe("<p>v1</p>");
+    expect(await app.text(joinPath(entry?.dir as string, "index.html"))).toBe(
+      "<p>v1</p>",
+    );
     // 磁盘上的清单、界面、配置三者一致——这正是按清单退会破坏的那一条。
     await expectConsistent(app);
 
@@ -1742,7 +2205,9 @@ describe("工具模块的状态转换（第七轮：配置落盘失败）", () =
     // 只有 native 宿主才有"配置落盘"这一步；测试跑在浏览器宿主上，要显式打开。
     vi.spyOn(desktopManagedStorage, "available").mockReturnValue(true);
     vi.spyOn(desktopManagedStorage, "flush").mockResolvedValue(undefined);
-    vi.spyOn(desktopManagedStorage, "configurationError").mockReturnValue(reason);
+    vi.spyOn(desktopManagedStorage, "configurationError").mockReturnValue(
+      reason,
+    );
   }
 
   it("更新时配置没写进去：整体算没生效，三层仍停在旧版本，孤儿副本当场收掉", async () => {
@@ -1753,7 +2218,9 @@ describe("工具模块的状态转换（第七轮：配置落盘失败）", () =
 
     breakDisk("磁盘已满");
     const v2 = packageOf("1.1.0", "<p>v2</p>");
-    await expect(workshop.installArchive(v2, runtimeFiles(v2))).rejects.toThrow("没有保存成功");
+    await expect(workshop.installArchive(v2, runtimeFiles(v2))).rejects.toThrow(
+      "没有保存成功",
+    );
 
     // 界面、配置、磁盘三层都还在 v1：不能出现"卡片说 v2、目录里只有 v1"。
     expect(app.tools().state.getState()[0]?.package.version).toBe("1.0.0");

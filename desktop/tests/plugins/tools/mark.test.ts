@@ -1,5 +1,9 @@
 import { expect, it } from "vitest";
-import { toneCount, toneOf, toolGlyph } from "../../../src/plugins/tools/ui/mark.ts";
+import {
+  toneCount,
+  toneOf,
+  toolGlyph,
+} from "../../../src/plugins/tools/ui/mark.ts";
 import { parseToolPackage } from "../../../src/plugins/tools/runtime/package.ts";
 import { toolProjectFiles } from "../../../src/plugins/tools/runtime/projectArchive.ts";
 
@@ -39,19 +43,37 @@ it("assigns a stable tone from the tool id instead of the list position", () => 
     expect(toneOf(id), id).toBeLessThan(toneCount);
   }
   // 这批 id 至少覆盖两种颜色——否则"可区分"这个目标没达成。
-  expect(new Set(expectedTones.map(([, tone]) => tone)).size).toBeGreaterThan(1);
+  expect(new Set(expectedTones.map(([, tone]) => tone)).size).toBeGreaterThan(
+    1,
+  );
 });
 
 it("falls back to the first character of the name when no icon is declared", () => {
-  const plain = parseToolPackage(JSON.stringify({ schemaVersion: 1, id: "plain", name: "正则试验台", version: "1.0.0", html: "<p>x</p>" }));
+  const plain = parseToolPackage(
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "plain",
+      name: "正则试验台",
+      version: "1.0.0",
+      html: "<p>x</p>",
+    }),
+  );
   expect(toolGlyph(plain)).toBe("正");
   expect(toolGlyph({ name: "json formatter" })).toBe("J");
 });
 
 it("keeps a declared icon and rejects ones that are too long or contain control characters", () => {
-  const withIcon = (icon: string) => () => parseToolPackage(JSON.stringify({
-    schemaVersion: 1, id: "icon-test", name: "图标", version: "1.0.0", html: "<p>x</p>", icon,
-  }));
+  const withIcon = (icon: string) => () =>
+    parseToolPackage(
+      JSON.stringify({
+        schemaVersion: 1,
+        id: "icon-test",
+        name: "图标",
+        version: "1.0.0",
+        html: "<p>x</p>",
+        icon,
+      }),
+    );
   const glyph = withIcon("🧮")();
   expect(glyph.icon).toBe("🧮");
   expect(toolGlyph(glyph)).toBe("🧮");
@@ -62,13 +84,32 @@ it("keeps a declared icon and rejects ones that are too long or contain control 
 });
 
 it("round-trips the icon through the exported manifest so an exported project keeps it", () => {
-  const tool = parseToolPackage(JSON.stringify({
-    schemaVersion: 1, id: "keep-icon", name: "保留图标", version: "1.0.0", html: "<p>x</p>", icon: "终",
-  }));
-  const manifest = JSON.parse(toolProjectFiles(tool)["manifest.json"]!) as { icon?: string };
+  const tool = parseToolPackage(
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "keep-icon",
+      name: "保留图标",
+      version: "1.0.0",
+      html: "<p>x</p>",
+      icon: "终",
+    }),
+  );
+  const manifest = JSON.parse(toolProjectFiles(tool)["manifest.json"]!) as {
+    icon?: string;
+  };
   expect(manifest.icon).toBe("终");
-  expect(parseToolPackage(JSON.stringify({ ...manifest, html: "<p>x</p>" })).icon).toBe("终");
+  expect(
+    parseToolPackage(JSON.stringify({ ...manifest, html: "<p>x</p>" })).icon,
+  ).toBe("终");
   // 清单里没有 icon 时不写入空字段，避免导出包多出无意义的键。
-  const without = parseToolPackage(JSON.stringify({ schemaVersion: 1, id: "no-icon", name: "无图标", version: "1.0.0", html: "<p>x</p>" }));
+  const without = parseToolPackage(
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "no-icon",
+      name: "无图标",
+      version: "1.0.0",
+      html: "<p>x</p>",
+    }),
+  );
   expect("icon" in without).toBe(false);
 });

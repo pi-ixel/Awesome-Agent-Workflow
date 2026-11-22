@@ -1,3 +1,4 @@
+/* global document, location, window */
 /*
  * 开发指导窗口。
  *
@@ -47,7 +48,7 @@
   if (!theme) {
     try {
       theme = new URLSearchParams(location.search).get("theme");
-    } catch (_) {
+    } catch {
       theme = null;
     }
   }
@@ -81,13 +82,21 @@
   function withTimeout(promise, ms) {
     return new Promise(function (resolve, reject) {
       var timer = setTimeout(function () {
-        var error = new Error("等了 " + Math.round(ms / 1000) + " 秒还没有响应");
+        var error = new Error(
+          "等了 " + Math.round(ms / 1000) + " 秒还没有响应",
+        );
         error.name = "TimeoutError";
         reject(error);
       }, ms);
       promise.then(
-        function (value) { clearTimeout(timer); resolve(value); },
-        function (error) { clearTimeout(timer); reject(error); }
+        function (value) {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        function (error) {
+          clearTimeout(timer);
+          reject(error);
+        },
       );
     });
   }
@@ -99,10 +108,13 @@
     status.title = message;
     status.className = bad ? "status error" : "status";
     clearTimeout(flash.timer);
-    flash.timer = setTimeout(function () {
-      status.textContent = "";
-      status.title = "";
-    }, bad ? 6000 : 2400);
+    flash.timer = setTimeout(
+      function () {
+        status.textContent = "";
+        status.title = "";
+      },
+      bad ? 6000 : 2400,
+    );
   }
 
   // ── 确认条 ──────────────────────────────────────────────────────────────
@@ -139,7 +151,10 @@
   // ── markdown → html ────────────────────────────────────────────────────
 
   function escapeHtml(text) {
-    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
   }
 
   function inline(text) {
@@ -152,8 +167,15 @@
         // http(s) 打个标记，交给点击委托转给系统浏览器——让它在当前 webview
         // 里导航会把整个窗口换成网页，目录和编辑入口全丢。
         var external = /^https?:/i.test(href) ? ' data-external="1"' : "";
-        return '<a href="' + href.replace(/"/g, "&quot;") + '"' + external +
-          ' rel="noreferrer noopener">' + label + "</a>";
+        return (
+          '<a href="' +
+          href.replace(/"/g, "&quot;") +
+          '"' +
+          external +
+          ' rel="noreferrer noopener">' +
+          label +
+          "</a>"
+        );
       });
   }
 
@@ -173,30 +195,59 @@
     var index = 0;
     while (index < lines.length) {
       var line = lines[index];
-      if (/^\s*$/.test(line)) { index += 1; continue; }
+      if (/^\s*$/.test(line)) {
+        index += 1;
+        continue;
+      }
       // 代码块
       if (/^```/.test(line)) {
         var code = [];
         index += 1;
-        while (index < lines.length && !/^```/.test(lines[index])) { code.push(lines[index]); index += 1; }
+        while (index < lines.length && !/^```/.test(lines[index])) {
+          code.push(lines[index]);
+          index += 1;
+        }
         index += 1;
-        html.push("<pre><code>" + escapeHtml(code.join("\n")) + "</code></pre>");
+        html.push(
+          "<pre><code>" + escapeHtml(code.join("\n")) + "</code></pre>",
+        );
         continue;
       }
       // 表格：整块连续以 | 开头的行
       if (/^\s*\|/.test(line)) {
         var rows = [];
-        while (index < lines.length && /^\s*\|/.test(lines[index])) { rows.push(lines[index]); index += 1; }
+        while (index < lines.length && /^\s*\|/.test(lines[index])) {
+          rows.push(lines[index]);
+          index += 1;
+        }
         var cells = rows.map(function (row) {
-          return row.trim().replace(/^\||\|$/g, "").split("|").map(function (cell) { return cell.trim(); });
+          return row
+            .trim()
+            .replace(/^\||\|$/g, "")
+            .split("|")
+            .map(function (cell) {
+              return cell.trim();
+            });
         });
-        var body = cells.filter(function (row) { return !row.every(function (cell) { return /^:?-{2,}:?$/.test(cell); }); });
+        var body = cells.filter(function (row) {
+          return !row.every(function (cell) {
+            return /^:?-{2,}:?$/.test(cell);
+          });
+        });
         if (body.length) {
           // 表格外面套一层滚动容器：列多时在表格内部左右滚，不把整页顶宽。
           html.push('<div class="table-wrap"><table>');
           body.forEach(function (row, rowIndex) {
             var tag = rowIndex === 0 ? "th" : "td";
-            html.push("<tr>" + row.map(function (cell) { return "<" + tag + ">" + inline(cell) + "</" + tag + ">"; }).join("") + "</tr>");
+            html.push(
+              "<tr>" +
+                row
+                  .map(function (cell) {
+                    return "<" + tag + ">" + inline(cell) + "</" + tag + ">";
+                  })
+                  .join("") +
+                "</tr>",
+            );
           });
           html.push("</table></div>");
         }
@@ -209,15 +260,29 @@
         var id = "h" + headings.length;
         // 只有 h1–h3 进目录：h4 在这个窗口里全是"某个字段/某个参数"级别的
         // 小标题，塞进侧栏会把目录撑成一堵墙，反而找不到章节。
-        if (level <= 3) headings.push({ id: id, text: plainText(heading[2]), level: level });
-        html.push('<h' + level + ' id="' + id + '">' + inline(heading[2]) + "</h" + level + ">");
+        if (level <= 3)
+          headings.push({ id: id, text: plainText(heading[2]), level: level });
+        html.push(
+          "<h" +
+            level +
+            ' id="' +
+            id +
+            '">' +
+            inline(heading[2]) +
+            "</h" +
+            level +
+            ">",
+        );
         index += 1;
         continue;
       }
       // 引用
       if (/^>\s?/.test(line)) {
         var quote = [];
-        while (index < lines.length && /^>\s?/.test(lines[index])) { quote.push(lines[index].replace(/^>\s?/, "")); index += 1; }
+        while (index < lines.length && /^>\s?/.test(lines[index])) {
+          quote.push(lines[index].replace(/^>\s?/, ""));
+          index += 1;
+        }
         html.push("<blockquote>" + inline(quote.join(" ")) + "</blockquote>");
         continue;
       }
@@ -225,27 +290,50 @@
       if (/^\s*(?:[-*]|\d+\.)\s+/.test(line)) {
         var ordered = /^\s*\d+\./.test(line);
         var items = [];
-        while (index < lines.length && /^\s*(?:[-*]|\d+\.)\s+/.test(lines[index])) {
+        while (
+          index < lines.length &&
+          /^\s*(?:[-*]|\d+\.)\s+/.test(lines[index])
+        ) {
           var raw = lines[index];
           var depth = Math.floor((raw.length - raw.trimStart().length) / 2);
-          items.push({ depth: depth, text: raw.replace(/^\s*(?:[-*]|\d+\.)\s+/, "") });
+          items.push({
+            depth: depth,
+            text: raw.replace(/^\s*(?:[-*]|\d+\.)\s+/, ""),
+          });
           index += 1;
         }
         var tag = ordered ? "ol" : "ul";
         var depthNow = 0;
         items.forEach(function (item) {
-          while (item.depth > depthNow) { html.push("<" + tag + ">"); depthNow += 1; }
-          while (item.depth < depthNow) { html.push("</" + tag + ">"); depthNow -= 1; }
+          while (item.depth > depthNow) {
+            html.push("<" + tag + ">");
+            depthNow += 1;
+          }
+          while (item.depth < depthNow) {
+            html.push("</" + tag + ">");
+            depthNow -= 1;
+          }
           html.push("<li>" + inline(item.text) + "</li>");
         });
-        while (depthNow > 0) { html.push("</" + tag + ">"); depthNow -= 1; }
+        while (depthNow > 0) {
+          html.push("</" + tag + ">");
+          depthNow -= 1;
+        }
         continue;
       }
-      if (/^\s*---+\s*$/.test(line)) { html.push("<hr>"); index += 1; continue; }
+      if (/^\s*---+\s*$/.test(line)) {
+        html.push("<hr>");
+        index += 1;
+        continue;
+      }
       // 段落：吸收连续的普通行
       var paragraph = [line];
       index += 1;
-      while (index < lines.length && !/^\s*$/.test(lines[index]) && !/^(#{1,4}\s|```|\s*\||>\s?|\s*(?:[-*]|\d+\.)\s|---)/.test(lines[index])) {
+      while (
+        index < lines.length &&
+        !/^\s*$/.test(lines[index]) &&
+        !/^(#{1,4}\s|```|\s*\||>\s?|\s*(?:[-*]|\d+\.)\s|---)/.test(lines[index])
+      ) {
         paragraph.push(lines[index]);
         index += 1;
       }
@@ -258,7 +346,11 @@
 
   /** 标题相对滚动容器（`main`）的位置：offsetTop 的 offsetParent 不一定是它。 */
   function offsetInDoc(element) {
-    return element.getBoundingClientRect().top - doc.getBoundingClientRect().top + doc.scrollTop;
+    return (
+      element.getBoundingClientRect().top -
+      doc.getBoundingClientRect().top +
+      doc.scrollTop
+    );
   }
 
   function buildToc(headings) {
@@ -280,7 +372,8 @@
       link.addEventListener("click", function (event) {
         event.preventDefault();
         var target = document.getElementById(heading.id);
-        if (target) doc.scrollTo({ top: Math.max(0, offsetInDoc(target) - 16) });
+        if (target)
+          doc.scrollTo({ top: Math.max(0, offsetInDoc(target) - 16) });
       });
       toc.appendChild(link);
     });
@@ -297,7 +390,11 @@
       if (headings.length === 0) return;
       var current = headings[0].id;
       for (var i = 0; i < headings.length; i += 1) {
-        if (headings[i].getBoundingClientRect().top - doc.getBoundingClientRect().top <= 32) {
+        if (
+          headings[i].getBoundingClientRect().top -
+            doc.getBoundingClientRect().top <=
+          32
+        ) {
           current = headings[i].id;
         }
       }
@@ -305,7 +402,10 @@
       activeId = current;
       var links = toc.querySelectorAll(".toc-item");
       for (var j = 0; j < links.length; j += 1) {
-        links[j].classList.toggle("active", links[j].getAttribute("data-target") === current);
+        links[j].classList.toggle(
+          "active",
+          links[j].getAttribute("data-target") === current,
+        );
       }
     });
   }
@@ -427,9 +527,13 @@
 
   /** 失败态：把原因原样显示出来，并给一条能动手的建议。 */
   function showFailure(error) {
-    var timedOut = error && (error.name === "AbortError" || error.name === "TimeoutError");
+    var timedOut =
+      error && (error.name === "AbortError" || error.name === "TimeoutError");
     var reason = timedOut ? "请求一直没有响应" : describe(error);
-    doc.innerHTML = '<div class="doc-body"><p class="error">开发指导没能加载：' + escapeHtml(reason) + "</p>" +
+    doc.innerHTML =
+      '<div class="doc-body"><p class="error">开发指导没能加载：' +
+      escapeHtml(reason) +
+      "</p>" +
       '<p class="hint">关掉这个窗口重开一次通常就好；如果反复如此，说明宿主刚重启过或这次构建里缺了文档。</p></div>';
     doc.removeAttribute("aria-busy");
   }
@@ -441,31 +545,45 @@
    * 兜底能成立，是因为 `public/guide/guide.md` 就在同一个目录里。
    */
   function load() {
-    return withTimeout(invoke("tools_guide_load"), 5000).then(function (payload) {
-      state.editable = true;
-      return payload;
-    }, function (hostError) {
-      // 主路失败或超时。8 秒还没拿到正文就主动放弃：请求一旦挂住（宿主刚重启、
-      // dev server 正在换端口），窗口会永远停在"正在加载"，用户无法判断是慢还是坏。
-      var reason = describe(hostError);
-      var controller = new AbortController();
-      var timer = setTimeout(function () { controller.abort(); }, 8000);
-      return fetch("guide.md", { cache: "no-store", signal: controller.signal })
-        .then(function (response) {
-          clearTimeout(timer);
-          if (!response.ok) throw new Error("读不到 guide.md（HTTP " + response.status + "）");
-          return response.text();
+    return withTimeout(invoke("tools_guide_load"), 5000).then(
+      function (payload) {
+        state.editable = true;
+        return payload;
+      },
+      function (hostError) {
+        // 主路失败或超时。8 秒还没拿到正文就主动放弃：请求一旦挂住（宿主刚重启、
+        // dev server 正在换端口），窗口会永远停在"正在加载"，用户无法判断是慢还是坏。
+        var reason = describe(hostError);
+        var controller = new AbortController();
+        var timer = setTimeout(function () {
+          controller.abort();
+        }, 8000);
+        return fetch("guide.md", {
+          cache: "no-store",
+          signal: controller.signal,
         })
-        .then(function (text) {
-          // 降级到这里说明没有写回通道：能读、不能改。必须说出来——
-          // 否则用户看到正文正常，点「编辑」却什么都没有，会以为按钮坏了。
-          return {
-            text: text,
-            edited: false,
-            note: "没能连上宿主（" + reason + "）。现在显示的是随包正文，暂时不能编辑。",
-          };
-        });
-    });
+          .then(function (response) {
+            clearTimeout(timer);
+            if (!response.ok)
+              throw new Error(
+                "读不到 guide.md（HTTP " + response.status + "）",
+              );
+            return response.text();
+          })
+          .then(function (text) {
+            // 降级到这里说明没有写回通道：能读、不能改。必须说出来——
+            // 否则用户看到正文正常，点「编辑」却什么都没有，会以为按钮坏了。
+            return {
+              text: text,
+              edited: false,
+              note:
+                "没能连上宿主（" +
+                reason +
+                "）。现在显示的是随包正文，暂时不能编辑。",
+            };
+          });
+      },
+    );
   }
 
   editButton.addEventListener("click", openEditor);
@@ -477,15 +595,17 @@
   // 外链一律交给系统浏览器。让它在当前 webview 里导航，窗口会整个换成网页，
   // 目录和编辑入口都没了，用户只能关掉重开。
   doc.addEventListener("click", function (event) {
-    var link = event.target && event.target.closest
-      ? event.target.closest("a[data-external]")
-      : null;
+    var link =
+      event.target && event.target.closest
+        ? event.target.closest("a[data-external]")
+        : null;
     if (!link) return;
     event.preventDefault();
-    invoke("tools_guide_open_url", { url: link.getAttribute("href") || "" })
-      .catch(function (error) {
-        flash("打开链接失败：" + describe(error), true);
-      });
+    invoke("tools_guide_open_url", {
+      url: link.getAttribute("href") || "",
+    }).catch(function (error) {
+      flash("打开链接失败：" + describe(error), true);
+    });
   });
 
   // 编辑器里的键盘习惯：Esc 退出、Ctrl/Cmd+S 保存。
@@ -497,37 +617,46 @@
   // `isComposing` 必须先判：中文输入法用 Esc 取消候选词、用回车/空格上屏，
   // 这两下都不能被当成"退出编辑"或"提交"。
   editorText.addEventListener("input", reportDirty);
-  document.addEventListener("keydown", function (event) {
-    if (!askBar.hidden) {
-      // 确认条显示时只认 Esc（关掉它），别让 Ctrl+S 在背后偷偷保存。
+  document.addEventListener(
+    "keydown",
+    function (event) {
+      if (!askBar.hidden) {
+        // 确认条显示时只认 Esc（关掉它），别让 Ctrl+S 在背后偷偷保存。
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          closeAsk();
+        }
+        return;
+      }
+      if (editor.hidden || event.isComposing) return;
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        closeAsk();
-      }
-      return;
-    }
-    if (editor.hidden || event.isComposing) return;
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      if (editorText.value === state.markdown) {
-        closeEditor();
+        if (editorText.value === state.markdown) {
+          closeEditor();
+          return;
+        }
+        ask("放弃这次修改？", closeEditor);
         return;
       }
-      ask("放弃这次修改？", closeEditor);
-      return;
-    }
-    if ((event.ctrlKey || event.metaKey) && String(event.key).toLowerCase() === "s") {
-      event.preventDefault();
-      if (!saveButton.disabled) save();
-    }
-  }, true);
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        String(event.key).toLowerCase() === "s"
+      ) {
+        event.preventDefault();
+        if (!saveButton.disabled) save();
+      }
+    },
+    true,
+  );
 
   // 窗口重新获得焦点时问一次主题：主窗刚切过主题的话，这里跟上，不用重开。
   window.addEventListener("focus", function () {
     invoke("tools_guide_theme")
-      .then(function (value) { applyTheme(value); })
+      .then(function (value) {
+        applyTheme(value);
+      })
       .catch(function () {});
   });
 

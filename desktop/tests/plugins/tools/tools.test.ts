@@ -5,25 +5,36 @@ import { parseToolPackage } from "../../../src/plugins/tools/runtime/package.ts"
 import { readTools } from "../../../src/plugins/tools/index.ts";
 import * as backupRuntime from "../../../src/plugins/tools/runtime/backup.ts";
 
-const makeTool = (id: string) => parseToolPackage(JSON.stringify({
-  schemaVersion: 1,
-  id,
-  name: id,
-  version: "1.0.0",
-  html: "<button>Run</button>",
-}));
+const makeTool = (id: string) =>
+  parseToolPackage(
+    JSON.stringify({
+      schemaVersion: 1,
+      id,
+      name: id,
+      version: "1.0.0",
+      html: "<button>Run</button>",
+    }),
+  );
 
 /** 在运行目录里放一份能跑的最小副本：清单 + 页面。 */
 async function seedRunDir(
-  host: { skills: { writeTextFile(path: string, contents: string): Promise<void> } },
+  host: {
+    skills: { writeTextFile(path: string, contents: string): Promise<void> };
+  },
   dir: string,
   id: string,
   version: string,
   html: string,
 ) {
-  await host.skills.writeTextFile(`${dir}/manifest.json`, JSON.stringify({
-    schemaVersion: 1, id, name: id, version,
-  }));
+  await host.skills.writeTextFile(
+    `${dir}/manifest.json`,
+    JSON.stringify({
+      schemaVersion: 1,
+      id,
+      name: id,
+      version,
+    }),
+  );
   await host.skills.writeTextFile(`${dir}/index.html`, html);
 }
 
@@ -37,12 +48,17 @@ async function withContext(run: (context: Context) => Promise<void>) {
   const runtime = createTestDesktopRuntime(
     { attachPreloading: () => () => {}, close: () => Promise.resolve() },
     undefined,
-    (value) => { context = value; },
+    (value) => {
+      context = value;
+    },
   );
   try {
     await runtime.ready;
     if (!context) throw new Error("Missing desktop context");
-    context.account.loginAsDev({ name: "Runtime copy", employeeId: "tools-test-runtime-copy" });
+    context.account.loginAsDev({
+      name: "Runtime copy",
+      employeeId: "tools-test-runtime-copy",
+    });
     await run(context);
   } finally {
     await runtime.shutdown();
@@ -61,7 +77,9 @@ it("maintains distinct personal libraries and keeps recent use when updating", a
   const runtime = createTestDesktopRuntime(
     { attachPreloading: () => () => {}, close: () => Promise.resolve() },
     undefined,
-    (value) => { context = value; },
+    (value) => {
+      context = value;
+    },
   );
   try {
     await runtime.ready;
@@ -74,28 +92,62 @@ it("maintains distinct personal libraries and keeps recent use when updating", a
     account.loginAsDev(first);
     await tools.install(a);
     await tools.install(b);
-    await tools.install({ ...a, settingsSchema: [{ id: "count", type: "number", label: "数量", default: 2, min: 1, max: 8 }] }, { replace: true });
+    await tools.install(
+      {
+        ...a,
+        settingsSchema: [
+          {
+            id: "count",
+            type: "number",
+            label: "数量",
+            default: 2,
+            min: 1,
+            max: 8,
+          },
+        ],
+      },
+      { replace: true },
+    );
     tools.saveSettings(a.id, { count: 4 });
     expect(() => tools.saveSettings(a.id, { count: -1 })).toThrow("数量");
     await expect(tools.install(b)).rejects.toThrow("相同 ID");
     tools.open(b.id);
     // 升级要能回答"从哪一版到哪一版"：以前 install 返回 void，界面只能提示
     // "已安装或更新"，用户不知道版本到底动了没有。
-    const upgraded = await tools.install({ ...b, version: "1.1.0" }, { replace: true });
-    expect(upgraded).toMatchObject({ updated: true, versionChanged: true, previousVersion: "1.0.0", version: "1.1.0" });
+    const upgraded = await tools.install(
+      { ...b, version: "1.1.0" },
+      { replace: true },
+    );
+    expect(upgraded).toMatchObject({
+      updated: true,
+      versionChanged: true,
+      previousVersion: "1.0.0",
+      version: "1.1.0",
+    });
     expect(tools.state.getState()[0]?.installedAt).toBeTypeOf("number");
     expect(tools.state.getState()[0]?.updatedAt).toBeTypeOf("number");
     expect(tools.state.getState()[0]?.previousVersion).toBe("1.0.0");
-    const sameVersion = await tools.install({ ...b, version: "1.1.0", html: "<p>改</p>" }, { replace: true });
+    const sameVersion = await tools.install(
+      { ...b, version: "1.1.0", html: "<p>改</p>" },
+      { replace: true },
+    );
     expect(sameVersion).toMatchObject({ updated: true, versionChanged: false });
-    expect(tools.state.getState().map((entry) => entry.package.id)).toEqual(["b", "a"]);
+    expect(tools.state.getState().map((entry) => entry.package.id)).toEqual([
+      "b",
+      "a",
+    ]);
     account.loginAsDev(second);
     expect(tools.state.getState()).toEqual([]);
     account.loginAsDev(first);
-    expect(tools.state.getState().find((entry) => entry.package.id === a.id)?.settings).toEqual({ count: 4 });
+    expect(
+      tools.state.getState().find((entry) => entry.package.id === a.id)
+        ?.settings,
+    ).toEqual({ count: 4 });
     expect(tools.state.getState()[0]?.package.version).toBe("1.1.0");
     await tools.remove(b.id);
-    expect(tools.state.getState().map((entry) => entry.package.id)).toEqual(["a"]);
+    expect(tools.state.getState().map((entry) => entry.package.id)).toEqual([
+      "a",
+    ]);
   } finally {
     await runtime.shutdown();
   }
@@ -106,7 +158,9 @@ it("records the schema generation at install so future rule changes can read bac
   const runtime = createTestDesktopRuntime(
     { attachPreloading: () => () => {}, close: () => Promise.resolve() },
     undefined,
-    (value) => { context = value; },
+    (value) => {
+      context = value;
+    },
   );
   try {
     await runtime.ready;
@@ -121,7 +175,10 @@ it("records the schema generation at install so future rule changes can read bac
     expect(entry?.installedSchemaVersion).toBe(1);
     expect(entry?.installedContractVersion).toBe(2);
     // 覆盖安装新版本：schema 代际跟新包走，契约代际仍是安装时刻的宿主。
-    await tools.install({ ...makeTool("pinned"), version: "1.1.0" }, { replace: true });
+    await tools.install(
+      { ...makeTool("pinned"), version: "1.1.0" },
+      { replace: true },
+    );
     expect(tools.state.getState()[0]?.installedSchemaVersion).toBe(1);
   } finally {
     await runtime.shutdown();
@@ -133,7 +190,9 @@ it("keeps the previous version on disk so a bad upgrade can be undone", async ()
   const runtime = createTestDesktopRuntime(
     { attachPreloading: () => () => {}, close: () => Promise.resolve() },
     undefined,
-    (value) => { context = value; },
+    (value) => {
+      context = value;
+    },
   );
   try {
     await runtime.ready;
@@ -143,69 +202,106 @@ it("keeps the previous version on disk so a bad upgrade can be undone", async ()
     await tools.install(makeTool("r"));
     // 第一次安装没有"上一版"，回退必须明确说没有，而不是静默装回同一个东西。
     expect(await tools.rollback("r")).toBeUndefined();
-    await tools.install({ ...makeTool("r"), version: "1.1.0", html: "<p>新版</p>" }, { replace: true });
+    await tools.install(
+      { ...makeTool("r"), version: "1.1.0", html: "<p>新版</p>" },
+      { replace: true },
+    );
     const back = await tools.rollback("r");
     expect(back).toMatchObject({ version: "1.0.0", previousVersion: "1.1.0" });
-    expect(tools.state.getState()[0]?.package.html).toBe("<button>Run</button>");
+    expect(tools.state.getState()[0]?.package.html).toBe(
+      "<button>Run</button>",
+    );
     // 退回去之后，被换下来的那一版成了新的"上一版"——点错了还能换回来。
     const forward = await tools.rollback("r");
-    expect(forward).toMatchObject({ version: "1.1.0", previousVersion: "1.0.0" });
+    expect(forward).toMatchObject({
+      version: "1.1.0",
+      previousVersion: "1.0.0",
+    });
   } finally {
     await runtime.shutdown();
   }
 });
 
-it.each(["queue", "read"])("does not roll back another account when login changes during backup %s", async (phase) => {
-  let context: Context | undefined;
-  const runtime = createTestDesktopRuntime(
-    { attachPreloading: () => () => {}, close: () => Promise.resolve() },
-    undefined,
-    (value) => { context = value; },
-  );
-  try {
-    await runtime.ready;
-    if (!context) throw new Error("Missing desktop context");
-    const { account, tools } = context;
-    const first = { name: "First", employeeId: `rollback-switch-first-${phase}` };
-    const second = { name: "Second", employeeId: `rollback-switch-second-${phase}` };
-    account.loginAsDev(first);
-    await tools.install(makeTool("shared-id"));
-    await tools.install({ ...makeTool("shared-id"), version: "1.1.0" }, { replace: true });
-    account.loginAsDev(second);
-    await tools.install({ ...makeTool("shared-id"), version: "2.0.0" });
-    await tools.install({ ...makeTool("shared-id"), version: "2.1.0" }, { replace: true });
-    account.loginAsDev(first);
-    let started = () => {};
-    let finish = () => {};
-    const reading = new Promise<void>((resolve) => { started = resolve; });
-    const release = new Promise<void>((resolve) => { finish = resolve; });
-    const originalRead = backupRuntime.readToolBackup;
-    if (phase === "read") vi.spyOn(backupRuntime, "readToolBackup").mockImplementationOnce(async (...args) => {
-      const value = await originalRead(...args);
-      started();
-      await release;
-      return value;
-    });
-    const pending = tools.rollback("shared-id");
-    if (phase === "read") await reading;
-    account.loginAsDev(second);
-    finish();
-    await expect(pending).rejects.toThrow("账号");
-    expect(tools.state.getState()[0]?.package.version).toBe("2.1.0");
-    account.loginAsDev(first);
-    expect(tools.state.getState()[0]?.package.version).toBe("1.1.0");
-  } finally {
-    vi.restoreAllMocks();
-    await runtime.shutdown();
-  }
-});
+it.each(["queue", "read"])(
+  "does not roll back another account when login changes during backup %s",
+  async (phase) => {
+    let context: Context | undefined;
+    const runtime = createTestDesktopRuntime(
+      { attachPreloading: () => () => {}, close: () => Promise.resolve() },
+      undefined,
+      (value) => {
+        context = value;
+      },
+    );
+    try {
+      await runtime.ready;
+      if (!context) throw new Error("Missing desktop context");
+      const { account, tools } = context;
+      const first = {
+        name: "First",
+        employeeId: `rollback-switch-first-${phase}`,
+      };
+      const second = {
+        name: "Second",
+        employeeId: `rollback-switch-second-${phase}`,
+      };
+      account.loginAsDev(first);
+      await tools.install(makeTool("shared-id"));
+      await tools.install(
+        { ...makeTool("shared-id"), version: "1.1.0" },
+        { replace: true },
+      );
+      account.loginAsDev(second);
+      await tools.install({ ...makeTool("shared-id"), version: "2.0.0" });
+      await tools.install(
+        { ...makeTool("shared-id"), version: "2.1.0" },
+        { replace: true },
+      );
+      account.loginAsDev(first);
+      let started = () => {};
+      let finish = () => {};
+      const reading = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const release = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const originalRead = backupRuntime.readToolBackup;
+      if (phase === "read")
+        vi.spyOn(backupRuntime, "readToolBackup").mockImplementationOnce(
+          async (...args) => {
+            const value = await originalRead(...args);
+            started();
+            await release;
+            return value;
+          },
+        );
+      const pending = tools.rollback("shared-id");
+      if (phase === "read") await reading;
+      account.loginAsDev(second);
+      finish();
+      await expect(pending).rejects.toThrow("账号");
+      expect(tools.state.getState()[0]?.package.version).toBe("2.1.0");
+      account.loginAsDev(first);
+      expect(tools.state.getState()[0]?.package.version).toBe("1.1.0");
+    } finally {
+      vi.restoreAllMocks();
+      await runtime.shutdown();
+    }
+  },
+);
 
 it("marks entries whose directory disappeared as broken without dropping them", () => {
   // dev 期的真实事故：安装目录在仓库里，一次 git clean 就没了，但配置里
   // 的安装记录还在——用户看到列表正常、点「打开」报一句只有路径的错误。
   // 现在列表阶段就把它标成 broken 卡片（2026-11-22 用户反馈）。
   const raw = [
-    { package: makeTool("gone"), dir: "E:/tools/gone", installedAt: 1, lastOpened: 2 },
+    {
+      package: makeTool("gone"),
+      dir: "E:/tools/gone",
+      installedAt: 1,
+      lastOpened: 2,
+    },
     { package: makeTool("here"), dir: "E:/tools/here" },
     { package: makeTool("nodir") },
   ];
@@ -218,12 +314,18 @@ it("marks entries whose directory disappeared as broken without dropping them", 
   expect(gone?.broken?.hint).toContain("重新安装");
   expect(gone?.dir).toBe("E:/tools/gone");
   // 目录没丢的、没记目录的，照常健康。
-  expect(tools.find((entry) => entry.package.id === "here")?.broken).toBeUndefined();
-  expect(tools.find((entry) => entry.package.id === "nodir")?.broken).toBeUndefined();
+  expect(
+    tools.find((entry) => entry.package.id === "here")?.broken,
+  ).toBeUndefined();
+  expect(
+    tools.find((entry) => entry.package.id === "nodir")?.broken,
+  ).toBeUndefined();
   // 不传探测结果（默认空集）时一切照旧：老调用方行为不变。
   const untouched = readTools(raw);
   expect(untouched.broken).toBe(0);
-  expect(untouched.tools.every((entry) => entry.broken === undefined)).toBe(true);
+  expect(untouched.tools.every((entry) => entry.broken === undefined)).toBe(
+    true,
+  );
 });
 
 /**
@@ -235,14 +337,20 @@ it("marks entries whose directory disappeared as broken without dropping them", 
 it("keeps the runtime copy separate from the authoring source dir", async () => {
   await withContext(async ({ tools, host }) => {
     await seedRunDir(host, "D:/tools/v1", "split", "1.0.0", "<p>v1</p>");
-    await tools.install(makeTool("split"), { runDir: "D:/tools/v1", sourceDir: "D:/projects/split" });
+    await tools.install(makeTool("split"), {
+      runDir: "D:/tools/v1",
+      sourceDir: "D:/projects/split",
+    });
     const entry = tools.state.getState()[0];
     expect(entry?.dir).toBe("D:/tools/v1");
     expect(entry?.sourceDir).toBe("D:/projects/split");
 
     // 从 ZIP 更新：来源显式清掉，免得管理页指着一个已经不对应这一版的目录。
     await seedRunDir(host, "D:/tools/v2", "split", "2.0.0", "<p>v2</p>");
-    await tools.install({ ...makeTool("split"), version: "2.0.0" }, { replace: true, runDir: "D:/tools/v2", sourceDir: null });
+    await tools.install(
+      { ...makeTool("split"), version: "2.0.0" },
+      { replace: true, runDir: "D:/tools/v2", sourceDir: null },
+    );
     const updated = tools.state.getState()[0];
     expect(updated?.dir).toBe("D:/tools/v2");
     expect(updated?.sourceDir).toBeUndefined();
@@ -263,13 +371,18 @@ it("rollback switches the runtime copy, not just the manifest", async () => {
     await seedRunDir(host, "D:/tools/v1", "turn", "1.0.0", "<p>v1</p>");
     await seedRunDir(host, "D:/tools/v2", "turn", "2.0.0", "<p>v2</p>");
     await tools.install(makeTool("turn"), { runDir: "D:/tools/v1" });
-    await tools.install({ ...makeTool("turn"), version: "2.0.0" }, { replace: true, runDir: "D:/tools/v2" });
+    await tools.install(
+      { ...makeTool("turn"), version: "2.0.0" },
+      { replace: true, runDir: "D:/tools/v2" },
+    );
 
     expect(await tools.rollback("turn")).toMatchObject({ version: "1.0.0" });
     const back = tools.state.getState()[0];
     expect(back?.dir).toBe("D:/tools/v1");
     expect(back?.previousDir).toBe("D:/tools/v2");
-    expect(await host.archives.readTextFile("D:/tools/v1/index.html")).toContain("v1");
+    expect(
+      await host.archives.readTextFile("D:/tools/v1/index.html"),
+    ).toContain("v1");
 
     // 退回去之后还能再退回来：被换下来的那一版成了新的"上一版"。
     expect(await tools.rollback("turn")).toMatchObject({ version: "2.0.0" });
@@ -284,19 +397,38 @@ it("rollback switches the runtime copy, not just the manifest", async () => {
  */
 it("refuses a rollback whose previous version is missing its run files", async () => {
   await withContext(async ({ tools, host }) => {
-    const bundled = parseToolPackage(JSON.stringify({
-      schemaVersion: 1, id: "bundled", name: "打包页", version: "1.0.0",
-      html: '<script src="./app.js"></script>', build: { out: "app.js" },
-    }));
+    const bundled = parseToolPackage(
+      JSON.stringify({
+        schemaVersion: 1,
+        id: "bundled",
+        name: "打包页",
+        version: "1.0.0",
+        html: '<script src="./app.js"></script>',
+        build: { out: "app.js" },
+      }),
+    );
     // 两版都真的落过盘，所以记录里带着"上一版"；但 v1 目录的清单声明了
     // `build.out: app.js`，那份产物当时不在了——退回去等于给用户一个点不动的空壳。
-    await host.skills.writeTextFile("E:/tools/v1/manifest.json", JSON.stringify({
-      schemaVersion: 1, id: "bundled", name: "打包页", version: "1.0.0", build: { out: "app.js" },
-    }));
-    await host.skills.writeTextFile("E:/tools/v1/index.html", '<script src="./app.js"></script>');
+    await host.skills.writeTextFile(
+      "E:/tools/v1/manifest.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        id: "bundled",
+        name: "打包页",
+        version: "1.0.0",
+        build: { out: "app.js" },
+      }),
+    );
+    await host.skills.writeTextFile(
+      "E:/tools/v1/index.html",
+      '<script src="./app.js"></script>',
+    );
     await seedRunDir(host, "E:/tools/v2", "bundled", "2.0.0", "<p>v2</p>");
     await tools.install(bundled, { runDir: "E:/tools/v1" });
-    await tools.install({ ...bundled, version: "2.0.0", html: "<p>v2</p>" }, { replace: true, runDir: "E:/tools/v2" });
+    await tools.install(
+      { ...bundled, version: "2.0.0", html: "<p>v2</p>" },
+      { replace: true, runDir: "E:/tools/v2" },
+    );
     expect(tools.state.getState()[0]?.previousVersion).toBe("1.0.0");
     await expect(tools.rollback("bundled")).rejects.toThrow("app.js");
     // 当前版本一个字节都没动。
@@ -316,17 +448,30 @@ it("ignores a retained copy that no longer belongs to the tool", async () => {
     await seedRunDir(host, "D:/tools/v1", "gone", "1.0.0", "<p>v1</p>");
     await seedRunDir(host, "D:/tools/v2", "gone", "2.0.0", "<p>v2</p>");
     await tools.install(makeTool("gone"), { runDir: "D:/tools/v1" });
-    await tools.install({ ...makeTool("gone"), version: "2.0.0" }, { replace: true, runDir: "D:/tools/v2" });
+    await tools.install(
+      { ...makeTool("gone"), version: "2.0.0" },
+      { replace: true, runDir: "D:/tools/v2" },
+    );
     // 模拟用户清理磁盘：上一版目录没了，只剩清单备份。
-    await host.skills.writeTextFile("D:/tools/v1/manifest.json", JSON.stringify({
-      schemaVersion: 1, id: "other", name: "别的工具", version: "1.0.0",
-    }));
+    await host.skills.writeTextFile(
+      "D:/tools/v1/manifest.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        id: "other",
+        name: "别的工具",
+        version: "1.0.0",
+      }),
+    );
     const back = await tools.rollback("gone");
     // 清单 id 对不上 → 当成不可用的副本，退回按清单重新物化一份能跑的。
     expect(back).toMatchObject({ version: "1.0.0" });
     expect(tools.state.getState()[0]?.dir).not.toBe("D:/tools/v1");
     // 重建出来的那份来自安装记录里的清单，不是 D:/tools/v1 里那份别人的页面。
-    expect(await host.archives.readTextFile(`${tools.state.getState()[0]?.dir}/index.html`)).toContain("Run");
+    expect(
+      await host.archives.readTextFile(
+        `${tools.state.getState()[0]?.dir}/index.html`,
+      ),
+    ).toContain("Run");
   });
 });
 
@@ -341,11 +486,17 @@ it("keeps the authoring source across updates and rollbacks, clears it only on r
   await withContext(async ({ tools, host }) => {
     await seedRunDir(host, "E:/run/v1", "notes", "1.0.0", "<p>v1</p>");
     await seedRunDir(host, "E:/run/v2", "notes", "2.0.0", "<p>v2</p>");
-    await tools.install(makeTool("notes"), { runDir: "E:/run/v1", sourceDir: "E:/dev/notes" });
+    await tools.install(makeTool("notes"), {
+      runDir: "E:/run/v1",
+      sourceDir: "E:/dev/notes",
+    });
     expect(tools.state.getState()[0]?.sourceDir).toBe("E:/dev/notes");
 
     // 从工坊再装一版（只给运行副本，没提来源）：来源沿用，不该被空值覆盖。
-    await tools.install({ ...makeTool("notes"), version: "2.0.0" }, { replace: true, runDir: "E:/run/v2" });
+    await tools.install(
+      { ...makeTool("notes"), version: "2.0.0" },
+      { replace: true, runDir: "E:/run/v2" },
+    );
     expect(tools.state.getState()[0]?.sourceDir).toBe("E:/dev/notes");
 
     // 退版同理：退回的是代码，来源还是那个目录。
@@ -354,7 +505,10 @@ it("keeps the authoring source across updates and rollbacks, clears it only on r
     expect(tools.state.getState()[0]?.sourceDir).toBe("E:/dev/notes");
 
     // 显式 null（ZIP 导入没有开发来源）才真的清掉。
-    await tools.install({ ...makeTool("notes"), version: "3.0.0" }, { replace: true, runDir: "E:/run/v1", sourceDir: null });
+    await tools.install(
+      { ...makeTool("notes"), version: "3.0.0" },
+      { replace: true, runDir: "E:/run/v1", sourceDir: null },
+    );
     expect(tools.state.getState()[0]?.sourceDir).toBeUndefined();
   });
 });

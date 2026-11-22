@@ -27,7 +27,10 @@ export function toneOf(id: string): ToolTone {
  * 之前所有个人工具共用同一个 `< >` 图标，8 个工具排开只靠 4 种颜色区分，
  * 截图里已经出现两两同色——用户没法用"看图标"代替"读文字"。
  */
-export function toolGlyph(tool: { readonly name: string; readonly icon?: string }): string {
+export function toolGlyph(tool: {
+  readonly name: string;
+  readonly icon?: string;
+}): string {
   const declared = tool.icon?.trim();
   if (declared) return declared;
   return tool.name.trim().slice(0, 1).toUpperCase() || "?";

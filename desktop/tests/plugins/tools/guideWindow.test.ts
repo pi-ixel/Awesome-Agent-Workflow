@@ -15,10 +15,22 @@ import { join } from "node:path";
  * 几件必须同时成立的事：建窗命令必须是 async、URL 不带 query、主题走
  * initialization_script、页面优先读注入的那个变量、目录与正文来自同一次解析。
  */
-const rust = readFileSync(join(process.cwd(), "src-tauri", "src", "tools", "guide.rs"), "utf8");
-const page = readFileSync(join(process.cwd(), "public", "guide", "guide.js"), "utf8");
-const html = readFileSync(join(process.cwd(), "public", "guide", "index.html"), "utf8");
-const css = readFileSync(join(process.cwd(), "public", "guide", "guide.css"), "utf8");
+const rust = readFileSync(
+  join(process.cwd(), "src-tauri", "src", "tools", "guide.rs"),
+  "utf8",
+);
+const page = readFileSync(
+  join(process.cwd(), "public", "guide", "guide.js"),
+  "utf8",
+);
+const html = readFileSync(
+  join(process.cwd(), "public", "guide", "index.html"),
+  "utf8",
+);
+const css = readFileSync(
+  join(process.cwd(), "public", "guide", "guide.css"),
+  "utf8",
+);
 
 /** 取出某个函数（从签名到下一个 `#[tauri::command]` 或文件尾）的正文。 */
 function rustBody(signature: string): string {
@@ -91,7 +103,7 @@ it("左侧目录与正文来自同一次解析", () => {
   expect(page).toContain("buildToc(parsed.toc)");
   // 目录项要能跳转，且当前章节要跟着滚动点亮
   expect(page).toContain("offsetInDoc");
-  expect(page).toContain("classList.toggle(\"active\"");
+  expect(page).toMatch(/classList\.toggle\(\s*"active",/);
 });
 
 it("正文可以改，也可以恢复默认", () => {
@@ -121,7 +133,7 @@ it("恢复默认是删副本，不是把默认正文抄成快照", () => {
   // 默认正文必须编进二进制：资源表坏了也要能恢复
   expect(rust).toContain("include_str!");
   // 三个读写命令只认开发指导窗口
-  expect(rust).toContain('window.label() != LABEL');
+  expect(rust).toContain("window.label() != LABEL");
 });
 
 it("主路加载也有超时，不靠兜底 fetch 的计时器", () => {
@@ -166,9 +178,10 @@ it("编辑器的键盘习惯：Esc 退出、Ctrl+S 保存，且避开输入法",
 
 it("快捷键挂在 document 的捕获阶段，焦点不在输入框时也生效", () => {
   // 点过确认条「取消」之后焦点在按钮上，绑在 textarea 的 Ctrl+S 会静默失效。
-  expect(page).toContain('document.addEventListener("keydown"');
-  expect(page).toContain("}, true);");
-  expect(page).not.toContain('editorText.addEventListener("keydown"');
+  expect(page).toMatch(
+    /document\.addEventListener\(\s*"keydown",[\s\S]*?},\s*true,?\s*\);/,
+  );
+  expect(page).not.toMatch(/editorText\.addEventListener\(\s*"keydown",/);
 });
 
 it("副本读不出来要说出原因，不能静默退回默认正文", () => {

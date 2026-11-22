@@ -32,12 +32,25 @@ const example = {
   window.aawActions = { count: async (input) => count(String(input?.text ?? "")) };
 </script>`,
   actions: [
-    { id: "count", description: "统计一段文本的字符数", inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } },
+    {
+      id: "count",
+      description: "统计一段文本的字符数",
+      inputSchema: {
+        type: "object",
+        properties: { text: { type: "string" } },
+        required: ["text"],
+      },
+    },
   ],
 };
 
 export function developerPrompt(): string {
-  const rules = ruleIds.map((id) => `- ${id}（${ruleGuidance[id].level === "block" ? "必须遵守" : "建议"}）${ruleGuidance[id].rule}：${ruleGuidance[id].fix}`).join("\n");
+  const rules = ruleIds
+    .map(
+      (id) =>
+        `- ${id}（${ruleGuidance[id].level === "block" ? "必须遵守" : "建议"}）${ruleGuidance[id].rule}：${ruleGuidance[id].fix}`,
+    )
+    .join("\n");
   return `请为我写一个 AAW 个人工具。只输出一个 JSON 对象（可以放在 \`\`\`json 代码块里），不要输出 Markdown 说明。
 
 ## 清单字段
@@ -101,12 +114,17 @@ ${JSON.stringify(example, null, 2)}
 }
 
 /** 从 AI 的整段回复里抠出第一个 JSON 对象；返回格式化后的 JSON 文本。 */
-export function extractToolPackage(text: string): { json: string } | { error: string } {
+export function extractToolPackage(
+  text: string,
+): { json: string } | { error: string } {
   const source = text.replace(/^\uFEFF/, "").trim();
   if (!source) return { error: "输入为空：把 AI 的回复整段粘进来再试。" };
   const fenced = /```(?:json|JSON)?\s*\n([\s\S]*?)```/.exec(source);
   const candidate = fenced?.[1]?.trim() ?? sliceObject(source);
-  if (!candidate) return { error: "没找到 JSON 对象：确认 AI 的回复里包含 { … } 形式的工具包。" };
+  if (!candidate)
+    return {
+      error: "没找到 JSON 对象：确认 AI 的回复里包含 { … } 形式的工具包。",
+    };
   try {
     const value: unknown = JSON.parse(candidate);
     if (!value || typeof value !== "object" || Array.isArray(value))
@@ -127,6 +145,16 @@ function sliceObject(text: string): string {
 
 /** 供测试与文档使用：清单里真正会被安装的字段（其余字段在解析时被丢弃）。 */
 export const toolPackageFields: readonly (keyof ToolPackage)[] = [
-  "schemaVersion", "id", "name", "version", "icon", "html", "actions", "settingsSchema",
-  "permissions", "author", "source", "sourceFiles",
+  "schemaVersion",
+  "id",
+  "name",
+  "version",
+  "icon",
+  "html",
+  "actions",
+  "settingsSchema",
+  "permissions",
+  "author",
+  "source",
+  "sourceFiles",
 ];

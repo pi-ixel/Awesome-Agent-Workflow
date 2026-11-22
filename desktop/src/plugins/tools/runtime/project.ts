@@ -10,15 +10,28 @@
  * （configuration 的 `user:<id>` 键）保持一致——同一件事不会一半按账号、
  * 一半按机器，换账号时"列表"和"源码"永远对得上。
  */
-import { joinPath, parentPath, pathKey, pathName } from "../../../shared/panelPaths.ts";
+import {
+  joinPath,
+  parentPath,
+  pathKey,
+  pathName,
+} from "../../../shared/panelPaths.ts";
 import { strToU8 } from "fflate";
 import type { ToolPackage, ToolViolation } from "../types.ts";
-import { toolIdPattern, validateToolPackage, validateToolPackageText } from "./package.ts";
+import {
+  toolIdPattern,
+  validateToolPackage,
+  validateToolPackageText,
+} from "./package.ts";
 // 老调用方从 project.ts 取这个函数；真源在 package.ts（构建时会 bundle 给 mjs 侧）。
 export { toolOwnerSegment } from "./package.ts";
 import { safeSourcePath } from "./sourceFiles.ts";
 import { toolLimits } from "./limits.ts";
-import { runToolRules, splitViolations, type ToolRuleOptions } from "./rules.ts";
+import {
+  runToolRules,
+  splitViolations,
+  type ToolRuleOptions,
+} from "./rules.ts";
 import { toolGuide, toolGuideFromDoc, type ToolGuideContext } from "./guide.ts";
 
 /** 宿主回收孤儿版本副本的报告（字段与 Rust 侧 `ToolPruneReport` 一一对应）。 */
@@ -60,7 +73,10 @@ export interface ToolProjectIO {
    * `owner` 用来确认"发起时和宿主当前账号是同一个人"；宿主对不上会直接拒绝，
    * 免得换账号那一瞬间以新身份去扫别人的目录。
    */
-  pruneVersions?(toolId: string, owner: string | undefined): Promise<ToolPruneReport>;
+  pruneVersions?(
+    toolId: string,
+    owner: string | undefined,
+  ): Promise<ToolPruneReport>;
   /** 写二进制文件（base64）；宿主不支持时安装会明确报错，而不是静默丢文件。 */
   writeBinaryFile?(path: string, base64: string): Promise<void>;
   /** 读二进制文件（base64）；导出带依赖的工具时用。 */
@@ -101,37 +117,46 @@ export async function listToolProjectSummaries(
   options: { readonly parent?: string; readonly owner?: string } = {},
 ): Promise<readonly ToolProjectSummary[]> {
   const dirs = await listToolProjects(io, options);
-  const text = (value: unknown) => typeof value === "string" && value.trim() ? value : undefined;
+  const text = (value: unknown) =>
+    typeof value === "string" && value.trim() ? value : undefined;
   // 并发读：每个项目要读一次清单、探一次 index.html，串行时项目一多就能感觉到
   // 面板"卡一下才出来"。这些目录之间互不依赖，直接并行。
-  return Promise.all(dirs.map(async (dir) => {
-    const [hasHtml, manifestResult] = await Promise.all([
-      io.pathExists(joinPath(dir, toolProjectFileNames.html)),
-      (async () => {
-        try {
-          const raw = await io.readTextFile(joinPath(dir, toolProjectFileNames.manifest));
-          const parsed = JSON.parse(raw) as unknown;
-          if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
-            return { manifest: parsed as Record<string, unknown> };
-          return { broken: "manifest.json 不是对象" };
-        } catch (error) {
-          return { broken: error instanceof Error ? error.message : String(error) };
-        }
-      })(),
-    ]);
-    const manifest = "manifest" in manifestResult ? manifestResult.manifest : undefined;
-    const permissions = manifest?.permissions as { network?: unknown } | undefined;
-    return {
-      dir,
-      dirName: pathName(dir),
-      id: text(manifest?.id),
-      name: text(manifest?.name),
-      version: text(manifest?.version),
-      hasHtml,
-      network: permissions?.network === true,
-      broken: "broken" in manifestResult ? manifestResult.broken : undefined,
-    };
-  }));
+  return Promise.all(
+    dirs.map(async (dir) => {
+      const [hasHtml, manifestResult] = await Promise.all([
+        io.pathExists(joinPath(dir, toolProjectFileNames.html)),
+        (async () => {
+          try {
+            const raw = await io.readTextFile(
+              joinPath(dir, toolProjectFileNames.manifest),
+            );
+            const parsed = JSON.parse(raw) as unknown;
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+              return { manifest: parsed as Record<string, unknown> };
+            return { broken: "manifest.json 不是对象" };
+          } catch (error) {
+            return {
+              broken: error instanceof Error ? error.message : String(error),
+            };
+          }
+        })(),
+      ]);
+      const manifest =
+        "manifest" in manifestResult ? manifestResult.manifest : undefined;
+      const permissions = manifest?.permissions as
+        { network?: unknown } | undefined;
+      return {
+        dir,
+        dirName: pathName(dir),
+        id: text(manifest?.id),
+        name: text(manifest?.name),
+        version: text(manifest?.version),
+        hasHtml,
+        network: permissions?.network === true,
+        broken: "broken" in manifestResult ? manifestResult.broken : undefined,
+      };
+    }),
+  );
 }
 
 export const toolProjectFileNames = {
@@ -158,7 +183,11 @@ export const toolProvenanceFields = ["author", "source"] as const;
  * `tool-m3k9x` 这种连作者自己都认不出来的随机串。名字另有 `manifest.name`。
  */
 export function toolProjectIdFromBrief(brief: string): string {
-  const ascii = brief.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
+  const ascii = brief
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32);
   return ascii || "tool";
 }
 
@@ -167,7 +196,10 @@ export function toolProjectIdFromBrief(brief: string): string {
  * 下不带账号层（账号私有家），默认位置带账号层（多账号共享的家）。前端
  * 不再自己拼账号段——两条路同一套解析，迁移后立即生效。
  */
-export async function defaultToolProjectsDir(io: ToolProjectIO, owner: string | undefined): Promise<string> {
+export async function defaultToolProjectsDir(
+  io: ToolProjectIO,
+  owner: string | undefined,
+): Promise<string> {
   void owner;
   return io.userDataDir("tools", "projects");
 }
@@ -184,7 +216,10 @@ export async function defaultToolProjectsDir(io: ToolProjectIO, owner: string | 
  * （留垃圾）或者冒险删用户源码。顺带还修掉一个真会让用户困惑的表现——以前
  * 导入一个 ZIP，那个工具会以"工具项目"的身份出现在用户从没创建过的项目列表里。
  */
-export async function defaultInstalledToolsDir(io: ToolProjectIO, owner: string | undefined): Promise<string> {
+export async function defaultInstalledToolsDir(
+  io: ToolProjectIO,
+  owner: string | undefined,
+): Promise<string> {
   void owner;
   return io.userDataDir("tools", "installed");
 }
@@ -196,7 +231,10 @@ export async function defaultInstalledToolsDir(io: ToolProjectIO, owner: string 
  * 读到的应该跟着它走。正文里定位不到项目段落（结构被改坏）时退回编译
  * 模板——宁可回到默认，也不能把一份残稿直接塞给 AI。
  */
-export async function projectGuide(io: ToolProjectIO, context: ToolGuideContext): Promise<string> {
+export async function projectGuide(
+  io: ToolProjectIO,
+  context: ToolGuideContext,
+): Promise<string> {
   if (!io.readGuideDoc) return toolGuide(context);
   try {
     const doc = await io.readGuideDoc();
@@ -214,20 +252,33 @@ export async function projectGuide(io: ToolProjectIO, context: ToolGuideContext)
  * manifest 读不出来时跳过：项目本身已经算坏了，`AGENTS.md` 留给修复流程，
  * 不能在这里用目录名冒充 id 写一份错规范进去。
  */
-export async function syncToolProjectGuide(io: ToolProjectIO, dir: string): Promise<boolean> {
+export async function syncToolProjectGuide(
+  io: ToolProjectIO,
+  dir: string,
+): Promise<boolean> {
   let context: ToolGuideContext;
   try {
-    const parsed = JSON.parse(await io.readTextFile(joinPath(dir, toolProjectFileNames.manifest))) as Record<string, unknown>;
+    const parsed = JSON.parse(
+      await io.readTextFile(joinPath(dir, toolProjectFileNames.manifest)),
+    ) as Record<string, unknown>;
     context = {
-      id: typeof parsed.id === "string" && parsed.id ? parsed.id : pathName(dir),
-      name: typeof parsed.name === "string" && parsed.name ? parsed.name : pathName(dir),
+      id:
+        typeof parsed.id === "string" && parsed.id ? parsed.id : pathName(dir),
+      name:
+        typeof parsed.name === "string" && parsed.name
+          ? parsed.name
+          : pathName(dir),
     };
   } catch {
     return false;
   }
   const desired = await projectGuide(io, context);
   let current: string | undefined;
-  try { current = await io.readTextFile(joinPath(dir, toolProjectFileNames.guide)); } catch { /* 没有 = 要写 */ }
+  try {
+    current = await io.readTextFile(joinPath(dir, toolProjectFileNames.guide));
+  } catch {
+    /* 没有 = 要写 */
+  }
   if (current === desired) return false;
   await io.writeTextFile(joinPath(dir, toolProjectFileNames.guide), desired);
   return true;
@@ -237,10 +288,17 @@ export async function syncToolProjectGuide(io: ToolProjectIO, dir: string): Prom
  * 批量刷新。一个项目失败不影响其余——列表刷新带着它们跑，不能让一张
  * 坏卡拖垮全部；失败的下次刷新还会再试。
  */
-export async function syncToolProjectGuides(io: ToolProjectIO, dirs: readonly string[]): Promise<number> {
+export async function syncToolProjectGuides(
+  io: ToolProjectIO,
+  dirs: readonly string[],
+): Promise<number> {
   let updated = 0;
   for (const dir of dirs) {
-    try { if (await syncToolProjectGuide(io, dir)) updated += 1; } catch { /* 跳过，下次刷新再试 */ }
+    try {
+      if (await syncToolProjectGuide(io, dir)) updated += 1;
+    } catch {
+      /* 跳过，下次刷新再试 */
+    }
   }
   return updated;
 }
@@ -249,8 +307,9 @@ export async function listToolProjects(
   io: ToolProjectIO,
   options: { readonly parent?: string; readonly owner?: string } = {},
 ): Promise<readonly string[]> {
-  const root = options.parent ?? await defaultToolProjectsDir(io, options.owner);
-  if (!await io.pathExists(root)) return [];
+  const root =
+    options.parent ?? (await defaultToolProjectsDir(io, options.owner));
+  if (!(await io.pathExists(root))) return [];
   const names = await io.listDirNames(root);
   return names.map((name) => joinPath(root, name));
 }
@@ -262,14 +321,18 @@ export async function listToolProjects(
  * index.html 清成空（等于吃掉用户已经做好的东西）。宁可多一个目录，也不覆盖。
  */
 async function freeProjectDir(
-  io: ToolProjectIO, parent: string, id: string,
+  io: ToolProjectIO,
+  parent: string,
+  id: string,
 ): Promise<{ readonly id: string; readonly dir: string }> {
   for (let index = 1; index <= 99; index += 1) {
     const candidate = index === 1 ? id : `${id}-${index}`;
     const dir = joinPath(parent, candidate);
-    if (!await io.pathExists(dir)) return { id: candidate, dir };
+    if (!(await io.pathExists(dir))) return { id: candidate, dir };
   }
-  throw new Error("同名工具项目已经有 99 个了，换个名字或者清理一下 projects 目录。");
+  throw new Error(
+    "同名工具项目已经有 99 个了，换个名字或者清理一下 projects 目录。",
+  );
 }
 
 export interface CreatedToolProject {
@@ -294,7 +357,8 @@ export async function createToolProject(
     readonly owner?: string;
   },
 ): Promise<CreatedToolProject> {
-  const parent = input.parent ?? await defaultToolProjectsDir(io, input.owner);
+  const parent =
+    input.parent ?? (await defaultToolProjectsDir(io, input.owner));
   // 显式给了 dir 就用它（导入/测试）；否则在同名目录已被占用时自动退到 -2。
   const target = input.dir
     ? { id: input.id, dir: input.dir }
@@ -306,14 +370,24 @@ export async function createToolProject(
     version: "0.1.0",
     html: "",
   };
-  await io.writeTextFile(joinPath(target.dir, toolProjectFileNames.guide), await projectGuide(io, { id: target.id, name: input.name }));
+  await io.writeTextFile(
+    joinPath(target.dir, toolProjectFileNames.guide),
+    await projectGuide(io, { id: target.id, name: input.name }),
+  );
   await io.writeTextFile(joinPath(target.dir, toolProjectFileNames.html), "");
-  await io.writeTextFile(joinPath(target.dir, toolProjectFileNames.manifest), JSON.stringify(manifest, null, 2));
+  await io.writeTextFile(
+    joinPath(target.dir, toolProjectFileNames.manifest),
+    JSON.stringify(manifest, null, 2),
+  );
   return { dir: target.dir, id: target.id, name: input.name };
 }
 
 export type ToolProjectRead =
-  | { readonly ok: true; readonly tool: ToolPackage; readonly violations: readonly ToolViolation[] }
+  | {
+      readonly ok: true;
+      readonly tool: ToolPackage;
+      readonly violations: readonly ToolViolation[];
+    }
   | { readonly ok: false; readonly violations: readonly ToolViolation[] };
 
 /**
@@ -322,28 +396,57 @@ export type ToolProjectRead =
  * AI 写东西时通常把界面写在 index.html、清单里不放 html（字符串里嵌整页 HTML
  * 太容易转义出错）。所以这里以文件为准，只有 manifest 自带 html 时才用它的。
  */
-export async function readToolProject(io: ToolProjectIO, dir: string, options: ToolRuleOptions = {}): Promise<ToolProjectRead> {
+export async function readToolProject(
+  io: ToolProjectIO,
+  dir: string,
+  options: ToolRuleOptions = {},
+): Promise<ToolProjectRead> {
   const manifestPath = joinPath(dir, toolProjectFileNames.manifest);
   let text: string;
   try {
     text = await io.readTextFile(manifestPath);
   } catch {
-    return { ok: false, violations: [{ ruleId: "FIELD", level: "block", where: toolProjectFileNames.manifest, message: "项目里没有 manifest.json。", hint: "在项目根目录新建 manifest.json，至少写 schemaVersion、id、name、version。" }] };
+    return {
+      ok: false,
+      violations: [
+        {
+          ruleId: "FIELD",
+          level: "block",
+          where: toolProjectFileNames.manifest,
+          message: "项目里没有 manifest.json。",
+          hint: "在项目根目录新建 manifest.json，至少写 schemaVersion、id、name、version。",
+        },
+      ],
+    };
   }
   let manifest: unknown;
   try {
     manifest = JSON.parse(text);
   } catch (error) {
-    return { ok: false, violations: [{ ruleId: "FIELD", level: "block", where: toolProjectFileNames.manifest, message: `manifest.json 不是有效 JSON：${error instanceof Error ? error.message : String(error)}`, hint: "检查逗号、引号是否闭合；文件里不要写注释。" }] };
+    return {
+      ok: false,
+      violations: [
+        {
+          ruleId: "FIELD",
+          level: "block",
+          where: toolProjectFileNames.manifest,
+          message: `manifest.json 不是有效 JSON：${error instanceof Error ? error.message : String(error)}`,
+          hint: "检查逗号、引号是否闭合；文件里不要写注释。",
+        },
+      ],
+    };
   }
   const page = joinPath(dir, toolProjectFileNames.html);
   let html: string | undefined;
   try {
     html = await io.readTextFile(page);
-  } catch { /* 没有 index.html 时退回清单里的 html */ }
-  const value = html !== undefined && html.trim()
-    ? { ...(manifest as Record<string, unknown>), html }
-    : manifest;
+  } catch {
+    /* 没有 index.html 时退回清单里的 html */
+  }
+  const value =
+    html !== undefined && html.trim()
+      ? { ...(manifest as Record<string, unknown>), html }
+      : manifest;
   const validated = validateToolPackage(value);
   if (!validated.ok) return { ok: false, violations: validated.violations };
   const problems = runToolRules(validated.tool, {
@@ -354,11 +457,21 @@ export async function readToolProject(io: ToolProjectIO, dir: string, options: T
 }
 
 /** 把一份工具包写回目录（迁移与"编辑后保存"共用）。 */
-export async function writeToolProject(io: ToolProjectIO, dir: string, tool: ToolPackage): Promise<void> {
+export async function writeToolProject(
+  io: ToolProjectIO,
+  dir: string,
+  tool: ToolPackage,
+): Promise<void> {
   const { html, ...manifest } = tool;
-  await io.writeTextFile(joinPath(dir, toolProjectFileNames.guide), await projectGuide(io, { id: tool.id, name: tool.name }));
+  await io.writeTextFile(
+    joinPath(dir, toolProjectFileNames.guide),
+    await projectGuide(io, { id: tool.id, name: tool.name }),
+  );
   await io.writeTextFile(joinPath(dir, toolProjectFileNames.html), html);
-  await io.writeTextFile(joinPath(dir, toolProjectFileNames.manifest), JSON.stringify(manifest, null, 2));
+  await io.writeTextFile(
+    joinPath(dir, toolProjectFileNames.manifest),
+    JSON.stringify(manifest, null, 2),
+  );
 }
 
 export interface ToolProjectCheck {
@@ -414,13 +527,21 @@ export async function renameToolProject(
       { cause: error },
     );
   }
-  const previousId = typeof manifest.id === "string" && manifest.id ? manifest.id : pathName(input.dir);
-  const name = (input.name ?? (typeof manifest.name === "string" ? manifest.name : previousId)).trim();
+  const previousId =
+    typeof manifest.id === "string" && manifest.id
+      ? manifest.id
+      : pathName(input.dir);
+  const name = (
+    input.name ??
+    (typeof manifest.name === "string" ? manifest.name : previousId)
+  ).trim();
   if (!name) throw new Error("名字不能为空。");
   if (name.length > 60) throw new Error("名字不超过 60 字。");
   const nextId = (input.id ?? previousId).trim();
   if (!toolIdPattern.test(nextId))
-    throw new Error("目录名只能用小写字母、数字、点和短横，以字母或数字开头，最长 64 个字符。");
+    throw new Error(
+      "目录名只能用小写字母、数字、点和短横，以字母或数字开头，最长 64 个字符。",
+    );
 
   let dir = input.dir;
   if (nextId !== previousId) {
@@ -428,7 +549,9 @@ export async function renameToolProject(
     if (pathKey(target) === pathKey(input.dir))
       throw new Error("目录名没有变化。");
     if (await io.pathExists(target))
-      throw new Error(`同级已经有 ${nextId} 这个目录了，换个名字，或先处理那个目录。`);
+      throw new Error(
+        `同级已经有 ${nextId} 这个目录了，换个名字，或先处理那个目录。`,
+      );
     await io.movePath(input.dir, target);
     dir = target;
   }
@@ -438,19 +561,31 @@ export async function renameToolProject(
   );
   // AGENTS.md 是平台生成的（里面写着 id 与名字），改名后要重新生成——
   // 并按当前开发指导正文生成：用户改过的规范同样要体现在新目录里。
-  await io.writeTextFile(joinPath(dir, toolProjectFileNames.guide), await projectGuide(io, { id: nextId, name }));
+  await io.writeTextFile(
+    joinPath(dir, toolProjectFileNames.guide),
+    await projectGuide(io, { id: nextId, name }),
+  );
   return { dir, id: nextId, name, moved: dir !== input.dir, previousId };
 }
 
 /** 校验一个项目目录，拆成"必须修 / 建议"。安装按钮只看 `ready`。 */
-export async function checkToolProject(io: ToolProjectIO, dir: string, options: ToolRuleOptions = {}): Promise<ToolProjectCheck> {
+export async function checkToolProject(
+  io: ToolProjectIO,
+  dir: string,
+  options: ToolRuleOptions = {},
+): Promise<ToolProjectCheck> {
   const read = await readToolProject(io, dir, options);
   if (!read.ok) {
     const split = splitViolations(read.violations);
     return { blocking: split.blocking, warnings: split.warnings, ready: false };
   }
   const split = splitViolations(read.violations);
-  return { tool: read.tool, blocking: split.blocking, warnings: split.warnings, ready: split.blocking.length === 0 };
+  return {
+    tool: read.tool,
+    blocking: split.blocking,
+    warnings: split.warnings,
+    ready: split.blocking.length === 0,
+  };
 }
 
 export interface LegacyMigration {
@@ -469,12 +604,15 @@ export async function migrateLegacyTools(
   tools: readonly ToolPackage[],
   options: { readonly parent?: string; readonly owner?: string } = {},
 ): Promise<LegacyMigration> {
-  const root = options.parent ?? await defaultToolProjectsDir(io, options.owner);
+  const root =
+    options.parent ?? (await defaultToolProjectsDir(io, options.owner));
   // 设了自定义根时，默认根里已有的项目不算"没有"：项目列表同时扫两个根，
   // 默认根里已有的工具不该在自定义根再克隆一份——否则同一个 id 两份源码，
   // 改哪份、装哪份全是歧义（2026-11-22 真机：自定义根指到工具整体的家根，
   // 面板每次重挂载都在家根下重生一份脚手架）。
-  const fallbackRoot = options.parent ? await defaultToolProjectsDir(io, options.owner) : null;
+  const fallbackRoot = options.parent
+    ? await defaultToolProjectsDir(io, options.owner)
+    : null;
   const created: string[] = [];
   const skipped: string[] = [];
   for (const tool of tools) {
@@ -483,7 +621,12 @@ export async function migrateLegacyTools(
       skipped.push(dir);
       continue;
     }
-    if (fallbackRoot && await io.pathExists(joinPath(fallbackRoot, tool.id, toolProjectFileNames.manifest))) {
+    if (
+      fallbackRoot &&
+      (await io.pathExists(
+        joinPath(fallbackRoot, tool.id, toolProjectFileNames.manifest),
+      ))
+    ) {
       skipped.push(joinPath(fallbackRoot, tool.id));
       continue;
     }
@@ -497,7 +640,13 @@ export async function migrateLegacyTools(
   return { created, skipped };
 }
 
-/** 从目录里取一份可安装的工具包（给"安装"按钮用）。 */export async function toolFromProject(io: ToolProjectIO, dir: string): Promise<{ ok: true; tool: ToolPackage } | { ok: false; violations: readonly ToolViolation[] }> {
+/** 从目录里取一份可安装的工具包（给"安装"按钮用）。 */ export async function toolFromProject(
+  io: ToolProjectIO,
+  dir: string,
+): Promise<
+  | { ok: true; tool: ToolPackage }
+  | { ok: false; violations: readonly ToolViolation[] }
+> {
   const read = await readToolProject(io, dir);
   if (!read.ok) return { ok: false, violations: read.violations };
   const { blocking } = splitViolations(read.violations);
@@ -514,7 +663,12 @@ export function checkToolText(text: string): ToolProjectCheck {
   }
   const problems = runToolRules(validated.tool);
   const split = splitViolations(problems);
-  return { tool: validated.tool, blocking: split.blocking, warnings: split.warnings, ready: split.blocking.length === 0 };
+  return {
+    tool: validated.tool,
+    blocking: split.blocking,
+    warnings: split.warnings,
+    ready: split.blocking.length === 0,
+  };
 }
 
 /* ---------------------------------------------------------------- 依赖落盘 */
@@ -531,21 +685,37 @@ export function checkToolText(text: string): ToolProjectCheck {
  */
 export async function prepareToolDir(
   io: ToolProjectIO,
-  input: { readonly id: string; readonly parent?: string; readonly owner?: string },
+  input: {
+    readonly id: string;
+    readonly parent?: string;
+    readonly owner?: string;
+  },
 ): Promise<string> {
-  const parent = input.parent ?? await defaultToolProjectsDir(io, input.owner);
+  const parent =
+    input.parent ?? (await defaultToolProjectsDir(io, input.owner));
   const dir = joinPath(parent, input.id);
-  if (!await io.pathExists(dir)) return dir;
+  if (!(await io.pathExists(dir))) return dir;
   let existingId: string | undefined;
   try {
-    const parsed = JSON.parse(await io.readTextFile(joinPath(dir, toolProjectFileNames.manifest))) as unknown;
+    const parsed = JSON.parse(
+      await io.readTextFile(joinPath(dir, toolProjectFileNames.manifest)),
+    ) as unknown;
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
-      existingId = typeof (parsed as { id?: unknown }).id === "string" ? (parsed as { id: string }).id : undefined;
-  } catch { /* 下面按"没有清单"处理 */ }
+      existingId =
+        typeof (parsed as { id?: unknown }).id === "string"
+          ? (parsed as { id: string }).id
+          : undefined;
+  } catch {
+    /* 下面按"没有清单"处理 */
+  }
   if (existingId === undefined)
-    throw new Error(`目标目录已存在且其中没有可读的 manifest.json：${dir}。请先确认那不是你要保留的项目。`);
+    throw new Error(
+      `目标目录已存在且其中没有可读的 manifest.json：${dir}。请先确认那不是你要保留的项目。`,
+    );
   if (existingId !== input.id)
-    throw new Error(`目标目录里已经有一个 id 为「${existingId}」的工具，与要安装的「${input.id}」不一致：${dir}。先处理那个目录，或改掉清单里的 id。`);
+    throw new Error(
+      `目标目录里已经有一个 id 为「${existingId}」的工具，与要安装的「${input.id}」不一致：${dir}。先处理那个目录，或改掉清单里的 id。`,
+    );
   return dir;
 }
 
@@ -569,7 +739,8 @@ function toBase64(bytes: Uint8Array): string {
 function fromBase64(text: string): Uint8Array {
   const binary = atob(text);
   const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  for (let index = 0; index < binary.length; index += 1)
+    bytes[index] = binary.charCodeAt(index);
   return bytes;
 }
 
@@ -602,21 +773,30 @@ export async function writeToolFiles(
 ): Promise<void> {
   const entries = Object.entries(files);
   if (!entries.length) return;
-  if (!io.writeBinaryFile && entries.some(([, bytes]) => decodeUtf8(bytes) === undefined))
-    throw new Error("当前宿主不支持写入二进制文件，这个包里的图片 / wasm / 原生模块装不进来。");
+  if (
+    !io.writeBinaryFile &&
+    entries.some(([, bytes]) => decodeUtf8(bytes) === undefined)
+  )
+    throw new Error(
+      "当前宿主不支持写入二进制文件，这个包里的图片 / wasm / 原生模块装不进来。",
+    );
   const queue = [...entries];
-  const workers = Array.from({ length: Math.min(8, queue.length) }, async () => {
-    for (;;) {
-      const next = queue.shift();
-      if (!next) return;
-      const [name, bytes] = next;
-      if (!safeSourcePath(name)) throw new Error(`工具包内含不安全路径：${name}`);
-      const target = joinPath(dir, name);
-      const text = decodeUtf8(bytes);
-      if (text !== undefined) await io.writeTextFile(target, text);
-      else await io.writeBinaryFile!(target, toBase64(bytes));
-    }
-  });
+  const workers = Array.from(
+    { length: Math.min(8, queue.length) },
+    async () => {
+      for (;;) {
+        const next = queue.shift();
+        if (!next) return;
+        const [name, bytes] = next;
+        if (!safeSourcePath(name))
+          throw new Error(`工具包内含不安全路径：${name}`);
+        const target = joinPath(dir, name);
+        const text = decodeUtf8(bytes);
+        if (text !== undefined) await io.writeTextFile(target, text);
+        else await io.writeBinaryFile!(target, toBase64(bytes));
+      }
+    },
+  );
   await Promise.all(workers);
 }
 
@@ -630,7 +810,10 @@ export async function readToolDirFiles(
   io: ToolProjectIO,
   dir: string,
   limit = toolLimits.archiveBytes,
-): Promise<{ readonly files: Readonly<Record<string, Uint8Array>>; readonly skipped: readonly string[] }> {
+): Promise<{
+  readonly files: Readonly<Record<string, Uint8Array>>;
+  readonly skipped: readonly string[];
+}> {
   if (!io.listFiles || !io.readBinaryFile) return { files: {}, skipped: [] };
   let names: readonly string[];
   try {
@@ -648,7 +831,10 @@ export async function readToolDirFiles(
       const base64 = await io.readBinaryFile(joinPath(dir, name), limit);
       const data = fromBase64(base64);
       bytes += data.length;
-      if (bytes > limit) { skipped.push(name); break; }
+      if (bytes > limit) {
+        skipped.push(name);
+        break;
+      }
       files[name] = data;
     } catch {
       skipped.push(name);

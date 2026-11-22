@@ -37,7 +37,15 @@ export interface PreviewLog {
   readonly text: string;
 }
 
-export function ToolPreview({ tool, onBack, onInstall, installLabel, onReload, revision = 0, embedded = false }: {
+export function ToolPreview({
+  tool,
+  onBack,
+  onInstall,
+  installLabel,
+  onReload,
+  revision = 0,
+  embedded = false,
+}: {
   tool: ToolPackage;
   /** 省略时不显示「← 返回」——右栏标签里没有"上一页"可回。 */
   onBack?: () => void;
@@ -58,12 +66,19 @@ export function ToolPreview({ tool, onBack, onInstall, installLabel, onReload, r
 
   useEffect(() => {
     function receive(event: MessageEvent) {
-      const data = event.data as { source?: unknown; level?: unknown; text?: unknown } | null;
+      const data = event.data as {
+        source?: unknown;
+        level?: unknown;
+        text?: unknown;
+      } | null;
       if (!data || data.source !== "aaw-tool-preview") return;
-      setLogs((previous) => [...previous.slice(-199), {
-        level: typeof data.level === "string" ? data.level : "log",
-        text: typeof data.text === "string" ? data.text : String(data.text),
-      }]);
+      setLogs((previous) => [
+        ...previous.slice(-199),
+        {
+          level: typeof data.level === "string" ? data.level : "log",
+          text: typeof data.text === "string" ? data.text : String(data.text),
+        },
+      ]);
     }
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
@@ -75,23 +90,54 @@ export function ToolPreview({ tool, onBack, onInstall, installLabel, onReload, r
   }, [logs]);
 
   return (
-    <section aria-label={`${tool.name} 预览`} className={`aaw-tools flex h-full min-h-0 flex-col ${embedded ? "" : "bg-base"}`}>
+    <section
+      aria-label={`${tool.name} 预览`}
+      className={`aaw-tools flex h-full min-h-0 flex-col ${embedded ? "" : "bg-base"}`}
+    >
       <header className={`preview-head${embedded ? " is-embedded" : ""}`}>
-        {onBack && <button type="button" className={btnGhost} onClick={onBack}>← 返回</button>}
+        {onBack && (
+          <button type="button" className={btnGhost} onClick={onBack}>
+            ← 返回
+          </button>
+        )}
         <div className="preview-title">
           <h2>{tool.name}</h2>
           <span>v{tool.version} · 预览</span>
         </div>
         <div className="preview-actions">
-          <button type="button" className={btnGhost} onClick={() => {
-            setLogs([]);
-            setNonce((value) => value + 1);
-            onReload?.();
-          }}>{onReload ? "重新读取" : "重新载入"}</button>
-          <button type="button" className={btnGhost} aria-pressed={showLogs} onClick={() => setShowLogs((value) => !value)}>
-            运行日志{errors ? ` · ${errors} 个错误` : logs.length ? ` · ${logs.length}` : ""}
+          <button
+            type="button"
+            className={btnGhost}
+            onClick={() => {
+              setLogs([]);
+              setNonce((value) => value + 1);
+              onReload?.();
+            }}
+          >
+            {onReload ? "重新读取" : "重新载入"}
           </button>
-          {onInstall && <button type="button" className="preview-install" onClick={onInstall}>{installLabel ?? "安装"}</button>}
+          <button
+            type="button"
+            className={btnGhost}
+            aria-pressed={showLogs}
+            onClick={() => setShowLogs((value) => !value)}
+          >
+            运行日志
+            {errors
+              ? ` · ${errors} 个错误`
+              : logs.length
+                ? ` · ${logs.length}`
+                : ""}
+          </button>
+          {onInstall && (
+            <button
+              type="button"
+              className="preview-install"
+              onClick={onInstall}
+            >
+              {installLabel ?? "安装"}
+            </button>
+          )}
         </div>
       </header>
       <iframe
@@ -107,16 +153,23 @@ export function ToolPreview({ tool, onBack, onInstall, installLabel, onReload, r
         <div className="preview-logs" role="log" aria-label="运行日志">
           <div className="preview-logs-head">
             <span>运行日志</span>
-            <button type="button" onClick={() => setLogs([])}>清空</button>
+            <button type="button" onClick={() => setLogs([])}>
+              清空
+            </button>
           </div>
           <div className="preview-logs-body" ref={list}>
-            {logs.length === 0
-              ? <p className="preview-logs-empty">还没有输出。工具里的 console 与未捕获异常会显示在这里。</p>
-              : logs.map((entry, index) => (
+            {logs.length === 0 ? (
+              <p className="preview-logs-empty">
+                还没有输出。工具里的 console 与未捕获异常会显示在这里。
+              </p>
+            ) : (
+              logs.map((entry, index) => (
                 <p key={index} className={`preview-log is-${entry.level}`}>
-                  <span>{entry.level}</span>{entry.text}
+                  <span>{entry.level}</span>
+                  {entry.text}
                 </p>
-              ))}
+              ))
+            )}
           </div>
         </div>
       )}

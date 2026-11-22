@@ -10,7 +10,8 @@
 //   npm run tools:pilot quick-notes   # 打开任意工具目录名
 import { spawn } from "node:child_process";
 
-const toolId = process.argv[2] || process.env.AAW_TOOLS_TAURI_PILOT_ID || "pilot";
+const toolId =
+  process.argv[2] || process.env.AAW_TOOLS_TAURI_PILOT_ID || "pilot";
 const isWindows = process.platform === "win32";
 
 // 用本地安装的 tauri CLI（node_modules/.bin），不依赖全局。
@@ -24,7 +25,8 @@ const child = spawn(isWindows ? "npx.cmd" : "npx", ["tauri", "dev"], {
     // 开调试端口：验证脚本要连上去读页面里的四项结果。
     // 只在 dev 脚本里设，发布构建拿不到它。
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:
-      process.env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS || "--remote-debugging-port=9222",
+      process.env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS ||
+      "--remote-debugging-port=9222",
   },
 });
 

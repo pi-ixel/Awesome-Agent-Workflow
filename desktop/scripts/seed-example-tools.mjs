@@ -1,4 +1,11 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { exampleTools } from "../src/plugins/tools/runtime/examples.ts";
@@ -14,13 +21,15 @@ import { exampleTools } from "../src/plugins/tools/runtime/examples.ts";
  */
 function dataRoot() {
   if (process.env.AAW_TOOLS_DATA_ROOT) return process.env.AAW_TOOLS_DATA_ROOT;
-  if (process.env.LOCALAPPDATA) return join(process.env.LOCALAPPDATA, "com.aaw.desktop");
+  if (process.env.LOCALAPPDATA)
+    return join(process.env.LOCALAPPDATA, "com.aaw.desktop");
   return join(homedir(), "AppData", "Local", "com.aaw.desktop");
 }
 
 function readJson(path, fallback) {
-  try { return JSON.parse(readFileSync(path, "utf8")); }
-  catch (error) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
     if (error.code === "ENOENT") return fallback;
     throw new Error(`读不出 ${path}：${error.message}`, { cause: error });
   }
@@ -32,8 +41,11 @@ const configuration = join(active, "configuration");
 const preferences = join(configuration, "preferences.json");
 const raw = readJson(preferences, {});
 const account = (() => {
-  try { return JSON.parse(raw["aaw-desktop.auth.v1"] || "null"); }
-  catch { return null; }
+  try {
+    return JSON.parse(raw["aaw-desktop.auth.v1"] || "null");
+  } catch {
+    return null;
+  }
 })();
 const userId = account?.user?.id;
 if (!userId) {
@@ -43,8 +55,11 @@ if (!userId) {
 
 const owner = `user:${userId}`;
 const library = (() => {
-  try { return JSON.parse(raw["aaw-desktop.personal-tools.v1"] || "{}"); }
-  catch { return {}; }
+  try {
+    return JSON.parse(raw["aaw-desktop.personal-tools.v1"] || "{}");
+  } catch {
+    return {};
+  }
 })();
 const current = Array.isArray(library[owner]) ? library[owner] : [];
 const installed = new Set(current.map((entry) => entry?.package?.id));
@@ -63,12 +78,20 @@ if (!added.length) {
 }
 
 mkdirSync(configuration, { recursive: true });
-const next = { ...raw, "aaw-desktop.personal-tools.v1": JSON.stringify({ ...library, [owner]: current }) };
+const next = {
+  ...raw,
+  "aaw-desktop.personal-tools.v1": JSON.stringify({
+    ...library,
+    [owner]: current,
+  }),
+};
 const backup = `${preferences}.bak-${Date.now()}`;
 if (existsSync(preferences)) copyFileSync(preferences, backup);
 const temp = `${preferences}.tmp-${process.pid}`;
 writeFileSync(temp, JSON.stringify(next));
 renameSync(temp, preferences);
-console.log(`已为 ${owner} 装入 ${added.length} 个示例工具：${added.join("、")}`);
+console.log(
+  `已为 ${owner} 装入 ${added.length} 个示例工具：${added.join("、")}`,
+);
 if (existsSync(backup)) console.log(`原配置备份：${backup}`);
 console.log("现在可以重新打开 AAW 桌面客户端查看「已安装」。");

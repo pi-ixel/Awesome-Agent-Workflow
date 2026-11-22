@@ -1,3 +1,4 @@
+/* global document, location */
 // 连上 WebView2 的调试端口，把 pilot 页面里的四项自检结果读出来并截图。
 //
 // 为什么不在页面上加"上报"按钮：验证要能自动化跑，而不是靠人眼看。
@@ -15,12 +16,18 @@ mkdirSync(outDir, { recursive: true });
 // 这里只是"顺手指一下"，真正的路径由 Rust 决定；找不到就算了，不阻断验证。
 const dataRoot =
   process.env.AAW_TOOLS_TAURI_DATA_ROOT ||
-  (process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, "com.aaw.desktop") : "");
+  (process.env.LOCALAPPDATA
+    ? join(process.env.LOCALAPPDATA, "com.aaw.desktop")
+    : "");
 let dataFile = "";
 try {
-  const prefs = JSON.parse(readFileSync(join(dataRoot, "configuration", "preferences.json"), "utf8"));
+  const prefs = JSON.parse(
+    readFileSync(join(dataRoot, "configuration", "preferences.json"), "utf8"),
+  );
   const auth = JSON.parse(prefs["aaw-desktop.auth.v1"] || "null");
-  const owner = String(auth?.user?.id || "").replace(/[^A-Za-z0-9._-]/g, "_").replace(/^[._]+|\.+$/g, "");
+  const owner = String(auth?.user?.id || "")
+    .replace(/[^A-Za-z0-9._-]/g, "_")
+    .replace(/^[._]+|\.+$/g, "");
   if (owner) dataFile = join(dataRoot, "tools", "storage", owner, "pilot.json");
 } catch {
   /* 未登录或没有偏好文件时不显示落盘证据 */
@@ -43,7 +50,10 @@ console.log("TITLE:", await page.title());
 
 // 等四项都出结果（store 与动作是异步的）。
 await page
-  .waitForFunction(() => document.getElementById("score")?.textContent?.includes("/"), { timeout: 20000 })
+  .waitForFunction(
+    () => document.getElementById("score")?.textContent?.includes("/"),
+    { timeout: 20000 },
+  )
   .catch(() => console.error("等待自检结果超时"));
 
 // 第 4 项要人点，这里替人点一下：点完等结果位变成带格式的返回体。
@@ -82,11 +92,20 @@ console.log(JSON.stringify(report, null, 2));
 await page.click("#btn-add");
 await page.click("#btn-add");
 await page.waitForTimeout(400);
-const beforeReload = (await page.evaluate(() => document.getElementById("out-store")?.textContent)) || "";
+const beforeReload =
+  (await page.evaluate(
+    () => document.getElementById("out-store")?.textContent,
+  )) || "";
 await page.reload({ waitUntil: "domcontentloaded" });
-await page.waitForFunction(() => (document.getElementById("out-store")?.textContent || "").includes("count ="), {
-  timeout: 15000,
-});
+await page.waitForFunction(
+  () =>
+    (document.getElementById("out-store")?.textContent || "").includes(
+      "count =",
+    ),
+  {
+    timeout: 15000,
+  },
+);
 const afterReload = await page.evaluate(() => ({
   store: document.getElementById("out-store")?.textContent,
   act: document.getElementById("out-act")?.textContent,
@@ -107,10 +126,19 @@ await page.setViewportSize({ width: 880, height: 640 });
 // 截图前再调一次动作：刷新会把第 4 项重置成"还没调用"，截图该是最终状态。
 await page.click("#btn-act").catch(() => {});
 await page
-  .waitForFunction(() => (document.getElementById("out-act")?.textContent || "").includes("stats 返回"), { timeout: 20000 })
+  .waitForFunction(
+    () =>
+      (document.getElementById("out-act")?.textContent || "").includes(
+        "stats 返回",
+      ),
+    { timeout: 20000 },
+  )
   .catch(() => {});
 await page.screenshot({ path: shot, fullPage: true });
 console.log("SHOT:", shot);
-console.log("最终得分:", await page.evaluate(() => document.getElementById("score")?.textContent));
+console.log(
+  "最终得分:",
+  await page.evaluate(() => document.getElementById("score")?.textContent),
+);
 
 await browser.close();

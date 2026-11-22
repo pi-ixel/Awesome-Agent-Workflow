@@ -80,9 +80,11 @@ export async function freeVersionDir(
 ): Promise<string> {
   for (let index = 1; index <= 99; index += 1) {
     const dir = joinPath(versionsRoot, index === 1 ? slug : `${slug}-${index}`);
-    if (!await io.pathExists(dir)) return dir;
+    if (!(await io.pathExists(dir))) return dir;
   }
-  throw new Error(`这个工具已经有 99 个 ${slug} 版本的副本了，先卸载重装，或清理工具库里的 versions 目录。`);
+  throw new Error(
+    `这个工具已经有 99 个 ${slug} 版本的副本了，先卸载重装，或清理工具库里的 versions 目录。`,
+  );
 }
 
 /**
@@ -92,12 +94,18 @@ export async function freeVersionDir(
  * JSON 包）。真正带 `node_modules` / `bin/` 的包必须走 ZIP 导入——这些文件
  * 只在磁盘上，清单里根本没有。
  */
-export function materializeToolFiles(tool: ToolPackage): Record<string, Uint8Array> {
+export function materializeToolFiles(
+  tool: ToolPackage,
+): Record<string, Uint8Array> {
   const files: Record<string, Uint8Array> = runtimeFiles(tool);
   for (const [name, text] of Object.entries(tool.sourceFiles ?? {})) {
     // 清单与页面由 runtimeFiles 负责，同一路径以它为准（`sourceFiles` 里
     // 出现它们只可能是作者手写清单时重复了）。
-    if (name === toolProjectFileNames.manifest || name === toolProjectFileNames.html) continue;
+    if (
+      name === toolProjectFileNames.manifest ||
+      name === toolProjectFileNames.html
+    )
+      continue;
     if (!safeSourcePath(name)) throw new Error(`工具包内含不安全路径：${name}`);
     files[name] = strToU8(text);
   }
@@ -111,7 +119,10 @@ export function materializeToolFiles(tool: ToolPackage): Record<string, Uint8Arr
  * 它）；`runtime.entry` 是进程工具的可执行文件。缺了它们，装进去就是一个
  * 能打开、点不动的空壳——这正是"重新导入原始 ZIP"要给用户挡住的坑。
  */
-export function missingEntryFiles(tool: ToolPackage, names: Iterable<string>): readonly string[] {
+export function missingEntryFiles(
+  tool: ToolPackage,
+  names: Iterable<string>,
+): readonly string[] {
   const present = new Set<string>();
   for (const name of names) present.add(name.replace(/\\/g, "/"));
   const missing: string[] = [];
@@ -123,7 +134,10 @@ export function missingEntryFiles(tool: ToolPackage, names: Iterable<string>): r
 }
 
 /** 同目录下列举文件名，用来核对清单声明的入口在不在磁盘上。 */
-async function listNames(io: ToolProjectIO, dir: string): Promise<readonly string[]> {
+async function listNames(
+  io: ToolProjectIO,
+  dir: string,
+): Promise<readonly string[]> {
   if (!io.listFiles) return [];
   try {
     return await io.listFiles(dir, 4000);
@@ -147,11 +161,16 @@ export interface StagedVersion {
 }
 
 /** 删除一个受管目录；宿主没提供删除端口时安静跳过。 */
-export async function discardManagedDir(io: ToolProjectIO, dir: string): Promise<void> {
+export async function discardManagedDir(
+  io: ToolProjectIO,
+  dir: string,
+): Promise<void> {
   if (!io.dropStaging) return;
   try {
     await io.dropStaging(dir);
-  } catch { /* 见 StagedVersion.discard 的注释 */ }
+  } catch {
+    /* 见 StagedVersion.discard 的注释 */
+  }
 }
 
 /**
@@ -176,19 +195,27 @@ export async function stageVersion(
 ): Promise<StagedVersion> {
   const root = await installedToolRoot(io, input.owner, input.tool.id);
   const versionsRoot = joinPath(root, toolVersionsDirName);
-  const nonce = input.nonce ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const nonce =
+    input.nonce ??
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const staging = joinPath(versionsRoot, `${toolStagingPrefix}${nonce}`);
   try {
     await writeToolFiles(io, staging, input.files);
     const read = await readToolProject(io, staging);
     if (!read.ok) {
-      throw new Error(`安装内容校验不通过：${read.violations[0]?.message ?? "原因未知"}`);
+      throw new Error(
+        `安装内容校验不通过：${read.violations[0]?.message ?? "原因未知"}`,
+      );
     }
     if (read.tool.id !== input.tool.id) {
-      throw new Error(`包里的清单 id 是「${read.tool.id}」，与要安装的「${input.tool.id}」不一致。`);
+      throw new Error(
+        `包里的清单 id 是「${read.tool.id}」，与要安装的「${input.tool.id}」不一致。`,
+      );
     }
     if (read.tool.version !== input.tool.version) {
-      throw new Error(`包里的清单版本是 v${read.tool.version}，与声明的 v${input.tool.version} 不一致。`);
+      throw new Error(
+        `包里的清单版本是 v${read.tool.version}，与声明的 v${input.tool.version} 不一致。`,
+      );
     }
     const missing = missingEntryFiles(read.tool, await listNames(io, staging));
     if (missing.length) {
@@ -196,7 +223,11 @@ export async function stageVersion(
         `包里缺少运行入口 ${missing.join("、")}。这个包只带了清单，运行需要的文件不在里面——请用作者提供的完整 ZIP 重新导入。`,
       );
     }
-    const dir = await freeVersionDir(io, versionsRoot, versionDirSlug(read.tool.version));
+    const dir = await freeVersionDir(
+      io,
+      versionsRoot,
+      versionDirSlug(read.tool.version),
+    );
     await io.movePath(staging, dir);
     return { tool: read.tool, dir, discard: () => discardManagedDir(io, dir) };
   } catch (error) {
@@ -218,13 +249,17 @@ export async function stageVersion(
 function requiredEntries(manifest: Record<string, unknown>): readonly string[] {
   const pick = (field: string, key: string): string | undefined => {
     const value = manifest[field];
-    const inner = value && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined;
+    const inner =
+      value && typeof value === "object"
+        ? (value as Record<string, unknown>)[key]
+        : undefined;
     return typeof inner === "string" ? inner.replace(/^\.\//, "") : undefined;
   };
   const out = pick("build", "out");
   const entry = pick("runtime", "entry");
-  return [out, entry, entry ? undefined : toolProjectFileNames.html]
-    .filter((name): name is string => !!name);
+  return [out, entry, entry ? undefined : toolProjectFileNames.html].filter(
+    (name): name is string => !!name,
+  );
 }
 
 /**
@@ -245,13 +280,14 @@ export async function canRunToolDir(
   if (!dir) return false;
   try {
     const manifestPath = joinPath(dir, toolProjectFileNames.manifest);
-    if (!await io.pathExists(manifestPath)) return false;
+    if (!(await io.pathExists(manifestPath))) return false;
     const parsed = JSON.parse(await io.readTextFile(manifestPath)) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return false;
     const manifest = parsed as Record<string, unknown>;
     if (manifest["id"] !== id) return false;
     for (const name of requiredEntries(manifest)) {
-      if (!await io.pathExists(joinPath(dir, name))) return false;
+      if (!(await io.pathExists(joinPath(dir, name)))) return false;
     }
     return true;
   } catch {
@@ -265,8 +301,11 @@ async function versionDirNames(
   owner: string | undefined,
   id: string,
 ): Promise<{ readonly root: string; readonly names: readonly string[] }> {
-  const root = joinPath(await installedToolRoot(io, owner, id), toolVersionsDirName);
-  if (!await io.pathExists(root)) return { root, names: [] };
+  const root = joinPath(
+    await installedToolRoot(io, owner, id),
+    toolVersionsDirName,
+  );
+  if (!(await io.pathExists(root))) return { root, names: [] };
   try {
     return { root, names: await io.listDirNames(root) };
   } catch {
@@ -322,7 +361,9 @@ export async function sweepStagingDirs(
     try {
       await io.dropStaging(dir);
       removed += 1;
-    } catch { /* 见上：下次再试 */ }
+    } catch {
+      /* 见上：下次再试 */
+    }
   }
   return removed;
 }
@@ -361,10 +402,19 @@ export async function pruneOrphanVersions(
  */
 const toolOperations = new Map<string, Promise<unknown>>();
 
-export function serializeToolOp<T>(key: string, task: () => Promise<T>): Promise<T> {
+export function serializeToolOp<T>(
+  key: string,
+  task: () => Promise<T>,
+): Promise<T> {
   const previous = toolOperations.get(key) ?? Promise.resolve();
   // 前一个任务无论成败都要放行下一个：一次失败不该把这个工具永久锁死。
   const next = previous.then(task, task);
-  toolOperations.set(key, next.then(() => undefined, () => undefined));
+  toolOperations.set(
+    key,
+    next.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
   return next;
 }

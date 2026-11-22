@@ -23,16 +23,45 @@ const quickNotes: ToolPackage = {
   icon: "✎",
   author: "AAW 示例",
   settingsSchema: [
-    { id: "auto-copy", type: "boolean", label: "记下后自动复制到剪切板", description: "新增一条时，顺手把内容写进系统剪切板。", default: true },
-    { id: "order", type: "select", label: "列表顺序", description: "只影响展示，不改变存储顺序。", default: "newest", options: [
-      { label: "最新的在前", value: "newest" },
-      { label: "最早的在前", value: "oldest" },
-    ] },
+    {
+      id: "auto-copy",
+      type: "boolean",
+      label: "记下后自动复制到剪切板",
+      description: "新增一条时，顺手把内容写进系统剪切板。",
+      default: true,
+    },
+    {
+      id: "order",
+      type: "select",
+      label: "列表顺序",
+      description: "只影响展示，不改变存储顺序。",
+      default: "newest",
+      options: [
+        { label: "最新的在前", value: "newest" },
+        { label: "最早的在前", value: "oldest" },
+      ],
+    },
   ],
   actions: [
-    { id: "add", description: "记下一条文本，可自动复制到剪切板", inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } },
-    { id: "list", description: "列出已经记下的所有内容", inputSchema: { type: "object", properties: {} } },
-    { id: "copy-last", description: "把最近记下的一条复制到剪切板", inputSchema: { type: "object", properties: {} } },
+    {
+      id: "add",
+      description: "记下一条文本，可自动复制到剪切板",
+      inputSchema: {
+        type: "object",
+        properties: { text: { type: "string" } },
+        required: ["text"],
+      },
+    },
+    {
+      id: "list",
+      description: "列出已经记下的所有内容",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      id: "copy-last",
+      description: "把最近记下的一条复制到剪切板",
+      inputSchema: { type: "object", properties: {} },
+    },
   ],
   html: `<style>
   :root { color-scheme: light dark; }

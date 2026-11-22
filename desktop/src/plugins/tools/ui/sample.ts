@@ -7,12 +7,28 @@ export const sampleTool: ToolPackage = {
   version: "1.0.0",
   // 示例顺便演示可选字段 icon：卡片与小窗用它替代默认的工具图标。
   icon: "J",
-  settingsSchema: [{ id: "indent", type: "number", label: "缩进空格数", description: "格式化 JSON 时每一级使用的空格数。", default: 2, min: 0, max: 8 }],
-  actions: [{
-    id: "format",
-    description: "按管理页中设置的缩进格式化 JSON 文本",
-    inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
-  }],
+  settingsSchema: [
+    {
+      id: "indent",
+      type: "number",
+      label: "缩进空格数",
+      description: "格式化 JSON 时每一级使用的空格数。",
+      default: 2,
+      min: 0,
+      max: 8,
+    },
+  ],
+  actions: [
+    {
+      id: "format",
+      description: "按管理页中设置的缩进格式化 JSON 文本",
+      inputSchema: {
+        type: "object",
+        properties: { text: { type: "string" } },
+        required: ["text"],
+      },
+    },
+  ],
   html: `<style>
   :root { color-scheme: light dark; color: CanvasText; background: Canvas; }
   body { font: 14px system-ui; max-width: 62rem; margin: 0 auto; padding: clamp(16px, 4vw, 32px); }

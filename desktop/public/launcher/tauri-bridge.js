@@ -1,3 +1,4 @@
+/* global window */
 /*
  * 启动器与宿主之间的一层薄 shim。
  *
@@ -23,30 +24,56 @@
   var shortcutPressed = null;
 
   window.launcher = {
-    entries: function () { return invoke("launcher_entries"); },
+    entries: function () {
+      return invoke("launcher_entries");
+    },
     // 打开工具的失败原因要能显示出来：宿主 reject 的是字符串，页面读的是
     // `error.message`，不折成 Error 就只剩一句 "undefined"。
     open: function (id) {
       return invoke("launcher_open", { id: id }).catch(function (error) {
         throw error instanceof Error
           ? error
-          : new Error(typeof error === "string" && error ? error : "打开工具失败。");
+          : new Error(
+              typeof error === "string" && error ? error : "打开工具失败。",
+            );
       });
     },
-    hide: function () { return invoke("launcher_hide"); },
-    pin: function (id, pinned) { return invoke("launcher_pin", { id: id, pinned: pinned === true }); },
-    shortcut: function (value) { return invoke("launcher_shortcut", { value: value }); },
-    capture: function (active) { return invoke("launcher_capture", { active: active === true }); },
-    theme: function () { return invoke("launcher_theme"); },
-    onRefresh: function (callback) { refresh = callback; },
-    onShortcutPressed: function (callback) { shortcutPressed = callback; },
+    hide: function () {
+      return invoke("launcher_hide");
+    },
+    pin: function (id, pinned) {
+      return invoke("launcher_pin", { id: id, pinned: pinned === true });
+    },
+    shortcut: function (value) {
+      return invoke("launcher_shortcut", { value: value });
+    },
+    capture: function (active) {
+      return invoke("launcher_capture", { active: active === true });
+    },
+    theme: function () {
+      return invoke("launcher_theme");
+    },
+    onRefresh: function (callback) {
+      refresh = callback;
+    },
+    onShortcutPressed: function (callback) {
+      shortcutPressed = callback;
+    },
   };
 
   // 宿主用 eval 调这两个钩子：刷新目录、回送录制中的组合键。
   window.__launcherRefresh = function () {
-    try { if (refresh) refresh(); } catch (_) { /* 页面自己的错不该冒到宿主 */ }
+    try {
+      if (refresh) refresh();
+    } catch {
+      /* 页面自己的错不该冒到宿主 */
+    }
   };
   window.__launcherShortcut = function (value) {
-    try { if (shortcutPressed) shortcutPressed(value); } catch (_) { /* 同上 */ }
+    try {
+      if (shortcutPressed) shortcutPressed(value);
+    } catch {
+      /* 同上 */
+    }
   };
 })();

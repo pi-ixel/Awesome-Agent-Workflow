@@ -14,7 +14,10 @@ export interface HostContract {
 }
 
 export function currentHostContract(): HostContract {
-  return { contract: toolContractVersion, capabilities: capabilitiesAt(toolContractVersion) };
+  return {
+    contract: toolContractVersion,
+    capabilities: capabilitiesAt(toolContractVersion),
+  };
 }
 
 /**

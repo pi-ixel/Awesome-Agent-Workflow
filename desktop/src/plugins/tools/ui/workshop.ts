@@ -18,11 +18,22 @@ import { createSnapshotView } from "../../../shared/state/readonlySnapshot.ts";
 import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
 import type { HostService } from "../../host/service.ts";
 import type { ProjectService } from "../../project/service.ts";
-import { briefMessage, repairMessage, toolGuideSkill, toolGuideSkillFromDoc } from "../runtime/guide.ts";
 import {
-  checkToolProject, createToolProject, listToolProjectSummaries,
-  migrateLegacyTools, readToolDirFiles, renameToolProject, syncToolProjectGuide,
-  syncToolProjectGuides, toolProjectFileNames,
+  briefMessage,
+  repairMessage,
+  toolGuideSkill,
+  toolGuideSkillFromDoc,
+} from "../runtime/guide.ts";
+import {
+  checkToolProject,
+  createToolProject,
+  listToolProjectSummaries,
+  migrateLegacyTools,
+  readToolDirFiles,
+  renameToolProject,
+  syncToolProjectGuide,
+  syncToolProjectGuides,
+  toolProjectFileNames,
   toolProjectIdFromBrief,
   type LegacyMigration,
   type ToolProjectCheck,
@@ -138,11 +149,17 @@ export interface WorkshopService {
    * 没法只写进配置——那些必须落在磁盘上，运行时才 `require` 得到。所以路径是
    * 「写一份完整版本副本 → 从磁盘回读校验 → 就位 → 再写安装记录」。
    */
-  installArchive(tool: ToolPackage, files?: Readonly<Record<string, Uint8Array>>): Promise<InstallOutcome>;
+  installArchive(
+    tool: ToolPackage,
+    files?: Readonly<Record<string, Uint8Array>>,
+  ): Promise<InstallOutcome>;
   /** 退回上一版（覆盖安装前保留的那份完整副本）。 */
   rollback(id: string): Promise<WorkshopNote>;
   /** 改显示名 / 改目录名（= 改 id）。 */
-  rename(dir: string, input: { readonly name?: string; readonly id?: string }): Promise<WorkshopNote>;
+  rename(
+    dir: string,
+    input: { readonly name?: string; readonly id?: string },
+  ): Promise<WorkshopNote>;
   /** 打开一个已有工具项目（继续开发：新开一条会话）。 */
   resume(dir: string): Promise<void>;
   /** 选中一个已有项目作为"当前项目"（只校验，不切视图）。 */
@@ -179,7 +196,8 @@ export interface WorkshopService {
   dispose(): void;
 }
 
-const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
+const errorText = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
 
 /**
  * 工具的内容指纹：只收影响运行行为的字段。
@@ -206,7 +224,10 @@ export function contentSignature(tool: ToolPackage): string {
 }
 
 /** 两份工具内容是否不同（影响运行行为的部分）。预览与工坊共用同一个口径。 */
-export function toolContentDiffers(left: ToolPackage, right: ToolPackage): boolean {
+export function toolContentDiffers(
+  left: ToolPackage,
+  right: ToolPackage,
+): boolean {
   return contentSignature(left) !== contentSignature(right);
 }
 
@@ -223,8 +244,13 @@ export const projectIO = hostToolIO;
  */
 export async function syncToolGuide(io: ToolProjectIO): Promise<void> {
   const dir = await io.userDataDir("chrys", "skills");
-  const doc = io.readGuideDoc ? await io.readGuideDoc().catch(() => undefined) : undefined;
-  await io.writeTextFile(`${dir}/tool-dev/SKILL.md`, doc ? toolGuideSkillFromDoc(doc) : toolGuideSkill());
+  const doc = io.readGuideDoc
+    ? await io.readGuideDoc().catch(() => undefined)
+    : undefined;
+  await io.writeTextFile(
+    `${dir}/tool-dev/SKILL.md`,
+    doc ? toolGuideSkillFromDoc(doc) : toolGuideSkill(),
+  );
 }
 
 /** 安装结果的用户话术：说清"新装/更新"、版本从哪到哪、版本号有没有动。 */
@@ -280,7 +306,9 @@ export function createWorkshop(deps: {
    */
   function assertOwner(origin: string | undefined): void {
     if (deps.owner() !== origin) {
-      throw new OwnerSwitchedError("账号已切换，这次操作已取消。请在当前账号下重新操作。");
+      throw new OwnerSwitchedError(
+        "账号已切换，这次操作已取消。请在当前账号下重新操作。",
+      );
     }
   }
 
@@ -336,9 +364,14 @@ export function createWorkshop(deps: {
    * 动作/设置/权限的改动——用户会看到"已安装"，打开却是旧行为。所以比
    * 一整份内容指纹：作者、来源这类描述字段除外（它们不影响跑起来的样子）。
    */
-  function syncWithInstalled(tool: ToolPackage | undefined): { installed: boolean; drift: boolean } {
+  function syncWithInstalled(tool: ToolPackage | undefined): {
+    installed: boolean;
+    drift: boolean;
+  } {
     if (!tool) return { installed: false, drift: false };
-    const entry = tools.state.getState().find((item) => item.package.id === tool.id);
+    const entry = tools.state
+      .getState()
+      .find((item) => item.package.id === tool.id);
     if (!entry) return { installed: false, drift: false };
     return { installed: true, drift: toolContentDiffers(entry.package, tool) };
   }
@@ -353,8 +386,14 @@ export function createWorkshop(deps: {
     if (current && pathKey(current) !== pathKey(dir)) return result;
     // 读不出清单时再分一次型：目录整个没了是环境问题（已失效，重试永远不会好），
     // 目录还在但清单不合法才是内容问题（AI 能改）。两者给的出路完全不同。
-    const alive = result.tool !== undefined || await io.pathExists(joinPath(dir, toolProjectFileNames.manifest));
-    patch({ check: result, missing: !alive, ...syncWithInstalled(result.tool) });
+    const alive =
+      result.tool !== undefined ||
+      (await io.pathExists(joinPath(dir, toolProjectFileNames.manifest)));
+    patch({
+      check: result,
+      missing: !alive,
+      ...syncWithInstalled(result.tool),
+    });
     return result;
   }
 
@@ -366,8 +405,16 @@ export function createWorkshop(deps: {
    */
   function dropMissingProject(name: string): void {
     patch({
-      project: null, check: null, installed: false, drift: false, stalled: false, repairs: 0, missing: false,
-      note: { text: `「${name}」的目录已经不在了（被移动或删除），已从工作台移除。源码如果只是换了位置，把目录放回根目录再刷新列表即可。` },
+      project: null,
+      check: null,
+      installed: false,
+      drift: false,
+      stalled: false,
+      repairs: 0,
+      missing: false,
+      note: {
+        text: `「${name}」的目录已经不在了（被移动或删除），已从工作台移除。源码如果只是换了位置，把目录放回根目录再刷新列表即可。`,
+      },
     });
   }
 
@@ -375,14 +422,23 @@ export function createWorkshop(deps: {
   function sendRepair(dir: string, check: ToolProjectCheck): boolean {
     const agentKey = project.sessions.catalog.getState().agentKey ?? "";
     if (!agentKey) {
-      patch({ note: { text: "会话还没连上 Agent，无法自动回灌。把下面的问题复制给 AI 即可。", error: true } });
+      patch({
+        note: {
+          text: "会话还没连上 Agent，无法自动回灌。把下面的问题复制给 AI 即可。",
+          error: true,
+        },
+      });
       return false;
     }
-    project.conversation.send({
-      workspacePath: dir,
-      agentKey,
-      sessionId: project.conversation.foreground.session.getState().activeSessionId,
-    }, repairMessage(check.blocking));
+    project.conversation.send(
+      {
+        workspacePath: dir,
+        agentKey,
+        sessionId:
+          project.conversation.foreground.session.getState().activeSessionId,
+      },
+      repairMessage(check.blocking),
+    );
     return true;
   }
 
@@ -425,7 +481,10 @@ export function createWorkshop(deps: {
     }
     if (!isForeground(dir)) return;
     if (!sendRepair(dir, result)) return;
-    patch({ repairs: repairs + 1, note: { text: `发现问题，已回给 AI 修（第 ${repairs + 1} 轮）。` } });
+    patch({
+      repairs: repairs + 1,
+      note: { text: `发现问题，已回给 AI 修（第 ${repairs + 1} 轮）。` },
+    });
   }
 
   // AI 停下来就校验。订阅挂在插件层，面板切走/重挂都不影响。
@@ -441,7 +500,8 @@ export function createWorkshop(deps: {
     running = state.isAgentRunning;
     // 「正在写」只算正在写**这个项目**：别的项目在跑时这里不该转圈。
     const tracked = store.getState().project?.dir;
-    const activeNow = state.isAgentRunning && !!tracked && isForeground(tracked);
+    const activeNow =
+      state.isAgentRunning && !!tracked && isForeground(tracked);
     if (activeNow !== store.getState().running) patch({ running: activeNow });
     if (!stopped) return;
     const dir = store.getState().project?.dir;
@@ -460,10 +520,17 @@ export function createWorkshop(deps: {
     const current = store.getState().project;
     if (!current) return;
     const tool = store.getState().check?.tool;
-    patch(tool
-      ? syncWithInstalled(tool)
-      // 清单读不出来时只能回答"装没装"，内容指纹无从比对。
-      : { installed: tools.state.getState().some((entry) => entry.package.id === current.id), drift: false });
+    patch(
+      tool
+        ? syncWithInstalled(tool)
+        : // 清单读不出来时只能回答"装没装"，内容指纹无从比对。
+          {
+            installed: tools.state
+              .getState()
+              .some((entry) => entry.package.id === current.id),
+            drift: false,
+          },
+    );
   });
 
   // 工具项目不进侧栏「最近项目」：它们由工具中心自己管。
@@ -471,8 +538,12 @@ export function createWorkshop(deps: {
     try {
       const root = await io.userDataDir("tools", "projects");
       patch({ projectsRoot: root });
-      project.projects.setRecentExclusions(customRoot ? [root, customRoot] : [root]);
-    } catch { /* 拿不到目录只是不排除，不影响主流程 */ }
+      project.projects.setRecentExclusions(
+        customRoot ? [root, customRoot] : [root],
+      );
+    } catch {
+      /* 拿不到目录只是不排除，不影响主流程 */
+    }
   })();
 
   /**
@@ -484,7 +555,10 @@ export function createWorkshop(deps: {
    * 不该变成一个要用户记得去点的开关，失败也不该弹一条打断用户的提示。
    * 只在桌面版写；浏览器预览模式没有宿主文件通道。
    */
-  if (host.isNative()) void syncToolGuide(io).catch(() => { /* 技能目录不可写不影响工具中心：项目里的 AGENTS.md 仍在 */ });
+  if (host.isNative())
+    void syncToolGuide(io).catch(() => {
+      /* 技能目录不可写不影响工具中心：项目里的 AGENTS.md 仍在 */
+    });
 
   /**
    * 最近**动过**的项目排前面（新建 / 安装 / 改名）。
@@ -494,9 +568,14 @@ export function createWorkshop(deps: {
    * 不做「进行中 / 其他」分组：条目在分组间跳来跳去比多点一次标题更烦。
    * 稳定排序让没动过的项目保持扫描顺序，列表不会因为无关操作重新排。
    */
-  function orderProjects(list: readonly ToolProjectSummary[]): readonly ToolProjectSummary[] {
-    return [...list].sort((left, right) =>
-      (touchedAt.get(pathKey(right.dir)) ?? 0) - (touchedAt.get(pathKey(left.dir)) ?? 0));
+  function orderProjects(
+    list: readonly ToolProjectSummary[],
+  ): readonly ToolProjectSummary[] {
+    return [...list].sort(
+      (left, right) =>
+        (touchedAt.get(pathKey(right.dir)) ?? 0) -
+        (touchedAt.get(pathKey(left.dir)) ?? 0),
+    );
   }
 
   async function refreshProjects(): Promise<void> {
@@ -516,27 +595,40 @@ export function createWorkshop(deps: {
       ]);
       if (token !== refreshToken) return;
       const seen = new Set<string>();
-      const projects = [...defaultProjects, ...customProjects].filter((entry) => {
-        const key = pathKey(entry.dir);
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
+      const projects = [...defaultProjects, ...customProjects].filter(
+        (entry) => {
+          const key = pathKey(entry.dir);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        },
+      );
       patch({ projects: orderProjects(projects) });
       // 改过开发指导后，存量项目的 AGENTS.md 也要跟着变：列表刷新顺手把每个
       // 项目的 AGENTS.md 刷成当前该有的样子（内容没变不写盘）。失败静默——
       // 下次刷新还会再试，不该让文档同步打断列表本身。
-      void syncToolProjectGuides(io, projects.map((entry) => entry.dir));
+      void syncToolProjectGuides(
+        io,
+        projects.map((entry) => entry.dir),
+      );
       // 列表是磁盘的镜像，所以它同时是"当前项目是否还活着"的判据。
       // 目录被删/移之后，卡片以前会一直挂着（状态只能进入、不能退出）；
       // 现在刷新一次就自动收起并说明——不依赖用户去点任何按钮。
       const current = store.getState().project;
-      if (current && !projects.some((entry) => pathKey(entry.dir) === pathKey(current.dir))) {
-        const alive = await io.pathExists(joinPath(current.dir, toolProjectFileNames.manifest));
+      if (
+        current &&
+        !projects.some((entry) => pathKey(entry.dir) === pathKey(current.dir))
+      ) {
+        const alive = await io.pathExists(
+          joinPath(current.dir, toolProjectFileNames.manifest),
+        );
         if (!alive && token === refreshToken) dropMissingProject(current.name);
       }
     } catch (error) {
-      if (token === refreshToken) patch({ note: { text: `读取工具项目失败：${errorText(error)}`, error: true } });
+      if (token === refreshToken)
+        patch({
+          note: { text: `读取工具项目失败：${errorText(error)}`, error: true },
+        });
     } finally {
       if (token === refreshToken) patch({ projectsLoading: false });
     }
@@ -544,12 +636,23 @@ export function createWorkshop(deps: {
 
   async function select(dir: string | null): Promise<void> {
     if (!dir) {
-      patch({ project: null, check: null, installed: false, drift: false, stalled: false, repairs: 0, missing: false, running: false });
+      patch({
+        project: null,
+        check: null,
+        installed: false,
+        drift: false,
+        stalled: false,
+        repairs: 0,
+        missing: false,
+        running: false,
+      });
       return;
     }
     // 列表去重用 pathKey，这里也用它比：大小写 / 分隔符差异不该让摘要查不到。
     const key = pathKey(dir);
-    const summary = store.getState().projects.find((entry) => pathKey(entry.dir) === key);
+    const summary = store
+      .getState()
+      .projects.find((entry) => pathKey(entry.dir) === key);
     patch({
       project: {
         dir,
@@ -571,8 +674,11 @@ export function createWorkshop(deps: {
     // 手指按下的是第 4 行，松开时那里已经是别的项目，旁边的「预览」也跟着
     // 移位。展开是"我要看这个"，不是"我改过这个"——排序只认真实的动作
     // （新建 / 安装 / 改名 / 继续开发）。
-    try { await readCheck(dir); }
-    catch (error) { patch({ note: { text: errorText(error), error: true } }); }
+    try {
+      await readCheck(dir);
+    } catch (error) {
+      patch({ note: { text: errorText(error), error: true } });
+    }
     // 选中后立刻刷新一次列表：目录可能是 AI 刚写完、列表还是旧的。
     void refreshProjects();
   }
@@ -595,9 +701,16 @@ export function createWorkshop(deps: {
       }
       // 手动点「重新校验」必须留下结论：否则界面看起来跟点之前一模一样，
       // 用户会怀疑按钮没生效。
-      patch(result.ready
-        ? { stalled: false, repairs: 0, note: { text: passText(result) } }
-        : { note: { text: `还有 ${result.blocking.length} 个问题没解决。`, error: true } });
+      patch(
+        result.ready
+          ? { stalled: false, repairs: 0, note: { text: passText(result) } }
+          : {
+              note: {
+                text: `还有 ${result.blocking.length} 个问题没解决。`,
+                error: true,
+              },
+            },
+      );
       return result;
     } catch (error) {
       patch({ note: { text: errorText(error), error: true } });
@@ -612,7 +725,10 @@ export function createWorkshop(deps: {
    * `bin/` 都只在磁盘上。读目录时任何一个文件读失败或超限都**中止**——装进去
    * 一份"少了一半依赖"的副本，比装失败难查得多（打开不报错，点哪儿都空白）。
    */
-  async function installFiles(dir: string, tool: ToolPackage): Promise<Record<string, Uint8Array>> {
+  async function installFiles(
+    dir: string,
+    tool: ToolPackage,
+  ): Promise<Record<string, Uint8Array>> {
     // 宿主没有列目录 / 读二进制通道（浏览器预览）：退回清单能表达的那部分。
     if (!io.listFiles || !io.readBinaryFile) return materializeToolFiles(tool);
     const read = await readToolDirFiles(io, dir);
@@ -622,7 +738,9 @@ export function createWorkshop(deps: {
         `项目里有 ${read.skipped.length} 个文件读不出来或超过单包上限（${names}${read.skipped.length > 3 ? " 等" : ""}），这次没有安装。处理掉这些文件，或改用「导入工具 → ZIP 包」逐个确认。`,
       );
     }
-    return Object.keys(read.files).length ? { ...read.files } : materializeToolFiles(tool);
+    return Object.keys(read.files).length
+      ? { ...read.files }
+      : materializeToolFiles(tool);
   }
 
   async function install(): Promise<boolean> {
@@ -633,62 +751,85 @@ export function createWorkshop(deps: {
     const owner = deps.owner();
     const result = await verify(current.dir);
     if (deps.owner() !== owner) {
-      patch({ note: { text: "账号已切换，这次安装已取消。请在当前账号下重新确认。", error: true } });
+      patch({
+        note: {
+          text: "账号已切换，这次安装已取消。请在当前账号下重新确认。",
+          error: true,
+        },
+      });
       return false;
     }
     // 校验期间用户切了项目：这时再装，装的是他刚才点的那个目录，但状态会写到
     // 现在选中的项目上（"已安装"标签跑到别的卡片）。直接取消，让他重新点。
     if (pathKey(store.getState().project?.dir ?? "") !== pathKey(current.dir)) {
-      patch({ note: { text: "项目已切换，这次安装已取消。回到这个项目再点一次确认安装。", error: true } });
+      patch({
+        note: {
+          text: "项目已切换，这次安装已取消。回到这个项目再点一次确认安装。",
+          error: true,
+        },
+      });
       return false;
     }
     if (!result?.ready || !result.tool) {
-      patch({ note: { text: "还有必须修的问题，先让 AI 修完再安装。", error: true } });
+      patch({
+        note: { text: "还有必须修的问题，先让 AI 修完再安装。", error: true },
+      });
       return false;
     }
     const tool = result.tool;
     try {
-      return await serializeToolOp(`tool:${owner ?? ""}:${tool.id}`, async () => {
-        const files = await installFiles(current.dir, tool);
-        // 装的是项目目录的一份**快照**：之后作者再改目录，已安装的工具不变。
-        const staged = await stageVersion(io, { owner, tool, files });
-        try {
-          // 写盘可能花几秒（大包 + node_modules）：落地前再确认账号，否则这份记录
-          // 会写进排队期间登录的另一个人名下。
-          assertOwner(owner);
-          const outcome = await tools.install(staged.tool, {
-            replace: true,
-            runDir: staged.dir,
-            sourceDir: current.dir,
-          });
-          touchedAt.set(pathKey(current.dir), Date.now());
-          // 这次更新把上一轮的 previousDir 挤成了没人引用的目录。当场收掉——
-          // 不然每装一次就多留一份旧副本，直到用户卸载这个工具。仍然在队列里：
-          // 配置已经写完，刚装好的这一版不会被当成孤儿。
-          await pruneOrphanVersions(io, owner, staged.tool.id);
-          patch({ installed: true, drift: false, note: { text: describeInstall(outcome, staged.tool.name) } });
-          void refreshProjects();
-          return true;
-        } catch (error) {
-          // 配置没写成功：这一版没人引用，清掉，别在磁盘上留一份孤儿副本。
-          await staged.discard();
-          throw error;
-        }
-      });
+      return await serializeToolOp(
+        `tool:${owner ?? ""}:${tool.id}`,
+        async () => {
+          const files = await installFiles(current.dir, tool);
+          // 装的是项目目录的一份**快照**：之后作者再改目录，已安装的工具不变。
+          const staged = await stageVersion(io, { owner, tool, files });
+          try {
+            // 写盘可能花几秒（大包 + node_modules）：落地前再确认账号，否则这份记录
+            // 会写进排队期间登录的另一个人名下。
+            assertOwner(owner);
+            const outcome = await tools.install(staged.tool, {
+              replace: true,
+              runDir: staged.dir,
+              sourceDir: current.dir,
+            });
+            touchedAt.set(pathKey(current.dir), Date.now());
+            // 这次更新把上一轮的 previousDir 挤成了没人引用的目录。当场收掉——
+            // 不然每装一次就多留一份旧副本，直到用户卸载这个工具。仍然在队列里：
+            // 配置已经写完，刚装好的这一版不会被当成孤儿。
+            await pruneOrphanVersions(io, owner, staged.tool.id);
+            patch({
+              installed: true,
+              drift: false,
+              note: { text: describeInstall(outcome, staged.tool.name) },
+            });
+            void refreshProjects();
+            return true;
+          } catch (error) {
+            // 配置没写成功：这一版没人引用，清掉，别在磁盘上留一份孤儿副本。
+            await staged.discard();
+            throw error;
+          }
+        },
+      );
     } catch (error) {
       patch({ note: { text: errorText(error), error: true } });
       return false;
     }
   }
 
-  async function installArchive(tool: ToolPackage, files?: Readonly<Record<string, Uint8Array>>): Promise<InstallOutcome> {
+  async function installArchive(
+    tool: ToolPackage,
+    files?: Readonly<Record<string, Uint8Array>>,
+  ): Promise<InstallOutcome> {
     // 闸门提前到写盘之前。`tools.install()` 里那道契约校验只依赖清单的
     // `requires`，不需要磁盘；等它拦下来时文件已经写完了。
     const incompatible = checkCompatibility(tool);
     if (incompatible.length) throw new ToolPackageError(incompatible);
     // 没有文件集（示例工具 / 只带清单的包）时按清单物化。装完必须有一份能跑
     // 的副本：否则主窗打开要临时补文件，启动器小窗根本补不了。
-    const contents = files && Object.keys(files).length ? files : materializeToolFiles(tool);
+    const contents =
+      files && Object.keys(files).length ? files : materializeToolFiles(tool);
     const missing = missingEntryFiles(tool, Object.keys(contents));
     if (missing.length) {
       throw new Error(
@@ -702,7 +843,11 @@ export function createWorkshop(deps: {
         assertOwner(owner);
         // ZIP / 文件夹导入没有开发来源：显式清掉上一次的来源，免得管理页
         // 指着一个已经不对应这一版的目录。
-        const outcome = await tools.install(staged.tool, { replace: true, runDir: staged.dir, sourceDir: null });
+        const outcome = await tools.install(staged.tool, {
+          replace: true,
+          runDir: staged.dir,
+          sourceDir: null,
+        });
         // 同上：这次导入把上一轮的旧副本挤成了孤儿，当场收掉。
         await pruneOrphanVersions(io, owner, staged.tool.id);
         void refreshProjects();
@@ -726,14 +871,21 @@ export function createWorkshop(deps: {
     if (!entry) return undefined;
     // 目录在、条目没被标坏：直接用，不动磁盘。broken（目录丢失）的条目
     // 也走物化重建——这是自愈，不是报错。
-    if (entry.dir && entry.broken === undefined && await io.pathExists(entry.dir)) return entry.dir;
+    if (
+      entry.dir &&
+      entry.broken === undefined &&
+      (await io.pathExists(entry.dir))
+    )
+      return entry.dir;
     const owner = deps.owner();
     return serializeToolOp(`tool:${owner ?? ""}:${id}`, async () => {
       assertOwner(owner);
-      const latest = tools.state.getState().find((item) => item.package.id === id);
+      const latest = tools.state
+        .getState()
+        .find((item) => item.package.id === id);
       if (!latest) return undefined;
       // 排队期间可能已经被另一次安装/自愈补好了。
-      if (latest.dir && await io.pathExists(latest.dir)) {
+      if (latest.dir && (await io.pathExists(latest.dir))) {
         if (latest.broken !== undefined) {
           assertOwner(owner);
           tools.setRunDir(id, latest.dir);
@@ -747,7 +899,11 @@ export function createWorkshop(deps: {
           `这个工具的运行副本不在了，而安装记录只剩清单（缺 ${missing.join("、")}）。请用作者提供的完整 ZIP 重新导入，或到「开发工具」里重新安装。`,
         );
       }
-      const staged = await stageVersion(io, { owner, tool: latest.package, files });
+      const staged = await stageVersion(io, {
+        owner,
+        tool: latest.package,
+        files,
+      });
       try {
         assertOwner(owner);
         tools.setRunDir(id, staged.dir);
@@ -762,26 +918,48 @@ export function createWorkshop(deps: {
 
   return {
     state: view.snapshot,
-    setBrief(value) { patch({ brief: value }); },
+    setBrief(value) {
+      patch({ brief: value });
+    },
 
     dismiss() {
       // 收起 = 这个项目退场：校验结论、「已安装 v1.2」这类话都是它的，
       // 留着只会贴到下一个项目头上。
-      patch({ project: null, check: null, installed: false, drift: false, stalled: false, repairs: 0, missing: false, running: false, note: null });
+      patch({
+        project: null,
+        check: null,
+        installed: false,
+        drift: false,
+        stalled: false,
+        repairs: 0,
+        missing: false,
+        running: false,
+        note: null,
+      });
     },
 
-    clearNote() { patch({ note: null }); },
+    clearNote() {
+      patch({ note: null });
+    },
 
     async create() {
       const state = store.getState();
       const brief = state.brief.trim();
       if (!brief || state.busy) return;
-      patch({ busy: true, note: null, installed: false, check: null, stalled: false, repairs: 0 });
+      patch({
+        busy: true,
+        note: null,
+        installed: false,
+        check: null,
+        stalled: false,
+        repairs: 0,
+      });
       try {
         const name = brief.slice(0, 24);
         const wanted = toolProjectIdFromBrief(brief);
         const created = await createToolProject(io, {
-          id: wanted, name,
+          id: wanted,
+          name,
           // 目录只有一个来源：设置里的项目根目录（用户可改）。以前还允许单次
           // 选目录，于是「选的目录」和「根目录」成了两个概念，而列表只扫根目录
           // ——建在别处的项目做完就从列表里消失了。一个概念、一个入口。
@@ -789,34 +967,58 @@ export function createWorkshop(deps: {
           owner: deps.owner(),
         });
         // 同名目录已存在时会退到 -2，得让用户知道"不是覆盖，是新建了一份"。
-        const renamed = created.id === wanted ? "" : `已有同名项目，这次建成了 ${created.id}。`;
+        const renamed =
+          created.id === wanted
+            ? ""
+            : `已有同名项目，这次建成了 ${created.id}。`;
         touchedAt.set(pathKey(created.dir), Date.now());
-        patch({ project: { dir: created.dir, id: created.id, name: created.name } });
+        patch({
+          project: { dir: created.dir, id: created.id, name: created.name },
+        });
         // 建完立刻读一次盘。
         //
         // 不读的话，展开行停在「读取中…」：状态徽标拿不到结论，合成行还会误报
         // 「还没有 index.html」（脚手架明明刚写完），而工具栏三个按钮全用
         // `check` 做 disabled —— 对新项目来说这是一整块死区。会话没连上时更糟：
         // 用户想点「继续开发」重试，按钮是灰的。
-        try { await readCheck(created.dir); }
-        catch (error) { patch({ note: { text: errorText(error), error: true } }); }
+        try {
+          await readCheck(created.dir);
+        } catch (error) {
+          patch({ note: { text: errorText(error), error: true } });
+        }
         project.projects.registerProject(created.dir);
         const started = await project.sessions.startNewSession(created.dir);
         if (!started.ok) {
-          patch({ note: { text: `${renamed}项目已建好，但会话没连上（${started.reason}）。可以稍后在会话里继续。`, error: true } });
+          patch({
+            note: {
+              text: `${renamed}项目已建好，但会话没连上（${started.reason}）。可以稍后在会话里继续。`,
+              error: true,
+            },
+          });
           void refreshProjects();
           return;
         }
         const agentKey = project.sessions.catalog.getState().agentKey ?? "";
         if (agentKey) {
-          project.conversation.send({
-            workspacePath: created.dir,
-            agentKey,
-            sessionId: project.conversation.foreground.session.getState().activeSessionId,
-          }, briefMessage(brief, created));
-          patch({ note: { text: `${renamed}会话已开始，AI 写完后会自动校验。` } });
+          project.conversation.send(
+            {
+              workspacePath: created.dir,
+              agentKey,
+              sessionId:
+                project.conversation.foreground.session.getState()
+                  .activeSessionId,
+            },
+            briefMessage(brief, created),
+          );
+          patch({
+            note: { text: `${renamed}会话已开始，AI 写完后会自动校验。` },
+          });
         } else {
-          patch({ note: { text: `${renamed}会话已建好，但还没连上 Agent。连上后把需求发给它即可（项目里的 AGENTS.md 就是规范）。` } });
+          patch({
+            note: {
+              text: `${renamed}会话已建好，但还没连上 Agent。连上后把需求发给它即可（项目里的 AGENTS.md 就是规范）。`,
+            },
+          });
         }
         void refreshProjects();
       } catch (error) {
@@ -833,12 +1035,22 @@ export function createWorkshop(deps: {
     async rollback(id) {
       try {
         const outcome = await tools.rollback(id);
-        if (!outcome) return { text: "没有可回退的版本——只有覆盖安装过的工具才会留下上一版。", error: true };
+        if (!outcome)
+          return {
+            text: "没有可回退的版本——只有覆盖安装过的工具才会留下上一版。",
+            error: true,
+          };
         // 退回旧版之后，项目目录里（如果有）通常还是新内容，标记成"有改动"。
         const selected = store.getState().project;
-        patch(selected?.id === id ? { installed: true, drift: true } : { installed: true });
+        patch(
+          selected?.id === id
+            ? { installed: true, drift: true }
+            : { installed: true },
+        );
         void refreshProjects();
-        const name = tools.state.getState().find((entry) => entry.package.id === id)?.package.name ?? id;
+        const name =
+          tools.state.getState().find((entry) => entry.package.id === id)
+            ?.package.name ?? id;
         return {
           text: `已退回 ${name} v${outcome.version}${outcome.previousVersion ? `（原 v${outcome.previousVersion} 已留下，可以再点一次退回去）` : ""}。`,
         };
@@ -849,21 +1061,32 @@ export function createWorkshop(deps: {
 
     async rename(dir, input) {
       const current = store.getState().project;
-      const previousId = current?.dir === dir ? current.id : dir.split(/[\\/]/).pop() ?? "";
-      const installedIds = new Set(tools.state.getState().map((entry) => entry.package.id));
+      const previousId =
+        current?.dir === dir ? current.id : (dir.split(/[\\/]/).pop() ?? "");
+      const installedIds = new Set(
+        tools.state.getState().map((entry) => entry.package.id),
+      );
       const nextId = input.id?.trim();
       // 已安装的工具改 id 会让设置与 aawStore 数据（都按 id 存）对不上，
       // 等于换了一个工具；只改显示名没有任何副作用。
       if (nextId && nextId !== previousId && installedIds.has(previousId))
-        return { text: "这个工具已经装进工具中心了。改目录名会换掉它的身份（设置与数据都按 id 存），先在「已安装」里卸载再改；只改显示名不受影响。", error: true };
+        return {
+          text: "这个工具已经装进工具中心了。改目录名会换掉它的身份（设置与数据都按 id 存），先在「已安装」里卸载再改；只改显示名不受影响。",
+          error: true,
+        };
       if (nextId && nextId !== previousId && isForeground(dir))
-        return { text: "这个项目正开着，会话历史挂在当前路径上——改目录名会让它接不上。先在侧栏换到别的项目再改名；只改显示名不受影响。", error: true };
+        return {
+          text: "这个项目正开着，会话历史挂在当前路径上——改目录名会让它接不上。先在侧栏换到别的项目再改名；只改显示名不受影响。",
+          error: true,
+        };
       try {
         const result = await renameToolProject(io, { dir, ...input });
         // 改名会换目录：把它当成"刚动过"，排序里留在前面。
         touchedAt.set(pathKey(result.dir), Date.now());
         if (current?.dir === dir)
-          patch({ project: { dir: result.dir, id: result.id, name: result.name } });
+          patch({
+            project: { dir: result.dir, id: result.id, name: result.name },
+          });
         await refreshProjects();
         return {
           text: result.moved
@@ -885,21 +1108,38 @@ export function createWorkshop(deps: {
       try {
         // 开会话前先确认项目还在：列表可能是旧数据（目录被移动/改名/删了），
         // 照着旧路径开会话只会让用户面对一个空目录，还以为是自己改错了地方。
-        if (!await io.pathExists(joinPath(dir, toolProjectFileNames.manifest))) {
-          patch({ note: { text: `这个目录里没有 manifest.json：${dir}。项目可能已被移动或删除，先刷新列表确认它还在。`, error: true } });
+        if (
+          !(await io.pathExists(joinPath(dir, toolProjectFileNames.manifest)))
+        ) {
+          patch({
+            note: {
+              text: `这个目录里没有 manifest.json：${dir}。项目可能已被移动或删除，先刷新列表确认它还在。`,
+              error: true,
+            },
+          });
           return;
         }
         // 会话开始前把 AGENTS.md 刷成当前文档的样子：AI 每个会话都读它，
         // 用户改过开发指导后从这里开始生效。同步失败不拦会话——编译模板
         // 兕底的那份即使旧一点，也比开不起来会话强。
-        try { await syncToolProjectGuide(io, dir); } catch { /* 不打断开会话 */ }
+        try {
+          await syncToolProjectGuide(io, dir);
+        } catch {
+          /* 不打断开会话 */
+        }
         patch({ busy: true });
         // select 自己会清掉上一个项目的提示；这里不再补一句 note: null——
         // 那会连本次读盘的失败原因一起擦掉，用户只看到"没反应"。
         await select(dir);
         project.projects.registerProject(dir);
         const started = await project.sessions.startNewSession(dir);
-        if (!started.ok) patch({ note: { text: `会话没连上（${started.reason}），可稍后重试。`, error: true } });
+        if (!started.ok)
+          patch({
+            note: {
+              text: `会话没连上（${started.reason}），可稍后重试。`,
+              error: true,
+            },
+          });
       } catch (error) {
         patch({ note: { text: errorText(error), error: true } });
       } finally {
@@ -927,7 +1167,9 @@ export function createWorkshop(deps: {
         known.set(entry.package.id, entry.sourceDir);
         // 读不到就当它不在：迁移最坏的结果是多造一个项目，删掉即可；
         // 反过来把活着的工具又迁一遍，会让"哪份是源码"变成歧义。
-        const alive = entry.dir ? await io.pathExists(entry.dir).catch(() => false) : false;
+        const alive = entry.dir
+          ? await io.pathExists(entry.dir).catch(() => false)
+          : false;
         if (!alive) pending.push(entry.package);
       }
       if (!pending.length) return { created: [], skipped: [] };
@@ -956,20 +1198,34 @@ export function createWorkshop(deps: {
           if (files) {
             const [defaultProjects, customProjects] = await Promise.all([
               listToolProjectSummaries(io, { owner }),
-              customRoot ? listToolProjectSummaries(io, { parent: customRoot }) : Promise.resolve([]),
+              customRoot
+                ? listToolProjectSummaries(io, { parent: customRoot })
+                : Promise.resolve([]),
             ]);
             const projectDirs = [...defaultProjects, ...customProjects]
               .filter((entry) => entry.id === id)
               .map((entry) => entry.dir);
             const root = await installedToolRoot(io, owner, id);
-            dirs = [...projectDirs, ...await listVersionDirs(io, owner, id), ...await listStagingDirs(io, owner, id)];
+            dirs = [
+              ...projectDirs,
+              ...(await listVersionDirs(io, owner, id)),
+              ...(await listStagingDirs(io, owner, id)),
+            ];
             // 旧版布局的运行副本直接放在工具根目录下。
-            if (await io.pathExists(joinPath(root, toolProjectFileNames.manifest))) dirs.push(root);
+            if (
+              await io.pathExists(joinPath(root, toolProjectFileNames.manifest))
+            )
+              dirs.push(root);
           }
           assertOwner(origin);
           const finish = host.skills.finishToolPurge;
           const report = files
-            ? await host.skills.toolPurge({ toolId: id, owner, projectDirs: dirs, stage: finish !== undefined })
+            ? await host.skills.toolPurge({
+                toolId: id,
+                owner,
+                projectDirs: dirs,
+                stage: finish !== undefined,
+              })
             : undefined;
           if (report?.failedDirs.length) {
             return {
@@ -991,18 +1247,37 @@ export function createWorkshop(deps: {
                 };
               }
             }
-            return { text: `卸载失败：${errorText(error)} 恢复写入后请重试卸载。`, error: true };
+            return {
+              text: `卸载失败：${errorText(error)} 恢复写入后请重试卸载。`,
+              error: true,
+            };
           }
           if (!report) {
             try {
               await host.closeTool(id);
             } catch (error) {
-              return { text: `安装记录已移除，工具窗口关闭失败：${errorText(error)}`, error: true };
+              return {
+                text: `安装记录已移除，工具窗口关闭失败：${errorText(error)}`,
+                error: true,
+              };
             }
             return { text: "文件与工具数据已保留。" };
           }
-          if (store.getState().project && dirs.includes(store.getState().project!.dir))
-            patch({ project: null, check: null, installed: false, drift: false, note: undefined, stalled: false, repairs: 0, missing: false, running: false });
+          if (
+            store.getState().project &&
+            dirs.includes(store.getState().project!.dir)
+          )
+            patch({
+              project: null,
+              check: null,
+              installed: false,
+              drift: false,
+              note: undefined,
+              stalled: false,
+              repairs: 0,
+              missing: false,
+              running: false,
+            });
           void refreshProjects();
           if (report.staged && finish) {
             try {
@@ -1015,11 +1290,21 @@ export function createWorkshop(deps: {
             }
           }
           const parts: string[] = [];
-          if (report.removedDirs.length) parts.push(`已删除 ${report.removedDirs.length} 个目录（源码或运行副本，含 node_modules）`);
+          if (report.removedDirs.length)
+            parts.push(
+              `已删除 ${report.removedDirs.length} 个目录（源码或运行副本，含 node_modules）`,
+            );
           if (report.removedData) parts.push("已删除工具数据");
           if (report.removedSecrets) parts.push("已删除工具保存的密钥");
-          if (report.skippedDirs.length) parts.push(`${report.skippedDirs.length} 个目录没有删除（不在受管目录内，或不是这个工具）`);
-          return { text: parts.length ? parts.join("；") + "。" : "没有找到需要清理的文件。" };
+          if (report.skippedDirs.length)
+            parts.push(
+              `${report.skippedDirs.length} 个目录没有删除（不在受管目录内，或不是这个工具）`,
+            );
+          return {
+            text: parts.length
+              ? parts.join("；") + "。"
+              : "没有找到需要清理的文件。",
+          };
         } catch (error) {
           return { text: purgeFailureText(error), error: true };
         }
@@ -1033,8 +1318,13 @@ export function createWorkshop(deps: {
       patch({ customRoot: path });
       deps.settings?.write(path);
       try {
-        project.projects.setRecentExclusions([await io.userDataDir("tools", "projects"), path]);
-      } catch { /* 排除列表失败不影响目录切换本身 */ }
+        project.projects.setRecentExclusions([
+          await io.userDataDir("tools", "projects"),
+          path,
+        ]);
+      } catch {
+        /* 排除列表失败不影响目录切换本身 */
+      }
       await refreshProjects();
     },
 
@@ -1046,15 +1336,24 @@ export function createWorkshop(deps: {
     },
 
     async importFromFolder() {
-      if (!host.isNative()) return { text: "导入文件夹需要桌面版。", error: true };
+      if (!host.isNative())
+        return { text: "导入文件夹需要桌面版。", error: true };
       const dir = await project.projects.pickDirectory();
       if (!dir) return { text: "已取消导入。" };
-      if (!await io.pathExists(joinPath(dir, toolProjectFileNames.manifest)))
-        return { text: `所选文件夹里没有 manifest.json：${dir}\n请选择包含 manifest.json 与 index.html 的工具目录。`, error: true };
+      if (!(await io.pathExists(joinPath(dir, toolProjectFileNames.manifest))))
+        return {
+          text: `所选文件夹里没有 manifest.json：${dir}\n请选择包含 manifest.json 与 index.html 的工具目录。`,
+          error: true,
+        };
       const check = await checkToolProject(io, dir);
       if (!check.ready || !check.tool) {
         const first = check.blocking[0];
-        return { text: first ? `校验没通过：${first.message}\n${first.hint}` : "校验没通过，没有可安装的工具。", error: true };
+        return {
+          text: first
+            ? `校验没通过：${first.message}\n${first.hint}`
+            : "校验没通过，没有可安装的工具。",
+          error: true,
+        };
       }
       try {
         // 带上目录里的其余文件（依赖、图片等），与 ZIP 导入走同一条安装链路。

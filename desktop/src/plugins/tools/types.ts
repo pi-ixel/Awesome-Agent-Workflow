@@ -58,11 +58,16 @@ export interface NetworkRule {
  * 想真正收紧的作者可以显式写 `network: false`；校验器会对"看起来在联网却没表态"
  * 的包给 warn，把声明这件事推给作者，而不是靠运行时突然翻脸。
  */
-export function readNetworkRule(permissions: ToolPermissions | undefined): NetworkRule {
+export function readNetworkRule(
+  permissions: ToolPermissions | undefined,
+): NetworkRule {
   const value = permissions?.network;
-  if (value === undefined) return { declared: false, enabled: true, hosts: [], insecure: false };
-  if (value === false) return { declared: true, enabled: false, hosts: [], insecure: false };
-  if (value === true) return { declared: true, enabled: true, hosts: [], insecure: false };
+  if (value === undefined)
+    return { declared: false, enabled: true, hosts: [], insecure: false };
+  if (value === false)
+    return { declared: true, enabled: false, hosts: [], insecure: false };
+  if (value === true)
+    return { declared: true, enabled: true, hosts: [], insecure: false };
   return {
     declared: true,
     enabled: true,
@@ -187,7 +192,9 @@ export interface ToolPackage {
  */
 export type ToolCarrierLevel = "L1" | "L2" | "L3";
 
-export function readToolCarrier(tool: Pick<ToolPackage, "build" | "runtime">): ToolCarrierLevel {
+export function readToolCarrier(
+  tool: Pick<ToolPackage, "build" | "runtime">,
+): ToolCarrierLevel {
   if (tool.runtime?.kind === "process") return "L3";
   return tool.build ? "L2" : "L1";
 }
@@ -216,9 +223,21 @@ export type ToolSetting = {
   readonly description?: string;
 } & (
   | { readonly type: "text"; readonly default: string }
-  | { readonly type: "number"; readonly default: number; readonly min?: number; readonly max?: number }
+  | {
+      readonly type: "number";
+      readonly default: number;
+      readonly min?: number;
+      readonly max?: number;
+    }
   | { readonly type: "boolean"; readonly default: boolean }
-  | { readonly type: "select"; readonly default: string; readonly options: readonly { readonly label: string; readonly value: string }[] }
+  | {
+      readonly type: "select";
+      readonly default: string;
+      readonly options: readonly {
+        readonly label: string;
+        readonly value: string;
+      }[];
+    }
 );
 
 export interface PersonalTool {

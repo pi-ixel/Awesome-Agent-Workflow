@@ -12,9 +12,19 @@ import type { ReactNode } from "react";
  * 单独渲染面板的夹具看不出这个问题（父级是 block），所以把外壳单独拎出来，
  * 让测试夹具和真实面板挂同一份代码，两边不会各写一份再跑偏。
  */
-export function ToolsPanelSurface({ visible, children }: { visible: boolean; children: ReactNode }) {
+export function ToolsPanelSurface({
+  visible,
+  children,
+}: {
+  visible: boolean;
+  children: ReactNode;
+}) {
   return (
-    <section aria-label={visible ? "工具面板" : undefined} hidden={!visible} className="h-full min-h-0">
+    <section
+      aria-label={visible ? "工具面板" : undefined}
+      hidden={!visible}
+      className="h-full min-h-0"
+    >
       {children}
     </section>
   );

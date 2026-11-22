@@ -1,6 +1,10 @@
 import { strToU8, unzipSync, zipSync } from "fflate";
 import type { ToolPackage } from "../types.ts";
-import { parseToolPackage, toolPackageLimit, validateToolPackageText } from "./package.ts";
+import {
+  parseToolPackage,
+  toolPackageLimit,
+  validateToolPackageText,
+} from "./package.ts";
 import { toolCapabilities, toolContractVersion } from "./contract.ts";
 import { isRuntimeBinPath, safeSourcePath } from "./sourceFiles.ts";
 import { toolLimits } from "./limits.ts";
@@ -17,9 +21,11 @@ export const toolArchiveEntries = 4000;
 
 /** 压缩包里与工具无关的系统垃圾：macOS 的 `__MACOSX/`、`.DS_Store`、`Thumbs.db`。 */
 function isArchiveNoise(path: string): boolean {
-  return path.startsWith("__MACOSX/")
-    || path.includes("/__MACOSX/")
-    || /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini)$/i.test(path);
+  return (
+    path.startsWith("__MACOSX/") ||
+    path.includes("/__MACOSX/") ||
+    /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini)$/i.test(path)
+  );
 }
 
 /**
@@ -59,7 +65,9 @@ const scannableSuffix = /\.(js|mjs|cjs|ts|tsx|jsx|html?|json|txt)$/i;
  * `actions` 是上行能力（工具提供给宿主，永远可用），`network` 是声明式
  * 授权（清单 `permissions` 里已有）——两者都不进 `requires`。
  */
-export function scanUsedCapabilities(texts: readonly string[]): readonly string[] {
+export function scanUsedCapabilities(
+  texts: readonly string[],
+): readonly string[] {
   const text = texts.filter(Boolean).join("\n");
   if (!text) return [];
   const used = new Set<string>();
@@ -83,15 +91,23 @@ export function scanUsedCapabilities(texts: readonly string[]): readonly string[
  * - 没扫到任何能力：什么都不写。空 `requires` 只会把“没用宿主能力的工具”
  *   挡在新契约之外，纯亏不赚。
  */
-export function withScannedRequires(tool: ToolPackage, texts: readonly string[]): ToolPackage {
+export function withScannedRequires(
+  tool: ToolPackage,
+  texts: readonly string[],
+): ToolPackage {
   const detected = scanUsedCapabilities(texts);
   if (!detected.length) return tool;
   const existing = tool.requires;
   if (existing) {
-    const capabilities = [...new Set([...(existing.capabilities ?? []), ...detected])];
+    const capabilities = [
+      ...new Set([...(existing.capabilities ?? []), ...detected]),
+    ];
     return { ...tool, requires: { ...existing, capabilities } };
   }
-  return { ...tool, requires: { contract: toolContractVersion, capabilities: detected } };
+  return {
+    ...tool,
+    requires: { contract: toolContractVersion, capabilities: detected },
+  };
 }
 
 /**
@@ -102,10 +118,17 @@ export function withScannedRequires(tool: ToolPackage, texts: readonly string[])
  * 打个包。现在直接写清：改完在工具中心点「导入工具」选中这个 ZIP 即可。
  * 不提「拖回」：拖拽导入从来没被支持过，写了只会让人照做然后发现没反应。
  */
-export function toolProjectFiles(tool: ToolPackage, extraTexts: readonly string[] = []): Record<string, string> {
+export function toolProjectFiles(
+  tool: ToolPackage,
+  extraTexts: readonly string[] = [],
+): Record<string, string> {
   // 导出前按实际用到的能力补写 `requires`：作者漏声明的包，拿到旧宿主的
   // 同事安装时就能看到“缺什么、怎么解决”，而不是装上之后白屏。
-  const scanned = withScannedRequires(tool, [tool.html, ...Object.values(tool.sourceFiles ?? {}), ...extraTexts]);
+  const scanned = withScannedRequires(tool, [
+    tool.html,
+    ...Object.values(tool.sourceFiles ?? {}),
+    ...extraTexts,
+  ]);
   const { html, sourceFiles, ...manifest } = scanned;
   const author = tool.author ? `作者：${tool.author}\n` : "";
   const source = tool.source ? `来源：${tool.source}\n` : "";
@@ -169,14 +192,24 @@ ID 相同的会覆盖更新；界面会在安装后告诉你版本从哪一版�
   };
   // Windows treats paths case-insensitively. Author files win over generated
   // scaffolding while retaining their exact contents and original path casing.
-  const authored = new Set(Object.keys(sourceFiles ?? {}).map((path) => path.toLowerCase()));
-  const generated = Object.fromEntries(Object.entries(scaffolding).filter(([path]) => !authored.has(path.toLowerCase())));
+  const authored = new Set(
+    Object.keys(sourceFiles ?? {}).map((path) => path.toLowerCase()),
+  );
+  const generated = Object.fromEntries(
+    Object.entries(scaffolding).filter(
+      ([path]) => !authored.has(path.toLowerCase()),
+    ),
+  );
   const combined = { ...generated, ...sourceFiles };
   // Optional instructions must not turn an installable package into a ZIP
   // that exceeds the source-count or serialized-size limits on reimport.
-  const exportedSources = Object.keys(generated).length > 0
-    && !validateToolPackageText(JSON.stringify({ ...manifest, html, sourceFiles: combined })).ok
-    ? sourceFiles : combined;
+  const exportedSources =
+    Object.keys(generated).length > 0 &&
+    !validateToolPackageText(
+      JSON.stringify({ ...manifest, html, sourceFiles: combined }),
+    ).ok
+      ? sourceFiles
+      : combined;
   return {
     ...exportedSources,
     "manifest.json": JSON.stringify(manifest, null, 2),
@@ -204,61 +237,102 @@ export interface ToolArchive {
   readonly binBytes: number;
 }
 
-export function exportToolProject(tool: ToolPackage, extra: Readonly<Record<string, Uint8Array>> = {}): Uint8Array {
+export function exportToolProject(
+  tool: ToolPackage,
+  extra: Readonly<Record<string, Uint8Array>> = {},
+): Uint8Array {
   // 目录里的代码文件也扫：L2 的 app.js 构建产物里才是 `aaw*` 调用的真实落点，
   // 只扫清单会漏掉打包页工具用到的一切能力。
   const extraTexts = Object.entries(extra)
     .filter(([name]) => !isDependencyPath(name) && scannableSuffix.test(name))
     .map(([, bytes]) => {
-      try { return new TextDecoder().decode(bytes); } catch { return ""; }
+      try {
+        return new TextDecoder().decode(bytes);
+      } catch {
+        return "";
+      }
     });
-  const text = Object.fromEntries(Object.entries(toolProjectFiles(tool, extraTexts)).map(([name, source]) => [name, strToU8(source)]));
+  const text = Object.fromEntries(
+    Object.entries(toolProjectFiles(tool, extraTexts)).map(([name, source]) => [
+      name,
+      strToU8(source),
+    ]),
+  );
   // 工具目录里的文件（node_modules、图片、wasm…）优先于清单里的同路径文本，
   // 因为磁盘上的那份才是作者实际在用的。
   return zipSync({ ...text, ...extra }, { level: 6 });
 }
 
 export function importToolArchive(bytes: Uint8Array): ToolArchive {
-  if (bytes.length > toolArchiveLimit) throw new Error(`源码 ZIP 不能超过 ${Math.round(toolArchiveLimit / 1024 / 1024)} MB。`);
+  if (bytes.length > toolArchiveLimit)
+    throw new Error(
+      `源码 ZIP 不能超过 ${Math.round(toolArchiveLimit / 1024 / 1024)} MB。`,
+    );
   const names = new Set<string>();
   let total = 0;
   let files: Record<string, Uint8Array>;
   try {
-    files = unzipSync(bytes, { filter: (file) => {
-      const path = file.name.replace(/\/$/, "");
-      // macOS 压缩会带一层 `__MACOSX/` 资源目录和 `.DS_Store`；以前它们会被
-      // 当成"不在项目根目录"的证据，用户只看到一句看不懂的报错。
-      if (isArchiveNoise(path)) return false;
-      if (!safeSourcePath(path) || names.has(path.toLowerCase())) throw new Error("源码 ZIP 含不安全或重复的文件路径。");
-      names.add(path.toLowerCase());
-      total += file.originalSize;
-      if (names.size > toolArchiveEntries || !Number.isSafeInteger(total) || total > toolArchiveLimit)
-        throw new Error(`源码 ZIP 解压后不能超过 ${Math.round(toolArchiveLimit / 1024 / 1024)} MB 或 ${toolArchiveEntries} 个条目。`);
-      return !file.name.endsWith("/");
-    } });
+    files = unzipSync(bytes, {
+      filter: (file) => {
+        const path = file.name.replace(/\/$/, "");
+        // macOS 压缩会带一层 `__MACOSX/` 资源目录和 `.DS_Store`；以前它们会被
+        // 当成"不在项目根目录"的证据，用户只看到一句看不懂的报错。
+        if (isArchiveNoise(path)) return false;
+        if (!safeSourcePath(path) || names.has(path.toLowerCase()))
+          throw new Error("源码 ZIP 含不安全或重复的文件路径。");
+        names.add(path.toLowerCase());
+        total += file.originalSize;
+        if (
+          names.size > toolArchiveEntries ||
+          !Number.isSafeInteger(total) ||
+          total > toolArchiveLimit
+        )
+          throw new Error(
+            `源码 ZIP 解压后不能超过 ${Math.round(toolArchiveLimit / 1024 / 1024)} MB 或 ${toolArchiveEntries} 个条目。`,
+          );
+        return !file.name.endsWith("/");
+      },
+    });
   } catch (error) {
-    throw new Error(error instanceof Error ? `无法读取源码 ZIP：${error.message}` : "无法读取源码 ZIP。", { cause: error });
+    throw new Error(
+      error instanceof Error
+        ? `无法读取源码 ZIP：${error.message}`
+        : "无法读取源码 ZIP。",
+      { cause: error },
+    );
   }
   // 依赖自身的 manifest.json 是普通资源，不能当作另一个工具的入口清单。
-  const manifests = Object.keys(files).filter((path) =>
-    (path === "manifest.json" || path.endsWith("/manifest.json"))
-    && !path.split("/").includes("node_modules"),
+  const manifests = Object.keys(files).filter(
+    (path) =>
+      (path === "manifest.json" || path.endsWith("/manifest.json")) &&
+      !path.split("/").includes("node_modules"),
   );
-  if (manifests.length !== 1) throw new Error("源码 ZIP 需要唯一的 manifest.json。");
+  if (manifests.length !== 1)
+    throw new Error("源码 ZIP 需要唯一的 manifest.json。");
   const prefix = manifests[0]!.slice(0, -"manifest.json".length);
-  if (!files[`${prefix}index.html`] || Object.keys(files).some((path) => !path.startsWith(prefix)))
+  if (
+    !files[`${prefix}index.html`] ||
+    Object.keys(files).some((path) => !path.startsWith(prefix))
+  )
     throw new Error("manifest.json 与 index.html 必须放在同一个项目根目录。");
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const decode = (path: string) => {
-    try { return decoder.decode(files[path]); }
-    catch { throw new Error(`${path} 必须是 UTF-8 文本。`); }
+    try {
+      return decoder.decode(files[path]);
+    } catch {
+      throw new Error(`${path} 必须是 UTF-8 文本。`);
+    }
   };
   let manifest: unknown;
-  try { manifest = JSON.parse(decode(`${prefix}manifest.json`)); } catch (error) {
-    if (error instanceof Error && error.message.endsWith("必须是 UTF-8 文本。")) throw error;
+  try {
+    manifest = JSON.parse(decode(`${prefix}manifest.json`));
+  } catch (error) {
+    if (error instanceof Error && error.message.endsWith("必须是 UTF-8 文本。"))
+      throw error;
     throw new Error("manifest.json 格式无效。", { cause: error });
   }
-  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) throw new Error("manifest.json 必须是对象。");
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest))
+    throw new Error("manifest.json 必须是对象。");
   // 文本文件仍然进清单（AI 编辑、导出时都要能读到）；二进制只留在 files 里，
   // 由调用方写到工具目录。用"能否按 UTF-8 严格解码"来分类，不猜扩展名。
   // `node_modules/**` 是例外：它虽然也是文本，但属于依赖而不是作者源码，
@@ -267,12 +341,14 @@ export function importToolArchive(bytes: Uint8Array): ToolArchive {
   // `preferences.json` 里，塞进去等于让每次唤起启动器都读一个大文件。运行只认
   // 磁盘上的那份（协议层从工具目录直接读），所以它只要落盘就够了。
   const declaredOut = (() => {
-    const build = manifest && typeof manifest === "object" && !Array.isArray(manifest)
-      ? (manifest as Record<string, unknown>).build
-      : undefined;
-    const out = build && typeof build === "object" && !Array.isArray(build)
-      ? (build as Record<string, unknown>).out
-      : undefined;
+    const build =
+      manifest && typeof manifest === "object" && !Array.isArray(manifest)
+        ? (manifest as Record<string, unknown>).build
+        : undefined;
+    const out =
+      build && typeof build === "object" && !Array.isArray(build)
+        ? (build as Record<string, unknown>).out
+        : undefined;
     return typeof out === "string" ? out.replace(/^\.\//, "") : undefined;
   })();
   const text: Record<string, string> = {};
@@ -286,14 +362,26 @@ export function importToolArchive(bytes: Uint8Array): ToolArchive {
       binBytes += data.byteLength;
       continue;
     }
-    if (name === "manifest.json" || name === "index.html" || isDependencyPath(name) || name === declaredOut) continue;
-    try { text[name] = decoder.decode(data); } catch { /* 二进制：只落盘，不进清单 */ }
+    if (
+      name === "manifest.json" ||
+      name === "index.html" ||
+      isDependencyPath(name) ||
+      name === declaredOut
+    )
+      continue;
+    try {
+      text[name] = decoder.decode(data);
+    } catch {
+      /* 二进制：只落盘，不进清单 */
+    }
   }
-  const tool = parseToolPackage(JSON.stringify({
-    ...manifest,
-    html: decode(`${prefix}index.html`),
-    sourceFiles: Object.keys(text).length ? text : undefined,
-  }));
+  const tool = parseToolPackage(
+    JSON.stringify({
+      ...manifest,
+      html: decode(`${prefix}index.html`),
+      sourceFiles: Object.keys(text).length ? text : undefined,
+    }),
+  );
   return { tool, files: relative, binBytes };
 }
 
@@ -308,14 +396,28 @@ export function importToolProject(bytes: Uint8Array): ToolPackage {
  * 返回 `files` 时表示"这个包带了需要落盘的文件"（ZIP 里除清单与页面之外的
  * 东西），调用方应当先写到工具目录再安装，否则运行时找不到 `node_modules`。
  */
-export async function readToolUpload(file: File): Promise<{ readonly tool: ToolPackage; readonly files?: Readonly<Record<string, Uint8Array>>; readonly binBytes?: number }> {
+export async function readToolUpload(file: File): Promise<{
+  readonly tool: ToolPackage;
+  readonly files?: Readonly<Record<string, Uint8Array>>;
+  readonly binBytes?: number;
+}> {
   if (file.name.toLowerCase().endsWith(".zip")) {
-    if (file.size > toolArchiveLimit) throw new Error(`源码 ZIP 不能超过 ${Math.round(toolArchiveLimit / 1024 / 1024)} MB。`);
+    if (file.size > toolArchiveLimit)
+      throw new Error(
+        `源码 ZIP 不能超过 ${Math.round(toolArchiveLimit / 1024 / 1024)} MB。`,
+      );
     const archive = importToolArchive(new Uint8Array(await file.arrayBuffer()));
     // 全部文件都交出去（含 manifest.json 与 index.html）：工具目录要能独立成为
     // 一个完整项目，作者装完可以直接在那个目录里继续改。
-    return { tool: archive.tool, files: archive.files, binBytes: archive.binBytes };
+    return {
+      tool: archive.tool,
+      files: archive.files,
+      binBytes: archive.binBytes,
+    };
   }
-  if (file.size > toolPackageLimit) throw new Error(`工具包不能超过 ${Math.round(toolPackageLimit / 1024 / 1024)} MB。`);
+  if (file.size > toolPackageLimit)
+    throw new Error(
+      `工具包不能超过 ${Math.round(toolPackageLimit / 1024 / 1024)} MB。`,
+    );
   return { tool: parseToolPackage(await file.text()) };
 }

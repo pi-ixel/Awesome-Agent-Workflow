@@ -29,13 +29,13 @@
 
 工具能做的事远比「格式化一段文本」多，常见的几类：
 
-| 场景 | 例子 |
-|---|---|
-| 文本与数据处理 | JSON / YAML 格式化与互转、正则测试、批量改名、编码解码、Markdown 转表格 |
-| 剪切板与输入增强 | 剪切板历史、复制后自动去格式或转大写、常用短语速查、颜色值转换 |
-| 计算与查阅 | 时间戳换算、进制与单位换算、哈希与二维码、内网接口状态速查 |
-| 文件与小批处理 | 打开一个文本、清洗内容、再存成新文件；把一批文本合并导出 |
-| 个人留存 | 待办清单、随手记、常用配置、最近用过的输入（走 `aawStore`） |
+| 场景             | 例子                                                                    |
+| ---------------- | ----------------------------------------------------------------------- |
+| 文本与数据处理   | JSON / YAML 格式化与互转、正则测试、批量改名、编码解码、Markdown 转表格 |
+| 剪切板与输入增强 | 剪切板历史、复制后自动去格式或转大写、常用短语速查、颜色值转换          |
+| 计算与查阅       | 时间戳换算、进制与单位换算、哈希与二维码、内网接口状态速查              |
+| 文件与小批处理   | 打开一个文本、清洗内容、再存成新文件；把一批文本合并导出                |
+| 个人留存         | 待办清单、随手记、常用配置、最近用过的输入（走 `aawStore`）             |
 
 它能读写系统剪切板、读写用户亲手选的文件、把数据留到下次打开、按声明联网访问 http/https，在你声明之后还能常驻后台与弹提醒。需要第三方库时，把纯 JS 依赖打进一个 `app.js`（见下面「带依赖的工具」）。**不能**读任意本地路径、不能调用摄像头或录屏——平台把这些挡在沙箱外面，是为了让一个 ZIP 能在别人机器上直接装、直接跑。
 
@@ -119,14 +119,14 @@ HTTP 请求（`fetch`）。**代价**：作者要会跑一条命令。脚手架�
 进程用 **NDJSON over stdio** 与宿主通信（一行一条 JSON，和 MCP / LSP 同一个形态，
 `echo '{...}' | ./bin/run` 就能手工调试）：
 
-| 方向 | 方法 | 参数 | 返回 |
-|---|---|---|---|
-| 宿主→工具 | `initialize` | `{ protocol, capabilities }` | `{ protocol, actions: [...] }` |
-| 宿主→工具 | `invoke` | `{ action, input }` | `{ ok: true, value }` 或 `{ ok: false, error }` |
-| 宿主→工具 | `event` | `{ topic, payload }` | 无（通知） |
-| 宿主→工具 | `shutdown` | — | 进程自行退出 |
-| 工具→宿主 | `aaw.call` | `{ cap, fn, args }` | `{ ok, value }` |
-| 工具→宿主 | `aaw.emit` | `{ topic, payload }` | 无 |
+| 方向      | 方法         | 参数                         | 返回                                            |
+| --------- | ------------ | ---------------------------- | ----------------------------------------------- |
+| 宿主→工具 | `initialize` | `{ protocol, capabilities }` | `{ protocol, actions: [...] }`                  |
+| 宿主→工具 | `invoke`     | `{ action, input }`          | `{ ok: true, value }` 或 `{ ok: false, error }` |
+| 宿主→工具 | `event`      | `{ topic, payload }`         | 无（通知）                                      |
+| 宿主→工具 | `shutdown`   | —                            | 进程自行退出                                    |
+| 工具→宿主 | `aaw.call`   | `{ cap, fn, args }`          | `{ ok, value }`                                 |
+| 工具→宿主 | `aaw.emit`   | `{ topic, payload }`         | 无                                              |
 
 **动作语义与页面载体完全一致**：20 秒超时、返回 ≤ 512 KB、同一输入重复调用结果相同。
 所以工具中心、启动器、AI 调用、导出校验对你用哪种载体一无所知。
@@ -171,10 +171,21 @@ L3 里 `store` / `sharedStore` / `secrets` / `settings` 这四项**必须走宿�
   "icon": "表",
   "html": "",
   "actions": [
-    { "id": "run", "description": "一句话说明", "inputSchema": { "type": "object", "properties": {} } }
+    {
+      "id": "run",
+      "description": "一句话说明",
+      "inputSchema": { "type": "object", "properties": {} }
+    }
   ],
   "settingsSchema": [
-    { "id": "indent", "label": "缩进空格数", "type": "number", "default": 2, "min": 0, "max": 8 }
+    {
+      "id": "indent",
+      "label": "缩进空格数",
+      "type": "number",
+      "default": 2,
+      "min": 0,
+      "max": 8
+    }
   ],
   "permissions": { "network": false }
 }
@@ -233,19 +244,19 @@ L3 里 `store` / `sharedStore` / `secrets` / `settings` 这四项**必须走宿�
 
 ## 红线
 
-| 编号 | 级别 | 规定 | 怎么改 |
-|---|---|---|---|
-| R1 | block | id 创建后不可改 | 继续原工具就保持原 id；确实另起一个就在回复里说明这是新工具 |
-| R2 | block | 不得引用远程 script/style（相对路径可以） | 把依赖源码内联进同一个 <script>/<style>，或把文件放进工具目录用相对路径引用 |
-| R3 | block | 清单声明的动作必须都有实现 | 在 <script> 末尾写 window.aawActions = { … }，与界面按钮共用同一函数 |
-| R4 | warn | 设置只能经 settingsSchema 声明 | 设置写进清单，代码读只读的 window.aawSettings |
-| R5 | warn | 不得把密钥/口令写进 html | 改成设置项由用户填，或运行时让用户输入 |
-| R6 | warn | 需要留存的数据走 window.aawStore | await aawStore.set(k, v) / get(k)；localStorage 重启即清空 |
-| R7 | warn | 不得写死 ≥800px 的宽度 | 用 width:100% + max-width，避免窄窗口横向溢出 |
-| R8 | warn | 联网的工具应该声明 permissions.network | 不声明也能跑（默认允许），但用户看不到「这个工具会联网」；补上 "permissions": { "network": true }，或写 hosts 限定域名 |
-| R9 | block | 不得改动或夹带平台框架与关键契约文件 | 工具包只保留 manifest.json、index.html、构建产物 app.js 或 bin/ 里的运行时，以及你自己写的源码；AGENTS.md / README.md / runtime 框架这些平台文件不该出现在包里，出现就删 |
-| R10 | warn | 声明了 build 却没带 src/，别人拿到只有产物没法读 | 想让人读懂就把 src/ 一起带上；不想公开实现就不带——这只是提醒，平台不拦。运行只认 build.out |
-| R11 | block | AI 许愿生成的工具不得声明进程载体（runtime.kind = process） | 许愿链路只产出 L1/L2；确实需要进程、原生模块或非 HTTP 协议时找人工接手，由人写 manifest 与 bin/、人审可执行文件 |
+| 编号 | 级别  | 规定                                                        | 怎么改                                                                                                                                                                   |
+| ---- | ----- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R1   | block | id 创建后不可改                                             | 继续原工具就保持原 id；确实另起一个就在回复里说明这是新工具                                                                                                              |
+| R2   | block | 不得引用远程 script/style（相对路径可以）                   | 把依赖源码内联进同一个 <script>/<style>，或把文件放进工具目录用相对路径引用                                                                                              |
+| R3   | block | 清单声明的动作必须都有实现                                  | 在 <script> 末尾写 window.aawActions = { … }，与界面按钮共用同一函数                                                                                                     |
+| R4   | warn  | 设置只能经 settingsSchema 声明                              | 设置写进清单，代码读只读的 window.aawSettings                                                                                                                            |
+| R5   | warn  | 不得把密钥/口令写进 html                                    | 改成设置项由用户填，或运行时让用户输入                                                                                                                                   |
+| R6   | warn  | 需要留存的数据走 window.aawStore                            | await aawStore.set(k, v) / get(k)；localStorage 重启即清空                                                                                                               |
+| R7   | warn  | 不得写死 ≥800px 的宽度                                      | 用 width:100% + max-width，避免窄窗口横向溢出                                                                                                                            |
+| R8   | warn  | 联网的工具应该声明 permissions.network                      | 不声明也能跑（默认允许），但用户看不到「这个工具会联网」；补上 "permissions": { "network": true }，或写 hosts 限定域名                                                   |
+| R9   | block | 不得改动或夹带平台框架与关键契约文件                        | 工具包只保留 manifest.json、index.html、构建产物 app.js 或 bin/ 里的运行时，以及你自己写的源码；AGENTS.md / README.md / runtime 框架这些平台文件不该出现在包里，出现就删 |
+| R10  | warn  | 声明了 build 却没带 src/，别人拿到只有产物没法读            | 想让人读懂就把 src/ 一起带上；不想公开实现就不带——这只是提醒，平台不拦。运行只认 build.out                                                                               |
+| R11  | block | AI 许愿生成的工具不得声明进程载体（runtime.kind = process） | 许愿链路只产出 L1/L2；确实需要进程、原生模块或非 HTTP 协议时找人工接手，由人写 manifest 与 bin/、人审可执行文件                                                          |
 
 ## 交付流程
 
@@ -272,4 +283,3 @@ L3 里 `store` / `sharedStore` / `secrets` / `settings` 这四项**必须走宿�
 - [ ] 会联网就声明了 `permissions.network`（会联网 true / 不联网 false / 限域名写 hosts）
 - [ ] 空输入 / 超长输入 / 非法输入都有提示，不会白屏（代码里每个分支都有返回）
 - [ ] 容器没有写死像素宽度，宽内容在 `overflow-x: auto` 的容器里滚动（渲染效果让用户在预览里确认）
-
