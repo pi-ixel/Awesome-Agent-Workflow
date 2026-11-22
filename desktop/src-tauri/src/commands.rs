@@ -392,6 +392,7 @@ fn is_tool_project_dir(dir: &std::path::Path, tool_id: &str) -> bool {
 /// ——和 tools-runtime 的 `tool-storage.mjs` 保持同一口径。
 #[tauri::command]
 pub fn tool_purge(
+    app: tauri::AppHandle,
     tool_id: String,
     owner: String,
     project_dirs: Vec<String>,
@@ -441,6 +442,11 @@ pub fn tool_purge(
         if file.is_file() {
             report.removed_data = std::fs::remove_file(&file).is_ok();
         }
+    }
+    // 卸载后运行目录登记不再有意义：清掉，避免下次重装同名工具时协议层
+    // 还查到指向旧目录的悬空项。
+    if let Some(host) = tauri::Manager::try_state::<crate::tools::ToolsHost>(&app) {
+        host.clear_runtime_dir(&tool_id);
     }
     Ok(report)
 }

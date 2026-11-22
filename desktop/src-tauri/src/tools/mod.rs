@@ -133,6 +133,13 @@ pub struct ToolsHost {
     bus: native::Bus,
     /// 跑着的 L3 进程工具。
     processes: Mutex<HashMap<String, Arc<process_host::ProcessHandle>>>,
+    /// 打开时登记的**运行目录**（`tool_id → dir`）。
+    ///
+    /// 协议层只认得 origin 里的 tool_id，不知道目录在哪——以前固定去
+    /// `tools_root/<id>` 找，于是「前端物化在 `installed/<账号>/<id>` 的示例
+    /// 工具」装完打开必 404（2026-11-22 用户截图报）。打开成功时在这里登记，
+    /// 协议层优先查这张表。
+    runtime_dirs: Mutex<HashMap<String, PathBuf>>,
 }
 
 impl ToolsHost {
@@ -223,6 +230,30 @@ impl ToolsHost {
             }
         }
         PathBuf::from("tools")
+    }
+
+    /// 打开成功时登记运行目录。重复打开覆盖旧值——以最近一次解析为准。
+    fn set_runtime_dir(&self, tool_id: &str, dir: &Path) {
+        if let Ok(mut map) = self.runtime_dirs.lock() {
+            map.insert(tool_id.to_string(), dir.to_path_buf());
+        }
+    }
+
+    /// 卸载时移除登记，避免留下指向已删目录的悬空项。
+    pub(crate) fn clear_runtime_dir(&self, tool_id: &str) {
+        if let Ok(mut map) = self.runtime_dirs.lock() {
+            map.remove(tool_id);
+        }
+    }
+
+    /// 协议层的目录解析：优先查打开时登记的运行目录（它比 `tools_root/<id>`
+    /// 更接近事实——前端物化、ZIP 导入的副本都记在这里）；登记的目录不在了
+    /// 才退回旧路径。`runtime_dir` 只在 open 成功后存在，返回 `None` 时让
+    /// 调用方走 `tool_dir` 的兼容路径与报错文案。
+    fn resolve_runtime_dir(&self, tool_id: &str) -> Option<PathBuf> {
+        let dir = self.runtime_dirs.lock().ok()?.get(tool_id).cloned()?;
+        // 目录被移动/删除后登记就成了悬空项：当作没有，别拿它 404。
+        if dir.is_dir() { Some(dir) } else { None }
     }
 
     fn tool_dir(&self, tool_id: &str) -> Result<PathBuf, String> {
@@ -444,12 +475,17 @@ fn serve(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
     }
 
     // ── 静态文件 ──────────────────────────────────────────────────────
-    let dir = match host.tool_dir(&tool_id) {
-        Ok(dir) => dir,
-        Err(error) => {
-            eprintln!("[aaw-tools] {error}");
-            return protocol::empty(404);
-        }
+    // 打开时登记的运行目录优先：示例工具物化在 installed/<账号>/<id>，
+    // tools_root/<id> 里根本没有它——以前固定查后者，装完打开必 404。
+    let dir = match host.resolve_runtime_dir(&tool_id) {
+        Some(dir) => dir,
+        None => match host.tool_dir(&tool_id) {
+            Ok(dir) => dir,
+            Err(error) => {
+                eprintln!("[aaw-tools] {error}");
+                return protocol::empty(404);
+            }
+        },
     };
     let Some(file) = protocol::resolve_file(&dir, &path) else {
         eprintln!("[aaw-tools] 工具 {tool_id} 找不到 {path}");
@@ -520,6 +556,9 @@ pub fn open_tool(app: &AppHandle, tool_id: &str, hint: Option<&str>) -> Result<(
     // 打开关口在**建窗口之前**：判定放后面就会出现"先闪一个空白窗口、再关掉"，
     // 那是用户最难描述的一类故障。判定本身只读清单，不需要窗口。
     compat::check(&manifest)?;
+    // 目录解析成功且验过身份：登记进运行目录表。协议层（serve）从这里拿
+    // 目录——tools_root/<id> 只是不在前端记录里的兼容路径。
+    host.set_runtime_dir(tool_id, &dir);
     // L3：先拉进程。进程起不来就不开窗——否则用户会看到一个界面，点任何东西
     // 都报"工具进程没有在运行"。
     if manifest.is_process() {
@@ -932,5 +971,31 @@ mod tests {
         // 这样"改一行工具代码、刷新窗口就见效"才成立。
         let root = resolve_tools_root(Path::new("C:/nonexistent-data"));
         assert!(root.ends_with("tools"), "{root:?}");
+    }
+
+    /// 运行目录注册表：打开时登记的目录优先于 tools_root；登记的目录被删后
+    /// 自愈为"没有登记"，退回旧路径。示例工具物化在 installed/<账号>/<id>，
+    /// tools_root 里根本没有它——没有这张表，协议层装完打开必 404
+    /// （2026-11-22 用户截图报的 Z-20）。
+    #[test]
+    fn runtime_dir_registry_overrides_tools_root_and_self_heals() {
+        let host = ToolsHost::default();
+        // 没登记：返回 None，调用方走 tool_dir 兼容路径。
+        assert!(host.resolve_runtime_dir("quick-notes").is_none());
+
+        // 登记一个真实存在的目录。
+        let dir = std::env::temp_dir().join("aaw-runtime-dir-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        host.set_runtime_dir("quick-notes", &dir);
+        assert_eq!(host.resolve_runtime_dir("quick-notes"), Some(dir.clone()));
+
+        // 目录被删：登记变悬空项，自愈为 None，不会拿它 404。
+        std::fs::remove_dir(&dir).unwrap();
+        assert!(host.resolve_runtime_dir("quick-notes").is_none());
+
+        // 卸载清理：登记被移除。
+        host.set_runtime_dir("quick-notes", &dir);
+        host.clear_runtime_dir("quick-notes");
+        assert!(host.resolve_runtime_dir("quick-notes").is_none());
     }
 }
