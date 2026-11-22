@@ -248,12 +248,17 @@ impl ToolsHost {
         }
     }
 
-    /// 工具目录迁移后重映射运行目录登记：旧前缀 → 新前缀。
-    pub(crate) fn remap_runtime_dirs(&self, from: &Path, to: &Path) {
+    /// 工具目录迁移后重映射运行目录登记：按结构性规则集改写（账号层
+    /// 变化不是纯前缀替换，规则由 location::structural_pairs 生成）。
+    pub(crate) fn remap_runtime_dirs_with(&self, pairs: &[(String, String)]) {
         if let Ok(mut map) = self.runtime_dirs.lock() {
             for dir in map.values_mut() {
-                if let Ok(relative) = dir.strip_prefix(from) {
-                    *dir = to.join(relative);
+                let text = dir.to_string_lossy().replace('\\', "/");
+                for (from, to) in pairs {
+                    if text.starts_with(from.as_str()) {
+                        *dir = PathBuf::from(format!("{to}{}", &text[from.len()..]));
+                        break;
+                    }
                 }
             }
         }
@@ -273,17 +278,15 @@ impl ToolsHost {
         if !valid_tool_id(tool_id) {
             return Err("无效的工具 id。".into());
         }
-        // dev 期仓库根里工具直接躺在根下；生产环境是
-        // `<工具目录根>/installed/<账号>/<id>`——与前端写入的路径同源
-        // （同一个位置指针），不再有两套解析。
+        // dev 期仓库根里工具直接躺在根下；生产环境按账号指针解析
+        // （自定义 home 无账号层、默认位置带账号层）——与前端写入的路径
+        // 同源，不再有两套解析。
         let dir = match self.dev_tools_root() {
             Some(root) => root.join(tool_id),
             None => {
+                let data_root = self.data_root()?;
                 let owner = self.store()?.owner()?;
-                location::tool_root(&self.data_root()?)
-                    .join("installed")
-                    .join(owner)
-                    .join(tool_id)
+                location::tool_partition(&data_root, &owner, "installed").join(tool_id)
             }
         };
         if !dir.is_dir() {
@@ -355,15 +358,13 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {    // 开发指导窗
         .ok_or("拿不到 AAW 数据目录")?;
     *host.data_root.lock().map_err(|error| error.to_string())? = Some(data_root.clone());
 
-    // 位置迁移状态（工具目录 / 工具数据各自一份），并做升级一次性搬迁：
-    // 把旧版裸 `%APPDATA%/tools` 的内容搬进统一落点。
-    if app.try_state::<location::ToolRootMigration>().is_none() {
-        app.manage(location::ToolRootMigration::default());
-    }
-    if app.try_state::<location::ToolDataMigration>().is_none() {
-        app.manage(location::ToolDataMigration::default());
+    // 位置迁移状态（工具整体一份），并做两项升级动作：旧裸 `%APPDATA%/tools`
+    // 搬进统一落点；旧全局双指针收编成按账号指针。
+    if app.try_state::<location::ToolHomeMigration>().is_none() {
+        app.manage(location::ToolHomeMigration::default());
     }
     location::migrate_legacy_root(app);
+    location::collect_legacy_pointers(app);
 
     // dev 期工具根：环境变量 > 仓库内 `desktop/tools`。生产环境没有这一层，
     // 工具目录一律由 location::tool_root 解析。
@@ -557,12 +558,12 @@ fn serve(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
 /// `tool-<id>` 这个 label 形状是有意的：`capabilities/tools.json` 用 `tool-*`
 /// 一条就覆盖全部工具窗口，不必每加一个工具就改权限表。
 pub fn open_tool(app: &AppHandle, tool_id: &str, hint: Option<&str>) -> Result<(), String> {
-    // 迁移闸：工具目录正在被搬走时，目录解析结果随时会失效。
+    // 迁移闸：工具整体正在被搬走时，目录解析结果随时会失效。
     if app
-        .try_state::<location::ToolRootMigration>()
+        .try_state::<location::ToolHomeMigration>()
         .is_some_and(|state| state.0.is_running())
     {
-        return Err("工具目录正在迁移，请等迁移完成后再打开。".into());
+        return Err("工具存储正在迁移，请等迁移完成后再打开。".into());
     }
     let label = format!("tool-{tool_id}");
     let host = app.state::<ToolsHost>();
@@ -938,9 +939,16 @@ pub fn tools_host_info(app: AppHandle) -> Result<serde_json::Value, String> {
         .dev_tools_root()
         .map(|root| root.to_string_lossy().into_owned())
         .unwrap_or_else(|| {
-            location::tool_root(&host.data_root().unwrap_or_default())
-                .to_string_lossy()
-                .into_owned()
+            // 生产环境按账号指针解析出当前账号的工具整体家。
+            let data_root = host.data_root().unwrap_or_default();
+            let owner = crate::tools::store::ToolStore::new(&data_root)
+                .owner()
+                .unwrap_or_default();
+            if owner.is_empty() {
+                location::default_tool_root(&data_root).to_string_lossy().into_owned()
+            } else {
+                location::tool_home(&data_root, &owner).to_string_lossy().into_owned()
+            }
         });
     let sessions: Vec<serde_json::Value> = host
         .sessions
@@ -1019,15 +1027,23 @@ mod tests {
         let dir = old.join("installed").join("u1").join("pilot");
         std::fs::create_dir_all(&dir).unwrap();
         host.set_runtime_dir("pilot", &dir);
-        // 外部目录不动；工具根内的目录换前缀。
+        // 外部目录不动；工具域内的目录按规则换前缀。
         let external = std::env::temp_dir().join("aaw-remap-test-external");
         std::fs::create_dir_all(&external).unwrap();
         host.set_runtime_dir("notes", &external);
+        // 结构性规则：默认家 → 自定义 home（去账号层）。
+        let pairs = location::structural_pairs(
+            "u1",
+            &old,
+            &std::env::temp_dir().join("aaw-remap-test-new"),
+            true,
+            false,
+        );
         let new_root = std::env::temp_dir().join("aaw-remap-test-new");
-        host.remap_runtime_dirs(&old, &new_root);
+        host.remap_runtime_dirs_with(&pairs);
         assert_eq!(
             host.resolve_runtime_dir("pilot"),
-            Some(new_root.join("installed").join("u1").join("pilot"))
+            Some(new_root.join("installed").join("pilot"))
         );
         assert_eq!(host.resolve_runtime_dir("notes"), Some(external.clone()));
     }

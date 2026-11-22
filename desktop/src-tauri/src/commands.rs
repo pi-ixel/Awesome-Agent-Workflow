@@ -250,12 +250,12 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::
     Ok(())
 }
 
-/// 工具目录迁移期间的写盘闸：迁移中（拷贝→切指针→删旧）任何落到
-/// 工具根内的新写入都会丢失或把旧目录删不干净。只在路径命中工具根时拦，
-/// 别的模块写盘不受影响。
+/// 工具整体迁移期间的写盘闸：迁移中（拷贝→切指针→删旧）任何落到工具域内
+/// （默认根或当前账号的 home）的新写入都会丢失或把旧目录删不干净。只在路径
+/// 命中工具域时拦，别的模块写盘不受影响。
 fn gate_tool_write(app: &tauri::AppHandle, paths: &[&str]) -> Result<(), String> {
     use tauri::Manager;
-    let Some(state) = app.try_state::<crate::tools::location::ToolRootMigration>() else {
+    let Some(state) = app.try_state::<crate::tools::location::ToolHomeMigration>() else {
         return Ok(());
     };
     if !state.0.is_running() {
@@ -263,10 +263,18 @@ fn gate_tool_write(app: &tauri::AppHandle, paths: &[&str]) -> Result<(), String>
     }
     let host = app.state::<crate::tools::ToolsHost>();
     let Ok(data_root) = host.data_root() else { return Ok(()) };
-    let root = crate::tools::location::tool_root(&data_root);
-    let under = paths.iter().any(|path| std::path::Path::new(path).starts_with(&root));
+    use crate::tools::location;
+    // 迁移期间整个工具域都别写：默认根（可能正被搬入/搬出）+ 当前账号 home。
+    let mut roots = vec![location::default_tool_root(&data_root)];    if let Ok(owner) = crate::tools::store::ToolStore::new(&data_root).owner() {
+        roots.push(location::tool_home(&data_root, &owner));
+    }
+    let under = paths.iter().any(|path| {
+        roots
+            .iter()
+            .any(|root| std::path::Path::new(path).starts_with(root))
+    });
     if under {
-        return Err("工具目录正在迁移，请等迁移完成后再试。".into());
+        return Err("工具存储正在迁移，请等迁移完成后再试。".into());
     }
     Ok(())
 }

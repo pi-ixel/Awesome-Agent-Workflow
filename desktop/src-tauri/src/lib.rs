@@ -239,10 +239,9 @@ pub fn run() {
             tools::guide::tools_guide_close,
             tools::guide::tools_guide_open_url,
             tools::guide::tools_guide_runtime_text,
-            // 工具位置（目录/数据指针）与在线迁移
+            // 工具整体位置（按账号单指针）与在线迁移
             tools::location::tools_location_read,
             tools::location::tools_location_schedule,
-            tools::location::tools_data_location_schedule,
             tools::location::tools_root_dir,
             tools::location::tools_storage_open,
             codeagent_history::agent_history_evidence,

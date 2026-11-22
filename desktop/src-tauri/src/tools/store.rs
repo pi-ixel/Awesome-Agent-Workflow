@@ -140,30 +140,19 @@ impl ToolStore {
         }
     }
 
-    /// 工具数据根：`data-location.json` 的 `storageRoot` 优先；否则跟数据根
-    /// （含迁移后的 active 根）走 `<数据根>/tools/storage`。指针文件在
-    /// `configuration/` 里，随数据根迁移一起走。与 `location.rs::tool_data_root`
-    /// 是同一规则的两半——那边的解析供迁移命令用，这边供逐次读写用。
+    /// 账号的工具数据目录：按账号指针解析（自定义 home 在 `<home>/storage`，
+    /// 默认在 `<数据根>/tools/storage/<账号>`）。与 `location.rs` 是同一规则
+    /// 的两半——那边的解析供迁移命令用，这边供逐次读写用。
     fn tool_data_root(&self) -> Result<PathBuf, String> {
-        let pointer = self.storage_root().join("configuration").join("data-location.json");
-        if let Ok(text) = std::fs::read_to_string(&pointer) {
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
-                if let Some(path) = value.get("storageRoot").and_then(|item| item.as_str()) {
-                    let path = path.trim();
-                    if !path.is_empty() {
-                        return Ok(PathBuf::from(path));
-                    }
-                }
-            }
-        }
-        Ok(self.storage_root().join("tools").join("storage"))
+        let owner = self.owner()?;
+        Ok(crate::tools::location::tool_storage_root(&self.storage_root(), &owner))
     }
 
     fn file(&self, owner: &str) -> Result<PathBuf, String> {
         if !valid_owner(owner) {
             return Err("无效的存储归属。".into());
         }
-        Ok(self.tool_data_root()?.join(self.owner()?).join(format!("{owner}.json")))
+        Ok(self.tool_data_root()?.join(format!("{owner}.json")))
     }
 
     fn read(&self, tool_id: &str) -> Result<BTreeMap<String, serde_json::Value>, String> {
