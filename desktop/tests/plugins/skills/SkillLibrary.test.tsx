@@ -662,7 +662,7 @@ it("全局分区优先，同一项目的多个来源合并，搜索和刷新保�
   }
   await expectOrder();
   await userEvent.type(
-    screen.getByRole("textbox", { name: "搜索技能" }),
+    screen.getByRole("searchbox", { name: "搜索技能" }),
     "sam",
   );
   await expectOrder();

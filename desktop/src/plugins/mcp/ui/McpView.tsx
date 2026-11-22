@@ -1,9 +1,11 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
+  type MouseEvent,
   type ReactNode,
 } from "react";
 import type {
@@ -17,22 +19,17 @@ import type {
   NativeMcpSnapshot,
 } from "../../../contracts/mcp/management.ts";
 import type { RuntimeSnapshot } from "../../acpRuntime/types.ts";
-import {
-  ActionButton,
-  Listbox,
-  ToggleSwitch,
-} from "../../../shared/ui/controls.tsx";
+import { ActionButton, ToggleSwitch } from "../../../shared/ui/controls.tsx";
+import { EdgeDrawer } from "../../../shared/ui/controls/EdgeDrawer.tsx";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { PageHeader } from "../../../shared/ui/PageHeader.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
-import { fieldSurfaceClass } from "../../../shared/ui/inputStyles.ts";
 import {
-  PlugIcon,
-  PlusIcon,
-  SearchIcon,
-  TrashIcon,
-} from "../../../shared/ui/icons.tsx";
+  PageFilterListbox,
+  PageFilterSearch,
+} from "../../../shared/ui/PageFilterControls.tsx";
+import { PlugIcon, PlusIcon, TrashIcon } from "../../../shared/ui/icons.tsx";
 import type { HostService } from "../../host/service.ts";
 import { useBrowserAgentControl } from "../../browser/service.ts";
 import {
@@ -132,6 +129,7 @@ function McpServiceRow({
   transport,
   status,
   selected,
+  detailsId,
   toggle,
   actions,
   onSelect,
@@ -141,9 +139,10 @@ function McpServiceRow({
   transport: string;
   status: string;
   selected: boolean;
+  detailsId: string;
   toggle: ReactNode;
   actions?: ReactNode;
-  onSelect: () => void;
+  onSelect: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   return (
     <li className="min-w-0">
@@ -153,7 +152,9 @@ function McpServiceRow({
       >
         <NavigationRow
           layout="compound"
-          aria-current={selected ? "true" : undefined}
+          aria-expanded={selected}
+          aria-controls={detailsId}
+          data-mcp-detail-trigger=""
           className="items-center gap-3 px-3 py-2.5"
           aria-label={name}
           onClick={onSelect}
@@ -275,6 +276,26 @@ export function McpView({
   const [filter, setFilter] = useState("all");
   const [transportFilter, setTransportFilter] = useState("all");
   const [selection, setSelection] = useState("");
+  const [isDetailClosing, setIsDetailClosing] = useState(false);
+  const detailsId = useId();
+  const detailDrawer = useRef<HTMLElement>(null);
+  const detailTrigger = useRef<HTMLButtonElement>(null);
+  const finishDetailClose = useCallback(() => {
+    setIsDetailClosing(false);
+    setSelection("");
+  }, []);
+  useEffect(() => {
+    if (!isDetailClosing) return;
+    const reducedMotion = window.matchMedia?.(
+      "(prefers-reduced-motion: reduce)",
+    );
+    const timer = window.setTimeout(finishDetailClose, 260);
+    reducedMotion?.addEventListener("change", finishDetailClose);
+    return () => {
+      window.clearTimeout(timer);
+      reducedMotion?.removeEventListener("change", finishDetailClose);
+    };
+  }, [isDetailClosing, finishDetailClose]);
   const [initialEditorTab, setInitialEditorTab] = useState<"form" | "json">(
     "form",
   );
@@ -596,13 +617,27 @@ export function McpView({
         );
       }, 0)
     : undefined;
-  const current =
-    targets.find((target) => targetKey(target) === selection) ??
-    (selection !== browserKey && !showBrowser ? visible[0] : undefined);
-  const hasBrowserDetail =
-    !current &&
-    (showBrowser || (selection === browserKey && browserControl.available));
-  const isNarrowDetail = Boolean(selection && (hasBrowserDetail || current));
+  const current = selection
+    ? targets.find((target) => targetKey(target) === selection)
+    : undefined;
+  const hasBrowserDetail = selection === browserKey && browserControl.available;
+  const isDetailVisible = Boolean(hasBrowserDetail || current);
+  const isDetailOpen = isDetailVisible && !isDetailClosing;
+  function closeDetail(restoreFocus = true) {
+    if (restoreFocus) detailTrigger.current?.focus({ preventScroll: true });
+    if (window.matchMedia?.("(prefers-reduced-motion: no-preference)").matches)
+      setIsDetailClosing(true);
+    else finishDetailClose();
+  }
+  function selectDetail(key: string, trigger: HTMLButtonElement) {
+    if (isDetailOpen && selection === key) {
+      closeDetail();
+      return;
+    }
+    detailTrigger.current = trigger;
+    setIsDetailClosing(false);
+    setSelection(key);
+  }
   const isLoading =
     (canManageNative && native.isLoading && native.data === undefined) ||
     (canManageInjected && managed.isLoading && managed.data === undefined);
@@ -869,8 +904,39 @@ export function McpView({
     setRefresh((version) => version + 1);
   }
   return (
-    <div className="@container flex h-full min-h-0 flex-col overflow-auto bg-base">
-      <section aria-label="MCP 管理" className="mx-auto w-full">
+    <div
+      className="@container flex h-full min-h-0 flex-col bg-base"
+      onClickCapture={(event) => {
+        const target = event.target;
+        if (
+          !isDetailOpen ||
+          !(target instanceof Element) ||
+          !event.currentTarget.contains(target) ||
+          detailDrawer.current?.contains(target) ||
+          target.closest("[data-mcp-detail-trigger]")
+        )
+          return;
+        closeDetail(
+          detailDrawer.current?.contains(document.activeElement) ?? false,
+        );
+      }}
+      onKeyDown={(event) => {
+        if (
+          event.key !== "Escape" ||
+          event.defaultPrevented ||
+          !isDetailOpen ||
+          editing ||
+          confirmation
+        )
+          return;
+        event.stopPropagation();
+        closeDetail();
+      }}
+    >
+      <section
+        aria-label="MCP 管理"
+        className="flex min-h-0 w-full flex-1 flex-col"
+      >
         <PageHeader
           bordered
           title="MCP"
@@ -915,23 +981,19 @@ export function McpView({
             </>
           }
         />
-        <div className="grid min-w-0 @min-[48rem]:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
-          <div
-            className={`min-w-0 space-y-4 px-6 py-4 ${isNarrowDetail ? "hidden @min-[48rem]:block" : ""}`}
-          >
+        <div
+          className={`relative flex min-h-0 min-w-0 flex-1 overflow-hidden [--mcp-drawer-width:min(46%,40rem)] motion-safe:transition-[padding-right] motion-safe:duration-200 motion-safe:ease-out ${isDetailOpen ? "@min-[48rem]:pr-(--mcp-drawer-width)" : ""}`}
+        >
+          <div className="mx-auto w-full min-w-0 max-w-[608px] space-y-4 overflow-auto px-6 py-4">
             <div className="flex flex-wrap items-center gap-2 border-b border-line pb-4">
-              <label className="relative flex min-w-40 flex-1 items-center">
-                <SearchIcon className="ui-icon-14 pointer-events-none absolute left-2.5 text-ink-mute" />
-                <input
-                  type="search"
-                  aria-label="搜索 MCP"
-                  className={`${fieldSurfaceClass} min-h-9 w-full pl-8 pr-2 text-ui-xs`}
-                  placeholder="搜索服务名、地址、命令或工具…"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                />
-              </label>
-              <Listbox
+              <PageFilterSearch
+                label="搜索 MCP"
+                className="basis-40 flex-1"
+                placeholder="搜索服务名、地址、命令或工具…"
+                value={search}
+                onChange={setSearch}
+              />
+              <PageFilterListbox
                 label="筛选状态"
                 value={filter}
                 onChange={setFilter}
@@ -942,7 +1004,7 @@ export function McpView({
                   { value: "error", label: "连接异常" },
                 ]}
               />
-              <Listbox
+              <PageFilterListbox
                 label="筛选传输方式"
                 value={transportFilter}
                 onChange={setTransportFilter}
@@ -997,8 +1059,11 @@ export function McpView({
                   detail="内置浏览器工具"
                   transport="AAW 内置"
                   status={browserStatus}
-                  selected={hasBrowserDetail}
-                  onSelect={() => setSelection(browserKey)}
+                  selected={isDetailOpen && hasBrowserDetail}
+                  detailsId={detailsId}
+                  onSelect={(event) =>
+                    selectDetail(browserKey, event.currentTarget)
+                  }
                   toggle={browserToggle()}
                 />
               )}
@@ -1023,8 +1088,9 @@ export function McpView({
                         : (entry.description ?? "")
                     }
                     status={statusOf(target)}
-                    selected={current === target}
-                    onSelect={() => setSelection(key)}
+                    selected={isDetailOpen && current === target}
+                    detailsId={detailsId}
+                    onSelect={(event) => selectDetail(key, event.currentTarget)}
                     toggle={
                       <ToggleSwitch
                         label={entry.name + " 启用"}
@@ -1061,153 +1127,160 @@ export function McpView({
               </p>
             )}
           </div>
-          {(hasBrowserDetail || current) && (
-            <div
-              className={
-                isNarrowDetail ? "min-w-0" : "hidden min-w-0 @min-[48rem]:block"
-              }
-            >
-              {hasBrowserDetail ? (
+          <EdgeDrawer
+            side="right"
+            id={detailsId}
+            open={isDetailOpen}
+            visible={isDetailVisible}
+            sliding
+            drawerRef={detailDrawer}
+            aria-label={
+              hasBrowserDetail
+                ? browserName + " 详情"
+                : current && current.entry.name + " 详情"
+            }
+            className="z-10 w-[min(100%,28rem)] min-w-0 flex-col overflow-auto border-l border-line bg-base @min-[48rem]:w-(--mcp-drawer-width)"
+          >
+            {hasBrowserDetail ? (
+              <McpServiceDetails
+                key={browserKey}
+                name={browserName}
+                transport="AAW 内置"
+                description="内置浏览器工具，提供导航、页面读取和交互等能力。"
+                summary={browserStatus}
+                connection={[
+                  ["控制范围", "Desktop 全局"],
+                  ["当前状态", browserStatus],
+                ]}
+                health={health[browserKey]}
+                config={{
+                  name: browserName,
+                  enabled: browserControl.enabled,
+                  transport: "builtin",
+                  disabledTools: browserTools.data?.disabledTools,
+                }}
+                tools={browserTools.data?.tools}
+                disabledTools={browserTools.data?.disabledTools ?? []}
+                toggle={browserToggle()}
+                actions={testButton(browserKey)}
+                onToggleTools={
+                  inspector
+                    ? (tools, enabled) => {
+                        void setTools(null, tools, enabled);
+                      }
+                    : undefined
+                }
+                onClose={closeDetail}
+                isToolPending={(name) =>
+                  pendingWrites.has(toolKey(browserKey, name))
+                }
+              />
+            ) : (
+              current && (
                 <McpServiceDetails
-                  key={browserKey}
-                  name={browserName}
-                  transport="AAW 内置"
-                  description="内置浏览器工具，提供导航、页面读取和交互等能力。"
-                  summary={browserStatus}
-                  connection={[
-                    ["控制范围", "Desktop 全局"],
-                    ["当前状态", browserStatus],
-                  ]}
-                  health={health[browserKey]}
-                  config={{
-                    name: browserName,
-                    enabled: browserControl.enabled,
-                    transport: "builtin",
-                    disabledTools: browserTools.data?.disabledTools,
-                  }}
-                  tools={browserTools.data?.tools}
-                  disabledTools={browserTools.data?.disabledTools ?? []}
-                  toggle={browserToggle()}
-                  actions={testButton(browserKey)}
+                  key={targetKey(current)}
+                  name={current.entry.name}
+                  transport={transportLabel(current.entry.transport)}
+                  description={current.entry.description ?? ""}
+                  summary={statusOf(current)}
+                  connection={
+                    current.source === "native"
+                      ? [
+                          ["所属配置", current.profile.name],
+                          ...(current.entry.transport === "stdio"
+                            ? ([
+                                ["启动命令", current.entry.command ?? "—"],
+                                [
+                                  "工作目录",
+                                  current.entry.cwd ?? "会话工作目录",
+                                ],
+                              ] as const)
+                            : ([
+                                ["服务地址", current.entry.url ?? "已隐藏"],
+                              ] as const)),
+                          [
+                            "凭据字段",
+                            current.entry.secretKeys.join("、") || "—",
+                          ],
+                        ]
+                      : [
+                          ["服务地址", current.entry.url],
+                          [
+                            "请求头凭据引用",
+                            current.entry.headers
+                              .map(
+                                ({ name, reference }) =>
+                                  `${name} → ${reference}`,
+                              )
+                              .join("、") || "—",
+                          ],
+                        ]
+                  }
+                  health={currentHealth}
+                  tools={currentTools}
+                  disabledTools={
+                    current.source === "managed"
+                      ? (current.entry.disabledTools ?? [])
+                      : []
+                  }
+                  config={
+                    current.source === "managed"
+                      ? {
+                          name: current.entry.name,
+                          transport: current.entry.transport,
+                          enabled: current.entry.enabled,
+                          description: current.entry.description,
+                          url: current.entry.url,
+                          headers: current.entry.headers,
+                          disabledTools: current.entry.disabledTools,
+                        }
+                      : (current.entry.redactedConfig ?? {
+                          name: current.entry.name,
+                          enabled: current.entry.enabled,
+                          transport: current.entry.transport,
+                        })
+                  }
+                  toggle={
+                    <ToggleSwitch
+                      label={current.entry.name + " 启用"}
+                      checked={current.entry.enabled}
+                      pending={pendingWrites.has(targetKey(current))}
+                      onChange={(enabled) => toggleService(current, enabled)}
+                    />
+                  }
+                  actions={
+                    <>
+                      {currentKey && testButton(currentKey)}
+                      {canEditCurrent && (
+                        <ActionButton
+                          tone="secondary"
+                          size="compact"
+                          disabled={pendingWrites.has(targetKey(current))}
+                          onClick={() => {
+                            setInitialEditorTab("form");
+                            setEditing(current);
+                          }}
+                        >
+                          编辑配置
+                        </ActionButton>
+                      )}
+                    </>
+                  }
                   onToggleTools={
-                    inspector
+                    current.source === "managed" && inspector
                       ? (tools, enabled) => {
-                          void setTools(null, tools, enabled);
+                          void setTools(current, tools, enabled);
                         }
                       : undefined
                   }
-                  onBack={() => setSelection("")}
+                  onClose={closeDetail}
                   isToolPending={(name) =>
-                    pendingWrites.has(toolKey(browserKey, name))
+                    pendingWrites.has(toolKey(targetKey(current), name))
                   }
                 />
-              ) : (
-                current && (
-                  <McpServiceDetails
-                    key={targetKey(current)}
-                    name={current.entry.name}
-                    transport={transportLabel(current.entry.transport)}
-                    description={current.entry.description ?? ""}
-                    summary={statusOf(current)}
-                    connection={
-                      current.source === "native"
-                        ? [
-                            ["所属配置", current.profile.name],
-                            ...(current.entry.transport === "stdio"
-                              ? ([
-                                  ["启动命令", current.entry.command ?? "—"],
-                                  [
-                                    "工作目录",
-                                    current.entry.cwd ?? "会话工作目录",
-                                  ],
-                                ] as const)
-                              : ([
-                                  ["服务地址", current.entry.url ?? "已隐藏"],
-                                ] as const)),
-                            [
-                              "凭据字段",
-                              current.entry.secretKeys.join("、") || "—",
-                            ],
-                          ]
-                        : [
-                            ["服务地址", current.entry.url],
-                            [
-                              "请求头凭据引用",
-                              current.entry.headers
-                                .map(
-                                  ({ name, reference }) =>
-                                    `${name} → ${reference}`,
-                                )
-                                .join("、") || "—",
-                            ],
-                          ]
-                    }
-                    health={currentHealth}
-                    tools={currentTools}
-                    disabledTools={
-                      current.source === "managed"
-                        ? (current.entry.disabledTools ?? [])
-                        : []
-                    }
-                    config={
-                      current.source === "managed"
-                        ? {
-                            name: current.entry.name,
-                            transport: current.entry.transport,
-                            enabled: current.entry.enabled,
-                            description: current.entry.description,
-                            url: current.entry.url,
-                            headers: current.entry.headers,
-                            disabledTools: current.entry.disabledTools,
-                          }
-                        : (current.entry.redactedConfig ?? {
-                            name: current.entry.name,
-                            enabled: current.entry.enabled,
-                            transport: current.entry.transport,
-                          })
-                    }
-                    toggle={
-                      <ToggleSwitch
-                        label={current.entry.name + " 启用"}
-                        checked={current.entry.enabled}
-                        pending={pendingWrites.has(targetKey(current))}
-                        onChange={(enabled) => toggleService(current, enabled)}
-                      />
-                    }
-                    actions={
-                      <div className="flex flex-wrap items-center gap-2">
-                        {currentKey && testButton(currentKey)}
-                        {canEditCurrent && (
-                          <ActionButton
-                            tone="secondary"
-                            size="compact"
-                            disabled={pendingWrites.has(targetKey(current))}
-                            onClick={() => {
-                              setInitialEditorTab("form");
-                              setEditing(current);
-                            }}
-                          >
-                            编辑配置
-                          </ActionButton>
-                        )}
-                      </div>
-                    }
-                    onToggleTools={
-                      current.source === "managed" && inspector
-                        ? (tools, enabled) => {
-                            void setTools(current, tools, enabled);
-                          }
-                        : undefined
-                    }
-                    onBack={() => setSelection("")}
-                    isToolPending={(name) =>
-                      pendingWrites.has(toolKey(targetKey(current), name))
-                    }
-                  />
-                )
-              )}
-            </div>
-          )}
+              )
+            )}
+          </EdgeDrawer>
         </div>
         {((failure && !confirmation) || browserControl.error) && (
           <div

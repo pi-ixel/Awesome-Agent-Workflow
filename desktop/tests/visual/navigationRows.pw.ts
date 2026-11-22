@@ -330,6 +330,12 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
     ];
   });
   const skillActionHeight = (await skillAction.boundingBox())!.height;
+  const skillFilterFont = await collections
+    .getByRole("combobox", { name: "技能状态" })
+    .evaluate((control) => getComputedStyle(control).fontSize);
+  await expect(
+    collections.getByRole("searchbox", { name: "搜索技能" }),
+  ).toHaveCSS("font-size", skillFilterFont);
   const skillSwitchStyle = await skillTrack.evaluate((track) => {
     const style = getComputedStyle(track);
     return [style.width, style.height, style.backgroundColor];
@@ -353,6 +359,12 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
     }),
   ).toEqual(skillHeaderStyle);
   const mcpAction = mcpHeader.getByRole("button", { name: "新增 MCP" });
+  await expect(
+    collections.getByRole("searchbox", { name: "搜索 MCP" }),
+  ).toHaveCSS("font-size", skillFilterFont);
+  await expect(
+    collections.getByRole("combobox", { name: "筛选状态" }),
+  ).toHaveCSS("font-size", skillFilterFont);
   expect((await mcpAction.boundingBox())!.height).toBeCloseTo(
     skillActionHeight,
     1,
@@ -382,21 +394,75 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
     name: "发布服务 详情",
   });
   await expect(serviceDetails).toBeVisible();
-  await expect(mcpCard).toBeHidden();
+  await expect(serviceDetails).toHaveAttribute("data-edge-drawer", "right");
+  await expect(mcpCard).toBeVisible();
   await serviceDetails.getByRole("tab", { name: "连接配置" }).click();
   await expect(
     serviceDetails.getByText("http://localhost:9000/mcp"),
   ).toBeVisible();
-  await serviceDetails.getByRole("button", { name: "返回服务列表" }).click();
+  await serviceDetails.getByRole("button", { name: "收起详情" }).click();
+  await expect(serviceDetails).toBeHidden();
   await expect(mcpCard).toBeVisible();
   await collections.setViewportSize({ width: 1400, height: 900 });
+  const closedRow = (await mcpCard.boundingBox())!;
+  const workspace = (await collections
+    .getByRole("region", { name: "MCP 管理" })
+    .boundingBox())!;
+  expect(closedRow.width).toBeLessThanOrEqual(560);
+  expect(closedRow.x + closedRow.width / 2).toBeCloseTo(
+    workspace.x + workspace.width / 2,
+    0,
+  );
   await mcpCard.getByRole("button", { name: "发布服务", exact: true }).click();
   await expect(serviceDetails).toBeVisible();
   await expect(mcpCard).toBeVisible();
-  const rowBounds = (await mcpCard.boundingBox())!;
-  expect((await serviceDetails.boundingBox())!.x).toBeGreaterThan(
-    rowBounds.x + rowBounds.width,
-  );
+  await expect
+    .poll(async () => {
+      const rowBounds = (await mcpCard.boundingBox())!;
+      return (
+        (await serviceDetails.boundingBox())!.x - rowBounds.x - rowBounds.width
+      );
+    })
+    .toBeGreaterThan(0);
+  await browser
+    .getByRole("button", { name: "AAW 内置浏览器", exact: true })
+    .click();
+  const browserDetails = collections.getByRole("complementary", {
+    name: "AAW 内置浏览器 详情",
+  });
+  await expect(browserDetails).toHaveAttribute("data-edge-drawer-open", "true");
+  await mcpHeader.getByRole("heading", { name: "MCP", exact: true }).click();
+  await expect(browserDetails).toBeHidden();
+});
+
+test("窄窗在减少动画模式下从右侧覆盖 MCP 列表，收起后恢复焦点", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 650, height: 770 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/tests/visual/sidebarTypographyFixture.html?collections");
+  await page
+    .getByRole("navigation", { name: "插件管理" })
+    .getByRole("button", { name: "MCP", exact: true })
+    .click();
+  const workspace = page.getByRole("region", { name: "MCP 管理" });
+  const card = workspace.getByRole("button", { name: "发布服务", exact: true });
+  const drawer = workspace.getByRole("complementary", {
+    name: "发布服务 详情",
+  });
+  await expect(card).toBeVisible();
+  const before = (await card.boundingBox())!;
+  await expect(drawer).toBeHidden();
+  await card.click();
+  await expect(drawer).toBeVisible();
+  const overlay = (await drawer.boundingBox())!;
+  const region = (await workspace.boundingBox())!;
+  expect(overlay.x + overlay.width).toBeCloseTo(region.x + region.width, 0);
+  expect(overlay.x).toBeLessThan(before.x + before.width);
+  expect(await card.boundingBox()).toEqual(before);
+  await drawer.getByRole("button", { name: "收起详情" }).click();
+  await expect(drawer).toBeHidden();
+  await expect(card).toBeFocused();
 });
 
 test("MCP 导入按钮和表单按钮共用尺寸，窄窗下文字保留内边距", async ({
