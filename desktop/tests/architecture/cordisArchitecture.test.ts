@@ -24,6 +24,7 @@ const plugins = [
   "account",
   "updates",
   "browser",
+  "remoteProject",
   "scheduledTasks",
 ] as const;
 const uiOwners = [
@@ -38,6 +39,7 @@ const uiOwners = [
   "account",
   "updates",
   "browser",
+  "remoteProject",
 ] as const;
 const root = resolve(import.meta.dirname, "../..");
 const read = (path: string) => readFileSync(resolve(root, path), "utf8");
@@ -420,6 +422,20 @@ it("keeps plugin names and dependency relations aligned with their production ow
       "src/plugins/terminal/ui/workbench.ts",
       "project.projects.registerProjectClose",
     ],
+    [
+      "remoteProject",
+      "登记项目关闭处理",
+      "project",
+      "src/plugins/remoteProject/ui/workbench.tsx",
+      "project.projects.registerProjectClose",
+    ],
+    [
+      "project",
+      "可选：添加远程项目入口",
+      "remoteProject",
+      "src/plugins/project/ui/workbench.ts",
+      'ctx.inject(["remoteProjectUi"]',
+    ],
   ] as const;
   const weak = optional.map(([source, label, target, file, marker]) => {
     expect(read(file), file).toContain(marker);
@@ -456,7 +472,7 @@ it("keeps plugin names and dependency relations aligned with their production ow
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => /^(?:\w+ --> \w+|\w+ -\. ".+" \.-> \w+)$/.test(line));
-  expect(new Set(edges).size).toBe(94);
+  expect(new Set(edges).size).toBe(99);
   expect(edges.sort()).toEqual([...required, ...weak].sort());
 
   const runtime = createTestDesktopRuntime(
@@ -534,6 +550,7 @@ it("keeps plugin names and dependency relations aligned with their production ow
       ["project-dialogs", "workspace"],
       ["updates-dialog", "window"],
       ["documents-dialogs", "window"],
+      ["remote-project-add-modal", "window"],
     ]);
     expect(view.headerIndicators.map(({ id }) => id)).toEqual(["updates"]);
     expect(view.settingsReset.map(({ id }) => id).sort()).toEqual([

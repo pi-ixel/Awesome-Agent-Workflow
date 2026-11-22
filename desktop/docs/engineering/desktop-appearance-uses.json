@@ -100,6 +100,19 @@
     "SessionBar · <input>"
   ],
   "plugins/project/usage/UsageSettings.tsx": ["Trend · <canvas>"],
+  "plugins/remoteProject/ui/AddRemoteProjectModal.tsx": [
+    "AddRemoteProjectModal · <input>",
+    "AddRemoteProjectModal · <input>",
+    "AddRemoteProjectModal · <input>",
+    "AddRemoteProjectModal · <input>",
+    "AddRemoteProjectModal · <input>",
+    "AddRemoteProjectModal · <input>",
+    "AddRemoteProjectModal · <input>",
+    "AddRemoteProjectModal · <input>",
+    "AddRemoteProjectModal · <input>",
+    "AddRemoteProjectModal · <input>",
+    "AddRemoteProjectModal · <input>"
+  ],
   "plugins/scheduledTasks/ui/TaskViews.tsx": [
     "TaskEditor · <input>",
     "TaskEditor · <input>",

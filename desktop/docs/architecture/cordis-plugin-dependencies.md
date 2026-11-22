@@ -1,10 +1,10 @@
 # Desktop 完整插件依赖图
 
-目标架构包含 18 个插件。Rust 为原生宿主，iCode 和 CodeAgent 作为 agents 插件内的适配器。
+目标架构包含 19 个插件。Rust 为原生宿主，iCode 和 CodeAgent 作为 agents 插件内的适配器。
 
 - 箭头指向被依赖或被注册的服务，不表示启动顺序或事件流向。
 - 实线表示必需服务依赖。虚线标签区分启动注入、可选业务接入、UI 注册、界面调用、界面订阅、安装退出调用、关闭参与者注册和导航检查注册。
-- 全图共 **94 条唯一关系**，包括 54 条必需服务依赖，以及 40 条启动注入、可选业务接入、UI 注册、界面调用与订阅、安装退出和关闭相关关系。
+- 全图共 **99 条唯一关系**，包括 56 条必需服务依赖，以及 43 条启动注入、可选业务接入、UI 注册、界面调用与订阅、安装退出和关闭相关关系。
 - 同一对插件间的不同关系保留为独立边，例如 updates → workbench 的 UI 注册和安装退出调用。
 - UI 和关闭参与者由子模块/装配层注册，不将其变为业务核心的强制依赖。documents → project 的关闭注册与 project → documents 的可选上下文接入，不代表核心服务循环注入。
 - 公共基础依赖逐条绘制，不合并节点、不省略公共连线。通过中间插件形成的间接依赖不新增为直接边。
@@ -30,6 +30,7 @@ flowchart TB
     account["account<br/>账户"]
     updates["updates<br/>更新"]
     browser["browser<br/>内嵌浏览器"]
+    remoteProject["remoteProject<br/>远程项目（SSH）"]
     scheduledTasks["scheduledTasks<br/>定时任务"]
   end
   rust["Rust / Tauri<br/>非插件"]
@@ -94,6 +95,8 @@ flowchart TB
   updates --> configuration
   updates --> diagnostics
   browser --> host
+  remoteProject --> host
+  remoteProject --> diagnostics
 
   %% 可选业务能力
   project -. "可选：技能候选" .-> skills
@@ -101,6 +104,7 @@ flowchart TB
   project -. "可选：文档上下文与导航" .-> documents
   project -. "可选：审阅上下文" .-> git
   project -. "可选：项目界面扩展" .-> workflow
+  project -. "可选：添加远程项目入口" .-> remoteProject
   agents -. "可选：切换前停下进行中的工作" .-> workflow
   documents -. "可选：文件状态" .-> git
   git -. "可选：工作区活动刷新" .-> project
@@ -119,6 +123,7 @@ flowchart TB
   account -. "UI 注册" .-> workbench
   updates -. "UI 注册" .-> workbench
   browser -. "UI 注册" .-> workbench
+  remoteProject -. "UI 注册" .-> workbench
   agents -. "设置页读取项目上下文并请求切换 Agent" .-> project
   project -. "注册标题区与新建会话入口" .-> workbench
   documents -. "登记文件路径解析" .-> workbench
@@ -135,6 +140,7 @@ flowchart TB
   terminal -. "登记退出检查与收尾" .-> workbench
   documents -. "登记项目关闭处理" .-> project
   terminal -. "登记项目关闭处理" .-> project
+  remoteProject -. "登记项目关闭处理" .-> project
 
   classDef base fill:#e8f0fe,stroke:#3565a8,color:#172b4d
   classDef runtime fill:#e2f5ee,stroke:#218763,color:#123d2e
@@ -142,7 +148,7 @@ flowchart TB
   classDef external fill:#eeeeee,stroke:#666666,color:#222222
   class host,configuration,diagnostics,workbench base
   class agents,acpConnection,acpRuntime runtime
-  class project,documents,git,terminal,workflow,skills,mcp,account,updates,browser,scheduledTasks product
+  class project,documents,git,terminal,workflow,skills,mcp,account,updates,browser,remoteProject,scheduledTasks product
   class rust external
 ```
 

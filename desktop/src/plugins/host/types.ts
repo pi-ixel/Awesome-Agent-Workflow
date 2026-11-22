@@ -21,6 +21,7 @@ export type {
   FilePreview,
   WatchPath,
   DocumentFileHost,
+  RemoteDocumentFileProvider,
   GitSource,
   GitChange,
   GitSnapshot,
@@ -316,6 +317,15 @@ export type SkillFiles = Pick<
  * 放行（workflow_service_* / aaw://workflow-service*），白名单外报错。
  */
 export interface WorkflowEngineHost {
+  invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
+  listen<T>(
+    event: string,
+    handler: (event: { payload: T }) => void,
+  ): Promise<() => void>;
+}
+
+/** 运维/远程项目 sidecar（ops_service_* / aaw://ops-service*）的受限 IPC 面。 */
+export interface OpsSidecarHost {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
   listen<T>(
     event: string,

@@ -12,6 +12,7 @@ export function createProjectViewNavigation(
   options: {
     readonly isCurrent: () => boolean;
     readonly openFileTree: (path: string) => void;
+    readonly openAddRemoteProject?: () => void;
   },
 ) {
   const { navigation, navigationGuard } = layout;
@@ -30,6 +31,9 @@ export function createProjectViewNavigation(
     commands: {
       page: page.snapshot,
       addProject: () => addProjectViaDialog(project, layout, isActive),
+      addRemoteProject: () => {
+        if (isActive()) options.openAddRemoteProject?.();
+      },
       showOverview,
       showConversation: (path: string) => {
         if (isActive()) project.sessions.showConversation(path);

@@ -20,6 +20,7 @@ import * as mcpPlugin from "../plugins/mcp/index.ts";
 import * as accountPlugin from "../plugins/account/index.ts";
 import * as updatesPlugin from "../plugins/updates/index.ts";
 import * as browserPlugin from "../plugins/browser/index.ts";
+import * as remoteProjectPlugin from "../plugins/remoteProject/index.ts";
 import * as scheduledTasksPlugin from "../plugins/scheduledTasks/index.ts";
 import { desktopPanelLayouts } from "./panelLayouts.ts";
 
@@ -91,6 +92,7 @@ export function createDesktopRuntime(
       await context.plugin(accountPlugin);
       await context.plugin(updatesPlugin);
       await context.plugin(browserPlugin);
+      await context.plugin(remoteProjectPlugin);
       await contribute?.(context);
       await context.plugin(scheduledTasksPlugin);
       context.project.sessions.resumePendingDeletions?.();
@@ -108,6 +110,7 @@ export function createDesktopRuntime(
         skills: context.skills,
         account: context.account,
         updates: context.updates,
+        remoteProject: context.remoteProject,
       };
     } catch (error) {
       await context.fiber.dispose();

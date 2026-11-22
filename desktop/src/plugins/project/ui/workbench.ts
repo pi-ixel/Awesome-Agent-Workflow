@@ -46,11 +46,13 @@ export function apply(ctx: Context): void {
   }>(() => ({}));
   /** 插件给项目界面的扩展（project:extension 绑定）；会话页、侧栏与总览共用。 */
   const extension = createStore<{ view?: ProjectExtension }>(() => ({}));
+  let openAddRemoteProject: (() => void) | undefined;
   let active = true;
   const isCurrent = () => active && project.isActive();
   const navigation = createProjectViewNavigation(workbench, project, {
     isCurrent,
     openFileTree: (path) => documentView.getState().openFileTree?.(path),
+    openAddRemoteProject: () => openAddRemoteProject?.(),
   });
   const projectView = {
     project,
@@ -115,6 +117,18 @@ export function apply(ctx: Context): void {
     });
     return () => binding.dispose();
   }, "project:skills-settings");
+  ctx.effect(() => {
+    const binding = ctx.inject(["remoteProjectUi"], function projectRemoteAdd(scoped) {
+      const ui = scoped.remoteProjectUi;
+      scoped.effect(() => {
+        openAddRemoteProject = ui ? () => ui.openAddRemoteProject() : undefined;
+        return () => {
+          openAddRemoteProject = undefined;
+        };
+      });
+    });
+    return () => binding.dispose();
+  }, "project:remote-project-ui");
   ctx.effect(() => {
     const binding = ctx.inject(["projectExtension"], function projectExtensionView(scoped) {
       const view = scoped.projectExtension;

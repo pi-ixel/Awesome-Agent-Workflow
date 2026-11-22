@@ -19,8 +19,10 @@ import type {
   HostNotifications,
   HostShell,
   HostStorage,
+  OpsSidecarHost,
   ProcessRunner,
   PtyNativeHost,
+  RemoteDocumentFileProvider,
   SkillFiles,
   UpdatesHost,
   WorkflowEngineHost,
@@ -53,6 +55,7 @@ export interface HostService {
   readonly notifications: HostNotifications;
   readonly archives: HostArchiveFiles;
   readonly files: DocumentFileHost;
+  registerRemoteDocumentFiles(provider: RemoteDocumentFileProvider): () => void;
   readonly git: GitHost;
   readonly terminal: PtyNativeHost;
   readonly process: ProcessRunner;
@@ -62,6 +65,7 @@ export interface HostService {
   readCodeAgentTokenQuota(modelId?: string): Promise<CodeAgentTokenResult>;
   readonly updates: UpdatesHost;
   readonly workflowEngine: WorkflowEngineHost;
+  readonly opsSidecar: OpsSidecarHost;
 }
 export { AcpWriteError } from "./process/transportErrors.ts";
 export { openWindowRequests } from "./storage/windowRequests.ts";

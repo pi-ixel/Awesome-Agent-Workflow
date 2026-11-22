@@ -1,3 +1,43 @@
+export const REMOTE_PROJECT_PREFIX = "//aaw-remote/";
+
+export interface ParsedRemoteProjectPath {
+  readonly projectId: string;
+  readonly remotePath: string;
+}
+
+export function isRemoteProjectPath(path: string): boolean {
+  return path.replaceAll("\\", "/").startsWith(REMOTE_PROJECT_PREFIX);
+}
+
+export function formatRemoteProjectPath(
+  projectId: string,
+  remotePath: string,
+): string {
+  const id = projectId.trim();
+  const normalizedRemote = normalizePath(
+    remotePath.trim().startsWith("/") ? remotePath.trim() : `/${remotePath.trim()}`,
+  );
+  return normalizedRemote === "/"
+    ? `${REMOTE_PROJECT_PREFIX}${id}`
+    : `${REMOTE_PROJECT_PREFIX}${id}${normalizedRemote}`;
+}
+
+export function parseRemoteProjectPath(
+  path: string,
+): ParsedRemoteProjectPath | null {
+  const normalized = normalizePath(path);
+  if (!normalized.startsWith(REMOTE_PROJECT_PREFIX)) return null;
+  const rest = normalized.slice(REMOTE_PROJECT_PREFIX.length);
+  const slash = rest.indexOf("/");
+  if (slash < 0) {
+    return rest ? { projectId: rest, remotePath: "/" } : null;
+  }
+  const projectId = rest.slice(0, slash);
+  if (!projectId) return null;
+  const remotePath = rest.slice(slash) || "/";
+  return { projectId, remotePath };
+}
+
 /** 文件路径身份与聊天链接解析；明确绝对路径可位于项目外，相对路径不得越根。 */
 export function normalizePath(path: string): string {
   const value = path.replaceAll("\\", "/");
@@ -14,6 +54,10 @@ export function normalizePath(path: string): string {
 }
 export function pathKey(path: string): string {
   const normalized = normalizePath(path);
+  // 远程 Linux 项目路径保留大小写语义，仅按项目 ID + POSIX 路径区分。
+  if (normalized.startsWith(REMOTE_PROJECT_PREFIX)) {
+    return normalized;
+  }
   return /^[a-z]:/i.test(normalized) || normalized.startsWith("//")
     ? normalized.toLowerCase()
     : normalized;

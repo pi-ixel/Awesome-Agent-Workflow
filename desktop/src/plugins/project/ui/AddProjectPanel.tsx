@@ -73,7 +73,9 @@ function KnownProjectRow({
 }
 
 export function AddProjectPanel({ onClose, triggerRef }: AddProjectPanelProps) {
-  const addProject = useProjectNavigation()?.addProject;
+  const projectNav = useProjectNavigation();
+  const addProject = projectNav?.addProject;
+  const addRemoteProject = projectNav?.addRemoteProject;
   const [tab, setTab] = useState<AddPanelTab>("new-session");
   const [isDialogUnavailable, setIsDialogUnavailable] = useState(false);
   const recentWorkspaces = useWorkspaceValue((state) => state.recentWorkspaces);
@@ -207,6 +209,19 @@ export function AddProjectPanel({ onClose, triggerRef }: AddProjectPanelProps) {
           >
             添加项目…
           </ActionButton>
+          {addRemoteProject && (
+            <ActionButton
+              tone="secondary"
+              type="button"
+              onClick={() => {
+                onClose();
+                addRemoteProject();
+              }}
+              className="px-3 py-2 text-ui-sm"
+            >
+              添加远程项目（SSH）…
+            </ActionButton>
+          )}
           {isDialogUnavailable && (
             <p className="text-ui-xs text-warn-ink">
               目录选择不可用或已取消；可重试，或从「新建会话」列表选择已有项目。

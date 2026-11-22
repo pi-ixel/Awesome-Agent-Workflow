@@ -912,6 +912,20 @@
       "createUsageSettingsEntry/\"usage-statistics\"/View → (inline)"
     ]
   },
+  "plugins/remoteProject/ui/AddRemoteProjectModal.tsx": {
+    "definitions": {
+      "提示与确认": ["AddRemoteProjectModal"]
+    },
+    "targets": []
+  },
+  "plugins/remoteProject/ui/workbench.tsx": {
+    "definitions": {
+      "提示与确认": ["apply/RemoteProjectModalOverlay"]
+    },
+    "targets": [
+      "apply/overlays/\"remote-project-add-modal\"/View → plugins/remoteProject/ui/workbench.tsx#apply/RemoteProjectModalOverlay"
+    ]
+  },
   "plugins/scheduledTasks/index.ts": {
     "definitions": {
       "布局与操纵": [

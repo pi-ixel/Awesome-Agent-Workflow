@@ -22,6 +22,13 @@ export interface WatchPath {
   recursive: boolean;
 }
 
+export interface RemoteDocumentFileProvider {
+  stat(path: string): Promise<FileEntry>;
+  directory(path: string): Promise<DirectoryResult>;
+  preview(path: string): Promise<FilePreview>;
+  listWorkspaceFiles(path: string): Promise<readonly string[] | null>;
+}
+
 export interface DocumentFileHost {
   openInFileManager(path: string, action: "open-directory" | "reveal"): Promise<void>;
   assetUrl(this: void, path: string): string | undefined;

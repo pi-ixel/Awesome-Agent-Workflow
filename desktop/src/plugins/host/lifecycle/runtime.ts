@@ -23,6 +23,7 @@ import { createTerminalHost } from "../process/terminal.ts";
 import { createHostProcessRunner } from "../process/processRunner.ts";
 import { createUpdatesHost } from "../adapters/updates.ts";
 import { createWorkflowEngineHost } from "../adapters/workflowEngine.ts";
+import { createOpsSidecarHost } from "../adapters/opsSidecar.ts";
 import { createInvoke, type NativeInvoke } from "../adapters/invoke.ts";
 import { createBrowserHost } from "../browser/tauri.ts";
 import { createLogger } from "../../../shared/logging/logger.ts";
@@ -135,6 +136,17 @@ export class DesktopHost implements HostService {
         : Promise.resolve(),
   };
   readonly files: HostService["files"];
+  private remoteDocumentFiles?: import("../types.ts").RemoteDocumentFileProvider;
+  registerRemoteDocumentFiles(
+    provider: import("../types.ts").RemoteDocumentFileProvider,
+  ): () => void {
+    this.remoteDocumentFiles = provider;
+    return () => {
+      if (this.remoteDocumentFiles === provider) {
+        this.remoteDocumentFiles = undefined;
+      }
+    };
+  }
   readonly git: HostService["git"];
   readonly terminal: HostService["terminal"];
   readonly process: HostService["process"];
@@ -143,6 +155,7 @@ export class DesktopHost implements HostService {
   readonly updates: HostService["updates"];
   readonly workflowEngine: HostService["workflowEngine"] =
     createWorkflowEngineHost();
+  readonly opsSidecar: HostService["opsSidecar"] = createOpsSidecarHost();
   readonly acpProcess: HostService["acpProcess"];
   readonly browser: HostService["browser"];
 
@@ -265,6 +278,7 @@ export class DesktopHost implements HostService {
       this.exitGate.isExiting,
       panel,
       this.invoke,
+      () => this.remoteDocumentFiles,
     );
     const git = createGitHost(this.exitGate.isExiting, panel);
     this.files = {

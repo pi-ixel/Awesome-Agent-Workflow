@@ -25,6 +25,7 @@ export function apply(ctx: Context, options?: HostOptions): void {
     notifications: host.notifications,
     archives: host.archives,
     files: host.files,
+    registerRemoteDocumentFiles: host.registerRemoteDocumentFiles.bind(host),
     git: host.git,
     terminal: host.terminal,
     process: host.process,
@@ -34,6 +35,7 @@ export function apply(ctx: Context, options?: HostOptions): void {
     readCodeAgentTokenQuota: host.readCodeAgentTokenQuota,
     updates: host.updates,
     workflowEngine: host.workflowEngine,
+    opsSidecar: host.opsSidecar,
   } satisfies HostService);
   ctx.effect(() => () => host.dispose(), "host:resources");
 }
