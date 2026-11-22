@@ -122,6 +122,12 @@ export function createTauriHost(invoke: NativeInvoke = defaultInvoke): HostRunti
       return invoke<string[]>("list_tool_files", { root, limit: limit ?? null });
     },
     async userDataDir(namespace, directory) {
+      // 工具目录不再走裸 `%APPDATA%/tools`：统一由位置指针
+      // （tools-location.json）解析，迁移到别的盘后立即生效。其他
+      // namespace（chrys 等）保持原命令不动——那条命令是共享基础设施。
+      if (namespace === "tools") {
+        return invoke<string>("tools_root_dir", { directory });
+      }
       return invoke<string>("user_data_dir", { namespace, directory });
     },
     async readGuideDoc() {

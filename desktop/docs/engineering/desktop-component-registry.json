@@ -1,7 +1,9 @@
 {
   "plugins/account/ui/LoginScreen.tsx": {
     "definitions": {
-      "布局与操纵": ["LoginScreen"]
+      "布局与操纵": [
+        "LoginScreen"
+      ]
     },
     "targets": []
   },
@@ -19,17 +21,31 @@
   },
   "plugins/agents/enhancements/codeagent/credit/QuotaContent.tsx": {
     "definitions": {
-      "图标与内容标识": ["CreditIcon"],
-      "布局与操纵": ["QuotaContent", "TokenContent"],
-      "导航与列表": ["QuotaRow"],
-      "状态与统计": ["QuotaStatus"]
+      "图标与内容标识": [
+        "CreditIcon"
+      ],
+      "布局与操纵": [
+        "QuotaContent",
+        "TokenContent"
+      ],
+      "导航与列表": [
+        "QuotaRow"
+      ],
+      "状态与统计": [
+        "QuotaStatus"
+      ]
     },
     "targets": []
   },
   "plugins/agents/enhancements/codeagent/credit/index.tsx": {
     "definitions": {
-      "布局与操纵": ["apply/QuotaPanel", "apply/Settings"],
-      "命令按钮": ["apply/RailAction"]
+      "布局与操纵": [
+        "apply/QuotaPanel",
+        "apply/Settings"
+      ],
+      "命令按钮": [
+        "apply/RailAction"
+      ]
     },
     "targets": [
       "apply/sync/activityRailActions/name/View → plugins/agents/enhancements/codeagent/credit/index.tsx#apply/RailAction",
@@ -50,7 +66,9 @@
         "AgentsSettingsSection",
         "ProtocolReportCard"
       ],
-      "状态与统计": ["ProbeSummaryBadge"]
+      "状态与统计": [
+        "ProbeSummaryBadge"
+      ]
     },
     "targets": []
   },
@@ -73,19 +91,27 @@
   },
   "plugins/browser/ui/BrowserPanel.tsx": {
     "definitions": {
-      "内容与专用绘制": ["BrowserPanel", "BrowserPanelSession"]
+      "内容与专用绘制": [
+        "BrowserPanel",
+        "BrowserPanelSession"
+      ]
     },
     "targets": []
   },
   "plugins/browser/ui/BrowserToolRecovery.tsx": {
     "definitions": {
-      "提示与确认": ["BrowserToolRecovery", "BrowserToolRecoverySession"]
+      "提示与确认": [
+        "BrowserToolRecovery",
+        "BrowserToolRecoverySession"
+      ]
     },
     "targets": []
   },
   "plugins/browser/ui/settings.tsx": {
     "definitions": {
-      "布局与操纵": ["BrowserAgentControlSettings"]
+      "布局与操纵": [
+        "BrowserAgentControlSettings"
+      ]
     },
     "targets": []
   },
@@ -105,35 +131,50 @@
   },
   "plugins/diagnostics/index.ts": {
     "definitions": {},
-    "targets": ["loadWindow/import → ./ui/DiagnosticsWindow.tsx"]
+    "targets": [
+      "loadWindow/import → ./ui/DiagnosticsWindow.tsx"
+    ]
   },
   "plugins/diagnostics/ui/ConnectionReport.tsx": {
     "definitions": {
-      "布局与操纵": ["ConnectionReport", "RuntimeDetails"]
+      "布局与操纵": [
+        "ConnectionReport",
+        "RuntimeDetails"
+      ]
     },
     "targets": []
   },
   "plugins/diagnostics/ui/DiagnosticsPage.tsx": {
     "definitions": {
-      "布局与操纵": ["DiagnosticsPage", "RuntimeView"]
+      "布局与操纵": [
+        "DiagnosticsPage",
+        "RuntimeView"
+      ]
     },
     "targets": []
   },
   "plugins/diagnostics/ui/DiagnosticsWindow.tsx": {
     "definitions": {
-      "布局与操纵": ["DiagnosticsWindow"]
+      "布局与操纵": [
+        "DiagnosticsWindow"
+      ]
     },
     "targets": []
   },
   "plugins/diagnostics/ui/LogView.tsx": {
     "definitions": {
-      "布局与操纵": ["LogView"]
+      "布局与操纵": [
+        "LogView"
+      ]
     },
     "targets": []
   },
   "plugins/diagnostics/ui/PerfHud.tsx": {
     "definitions": {
-      "状态与统计": ["PerfHud", "PerfReport"]
+      "状态与统计": [
+        "PerfHud",
+        "PerfReport"
+      ]
     },
     "targets": []
   },
@@ -146,14 +187,20 @@
   },
   "plugins/diagnostics/ui/StorageLocationSetting.tsx": {
     "definitions": {
-      "布局与操纵": ["StorageLocationSetting"]
+      "布局与操纵": [
+        "StorageLocationSetting"
+      ]
     },
     "targets": []
   },
   "plugins/diagnostics/ui/StorageSettings.tsx": {
     "definitions": {
-      "编辑输入": ["ThresholdInput"],
-      "状态与统计": ["createStorageSettings/Monitor"],
+      "编辑输入": [
+        "ThresholdInput"
+      ],
+      "状态与统计": [
+        "createStorageSettings/Monitor"
+      ],
       "布局与操纵": [
         "createStorageSettings/Settings",
         "createStorageSettings/Settings/render"
@@ -173,14 +220,21 @@
         "StorageView",
         "StorageView/categories"
       ],
-      "状态与统计": ["EmptyStorageGroup", "StorageCategoryName"],
-      "导航与列表": ["StorageCategoryTable"]
+      "状态与统计": [
+        "EmptyStorageGroup",
+        "StorageCategoryName"
+      ],
+      "导航与列表": [
+        "StorageCategoryTable"
+      ]
     },
     "targets": []
   },
   "plugins/diagnostics/ui/perf/MemoryChart.tsx": {
     "definitions": {
-      "状态与统计": ["MemoryChart"]
+      "状态与统计": [
+        "MemoryChart"
+      ]
     },
     "targets": []
   },
@@ -195,20 +249,28 @@
   },
   "plugins/documents/ui/FileAnnotations.tsx": {
     "definitions": {
-      "内容与专用绘制": ["FileAnnotations"]
+      "内容与专用绘制": [
+        "FileAnnotations"
+      ]
     },
     "targets": []
   },
   "plugins/documents/ui/FileDocumentTools.tsx": {
     "definitions": {
-      "内容与专用绘制": ["FileDocumentTools"],
-      "布局与操纵": ["FileDocumentTools/renderBranch"]
+      "内容与专用绘制": [
+        "FileDocumentTools"
+      ],
+      "布局与操纵": [
+        "FileDocumentTools/renderBranch"
+      ]
     },
     "targets": []
   },
   "plugins/documents/ui/FileMarkdownPreview.tsx": {
     "definitions": {
-      "内容与专用绘制": ["FileMarkdownPreview"]
+      "内容与专用绘制": [
+        "FileMarkdownPreview"
+      ]
     },
     "targets": []
   },
@@ -227,26 +289,37 @@
   },
   "plugins/documents/ui/FileTree.tsx": {
     "definitions": {
-      "导航与列表": ["FileTree"]
+      "导航与列表": [
+        "FileTree"
+      ]
     },
     "targets": []
   },
   "plugins/documents/ui/MarkdownDocumentDialogs.tsx": {
     "definitions": {
-      "提示与确认": ["DocumentDialog", "MarkdownDocumentDialogs"],
-      "命令按钮": ["MarkdownConflictActions"]
+      "提示与确认": [
+        "DocumentDialog",
+        "MarkdownDocumentDialogs"
+      ],
+      "命令按钮": [
+        "MarkdownConflictActions"
+      ]
     },
     "targets": []
   },
   "plugins/documents/ui/MarkdownSourceEditor.tsx": {
     "definitions": {
-      "编辑输入": ["MarkdownSourceEditor"]
+      "编辑输入": [
+        "MarkdownSourceEditor"
+      ]
     },
     "targets": []
   },
   "plugins/documents/ui/annotationView.ts": {
     "definitions": {
-      "布局与操纵": ["DocumentAnnotationContext"]
+      "布局与操纵": [
+        "DocumentAnnotationContext"
+      ]
     },
     "targets": []
   },
@@ -257,7 +330,9 @@
         "FileTreeList/plugins/documents/ui/file-tree/FileTreeList.tsx#StaticBranch@renderRow",
         "FileTreeList/renderRow"
       ],
-      "布局与操纵": ["StaticBranch"]
+      "布局与操纵": [
+        "StaticBranch"
+      ]
     },
     "targets": [
       "FileTreeList/plugins/documents/ui/file-tree/FileTreeList.tsx#StaticBranch@renderRow → (inline)",
@@ -266,26 +341,36 @@
   },
   "plugins/documents/ui/file-tree/FileTreeRow.tsx": {
     "definitions": {
-      "导航与列表": ["FileTreeRow"]
+      "导航与列表": [
+        "FileTreeRow"
+      ]
     },
     "targets": []
   },
   "plugins/documents/ui/file-tree/FileTreeStickyFolders.tsx": {
     "definitions": {
-      "导航与列表": ["FileTreeStickyFolders"]
+      "导航与列表": [
+        "FileTreeStickyFolders"
+      ]
     },
     "targets": []
   },
   "plugins/documents/ui/workbench.tsx": {
     "definitions": {
-      "提示与确认": ["apply/overlays/\"documents-dialogs\"/View"],
+      "提示与确认": [
+        "apply/overlays/\"documents-dialogs\"/View"
+      ],
       "布局与操纵": [
         "documentPanels/\"directory\"/View",
         "documentPanels/\"file\"/View",
         "documentPanels/fileTreeId/View"
       ],
-      "内容与专用绘制": ["documentPanels/WorkbenchFilePreview"],
-      "导航与列表": ["documentPanels/WorkbenchFileTree"]
+      "内容与专用绘制": [
+        "documentPanels/WorkbenchFilePreview"
+      ],
+      "导航与列表": [
+        "documentPanels/WorkbenchFileTree"
+      ]
     },
     "targets": [
       "apply/overlays/\"documents-dialogs\"/View → (inline)",
@@ -298,33 +383,50 @@
   },
   "plugins/git/ui/GitDiffView.tsx": {
     "definitions": {
-      "内容与专用绘制": ["GitDiffView"]
+      "内容与专用绘制": [
+        "GitDiffView"
+      ]
     },
     "targets": []
   },
   "plugins/git/ui/GitLineStats.tsx": {
     "definitions": {
-      "布局与操纵": ["GitLineStats"]
+      "布局与操纵": [
+        "GitLineStats"
+      ]
     },
     "targets": []
   },
   "plugins/git/ui/GitPanel.tsx": {
     "definitions": {
-      "导航与列表": ["GitFileTree"],
-      "布局与操纵": ["GitPanel"],
-      "内容与专用绘制": ["GitReview", "GitReview/renderChange"]
+      "导航与列表": [
+        "GitFileTree"
+      ],
+      "布局与操纵": [
+        "GitPanel"
+      ],
+      "内容与专用绘制": [
+        "GitReview",
+        "GitReview/renderChange"
+      ]
     },
     "targets": []
   },
   "plugins/git/ui/GitReviewDiff.tsx": {
     "definitions": {
-      "内容与专用绘制": ["GitReviewDiff", "GitReviewDiff/cell"]
+      "内容与专用绘制": [
+        "GitReviewDiff",
+        "GitReviewDiff/cell"
+      ]
     },
     "targets": []
   },
   "plugins/git/ui/workbench.tsx": {
     "definitions": {
-      "布局与操纵": ["gitPanels/\"diff\"/View", "gitPanels/\"git\"/View"]
+      "布局与操纵": [
+        "gitPanels/\"diff\"/View",
+        "gitPanels/\"git\"/View"
+      ]
     },
     "targets": [
       "apply/panels → plugins/git/ui/workbench.tsx#apply/panel",
@@ -397,39 +499,56 @@
   },
   "plugins/project/conversation/ui/AnnotationCards.tsx": {
     "definitions": {
-      "提示与确认": ["AnnotationCards"]
+      "提示与确认": [
+        "AnnotationCards"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/AnnotationSummary.tsx": {
     "definitions": {
-      "布局与操纵": ["AnnotationSummary"]
+      "布局与操纵": [
+        "AnnotationSummary"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/AssistantMessage.tsx": {
     "definitions": {
-      "内容与专用绘制": ["AssistantMessage", "AssistantMessageBase"]
+      "内容与专用绘制": [
+        "AssistantMessage",
+        "AssistantMessageBase"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/BrowserElementSummary.tsx": {
     "definitions": {
-      "图标与内容标识": ["BrowserElementSummary"]
+      "图标与内容标识": [
+        "BrowserElementSummary"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/ChatInput.tsx": {
     "definitions": {
-      "编辑输入": ["ChatInput"],
-      "命令按钮": ["ComposerActionHint"],
-      "图标与内容标识": ["StopIcon"]
+      "编辑输入": [
+        "ChatInput"
+      ],
+      "命令按钮": [
+        "ComposerActionHint"
+      ],
+      "图标与内容标识": [
+        "StopIcon"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/ConversationNavigator.tsx": {
     "definitions": {
-      "导航与列表": ["ConversationNavigator"]
+      "导航与列表": [
+        "ConversationNavigator"
+      ]
     },
     "targets": []
   },
@@ -440,7 +559,9 @@
         "ConversationTurnViewBase",
         "ConversationTurnViewBase/renderWorkItem"
       ],
-      "布局与操纵": ["WorkGroup"]
+      "布局与操纵": [
+        "WorkGroup"
+      ]
     },
     "targets": [
       "ConversationTurnViewBase/plugins/project/conversation/ui/ConversationTurnView.tsx#WorkGroup@renderItem → plugins/project/conversation/ui/ConversationTurnView.tsx#ConversationTurnViewBase/renderItem",
@@ -449,7 +570,9 @@
   },
   "plugins/project/conversation/ui/EditDiffView.tsx": {
     "definitions": {
-      "导航与列表": ["DiffRowsView"],
+      "导航与列表": [
+        "DiffRowsView"
+      ],
       "内容与专用绘制": [
         "EditCard",
         "EditDiffView",
@@ -480,33 +603,48 @@
   },
   "plugins/project/conversation/ui/ImageAttachmentThumbnail.tsx": {
     "definitions": {
-      "图标与内容标识": ["ImageAttachmentThumbnail"]
+      "图标与内容标识": [
+        "ImageAttachmentThumbnail"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/ImageAttachments.tsx": {
     "definitions": {
-      "内容与专用绘制": ["ImageAttachments"]
+      "内容与专用绘制": [
+        "ImageAttachments"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/InputStatusBar.tsx": {
     "definitions": {
-      "状态与统计": ["ContextRing", "InputStatusRight"],
-      "图标与内容标识": ["ModelTag"],
-      "导航与列表": ["TurnStatusRow"]
+      "状态与统计": [
+        "ContextRing",
+        "InputStatusRight"
+      ],
+      "图标与内容标识": [
+        "ModelTag"
+      ],
+      "导航与列表": [
+        "TurnStatusRow"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/MessageAttachments.tsx": {
     "definitions": {
-      "内容与专用绘制": ["MessageAttachments"]
+      "内容与专用绘制": [
+        "MessageAttachments"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/OrdinaryToolCallCard.tsx": {
     "definitions": {
-      "布局与操纵": ["OrdinaryToolCallCard"]
+      "布局与操纵": [
+        "OrdinaryToolCallCard"
+      ]
     },
     "targets": [
       "edit → shared/ui/icons.tsx#PencilIcon",
@@ -519,40 +657,59 @@
   },
   "plugins/project/conversation/ui/PlanCard.tsx": {
     "definitions": {
-      "图标与内容标识": ["EntryStatusIcon"],
-      "内容与专用绘制": ["PlanCard", "PlanCardBase"]
+      "图标与内容标识": [
+        "EntryStatusIcon"
+      ],
+      "内容与专用绘制": [
+        "PlanCard",
+        "PlanCardBase"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/QueueDock.tsx": {
     "definitions": {
-      "布局与操纵": ["QueueDock"]
+      "布局与操纵": [
+        "QueueDock"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/ReconnectButton.tsx": {
     "definitions": {
-      "命令按钮": ["ReconnectButton"],
-      "布局与操纵": ["SessionReconnect"]
+      "命令按钮": [
+        "ReconnectButton"
+      ],
+      "布局与操纵": [
+        "SessionReconnect"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/SessionDock.tsx": {
     "definitions": {
-      "布局与操纵": ["SessionDock"]
+      "布局与操纵": [
+        "SessionDock"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/SessionPerformanceBadge.tsx": {
     "definitions": {
-      "状态与统计": ["SessionPerformanceBadge"]
+      "状态与统计": [
+        "SessionPerformanceBadge"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/SessionStatusOverlay.tsx": {
     "definitions": {
-      "布局与操纵": ["Section"],
-      "提示与确认": ["SessionStatusOverlay"]
+      "布局与操纵": [
+        "Section"
+      ],
+      "提示与确认": [
+        "SessionStatusOverlay"
+      ]
     },
     "targets": []
   },
@@ -568,112 +725,158 @@
   },
   "plugins/project/conversation/ui/SkillReferenceTokens.tsx": {
     "definitions": {
-      "图标与内容标识": ["SkillReferenceToken"],
-      "布局与操纵": ["SkillReferenceTokens"]
+      "图标与内容标识": [
+        "SkillReferenceToken"
+      ],
+      "布局与操纵": [
+        "SkillReferenceTokens"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/StatusChipMenu.tsx": {
     "definitions": {
-      "提示与确认": ["StatusChipMenu"]
+      "提示与确认": [
+        "StatusChipMenu"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/StatusTaskProgress.tsx": {
     "definitions": {
-      "状态与统计": ["StatusTaskProgress"],
-      "布局与操纵": ["StatusTaskProgress/group"],
-      "导航与列表": ["TaskRows"]
+      "状态与统计": [
+        "StatusTaskProgress"
+      ],
+      "布局与操纵": [
+        "StatusTaskProgress/group"
+      ],
+      "导航与列表": [
+        "TaskRows"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/SubagentDetails.tsx": {
     "definitions": {
-      "布局与操纵": ["SubagentDetails"]
+      "布局与操纵": [
+        "SubagentDetails"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/SubagentProgressView.tsx": {
     "definitions": {
-      "状态与统计": ["SubagentProgressView"]
+      "状态与统计": [
+        "SubagentProgressView"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/SubagentToolRow.tsx": {
     "definitions": {
-      "导航与列表": ["SubagentToolRow"]
+      "导航与列表": [
+        "SubagentToolRow"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/SystemNotice.tsx": {
     "definitions": {
-      "状态与统计": ["SystemNotice", "SystemNoticeBase"]
+      "状态与统计": [
+        "SystemNotice",
+        "SystemNoticeBase"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/TerminalOutput.tsx": {
     "definitions": {
-      "内容与专用绘制": ["TerminalOutput"]
+      "内容与专用绘制": [
+        "TerminalOutput"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/ThoughtBlock.tsx": {
     "definitions": {
-      "内容与专用绘制": ["ThoughtBlock", "ThoughtBlockBase"]
+      "内容与专用绘制": [
+        "ThoughtBlock",
+        "ThoughtBlockBase"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/ToolCallCard.tsx": {
     "definitions": {
-      "内容与专用绘制": ["ToolCallCard", "ToolCallCardBase"]
+      "内容与专用绘制": [
+        "ToolCallCard",
+        "ToolCallCardBase"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/ToolContent.tsx": {
     "definitions": {
-      "内容与专用绘制": ["ToolContent"]
+      "内容与专用绘制": [
+        "ToolContent"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/TurnUsageBadge.tsx": {
     "definitions": {
-      "状态与统计": ["TurnUsageBadge"]
+      "状态与统计": [
+        "TurnUsageBadge"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/UserMessage.tsx": {
     "definitions": {
-      "内容与专用绘制": ["UserMessage", "UserMessageBase"]
+      "内容与专用绘制": [
+        "UserMessage",
+        "UserMessageBase"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/WorkGroupCard.tsx": {
     "definitions": {
-      "布局与操纵": ["WorkGroupCard"]
+      "布局与操纵": [
+        "WorkGroupCard"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/documentView.ts": {
     "definitions": {
-      "布局与操纵": ["ConversationDocumentContext"]
+      "布局与操纵": [
+        "ConversationDocumentContext"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/expansionState.tsx": {
     "definitions": {
-      "布局与操纵": ["ExpansionScopeProvider"]
+      "布局与操纵": [
+        "ExpansionScopeProvider"
+      ]
     },
     "targets": []
   },
   "plugins/project/conversation/ui/useExpansionState.ts": {
     "definitions": {
-      "布局与操纵": ["ExpansionScope"]
+      "布局与操纵": [
+        "ExpansionScope"
+      ]
     },
     "targets": []
   },
   "plugins/project/interactions/ui/ApprovalModal.tsx": {
     "definitions": {
-      "提示与确认": ["ApprovalModal"]
+      "提示与确认": [
+        "ApprovalModal"
+      ]
     },
     "targets": []
   },
@@ -685,20 +888,29 @@
         "FormCard",
         "FormQueue"
       ],
-      "提示与确认": ["ElicitationModal", "ElicitationModalView"]
+      "提示与确认": [
+        "ElicitationModal",
+        "ElicitationModalView"
+      ]
     },
     "targets": []
   },
   "plugins/project/interactions/ui/QuestionDock.tsx": {
     "definitions": {
-      "布局与操纵": ["QuestionDock"]
+      "布局与操纵": [
+        "QuestionDock"
+      ]
     },
     "targets": []
   },
   "plugins/project/interactions/ui/QuestionPanel.tsx": {
     "definitions": {
-      "选择控件": ["QuestionChoices"],
-      "布局与操纵": ["QuestionPanel"]
+      "选择控件": [
+        "QuestionChoices"
+      ],
+      "布局与操纵": [
+        "QuestionPanel"
+      ]
     },
     "targets": []
   },
@@ -711,25 +923,33 @@
   },
   "plugins/project/ui/ArchiveManagementSection.tsx": {
     "definitions": {
-      "布局与操纵": ["ArchiveManagementSection"]
+      "布局与操纵": [
+        "ArchiveManagementSection"
+      ]
     },
     "targets": []
   },
   "plugins/project/ui/ArchiveNotice.tsx": {
     "definitions": {
-      "提示与确认": ["ArchiveNotice"]
+      "提示与确认": [
+        "ArchiveNotice"
+      ]
     },
     "targets": []
   },
   "plugins/project/ui/FilePathButton.tsx": {
     "definitions": {
-      "命令按钮": ["FilePathButton"]
+      "命令按钮": [
+        "FilePathButton"
+      ]
     },
     "targets": []
   },
   "plugins/project/ui/InteractionPicker.tsx": {
     "definitions": {
-      "选择控件": ["InteractionPicker"],
+      "选择控件": [
+        "InteractionPicker"
+      ],
       "内容与专用绘制": [
         "InteractionPicker/plugins/project/ui/SettingsPreviewPicker.tsx#SettingsPreviewPicker@renderPreview",
         "InteractionPreview"
@@ -750,7 +970,9 @@
   },
   "plugins/project/ui/MessageStreamPicker.tsx": {
     "definitions": {
-      "选择控件": ["MessageStreamPicker"],
+      "选择控件": [
+        "MessageStreamPicker"
+      ],
       "内容与专用绘制": [
         "MessageStreamPicker/plugins/project/ui/SettingsPreviewPicker.tsx#SettingsPreviewPicker@renderPreview",
         "renderPreviewItem"
@@ -763,7 +985,9 @@
   },
   "plugins/project/ui/NewTaskButtonGroup.tsx": {
     "definitions": {
-      "命令按钮": ["NewTaskButtonGroup"]
+      "命令按钮": [
+        "NewTaskButtonGroup"
+      ]
     },
     "targets": [
       "NewTaskButtonGroup/shared/ui/SidebarCreateButton.tsx#SidebarCreateButton@Icon → shared/ui/icons.tsx#MessageCirclePlusIcon"
@@ -771,9 +995,15 @@
   },
   "plugins/project/ui/ProjectOverview.tsx": {
     "definitions": {
-      "布局与操纵": ["ProjectOverview"],
-      "状态与统计": ["ProjectSetup"],
-      "导航与列表": ["ProjectStatusRow"]
+      "布局与操纵": [
+        "ProjectOverview"
+      ],
+      "状态与统计": [
+        "ProjectSetup"
+      ],
+      "导航与列表": [
+        "ProjectStatusRow"
+      ]
     },
     "targets": []
   },
@@ -792,7 +1022,10 @@
         "SessionStarAction",
         "TreeViewSwitchButton"
       ],
-      "状态与统计": ["SessionActivityBadge", "SessionGroupStatusBadge"],
+      "状态与统计": [
+        "SessionActivityBadge",
+        "SessionGroupStatusBadge"
+      ],
       "布局与操纵": [
         "BusySessionsContext",
         "ListHeader",
@@ -813,19 +1046,25 @@
         "SessionsView",
         "TreeSection"
       ],
-      "编辑输入": ["SessionRenameInput"]
+      "编辑输入": [
+        "SessionRenameInput"
+      ]
     },
     "targets": []
   },
   "plugins/project/ui/SessionRunningIndicator.tsx": {
     "definitions": {
-      "状态与统计": ["SessionRunningIndicator"]
+      "状态与统计": [
+        "SessionRunningIndicator"
+      ]
     },
     "targets": []
   },
   "plugins/project/ui/SettingsPreviewPicker.tsx": {
     "definitions": {
-      "选择控件": ["SettingsPreviewPicker"]
+      "选择控件": [
+        "SettingsPreviewPicker"
+      ]
     },
     "targets": []
   },
@@ -860,9 +1099,18 @@
   },
   "plugins/project/ui/projectHeaders.tsx": {
     "definitions": {
-      "命令按钮": ["BackButton", "FolderButton", "NewSessionHeaderAction"],
-      "提示与确认": ["ConnectErrorBanner"],
-      "布局与操纵": ["OverviewBar", "SessionBar"]
+      "命令按钮": [
+        "BackButton",
+        "FolderButton",
+        "NewSessionHeaderAction"
+      ],
+      "提示与确认": [
+        "ConnectErrorBanner"
+      ],
+      "布局与操纵": [
+        "OverviewBar",
+        "SessionBar"
+      ]
     },
     "targets": [
       "projectConversationPageId/Banner → plugins/project/ui/projectHeaders.tsx#ConnectErrorBanner",
@@ -918,13 +1166,19 @@
   },
   "plugins/project/ui/workbenchViews.tsx": {
     "definitions": {
-      "提示与确认": ["ProjectDialogs"],
-      "状态与统计": ["ProjectExitDetails"],
+      "提示与确认": [
+        "ProjectDialogs"
+      ],
+      "状态与统计": [
+        "ProjectExitDetails"
+      ],
       "布局与操纵": [
         "createProjectPages/OverviewPage",
         "createProjectPages/SessionPage"
       ],
-      "导航与列表": ["createProjectSidebar/ProjectSidebar"]
+      "导航与列表": [
+        "createProjectSidebar/ProjectSidebar"
+      ]
     },
     "targets": [
       "\"project-dialogs\"/View → plugins/project/ui/workbenchViews.tsx#ProjectDialogs",
@@ -940,22 +1194,36 @@
   },
   "plugins/project/ui/workspaces/RemoveProjectDialog.tsx": {
     "definitions": {
-      "提示与确认": ["RemoveProjectDialog"]
+      "提示与确认": [
+        "RemoveProjectDialog"
+      ]
     },
     "targets": []
   },
   "plugins/project/usage/UsageHeatmap.tsx": {
     "definitions": {
-      "布局与操纵": ["Cell"],
-      "状态与统计": ["DailyCell", "UsageHeatmap", "WeeklyColumn"]
+      "布局与操纵": [
+        "Cell"
+      ],
+      "状态与统计": [
+        "DailyCell",
+        "UsageHeatmap",
+        "WeeklyColumn"
+      ]
     },
     "targets": []
   },
   "plugins/project/usage/UsageSettings.tsx": {
     "definitions": {
-      "状态与统计": ["Trend"],
-      "选择控件": ["UsageAgentFilter"],
-      "布局与操纵": ["UsageSettings"]
+      "状态与统计": [
+        "Trend"
+      ],
+      "选择控件": [
+        "UsageAgentFilter"
+      ],
+      "布局与操纵": [
+        "UsageSettings"
+      ]
     },
     "targets": []
   },
@@ -1037,8 +1305,13 @@
   },
   "plugins/scheduledTasks/ui/TaskViews.tsx": {
     "definitions": {
-      "布局与操纵": ["TaskEditor", "TaskWorkspace"],
-      "导航与列表": ["TaskSidebar"]
+      "布局与操纵": [
+        "TaskEditor",
+        "TaskWorkspace"
+      ],
+      "导航与列表": [
+        "TaskSidebar"
+      ]
     },
     "targets": [
       "TaskSidebar/shared/ui/SidebarCreateButton.tsx#SidebarCreateButton@Icon → shared/ui/icons.tsx#PlusIcon"
@@ -1046,39 +1319,56 @@
   },
   "plugins/skills/ui/SkillCards.tsx": {
     "definitions": {
-      "命令按钮": ["ActionsRow"],
-      "布局与操纵": ["SkillCard"],
-      "导航与列表": ["SkillGroup"]
+      "命令按钮": [
+        "ActionsRow"
+      ],
+      "布局与操纵": [
+        "SkillCard"
+      ],
+      "导航与列表": [
+        "SkillGroup"
+      ]
     },
     "targets": []
   },
   "plugins/skills/ui/SkillDetail.tsx": {
     "definitions": {
-      "布局与操纵": ["SkillDetail"]
+      "布局与操纵": [
+        "SkillDetail"
+      ]
     },
     "targets": []
   },
   "plugins/skills/ui/SkillLibrary.tsx": {
     "definitions": {
-      "布局与操纵": ["LibraryPage", "SkillLibrary"]
+      "布局与操纵": [
+        "LibraryPage",
+        "SkillLibrary"
+      ]
     },
     "targets": []
   },
   "plugins/skills/ui/SkillPackageActions.tsx": {
     "definitions": {
-      "命令按钮": ["SkillPackageActions"]
+      "命令按钮": [
+        "SkillPackageActions"
+      ]
     },
     "targets": []
   },
   "plugins/skills/ui/SkillsInstallerSection.tsx": {
     "definitions": {
-      "布局与操纵": ["SkillsInstallerSection"]
+      "布局与操纵": [
+        "SkillsInstallerSection"
+      ]
     },
     "targets": []
   },
   "plugins/skills/ui/SkillsSourceSettings.tsx": {
     "definitions": {
-      "布局与操纵": ["SkillsSourceSettings"]
+      "布局与操纵": [
+        "SkillsSourceSettings"
+      ]
     },
     "targets": []
   },
@@ -1089,7 +1379,9 @@
         "apply/Source",
         "apply/sidebar/\"plugin-management\"/WorkArea"
       ],
-      "导航与列表": ["apply/Sidebar"]
+      "导航与列表": [
+        "apply/Sidebar"
+      ]
     },
     "targets": [
       "apply/Installer → (inline)",
@@ -1103,20 +1395,28 @@
   },
   "plugins/terminal/ui/TerminalPanel.tsx": {
     "definitions": {
-      "内容与专用绘制": ["TerminalPanel"],
-      "导航与列表": ["TerminalTabChip"]
+      "内容与专用绘制": [
+        "TerminalPanel"
+      ],
+      "导航与列表": [
+        "TerminalTabChip"
+      ]
     },
     "targets": []
   },
   "plugins/terminal/ui/TerminalSessionView.tsx": {
     "definitions": {
-      "内容与专用绘制": ["TerminalSessionView"]
+      "内容与专用绘制": [
+        "TerminalSessionView"
+      ]
     },
     "targets": []
   },
   "plugins/terminal/ui/workbench.ts": {
     "definitions": {
-      "布局与操纵": ["terminalDock/\"terminal\"/View"]
+      "布局与操纵": [
+        "terminalDock/\"terminal\"/View"
+      ]
     },
     "targets": [
       "apply/docks → plugins/terminal/ui/workbench.ts#terminalDock",
@@ -1126,60 +1426,88 @@
   },
   "plugins/tools/ui/ToolBuilder.tsx": {
     "definitions": {
-      "编辑输入": ["NewToolForm"],
-      "状态与统计": ["ViolationList"],
-      "内容与专用绘制": ["ProjectDetail"]
+      "编辑输入": [
+        "NewToolForm"
+      ],
+      "状态与统计": [
+        "ViolationList"
+      ],
+      "内容与专用绘制": [
+        "ProjectDetail"
+      ]
     },
     "targets": []
   },
   "plugins/tools/ui/ToolManagement.tsx": {
     "definitions": {
-      "布局与操纵": ["Section"],
-      "内容与专用绘制": ["ToolManagement"]
+      "布局与操纵": [
+        "Section"
+      ],
+      "内容与专用绘制": [
+        "ToolManagement"
+      ]
     },
     "targets": []
   },
   "plugins/tools/ui/ToolPath.tsx": {
     "definitions": {
-      "布局与操纵": ["ToolPath"]
+      "布局与操纵": [
+        "ToolPath"
+      ]
     },
     "targets": []
   },
   "plugins/tools/ui/ToolPreview.tsx": {
     "definitions": {
-      "内容与专用绘制": ["ToolPreview"]
+      "内容与专用绘制": [
+        "ToolPreview"
+      ]
     },
     "targets": []
   },
   "plugins/tools/ui/ToolPreviewTab.tsx": {
     "definitions": {
-      "布局与操纵": ["ToolPreviewTab"]
+      "布局与操纵": [
+        "ToolPreviewTab"
+      ]
     },
     "targets": []
   },
   "plugins/tools/ui/ToolProjects.tsx": {
     "definitions": {
-      "导航与列表": ["ToolProjectList"]
+      "导航与列表": [
+        "ToolProjectList"
+      ]
     },
     "targets": []
   },
   "plugins/tools/ui/ToolsPanel.tsx": {
     "definitions": {
-      "提示与确认": ["EmptyLibrary"],
-      "布局与操纵": ["ToolsPanel"]
+      "提示与确认": [
+        "EmptyLibrary"
+      ],
+      "布局与操纵": [
+        "ToolsPanel"
+      ]
     },
     "targets": []
   },
   "plugins/tools/ui/surface.tsx": {
     "definitions": {
-      "布局与操纵": ["ToolsPanelSurface"]
+      "布局与操纵": [
+        "ToolsPanelSurface"
+      ]
     },
     "targets": []
   },
   "plugins/tools/ui/workbench.tsx": {
     "definitions": {
-      "布局与操纵": ["apply/ToolsView"],
-      "内容与专用绘制": ["apply/panels/previewKind/View"]
+      "布局与操纵": [
+        "apply/ToolsView"
+      ],
+      "内容与专用绘制": [
+        "apply/panels/previewKind/View"
+      ]
     },
     "targets": [
       "apply/panels/\"tools\"/Icon → shared/ui/icons.tsx#WrenchIcon",
@@ -1189,20 +1517,30 @@
   },
   "plugins/updates/ui/DesktopUpdate.tsx": {
     "definitions": {
-      "命令按钮": ["UpdateButton"],
-      "布局与操纵": ["UpdateController", "UpdateSettings"]
+      "命令按钮": [
+        "UpdateButton"
+      ],
+      "布局与操纵": [
+        "UpdateController",
+        "UpdateSettings"
+      ]
     },
     "targets": []
   },
   "plugins/updates/ui/ReleaseHistory.tsx": {
     "definitions": {
-      "布局与操纵": ["ReleaseHistory"]
+      "布局与操纵": [
+        "ReleaseHistory"
+      ]
     },
     "targets": []
   },
   "plugins/updates/ui/UpdateReleaseNotes.tsx": {
     "definitions": {
-      "布局与操纵": ["ReleaseNotes", "UpdateReleaseNotes"]
+      "布局与操纵": [
+        "ReleaseNotes",
+        "UpdateReleaseNotes"
+      ]
     },
     "targets": []
   },
@@ -1212,7 +1550,9 @@
         "apply/headerIndicators/\"updates\"/View",
         "updateSettings/\"updates\"/View"
       ],
-      "提示与确认": ["apply/overlays/\"updates-dialog\"/View"]
+      "提示与确认": [
+        "apply/overlays/\"updates-dialog\"/View"
+      ]
     },
     "targets": [
       "apply/headerIndicators/\"updates\"/View → (inline)",
@@ -1259,7 +1599,10 @@
   },
   "plugins/workbench/ui/CloseConfirmModal.tsx": {
     "definitions": {
-      "提示与确认": ["CloseConfirmModal", "ExitOverlay"]
+      "提示与确认": [
+        "CloseConfirmModal",
+        "ExitOverlay"
+      ]
     },
     "targets": []
   },
@@ -1269,63 +1612,94 @@
   },
   "plugins/workbench/ui/CloseGuard.tsx": {
     "definitions": {
-      "提示与确认": ["CloseGuard"]
+      "提示与确认": [
+        "CloseGuard"
+      ]
     },
     "targets": []
   },
   "plugins/workbench/ui/ContentArea.tsx": {
     "definitions": {
-      "布局与操纵": ["ContentArea"]
+      "布局与操纵": [
+        "ContentArea"
+      ]
     },
     "targets": []
   },
   "plugins/workbench/ui/ContextBar.tsx": {
     "definitions": {
-      "布局与操纵": ["ContextBar", "DockToggle", "SidePaneToggle"],
-      "提示与确认": ["HelpMenu", "HelpMenuButton"]
+      "布局与操纵": [
+        "ContextBar",
+        "DockToggle",
+        "SidePaneToggle"
+      ],
+      "提示与确认": [
+        "HelpMenu",
+        "HelpMenuButton"
+      ]
     },
     "targets": []
   },
   "plugins/workbench/ui/HeaderIndicators.tsx": {
     "definitions": {
-      "状态与统计": ["HeaderIndicators"]
+      "状态与统计": [
+        "HeaderIndicators"
+      ]
     },
     "targets": []
   },
   "plugins/workbench/ui/SettingsPage.tsx": {
     "definitions": {
-      "提示与确认": ["ResetConfirm"],
-      "布局与操纵": ["SettingsContent", "SettingsPage", "SettingsPanel"]
+      "提示与确认": [
+        "ResetConfirm"
+      ],
+      "布局与操纵": [
+        "SettingsContent",
+        "SettingsPage",
+        "SettingsPanel"
+      ]
     },
     "targets": []
   },
   "plugins/workbench/ui/SidebarFooter.tsx": {
     "definitions": {
-      "导航与列表": ["SidebarFooter"]
+      "导航与列表": [
+        "SidebarFooter"
+      ]
     },
     "targets": []
   },
   "plugins/workbench/ui/SidebarToggle.tsx": {
     "definitions": {
-      "导航与列表": ["SidebarToggle"]
+      "导航与列表": [
+        "SidebarToggle"
+      ]
     },
     "targets": []
   },
   "plugins/workbench/ui/StartupGate.tsx": {
     "definitions": {
-      "布局与操纵": ["StartupGate", "StartupScreen"]
+      "布局与操纵": [
+        "StartupGate",
+        "StartupScreen"
+      ]
     },
     "targets": []
   },
   "plugins/workbench/ui/ToastHost.tsx": {
     "definitions": {
-      "状态与统计": ["ToastEntry", "ToastHost"]
+      "状态与统计": [
+        "ToastEntry",
+        "ToastHost"
+      ]
     },
     "targets": []
   },
   "plugins/workbench/ui/WindowControls.tsx": {
     "definitions": {
-      "布局与操纵": ["WindowControls"]
+      "布局与操纵": [
+        "WindowControls"
+      ]
     },
     "targets": []
   },
@@ -1340,13 +1714,19 @@
   },
   "plugins/workbench/ui/WorkbenchWindow.tsx": {
     "definitions": {
-      "布局与操纵": ["WindowContent", "WorkbenchWindow"]
+      "布局与操纵": [
+        "WindowContent",
+        "WorkbenchWindow"
+      ]
     },
     "targets": []
   },
   "plugins/workbench/ui/WorkspaceGate.tsx": {
     "definitions": {
-      "布局与操纵": ["BlockingScreen", "WorkspaceGate"]
+      "布局与操纵": [
+        "BlockingScreen",
+        "WorkspaceGate"
+      ]
     },
     "targets": [
       "WorkspaceGate/plugins/workbench/ui/WorkspaceGate.tsx#WorkspaceGate/Gate@BlockingScreen → plugins/workbench/ui/WorkspaceGate.tsx#BlockingScreen"
@@ -1354,56 +1734,80 @@
   },
   "plugins/workbench/ui/bindings/react.ts": {
     "definitions": {
-      "布局与操纵": ["WorkbenchContext"]
+      "布局与操纵": [
+        "WorkbenchContext"
+      ]
     },
     "targets": []
   },
   "plugins/workbench/ui/right-panel/FullViewHost.tsx": {
     "definitions": {
-      "布局与操纵": ["FullViewHost", "FullViewHostFrame"]
+      "布局与操纵": [
+        "FullViewHost",
+        "FullViewHostFrame"
+      ]
     },
     "targets": []
   },
   "plugins/workbench/ui/right-panel/NewTabPane.tsx": {
     "definitions": {
-      "导航与列表": ["NewTabPane"]
+      "导航与列表": [
+        "NewTabPane"
+      ]
     },
     "targets": []
   },
   "plugins/workbench/ui/right-panel/PanelTabStrip.tsx": {
     "definitions": {
-      "导航与列表": ["PanelTabStrip", "PanelTabTrigger"]
+      "导航与列表": [
+        "PanelTabStrip",
+        "PanelTabTrigger"
+      ]
     },
     "targets": []
   },
   "plugins/workbench/ui/right-panel/RightPanel.tsx": {
     "definitions": {
-      "布局与操纵": ["PanelWorkspace", "ProjectPanel"]
+      "布局与操纵": [
+        "PanelWorkspace",
+        "ProjectPanel"
+      ]
     },
     "targets": []
   },
   "plugins/workbench/ui/right-panel/TabOverviewPopover.tsx": {
     "definitions": {
-      "提示与确认": ["TabOverviewPopover"],
-      "导航与列表": ["TabOverviewPopover/renderRows"]
+      "提示与确认": [
+        "TabOverviewPopover"
+      ],
+      "导航与列表": [
+        "TabOverviewPopover/renderRows"
+      ]
     },
     "targets": []
   },
   "plugins/workbench/ui/right-panel/fullViewContext.ts": {
     "definitions": {
-      "布局与操纵": ["RightPanelSlideContext", "RightPanelSlotContext"]
+      "布局与操纵": [
+        "RightPanelSlideContext",
+        "RightPanelSlotContext"
+      ]
     },
     "targets": []
   },
   "plugins/workbench/ui/right-panel/panelTabModel.tsx": {
     "definitions": {
-      "图标与内容标识": ["PanelTabIcon"]
+      "图标与内容标识": [
+        "PanelTabIcon"
+      ]
     },
     "targets": []
   },
   "plugins/workbench/ui/settingsContributions.tsx": {
     "definitions": {
-      "布局与操纵": ["GeneralSettings"]
+      "布局与操纵": [
+        "GeneralSettings"
+      ]
     },
     "targets": [
       "\"general\"/Icon → shared/ui/icons.tsx#SlidersHorizontalIcon",
@@ -1425,13 +1829,17 @@
   },
   "plugins/workflow/ui/AiComposeDialog.tsx": {
     "definitions": {
-      "编辑输入": ["AiComposeDialog"]
+      "编辑输入": [
+        "AiComposeDialog"
+      ]
     },
     "targets": []
   },
   "plugins/workflow/ui/DisposePanel.tsx": {
     "definitions": {
-      "布局与操纵": ["DisposePanel"]
+      "布局与操纵": [
+        "DisposePanel"
+      ]
     },
     "targets": []
   },
@@ -1453,25 +1861,33 @@
   },
   "plugins/workflow/ui/KnowledgeDetail.tsx": {
     "definitions": {
-      "内容与专用绘制": ["KnowledgeDetail"]
+      "内容与专用绘制": [
+        "KnowledgeDetail"
+      ]
     },
     "targets": []
   },
   "plugins/workflow/ui/MoreMenu.tsx": {
     "definitions": {
-      "提示与确认": ["MoreMenu"]
+      "提示与确认": [
+        "MoreMenu"
+      ]
     },
     "targets": []
   },
   "plugins/workflow/ui/NodeDetail.tsx": {
     "definitions": {
-      "内容与专用绘制": ["NodeDetail"]
+      "内容与专用绘制": [
+        "NodeDetail"
+      ]
     },
     "targets": []
   },
   "plugins/workflow/ui/NodeReview.tsx": {
     "definitions": {
-      "内容与专用绘制": ["NodeReview"]
+      "内容与专用绘制": [
+        "NodeReview"
+      ]
     },
     "targets": []
   },
@@ -1493,46 +1909,69 @@
   },
   "plugins/workflow/ui/RunSummaryPage.tsx": {
     "definitions": {
-      "布局与操纵": ["RunSummaryPage"]
+      "布局与操纵": [
+        "RunSummaryPage"
+      ]
     },
     "targets": []
   },
   "plugins/workflow/ui/RunView.tsx": {
     "definitions": {
-      "布局与操纵": ["RunView"]
+      "布局与操纵": [
+        "RunView"
+      ]
     },
     "targets": []
   },
   "plugins/workflow/ui/SplitPane.tsx": {
     "definitions": {
-      "布局与操纵": ["SplitPane", "SplitStorageContext"]
+      "布局与操纵": [
+        "SplitPane",
+        "SplitStorageContext"
+      ]
     },
     "targets": []
   },
   "plugins/workflow/ui/StatusWord.tsx": {
     "definitions": {
-      "状态与统计": ["StatusWord"]
+      "状态与统计": [
+        "StatusWord"
+      ]
     },
     "targets": []
   },
   "plugins/workflow/ui/WorkflowDetailView.tsx": {
     "definitions": {
-      "布局与操纵": ["WorkflowDetailView"]
+      "布局与操纵": [
+        "WorkflowDetailView"
+      ]
     },
     "targets": []
   },
   "plugins/workflow/ui/WorkflowLibrary.tsx": {
     "definitions": {
-      "内容与专用绘制": ["ImportPreviewCard"],
-      "布局与操纵": ["WorkflowCard", "WorkflowLibrary"],
-      "提示与确认": ["CardDelete"],
-      "导航与列表": ["CardName", "DraftCard"]
+      "内容与专用绘制": [
+        "ImportPreviewCard"
+      ],
+      "布局与操纵": [
+        "WorkflowCard",
+        "WorkflowLibrary"
+      ],
+      "提示与确认": [
+        "CardDelete"
+      ],
+      "导航与列表": [
+        "CardName",
+        "DraftCard"
+      ]
     },
     "targets": []
   },
   "plugins/workflow/ui/WorkflowPanel.tsx": {
     "definitions": {
-      "布局与操纵": ["WorkflowPanel"]
+      "布局与操纵": [
+        "WorkflowPanel"
+      ]
     },
     "targets": []
   },
@@ -1545,7 +1984,9 @@
   },
   "plugins/workflow/ui/WorkflowSidebar.tsx": {
     "definitions": {
-      "导航与列表": ["WorkflowSidebar"]
+      "导航与列表": [
+        "WorkflowSidebar"
+      ]
     },
     "targets": [
       "WorkflowSidebar/shared/ui/SidebarCreateButton.tsx#SidebarCreateButton@Icon → shared/ui/icons.tsx#SparklesIcon"
@@ -1581,38 +2022,52 @@
   },
   "shared/logging/react.ts": {
     "definitions": {
-      "布局与操纵": ["LoggerContext"]
+      "布局与操纵": [
+        "LoggerContext"
+      ]
     },
     "targets": []
   },
   "shared/ui/BrandLoading.tsx": {
     "definitions": {
-      "状态与统计": ["BrandLoading"]
+      "状态与统计": [
+        "BrandLoading"
+      ]
     },
     "targets": []
   },
   "shared/ui/BrandMark.tsx": {
     "definitions": {
-      "图标与内容标识": ["BrandMark"]
+      "图标与内容标识": [
+        "BrandMark"
+      ]
     },
     "targets": []
   },
   "shared/ui/Breadcrumb.tsx": {
     "definitions": {
-      "导航与列表": ["Breadcrumb"]
+      "导航与列表": [
+        "Breadcrumb"
+      ]
     },
     "targets": []
   },
   "shared/ui/Callout.tsx": {
     "definitions": {
-      "提示与确认": ["Callout"],
-      "图标与内容标识": ["ToneIcon"]
+      "提示与确认": [
+        "Callout"
+      ],
+      "图标与内容标识": [
+        "ToneIcon"
+      ]
     },
     "targets": []
   },
   "shared/ui/CapabilityCard.tsx": {
     "definitions": {
-      "布局与操纵": ["CapabilityCard"]
+      "布局与操纵": [
+        "CapabilityCard"
+      ]
     },
     "targets": []
   },
@@ -1624,31 +2079,42 @@
   },
   "shared/ui/ConfirmationDialog.tsx": {
     "definitions": {
-      "提示与确认": ["ConfirmationDialog"]
+      "提示与确认": [
+        "ConfirmationDialog"
+      ]
     },
     "targets": []
   },
   "shared/ui/ContextMenu.tsx": {
     "definitions": {
-      "提示与确认": ["ContextMenu"]
+      "提示与确认": [
+        "ContextMenu"
+      ]
     },
     "targets": []
   },
   "shared/ui/CopyButton.tsx": {
     "definitions": {
-      "命令按钮": ["CopyButton"]
+      "命令按钮": [
+        "CopyButton"
+      ]
     },
     "targets": []
   },
   "shared/ui/Disclosure.tsx": {
     "definitions": {
-      "布局与操纵": ["Disclosure"]
+      "布局与操纵": [
+        "Disclosure"
+      ]
     },
     "targets": []
   },
   "shared/ui/DocumentPreview.tsx": {
     "definitions": {
-      "内容与专用绘制": ["DocumentPreview", "MarkdownView"]
+      "内容与专用绘制": [
+        "DocumentPreview",
+        "MarkdownView"
+      ]
     },
     "targets": [
       "default → shared/ui/MarkdownView.tsx#MarkdownView",
@@ -1657,7 +2123,9 @@
   },
   "shared/ui/EmptyState.tsx": {
     "definitions": {
-      "状态与统计": ["EmptyState"]
+      "状态与统计": [
+        "EmptyState"
+      ]
     },
     "targets": []
   },
@@ -1676,15 +2144,23 @@
   },
   "shared/ui/IconButton.tsx": {
     "definitions": {
-      "图标与内容标识": ["IconHoverProvider"],
-      "布局与操纵": ["PlacementContext"],
-      "命令按钮": ["IconButton"]
+      "图标与内容标识": [
+        "IconHoverProvider"
+      ],
+      "布局与操纵": [
+        "PlacementContext"
+      ],
+      "命令按钮": [
+        "IconButton"
+      ]
     },
     "targets": []
   },
   "shared/ui/InlineConfirm.tsx": {
     "definitions": {
-      "提示与确认": ["InlineConfirm"]
+      "提示与确认": [
+        "InlineConfirm"
+      ]
     },
     "targets": []
   },
@@ -1746,20 +2222,28 @@
   },
   "shared/ui/MetricStrip.tsx": {
     "definitions": {
-      "状态与统计": ["MetricStrip"]
+      "状态与统计": [
+        "MetricStrip"
+      ]
     },
     "targets": []
   },
   "shared/ui/ModalShell.tsx": {
     "definitions": {
-      "布局与操纵": ["ModalDepth"],
-      "提示与确认": ["ModalShell"]
+      "布局与操纵": [
+        "ModalDepth"
+      ],
+      "提示与确认": [
+        "ModalShell"
+      ]
     },
     "targets": []
   },
   "shared/ui/NavigationRow.tsx": {
     "definitions": {
-      "导航与列表": ["NavigationRow"]
+      "导航与列表": [
+        "NavigationRow"
+      ]
     },
     "targets": []
   },
@@ -1772,56 +2256,79 @@
   },
   "shared/ui/PageHeader.tsx": {
     "definitions": {
-      "布局与操纵": ["PageHeader"]
+      "布局与操纵": [
+        "PageHeader"
+      ]
     },
     "targets": []
   },
   "shared/ui/PageVisibility.ts": {
     "definitions": {
-      "布局与操纵": ["PageVisibility"]
+      "布局与操纵": [
+        "PageVisibility"
+      ]
     },
     "targets": []
   },
   "shared/ui/SettingsPageParts.tsx": {
     "definitions": {
-      "编辑输入": ["IntegerSettingInput"],
-      "布局与操纵": ["SettingCard", "SettingRow"]
+      "编辑输入": [
+        "IntegerSettingInput"
+      ],
+      "布局与操纵": [
+        "SettingCard",
+        "SettingRow"
+      ]
     },
     "targets": []
   },
   "shared/ui/SidebarCreateButton.tsx": {
     "definitions": {
-      "命令按钮": ["SidebarCreateButton"]
+      "命令按钮": [
+        "SidebarCreateButton"
+      ]
     },
     "targets": []
   },
   "shared/ui/SidebarFooterRow.tsx": {
     "definitions": {
-      "导航与列表": ["SidebarFooterRow"]
+      "导航与列表": [
+        "SidebarFooterRow"
+      ]
     },
     "targets": []
   },
   "shared/ui/SidebarItemTitle.tsx": {
     "definitions": {
-      "导航与列表": ["SidebarItemTitle"]
+      "导航与列表": [
+        "SidebarItemTitle"
+      ]
     },
     "targets": []
   },
   "shared/ui/TextLink.tsx": {
     "definitions": {
-      "命令按钮": ["TextLink"]
+      "命令按钮": [
+        "TextLink"
+      ]
     },
     "targets": []
   },
   "shared/ui/TreeMotion.tsx": {
     "definitions": {
-      "导航与列表": ["CollapsibleTreePane", "TreeBranch"]
+      "导航与列表": [
+        "CollapsibleTreePane",
+        "TreeBranch"
+      ]
     },
     "targets": []
   },
   "shared/ui/UiIcon.tsx": {
     "definitions": {
-      "图标与内容标识": ["Svg", "UiIcon"]
+      "图标与内容标识": [
+        "Svg",
+        "UiIcon"
+      ]
     },
     "targets": []
   },
@@ -1847,31 +2354,41 @@
   },
   "shared/ui/controls/ColumnResizer.tsx": {
     "definitions": {
-      "布局与操纵": ["ColumnResizer"]
+      "布局与操纵": [
+        "ColumnResizer"
+      ]
     },
     "targets": []
   },
   "shared/ui/controls/EdgeDrawer.tsx": {
     "definitions": {
-      "提示与确认": ["EdgeDrawer"]
+      "提示与确认": [
+        "EdgeDrawer"
+      ]
     },
     "targets": []
   },
   "shared/ui/controls/FindBar.tsx": {
     "definitions": {
-      "编辑输入": ["FindBar"]
+      "编辑输入": [
+        "FindBar"
+      ]
     },
     "targets": []
   },
   "shared/ui/controls/HintNumber.tsx": {
     "definitions": {
-      "布局与操纵": ["HintNumber"]
+      "布局与操纵": [
+        "HintNumber"
+      ]
     },
     "targets": []
   },
   "shared/ui/controls/HintSurface.tsx": {
     "definitions": {
-      "提示与确认": ["HintSurface"]
+      "提示与确认": [
+        "HintSurface"
+      ]
     },
     "targets": []
   },
@@ -1881,49 +2398,66 @@
   },
   "shared/ui/controls/HintTooltip.tsx": {
     "definitions": {
-      "提示与确认": ["HintTooltip"]
+      "提示与确认": [
+        "HintTooltip"
+      ]
     },
     "targets": []
   },
   "shared/ui/controls/RefreshButton.tsx": {
     "definitions": {
-      "命令按钮": ["RefreshButton"]
+      "命令按钮": [
+        "RefreshButton"
+      ]
     },
     "targets": []
   },
   "shared/ui/controls/SegmentedControl.tsx": {
     "definitions": {
-      "选择控件": ["SegmentedControl"]
+      "选择控件": [
+        "SegmentedControl"
+      ]
     },
     "targets": []
   },
   "shared/ui/controls/UsageMeter.tsx": {
     "definitions": {
-      "状态与统计": ["UsageMeter"]
+      "状态与统计": [
+        "UsageMeter"
+      ]
     },
     "targets": []
   },
   "shared/ui/controls/hintMotion.ts": {
     "definitions": {
-      "布局与操纵": ["HintOpening"]
+      "布局与操纵": [
+        "HintOpening"
+      ]
     },
     "targets": []
   },
   "shared/ui/feedback.ts": {
     "definitions": {
-      "布局与操纵": ["Feedback"]
+      "布局与操纵": [
+        "Feedback"
+      ]
     },
     "targets": []
   },
   "shared/ui/file-icons/FileEntryLabel.tsx": {
     "definitions": {
-      "导航与列表": ["FileEntryLabel"]
+      "导航与列表": [
+        "FileEntryLabel"
+      ]
     },
     "targets": []
   },
   "shared/ui/file-icons/fileDisplay.tsx": {
     "definitions": {
-      "图标与内容标识": ["FileDisplayIcon", "GlyphMotif"]
+      "图标与内容标识": [
+        "FileDisplayIcon",
+        "GlyphMotif"
+      ]
     },
     "targets": []
   },
@@ -2029,38 +2563,64 @@
   },
   "shared/ui/markdown/CodeBlock.tsx": {
     "definitions": {
-      "内容与专用绘制": ["CodeBlock"],
-      "布局与操纵": ["CodeBlockContext"],
-      "命令按钮": ["CodeBlockPreviewButton", "CodeBlockWrapButton"]
+      "内容与专用绘制": [
+        "CodeBlock"
+      ],
+      "布局与操纵": [
+        "CodeBlockContext"
+      ],
+      "命令按钮": [
+        "CodeBlockPreviewButton",
+        "CodeBlockWrapButton"
+      ]
     },
     "targets": []
   },
   "shared/ui/markdown/DiagramPreviewDialog.tsx": {
     "definitions": {
-      "图标与内容标识": ["CircleIcon"],
-      "提示与确认": ["DiagramPreviewDialog"]
+      "图标与内容标识": [
+        "CircleIcon"
+      ],
+      "提示与确认": [
+        "DiagramPreviewDialog"
+      ]
     },
     "targets": []
   },
   "shared/ui/markdown/MarkdownImage.tsx": {
     "definitions": {
-      "图标与内容标识": ["ImagePlaceholderIcon"],
-      "提示与确认": ["ImagePreviewDialog"],
-      "内容与专用绘制": ["MarkdownImage", "MarkdownImageParagraph"]
+      "图标与内容标识": [
+        "ImagePlaceholderIcon"
+      ],
+      "提示与确认": [
+        "ImagePreviewDialog"
+      ],
+      "内容与专用绘制": [
+        "MarkdownImage",
+        "MarkdownImageParagraph"
+      ]
     },
     "targets": []
   },
   "shared/ui/markdown/MarkdownTable.tsx": {
     "definitions": {
-      "内容与专用绘制": ["MarkdownTable"],
-      "导航与列表": ["TableEdgeShadow"],
-      "提示与确认": ["TablePreviewDialog"]
+      "内容与专用绘制": [
+        "MarkdownTable"
+      ],
+      "导航与列表": [
+        "TableEdgeShadow"
+      ],
+      "提示与确认": [
+        "TablePreviewDialog"
+      ]
     },
     "targets": []
   },
   "shared/ui/markdown/MermaidBlock.tsx": {
     "definitions": {
-      "内容与专用绘制": ["MermaidBlock"]
+      "内容与专用绘制": [
+        "MermaidBlock"
+      ]
     },
     "targets": []
   },
@@ -2072,7 +2632,18 @@
   },
   "shared/ui/markdown/theme.ts": {
     "definitions": {
-      "布局与操纵": ["MarkdownAppearance"]
+      "布局与操纵": [
+        "MarkdownAppearance"
+      ]
+    },
+    "targets": []
+  },
+  "plugins/diagnostics/ui/ToolsStorageSetting.tsx": {
+    "definitions": {
+      "布局与操纵": [
+        "LocationRow",
+        "ToolsStorageSetting"
+      ]
     },
     "targets": []
   }

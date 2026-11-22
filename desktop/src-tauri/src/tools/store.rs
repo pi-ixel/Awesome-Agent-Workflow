@@ -28,7 +28,9 @@ pub const SHARED_OWNER: &str = "__shared";
 /// 进程级写锁。`set` / `delete` 是“读文件 → 改 → 原子替换”三步，不是原子的：
 /// 同一工具的两个调用方（页面 + L3 进程反向调用，或两个并发能力调用）同时写，
 /// 后写的整份文件会盖掉先写的键。锁住整个读改写，代价只是一次本地互斥。
-static WRITE_LOCK: Mutex<()> = Mutex::new(());
+/// 工具数据迁移（`location.rs`）也拿它包住拷贝→切指针整段，防止迁移期间
+/// 有新写入落到旧位置。
+pub(crate) static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 /// 工具 id 的形状校验，与 `protocol::valid_tool_id` 同一套。
 fn valid_tool_id(id: &str) -> bool {
@@ -138,16 +140,30 @@ impl ToolStore {
         }
     }
 
+    /// 工具数据根：`data-location.json` 的 `storageRoot` 优先；否则跟数据根
+    /// （含迁移后的 active 根）走 `<数据根>/tools/storage`。指针文件在
+    /// `configuration/` 里，随数据根迁移一起走。与 `location.rs::tool_data_root`
+    /// 是同一规则的两半——那边的解析供迁移命令用，这边供逐次读写用。
+    fn tool_data_root(&self) -> Result<PathBuf, String> {
+        let pointer = self.storage_root().join("configuration").join("data-location.json");
+        if let Ok(text) = std::fs::read_to_string(&pointer) {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+                if let Some(path) = value.get("storageRoot").and_then(|item| item.as_str()) {
+                    let path = path.trim();
+                    if !path.is_empty() {
+                        return Ok(PathBuf::from(path));
+                    }
+                }
+            }
+        }
+        Ok(self.storage_root().join("tools").join("storage"))
+    }
+
     fn file(&self, owner: &str) -> Result<PathBuf, String> {
         if !valid_owner(owner) {
             return Err("无效的存储归属。".into());
         }
-        Ok(self
-            .storage_root()
-            .join("tools")
-            .join("storage")
-            .join(self.owner()?)
-            .join(format!("{owner}.json")))
+        Ok(self.tool_data_root()?.join(self.owner()?).join(format!("{owner}.json")))
     }
 
     fn read(&self, tool_id: &str) -> Result<BTreeMap<String, serde_json::Value>, String> {
@@ -322,11 +338,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// `data-location.json` 的 storageRoot 指针必须真的挪走落盘文件：
+    /// 迁移（location.rs）切完指针后，旧位置不会再有新写入——如果 file()
+    /// 还按老路径拼，迁移就是摆设。
+    #[test]
+    fn data_location_pointer_moves_the_storage_file() {
+        let root = temp_root("datapointer");
+        login(&root, "u1");
+        let config = root.join("configuration");
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::write(config.join("data-location.json"), r#"{"storageRoot":"D:/aaw-data-test"}"#).unwrap();
+        let store = ToolStore::new(&root);
+        store.set("pilot", "k", serde_json::json!(1)).unwrap();
+        let path = storage_path(&store, "pilot").unwrap();
+        assert!(path.ends_with("D:/aaw-data-test/u1/pilot.json"), "{path:?}");
+        assert!(path.is_file());
+        assert_eq!(store.get("pilot", "k").unwrap(), serde_json::json!(1));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// 两个调用方并发 set 不得互相丢键：set 是"读 → 改 → 整文件替换"，
     /// 没有进程级锁时后写的会盖掉先写的（页面 + L3 反向调用真实存在并发）。
     #[test]
-    fn concurrent_sets_do_not_lose_keys() {
-        let root = temp_root("concurrent");
+    fn concurrent_sets_do_not_lose_keys() {        let root = temp_root("concurrent");
         login(&root, "u1");
         let store = ToolStore::new(&root);
         std::thread::scope(|scope| {
