@@ -35,6 +35,7 @@ import {
   listVersionDirs,
   materializeToolFiles,
   missingEntryFiles,
+  pruneOrphanVersions,
   serializeToolOp,
   stageVersion,
 } from "../runtime/versions.ts";
@@ -663,6 +664,10 @@ export function createWorkshop(deps: {
             sourceDir: current.dir,
           });
           touchedAt.set(pathKey(current.dir), Date.now());
+          // 这次更新把上一轮的 previousDir 挤成了没人引用的目录。当场收掉——
+          // 不然每装一次就多留一份旧副本，直到用户卸载这个工具。仍然在队列里：
+          // 配置已经写完，刚装好的这一版不会被当成孤儿。
+          await pruneOrphanVersions(io, owner, staged.tool.id);
           patch({ installed: true, drift: false, note: { text: describeInstall(outcome, staged.tool.name) } });
           void refreshProjects();
           return true;
@@ -700,6 +705,8 @@ export function createWorkshop(deps: {
         // ZIP / 文件夹导入没有开发来源：显式清掉上一次的来源，免得管理页
         // 指着一个已经不对应这一版的目录。
         const outcome = tools.install(staged.tool, { replace: true, runDir: staged.dir, sourceDir: null });
+        // 同上：这次导入把上一轮的旧副本挤成了孤儿，当场收掉。
+        await pruneOrphanVersions(io, owner, staged.tool.id);
         void refreshProjects();
         return outcome;
       } catch (error) {

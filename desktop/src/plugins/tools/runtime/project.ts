@@ -21,6 +21,13 @@ import { toolLimits } from "./limits.ts";
 import { runToolRules, splitViolations, type ToolRuleOptions } from "./rules.ts";
 import { toolGuide, toolGuideFromDoc, type ToolGuideContext } from "./guide.ts";
 
+/** 宿主回收孤儿版本副本的报告（字段与 Rust 侧 `ToolPruneReport` 一一对应）。 */
+export interface ToolPruneReport {
+  readonly removed: readonly string[];
+  readonly kept: readonly string[];
+  readonly skipped: readonly string[];
+}
+
 /** 工具项目需要的最小宿主能力（便于测试时注入假实现）。 */
 export interface ToolProjectIO {
   userDataDir(namespace: string, directory: string): Promise<string>;
@@ -43,6 +50,17 @@ export interface ToolProjectIO {
    * 两条错误。宿主侧只接受受管范围内的这种目录，别的路径一律拒绝。
    */
   dropStaging?(path: string): Promise<void>;
+  /**
+   * 回收孤儿版本副本：`versions/` 下既没有被安装记录引用、也没有窗口在用
+   * 的目录。返回真正删掉的目录数。
+   *
+   * 判据**全部在宿主侧**——只有它同时看得到安装记录（`dir` / `previousDir`
+   * / `sourceDir`）和窗口表。前端只负责说"什么时候可以扫一遍"。
+   *
+   * `owner` 用来确认"发起时和宿主当前账号是同一个人"；宿主对不上会直接拒绝，
+   * 免得换账号那一瞬间以新身份去扫别人的目录。
+   */
+  pruneVersions?(toolId: string, owner: string | undefined): Promise<ToolPruneReport>;
   /** 写二进制文件（base64）；宿主不支持时安装会明确报错，而不是静默丢文件。 */
   writeBinaryFile?(path: string, base64: string): Promise<void>;
   /** 读二进制文件（base64）；导出带依赖的工具时用。 */

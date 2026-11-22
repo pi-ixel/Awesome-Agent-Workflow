@@ -384,6 +384,13 @@ export class DesktopHost implements HostService {
               this.resources.run(() => backend.dropToolStaging!(path)),
           }
         : {}),
+      // 孤儿版本回收：判据在宿主侧（安装记录 + 窗口表），门面只负责转发。
+      ...(backend.pruneToolVersions
+        ? {
+            pruneToolVersions: (toolId: string, owner?: string) =>
+              this.resources.run(() => backend.pruneToolVersions!(toolId, owner)),
+          }
+        : {}),
     };
     this.account = createAccountHost(backend, this.resources);
     this.process = {

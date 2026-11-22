@@ -13,6 +13,7 @@ import {
   canRunToolDir,
   materializeToolFiles,
   missingEntryFiles,
+  pruneOrphanVersions,
   serializeToolOp,
   stageVersion,
   sweepStagingDirs,
@@ -255,8 +256,16 @@ export function apply(ctx: Context): void {
     // 不收就永远占着盘。按工具排队，避免删掉另一个正在写的暂存目录。
     for (const entry of entries) {
       try {
-        await serializeToolOp(`tool:${current}:${entry.package.id}`, () =>
-          sweepStagingDirs(io, current, entry.package.id));
+        await serializeToolOp(`tool:${current}:${entry.package.id}`, async () => {
+          await sweepStagingDirs(io, current, entry.package.id);
+          // 启动是清理历史遗留的唯一统一时机：版本副本以前只增不减，升级过
+          // 几次的工具盘上会堆着几个再没有任何记录能退回的目录。
+          //
+          // 只对"运行目录还在"的条目做。目录丢了的那类会在下一轮物化出一份
+          // 新的，而那份刚写好、还没写进配置——这时扫盘会把它当孤儿删掉。
+          const alive = entry.dir ? await io.pathExists(entry.dir).catch(() => false) : false;
+          if (alive) await pruneOrphanVersions(io, current, entry.package.id);
+        });
       } catch { /* 清不掉不影响启动，下次再试 */ }
     }
     for (const entry of entries) {
@@ -427,7 +436,12 @@ export function apply(ctx: Context): void {
         try {
           // 回滚本身也是一次安装：被换下来的那一版会自动成为新的"上一版"，
           // 所以点错了还能再点一次换回去。
-          return ctx.tools.install(backup, { replace: true, runDir: dir });
+          const outcome = ctx.tools.install(backup, { replace: true, runDir: dir });
+          // 两格之外的副本到这一步就再没有任何记录指向它了。顺手收掉——留着
+          // 既占盘，也没有入口能让用户退回去。仍然排在同一个队列里：此时配置
+          // 已经写完，不会把刚切过去的那一版当孤儿。
+          await pruneOrphanVersions(io, current, id);
+          return outcome;
         } catch (error) {
           await staged?.discard();
           throw error;

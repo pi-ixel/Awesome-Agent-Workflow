@@ -18,6 +18,13 @@ export function hostToolIO(host: HostService): ToolProjectIO {
     ...(host.skills.dropToolStaging
       ? { dropStaging: (path) => host.skills.dropToolStaging!(path) }
       : {}),
+    // 孤儿版本回收：判据在宿主（安装记录 + 窗口表），前端只发起。
+    ...(host.skills.pruneToolVersions
+      ? {
+          pruneVersions: (toolId: string, owner: string | undefined) =>
+            host.skills.pruneToolVersions!(toolId, owner),
+        }
+      : {}),
     ...(host.skills.writeBinaryFile
       ? { writeBinaryFile: (path, base64) => host.skills.writeBinaryFile!(path, base64) }
       : {}),
@@ -90,5 +97,8 @@ export function memoryToolIO(seed: Readonly<Record<string, string>> = {}): ToolP
       }
       return Promise.resolve();
     },
+    // 内存实现不知道"谁在引用哪一份"——安装记录不在这里。真删等于瞎删，
+    // 所以一律回空报告；要断言回收行为，测试里包一层假宿主即可。
+    pruneVersions: () => Promise.resolve({ removed: [], kept: [], skipped: [] }),
   };
 }

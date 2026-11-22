@@ -121,8 +121,60 @@ function machine() {
    * 慢"，不是"操作坏"，两者要分开验。
    */
   let gate: { readonly match: (path: string) => boolean; readonly wait: Promise<void> } | undefined;
+  /** 每次回收被发起时的参数：验"什么时候扫了一遍"与"带的账号对不对"。 */
+  const pruneCalls: { readonly toolId: string; readonly owner: string | undefined }[] = [];
+  /**
+   * 目录归谁。真机上这条信息就在路径里（`installed/<账号>/<id>`），而演示宿主
+   * 的文件树不按账号分段——不自己记一份，B 的回收就会把 A 的副本当孤儿删掉。
+   */
+  const ownerOfDir = new Map<string, string>();
   const backend: DemoHost = {
     ...base,
+    /**
+     * 真正的"孤儿副本回收"：按配置里这一条记录的三个目录排除，其余删掉。
+     *
+     * 真实宿主还会排除"窗口正在加载的目录"——这里没有窗口，所以只看配置。
+     * 这层测试要验的是**前端在正确时机发起了回收、参数对不对**；"谁该被保留"
+     * 那套判断由 Rust 单测（`commands::tests::prune_*`）守住。
+     */
+    async pruneToolVersions(toolId, owner) {
+      pruneCalls.push({ toolId, owner });
+      const keep = new Set<string>();
+      const key = owner ? `user:${owner}` : undefined;
+      const raw = key ? localStorage.getItem(configKey) : null;
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        const list = parsed[key as string];
+        if (Array.isArray(list)) {
+          for (const item of list) {
+            const entry = item as Record<string, unknown> | null;
+            const pkg = entry?.["package"] as Record<string, unknown> | undefined;
+            if (pkg?.["id"] !== toolId) continue;
+            for (const field of ["dir", "previousDir", "sourceDir"]) {
+              const value = entry?.[field];
+              if (typeof value === "string") keep.add(value.toLowerCase());
+            }
+          }
+        }
+      }
+      const versionsRoot = joinPath(installedRoot, toolId, "versions");
+      const who = owner ?? "";
+      // 先把本账号引用的目录登记归属——真机上这一步由路径本身完成。
+      for (const dir of keep) ownerOfDir.set(dir, who);
+      const removed: string[] = [];
+      for (const name of await versionDirs(toolId)) {
+        if (name.startsWith(".staging-")) continue;
+        const dir = joinPath(versionsRoot, name);
+        const key = dir.toLowerCase();
+        // 别人的分区：不碰。真机上这些目录根本不在我的 `installed/<账号>` 下。
+        const belongsTo = ownerOfDir.get(key);
+        if (belongsTo !== undefined && belongsTo !== who) continue;
+        if (keep.has(key)) continue;
+        backend.removePath(dir);
+        removed.push(dir);
+      }
+      return { removed, kept: [...keep], skipped: [] };
+    },
     async writeTextFile(path, contents) {
       if (failWrite?.(path)) throw new Error("磁盘写不进去");
       const pending = gate;
@@ -259,6 +311,8 @@ function machine() {
     },
     /** 直接删掉一个版本目录，模拟"安装目录被清理工具扫走了"。 */
     removeDir(path: string) { backend.removePath(path); },
+    /** 到目前为止每一次回收的参数（按调用顺序）。 */
+    pruneCalls() { return [...pruneCalls]; },
   };
   return api;
 }
@@ -484,10 +538,9 @@ describe("工具模块的状态转换", () => {
     expect(app.tools().state.getState()).toEqual([]);
     expect(await app.filesOf(joinPath(installedRoot, "notes"))).toEqual([]);
 
-    // 已知留白：上一版清单备份（backups/<id>/previous.json）不随卸载删除。
-    // 它是纯清单文本、不含运行数据，也没有任何记录引用它；下次装同 id 再更新
-    // 时会被覆盖。要清干净得再给宿主加一个"只删这个文件"的窄命令，本批没做。
-    expect(await app.exists(joinPath(backupRoot, "notes", "previous.json"))).toBe(true);
+    // 上一版清单也一起清掉：它只服务于"退回上一版"，记录没了就没有任何路径
+    // 能用到它——留着只是用户看不到、也没有入口删的残留。
+    expect(await app.exists(joinPath(backupRoot, "notes", "previous.json"))).toBe(false);
   });
 
   it("重启时发现运行副本被清掉：能凑齐文件就自愈一份，拼不出来的保持坏标记", async () => {
@@ -604,9 +657,9 @@ describe("工具模块的状态转换（长序列与并发）", () => {
     expect(app.tools().state.getState()[0]).toMatchObject({ package: { version: "2.0.0" }, dir: v3Dir, previousDir: v2Dir });
     await expectConsistent(app);
 
-    // 已知留白：v1 那份副本此刻没有任何记录引用它（界面上也回不去），
-    // 会一直留到卸载才随 versions 一起清。见本轮报告"副本不回收"一条。
-    expect(await app.exists(v1Dir)).toBe(true);
+    // v1 在第一次退版时就被回收了：两格（dir / previousDir）里再也到不了它，
+    // 继续留着只是一份谁也退不回去的副本。
+    expect(await app.exists(v1Dir)).toBe(false);
     expect(app.savedEntries()[0]?.dir).toBe(v3Dir);
     expect(app.savedEntries()[0]?.previousDir).toBe(v2Dir);
   });
@@ -737,9 +790,10 @@ describe("工具模块的状态转换（长序列与并发）", () => {
     // 上一次安装确实留下了一份"上一版清单"（backups/<id>/previous.json）。
     expect(await app.exists(joinPath(backupRoot, "notes", "previous.json"))).toBe(true);
 
-    // 卸载（记录 + 版本目录都清掉，但那份清单备份按已知留白留在盘上）。
+    // 卸载：记录、版本目录、上一版清单一起清掉。
     app.tools().remove("notes");
     expect((await app.workshopOf().purge("notes")).error).toBeUndefined();
+    expect(await app.exists(joinPath(backupRoot, "notes", "previous.json"))).toBe(false);
 
     // 重新装一版：这是全新的一次安装，跟盘上那份旧清单没有关系。
     const v3 = packageOf("2.0.0", "<p>第二次安装 v3</p>");
@@ -783,7 +837,9 @@ describe("工具模块的状态转换（长序列与并发）", () => {
     // 后提交的那次赢：当前 v3，上一版就是先装进去的 v2（不是 v1）。
     expect(afterBurst[0]).toMatchObject({ package: { version: "2.0.0" }, previousVersion: "1.1.0" });
     expect(afterBurst[0]?.previousDir).toBe(joinPath(installedRoot, "notes", "versions", "1.1.0"));
-    expect([...(await app.versionDirs("notes"))].sort()).toEqual(["1.0.0", "1.1.0", "2.0.0"]);
+    // 只留两格：当前 v3 + 上一版 v2。v1 在 v3 落盘那一刻就再没有任何记录指向它
+    // ——退版也退不到它（`previousDir` 已经换成 v2），所以当场回收。
+    expect([...(await app.versionDirs("notes"))].sort()).toEqual(["1.1.0", "2.0.0"]);
     expect(await app.stagingLeftovers("notes")).toEqual([]);
     await expectConsistent(app);
 
@@ -1254,5 +1310,96 @@ describe("工具模块的状态转换（自愈与账号）", () => {
     expect(healed?.broken).toBeUndefined();
     expect(await app.exists(healed?.dir as string)).toBe(true);
     expect(await app.versionDirs("notes")).toEqual(["1.0.0"]);
+  });
+});
+
+/**
+ * 第五轮：版本副本的回收。
+ *
+ * 以前每次更新都在 `versions/` 下新开一份，退回去之后更早的那份就再没有任何
+ * 记录指向它，可它一直留在盘上——带 `node_modules` 的工具一次几十上百 MB，
+ * 装十几次就是几个 G。这一组盯三件事：什么时候收、收完还剩哪两格、绝不碰
+ * 不该删的（暂存目录、开发来源、窗口正在用的）。
+ */
+describe("工具模块的版本副本回收", () => {
+  it("连续更新只留当前版与上一版，更早的当场回收", async () => {
+    const app = await device();
+    const workshop = app.workshopOf();
+    for (const version of ["1.0.0", "1.1.0", "1.2.0", "1.3.0"]) {
+      const pkg = packageOf(version, `<p>${version}</p>`);
+      await workshop.installArchive(pkg, runtimeFiles(pkg));
+    }
+
+    const entry = app.tools().state.getState()[0];
+    // 两格：dir = 1.3.0、previousDir = 1.2.0。1.0.0 / 1.1.0 已经不在任何
+    // 入口能到达的范围里——界面只有一个"退回上一版"。
+    expect([...(await app.versionDirs("notes"))].sort()).toEqual(["1.2.0", "1.3.0"]);
+    expect(entry?.dir).toBe(joinPath(installedRoot, "notes", "versions", "1.3.0"));
+    expect(entry?.previousDir).toBe(joinPath(installedRoot, "notes", "versions", "1.2.0"));
+    await expectConsistent(app);
+
+    // 回收是跟着安装发起的，每次安装一次，带的都是发起时的账号。
+    const calls = app.pruneCalls().filter((call) => call.toolId === "notes");
+    expect(calls).toHaveLength(4);
+    expect(calls.every((call) => call.owner === app.userKey()?.slice("user:".length))).toBe(true);
+  });
+
+  it("退版之后：换下来的那份留着（点错了能再退回去），更早的那份才收", async () => {
+    const app = await device();
+    const workshop = app.workshopOf();
+    const v1 = packageOf("1.0.0", "<p>v1</p>");
+    await workshop.installArchive(v1, runtimeFiles(v1));
+    const v2 = packageOf("1.1.0", "<p>v2</p>");
+    await workshop.installArchive(v2, runtimeFiles(v2));
+
+    const back = await workshop.rollback("notes");
+    expect(back.error).toBeUndefined();
+    expect(app.tools().state.getState()[0]?.package.version).toBe("1.0.0");
+    // 退回之后两格是 1.0.0(当前) / 1.1.0(上一版)：一个都不能少。
+    expect([...(await app.versionDirs("notes"))].sort()).toEqual(["1.0.0", "1.1.0"]);
+    await expectConsistent(app);
+
+    // 从退回的状态再升到 v3：上一版变成 1.0.0，1.1.0 从此没人指向。
+    const v3 = packageOf("1.2.0", "<p>v3</p>");
+    await workshop.installArchive(v3, runtimeFiles(v3));
+    expect([...(await app.versionDirs("notes"))].sort()).toEqual(["1.0.0", "1.2.0"]);
+    await expectConsistent(app);
+  });
+
+  it("启动时收掉升级前留下的孤儿副本", async () => {
+    const app = await device();
+    const workshop = app.workshopOf();
+    const v1 = packageOf("1.0.0", "<p>v1</p>");
+    await workshop.installArchive(v1, runtimeFiles(v1));
+    const v2 = packageOf("1.1.0", "<p>v2</p>");
+    await workshop.installArchive(v2, runtimeFiles(v2));
+
+    // 模拟旧版本留在盘上的第三份：配置里没有任何字段指向它。
+    const stale = joinPath(installedRoot, "notes", "versions", "0.9.0");
+    app.backend.addDir(stale);
+    await app.backend.writeTextFile(joinPath(stale, "index.html"), "<p>旧</p>");
+    expect([...(await app.versionDirs("notes"))].sort()).toEqual(["0.9.0", "1.0.0", "1.1.0"]);
+
+    await app.restart();
+    // 启动自愈对"目录还在"的条目扫一遍：两格留下，历史遗留收掉。
+    expect([...(await app.versionDirs("notes"))].sort()).toEqual(["1.0.0", "1.1.0"]);
+    await expectConsistent(app);
+  });
+
+  it("崩溃残留的暂存目录归另一条通道：回收不插手，启动自愈照样收", async () => {
+    const app = await device();
+    const workshop = app.workshopOf();
+    const v1 = packageOf("1.0.0", "<p>v1</p>");
+    await workshop.installArchive(v1, runtimeFiles(v1));
+
+    const crash = joinPath(installedRoot, "notes", "versions", ".staging-crash");
+    app.backend.addDir(crash);
+    await app.backend.writeTextFile(joinPath(crash, "manifest.json"), "{}");
+
+    await app.restart();
+    // 两条通道各清各的：暂存由 sweepStagingDirs 收，版本由回收收，互不越界。
+    expect(await app.stagingLeftovers("notes")).toEqual([]);
+    expect(await app.versionDirs("notes")).toEqual(["1.0.0"]);
+    await expectConsistent(app);
   });
 });
