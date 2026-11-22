@@ -253,6 +253,31 @@ impl ToolsHost {
         }
     }
 
+    /// 这个工具此刻正被哪些目录占着：窗口会话打开的目录 + 打开时登记的运行目录。
+    ///
+    /// 回收孤儿版本副本前必须问它。一个目录没有记录指向，不等于没人正在用：
+    /// 用户可能还开着更新前那一版的窗口，删掉就是当场白屏。这件事判断不了
+    /// 也就不该删——所以由宿主自己回答，而不是让只看得到配置的前端去猜。
+    pub(crate) fn busy_dirs(&self, tool_id: &str) -> Vec<PathBuf> {
+        let mut dirs: Vec<PathBuf> = self
+            .sessions
+            .lock()
+            .map(|map| {
+                map.values()
+                    .filter(|session| session.tool_id == tool_id)
+                    .map(|session| session.dir.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        // L3 进程工具的目录只登记在 runtime_dirs，不一定有会话（不带界面的）。
+        if let Ok(map) = self.runtime_dirs.lock() {
+            if let Some(dir) = map.get(tool_id) {
+                dirs.push(dir.clone());
+            }
+        }
+        dirs
+    }
+
     /// 协议层的目录解析：优先查打开时登记的运行目录（它比 `tools_root/<id>`
     /// 更接近事实——前端物化、ZIP 导入的副本都记在这里）；登记的目录不在了
     /// 才退回旧路径。`runtime_dir` 只在 open 成功后存在，返回 `None` 时让

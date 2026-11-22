@@ -308,6 +308,8 @@ pub fn run() {
             commands::tool_purge,
             commands::tool_move_path,
             commands::tool_drop_staging,
+            // 回收孤儿版本副本（判断在宿主：它同时看得到安装记录与窗口表）
+            commands::tool_prune_versions,
             // 工具目录整树列举（导出带依赖的工具；不跳过 node_modules）
             commands::list_tool_files,
             // 工作区文件列举（@ 提及数据源；跳过依赖目录，深度/条目封顶）
