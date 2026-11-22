@@ -22,6 +22,7 @@ import {
   XIcon,
 } from "../../../shared/ui/icons.tsx";
 import { ActionsRow, type Actions } from "./SkillCards.tsx";
+import { formatSize } from "./skillGroups.ts";
 
 const defaultFile = "SKILL.md";
 
@@ -58,10 +59,6 @@ function useSkillFiles(
     };
   }, [readFiles, query, skill, request]);
   return state?.request === request ? state : undefined;
-}
-
-function formatSize(bytes: number): string {
-  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KiB`;
 }
 
 const dateFormat = new Intl.DateTimeFormat("zh-CN", {

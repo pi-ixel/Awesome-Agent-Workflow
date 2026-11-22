@@ -42,6 +42,44 @@ const catalog: SkillCatalog = {
   warnings: [],
 };
 
+it("先显示技能卡片，随后补充当前列表的目录大小", async () => {
+  let resolveSize!: (bytes: (number | null)[]) => void;
+  const sizes = vi
+    .fn<NonNullable<NativeSkillLibrary["sizes"]>>()
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSize = resolve;
+        }),
+    )
+    .mockResolvedValue([3072]);
+  render(
+    <SkillLibrary
+      library={{
+        list: () => Promise.resolve(catalog),
+        candidates: () => Promise.resolve([]),
+        change: () => Promise.resolve([]),
+        sizes,
+      }}
+      provider="codeagent"
+      storage={window.localStorage}
+      knownProjects={() => []}
+      pick={() => Promise.resolve(null)}
+      reveal={() => Promise.resolve()}
+    />,
+  );
+  const card = await screen.findByRole("article", { name: "sample" });
+  expect(within(card).getByText(".cac")).toBeVisible();
+  await waitFor(() => expect(sizes).toHaveBeenCalledTimes(1));
+  await userEvent.click(screen.getByRole("button", { name: "刷新" }));
+  expect(await within(card).findByText(".cac · 3.0 KiB")).toBeVisible();
+  await act(() => {
+    resolveSize([512]);
+    return Promise.resolve();
+  });
+  expect(within(card).queryByText(/512 B/)).toBeNull();
+});
+
 it("详情浏览真实目录，在同一弹窗切换并复制完整原文", async () => {
   const user = userEvent.setup();
   const main = "---\r\nname: sample\r\n---\r\n# 真正文\r\n\r\n## 审查\r\n";
@@ -211,10 +249,7 @@ it("旧回收记录作为停用卡片，可查看原文、恢复或删除", asyn
   expect(await screen.findByText(/同名配置已存在/)).toBeVisible();
   expect(control).not.toBeChecked();
   expect(screen.queryByRole("dialog")).toBeNull();
-  await user.click(
-    within(card).getByRole("button", { name: "旧技能 更多操作" }),
-  );
-  await user.click(screen.getByRole("menuitem", { name: "删除" }));
+  await user.click(within(card).getByRole("button", { name: "旧技能 删除" }));
   await user.click(screen.getByRole("button", { name: "永久删除" }));
   expect(change).toHaveBeenLastCalledWith(
     { provider: "icode", profile: null, projects: [] },
@@ -364,7 +399,7 @@ it("同名技能按来源查看和删除，路径操作在详情工作台", asyn
   await user.click(more);
   expect(
     screen.getAllByRole("menuitem").map((item) => item.textContent),
-  ).toEqual(["查看详情", "删除"]);
+  ).toEqual(["查看详情"]);
   await user.click(screen.getByRole("menuitem", { name: "查看详情" }));
   const detail = within(screen.getByRole("dialog", { name: "技能详情" }));
   expect(detail.getByText(alt + "/sample")).toBeInTheDocument();
@@ -381,14 +416,13 @@ it("同名技能按来源查看和删除，路径操作在详情工作台", asyn
   write.mockRestore();
   await user.keyboard("{Escape}");
   expect(more).toHaveFocus();
-  await user.click(more);
-  await user.click(screen.getByRole("menuitem", { name: "删除" }));
+  const remove = within(cards[1]!).getByRole("button", { name: "sample 删除" });
+  await user.click(remove);
   const dialog = within(screen.getByRole("dialog", { name: "确认技能操作" }));
   expect(dialog.getByText(/仅删除本条链接/)).toBeInTheDocument();
   await user.keyboard("{Escape}");
   expect(change).not.toHaveBeenCalled();
-  await user.click(more);
-  await user.click(screen.getByRole("menuitem", { name: "删除" }));
+  await user.click(remove);
   await user.click(screen.getByRole("button", { name: "永久删除" }));
   expect(change).toHaveBeenCalledWith(
     { provider: "icode", profile: "Code.yaml", projects: [] },

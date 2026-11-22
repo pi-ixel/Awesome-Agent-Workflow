@@ -13,7 +13,7 @@ test("技能卡片只滚动溢出的描述，并保持详情键盘入口", async
   const title = "发布准备和回滚预案的完整审查";
   const card = library.getByRole("article", { name: title });
   const detail = card.getByRole("button", { name: "查看 " + title + " 详情" });
-  const desc = detail.getByText(/^审查发布准备/);
+  const desc = card.getByText(/^审查发布准备/);
   const offset = () => desc.evaluate((el) => getComputedStyle(el).translate);
   const short = library.getByRole("article", { name: "旧版发布检查" });
   await short.hover();

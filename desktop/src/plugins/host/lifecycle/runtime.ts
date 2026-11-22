@@ -228,6 +228,10 @@ export class DesktopHost implements HostService {
               this.resources.run(() =>
                 this.invoke("skill_library_change", { query, action }),
               ),
+            sizes: (query, skills) =>
+              this.resources.run(() =>
+                this.invoke("skill_library_sizes", { query, skills }),
+              ),
             files: (query, { source, path, realPath, disabledId }, request) =>
               this.resources.run(() =>
                 this.invoke("skill_library_files", {

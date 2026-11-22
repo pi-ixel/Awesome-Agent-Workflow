@@ -33,6 +33,53 @@ fn action(json: serde_json::Value) -> Action {
     serde_json::from_value(json).unwrap()
 }
 
+#[cfg(any(windows, unix))]
+fn link_directory(link: &Path, target: &Path) {
+    #[cfg(windows)]
+    assert!(
+        std::process::Command::new("cmd")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(link.to_string_lossy().replace('/', "\\"))
+            .arg(target.to_string_lossy().replace('/', "\\"))
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
+#[cfg(any(windows, unix))]
+#[test]
+fn directory_sizes_resolve_skill_links_but_skip_nested_links_and_other_roots() {
+    let (tmp, loc, query) = setup(Provider::CodeAgent);
+    let target = tmp.path().join("shared-skill");
+    skill(&target, "linked");
+    let templates = target.join("templates");
+    fs::create_dir(&templates).unwrap();
+    fs::write(templates.join("test.txt"), "模板").unwrap();
+    let outside = tmp.path().join("outside");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("ignored"), [0; 128]).unwrap();
+    link_directory(&templates.join("external"), &outside);
+    link_directory(&templates.join("loop"), &target);
+    let root = loc.home.join(".cac/skills");
+    fs::create_dir_all(&root).unwrap();
+    link_directory(&root.join("linked"), &target);
+    let catalog = catalog::list(&loc, &query).unwrap();
+    let valid = serde_json::to_value(&catalog.entries[0]).unwrap();
+    let mut invalid = valid.clone();
+    invalid["realPath"] = json!(outside);
+    let selected =
+        serde_json::from_value::<Vec<files::Selection>>(json!([valid, invalid])).unwrap();
+    let expected = fs::metadata(target.join("SKILL.md")).unwrap().len() + "模板".len() as u64;
+    assert_eq!(
+        files::directory_sizes(&loc, &query, &selected).unwrap(),
+        vec![Some(expected), None]
+    );
+}
+
 #[test]
 fn skill_detail_reads_selected_directory_and_exact_text() {
     use files::{Request, browse};
@@ -288,6 +335,8 @@ fn reads_disabled_files_by_record_and_permanently_deletes_only_the_selected_skil
         ..q.clone()
     };
     assert!(browse(&loc, &other, &selection, request("SKILL.md")).is_err());
+    let bytes = files::directory_sizes(&loc, &q, std::slice::from_ref(&selection)).unwrap();
+    assert!(bytes[0].is_some_and(|size| size > 0));
     assert!(
         apply(&loc, &q, action(json!({"type":"restore","ids":[id]}))).unwrap()[0]
             .contains("已恢复")
@@ -338,19 +387,8 @@ fn link_recovery_keeps_the_original_target_and_sibling_intact() {
     let root = loc.home.join(".cac/skills");
     fs::create_dir_all(&root).unwrap();
     let link = root.join("linked");
-    #[cfg(windows)]
-    assert!(
-        std::process::Command::new("cmd")
-            .args(["/d", "/c", "mklink", "/J"])
-            .arg(link.to_string_lossy().replace('/', "\\"))
-            .arg(target.to_string_lossy().replace('/', "\\"))
-            .output()
-            .unwrap()
-            .status
-            .success()
-    );
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(&target, &link).unwrap();
+    #[cfg(any(windows, unix))]
+    link_directory(&link, &target);
     let item = catalog::list(&loc, &q).unwrap().entries.remove(0);
     assert!(item.is_link);
     assert!(delete(&loc, &q, &item).contains("已停用"));

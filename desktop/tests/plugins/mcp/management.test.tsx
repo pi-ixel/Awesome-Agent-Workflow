@@ -261,9 +261,8 @@ it("tests the unsaved HTTP draft from the unified card editor and confirms delet
   });
 
   await user.click(
-    await within(grid).findByRole("button", { name: "managed-tools 更多操作" }),
+    await within(grid).findByRole("button", { name: "managed-tools 删除" }),
   );
-  await user.click(screen.getByRole("menuitem", { name: "删除" }));
   const confirm = screen.getByRole("dialog", { name: "删除 MCP" });
   expect(host.managedChange).toHaveBeenCalledTimes(1);
   await user.click(within(confirm).getByRole("button", { name: "删除" }));

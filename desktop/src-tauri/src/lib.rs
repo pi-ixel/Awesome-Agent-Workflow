@@ -199,6 +199,7 @@ pub fn run() {
             skill_library::skill_library_candidates,
             skill_library::skill_library_change,
             skill_library::skill_library_files,
+            skill_library::skill_library_sizes,
             mcp_management::mcp_native_read,
             mcp_management::mcp_native_read_local,
             mcp_management::mcp_native_change,

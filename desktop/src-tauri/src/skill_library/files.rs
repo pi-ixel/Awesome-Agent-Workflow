@@ -1,8 +1,11 @@
 use super::*;
-use std::{io::Read, path::Component};
+use std::{collections::HashMap, io::Read, path::Component};
 
 const MAX_TEXT_BYTES: u64 = 256 * 1024;
 const MAX_DIRECTORY_ITEMS: usize = 500;
+const MAX_SIZE_ENTRIES: usize = 100_000;
+const MAX_SIZE_DEPTH: usize = 64;
+pub(super) const MAX_SIZE_SELECTIONS: usize = 16;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,10 +64,8 @@ fn relative_parts(path: &Path) -> Result<Vec<&std::ffi::OsStr>> {
         .collect()
 }
 
-fn skill_root(loc: &Locations, query: &Query, selected: &Selection) -> Result<PathBuf> {
-    let discovered = catalog::discover_sources(loc, query)?;
-    let source = discovered
-        .sources
+fn skill_root(sources: &[Source], provider: Provider, selected: &Selection) -> Result<PathBuf> {
+    let source = sources
         .iter()
         .find(|source| source.kind != Kind::Inline && source.path == selected.source)
         .ok_or_else(|| error("技能来源已变化，请刷新列表"))?;
@@ -73,13 +74,9 @@ fn skill_root(loc: &Locations, query: &Query, selected: &Selection) -> Result<Pa
         .strip_prefix(&source.path)
         .map_err(|_| error("技能位置不属于选定来源"))?;
     let parts = relative_parts(relative)?;
-    let max_depth = if query.provider == Provider::ICode {
-        2
-    } else {
-        1
-    };
+    let max_depth = if provider == Provider::ICode { 2 } else { 1 };
     if parts.len() > max_depth
-        || (parts.is_empty() && query.provider != Provider::ICode)
+        || (parts.is_empty() && provider != Provider::ICode)
         || parts
             .iter()
             .any(|part| part.to_string_lossy().starts_with(".aaw-"))
@@ -87,7 +84,7 @@ fn skill_root(loc: &Locations, query: &Query, selected: &Selection) -> Result<Pa
     {
         return Err(error("技能目录已变化，请刷新列表"));
     }
-    if query.provider == Provider::ICode && !parts.is_empty() {
+    if provider == Provider::ICode && !parts.is_empty() {
         let mut parent = selected.path.parent();
         while let Some(path) = parent {
             if path.join("SKILL.md").is_file() {
@@ -104,6 +101,53 @@ fn skill_root(loc: &Locations, query: &Query, selected: &Selection) -> Result<Pa
         return Err(error("技能目录已变化，请刷新列表"));
     }
     Ok(real)
+}
+
+pub(super) fn directory_sizes(
+    loc: &Locations,
+    query: &Query,
+    selected: &[Selection],
+) -> Result<Vec<Option<u64>>> {
+    let catalog = catalog::discover_sources(loc, query)?;
+    let mut sizes = HashMap::new();
+    Ok(selected
+        .iter()
+        .map(|skill| {
+            let root = match &skill.disabled_id {
+                Some(id) => changes::disabled_root(loc, query, id),
+                None => skill_root(&catalog.sources, query.provider, skill),
+            }
+            .ok()?;
+            *sizes.entry(root).or_insert_with_key(|root| {
+                let mut remaining = MAX_SIZE_ENTRIES;
+                directory_size(root, root, MAX_SIZE_DEPTH, &mut remaining).ok()
+            })
+        })
+        .collect())
+}
+
+fn directory_size(root: &Path, path: &Path, depth: usize, remaining: &mut usize) -> Result<u64> {
+    let _guard = open_checked(path, root, true)?;
+    let mut size = 0;
+    for child in fs::read_dir(path)? {
+        *remaining = remaining
+            .checked_sub(1)
+            .ok_or_else(|| error("技能目录过大"))?;
+        let path = child?.path();
+        let info = fs::symlink_metadata(&path)?;
+        if is_link(&info) {
+            continue;
+        }
+        if info.is_file() {
+            size += info.len();
+        } else if info.is_dir() {
+            let depth = depth
+                .checked_sub(1)
+                .ok_or_else(|| error("技能目录层级过深"))?;
+            size += directory_size(root, &path, depth, remaining)?;
+        }
+    }
+    Ok(size)
 }
 
 fn is_link(meta: &fs::Metadata) -> bool {
@@ -201,7 +245,11 @@ pub(super) fn browse(
 ) -> Result<Response> {
     let root = match &skill.disabled_id {
         Some(id) => changes::disabled_root(loc, query, id)?,
-        None => skill_root(loc, query, skill)?,
+        None => skill_root(
+            &catalog::discover_sources(loc, query)?.sources,
+            query.provider,
+            skill,
+        )?,
     };
     let (relative, directory) = match request {
         Request::Directory { path } => (path, true),

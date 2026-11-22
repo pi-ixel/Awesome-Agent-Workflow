@@ -74,13 +74,21 @@ export interface SkillFileRow {
 export type SkillFileResponse =
   | { type: "directory"; entries: SkillFileRow[]; truncated: boolean }
   | { type: "text"; text: string; modifiedAt: number | null };
+export type SkillDirectorySelection = Pick<
+  NativeSkill,
+  "source" | "path" | "realPath" | "disabledId"
+>;
 export interface NativeSkillLibrary {
   candidates(from: string): Promise<string[]>;
   list(query: SkillQuery): Promise<SkillCatalog>;
   change(query: SkillQuery, action: SkillAction): Promise<string[]>;
+  sizes?: (
+    query: SkillQuery,
+    skills: SkillDirectorySelection[],
+  ) => Promise<(number | null)[]>;
   files?: (
     query: SkillQuery,
-    skill: Pick<NativeSkill, "source" | "path" | "realPath" | "disabledId">,
+    skill: SkillDirectorySelection,
     request: SkillFileRequest,
   ) => Promise<SkillFileResponse>;
 }
