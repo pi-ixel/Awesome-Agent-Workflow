@@ -1209,3 +1209,50 @@ describe("工具模块的状态转换（账号与事务边界）", () => {
     expect(await app.exists(dir)).toBe(false);
   });
 });
+
+/**
+ * 启动自愈也是"写磁盘 + 写配置"：重建副本的几秒里换了账号，副本不能留在
+ * 已经不用了的那个人名下（没人引用它，还白占一份体积）。
+ */
+describe("工具模块的状态转换（自愈与账号）", () => {
+  it("启动自愈重建副本时换了账号：副本当场丢掉，不在旧账号下留孤儿", async () => {
+    const app = await device();
+    const tool = packageOf("1.0.0", "<p>页面</p>");
+    await app.workshopOf().installArchive(tool, runtimeFiles(tool));
+    const dir = app.tools().state.getState()[0]?.dir as string;
+
+    // 安装目录被清理工具扫走，下次启动会自愈；在"检查目录在不在"这一步停住。
+    app.removeDir(dir);
+    const originalExists = app.backend.pathExists.bind(app.backend);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let armed = true;
+    vi.spyOn(app.backend, "pathExists").mockImplementation(async (path: string) => {
+      if (armed && path === dir) {
+        armed = false;
+        await gate;
+      }
+      return originalExists(path);
+    });
+    await app.restart();
+    for (let spin = 0; armed && spin < 60; spin += 1) await app.settle(1);
+    expect(armed).toBe(false);
+
+    // 自愈正在写副本时换个人登录。
+    app.loginAs({ name: "另一个人", employeeId: "lifecycle-other" });
+    await app.settle();
+    release();
+    await app.settle();
+
+    // 这份副本没人引用：不该出现在磁盘上（否则每换一次账号就攒一份孤儿）。
+    expect(await app.versionDirs("notes")).toEqual([]);
+
+    // 切回原账号：自愈重新跑一遍，这次能正常补好。
+    app.loginAs({ name: "生命周期", employeeId: ownerId });
+    await app.settle();
+    const healed = app.tools().state.getState()[0];
+    expect(healed?.broken).toBeUndefined();
+    expect(await app.exists(healed?.dir as string)).toBe(true);
+    expect(await app.versionDirs("notes")).toEqual(["1.0.0"]);
+  });
+});
