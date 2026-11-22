@@ -358,11 +358,20 @@ export function apply(ctx: Context): void {
       const incompatible = checkCompatibility(tool);
       if (incompatible.length) throw new ToolPackageError(incompatible);
       let outcome: InstallOutcome = { version: tool.version, updated: false, versionChanged: false };
+      /**
+       * 这一次被换下来的那一版。备份**在配置写成功之后**才留。
+       *
+       * 以前这一句写在 `update()` 的转换函数里，于是"文件写完、配置没写进去"的
+       * 一次失败更新也会把 `previous.json` 改写成它要换下的那一版。下一步退版
+       * 读到的是**这次没生效的更新**留下的清单：记录说退回 v1.1.0，目录里却是
+       * v1.0.0 的页面——界面、配置、磁盘各说一套。
+       */
+      let displaced: ToolPackage | undefined;
       update((current) => {
         const previous = current.find((entry) => entry.package.id === tool.id);
         if (previous && !options.replace) throw new Error("已安装相同 ID 的工具。请在「开发工具」里重新安装，或先卸载旧版本。");
         // 上一版清单留到磁盘：旧记录没有版本目录，退版只能靠它重新物化。
-        if (previous) backups.enqueue(previous.package);
+        displaced = previous?.package;
         // 运行副本用调用方写好的版本目录；没给就沿用原路径（那里没有新目录可切）。
         const dir = options.runDir ?? previous?.dir;
         // 这个目录刚被写过（或刚被确认可跑），上一轮探测留下的"丢失"标记必须撤掉。
@@ -406,6 +415,8 @@ export function apply(ctx: Context): void {
           },
         ];
       });
+      // 配置已经落地：这一版确实成了"上一版"，这时候留备份才有意义。
+      if (displaced) backups.enqueue(displaced);
       return outcome;
     },
     async rollback(id) {
@@ -427,32 +438,40 @@ export function apply(ctx: Context): void {
         // 清单（它只是一段文本）。于是"卸载 → 重装"之后点退版，会把刚装好的这一版
         // 换成**上一次安装**残留的那一版：用户从没在这一次安装里退回什么。
         if (!entry.previousVersion) return undefined;
-        // 备份清单只是"上一版清单"的一份影印件，而完整的上一版副本里本来就有清单。
-        // 所以先看副本能不能跑，再决定要不要那份备份：反过来会让一颗完好的副本
-        // 被判成"没有可回退的版本"——磁盘满时备份写失败，用户就会撞上这个。
-        let backup = await readToolBackup(io, current, id);
-        assertOwner();
-        // 优先直接切回上一版的完整副本：那是当时真正跑过的那一份。
-        let dir = entry.previousDir;
+        // 判据顺序（改过一次，别倒回去）：
+        // 1. **副本能跑就以副本里的清单为准**——那是当时真正跑过的那一版；
+        // 2. 副本跑不起来，才用 `previous.json` 重建一份到新目录；
+        // 3. 两个都不可用就明说"没有可回退的版本"。
+        //
+        // 以前是"先读备份、备份有就用它"，副本只当文件来源。备份写的却是
+        // "下一次安装要换下的那一版"：一次没写进配置的更新也能把它改写掉，
+        // 于是退版退的是**没生效的那次更新**的清单，配上更早那一版的页面。
+        let dir: string | undefined = entry.previousDir;
         let staged: Awaited<ReturnType<typeof stageVersion>> | undefined;
-        if (!await canRunToolDir(io, dir, id)) {
+        let backup: ToolPackage | undefined;
+        if (dir && await canRunToolDir(io, dir, id)) {
           assertOwner();
-          if (!backup) return undefined;
-          const files = materializeToolFiles(backup);
-          const missing = missingEntryFiles(backup, Object.keys(files));
+          const read = await readToolProject(io, dir);
+          // 版本号对不上时宁可不动：记录说"上一版是 1.0.0"、目录里却是别的
+          // 版本，切过去等于装了一个用户没要求过的版本。
+          backup = read.ok && read.tool.version === entry.previousVersion ? read.tool : undefined;
+        }
+        if (!backup) {
+          const saved = await readToolBackup(io, current, id);
+          assertOwner();
+          // 备份同样是影印件，也可能是过期的（同 id 重装、失败的更新都改过它）：
+          // 版本对不上就明说"没有可回退的版本"，不把别的版本装进去。
+          if (!saved || saved.version !== entry.previousVersion) return undefined;
+          const files = materializeToolFiles(saved);
+          const missing = missingEntryFiles(saved, Object.keys(files));
           if (missing.length) {
             throw new Error(
               `上一版缺少运行文件（${missing.join("、")}）：它当时只留下了清单。请重新导入那一版的 ZIP，当前版本保持不变。`,
             );
           }
-          staged = await stageVersion(io, { owner: current, tool: backup, files });
+          staged = await stageVersion(io, { owner: current, tool: saved, files });
           dir = staged.dir;
-        } else if (!backup && dir) {
-          // 副本在、备份清单丢了：从副本自己的清单读回这一版。版本号对不上时
-          // 宁可不动——记录说"上一版是 1.0.0"而目录里是别的版本，切过去等于
-          // 装了一个用户没要求过的版本。
-          const read = await readToolProject(io, dir);
-          backup = read.ok && read.tool.version === entry.previousVersion ? read.tool : undefined;
+          backup = saved;
         }
         if (!backup) return undefined;
         assertOwner();
