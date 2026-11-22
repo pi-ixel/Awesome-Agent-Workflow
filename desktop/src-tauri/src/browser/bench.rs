@@ -144,7 +144,7 @@ async fn run(app: &AppHandle) -> Result<Value, String> {
         verify_profile_lifecycle(app, &url, &phase, &root).await
     };
     server.abort();
-    result
+    result.map_err(|error| format!("{phase}: {error}"))
 }
 
 fn bounds() -> NativeBounds {
@@ -335,7 +335,7 @@ async fn verify_profile_lifecycle(
             set_markers(&a, 1).await?;
             close_session(app, A).await?;
             super::data::browser_clear_session_data(app.clone(), app.state(), A.into()).await?;
-            let cleared = open_session(app, A, url).await?;
+            let (_, cleared) = open_tab(app, A, url).await?;
             check_markers(&cleared, None).await?;
             check_markers(&b, Some(2)).await?;
             for row in super::data::browser_data_catalog(app.clone(), app.state())? {
@@ -541,12 +541,12 @@ async fn measure(
     // 测量之后走正式关闭、重开和清理路径，不把额外窗口计入基准。
     let (first_session, _) = &tabs[0];
     browser_close_session(app.clone(), app.state(), first_session.clone())?;
-    let reopened = open_session(app, first_session, url).await?;
+    let (_, reopened) = open_tab(app, first_session, url).await?;
     check_markers(&reopened, Some(0)).await?;
     browser_close_session(app.clone(), app.state(), first_session.clone())?;
     super::data::browser_clear_session_data(app.clone(), app.state(), first_session.clone())
         .await?;
-    let cleared = open_session(app, first_session, url).await?;
+    let (_, cleared) = open_tab(app, first_session, url).await?;
     check_markers(&cleared, None).await?;
     for (i, (_, view)) in tabs.iter().enumerate().skip(1) {
         check_markers(view, Some(i)).await?;

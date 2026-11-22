@@ -33,6 +33,13 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: desktop/package-lock.json
+      - name: Cache Rust compilation
+        uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a
+        with:
+          workspaces: |
+            desktop/src-tauri -> target
+            desktop/workflow-engine-rs -> target
+          cache-on-failure: true
       - name: Build UI and sidecar
         run: |
           npm ci
