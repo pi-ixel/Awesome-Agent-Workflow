@@ -81,6 +81,33 @@ describe("demoHost 文件树", () => {
     expect(await host.userDataDir("chrys", "skills")).toBe("/virtual/chrys-skills");
   });
 
+  it("二进制按字节存、按字节读，listToolFiles 只列文件", async () => {
+    // 工具可以带 node_modules / 图片 / wasm：按文本存会把字节改坏，装进去的
+    // 工具打不开（真实宿主写的是原始字节，内存宿主必须同样不经过 UTF-8）。
+    const base64 = "iVBORw0KGgoAAAANSUhEUg==";
+    await host.writeTextFile("/tool/manifest.json", "{}");
+    await host.writeBinaryFile!("/tool/assets/logo.png", base64);
+
+    expect(await host.readBinaryFile!("/tool/assets/logo.png")).toBe(base64);
+    // 二进制不能当文本读回来：调用方会把它当 JSON / 源码解析。
+    await expect(host.readTextFile("/tool/assets/logo.png")).rejects.toThrow(/不是文本/);
+    // 文本文件也能按字节读（导出时要整棵树按字节打包）。
+    expect(await host.readBinaryFile!("/tool/manifest.json")).toBe(btoa("{}"));
+    expect(await host.listToolFiles!("/tool")).toEqual(["assets/logo.png", "manifest.json"]);
+  });
+
+  it("dropToolStaging 只删 versions 下的目录，别处一律拒绝", async () => {
+    host.addDir("/data/tools/installed/notes/versions/.staging-abc");
+    await host.writeTextFile("/data/tools/installed/notes/versions/.staging-abc/index.html", "x");
+    host.addDir("/data/tools/projects/notes");
+
+    await expect(host.dropToolStaging!("/data/tools/projects/notes")).rejects.toThrow(/versions/);
+    expect(await host.pathExists("/data/tools/projects/notes")).toBe(true);
+
+    await host.dropToolStaging!("/data/tools/installed/notes/versions/.staging-abc");
+    expect(await host.pathExists("/data/tools/installed/notes/versions/.staging-abc")).toBe(false);
+  });
+
   it("runCommand 命中脚本返回预置结果，未脚本化给出错误", async () => {
     host.scriptCommand("chrys.exe", ["--version"], {
       code: 0,
