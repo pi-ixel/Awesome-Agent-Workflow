@@ -1048,6 +1048,16 @@ mod tests {
             .parse::<u32>()
             .unwrap();
         assert!(!process_running(pid, None).unwrap());
-        fs::remove_dir_all(home).unwrap();
+        // 进程退出已验证。Windows 可能稍后才释放测试目录的句柄。
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match fs::remove_dir_all(&home) {
+                Ok(()) => break,
+                Err(error) if error.raw_os_error() == Some(32) && Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(error) => panic!("无法清理测试目录 {}：{error}", home.display()),
+            }
+        }
     }
 }
