@@ -60,6 +60,7 @@ export interface WorkbenchWindowClose extends ReadonlySnapshot<WindowCloseState>
 }
 
 export interface WorkbenchWindowChrome extends ReadonlySnapshot<boolean> {
+  readonly displayed?: ReadonlySnapshot<boolean>;
   minimize(this: void): void;
   toggleMaximize(this: void): void;
   requestClose(this: void): void;

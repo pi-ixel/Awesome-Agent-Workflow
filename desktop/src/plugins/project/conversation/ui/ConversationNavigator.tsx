@@ -9,7 +9,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { QueryNavigationItem } from "./conversationNavigation.ts";
+import { buildQueryNavigation, type QueryNavigationItem } from "./conversationNavigation.ts";
+import { useSessionValue } from "../../ui/bindings/conversationView.ts";
 
 /** ZCode 式用户提问导航：目录独立滚动，正文仍由最右侧主滚动条控制。 */
 export function ConversationNavigator({
@@ -41,6 +42,11 @@ export function ConversationNavigator({
   });
   const activeIndex = items.findIndex((item) => item.id === activeId);
   const selected = items.find((item) => item.id === previewId);
+  const previewAnswer = useSessionValue((state) => {
+    if (!selected?.running || state.historyPreview || state.items[selected.itemIndex]?.id !== selected.id)
+      return selected?.answer;
+    return buildQueryNavigation(state.items.slice(selected.itemIndex), true)[0]?.answer ?? selected.answer;
+  });
   function focusRow(index: number) {
     pendingFocus.current = index;
     virtualizer.scrollToIndex(index, { align: "auto" });
@@ -264,7 +270,7 @@ export function ConversationNavigator({
             {selected?.question}
           </p>
           <p className="line-clamp-3 whitespace-pre-line break-words text-ink-soft">
-            {selected?.answer}
+            {previewAnswer}
           </p>
         </HintSurface>,
         document.body,

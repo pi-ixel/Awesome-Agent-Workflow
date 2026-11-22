@@ -4,7 +4,7 @@ import { createSnapshotView } from "../../../shared/state/readonlySnapshot.ts";
 import { createStoreView } from "./storeView.ts";
 import { createApprovalStore } from "../interactions/approvalStore.ts";
 import { createRuntimeStatusStore } from "./runtimeStatusStore.ts";
-import { createSessionStore } from "./sessionStore.ts";
+import { createSessionStore, timelineItemsOf } from "./sessionStore.ts";
 import { createForegroundActivity } from "./activity.ts";
 import { createLogger } from "../../../shared/logging/logger.ts";
 
@@ -12,9 +12,17 @@ export function createProjectForeground(
   annotationDrafts?: AnnotationDraftService,
   loggerFactory = createLogger,
 ) {
-  const session = createStoreView(
-    createSessionStore(undefined, annotationDrafts, undefined, loggerFactory("session")),
+  let selected = createSessionStore(
+    undefined, annotationDrafts, undefined, loggerFactory("session"), { playbackActive: false },
   );
+  let following = false;
+  let disposed = false;
+  const session = createStoreView(selected);
+  const setPlaybackFollowing = (next: boolean): void => {
+    if (disposed) return;
+    following = next;
+    selected.getState().setPlaybackActive(next);
+  };
   const approval = createStoreView(createApprovalStore(loggerFactory("approval")));
   const selectedStatus = createRuntimeStatusStore(loggerFactory("usage"));
   const runtime = createStoreView(selectedStatus);
@@ -35,6 +43,8 @@ export function createProjectForeground(
     steerPhase: state.steerPhase,
     steerEditableId: state.steerEditableId,
     items: state.items,
+    timelineItems: timelineItemsOf(state),
+    historyPreview: state.historyPreview,
     hasCumulativePromptUsage: state.hasCumulativePromptUsage,
     recovery: state.recovery,
     connectionFailure: state.connectionFailure,
@@ -82,6 +92,7 @@ export function createProjectForeground(
     lastSessionId: state.lastSessionId,
   }));
   const snapshot = {
+    setPlaybackFollowing,
     session: sessionSnapshot.snapshot,
     approval: approvalSnapshot.snapshot,
     runtime: runtimeSnapshot.snapshot,
@@ -97,11 +108,18 @@ export function createProjectForeground(
       status = createRuntimeStatusStore(loggerFactory("usage")),
     ) {
       if (session.view.getState() !== store.getState()) session.view.getState().stopSteering();
+      if (selected !== store) {
+        selected.getState().setPlaybackActive(false);
+        selected = store;
+        store.getState().setPlaybackActive(following);
+      }
       session.select(store);
       approval.select(approvals);
       runtime.select(status);
     },
     dispose() {
+      setPlaybackFollowing(false);
+      disposed = true;
       activity.dispose();
       session.dispose();
       approval.dispose();

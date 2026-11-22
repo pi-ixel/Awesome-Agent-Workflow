@@ -869,6 +869,7 @@ export function createSessionCoordinator({
       annotationDrafts,
       messageImages,
       sessionLogger,
+      { playbackActive: false },
     );
     empty.setState({ sessionsByPath: history });
     selectForeground(empty);
@@ -882,6 +883,7 @@ export function createSessionCoordinator({
       annotationDrafts,
       messageImages,
       sessionLogger,
+      { playbackActive: false },
     );
     store.setState({
       sessionsByPath: history,
@@ -1801,6 +1803,7 @@ export function createSessionCoordinator({
           annotationDrafts,
           messageImages,
           sessionLogger,
+          { playbackActive: false },
         ),
       approvalStore = retained?.approval ?? createApprovalStore(approvalLogger),
       statusStore = retained?.status ?? createRuntimeStatusStore(usageLogger);

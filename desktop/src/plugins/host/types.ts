@@ -182,6 +182,8 @@ export interface WindowChromeHost {
   requestClose(): Promise<void>;
   isMaximized(): Promise<boolean>;
   listenForResize(onResize: () => void): Promise<() => void>;
+  isDisplayed?(): Promise<boolean>;
+  listenForFocusChange?(onFocusChange: () => void): Promise<() => void>;
 }
 
 export interface HostDialogs {

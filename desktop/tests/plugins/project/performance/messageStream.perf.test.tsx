@@ -5,7 +5,7 @@ import { useSessionStore } from "../../../helpers/foreground.ts";
  *
  * 1. 千级条目下流式分片到达：历史消息 DOM 零变更——memo + 条目引用
  *    稳定共同生效的行为级断言（比计时断言稳，不随机器抖动）；
- * 2. 时间片合并：高频分片在 CHUNK_COALESCE_MS 窗口内合并提交，
+ * 2. 时间片合并：高频分片按吐字窗口合并提交，
  *    flush 后文本完整不丢；
  * 3. 窗口化首挂：千级条目只挂载最近 WINDOW_CHUNK 条；
  * 4. 快照脏判：条目未变更的重复 flush 不再序列化；千级条目单次
@@ -15,7 +15,7 @@ import { act, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SessionView } from "../../../../src/plugins/project/conversation/ui/SessionView.tsx";
-import { CHUNK_COALESCE_MS } from "../../../../src/plugins/project/conversation/sessionStore.ts";
+import { STREAM_COMMIT_MS } from "../../../../src/plugins/project/conversation/streamPlayback.ts";
 import { WINDOW_CHUNK } from "../../../../src/plugins/project/conversation/ui/sessionWindow.ts";
 import { createTestWorkspace } from "../../../helpers/workspace.ts";
 const useWorkspaceStore = createTestWorkspace();
@@ -110,7 +110,7 @@ describe("消息流性能基准", () => {
     expect(bufferedCommits).toBeLessThan(10); // 未合并时应为 20+
 
     act(() => {
-      vi.advanceTimersByTime(CHUNK_COALESCE_MS);
+      vi.advanceTimersByTime(STREAM_COMMIT_MS);
     });
     useSessionStore.getState().flushStreamingChunks();
     unsubscribe();

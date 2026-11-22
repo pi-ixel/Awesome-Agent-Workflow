@@ -183,6 +183,8 @@ export interface ConversationValues {
   readonly connectionFailure: string | null;
   /** 会话条目（含流式中的条目；plan 步骤清单也是流内条目之一）。 */
   readonly items: readonly SessionItem[];
+  /** 供消息流布局使用，流式文本由活跃叶节点单独订阅。 */
+  readonly timelineItems?: readonly SessionItem[];
   /** agent 是否正在处理一轮 prompt。 */
   readonly isAgentRunning: boolean;
   readonly turnState: TurnState;

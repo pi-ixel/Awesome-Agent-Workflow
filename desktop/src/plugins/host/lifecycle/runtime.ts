@@ -76,6 +76,12 @@ export class DesktopHost implements HostService {
                 if (this.resources.isActive()) receive();
               }),
             ),
+          listenForFocusChange: (receive) =>
+            this.resources.listen(() =>
+              windowChromeHost.listenForFocusChange(() => {
+                if (this.resources.isActive()) receive();
+              }),
+            ),
         }
       : undefined,
     forceClose: () =>
