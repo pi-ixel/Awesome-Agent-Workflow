@@ -36,6 +36,7 @@ import {
   defaultRehypePlugins,
   defaultRemarkPlugins,
   Streamdown,
+  useIsCodeFenceIncomplete,
 } from "streamdown";
 import { cjk } from "@streamdown/cjk";
 import { createMathPlugin } from "@streamdown/math";
@@ -578,8 +579,16 @@ function buildMarkdownComponents(options: {
     logger,
   } = options;
   return {
-    pre: ({ children }) => {
+    pre: function MarkdownPre({ children }) {
+      const isIncomplete = useIsCodeFenceIncomplete();
       const { language, text } = inspectCodeChildren(children);
+      if (streaming && isIncomplete) {
+        return (
+          <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-ui-sm">
+            {text}
+          </pre>
+        );
+      }
       return (
         <CodeBlock
           code={text}
@@ -866,6 +875,7 @@ function MarkdownViewBase({
       <MarkdownRenderBoundary fallbackText={normalized} resetKey={normalized}>
         <Streamdown
           animated={false}
+          isAnimating={streaming}
           components={components}
           // 只有真实流式输出进 streaming 解析(remend 补全未闭合的粗体/
           // 围栏/链接),完成态收敛 static,避免 React #185(ZCode 同款收敛)。

@@ -23,6 +23,7 @@ import {
 } from "../../ui/bindings/projectView.tsx";
 import type { ConversationDocumentView } from "./documentView.ts";
 import { useRegisteredSnapshot } from "../../../../shared/state/useRegisteredSnapshot.ts";
+import { useWindowDisplayed } from "../../../workbench/service.ts";
 import type { ProjectService, ProjectWorkspace } from "../../service.ts";
 import { useSessionCommands } from "./useSessionCommands.ts";
 import type { ContentBlock } from "../../../../contracts/acp/protocol.ts";
@@ -414,7 +415,14 @@ export function SessionView({
   const composer = useProjectComposer();
   const foregroundSession = foreground?.session;
   const foregroundApproval = foreground?.approval;
-  const items = useSessionValue((state) => state.historyPreview?.items ?? state.items);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const items = useSessionValue((state) =>
+    state.historyPreview?.items ?? state.timelineItems ?? state.items,
+  );
+  const findItems = useSessionValue((state) =>
+    findOpen && findQuery.trim() ? state.historyPreview?.items ?? state.items : undefined,
+  );
   const isAgentRunning = useSessionValue((state) => state.isAgentRunning);
   const turnState = useSessionValue((state) => state.turnState);
   const isAwaitingUser = useSessionValue((state) => state.isAwaitingUser);
@@ -495,13 +503,11 @@ export function SessionView({
   const [activeQueryId, setActiveQueryId] = useState<string | null>(null);
   // ---- 会话查找（Ctrl/Cmd+F）：浮层 + 匹配索引 + DOM 高亮（ZCode
   // TaskFindDialog 同款交互；索引/高亮见 conversationFindIndex/Highlight）----
-  const [findOpen, setFindOpen] = useState(false);
-  const [findQuery, setFindQuery] = useState("");
   const [findActiveIndex, setFindActiveIndex] = useState(0);
   const findInputRef = useRef<HTMLInputElement | null>(null);
   const findIndex = useMemo(
-    () => buildConversationFindIndex(items, findQuery),
-    [items, findQuery],
+    () => buildConversationFindIndex(findItems ?? [], findQuery),
+    [findItems, findQuery],
   );
   const findMatchedItemIds = useMemo(
     () => [...new Set(findIndex.matches.map((match) => match.itemId))],
@@ -555,11 +561,7 @@ export function SessionView({
   // DOM 高亮：query 非空时注册（items / 激活下标变化即重建）
   useEffect(() => {
     const root = scrollRef.current;
-    if (!root || !findOpen || findQuery.trim() === "") {
-      clearFindHighlights();
-      return;
-    }
-    console.info("[find-diag] apply", findQuery.trim());
+    if (!root || !findOpen || findQuery.trim() === "") return;
     const normalizedQuery = normalizeConversationFindQuery(findQuery);
     applyFindHighlights({
       root,
@@ -600,6 +602,19 @@ export function SessionView({
   // ref 是同步权威值——capture handler 与内容 commit 的 layout effect 在
   // state 落定之前就要读写；state 只驱动「回到底部」按钮的呈现。
   const [isFollowing, setIsFollowing] = useState(initialFollowing());
+  const isWindowDisplayed = useWindowDisplayed();
+  useLayoutEffect(() => {
+    const setFollowing = foreground?.setPlaybackFollowing;
+    if (!setFollowing) return;
+    const onVisibility = () =>
+      setFollowing(isFollowing && isWindowDisplayed && document.visibilityState !== "hidden");
+    onVisibility();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      setFollowing(false);
+    };
+  }, [foreground, isFollowing, isWindowDisplayed]);
   const followingRef = useRef(initialFollowing());
   const commitFollowing = useCallback((following: boolean): void => {
     if (followingRef.current === following) return;
@@ -926,26 +941,27 @@ export function SessionView({
     getActiveUserScrollIntent,
   ]);
 
-  // 视口高度变化（停靠坞出现、输入区长高、窗口缩放）：跟随中重新贴底，
-  // 未跟随不动。内容撑高不经这里——它由上面的内容锚定 effect 处理。
+  // 叶子正文独立提交，内容或视口尺寸变化时仍按原跟随状态贴底。
   useLayoutEffect(() => {
     const element = scrollRef.current;
-    if (element === null || typeof ResizeObserver === "undefined") {
-      return;
-    }
-    let lastViewport = element.clientHeight;
+    const column = messageColumnRef.current;
+    if (!element || !column || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      if (element.clientHeight === lastViewport) return;
-      lastViewport = element.clientHeight;
+      const viewport = element.clientHeight;
+      const height = element.scrollHeight;
+      const layout = lastAnchorLayoutRef.current;
+      if (viewport === layout?.viewport && height === layout.height) return;
+      lastAnchorLayoutRef.current = { viewport, height };
+      if (!followingRef.current || getActiveUserScrollIntent() === "awayFromBottom") return;
       markLayoutScrollGuard();
-      if (!followingRef.current) return;
       markProgrammaticScroll();
-      element.scrollTop = element.scrollHeight;
+      element.scrollTop = height;
       lastObservedScrollTopRef.current = element.scrollTop;
     });
     observer.observe(element);
+    observer.observe(column);
     return () => observer.disconnect();
-  }, [markLayoutScrollGuard, markProgrammaticScroll]);
+  }, [markLayoutScrollGuard, markProgrammaticScroll, getActiveUserScrollIntent]);
 
   // The right panel holds the old chat width until the slide ends. Anchor the
   // single width change before paint, using the current follow/reading state.

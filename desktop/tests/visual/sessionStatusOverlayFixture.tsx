@@ -16,6 +16,8 @@ import { createGitWorkbench } from "../helpers/gitWorkbench.tsx";
 import { ContextBar } from "../../src/plugins/workbench/ui/ContextBar.tsx";
 import { PanelWorkspace } from "../../src/plugins/workbench/ui/right-panel/RightPanel.tsx";
 import { WorkbenchShell } from "../../src/plugins/workbench/ui/WorkbenchShell.tsx";
+import { WorkbenchContext } from "../../src/plugins/workbench/ui/bindings/react.ts";
+import type { WorkbenchService } from "../../src/plugins/workbench/service.ts";
 import { projectHeaders } from "../../src/plugins/project/ui/projectHeaders.tsx";
 import { projectConversationPageId } from "../../src/plugins/project/workspace/pageIds.ts";
 import { emptyWorkspace } from "../../src/plugins/project/workspace/types.ts";
@@ -48,6 +50,12 @@ for (let i = 0; i < queryCount; i++) {
   });
 }
 const foreground = createProjectForeground();
+const displayed = createStore(() => true);
+const streamWorkbench = {
+  windowChrome: { displayed },
+  getSnapshot: () => ({}),
+  subscribe: () => () => {},
+} as unknown as WorkbenchService;
 const contextPercent = new URLSearchParams(location.search).get("context-percent");
 if (contextPercent !== null) {
   foreground.view.runtime.getState().handleSessionEvent({
@@ -70,6 +78,20 @@ foreground.view.session.setState({
       }
     : {}),
 });
+if (params.has("stream-playback")) {
+  window.addEventListener("fixture-stream-chunk", (event) => {
+    if (!(event instanceof CustomEvent) || typeof event.detail !== "string") return;
+    foreground.view.session.getState().handleEvent({
+      type: "agent_message_chunk",
+      sessionId: "sample",
+      text: event.detail,
+    });
+  });
+  window.addEventListener("fixture-window-displayed", (event) => {
+    if (event instanceof CustomEvent && typeof event.detail === "boolean")
+      displayed.setState(event.detail);
+  });
+}
 if (params.has("composer-selection")) {
   foreground.view.session.setState({
     agentKey: "preview",
@@ -236,6 +258,10 @@ createRoot(document.getElementById("root")!).render(
     <ProjectPreferencesContext.Provider value={preferences}>
       {NavigationDetails ? <NavigationDetails /> : params.has("right-panel") ? (
         <RightPanelFixture />
+      ) : params.has("stream-playback") ? (
+        <WorkbenchContext.Provider value={streamWorkbench}>
+          <div className="h-screen">{conversation}</div>
+        </WorkbenchContext.Provider>
       ) : (
         <div className="h-screen">{conversation}</div>
       )}

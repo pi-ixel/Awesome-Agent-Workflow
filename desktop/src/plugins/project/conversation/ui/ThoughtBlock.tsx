@@ -1,5 +1,6 @@
 import { NavigationRow } from "../../../../shared/ui/NavigationRow.tsx";
 import type { ThoughtItem } from "../types.ts";
+import { useStreamingItem } from "./useStreamingItem.ts";
 import { MessageAttachments } from "./MessageAttachments.tsx";
 /**
  * 思考行（agent_thought_chunk）：对齐 ZCode ReasoningRowView + ReasoningTrigger。
@@ -17,13 +18,14 @@ import { BrainIcon, ChevronRightIcon } from "../../../../shared/ui/icons.tsx";
 
 /** 流式摘要：取最后一个非空行（resolveReasoningStreamingSummary 语义）。 */
 function streamingSummaryOf(text: string): string {
-  return (
-    text
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .at(-1) ?? ""
-  );
+  let end = text.length;
+  while (end > 0) {
+    const start = text.lastIndexOf("\n", end - 1);
+    const summary = text.slice(start + 1, end).trim();
+    if (summary || start < 0) return summary;
+    end = start;
+  }
+  return "";
 }
 
 /** 流式摘要双缘渐变 mask（ZCode REASONING_SUMMARY_MASK）。 */
@@ -46,7 +48,8 @@ function streamingSummaryMaskStyle(
   };
 }
 
-function ThoughtBlockBase({ item }: { readonly item: ThoughtItem }) {
+function ThoughtBlockBase({ item: layoutItem }: { readonly item: ThoughtItem }) {
+  const item = useStreamingItem(layoutItem);
   const [isOpen, setIsOpen] = useState(false);
   const [summaryOverflowing, setSummaryOverflowing] = useState(false);
   const summaryViewportRef = useRef<HTMLSpanElement | null>(null);

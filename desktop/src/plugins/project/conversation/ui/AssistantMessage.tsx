@@ -5,7 +5,8 @@ import { describeUnknownError } from "../../../../shared/errors.ts";
 import { useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
 import { ConversationDocumentContext } from "./documentView.ts";
 import { MessageAttachments } from "./MessageAttachments.tsx";
-import { memo } from "react";
+import { memo, useCallback, useContext, useState } from "react";
+import { useStreamingItem } from "./useStreamingItem.ts";
 /**
  * 助手消息：Markdown 渲染 + 整条复制（复制 Markdown 源文本）。
  * 流式时正文经 MarkdownView 以 streaming 解析（remend 补全未闭合 markdown），
@@ -16,10 +17,9 @@ import { CopyButton } from "../../../../shared/ui/CopyButton.tsx";
 import { CopyIcon } from "../../../../shared/ui/icons.tsx";
 import { formatActionClock, formatClock } from "./clock.ts";
 import { MarkdownView } from "../../../../shared/ui/MarkdownView.tsx";
-import { useContext, useState } from "react";
 
 function AssistantMessageBase({
-  item,
+  item: layoutItem,
   showActions = true,
   usage,
 }: {
@@ -28,9 +28,17 @@ function AssistantMessageBase({
   readonly showActions?: boolean;
   readonly usage?: TurnUsageDetails | null;
 }) {
+  const item = useStreamingItem(layoutItem);
   const { assetUrl, openPath, openExternal } = useContext(ConversationDocumentContext) ?? {};
   const project = useWorkspaceValue((state) => state.activePath);
   const [fileError, setFileError] = useState<string | null>(null);
+  const onOpenFile = useCallback((path: string, line?: number) => {
+    if (!project || !openPath) return;
+    setFileError(null);
+    void openPath(project, path, line).catch((error: unknown) =>
+      setFileError(describeUnknownError(error)),
+    );
+  }, [openPath, project]);
   return (
     // group：复制按钮随卡片 hover 浮现，不再常驻制造噪音
     <div
@@ -46,22 +54,7 @@ function AssistantMessageBase({
           fileRoot={project ?? undefined}
           onOpenExternal={openExternal}
           assetUrl={assetUrl}
-          onOpenFile={
-            openPath
-              ? (path, line) => {
-                  if (project) {
-                    setFileError(null);
-                    void openPath(
-                      project,
-                      path,
-                      line,
-                    ).catch((error: unknown) =>
-                      setFileError(describeUnknownError(error)),
-                    );
-                  }
-                }
-              : undefined
-          }
+          onOpenFile={openPath ? onOpenFile : undefined}
         />
         <MessageAttachments blocks={item.attachments} />
         {fileError && (

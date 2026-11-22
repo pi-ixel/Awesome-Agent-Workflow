@@ -4,6 +4,7 @@ import type { RuntimeStatusValues } from "../types.ts";
 import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
 
 export interface ProjectForeground {
+  readonly setPlaybackFollowing?: (following: boolean) => void;
   readonly session: ReadonlySnapshot<ConversationValues>;
   readonly approval: ReadonlySnapshot<ApprovalValues>;
   readonly runtime: ReadonlySnapshot<RuntimeStatusValues>;

@@ -47,7 +47,7 @@ export interface WorkbenchService extends WorkbenchExit, WorkbenchLayout {
   ): () => void;
 }
 
-export { useWorkbenchLanguage } from "./ui/bindings/react.ts";
+export { useWindowDisplayed, useWorkbenchLanguage } from "./ui/bindings/react.ts";
 export { useRightPanelSliding } from "./ui/right-panel/fullViewContext.ts";
 export {
   bindSecondaryWindowAppearance,
