@@ -174,13 +174,14 @@ fn managed_paths(
     paths.push((cache.join("updates"), "updates"));
     // 工具目录（installed/projects/backups）与工具数据（tools/storage）默认
     // 就在数据根的 tools/ 下——数据根迁移时它们必须跟着走，否则指针切了
-    // 数据没搬，用户会看到"工具数据没了"。工具位置指针
-    // （tools-location.json）指向别处时不跟：那里已经是用户选的位置。
-    let tools_at_default = fs::read_to_string(root.join("configuration").join("tools-location.json"))
-        .ok()
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-        .and_then(|value| value.get("toolRoot").and_then(|item| item.as_str()).map(|item| item.trim().to_owned()))
-        .map(|value| value.is_empty())
+    // 数据没搬，用户会看到"工具数据没了"。任一账号的工具整体指针指向别处
+    // （tool-locations/ 下有指针文件）时都不跟：那里已经是用户选的位置。
+    let tools_at_default = std::fs::read_dir(root.join("configuration").join("tool-locations"))
+        .map(|entries| {
+            entries
+                .flatten()
+                .all(|entry| entry.path().extension().is_none_or(|ext| ext != "json"))
+        })
         .unwrap_or(true);
     if tools_at_default {
         paths.push((root.join("tools"), "tools"));
