@@ -14,6 +14,7 @@ import {
   missingEntryFiles,
   serializeToolOp,
   stageVersion,
+  sweepStagingDirs,
 } from "./runtime/versions.ts";
 
 export const name = "tools";
@@ -248,6 +249,15 @@ export function apply(ctx: Context): void {
       return;
     }
     const repairs: { readonly id: string; readonly dir: string }[] = [];
+    // 先收掉上次进程死在"写暂存 → 改名"之间留下的半成品。它没有任何记录
+    // 指向它，卸载时按版本目录扫也扫不到（那里明确排除了 `.staging-`），
+    // 不收就永远占着盘。按工具排队，避免删掉另一个正在写的暂存目录。
+    for (const entry of entries) {
+      try {
+        await serializeToolOp(`tool:${current}:${entry.package.id}`, () =>
+          sweepStagingDirs(io, current, entry.package.id));
+      } catch { /* 清不掉不影响启动，下次再试 */ }
+    }
     for (const entry of entries) {
       // 不兼容的条目不重建：那不是文件问题，重建了也跑不了。
       if (entry.broken && entry.broken.kind !== "missing-dir") continue;
@@ -366,6 +376,12 @@ export function apply(ctx: Context): void {
         assertOwner();
         const entry = readCurrent().find((item) => item.package.id === id);
         if (!entry) return undefined;
+        // 界面只在记录里存着"上一版"时才摆出退版入口，这里用同一个判据。
+        //
+        // 少了这一条，退版会去读 `backups/<id>/previous.json`——而卸载并不清这份
+        // 清单（它只是一段文本）。于是"卸载 → 重装"之后点退版，会把刚装好的这一版
+        // 换成**上一次安装**残留的那一版：用户从没在这一次安装里退回什么。
+        if (!entry.previousVersion) return undefined;
         const backup = await readToolBackup(io, current, id);
         assertOwner();
         if (!backup) return undefined;

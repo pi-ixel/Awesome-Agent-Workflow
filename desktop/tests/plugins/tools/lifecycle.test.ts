@@ -232,7 +232,9 @@ type Device = ReturnType<typeof machine>;
 async function expectConsistent(app: Device) {
   const entries = app.tools().state.getState();
   const saved = app.savedEntries();
-  expect(saved.map((item) => item.package.id)).toEqual(entries.map((item) => item.package.id));
+  // 两边的顺序无关：界面按"最近打开 + 名字"排，配置按安装先后存。比对身份要按集合。
+  expect([...saved.map((item) => item.package.id)].sort())
+    .toEqual([...entries.map((item) => item.package.id)].sort());
   for (const entry of entries) {
     const record = saved.find((item) => item.package.id === entry.package.id);
     expect(record).toBeDefined();
@@ -506,6 +508,251 @@ describe("工具模块的状态转换", () => {
     await app.restart();
     expect(app.tools().state.getState()[0]?.dir).toBe(entry?.dir);
     expect(await app.versionDirs("legacy")).toEqual(["0.9.0"]);
+    await expectConsistent(app);
+  });
+});
+
+/**
+ * 第二轮：短序列走通之后，问的是"走长了会不会歪"。
+ *
+ * 第一轮每条用例只装一两次；这一轮换成连续更新、同版本重装、多工具交叉、
+ * 进程被杀、连点两下。这几种在真实使用里比单次安装常见得多，也正是"上一版
+ * 目录指错、副本越攒越多、写一半的目录没人收"这类问题的藏身处。
+ */
+describe("工具模块的状态转换（长序列与并发）", () => {
+  it("连续更两版后反复退版：退版是「当前 ↔ 上一版」来回切，不往回翻更早的", async () => {
+    const app = await device();
+    const workshop = app.workshopOf();
+    const v1Dir = joinPath(installedRoot, "notes", "versions", "1.0.0");
+    const v2Dir = joinPath(installedRoot, "notes", "versions", "1.1.0");
+    const v3Dir = joinPath(installedRoot, "notes", "versions", "2.0.0");
+
+    for (const [version, html] of [["1.0.0", "<p>v1</p>"], ["1.1.0", "<p>v2</p>"], ["2.0.0", "<p>v3</p>"]]) {
+      const tool = packageOf(version as string, html as string);
+      await workshop.installArchive(tool, runtimeFiles(tool));
+      await expectConsistent(app);
+    }
+    // 界面/配置/磁盘：当前 v3，上一版是 v2（不是 v1，也不是"最后一版之前的任意一版"）。
+    expect(app.tools().state.getState()[0]).toMatchObject({
+      package: { version: "2.0.0" },
+      dir: v3Dir,
+      previousDir: v2Dir,
+      previousVersion: "1.1.0",
+    });
+    expect(app.savedEntries()[0]?.previousDir).toBe(v2Dir);
+
+    // 第一次退版：回到 v2，被换下来的 v3 成为新的"上一版"。
+    const first = await workshop.rollback("notes");
+    expect(first.error).toBeUndefined();
+    expect(first.text).toContain("已退回 随手记 v1.1.0");
+    expect(app.tools().state.getState()[0]).toMatchObject({
+      package: { version: "1.1.0" },
+      dir: v2Dir,
+      previousDir: v3Dir,
+      previousVersion: "2.0.0",
+    });
+    expect(await app.text(joinPath(v2Dir, "index.html"))).toBe("<p>v2</p>");
+    await expectConsistent(app);
+
+    // 再点一次：回 v3，不是 v1。退版槽只有一个，界面文案也写着"可以再点一次退回去"。
+    // 这条断言是故意的：如果哪天有人把它做成版本栈，这里会红，提醒同步改文案与测试。
+    const second = await workshop.rollback("notes");
+    expect(second.error).toBeUndefined();
+    expect(second.text).toContain("已退回 随手记 v2.0.0");
+    expect(app.tools().state.getState()[0]).toMatchObject({ package: { version: "2.0.0" }, dir: v3Dir, previousDir: v2Dir });
+    await expectConsistent(app);
+
+    // 已知留白：v1 那份副本此刻没有任何记录引用它（界面上也回不去），
+    // 会一直留到卸载才随 versions 一起清。见本轮报告"副本不回收"一条。
+    expect(await app.exists(v1Dir)).toBe(true);
+    expect(app.savedEntries()[0]?.dir).toBe(v3Dir);
+    expect(app.savedEntries()[0]?.previousDir).toBe(v2Dir);
+  });
+
+  it("同版本号重装：换一份新副本，退回能拿回上一份内容，设置不丢", async () => {
+    const app = await device();
+    const workshop = app.workshopOf();
+    const schema = [{ id: "theme", label: "主题", type: "text" as const, default: "浅色" }];
+    const older = packageOf("1.0.0", "<p>旧页面</p>", { settingsSchema: schema });
+    await workshop.installArchive(older, runtimeFiles(older));
+    app.tools().saveSettings("notes", { theme: "深色" });
+    expect(app.tools().state.getState()[0]?.settings).toEqual({ theme: "深色" });
+
+    // 作者没升版本号就重装（改完 AI 直接再装一次，现实中很常见）。
+    const newer = packageOf("1.0.0", "<p>新页面</p>", { settingsSchema: schema });
+    const outcome = await workshop.installArchive(newer, runtimeFiles(newer));
+    // 同版本不共用目录：宁可多一份 `1.0.0-2`，也不在旧目录上叠盖。
+    expect(outcome).toMatchObject({ version: "1.0.0", updated: true, versionChanged: false, previousVersion: "1.0.0" });
+    const current = app.tools().state.getState()[0];
+    expect(current?.dir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0-2"));
+    expect(current?.previousDir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0"));
+    expect(await app.text(joinPath(current?.dir as string, "index.html"))).toBe("<p>新页面</p>");
+    // 设置按 id 存、不绑目录：换一版之后用户填过的值还在。
+    expect(current?.settings).toEqual({ theme: "深色" });
+    await expectConsistent(app);
+
+    // 退回上一个同版本：拿回旧页面，设置仍然在。
+    const back = await workshop.rollback("notes");
+    expect(back.error).toBeUndefined();
+    const rolled = app.tools().state.getState()[0];
+    expect(rolled?.dir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0"));
+    expect(await app.text(joinPath(rolled?.dir as string, "index.html"))).toBe("<p>旧页面</p>");
+    expect(rolled?.settings).toEqual({ theme: "深色" });
+    await expectConsistent(app);
+  });
+
+  it("两个工具交叉装、更、卸：互不影响，卸载一个另一个照常打开", async () => {
+    const app = await device();
+    const workshop = app.workshopOf();
+    const notesV1 = packageOf("1.0.0", "<p>记事 v1</p>");
+    const clockV1 = packageOf("1.0.0", "<p>时钟 v1</p>", { id: "clock", name: "时钟" });
+
+    await workshop.installArchive(notesV1, { ...runtimeFiles(notesV1), "assets/logo.png": pngBytes });
+    await workshop.installArchive(clockV1, runtimeFiles(clockV1));
+    const notesDir = app.tools().state.getState().find((entry) => entry.package.id === "notes")?.dir as string;
+    const clockDir = app.tools().state.getState().find((entry) => entry.package.id === "clock")?.dir as string;
+    expect(notesDir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0"));
+    expect(clockDir).toBe(joinPath(installedRoot, "clock", "versions", "1.0.0"));
+    await expectConsistent(app);
+
+    // 更记事：只动 notes 的版本目录，clock 的目录与文件一个字节都不碰。
+    const notesV2 = packageOf("1.1.0", "<p>记事 v2</p>");
+    await workshop.installArchive(notesV2, runtimeFiles(notesV2));
+    await app.settle();
+    const notesNewDir = app.tools().state.getState().find((entry) => entry.package.id === "notes")?.dir as string;
+    expect(notesNewDir).toBe(joinPath(installedRoot, "notes", "versions", "1.1.0"));
+    expect(app.tools().state.getState().find((entry) => entry.package.id === "clock")?.dir).toBe(clockDir);
+    expect(await app.text(joinPath(clockDir, "index.html"))).toBe("<p>时钟 v1</p>");
+    expect(await app.filesOf(clockDir)).toEqual(["index.html", "manifest.json"]);
+    await expectConsistent(app);
+
+    // 卸载时钟：记录、版本目录、文件全清；记事的当前目录与上一版目录都还在。
+    app.tools().remove("clock");
+    const note = await workshop.purge("clock");
+    expect(note.error).toBeUndefined();
+    expect(app.tools().state.getState().map((entry) => entry.package.id)).toEqual(["notes"]);
+    expect(await app.versionDirs("clock")).toEqual([]);
+    expect(await app.filesOf(joinPath(installedRoot, "clock"))).toEqual([]);
+    expect(await app.exists(clockDir)).toBe(false);
+    expect(await app.exists(notesNewDir)).toBe(true);
+    expect(await app.exists(joinPath(installedRoot, "notes", "versions", "1.0.0"))).toBe(true);
+    // 记事那份带图片的旧副本仍然完整（退版要用它）。
+    expect(await app.filesOf(joinPath(installedRoot, "notes", "versions", "1.0.0"))).toContain("assets/logo.png");
+    await expectConsistent(app);
+
+    // 重启：只剩记事，仍在 v2 上，配置与磁盘一致。
+    await app.restart();
+    expect(app.tools().state.getState().map((entry) => entry.package.id)).toEqual(["notes"]);
+    expect(app.tools().state.getState()[0]?.dir).toBe(notesNewDir);
+    expect(await app.text(joinPath(notesNewDir, "index.html"))).toBe("<p>记事 v2</p>");
+    await expectConsistent(app);
+  });
+
+  it("进程被杀留下的暂存目录：重启时清掉，下次卸载也一起清", async () => {
+    const app = await device();
+    const workshop = app.workshopOf();
+    const v1 = packageOf("1.0.0", "<p>v1</p>");
+    await workshop.installArchive(v1, runtimeFiles(v1));
+
+    // 模拟"正在装 v2 时进程被结束"：暂存目录已经写了一部分文件，还没来得及改名。
+    const staged = joinPath(installedRoot, "notes", "versions", ".staging-crash");
+    await app.backend.writeTextFile(
+      joinPath(staged, "manifest.json"),
+      JSON.stringify({ schemaVersion: 1, id: "notes", name: "随手记", version: "2.0.0" }, null, 2),
+    );
+    await app.backend.writeTextFile(joinPath(staged, "index.html"), "<p>写了一半</p>");
+    expect(await app.exists(staged)).toBe(true);
+    // 它没人引用：界面与配置都还指着 v1。
+    expect(app.savedEntries()[0]?.dir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0"));
+
+    await app.restart();
+    // 重启后：残留暂存目录被收掉，v1 完好，界面没有因此变坏。
+    expect(await app.stagingLeftovers("notes")).toEqual([]);
+    expect(await app.exists(staged)).toBe(false);
+    expect(app.tools().state.getState()[0]?.package.version).toBe("1.0.0");
+    expect(app.tools().state.getState()[0]?.broken).toBeUndefined();
+    expect(await app.text(joinPath(installedRoot, "notes", "versions", "1.0.0", "index.html"))).toBe("<p>v1</p>");
+    await expectConsistent(app);
+
+    // 不回退成"只有重启才能清"：又崩一次，这次直接卸载，也要清干净。
+    const again = joinPath(installedRoot, "notes", "versions", ".staging-again");
+    await app.backend.writeTextFile(joinPath(again, "index.html"), "<p>又写了一半</p>");
+    app.tools().remove("notes");
+    const note = await app.workshopOf().purge("notes");
+    expect(note.error).toBeUndefined();
+    expect(await app.versionDirs("notes")).toEqual([]);
+    expect(await app.filesOf(joinPath(installedRoot, "notes"))).toEqual([]);
+  });
+
+  it("卸载后重装同一个 id：不会翻出上一次安装留下的「上一版」", async () => {
+    const app = await device();
+    const first = app.workshopOf();
+    const v1 = packageOf("1.0.0", "<p>第一次安装 v1</p>");
+    await first.installArchive(v1, runtimeFiles(v1));
+    const v2 = packageOf("1.1.0", "<p>第一次安装 v2</p>");
+    await first.installArchive(v2, runtimeFiles(v2));
+    await app.settle();
+    // 上一次安装确实留下了一份"上一版清单"（backups/<id>/previous.json）。
+    expect(await app.exists(joinPath(backupRoot, "notes", "previous.json"))).toBe(true);
+
+    // 卸载（记录 + 版本目录都清掉，但那份清单备份按已知留白留在盘上）。
+    app.tools().remove("notes");
+    expect((await app.workshopOf().purge("notes")).error).toBeUndefined();
+
+    // 重新装一版：这是全新的一次安装，跟盘上那份旧清单没有关系。
+    const v3 = packageOf("2.0.0", "<p>第二次安装 v3</p>");
+    await app.workshopOf().installArchive(v3, runtimeFiles(v3));
+    const fresh = app.tools().state.getState()[0];
+    expect(fresh).toMatchObject({ package: { version: "2.0.0" } });
+    expect(fresh?.previousVersion).toBeUndefined();
+    expect(fresh?.previousDir).toBeUndefined();
+    await expectConsistent(app);
+
+    // 界面上没有"退回上一版"入口；就算从别处调到这个动作，也不能把刚装的 v3
+    // 换成上一次安装残留的那一版——那是用户从没"退回"过的版本。
+    const ghost = await app.workshopOf().rollback("notes");
+    expect(ghost.error).toBe(true);
+    expect(ghost.text).toContain("没有可回退");
+    const kept = app.tools().state.getState()[0];
+    expect(kept?.package.version).toBe("2.0.0");
+    expect(kept?.dir).toBe(fresh?.dir);
+    expect(await app.text(joinPath(kept?.dir as string, "index.html"))).toBe("<p>第二次安装 v3</p>");
+    await expectConsistent(app);
+  });
+
+  it("连点两下安装、连点两下退版：按工具排队，只留一条记录、不产生半成品", async () => {
+    const app = await device();
+    const workshop = app.workshopOf();
+    const v1 = packageOf("1.0.0", "<p>v1</p>");
+    await workshop.installArchive(v1, runtimeFiles(v1));
+
+    // 用户手快点了两次导入（或两张卡片各点一次）：两次都必须成功，
+    // 但只能有一条记录、目录不能串。
+    const v2 = packageOf("1.1.0", "<p>v2</p>");
+    const v3 = packageOf("2.0.0", "<p>v3</p>");
+    const [second, third] = await Promise.all([
+      workshop.installArchive(v2, runtimeFiles(v2)),
+      workshop.installArchive(v3, runtimeFiles(v3)),
+    ]);
+    expect(second.version).toBe("1.1.0");
+    expect(third.version).toBe("2.0.0");
+    const afterBurst = app.tools().state.getState();
+    expect(afterBurst).toHaveLength(1);
+    // 后提交的那次赢：当前 v3，上一版就是先装进去的 v2（不是 v1）。
+    expect(afterBurst[0]).toMatchObject({ package: { version: "2.0.0" }, previousVersion: "1.1.0" });
+    expect(afterBurst[0]?.previousDir).toBe(joinPath(installedRoot, "notes", "versions", "1.1.0"));
+    expect([...(await app.versionDirs("notes"))].sort()).toEqual(["1.0.0", "1.1.0", "2.0.0"]);
+    expect(await app.stagingLeftovers("notes")).toEqual([]);
+    await expectConsistent(app);
+
+    // 连点两下退版：排队执行，第二下退的版本是第一下换下来的那一份（v3），
+    // 所以来回切一次又回到 v3——不会出现"两条记录都指向 v1"这种错位。
+    const [first, second2] = await Promise.all([workshop.rollback("notes"), workshop.rollback("notes")]);
+    expect(first.text).toContain("已退回 随手记 v1.1.0");
+    expect(second2.text).toContain("已退回 随手记 v2.0.0");
+    const settled = app.tools().state.getState();
+    expect(settled).toHaveLength(1);
+    expect(settled[0]).toMatchObject({ package: { version: "2.0.0" }, dir: joinPath(installedRoot, "notes", "versions", "2.0.0") });
     await expectConsistent(app);
   });
 });

@@ -283,16 +283,25 @@ it("rollback switches the runtime copy, not just the manifest", async () => {
  * 以前会把这个包当场"装回去"，用户拿到一个能打开、点不动的空壳。
  */
 it("refuses a rollback whose previous version is missing its run files", async () => {
-  await withContext(async ({ tools }) => {
+  await withContext(async ({ tools, host }) => {
     const bundled = parseToolPackage(JSON.stringify({
       schemaVersion: 1, id: "bundled", name: "打包页", version: "1.0.0",
       html: '<script src="./app.js"></script>', build: { out: "app.js" },
     }));
-    tools.install(bundled);
-    tools.install({ ...bundled, version: "2.0.0", html: "<p>v2</p>" }, { replace: true });
+    // 两版都真的落过盘，所以记录里带着"上一版"；但 v1 目录的清单声明了
+    // `build.out: app.js`，那份产物当时不在了——退回去等于给用户一个点不动的空壳。
+    await host.skills.writeTextFile("E:/tools/v1/manifest.json", JSON.stringify({
+      schemaVersion: 1, id: "bundled", name: "打包页", version: "1.0.0", build: { out: "app.js" },
+    }));
+    await host.skills.writeTextFile("E:/tools/v1/index.html", '<script src="./app.js"></script>');
+    await seedRunDir(host, "E:/tools/v2", "bundled", "2.0.0", "<p>v2</p>");
+    tools.install(bundled, { runDir: "E:/tools/v1" });
+    tools.install({ ...bundled, version: "2.0.0", html: "<p>v2</p>" }, { replace: true, runDir: "E:/tools/v2" });
+    expect(tools.state.getState()[0]?.previousVersion).toBe("1.0.0");
     await expect(tools.rollback("bundled")).rejects.toThrow("app.js");
     // 当前版本一个字节都没动。
     expect(tools.state.getState()[0]?.package.version).toBe("2.0.0");
+    expect(tools.state.getState()[0]?.dir).toBe("E:/tools/v2");
   });
 });
 

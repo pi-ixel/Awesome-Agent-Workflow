@@ -232,8 +232,10 @@ function requiredEntries(manifest: Record<string, unknown>): readonly string[] {
  *
  * 为什么要查入口：退版切过去的是用户**马上要打开**的那一份。"清单还在"只说明
  * 这个目录是它的，不说明它跑得起来——少一个 `index.html` 或 `build.out`，
- * 用户看到的就是白窗口，而界面上写着"已退回 v1"。查不出来（宿主没有列目录
- * 通道）时才退回只看清单。
+ * 用户看到的就是白窗口，而界面上写着"已退回 v1"。
+ *
+ * 逐个 `pathExists` 而不是列目录：宿主不一定有列目录端口（预览环境就没有），
+ * 而"缺不缺这几个文件"本来就不需要知道目录里有什么别的。
  */
 export async function canRunToolDir(
   io: ToolProjectIO,
@@ -248,12 +250,27 @@ export async function canRunToolDir(
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
     const manifest = parsed as Record<string, unknown>;
     if (manifest["id"] !== id) return false;
-    const names = await listNames(io, dir);
-    if (!names.length) return true;
-    const present = new Set(names.map((name) => name.replace(/\\/g, "/")));
-    return requiredEntries(manifest).every((name) => present.has(name));
+    for (const name of requiredEntries(manifest)) {
+      if (!await io.pathExists(joinPath(dir, name))) return false;
+    }
+    return true;
   } catch {
     return false;
+  }
+}
+
+/** `versions/` 下真实的目录名；宿主没有列目录端口或目录不存在时返回空表。 */
+async function versionDirNames(
+  io: ToolProjectIO,
+  owner: string | undefined,
+  id: string,
+): Promise<{ readonly root: string; readonly names: readonly string[] }> {
+  const root = joinPath(await installedToolRoot(io, owner, id), toolVersionsDirName);
+  if (!await io.pathExists(root)) return { root, names: [] };
+  try {
+    return { root, names: await io.listDirNames(root) };
+  } catch {
+    return { root, names: [] };
   }
 }
 
@@ -263,17 +280,51 @@ export async function listVersionDirs(
   owner: string | undefined,
   id: string,
 ): Promise<readonly string[]> {
-  const root = await installedToolRoot(io, owner, id);
-  const versionsRoot = joinPath(root, toolVersionsDirName);
-  if (!await io.pathExists(versionsRoot)) return [];
-  try {
-    const names = await io.listDirNames(versionsRoot);
-    return names
-      .filter((name) => !name.startsWith(toolStagingPrefix))
-      .map((name) => joinPath(versionsRoot, name));
-  } catch {
-    return [];
+  const { root, names } = await versionDirNames(io, owner, id);
+  return names
+    .filter((name) => !name.startsWith(toolStagingPrefix))
+    .map((name) => joinPath(root, name));
+}
+
+/**
+ * 崩溃残留的暂存目录（`.staging-*`）。
+ *
+ * 正常情况下它们的寿命只有"写文件 → 改名"那一瞬间；但进程可能正好死在中间
+ * （用户关窗、任务管理器结束、断电），留下一个写了一半、没人引用的目录。
+ * 它不会自己消失：`versions/` 下没有任何记录指向它，卸载时按版本目录扫也扫
+ * 不到它（`listVersionDirs` 明确把它们排除了）——所以必须单独收。
+ */
+export async function listStagingDirs(
+  io: ToolProjectIO,
+  owner: string | undefined,
+  id: string,
+): Promise<readonly string[]> {
+  const { root, names } = await versionDirNames(io, owner, id);
+  return names
+    .filter((name) => name.startsWith(toolStagingPrefix))
+    .map((name) => joinPath(root, name));
+}
+
+/**
+ * 收掉崩溃残留的暂存目录，返回清掉的个数。
+ *
+ * 只在没有同名操作正在进行时调用（启动自愈、卸载），否则可能删掉另一个正在
+ * 写的暂存目录。清不掉不算错：下次启动或卸载还会再试。
+ */
+export async function sweepStagingDirs(
+  io: ToolProjectIO,
+  owner: string | undefined,
+  id: string,
+): Promise<number> {
+  if (!io.dropStaging) return 0;
+  let removed = 0;
+  for (const dir of await listStagingDirs(io, owner, id)) {
+    try {
+      await io.dropStaging(dir);
+      removed += 1;
+    } catch { /* 见上：下次再试 */ }
   }
+  return removed;
 }
 
 /**
