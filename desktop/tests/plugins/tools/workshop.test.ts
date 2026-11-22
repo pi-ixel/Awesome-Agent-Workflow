@@ -35,7 +35,9 @@ function harness(options: { native?: boolean; settings?: { read: () => string | 
     skills: {
       // 卸载清理要走宿主端口：返回一份“什么都没删”的报告就够断言传给它的目录。
       toolPurge,
-      userDataDir: (namespace: string, directory: string) => io.userDataDir(namespace, directory),
+      // 模拟新契约：tools 分区由 Rust 按当前账号（u1）解析好。
+      userDataDir: (namespace: string, directory: string) =>
+        io.userDataDir(namespace, namespace === "tools" ? `${directory}/u1` : directory),
       pathExists: (path: string) => io.pathExists(path),
       listDirNames: (path: string) => io.listDirNames(path),
       writeTextFile: (path: string, contents: string) => io.writeTextFile(path, contents),

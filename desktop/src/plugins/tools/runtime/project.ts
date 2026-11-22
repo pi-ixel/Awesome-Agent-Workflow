@@ -13,7 +13,7 @@
 import { joinPath, parentPath, pathKey, pathName } from "../../../shared/panelPaths.ts";
 import { strToU8 } from "fflate";
 import type { ToolPackage, ToolViolation } from "../types.ts";
-import { toolIdPattern, toolOwnerSegment, validateToolPackage, validateToolPackageText } from "./package.ts";
+import { toolIdPattern, validateToolPackage, validateToolPackageText } from "./package.ts";
 // 老调用方从 project.ts 取这个函数；真源在 package.ts（构建时会 bundle 给 mjs 侧）。
 export { toolOwnerSegment } from "./package.ts";
 import { safeSourcePath } from "./sourceFiles.ts";
@@ -138,15 +138,13 @@ export function toolProjectIdFromBrief(brief: string): string {
 }
 
 /**
- * 默认落点：`<AAW 数据目录>/tools/projects/<账号>`。
- *
- * 按账号分一层，和"装了什么工具"（configuration 里的 `user:<id>` 键）对齐：
- * 以前源码目录是机器级、安装记录是按账号，结果换账号会出现"工具列表空着、
- * 目录里还躺着代码"。用户自己选了目录时以他选的为准，不再套账号段。
+ * 落点由 Rust 的 `tools_root_dir` 按当前账号解析好：自定义「工具整体」目录
+ * 下不带账号层（账号私有家），默认位置带账号层（多账号共享的家）。前端
+ * 不再自己拼账号段——两条路同一套解析，迁移后立即生效。
  */
 export async function defaultToolProjectsDir(io: ToolProjectIO, owner: string | undefined): Promise<string> {
-  const base = await io.userDataDir("tools", "projects");
-  return joinPath(base, toolOwnerSegment(owner));
+  void owner;
+  return io.userDataDir("tools", "projects");
 }
 
 /**
@@ -162,8 +160,8 @@ export async function defaultToolProjectsDir(io: ToolProjectIO, owner: string | 
  * 导入一个 ZIP，那个工具会以"工具项目"的身份出现在用户从没创建过的项目列表里。
  */
 export async function defaultInstalledToolsDir(io: ToolProjectIO, owner: string | undefined): Promise<string> {
-  const base = await io.userDataDir("tools", "installed");
-  return joinPath(base, toolOwnerSegment(owner));
+  void owner;
+  return io.userDataDir("tools", "installed");
 }
 
 /**

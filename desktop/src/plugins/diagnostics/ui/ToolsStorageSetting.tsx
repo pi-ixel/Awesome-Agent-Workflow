@@ -4,127 +4,29 @@ import { SettingCard, SettingRow } from "../../../shared/ui/SettingsPageParts.ts
 import { desktopManagedStorage } from "../../host/service.ts";
 
 /**
- * 工具存储位置设置：工具目录（installed/projects/backups 的根）与工具数据
- * （aawStore）两个独立位置。
+ * 工具存储位置设置：**工具整体**（本体 installed/projects/backups + 数据
+ * storage）一个单位一个位置，按当前登录账号隔离——这里的选择只影响当前
+ * 账号，其他账号的工具与数据不受影响。
  *
  * 与数据根（StorageLocationSetting）的区别：
  * - **在线迁移**：不要求重启，Rust 在后台线程执行，这里轮询阶段级进度；
- * - 工具目录迁完后**删除旧副本**；工具数据**只拷贝不删**，结果文案会把旧
- *   路径原文写出来，让用户知道去哪里手动清理。
+ * - 迁移成功后**旧位置的本体与数据都删除**（逐文件 SHA-256 核验兜底），
+ *   报告写明删了什么。
  */
 
 interface ToolLocationStatus {
-  readonly toolRoot: string;
-  readonly toolRootCustom: boolean;
-  readonly storageRoot: string;
-  readonly storageRootCustom: boolean;
+  readonly dataRoot: string;
+  readonly owner: string;
+  readonly home: string;
+  readonly homeCustom: boolean;
   readonly legacyRoot: string | null;
   readonly migrating: boolean;
-  readonly dataMigrating: boolean;
   readonly progress: { readonly stage: string; readonly detail: string } | null;
-  readonly toolRootReport: string | null;
-  readonly storageReport: string | null;
+  readonly report: string | null;
 }
 
 async function readStatus(): Promise<ToolLocationStatus> {
   return desktopManagedStorage.request<ToolLocationStatus>("tools_location_read");
-}
-
-/**
- * 一行位置设置的通用交互：选择文件夹 → 立即开始迁移；打开文件夹查看内容。
- *
- * 不展示路径文本框（Z-22 用户反馈）：窄列里长路径只露出首字母，展示意义
- * 为零；目标位置一律通过系统文件夹选择器给出，选完即迁。
- */
-function LocationRow({
-  label,
-  desc,
-  currentPath,
-  custom,
-  migrating,
-  progress,
-  report,
-  busy,
-  pickDirectory,
-  schedule,
-}: {
-  readonly label: string;
-  readonly desc: string;
-  readonly currentPath: string;
-  readonly custom: boolean;
-  readonly migrating: boolean;
-  readonly progress: ToolLocationStatus["progress"];
-  readonly report: string | null;
-  readonly busy: boolean;
-  readonly pickDirectory?: () => Promise<string | null>;
-  readonly schedule: (target: string | null) => void;
-}) {
-  return (
-    <SettingRow
-      label={label}
-      desc={desc}
-      footerAlign="start"
-      footer={
-        migrating || report ? (
-          <div className="space-y-1 break-all text-ui-caption">
-            {migrating && progress && (
-              <p role="status" className="text-warn-ink">
-                {progress.stage}… {progress.detail}
-              </p>
-            )}
-            {report && !migrating && (
-              <p role="status" className={report.includes("失败") ? "text-danger-ink" : undefined}>
-                {report}
-              </p>
-            )}
-          </div>
-        ) : undefined
-      }
-    >
-      <div className="flex w-full min-w-0 flex-wrap items-center gap-2">
-        {pickDirectory && (
-          <ActionButton
-            tone="secondary"
-            type="button"
-            className="min-h-8 shrink-0 px-3 py-1 text-ui-base"
-            disabled={!currentPath || busy || migrating}
-            onClick={() => {
-              void (async () => {
-                const path = await pickDirectory?.();
-                if (path) schedule(path);
-              })();
-            }}
-          >
-            选择文件夹
-          </ActionButton>
-        )}
-        <ActionButton
-          tone="secondary"
-          type="button"
-          className="min-h-8 shrink-0 px-3 py-1 text-ui-base"
-          disabled={!currentPath || busy || migrating}
-          onClick={() => {
-            void desktopManagedStorage
-              .request("tools_storage_open", { path: currentPath })
-              .catch(() => undefined);
-          }}
-        >
-          打开文件夹
-        </ActionButton>
-        {custom && !migrating && (
-          <ActionButton
-            tone="secondary"
-            type="button"
-            className="min-h-8 shrink-0 px-3 py-1 text-ui-base"
-            disabled={busy}
-            onClick={() => schedule(null)}
-          >
-            迁回默认
-          </ActionButton>
-        )}
-      </div>
-    </SettingRow>
-  );
 }
 
 export function ToolsStorageSetting({
@@ -152,7 +54,7 @@ export function ToolsStorageSetting({
 
   // 迁移期间轮询进度；迁移结束后 status 更新、migrating 变 false，本
   // effect 随之清理，最后一轮读到的就是最终报告。
-  const migrating = status?.migrating === true || status?.dataMigrating === true;
+  const migrating = status?.migrating === true;
   useEffect(() => {
     if (!migrating) return;
     const timer = window.setInterval(() => void refresh(), 800);
@@ -161,13 +63,13 @@ export function ToolsStorageSetting({
 
   if (!desktopManagedStorage.available()) return null;
 
-  function schedule(command: "tools_location_schedule" | "tools_data_location_schedule", target: string | null) {
+  function schedule(target: string | null) {
     void (async () => {
       setBusy(true);
       setError("");
       try {
         const args = target === null ? {} : { target };
-        setStatus(await desktopManagedStorage.request<ToolLocationStatus>(command, args));
+        setStatus(await desktopManagedStorage.request<ToolLocationStatus>("tools_location_schedule", args));
       } catch (cause) {
         setError(String(cause));
       } finally {
@@ -175,6 +77,8 @@ export function ToolsStorageSetting({
       }
     })();
   }
+
+  const account = status?.owner ? `当前账号 ${status.owner}` : "当前账号";
 
   return (
     <SettingCard label="工具存储">
@@ -196,30 +100,73 @@ export function ToolsStorageSetting({
           检测到旧版工具目录 {status.legacyRoot} 还有内容未能自动搬迁（默认位置已有同名分区），确认无用后可手动删除。
         </p>
       )}
-      <LocationRow
-        label="工具目录"
-        desc="工具的运行副本、源码项目与备份存放在这里。修改后立即在线迁移：先逐文件核验复制，再切换位置并删除旧目录；迁移期间打开工具会被暂时拦下。"
-        currentPath={status?.toolRoot ?? ""}
-        custom={status?.toolRootCustom ?? false}
-        migrating={status?.migrating ?? false}
-        progress={status?.progress ?? null}
-        report={status?.toolRootReport ?? null}
-        busy={busy}
-        pickDirectory={pickDirectory}
-        schedule={(target) => schedule("tools_location_schedule", target)}
-      />
-      <LocationRow
-        label="工具数据"
-        desc="工具自己保存的键值数据（设置、记录）存放在这里。修改后只拷贝不删除：旧位置的数据会原样保留，确认无用后手动清理。"
-        currentPath={status?.storageRoot ?? ""}
-        custom={status?.storageRootCustom ?? false}
-        migrating={status?.dataMigrating ?? false}
-        progress={status?.progress ?? null}
-        report={status?.storageReport ?? null}
-        busy={busy}
-        pickDirectory={pickDirectory}
-        schedule={(target) => schedule("tools_data_location_schedule", target)}
-      />
+      <SettingRow
+        label="工具整体"
+        desc={`工具本体（运行副本、源码项目、备份）与工具自己保存的数据作为一个整体存放在这里，只影响${account}；其他账号不受影响。「选择文件夹」后立即在线迁移：先逐文件核验复制，再切换位置并删除旧目录（数据也一并搬走）；迁移期间打开工具会被暂时拦下。`}
+        footerAlign="start"
+        footer={
+          migrating || status?.report ? (
+            <div className="space-y-1 break-all text-ui-caption">
+              {migrating && status?.progress && (
+                <p role="status" className="text-warn-ink">
+                  {status.progress.stage}… {status.progress.detail}
+                </p>
+              )}
+              {status?.report && !migrating && (
+                <p
+                  role="status"
+                  className={status.report.includes("失败") ? "text-danger-ink" : undefined}
+                >
+                  {status.report}
+                </p>
+              )}
+            </div>
+          ) : undefined
+        }
+      >
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-2">
+          {pickDirectory && (
+            <ActionButton
+              tone="secondary"
+              type="button"
+              className="min-h-8 shrink-0 px-3 py-1 text-ui-base"
+              disabled={busy || migrating || !status?.home}
+              onClick={() => {
+                void (async () => {
+                  const path = await pickDirectory?.();
+                  if (path) schedule(path);
+                })();
+              }}
+            >
+              选择文件夹
+            </ActionButton>
+          )}
+          <ActionButton
+            tone="secondary"
+            type="button"
+            className="min-h-8 shrink-0 px-3 py-1 text-ui-base"
+            disabled={busy || migrating || !status?.home}
+            onClick={() => {
+              void desktopManagedStorage
+                .request("tools_storage_open", { path: status?.home })
+                .catch(() => undefined);
+            }}
+          >
+            打开文件夹
+          </ActionButton>
+          {status?.homeCustom && !migrating && (
+            <ActionButton
+              tone="secondary"
+              type="button"
+              className="min-h-8 shrink-0 px-3 py-1 text-ui-base"
+              disabled={busy}
+              onClick={() => schedule(null)}
+            >
+              迁回默认
+            </ActionButton>
+          )}
+        </div>
+      </SettingRow>
     </SettingCard>
   );
 }
