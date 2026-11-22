@@ -89,13 +89,13 @@ export function ToolsStorageSetting({
           role="status"
           className="break-all px-4 py-2 text-ui-caption text-warn-ink"
         >
-          检测到旧版工具位置。选择文件夹或归并到默认位置后，重启将一起复制这些工具和数据。
+          一些旧工具可能还分散在其他位置。选择新位置，或点击「归并到默认位置」，可以在重启时把旧工具一起搬入新的工具库。
         </p>
       )}
       <SettingRow
         label="工具整体"
         htmlFor="tools-home-path"
-        desc="本机的 AAW 账号共用这个存储位置。安装副本、托管源码、备份和工具数据一起保存。选择文件夹后，AAW 会在下次启动时创建 aaw-tools 子目录，复制并核验工具数据，再切换位置。原目录会保留。"
+        desc="工具和它保存的数据一起放在这里。默认使用 AAW 数据目录。要搬到其他盘，请先选择父文件夹，例如 D:/，再重启 AAW。工具会放进新建的 aaw-tools 文件夹，原目录作为备份保留。"
         footerAlign="start"
         footer={
           status?.pendingPath || status?.migrationError ? (
@@ -155,7 +155,7 @@ export function ToolsStorageSetting({
               disabled={busy || !status?.home}
               onClick={() => {
                 void desktopManagedStorage
-                  .request("tools_storage_open", { path: status?.home })
+                  .request("tools_storage_open")
                   .catch((cause: unknown) => setError(String(cause)));
               }}
             >
