@@ -65,9 +65,9 @@ function createMockService(overrides: Partial<RemoteProjectService> = {}): Remot
     updateConnection: vi.fn(),
     deleteConnection: vi.fn(),
     testConnection: vi.fn(),
-    listDirectory: vi.fn().mockImplementation(async (connectionId: string, path: string): Promise<RemoteFSListResult> => {
+    listDirectory: vi.fn().mockImplementation((connectionId: string, path: string): Promise<RemoteFSListResult> => {
       const resolved = path || (connectionId === "conn-alice" ? "/home/alice" : "/home/bob");
-      return {
+      return Promise.resolve({
         path: resolved,
         parentPath: "/",
         truncated: false,
@@ -81,7 +81,7 @@ function createMockService(overrides: Partial<RemoteProjectService> = {}): Remot
             mtime: 1,
           },
         ],
-      };
+      });
     }),
     stat: vi.fn(),
     preview: vi.fn(),

@@ -192,8 +192,28 @@ export function AddRemoteProjectModal({
   );
 
   useEffect(() => {
-    void reloadConnections();
-  }, [reloadConnections]);
+    let cancelled = false;
+    void service
+      .listConnections()
+      .then((list) => {
+        if (cancelled) return;
+        setConnections(list);
+        setConnectionsError(null);
+        setSelectedConnectionId((current) => {
+          if (current && list.some((c) => c.id === current)) return current;
+          return list[0]?.id ?? null;
+        });
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setConnectionsError(describeUnknownError(error));
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingConnections(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [service]);
 
   const loadDirectory = useCallback(
     async (connectionId: string, targetPath: string) => {
@@ -222,21 +242,34 @@ export function AddRemoteProjectModal({
     [service],
   );
 
-  // 切换连接时自动清空旧目录并加载新连接的家目录。
+  // 切换连接时自动加载新连接的家目录，并通过请求序号丢弃旧连接的迟到响应。
   useEffect(() => {
-    browseSeqRef.current += 1;
-    setCurrentDir("");
-    setPathInput("");
-    setEntries([]);
-    setDirError(null);
-    setDirReady(false);
-    setDeleteBlockedRefs(null);
+    const seq = ++browseSeqRef.current;
     if (!selectedConnectionId || form !== null) {
-      setDirLoading(false);
       return;
     }
-    void loadDirectory(selectedConnectionId, "");
-  }, [selectedConnectionId, form, loadDirectory]);
+    void service
+      .listDirectory(selectedConnectionId, "")
+      .then((res) => {
+        if (browseSeqRef.current !== seq) return;
+        setCurrentDir(res.path);
+        setPathInput(res.path);
+        setParentDir(res.parentPath);
+        setEntries(res.entries.filter((e) => e.directory));
+        setDirError(null);
+        setDirReady(true);
+        setDirLoading(false);
+      })
+      .catch((error: unknown) => {
+        if (browseSeqRef.current !== seq) return;
+        setCurrentDir("");
+        setPathInput("");
+        setEntries([]);
+        setDirError(describeUnknownError(error));
+        setDirReady(false);
+        setDirLoading(false);
+      });
+  }, [selectedConnectionId, form, service]);
 
   const runTestForm = async (overrideForm?: ConnectionFormState) => {
     const activeForm = overrideForm ?? form;

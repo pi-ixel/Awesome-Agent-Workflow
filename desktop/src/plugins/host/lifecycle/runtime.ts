@@ -3,6 +3,7 @@ import type {
   CodeAgentTokenResult,
   ExitDiagnostics,
   HostOptions,
+  RemoteDocumentFileProvider,
 } from "../types.ts";
 import type { HostService } from "../service.ts";
 import { createTauriAcpProcessHost } from "../process/acpProcess.ts";
@@ -136,10 +137,8 @@ export class DesktopHost implements HostService {
         : Promise.resolve(),
   };
   readonly files: HostService["files"];
-  private remoteDocumentFiles?: import("../types.ts").RemoteDocumentFileProvider;
-  registerRemoteDocumentFiles(
-    provider: import("../types.ts").RemoteDocumentFileProvider,
-  ): () => void {
+  private remoteDocumentFiles?: RemoteDocumentFileProvider;
+  registerRemoteDocumentFiles(provider: RemoteDocumentFileProvider): () => void {
     this.remoteDocumentFiles = provider;
     return () => {
       if (this.remoteDocumentFiles === provider) {

@@ -158,7 +158,7 @@ export class OpsSidecarClient {
           this.pending.delete(id);
           clearTimeout(call.timer);
           this.generation = null;
-          reject(error);
+          reject(error instanceof Error ? error : new Error(String(error)));
         });
     });
   }

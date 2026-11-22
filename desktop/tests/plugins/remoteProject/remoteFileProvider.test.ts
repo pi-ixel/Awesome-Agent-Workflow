@@ -37,38 +37,42 @@ describe("createDocumentFileHost + remoteFileProvider routing", () => {
 
     const remoteProvider = createRemoteDocumentFileProvider({
       getById: (id) => records.get(id) ?? null,
-      listDirectory: async (_connectionId, remotePath) => ({
-        path: remotePath,
-        parentPath: "/",
-        truncated: false,
-        entries: [
-          {
-            path: `${remotePath}/owner.txt`,
-            name: "owner.txt",
-            directory: false,
-            symlink: false,
-            size: 16,
-            mtime: 1,
-          },
-        ],
-      }),
-      stat: async (_connectionId, remotePath) => ({
-        path: remotePath,
-        name: "owner.txt",
-        directory: false,
-        symlink: false,
-        size: 16,
-        mtime: 1,
-      }),
-      preview: async (connectionId) => ({
-        kind: "text",
-        content: connectionId === "conn-alice" ? "alice-data" : "bob-data",
-        mime: "text/plain",
-        bytes: 10,
-      }),
-      listWorkspaceFiles: async (connectionId) => [
-        connectionId === "conn-alice" ? "alice.ts" : "bob.ts",
-      ],
+      listDirectory: (_connectionId, remotePath) =>
+        Promise.resolve({
+          path: remotePath,
+          parentPath: "/",
+          truncated: false,
+          entries: [
+            {
+              path: `${remotePath}/owner.txt`,
+              name: "owner.txt",
+              directory: false,
+              symlink: false,
+              size: 16,
+              mtime: 1,
+            },
+          ],
+        }),
+      stat: (_connectionId, remotePath) =>
+        Promise.resolve({
+          path: remotePath,
+          name: "owner.txt",
+          directory: false,
+          symlink: false,
+          size: 16,
+          mtime: 1,
+        }),
+      preview: (connectionId) =>
+        Promise.resolve({
+          kind: "text",
+          content: connectionId === "conn-alice" ? "alice-data" : "bob-data",
+          mime: "text/plain",
+          bytes: 10,
+        }),
+      listWorkspaceFiles: (connectionId) =>
+        Promise.resolve([
+          connectionId === "conn-alice" ? "alice.ts" : "bob.ts",
+        ]),
     });
 
     const localPanel = {

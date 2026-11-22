@@ -55,53 +55,52 @@ function readPersisted(storage: HostStorage): RemoteProjectStoreSnapshot {
     ) {
       return { records: [], recentDirsByConnection: {} };
     }
-    const candidate = parsed as Partial<PersistedRemoteProjects>;
+    const candidate = parsed as Record<string, unknown>;
     const records: RemoteProjectRecord[] = [];
-    if (Array.isArray(candidate.records)) {
-      for (const item of candidate.records) {
-        if (
-          typeof item === "object" &&
-          item !== null &&
-          typeof item.projectId === "string" &&
-          typeof item.connectionId === "string" &&
-          typeof item.remoteRoot === "string" &&
-          item.projectId.trim() &&
-          item.connectionId.trim()
-        ) {
-          const remoteRoot = cleanRemoteRoot(item.remoteRoot);
-          const workspacePath = formatRemoteProjectPath(item.projectId, remoteRoot);
-          records.push({
-            projectId: item.projectId,
-            connectionId: item.connectionId,
-            remoteRoot,
-            workspacePath,
-            agentCwd:
-              typeof item.agentCwd === "string" && item.agentCwd
-                ? item.agentCwd
-                : `remote-projects/${item.projectId}`,
-            name:
-              typeof item.name === "string" && item.name.trim()
-                ? item.name.trim()
-                : defaultProjectName(remoteRoot),
-            createdAt:
-              typeof item.createdAt === "string"
-                ? item.createdAt
-                : new Date().toISOString(),
-            lastOpenedAt:
-              typeof item.lastOpenedAt === "string"
-                ? item.lastOpenedAt
-                : new Date().toISOString(),
-          });
-        }
+    if (Array.isArray(candidate["records"])) {
+      for (const rawItem of candidate["records"] as unknown[]) {
+        if (typeof rawItem !== "object" || rawItem === null) continue;
+        const item = rawItem as Record<string, unknown>;
+        const projectId = typeof item["projectId"] === "string" ? item["projectId"] : "";
+        const connectionId =
+          typeof item["connectionId"] === "string" ? item["connectionId"] : "";
+        const rawRoot = typeof item["remoteRoot"] === "string" ? item["remoteRoot"] : "";
+        if (!projectId.trim() || !connectionId.trim()) continue;
+        const remoteRoot = cleanRemoteRoot(rawRoot);
+        const workspacePath = formatRemoteProjectPath(projectId, remoteRoot);
+        const rawCwd = item["agentCwd"];
+        const rawName = item["name"];
+        const rawCreatedAt = item["createdAt"];
+        const rawLastOpenedAt = item["lastOpenedAt"];
+        records.push({
+          projectId,
+          connectionId,
+          remoteRoot,
+          workspacePath,
+          agentCwd:
+            typeof rawCwd === "string" && rawCwd
+              ? rawCwd
+              : `remote-projects/${projectId}`,
+          name:
+            typeof rawName === "string" && rawName.trim()
+              ? rawName.trim()
+              : defaultProjectName(remoteRoot),
+          createdAt:
+            typeof rawCreatedAt === "string"
+              ? rawCreatedAt
+              : new Date().toISOString(),
+          lastOpenedAt:
+            typeof rawLastOpenedAt === "string"
+              ? rawLastOpenedAt
+              : new Date().toISOString(),
+        });
       }
     }
     const recentDirsByConnection: Record<string, readonly string[]> = {};
-    if (
-      typeof candidate.recentDirsByConnection === "object" &&
-      candidate.recentDirsByConnection !== null
-    ) {
+    const rawRecent = candidate["recentDirsByConnection"];
+    if (typeof rawRecent === "object" && rawRecent !== null) {
       for (const [connId, dirs] of Object.entries(
-        candidate.recentDirsByConnection,
+        rawRecent as Record<string, unknown>,
       )) {
         if (Array.isArray(dirs)) {
           recentDirsByConnection[connId] = dirs
