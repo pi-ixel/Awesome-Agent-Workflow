@@ -8,22 +8,21 @@ it("uses native visibility across resize, loss of focus and minimize without tre
   const unlistenResize = vi.fn();
   const unlistenFocus = vi.fn();
   const chrome = createWindowChrome({
-    async minimize() {
+    minimize() {
       isDisplayed = false;
+      return Promise.resolve();
     },
-    async toggleMaximize() {},
-    async requestClose() {},
-    async isMaximized() {
-      return false;
-    },
-    isDisplayed: async () => isDisplayed,
-    listenForResize: async (receive) => {
+    toggleMaximize: () => Promise.resolve(),
+    requestClose: () => Promise.resolve(),
+    isMaximized: () => Promise.resolve(false),
+    isDisplayed: () => Promise.resolve(isDisplayed),
+    listenForResize: (receive) => {
       resize = receive;
-      return unlistenResize;
+      return Promise.resolve(unlistenResize);
     },
-    listenForFocusChange: async (receive) => {
+    listenForFocusChange: (receive) => {
       changeFocus = receive;
-      return unlistenFocus;
+      return Promise.resolve(unlistenFocus);
     },
   });
   const stop = chrome.observe();
