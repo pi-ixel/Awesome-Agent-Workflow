@@ -656,7 +656,7 @@ export function createWorkshop(deps: {
           // 写盘可能花几秒（大包 + node_modules）：落地前再确认账号，否则这份记录
           // 会写进排队期间登录的另一个人名下。
           assertOwner(owner);
-          const outcome = tools.install(staged.tool, {
+          const outcome = await tools.install(staged.tool, {
             replace: true,
             runDir: staged.dir,
             sourceDir: current.dir,
@@ -702,7 +702,7 @@ export function createWorkshop(deps: {
         assertOwner(owner);
         // ZIP / 文件夹导入没有开发来源：显式清掉上一次的来源，免得管理页
         // 指着一个已经不对应这一版的目录。
-        const outcome = tools.install(staged.tool, { replace: true, runDir: staged.dir, sourceDir: null });
+        const outcome = await tools.install(staged.tool, { replace: true, runDir: staged.dir, sourceDir: null });
         // 同上：这次导入把上一轮的旧副本挤成了孤儿，当场收掉。
         await pruneOrphanVersions(io, owner, staged.tool.id);
         void refreshProjects();
@@ -1027,7 +1027,19 @@ export function createWorkshop(deps: {
           // 删记录写的是**当前账号**：删之前必须再确认一次还是发起时那个人，
           // 否则会把别人同 id 的工具从列表里抹掉。
           assertOwner(origin);
-          try { tools.remove(id); } catch { /* 未登录等情况：没有记录可删 */ }
+          try {
+            await tools.remove(id);
+          } catch (error) {
+            // 未登录时本来就没有记录可删，忽略（历史行为）。其余情况是"配置没
+            // 写进去"——文件已经删了，记录留着会变成一张指向空目录的卡片，
+            // 得如实告诉用户下次启动再点一次，而不是报"已卸载"。
+            const message = error instanceof Error ? error.message : String(error);
+            if (message.includes("请先登录")) {
+              /* 没有记录可删 */
+            } else {
+              return { text: `文件已删除，但安装记录没删掉：${message} 重启后再点一次「卸载」即可。`, error: true };
+            }
+          }
           if (store.getState().project && dirs.includes(store.getState().project!.dir))
             patch({ project: null, check: null, installed: false, drift: false, stalled: false, repairs: 0, missing: false, running: false });
           void refreshProjects();

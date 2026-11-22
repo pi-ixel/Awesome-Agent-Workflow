@@ -232,6 +232,31 @@ export function apply(ctx: Context): void {
   }
 
   /**
+   * 提交步的后半截：等一次落盘，写不进去就把内存退回原样并报错。
+   *
+   * `update()` 只动内存——`setItem` 把值塞进 in-flight 队列，真正的
+   * `storage_configuration_write` 是另一次异步动作（`host/storage/storage.ts`）。
+   * 所以"update 返回"不等于"配置已经在磁盘上"。以前这里不等：一次因为磁盘满 /
+   * 配置文件被占而失败的落盘，面板照样报"已更新到 v1.1.0"，重启却回到 v1.0.0；
+   * 而 v1.1.0 的目录已经没人指向，启动回收顺手删掉——更新就这么无声消失了。
+   * 定时任务那条路早就是 `await flush` + 查 error，这里对齐。
+   *
+   * `before` 是这次修改之前的整份列表：落盘失败时用它覆盖回去，让"界面 / 配置 /
+   * 磁盘"三者仍然指向同一版，而不是留在"界面上是新版、磁盘上是旧版"的中间态。
+   */
+  async function persist(before: readonly PersonalTool[]): Promise<void> {
+    const managed = ctx.host.storage?.managed;
+    // 浏览器 / demo 宿主没有异步落盘这一步：配置就是 localStorage，写即生效。
+    if (!managed?.available()) return;
+    await managed.flush();
+    const error = managed.configurationError();
+    if (!error) return;
+    const key = userKey();
+    if (key) scope.update({ [key]: before });
+    throw new Error(`安装记录没有保存成功（${error}）。这次操作没有生效；磁盘满或文件被占用时清一下再试。`);
+  }
+
+  /**
    * 运行副本自愈：记录在、目录不在时，按记录里的清单物化一份并写回 `dir`。
    *
    * 为什么放在启动时而不是等"打开"：小窗（启动器）打开工具时走的是宿主侧
@@ -352,12 +377,14 @@ export function apply(ctx: Context): void {
 
   ctx.provide(name, {
     state: view.snapshot,
-    install(tool, options: InstallOptions = {}): InstallOutcome {
+    async install(tool, options: InstallOptions = {}): Promise<InstallOutcome> {
       // 安装关口：先问"当前宿主能不能跑这个工具"。不兼容就当场拦下并说清原因，
       // 而不是装进去之后让用户面对一个白窗口。
       const incompatible = checkCompatibility(tool);
       if (incompatible.length) throw new ToolPackageError(incompatible);
       let outcome: InstallOutcome = { version: tool.version, updated: false, versionChanged: false };
+      // 提交前的整份列表：落盘失败时用它退回去（见 `persist`）。
+      const before = readCurrent();
       /**
        * 这一次被换下来的那一版。备份**在配置写成功之后**才留。
        *
@@ -415,7 +442,15 @@ export function apply(ctx: Context): void {
           },
         ];
       });
-      // 配置已经落地：这一版确实成了"上一版"，这时候留备份才有意义。
+      try {
+        await persist(before);
+      } catch (error) {
+        // 文件已经写进版本目录、配置又退回原样：这份新副本再没有任何记录指向
+        // 它。顺手收掉——"磁盘满导致的失败"不该再白白多占几十 MB。
+        await pruneOrphanVersions(io, owner(), tool.id);
+        throw error;
+      }
+      // 配置真的落盘了：这一版确实成了"上一版"，这时候留备份才有意义。
       if (displaced) backups.enqueue(displaced);
       return outcome;
     },
@@ -478,7 +513,7 @@ export function apply(ctx: Context): void {
         try {
           // 回滚本身也是一次安装：被换下来的那一版会自动成为新的"上一版"，
           // 所以点错了还能再点一次换回去。
-          const outcome = ctx.tools.install(backup, { replace: true, runDir: dir });
+          const outcome = await ctx.tools.install(backup, { replace: true, runDir: dir });
           // 两格之外的副本到这一步就再没有任何记录指向它了。顺手收掉——留着
           // 既占盘，也没有入口能让用户退回去。仍然排在同一个队列里：此时配置
           // 已经写完，不会把刚切过去的那一版当孤儿。
@@ -514,8 +549,12 @@ export function apply(ctx: Context): void {
         entry.package.id === id ? { ...entry, lastOpened: Date.now() } : entry,
       ));
     },
-    remove(id) {
+    async remove(id) {
+      const before = readCurrent();
       update((current) => current.filter((entry) => entry.package.id !== id));
+      // 撤记录也要落盘：写不进去就把条目放回去，否则重启后它又冒出来，
+      // 而卡片上的"卸载"已经被用户当成做完了。
+      await persist(before);
     },
     saveSettings(id, values) {
       update((current) => {

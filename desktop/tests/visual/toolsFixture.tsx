@@ -37,12 +37,12 @@ const service: ToolsService = {
     state.setState((current) => current.some((entry) => entry.package.id === tool.id)
       ? current
       : [...current, { package: tool, installedAt: Date.now() }], true);
-    return { version: tool.version, updated: false, versionChanged: false };
+    return Promise.resolve({ version: tool.version, updated: false, versionChanged: false });
   },
   rollback: () => Promise.resolve(undefined),
   setRunDir: () => {},
   setSourceDir: () => {},
-  open: () => {}, remove: () => {},
+  open: () => {}, remove: () => Promise.resolve(),
   saveSettings: (id, values) => state.setState(state.getState().map((entry) => entry.package.id === id ? { ...entry, settings: resolveToolSettings(entry.package, values) } : entry), true),
 };
 const host = {

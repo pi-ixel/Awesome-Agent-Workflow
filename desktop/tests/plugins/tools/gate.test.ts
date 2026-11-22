@@ -89,10 +89,10 @@ it("安装关口真的挂在 install 上：不兼容的包装不进去", async (
   if (!context) throw new Error("Missing desktop context");
   const { account, tools } = context;
   account.loginAsDev({ name: "Gate", employeeId: "tools-gate-install" });
-  expect(() => tools.install(makeTool({ requires: { contract: 99 } }))).toThrow("第 99 代");
+  await expect(tools.install(makeTool({ requires: { contract: 99 } }))).rejects.toThrow("第 99 代");
   // 拦下就是拦下：不能"报错了但已经写进去"。
   expect(tools.state.getState()).toEqual([]);
   // 兼容的照常装。
-  tools.install(makeTool({ requires: { capabilities: ["files"] } }));
+  await tools.install(makeTool({ requires: { capabilities: ["files"] } }));
   expect(tools.state.getState()).toHaveLength(1);
 });
