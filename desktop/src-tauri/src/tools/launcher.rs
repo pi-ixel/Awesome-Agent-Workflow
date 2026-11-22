@@ -214,16 +214,24 @@ pub fn launcher_entries(window: tauri::WebviewWindow, app: AppHandle) -> Result<
 #[tauri::command]
 pub async fn launcher_open(window: tauri::WebviewWindow, app: AppHandle, id: String) -> Result<(), String> {
     ensure_launcher(&window)?;
-    // 先收起：打开工具之后启动器还挡在前面，用户会以为没反应。
-    if let Some(panel) = app.get_webview_window(LABEL) {
-        let _ = panel.hide();
-    }
     if let Some(tool_id) = id.strip_prefix("personal:") {
+        // **先打开、再收起**。
+        //
+        // 以前是先收起再打开：打开失败时启动器已经藏了，用户只看到"按了快捷键
+        // 什么都没发生"，连失败原因都读不到——而首次从这条路径打开时，运行
+        // 目录恰好是最容易缺的那一步（小窗没有主窗那套解析）。
         super::open_tool(&app, tool_id, None)?;
+        if let Some(panel) = app.get_webview_window(LABEL) {
+            let _ = panel.hide();
+        }
         let store = store_of(&app)?;
         let owner = catalog::read(&store)?.owner.unwrap_or_else(|| "guest".into());
         LauncherStore::new(&store).touch(&owner, &id).ok();
         return Ok(());
+    }
+    // 非工具条目：焦点要交回主窗，先把启动器收起来。
+    if let Some(panel) = app.get_webview_window(LABEL) {
+        let _ = panel.hide();
     }
     let target = match id.as_str() {
         "builtin:aaw" => "aaw",

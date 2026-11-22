@@ -230,6 +230,9 @@ export function createBridgeHost(): HostRuntime {
     moveToolPath() {
       return Promise.reject(new Error("浏览器预览模式不支持移动目录，请在桌面版中改名。"));
     },
+    dropToolStaging() {
+      return Promise.reject(new Error("浏览器预览模式不支持删除工具文件，请在桌面版中操作。"));
+    },
     async userDataDir(namespace, directory) {
       const raw = await request("POST", "/user-data-dir", {
         namespace,

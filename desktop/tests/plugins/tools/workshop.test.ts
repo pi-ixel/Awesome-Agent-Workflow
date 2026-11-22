@@ -1,9 +1,12 @@
 import { expect, it, vi } from "vitest";
+import type { Context } from "cordis";
 import { createStore } from "zustand";
+import { createTestDesktopRuntime } from "../../helpers/desktopRuntime.ts";
 import type { HostService } from "../../../src/plugins/host/service.ts";
 import type { ProjectService } from "../../../src/plugins/project/service.ts";
-import { memoryToolIO } from "../../../src/plugins/tools/runtime/io.ts";
+import { hostToolIO, memoryToolIO } from "../../../src/plugins/tools/runtime/io.ts";
 import { parseToolPackage } from "../../../src/plugins/tools/runtime/package.ts";
+import { readToolDirFiles, runtimeFiles } from "../../../src/plugins/tools/runtime/project.ts";
 import type { ToolsService } from "../../../src/plugins/tools/service.ts";
 import type { PersonalTool } from "../../../src/plugins/tools/types.ts";
 import { createWorkshop, syncToolGuide } from "../../../src/plugins/tools/ui/workshop.ts";
@@ -13,16 +16,18 @@ import { createWorkshop, syncToolGuide } from "../../../src/plugins/tools/ui/wor
  * 状态里留着项目路径（UI 用它渲染可复制的文本）和"重新校验"入口。
  * 只写一句"或直接改文件"等于把死路当结论（见 docs 22 §4 P0-2）。
  */
-function harness(options: { native?: boolean; settings?: { read: () => string | undefined; write: (value: string | undefined) => void } } = {}) {
+function harness(options: { native?: boolean; settings?: { read: () => string | undefined; write: (value: string | undefined) => void }; toolsService?: ToolsService; owner?: () => string | undefined } = {}) {
   const io = memoryToolIO();
   const dir = "/data/tools/projects/u1/demo";
   const openInFileManager = vi.fn().mockResolvedValue(undefined);
   // 二进制端口的最小实现：导入/导出文件夹时 listToolFiles / readBinaryFile 会用到。
   const binaries = new Map<string, string>();
   const readBinaryFile = (path: string) => {
-    const raw = binaries.get(path) ?? io.files.get(path);
+    // 二进制端口存的就是 base64 原文：不能再编码一次，否则读回来的是它的 base64。
+    const saved = binaries.get(path);
+    if (saved !== undefined) return Promise.resolve(saved);
+    const raw = io.files.get(path);
     if (raw === undefined) return Promise.reject(new Error(`文件不存在：${path}`));
-    if (typeof raw !== "string") return Promise.resolve(raw);
     // 文本要走 UTF-8 字节再转 base64：btoa 遇到中文直接抛（真实宿主读的是原始字节，无此问题）。
     const bytes = new TextEncoder().encode(raw);
     let binary = "";
@@ -50,23 +55,42 @@ function harness(options: { native?: boolean; settings?: { read: () => string | 
         binaries.set(path, base64);
         return Promise.resolve();
       },
+      // 版本目录就位靠宿主 movePath：内存里文本与二进制两套都要跟着搬，
+      // 否则「装完的副本」看起来缺文件（真实宿主只有一棵树，不存在这个问题）。
+      moveToolPath: (from: string, to: string) => {
+        for (const [path, value] of [...binaries]) {
+          if (path !== from && !path.startsWith(`${from}/`)) continue;
+          binaries.delete(path);
+          binaries.set(`${to}${path.slice(from.length)}`, value);
+        }
+        return io.movePath(from, to);
+      },
+      dropToolStaging: (path: string) => {
+        for (const key of [...binaries.keys()]) {
+          if (key === path || key.startsWith(`${path}/`)) binaries.delete(key);
+        }
+        return io.dropStaging ? io.dropStaging(path) : Promise.resolve();
+      },
     },
     archives: { readTextFile: (path: string) => io.readTextFile(path) },
     files: { openInFileManager },
   } as unknown as HostService;
 
-  const setSource = vi.fn();
+  const setRunDir = vi.fn();
+  const setSourceDir = vi.fn();
   const toolStore = createStore<readonly PersonalTool[]>(() => []);
   const tools = {
     state: toolStore,
     // 返回真实的 InstallOutcome：installArchive 之后 describeInstall 要读它。
     install: vi.fn((tool: { version: string }) => ({ version: tool.version, updated: false, versionChanged: false })),
     rollback: vi.fn(),
-    setSource,
+    setRunDir,
+    setSourceDir,
     open: vi.fn(),
     remove: vi.fn(),
     saveSettings: vi.fn(),
   } as unknown as ToolsService;
+  const service = options.toolsService ?? tools;
 
   // 会话是否在跑由测试推：工坊订阅的是"true → false"这个沿。
   const session = createStore<{ isAgentRunning: boolean; activeSessionId: string }>(
@@ -91,8 +115,8 @@ function harness(options: { native?: boolean; settings?: { read: () => string | 
     conversation: { send, foreground: { session } },
   } as unknown as ProjectService;
 
-  const workshop = createWorkshop({ tools, project, host, owner: () => "u1", ...(options.settings ? { settings: options.settings } : {}) });
-  return { workshop, io, dir, send, openInFileManager, session, setSource, project, startNewSession, pickDirectory, tools, toolStore, host, toolPurge, workspace };
+  const workshop = createWorkshop({ tools: service, project, host, owner: options.owner ?? (() => "u1"), ...(options.settings ? { settings: options.settings } : {}) });
+  return { workshop, io, dir, send, openInFileManager, session, setRunDir, setSourceDir, project, startNewSession, pickDirectory, tools: service, fakeTools: tools, toolStore, host, toolPurge, workspace };
 }
 
 /** 让 AI 停下来：工坊的回调是订阅里发的，不等它跑完就断言会读到旧状态。 */
@@ -178,7 +202,8 @@ it("extracts an imported archive into installed/, never into the author's projec
   const toolFiles = written.filter((path) => path.startsWith("tools/"));
   expect(toolFiles.length).toBeGreaterThan(0);
   expect(toolFiles.filter((path) => path.startsWith("tools/projects/"))).toEqual([]);
-  expect(toolFiles.every((path) => path.startsWith("tools/installed/u1/demo/"))).toBe(true);
+  // 落点是 `versions/<版本>/`：一次安装一个独立目录，不再往同一个目录叠盖。
+  expect(toolFiles.every((path) => path.startsWith("tools/installed/u1/demo/versions/"))).toBe(true);
   workshop.dispose();
 });
 
@@ -213,16 +238,18 @@ it("rejects an incompatible archive before creating any directory", async () => 
  * 里却一个也没有。这条断言盯的就是那个 anonymous 目录不再出现。
  */
 it("migrates legacy tools into the signed-in account, not into anonymous", async () => {
-  const { workshop, io, setSource } = harness();
+  const { workshop, io, setRunDir, setSourceDir } = harness();
   const tool = parseToolPackage(JSON.stringify({
     schemaVersion: 1, id: "legacy", name: "旧工具", version: "1.0.0", html: "<p>hi</p>",
   }));
-  const result = await workshop.migrateLegacy([tool]);
+  const result = await workshop.migrateLegacy([{ package: tool }]);
   expect(result.created).toEqual(["tools/projects/u1/legacy"]);
   expect(await io.pathExists("tools/projects/u1/legacy/manifest.json")).toBe(true);
   expect(await io.pathExists("tools/projects/anonymous/legacy/manifest.json")).toBe(false);
-  // 迁出来的目录要登记成这个工具的源码位置，卡片才判得出"项目改了没重装"。
-  expect(setSource).toHaveBeenCalledWith("legacy", "tools/projects/u1/legacy");
+  // 迁出来的目录只登记成**开发来源**：运行副本还是安装记录里那一份。
+  // 以前这里顺手指了运行目录，带二进制附件的工具当场读不到附件。
+  expect(setSourceDir).toHaveBeenCalledWith("legacy", "tools/projects/u1/legacy");
+  expect(setRunDir).not.toHaveBeenCalled();
   workshop.dispose();
 });
 
@@ -292,10 +319,10 @@ it("imports a tool from a folder through the same archive pipeline", async () =>
 
   const note = await workshop.importFromFolder();
   expect(note.error).toBeUndefined();
-  // 安装带上了来源目录，文件都写进了 installed/ 运行副本。
+  // 文件都写进了 installed/ 下的版本副本（含附件），不碰用户项目区。
   expect(startNewSession).not.toHaveBeenCalled();
-  expect(await io.pathExists("tools/installed/u1/demo/index.html")).toBe(true);
-  expect(await io.pathExists("tools/installed/u1/demo/assets/data.txt")).toBe(true);
+  expect(await io.pathExists("tools/installed/u1/demo/versions/1.0.0/index.html")).toBe(true);
+  expect(await io.pathExists("tools/installed/u1/demo/versions/1.0.0/assets/data.txt")).toBe(true);
   workshop.dispose();
 });
 
@@ -576,4 +603,152 @@ it("reads the new project right after creating it", async () => {
   expect(state.check).not.toBeNull();
   expect(state.check?.blocking.some((problem) => problem.where === "html")).toBe(true);
   expect(state.note?.error).toBeUndefined();
+});
+
+/* ─────────────────────────────────────────────── 组合操作回归（2026-11-22 审计）*/
+
+const combo = (version: string, id = "combo") => parseToolPackage(JSON.stringify({
+  schemaVersion: 1, id, name: "组合操作", version, html: `<p>runtime-${version}</p>`,
+}));
+
+/** 真工具服务 + 工坊：安装记录、版本目录、备份都是真的，只有宿主是内存实现。 */
+async function withRealTools(run: (context: Context) => Promise<void>) {
+  localStorage.clear();
+  let context: Context | undefined;
+  const runtime = createTestDesktopRuntime(
+    { attachPreloading: () => () => {}, close: () => Promise.resolve() },
+    undefined,
+    (value) => { context = value; },
+  );
+  try {
+    await runtime.ready;
+    if (!context) throw new Error("缺少桌面上下文");
+    context.account.loginAsDev({ name: "工坊回归", employeeId: "tools-workshop-regression" });
+    await run(context);
+  } finally {
+    await runtime.shutdown();
+  }
+}
+
+/**
+ * OBS-03：更新中途失败，已经生效的那一版必须一个字节都不动。
+ *
+ * 以前安装是往生效目录里直接覆盖写、写完才校验：写到一半失败，清单还是 v1，
+ * 页面已经变成 v2。现在写的是暂存目录，失败只清它自己。
+ */
+it("a failed update leaves the live version and its page untouched", async () => {
+  await withRealTools(async ({ tools, account }) => {
+    const h = harness({ toolsService: tools, owner: () => account.state.getState().currentUser?.id });
+    try {
+      const v1 = combo("1.0.0");
+      const installed = await h.workshop.installArchive(v1, runtimeFiles(v1));
+      vi.spyOn(h.host.skills, "writeBinaryFile").mockRejectedValueOnce(new Error("模拟附件写入失败"));
+      await expect(h.workshop.installArchive(combo("2.0.0"), {
+        ...runtimeFiles(combo("2.0.0")),
+        "assets/stop.bin": Uint8Array.of(255),
+      })).rejects.toThrow("模拟附件写入失败");
+
+      const entry = tools.state.getState()[0];
+      expect(entry?.package.version).toBe("1.0.0");
+      expect(entry?.dir).toBe(installed.dir);
+      expect(await h.io.readTextFile(`${entry?.dir}/index.html`)).toContain("runtime-1.0.0");
+      // 失败的那次只留下清理干净的暂存：别在磁盘上留一份孤儿副本。
+      expect([...h.io.files.keys()].filter((path) => path.includes(".staging-"))).toEqual([]);
+    } finally { h.workshop.dispose(); }
+  });
+});
+
+/**
+ * OBS-08：新版目录里不该有上一版的文件，导出也就不会把它们带走。
+ *
+ * 以前同目录叠盖：v2 不再提供的附件还留在那儿，导出递归读整个目录，收件人
+ * 拿到的包里带着上一个版本的文件。
+ */
+it("exports only the files this version actually installed", async () => {
+  await withRealTools(async ({ tools, account }) => {
+    const h = harness({ toolsService: tools, owner: () => account.state.getState().currentUser?.id });
+    try {
+      const v1 = combo("1.0.0");
+      const stale = "assets/v1-only.txt";
+      await h.workshop.installArchive(v1, { ...runtimeFiles(v1), [stale]: new TextEncoder().encode("v1 only") });
+      const newer = await h.workshop.installArchive(combo("2.0.0"), runtimeFiles(combo("2.0.0")));
+
+      const exported = await readToolDirFiles(hostToolIO(h.host), newer.dir!);
+      expect(exported.files[stale]).toBeUndefined();
+      expect(tools.state.getState()[0]?.package.version).toBe("2.0.0");
+      // 两版各占一个目录：上一版还在，退版有东西可切（切目录的断言在 tools.test.ts）。
+      expect(newer.dir).not.toBe(tools.state.getState()[0]?.previousDir);
+      expect(await h.io.pathExists(tools.state.getState()[0]!.previousDir!)).toBe(true);
+    } finally { h.workshop.dispose(); }
+  });
+});
+
+/**
+ * OBS-05：安装的是开发目录的一份快照。
+ *
+ * 以前工坊把作者目录同时当运行地址，作者改完页面、没重新安装，已安装的工具
+ * 就已经读到新内容了——与管理页承诺的"快照"相反。
+ */
+it("keeps reading the installed snapshot after the author edits the project", async () => {
+  await withRealTools(async ({ tools, account }) => {
+    const h = harness({ toolsService: tools, owner: () => account.state.getState().currentUser?.id });
+    try {
+      await h.io.writeTextFile(`${h.dir}/manifest.json`, JSON.stringify({
+        schemaVersion: 1, id: "demo", name: "演示", version: "1.0.0",
+      }));
+      await h.io.writeTextFile(`${h.dir}/index.html`, "<p>runtime-1.0.0</p>");
+      await h.workshop.select(h.dir);
+      expect(await h.workshop.install()).toBe(true);
+
+      // 只改开发目录，不重新安装。
+      await h.io.writeTextFile(`${h.dir}/index.html`, "<p>还没装的草稿</p>");
+      const opened = await h.workshop.resolveOpenDir("demo");
+      expect(opened).not.toBe(h.dir);
+      expect(await h.io.readTextFile(`${opened}/index.html`)).toContain("runtime-1.0.0");
+      // 来源另存一份：管理页仍能指出"从哪儿装的"，但它不参与运行。
+      expect(tools.state.getState()[0]?.sourceDir).toBe(h.dir);
+    } finally { h.workshop.dispose(); }
+  });
+});
+
+/**
+ * OBS-02：旧版补齐不再改写运行目录。
+ *
+ * 面板首扫会拿全部已安装包去"迁移旧记录"。以前这一步顺手把安装记录的运行
+ * 路径指到了刚生成的脚手架，带二进制附件的工具当场读不到附件。
+ */
+it("migrating legacy records never repoints a working runtime copy", async () => {
+  await withRealTools(async ({ tools, account }) => {
+    const h = harness({ toolsService: tools, owner: () => account.state.getState().currentUser?.id });
+    try {
+      const tool = combo("1.0.0");
+      const installed = await h.workshop.installArchive(tool, {
+        ...runtimeFiles(tool),
+        "assets/probe.bin": Uint8Array.of(255, 128, 1),
+      });
+      await h.workshop.migrateLegacy(tools.state.getState());
+      const dir = await h.workshop.resolveOpenDir(tool.id);
+      expect(dir).toBe(installed.dir);
+      expect(await h.host.skills.readBinaryFile!(`${dir}/assets/probe.bin`, 64)).toBe("/4AB");
+
+      // 再进一次面板：不重复生成项目、不重复写记录。
+      await h.workshop.migrateLegacy(tools.state.getState());
+      expect(await h.io.pathExists("tools/projects/u1/combo/manifest.json")).toBe(false);
+    } finally { h.workshop.dispose(); }
+  });
+});
+
+/** 只带清单、缺运行入口的包明确拒绝，而不是装一个点不动的空壳。 */
+it("refuses a package that only carries the manifest", async () => {
+  await withRealTools(async ({ tools, account }) => {
+    const h = harness({ toolsService: tools, owner: () => account.state.getState().currentUser?.id });
+    try {
+      const bundled = parseToolPackage(JSON.stringify({
+        schemaVersion: 1, id: "bundled", name: "打包页", version: "1.0.0",
+        html: '<script src="./app.js"></script>', build: { out: "app.js" },
+      }));
+      await expect(h.workshop.installArchive(bundled)).rejects.toThrow("app.js");
+      expect(tools.state.getState()).toEqual([]);
+    } finally { h.workshop.dispose(); }
+  });
 });

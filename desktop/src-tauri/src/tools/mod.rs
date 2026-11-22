@@ -97,6 +97,11 @@ pub(crate) struct ToolSession {
     pub(crate) token: String,
     /// 载体：`page` 或 `process`。诊断与手册自检用。
     pub(crate) carrier: String,
+    /// 这一窗建起来时注入的那组设置（序列化后的 JSON）。
+    ///
+    /// 复用窗口前拿它和"现在生效的设置"比：不一样就重建窗口。注入脚本是建窗
+    /// 时的常量，复用旧窗口等于用户保存了设置、打开还是旧值。
+    pub(crate) settings: String,
     /// `aawLifecycle.keepAlive` 的开关：声明之后关窗只是隐藏。
     pub(crate) keep_alive: AtomicBool,
     /// 定时唤醒：`(间隔秒, 下次到点)`。
@@ -262,27 +267,51 @@ impl ToolsHost {
         if !valid_tool_id(tool_id) {
             return Err("无效的工具 id。".into());
         }
-        // dev 期仓库根里工具直接躺在根下；生产环境按账号指针解析
-        // （自定义 home 无账号层、默认位置带账号层）——与前端写入的路径
-        // 同源，不再有两套解析。
-        let dir = match self.dev_tools_root() {
-            Some(root) => root.join(tool_id),
-            None => {
-                let data_root = self.data_root()?;
-                let owner = self.store()?.owner()?;
-                location::tool_partition(&data_root, &owner, "installed")?.join(tool_id)
+        // dev 期仓库根里工具直接躺在根下。
+        if let Some(root) = self.dev_tools_root() {
+            let dir = root.join(tool_id);
+            if dir.is_dir() {
+                return Ok(dir);
             }
-        };
-        if !dir.is_dir() {
-            // 只报路径用户没法动手：目录丢失（被移动/清理）是 dev 期的常态，
-            // 文案必须告诉他两条出路——放回原位，或卸载重装。列表侧会在
-            // 启动时把这类条目标成 broken 卡片，这里是打开时刻的兜底。
-            return Err(format!(
-                "这个工具的目录不存在（{}）。它可能已被移动或删除：把目录放回原位可继续使用，或在工具中心卸载这条记录后重新安装。",
-                dir.display()
-            ));
         }
-        Ok(dir)
+        // 生产环境：安装记录里的 `dir` 是**唯一真源**。
+        //
+        // 以前这里猜 `installed/<账号>/<id>`。副本现在住在
+        // `installed/<账号>/<id>/versions/<版本>` 下，猜出来的路径永远是空的——
+        // 启动器小窗第一次打开工具就是这么坏的（主窗会先解析再传 `hint`，
+        // 小窗没有那一步）。
+        let mut recorded = None;
+        if let Ok(store) = self.store() {
+            if let Ok(library) = catalog::read(&store) {
+                if let Some(entry) = library.entries.iter().find(|entry| entry.tool.id == tool_id) {
+                    if let Some(dir) = entry.dir.as_ref() {
+                        let dir = PathBuf::from(dir);
+                        if dir.is_dir() {
+                            return Ok(dir);
+                        }
+                        recorded = Some(dir);
+                    }
+                }
+            }
+        }
+        // 兼容旧布局：`installed/<账号>/<id>` 本身就是运行副本（没有 versions 层）。
+        let legacy = match (self.data_root(), self.store().and_then(|store| store.owner())) {
+            (Ok(data_root), Ok(owner)) => location::tool_partition(&data_root, &owner, "installed")
+                .ok()
+                .map(|partition| partition.join(tool_id)),
+            _ => None,
+        };
+        if let Some(dir) = legacy.filter(|dir| dir.is_dir()) {
+            return Ok(dir);
+        }
+        // 都找不到：把"记录里写着的那个路径"报出来，用户才知道去哪找。
+        Err(match recorded {
+            Some(dir) => format!(
+                "这个工具的运行副本不在了（{}）。它可能已被移动或删除：在工具中心点「打开」会按安装记录重建，或卸载这条记录后重新安装。",
+                dir.display()
+            ),
+            None => "这个工具还没有可运行的副本：在工具中心点一次「打开」会补齐，或重新导入一次 ZIP。".to_string(),
+        })
     }
 }
 
@@ -541,9 +570,32 @@ pub fn open_tool(app: &AppHandle, tool_id: &str, hint: Option<&str>) -> Result<(
         // 返回。不重生进程的话，窗口是活的、工具是死的——用户看到的就是
         // "重新打开了还是不能用"（2026-11-22 真机验收发现）。
         process_host::respawn(app, &host, tool_id)?;
-        window.show().ok();
-        window.set_focus().ok();
-        return Ok(());
+        if let Some((dir, created_with, name)) = session_baseline(&host, &label) {
+            let current = manifest::read(&dir)
+                .map(|manifest| settings_json(&resolve_settings(&host, tool_id, &manifest)))
+                .unwrap_or_default();
+            if current != created_with {
+                // 设置变了：按新值重建窗口。
+                //
+                // 为什么只能重建：`aawSettings` 是建窗时烘焙进
+                // `initialization_script` 的常量，页面在加载时同步读一次。
+                // 复用旧窗口、或者 reload，注入的都还是上一组值——用户保存了
+                // 设置，打开还是旧值。
+                //
+                // 代价是工具自己的未保存状态会没。这一步只在"设置真的变了、
+                // 用户又点开工具"时发生，与界面承诺的"保存后重新打开生效"
+                // 一致；给一句系统提示，免得他把界面重置当成故障。
+                host.remove_process(tool_id);
+                window.destroy().ok();
+                notify_settings_applied(app, &name);
+            }
+        }
+        // 窗口还在（设置没变，或重建被同一轮建窗接手）就是唤醒它。
+        if let Some(window) = app.get_webview_window(&label) {
+            window.show().ok();
+            window.set_focus().ok();
+            return Ok(());
+        }
     }
     let dir = match hint {
         Some(dir) if std::path::Path::new(dir).is_dir() => std::path::PathBuf::from(dir),
@@ -577,6 +629,49 @@ pub fn open_tool(app: &AppHandle, tool_id: &str, hint: Option<&str>) -> Result<(
     open_page_window(app, tool_id, &dir, &manifest, "page")
 }
 
+/// 一个工具**现在生效**的设置：清单默认值打底，用户存过的值覆盖。
+///
+/// 与建窗时注入的那组必须同源，否则"设置变没变"的判断会一直报变。
+fn resolve_settings(
+    host: &ToolsHost,
+    tool_id: &str,
+    manifest: &manifest::ToolManifest,
+) -> serde_json::Map<String, serde_json::Value> {
+    if let Ok(store) = host.store() {
+        if let Ok(library) = catalog::read(&store) {
+            if let Some(entry) = library.entries.into_iter().find(|entry| entry.tool.id == tool_id) {
+                return entry.settings;
+            }
+        }
+    }
+    manifest.settings_defaults()
+}
+
+fn settings_json(settings: &serde_json::Map<String, serde_json::Value>) -> String {
+    serde_json::to_string(settings).unwrap_or_default()
+}
+
+/// 窗口那一代的基线：建窗时用的运行目录、注入的设置、工具名。
+fn session_baseline(host: &ToolsHost, label: &str) -> Option<(PathBuf, String, String)> {
+    let sessions = host.sessions.lock().ok()?;
+    let session = sessions.get(label)?;
+    Some((session.dir.clone(), session.settings.clone(), session.name.clone()))
+}
+
+/// 设置变更导致窗口重建时给一句系统提示。
+///
+/// 为什么要提示：重建会丢掉工具界面里没保存的内容。那是这一步的代价，
+/// 不该只在代码注释里存在——用户得知道刚看到的界面重置是预期行为。
+fn notify_settings_applied(app: &AppHandle, name: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app
+        .notification()
+        .builder()
+        .title("工具已按新设置重新打开")
+        .body(format!("{name}：这次打开用的是刚保存的设置；界面里没保存的内容会重置。"))
+        .show();
+}
+
 /// 开一个页面工具窗口（L1/L2，以及带界面的 L3）。
 ///
 /// `carrier` 只影响诊断信息与关窗时的回收：动作走哪条链路由 `manifest.runtime`
@@ -604,11 +699,9 @@ pub(crate) fn open_page_window(
     // 必须读**用户存过的值**，不能只用清单默认值：在工具中心改过设置的用户，
     // 打开工具却看到默认值，会以为设置没生效（Electron 版用 sendSync 读的就是
     // 这份，行为要一致）。
-    let settings = catalog::read(&host.store()?)
-        .ok()
-        .and_then(|library| library.entries.into_iter().find(|entry| entry.tool.id == tool_id))
-        .map(|entry| entry.settings)
-        .unwrap_or_else(|| manifest.settings_defaults());
+    let settings = resolve_settings(&host, tool_id, manifest);
+    // 记下"这一窗是按哪组设置建的"：复用窗口时要靠它判断设置有没有变。
+    let settings_created = settings_json(&settings);
     let script = inject::script(&inject::InjectContext {
         tool_id: tool_id.to_string(),
         token: token.clone(),
@@ -624,6 +717,7 @@ pub(crate) fn open_page_window(
         network: network.clone(),
         token,
         carrier: carrier.to_string(),
+        settings: settings_created,
         keep_alive: AtomicBool::new(false),
         schedule: Mutex::new(None),
     });
@@ -660,12 +754,21 @@ pub(crate) fn open_page_window(
             }
         }
         tauri::WindowEvent::Destroyed => {
+            // 只移除**这一代**的会话：设置变更后会先销毁再在同一个 label 上
+            // 重建，晚到的销毁事件不该把新窗口的会话删掉（删了页面还在，能力
+            // 通道却查不到会话，表现是点什么都报错）。
             if let Ok(mut map) = app_handle.state::<ToolsHost>().sessions.lock() {
-                map.remove(&closing);
+                let current = map.get(&closing).map(|now| Arc::ptr_eq(now, &session)).unwrap_or(false);
+                if current {
+                    map.remove(&closing);
+                }
             }
             // 窗口没了，进程工具也就没有宿主了：留着它就是个孤儿进程。
-            if let Some(tool_id) = closing.strip_prefix("tool-") {
-                app_handle.state::<ToolsHost>().remove_process(tool_id);
+            // 同一个 label 上已经有新窗口时跳过——那一代的进程归它用。
+            if app_handle.get_webview_window(&closing).is_none() {
+                if let Some(tool_id) = closing.strip_prefix("tool-") {
+                    app_handle.state::<ToolsHost>().remove_process(tool_id);
+                }
             }
         }
         _ => {}
@@ -971,6 +1074,7 @@ mod tests {
             network: NetworkRule::default(),
             token: "t".into(),
             carrier: "page".into(),
+            settings: String::new(),
             keep_alive: AtomicBool::new(false),
             schedule: Mutex::new(None),
         }

@@ -36,6 +36,13 @@ export interface ToolProjectIO {
    * 跨盘时退回复制 + 删除。
    */
   movePath(from: string, to: string): Promise<void>;
+  /**
+   * 删除一次安装创建的受管目录（`versions/` 下的版本目录或暂存目录）。
+   *
+   * 只用于"这次安装失败了，把刚写的东西清掉"：清不到也不该让安装错误变成
+   * 两条错误。宿主侧只接受受管范围内的这种目录，别的路径一律拒绝。
+   */
+  dropStaging?(path: string): Promise<void>;
   /** 写二进制文件（base64）；宿主不支持时安装会明确报错，而不是静默丢文件。 */
   writeBinaryFile?(path: string, base64: string): Promise<void>;
   /** 读二进制文件（base64）；导出带依赖的工具时用。 */

@@ -502,10 +502,49 @@ pub fn tool_move_path(from: String, to: String) -> Result<(), String> {
     }
 }
 
+/// 删除一次安装创建的受管版本目录：
+/// `<installed>/<账号>/<id>/versions/<名字>`。
+///
+/// 只服务一件事——**安装失败时把刚写进去的东西清掉**。为了让这条命令不可能
+/// 变成"任意删目录"，护栏比 `tool_purge` 更窄：
+/// - 父目录必须叫 `versions`；
+/// - 祖父目录必须**直接**落在这个账号的 `installed` 分区下；
+/// - 全部走 `canonicalize` 之后再比，`..` 与符号链接都过不去；
+/// - 只删目录，不删文件，不碰工具数据。
+#[tauri::command]
+pub fn tool_drop_staging(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let target = std::path::PathBuf::from(&path);
+    let versions = target.parent().ok_or("路径无效")?;
+    if versions.file_name().and_then(|name| name.to_str()) != Some("versions") {
+        return Err(format!("只允许删除工具版本目录下的副本：{}", target.display()));
+    }
+    let tool_root = versions.parent().ok_or("路径无效")?;
+    let host = tauri::Manager::try_state::<crate::tools::ToolsHost>(&app)
+        .ok_or("工具宿主未就绪。")?;
+    let store = host.store()?;
+    let owner = store.owner()?;
+    let installed = crate::tools::location::tool_partition(&host.data_root()?, &owner, "installed")?;
+    let canonical_installed = std::fs::canonicalize(&installed)
+        .map_err(|error| format!("无法定位工具库目录 {}：{error}", installed.display()))?;
+    let canonical_tool = std::fs::canonicalize(tool_root)
+        .map_err(|error| format!("工具目录不存在 {}：{error}", tool_root.display()))?;
+    if canonical_tool.parent() != Some(canonical_installed.as_path()) {
+        return Err(format!("这个目录不在工具库里，已拒绝删除：{}", target.display()));
+    }
+    let canonical_versions = std::fs::canonicalize(versions)
+        .map_err(|error| format!("版本目录不存在 {}：{error}", versions.display()))?;
+    let canonical_target = std::fs::canonicalize(&target)
+        .map_err(|error| format!("路径不存在 {}：{error}", target.display()))?;
+    if canonical_target.parent() != Some(canonical_versions.as_path()) || !canonical_target.is_dir() {
+        return Err(format!("只允许删除 versions 下的目录：{}", target.display()));
+    }
+    std::fs::remove_dir_all(&canonical_target)
+        .map_err(|error| format!("删除失败 {}：{error}", target.display()))
+}
+
 /// Resolve namespaced user data without knowledge of any agent implementation.
 #[tauri::command]
-pub fn user_data_dir(namespace: String, directory: String) -> Result<String, String> {
-    fn valid(part: &str) -> bool {
+pub fn user_data_dir(namespace: String, directory: String) -> Result<String, String> {    fn valid(part: &str) -> bool {
         !part.is_empty() && part.as_bytes()[0].is_ascii_alphanumeric()
             && part.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
     }

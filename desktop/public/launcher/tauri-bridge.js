@@ -24,7 +24,15 @@
 
   window.launcher = {
     entries: function () { return invoke("launcher_entries"); },
-    open: function (id) { return invoke("launcher_open", { id: id }); },
+    // 打开工具的失败原因要能显示出来：宿主 reject 的是字符串，页面读的是
+    // `error.message`，不折成 Error 就只剩一句 "undefined"。
+    open: function (id) {
+      return invoke("launcher_open", { id: id }).catch(function (error) {
+        throw error instanceof Error
+          ? error
+          : new Error(typeof error === "string" && error ? error : "打开工具失败。");
+      });
+    },
     hide: function () { return invoke("launcher_hide"); },
     pin: function (id, pinned) { return invoke("launcher_pin", { id: id, pinned: pinned === true }); },
     shortcut: function (value) { return invoke("launcher_shortcut", { value: value }); },
