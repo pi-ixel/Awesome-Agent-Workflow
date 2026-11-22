@@ -357,9 +357,12 @@ it("shows the current storage path and schedules a folder picked by the user", a
       pick,
     );
     render(<Settings />);
-    const path = screen.getByLabelText<HTMLInputElement>("数据存储路径");
+    // 工具存储卡（ToolsStorageSetting）也有「选择文件夹 / 保存」按钮，
+    // 这里的查询必须限定在「存储位置」卡内。
+    const card = within(screen.getByLabelText("存储位置"));
+    const path = card.getByLabelText<HTMLInputElement>("数据存储路径");
     await waitFor(() => expect(path.value).toBe(currentPath));
-    const choose = screen.getByRole("button", { name: "选择文件夹" });
+    const choose = card.getByRole("button", { name: "选择文件夹" });
     fireEvent.click(choose);
     fireEvent.click(choose);
     expect(pick).toHaveBeenCalledOnce();
@@ -369,7 +372,7 @@ it("shows the current storage path and schedules a folder picked by the user", a
     expect(path.value).toBe(currentPath);
     fireEvent.click(choose);
     await waitFor(() => expect(path.value).toBe("D:\\Storage"));
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    fireEvent.click(card.getByRole("button", { name: "保存" }));
     await screen.findByText("重启后迁移到 " + pendingPath);
     expect(path.value).toBe(currentPath);
     expect(request).toHaveBeenCalledWith("storage_location_schedule", {

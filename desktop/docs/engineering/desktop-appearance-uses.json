@@ -25,14 +25,27 @@
     "DiagnosticsWindow · <input>",
     "DiagnosticsWindow · <input>"
   ],
-  "plugins/diagnostics/ui/LogView.tsx": ["LogView · <input>"],
-  "plugins/diagnostics/ui/ResourceReport.tsx": ["Chart · <svg>"],
+  "plugins/diagnostics/ui/LogView.tsx": [
+    "LogView · <input>"
+  ],
+  "plugins/diagnostics/ui/ResourceReport.tsx": [
+    "Chart · <svg>"
+  ],
   "plugins/diagnostics/ui/StorageLocationSetting.tsx": [
     "StorageLocationSetting · <input>"
   ],
-  "plugins/diagnostics/ui/StorageSettings.tsx": ["ThresholdInput · <input>"],
-  "plugins/diagnostics/ui/perf/MemoryChart.tsx": ["MemoryChart · <svg>"],
-  "plugins/documents/ui/FileAnnotations.tsx": ["FileAnnotations · <textarea>"],
+  "plugins/diagnostics/ui/StorageSettings.tsx": [
+    "ThresholdInput · <input>"
+  ],
+  "plugins/diagnostics/ui/ToolsStorageSetting.tsx": [
+    "LocationRow · <input>"
+  ],
+  "plugins/diagnostics/ui/perf/MemoryChart.tsx": [
+    "MemoryChart · <svg>"
+  ],
+  "plugins/documents/ui/FileAnnotations.tsx": [
+    "FileAnnotations · <textarea>"
+  ],
   "plugins/documents/ui/FileDocumentTools.tsx": [
     "FileDocumentTools · <input>",
     "FileDocumentTools · 内嵌图形",
@@ -42,7 +55,9 @@
     "FilePreview/headerInner · 内嵌图形",
     "专用渲染依赖 · highlight.js/lib/common"
   ],
-  "plugins/documents/ui/FileTree.tsx": ["FileTree · <input>"],
+  "plugins/documents/ui/FileTree.tsx": [
+    "FileTree · <input>"
+  ],
   "plugins/documents/ui/MarkdownSourceEditor.tsx": [
     "专用渲染依赖 · @codemirror/lang-markdown",
     "专用渲染依赖 · @codemirror/language",
@@ -94,19 +109,25 @@
   "plugins/project/ui/LegacyAgentDataSection.tsx": [
     "LegacyAgentDataSection · <input>"
   ],
-  "plugins/project/ui/ProjectTree.tsx": ["SessionRenameInput · <input>"],
+  "plugins/project/ui/ProjectTree.tsx": [
+    "SessionRenameInput · <input>"
+  ],
   "plugins/project/ui/projectHeaders.tsx": [
     "SessionBar · <h1>",
     "SessionBar · <input>"
   ],
-  "plugins/project/usage/UsageSettings.tsx": ["Trend · <canvas>"],
+  "plugins/project/usage/UsageSettings.tsx": [
+    "Trend · <canvas>"
+  ],
   "plugins/scheduledTasks/ui/TaskViews.tsx": [
     "TaskEditor · <input>",
     "TaskEditor · <input>",
     "TaskEditor · <textarea>",
     "TaskWorkspace · <h1>"
   ],
-  "plugins/skills/ui/SkillLibrary.tsx": ["LibraryPage · <input>"],
+  "plugins/skills/ui/SkillLibrary.tsx": [
+    "LibraryPage · <input>"
+  ],
   "plugins/skills/ui/SkillsSourceSettings.tsx": [
     "SkillsSourceSettings · <input>"
   ],
@@ -116,7 +137,9 @@
   "plugins/terminal/rendering/terminalTheme.ts": [
     "专用渲染依赖 · @xterm/xterm"
   ],
-  "plugins/terminal/ui/TerminalPanel.tsx": ["TerminalTabChip · role=tab"],
+  "plugins/terminal/ui/TerminalPanel.tsx": [
+    "TerminalTabChip · role=tab"
+  ],
   "plugins/terminal/ui/TerminalSessionView.tsx": [
     "专用渲染依赖 · @xterm/addon-clipboard",
     "专用渲染依赖 · @xterm/addon-fit",
@@ -160,7 +183,9 @@
     "ToolManagement · <input>",
     "ToolManagement · role=switch"
   ],
-  "plugins/tools/ui/ToolPath.tsx": ["ToolPath · 内嵌图形"],
+  "plugins/tools/ui/ToolPath.tsx": [
+    "ToolPath · 内嵌图形"
+  ],
   "plugins/tools/ui/ToolPreview.tsx": [
     "ToolPreview · <button>",
     "ToolPreview · <button>",
@@ -168,7 +193,9 @@
     "ToolPreview · <button>",
     "ToolPreview · <button>"
   ],
-  "plugins/tools/ui/ToolPreviewTab.tsx": ["ToolPreviewTab · <button>"],
+  "plugins/tools/ui/ToolPreviewTab.tsx": [
+    "ToolPreviewTab · <button>"
+  ],
   "plugins/tools/ui/ToolProjects.tsx": [
     "ToolProjectList · <button>",
     "ToolProjectList · <button>",
@@ -225,13 +252,19 @@
   "plugins/workbench/ui/right-panel/TabOverviewPopover.tsx": [
     "TabOverviewPopover · <input>"
   ],
-  "plugins/workflow/ui/AiComposeDialog.tsx": ["AiComposeDialog · <textarea>"],
+  "plugins/workflow/ui/AiComposeDialog.tsx": [
+    "AiComposeDialog · <textarea>"
+  ],
   "plugins/workflow/ui/DisposePanel.tsx": [
     "DisposePanel · <textarea>",
     "DisposePanel · <textarea>"
   ],
-  "plugins/workflow/ui/DraftPage.tsx": ["DraftPage · <textarea>"],
-  "plugins/workflow/ui/FlowStages.tsx": ["FlowStages · <canvas>"],
+  "plugins/workflow/ui/DraftPage.tsx": [
+    "DraftPage · <textarea>"
+  ],
+  "plugins/workflow/ui/FlowStages.tsx": [
+    "FlowStages · <canvas>"
+  ],
   "plugins/workflow/ui/RunManager.tsx": [
     "RunManager · <input>",
     "RunManager/row · <input>"
@@ -304,10 +337,18 @@
     "html.theme-warm --turn-status-shimmer-soft · rgb(10 10 10 / 0.22)",
     "html.theme-warm --turn-status-shimmer-strong · rgb(10 10 10 / 1)"
   ],
-  "shared/ui/BrandLoading.tsx": ["BrandLoading · 内嵌图形"],
-  "shared/ui/BrandMark.tsx": ["品牌图形 · ../assets/aaw-logo.png"],
-  "shared/ui/Breadcrumb.tsx": ["Breadcrumb · <button>"],
-  "shared/ui/Callout.tsx": ["ToneIcon · 内嵌图形"],
+  "shared/ui/BrandLoading.tsx": [
+    "BrandLoading · 内嵌图形"
+  ],
+  "shared/ui/BrandMark.tsx": [
+    "品牌图形 · ../assets/aaw-logo.png"
+  ],
+  "shared/ui/Breadcrumb.tsx": [
+    "Breadcrumb · <button>"
+  ],
+  "shared/ui/Callout.tsx": [
+    "ToneIcon · 内嵌图形"
+  ],
   "shared/ui/ContextMenu.tsx": [
     "ContextMenu · <button>",
     "ContextMenu · 原生 role=menu",
@@ -317,7 +358,9 @@
     "Disclosure · <details>",
     "Disclosure · <summary>"
   ],
-  "shared/ui/IconButton.tsx": ["IconButton · <button>"],
+  "shared/ui/IconButton.tsx": [
+    "IconButton · <button>"
+  ],
   "shared/ui/MarkdownView.tsx": [
     "buildMarkdownComponents/h1 · <h1>",
     "专用渲染依赖 · @streamdown/cjk",
@@ -325,11 +368,21 @@
     "专用渲染依赖 · streamdown",
     "专用渲染依赖 · streamdown"
   ],
-  "shared/ui/ModalShell.tsx": ["ModalShell/content · aria-modal"],
-  "shared/ui/NavigationRow.tsx": ["NavigationRow · <button>"],
-  "shared/ui/SettingsPageParts.tsx": ["IntegerSettingInput · <input>"],
-  "shared/ui/TextLink.tsx": ["TextLink · <button>"],
-  "shared/ui/UiIcon.tsx": ["UiIcon · <svg>"],
+  "shared/ui/ModalShell.tsx": [
+    "ModalShell/content · aria-modal"
+  ],
+  "shared/ui/NavigationRow.tsx": [
+    "NavigationRow · <button>"
+  ],
+  "shared/ui/SettingsPageParts.tsx": [
+    "IntegerSettingInput · <input>"
+  ],
+  "shared/ui/TextLink.tsx": [
+    "TextLink · <button>"
+  ],
+  "shared/ui/UiIcon.tsx": [
+    "UiIcon · <svg>"
+  ],
   "shared/ui/controls.tsx": [
     "ActionButton · <button>",
     "Checkbox · <input>",
@@ -345,10 +398,18 @@
     "ToggleSwitch · <input>",
     "ToggleSwitch · role=switch"
   ],
-  "shared/ui/controls/ColumnResizer.tsx": ["ColumnResizer · 原生可调分隔线"],
-  "shared/ui/controls/FindBar.tsx": ["FindBar · <input>"],
-  "shared/ui/controls/SegmentedControl.tsx": ["SegmentedControl · <button>"],
-  "shared/ui/controls/UsageMeter.tsx": ["UsageMeter · 原生 role=progressbar"],
+  "shared/ui/controls/ColumnResizer.tsx": [
+    "ColumnResizer · 原生可调分隔线"
+  ],
+  "shared/ui/controls/FindBar.tsx": [
+    "FindBar · <input>"
+  ],
+  "shared/ui/controls/SegmentedControl.tsx": [
+    "SegmentedControl · <button>"
+  ],
+  "shared/ui/controls/UsageMeter.tsx": [
+    "UsageMeter · 原生 role=progressbar"
+  ],
   "shared/ui/diffStyles.ts": [
     "addedEdge · 差异样式 shadow-[inset_3px_0_0_var(--color-diff-added)]",
     "addedGutter · 差异样式 bg-diff-added-gutter",
@@ -359,7 +420,9 @@
     "removedGutter · 差异样式 bg-diff-removed-gutter",
     "removedInk · 差异样式 text-diff-removed-ink"
   ],
-  "shared/ui/file-icons/fileDisplay.tsx": ["FileDisplayIcon · 内嵌图形"],
+  "shared/ui/file-icons/fileDisplay.tsx": [
+    "FileDisplayIcon · 内嵌图形"
+  ],
   "shared/ui/markdown/DiagramPreviewDialog.tsx": [
     "CircleIcon · 内嵌图形",
     "isTransparentPaint · rgba(0, 0, 0, 0)"

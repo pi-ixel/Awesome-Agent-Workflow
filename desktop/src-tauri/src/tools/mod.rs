@@ -37,6 +37,7 @@ pub mod guide;
 pub mod inject;
 pub mod launcher;
 pub mod limits;
+pub mod location;
 pub mod manifest;
 pub mod native;
 pub mod process_host;
@@ -209,27 +210,28 @@ impl ToolsHost {
         }
     }
 
-    fn store(&self) -> Result<ToolStore, String> {
-        let root = self
-            .data_root
+    pub(crate) fn store(&self) -> Result<ToolStore, String> {
+        Ok(ToolStore::new(self.data_root()?))
+    }
+
+    /// 数据根（已含数据根迁移后的 active 位置）。工具数据、位置指针都从这里拼。
+    pub(crate) fn data_root(&self) -> Result<PathBuf, String> {
+        self.data_root
             .lock()
             .map_err(|error| error.to_string())?
             .clone()
-            .ok_or_else(|| "工具宿主未初始化。".to_string())?;
-        Ok(ToolStore::new(root))
+            .ok_or_else(|| "工具宿主未初始化。".to_string())
     }
 
-    /// 工具根目录：环境变量 > dev 期的仓库内 `desktop/tools` > 数据目录下的 `tools`。
-    ///
-    /// dev 期优先仓库内目录，是为了让"改一行工具代码、刷新窗口就见效"这条链路成立；
-    /// 打包后仓库目录不存在，自然落回数据目录。
-    fn tools_root(&self) -> PathBuf {
+    /// dev 期的工具根目录：环境变量指定的目录或仓库内 `desktop/tools`。
+    /// 只有 dev 期才有值——打包后返回 `None`，生产环境的工具目录统一走
+    /// `location::tool_root`（含位置指针），消灭了以前"Rust 算一个地方、
+    /// 前端写另一个地方"的分裂。
+    fn dev_tools_root(&self) -> Option<PathBuf> {
         if let Ok(path) = self.tools_root.lock() {
-            if let Some(path) = path.as_ref() {
-                return path.clone();
-            }
+            return path.clone();
         }
-        PathBuf::from("tools")
+        None
     }
 
     /// 打开成功时登记运行目录。重复打开覆盖旧值——以最近一次解析为准。
@@ -243,6 +245,17 @@ impl ToolsHost {
     pub(crate) fn clear_runtime_dir(&self, tool_id: &str) {
         if let Ok(mut map) = self.runtime_dirs.lock() {
             map.remove(tool_id);
+        }
+    }
+
+    /// 工具目录迁移后重映射运行目录登记：旧前缀 → 新前缀。
+    pub(crate) fn remap_runtime_dirs(&self, from: &Path, to: &Path) {
+        if let Ok(mut map) = self.runtime_dirs.lock() {
+            for dir in map.values_mut() {
+                if let Ok(relative) = dir.strip_prefix(from) {
+                    *dir = to.join(relative);
+                }
+            }
         }
     }
 
@@ -260,7 +273,19 @@ impl ToolsHost {
         if !valid_tool_id(tool_id) {
             return Err("无效的工具 id。".into());
         }
-        let dir = self.tools_root().join(tool_id);
+        // dev 期仓库根里工具直接躺在根下；生产环境是
+        // `<工具目录根>/installed/<账号>/<id>`——与前端写入的路径同源
+        // （同一个位置指针），不再有两套解析。
+        let dir = match self.dev_tools_root() {
+            Some(root) => root.join(tool_id),
+            None => {
+                let owner = self.store()?.owner()?;
+                location::tool_root(&self.data_root()?)
+                    .join("installed")
+                    .join(owner)
+                    .join(tool_id)
+            }
+        };
         if !dir.is_dir() {
             // 只报路径用户没法动手：目录丢失（被移动/清理）是 dev 期的常态，
             // 文案必须告诉他两条出路——放回原位，或卸载重装。列表侧会在
@@ -321,14 +346,34 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {    // 开发指导窗
         app.manage(guide::GuideDirty::default());
     }
     let host = app.state::<ToolsHost>();
+    // 数据根必须用**迁移后的 active 根**（storage_location::initialize 先于本
+    // 函数运行）。以前拿原始 app_local_data_dir，数据根迁走后工具宿主还在读
+    // 旧位置——迁移清单与实际读取各说各话。
     let data_root = std::env::var_os("AAW_TOOLS_TAURI_DATA_ROOT")
         .map(PathBuf::from)
-        .or_else(|| app.path().app_local_data_dir().ok())
+        .or_else(|| crate::storage_location::data_dir(app).ok())
         .ok_or("拿不到 AAW 数据目录")?;
     *host.data_root.lock().map_err(|error| error.to_string())? = Some(data_root.clone());
 
-    let root = resolve_tools_root(&data_root);
-    *host.tools_root.lock().map_err(|error| error.to_string())? = Some(root);
+    // 位置迁移状态（工具目录 / 工具数据各自一份），并做升级一次性搬迁：
+    // 把旧版裸 `%APPDATA%/tools` 的内容搬进统一落点。
+    if app.try_state::<location::ToolRootMigration>().is_none() {
+        app.manage(location::ToolRootMigration::default());
+    }
+    if app.try_state::<location::ToolDataMigration>().is_none() {
+        app.manage(location::ToolDataMigration::default());
+    }
+    location::migrate_legacy_root(app);
+
+    // dev 期工具根：环境变量 > 仓库内 `desktop/tools`。生产环境没有这一层，
+    // 工具目录一律由 location::tool_root 解析。
+    let dev_root = std::env::var_os("AAW_TOOLS_TAURI_ROOT")
+        .map(PathBuf::from)
+        .or_else(|| {
+            let dev = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("tools");
+            dev.is_dir().then_some(dev)
+        });
+    *host.tools_root.lock().map_err(|error| error.to_string())? = dev_root;
 
     // 定时唤醒：一个线程扫所有打开了定时的工具窗口，到点 eval 一次。
     // 5 秒粒度足够（契约最小间隔 60 秒），也不会让低配机多一份常驻负担。
@@ -408,18 +453,6 @@ fn start_ticker(app: &AppHandle) {
 }
 
 /// 工具根目录的解析顺序。抽成函数是为了能被测试直接打。
-fn resolve_tools_root(data_root: &Path) -> PathBuf {
-    if let Some(value) = std::env::var_os("AAW_TOOLS_TAURI_ROOT") {
-        return PathBuf::from(value);
-    }
-    // dev 期：仓库里的 `desktop/tools`。编译期锚点比"往上找几层"可靠。
-    let dev = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("tools");
-    if dev.is_dir() {
-        return dev;
-    }
-    data_root.join("tools").join("installed")
-}
-
 /// 注册 `aaw-tool://` 协议。
 ///
 /// 必须是**异步**版本：读文件是阻塞 IO，用同步版本会在低配机上卡住整个 UI 线程
@@ -524,6 +557,13 @@ fn serve(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
 /// `tool-<id>` 这个 label 形状是有意的：`capabilities/tools.json` 用 `tool-*`
 /// 一条就覆盖全部工具窗口，不必每加一个工具就改权限表。
 pub fn open_tool(app: &AppHandle, tool_id: &str, hint: Option<&str>) -> Result<(), String> {
+    // 迁移闸：工具目录正在被搬走时，目录解析结果随时会失效。
+    if app
+        .try_state::<location::ToolRootMigration>()
+        .is_some_and(|state| state.0.is_running())
+    {
+        return Err("工具目录正在迁移，请等迁移完成后再打开。".into());
+    }
     let label = format!("tool-{tool_id}");
     let host = app.state::<ToolsHost>();
     if let Some(window) = app.get_webview_window(&label) {
@@ -894,7 +934,14 @@ pub async fn tool_act(
 #[tauri::command]
 pub fn tools_host_info(app: AppHandle) -> Result<serde_json::Value, String> {
     let host = app.state::<ToolsHost>();
-    let tools_root = host.tools_root();
+    let tools_root = host
+        .dev_tools_root()
+        .map(|root| root.to_string_lossy().into_owned())
+        .unwrap_or_else(|| {
+            location::tool_root(&host.data_root().unwrap_or_default())
+                .to_string_lossy()
+                .into_owned()
+        });
     let sessions: Vec<serde_json::Value> = host
         .sessions
         .lock()
@@ -918,7 +965,7 @@ pub fn tools_host_info(app: AppHandle) -> Result<serde_json::Value, String> {
         format!("{}://", protocol::SCHEME)
     };
     Ok(serde_json::json!({
-        "toolsRoot": tools_root.to_string_lossy(),
+        "toolsRoot": tools_root,
         "protocol": protocol_base,
         "contractGeneration": CONTRACT_GENERATION,
         "capabilities": caps_capability_names(),
@@ -966,11 +1013,23 @@ mod tests {
     }
 
     #[test]
-    fn tools_root_prefers_the_repo_copy_during_dev() {
-        // dev 期仓库里存在 desktop/tools，解析结果应该指过去；
-        // 这样"改一行工具代码、刷新窗口就见效"才成立。
-        let root = resolve_tools_root(Path::new("C:/nonexistent-data"));
-        assert!(root.ends_with("tools"), "{root:?}");
+    fn runtime_dirs_remap_follows_a_tool_root_migration() {
+        let host = ToolsHost::default();
+        let old = std::env::temp_dir().join("aaw-remap-test-old");
+        let dir = old.join("installed").join("u1").join("pilot");
+        std::fs::create_dir_all(&dir).unwrap();
+        host.set_runtime_dir("pilot", &dir);
+        // 外部目录不动；工具根内的目录换前缀。
+        let external = std::env::temp_dir().join("aaw-remap-test-external");
+        std::fs::create_dir_all(&external).unwrap();
+        host.set_runtime_dir("notes", &external);
+        let new_root = std::env::temp_dir().join("aaw-remap-test-new");
+        host.remap_runtime_dirs(&old, &new_root);
+        assert_eq!(
+            host.resolve_runtime_dir("pilot"),
+            Some(new_root.join("installed").join("u1").join("pilot"))
+        );
+        assert_eq!(host.resolve_runtime_dir("notes"), Some(external.clone()));
     }
 
     /// 运行目录注册表：打开时登记的目录优先于 tools_root；登记的目录被删后

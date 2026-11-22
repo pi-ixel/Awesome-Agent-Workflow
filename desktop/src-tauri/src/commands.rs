@@ -250,11 +250,37 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::
     Ok(())
 }
 
+/// 工具目录迁移期间的写盘闸：迁移中（拷贝→切指针→删旧）任何落到
+/// 工具根内的新写入都会丢失或把旧目录删不干净。只在路径命中工具根时拦，
+/// 别的模块写盘不受影响。
+fn gate_tool_write(app: &tauri::AppHandle, paths: &[&str]) -> Result<(), String> {
+    use tauri::Manager;
+    let Some(state) = app.try_state::<crate::tools::location::ToolRootMigration>() else {
+        return Ok(());
+    };
+    if !state.0.is_running() {
+        return Ok(());
+    }
+    let host = app.state::<crate::tools::ToolsHost>();
+    let Ok(data_root) = host.data_root() else { return Ok(()) };
+    let root = crate::tools::location::tool_root(&data_root);
+    let under = paths.iter().any(|path| std::path::Path::new(path).starts_with(&root));
+    if under {
+        return Err("工具目录正在迁移，请等迁移完成后再试。".into());
+    }
+    Ok(())
+}
+
 /// 整树复制 src → dst；dst 已存在时先删除（install.sh 的 rm -rf + cp -R
 /// 覆盖语义，供 skills 安装器逐项覆盖安装）。
 #[tauri::command]
-pub fn copy_dir(src: String, dst: String) -> Result<(), String> {
-    let (src, dst) = (std::path::Path::new(&src), std::path::Path::new(&dst));
+pub fn copy_dir(app: tauri::AppHandle, src: String, dst: String) -> Result<(), String> {
+    gate_tool_write(&app, &[&src, &dst])?;
+    copy_dir_impl(&src, &dst)
+}
+
+fn copy_dir_impl(src: &str, dst: &str) -> Result<(), String> {
+    let (src, dst) = (std::path::Path::new(src), std::path::Path::new(dst));
     if !src.is_dir() {
         return Err(format!("源目录不存在或不是目录：{}", src.display()));
     }
@@ -273,8 +299,13 @@ pub fn read_text_file(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn write_text_file(path: String, contents: String) -> Result<(), String> {
-    let target = std::path::Path::new(&path);
+pub fn write_text_file(app: tauri::AppHandle, path: String, contents: String) -> Result<(), String> {
+    gate_tool_write(&app, &[&path])?;
+    write_text_file_impl(&path, contents)
+}
+
+fn write_text_file_impl(path: &str, contents: String) -> Result<(), String> {
+    let target = std::path::Path::new(path);
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("创建父目录失败 {}: {error}", parent.display()))?;
@@ -289,7 +320,8 @@ pub fn write_text_file(path: String, contents: String) -> Result<(), String> {
 /// `write_text_file` 会把字节改坏。前端解压 ZIP 后逐个调用它落盘，运行时再从
 /// 工具目录加载——所以这里必须保字节原样。
 #[tauri::command]
-pub fn write_binary_file(path: String, base64_contents: String) -> Result<(), String> {
+pub fn write_binary_file(app: tauri::AppHandle, path: String, base64_contents: String) -> Result<(), String> {
+    gate_tool_write(&app, &[&path])?;
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     let bytes = STANDARD
         .decode(base64_contents.as_bytes())
@@ -423,24 +455,15 @@ pub fn tool_purge(
             Err(_) => report.skipped_dirs.push(raw),
         }
     }
-    #[cfg(windows)]
-    let base = std::env::var("LOCALAPPDATA").ok().filter(|s| !s.is_empty());
-    #[cfg(not(windows))]
-    let base = std::env::var("HOME").ok().filter(|s| !s.is_empty());
-    if let Some(base) = base {
-        let folder = if cfg!(windows) {
-            "com.aaw.desktop".to_string()
-        } else {
-            ".com.aaw.desktop".to_string()
-        };
-        let file = std::path::Path::new(&base)
-            .join(folder)
-            .join("tools")
-            .join("storage")
-            .join(&owner)
-            .join(format!("{tool_id}.json"));
-        if file.is_file() {
-            report.removed_data = std::fs::remove_file(&file).is_ok();
+    // 工具数据文件：路径由 ToolStore 统一解析（含 data-location.json 指针与
+    // 账号段）。以前在这里手拼 LOCALAPPDATA——数据迁走后卸载会删错位置。
+    if let Some(host) = tauri::Manager::try_state::<crate::tools::ToolsHost>(&app) {
+        if let Ok(store) = host.store() {
+            if let Ok(path) = crate::tools::store::storage_path(&store, &tool_id) {
+                if path.is_file() {
+                    report.removed_data = std::fs::remove_file(&path).is_ok();
+                }
+            }
         }
     }
     // 卸载后运行目录登记不再有意义：清掉，避免下次重装同名工具时协议层
@@ -464,7 +487,8 @@ pub fn tool_purge(
 ///   搬走；
 /// - 目标与源不能是同一个路径，也不能把目录搬到它自己的子目录里。
 #[tauri::command]
-pub fn tool_move_path(from: String, to: String) -> Result<(), String> {
+pub fn tool_move_path(app: tauri::AppHandle, from: String, to: String) -> Result<(), String> {
+    gate_tool_write(&app, &[&from, &to])?;
     let src = std::path::Path::new(&from);
     let dst = std::path::Path::new(&to);
     if from.trim().is_empty() || to.trim().is_empty() {
@@ -629,9 +653,9 @@ mod tests {
         std::fs::write(dst.join("SKILL.md"), "v1").expect("写旧文件");
         std::fs::write(dst.join("stale.txt"), "旧文件").expect("写多余文件");
 
-        copy_dir(
-            src.to_string_lossy().into_owned(),
-            dst.to_string_lossy().into_owned(),
+        copy_dir_impl(
+            &src.to_string_lossy(),
+            &dst.to_string_lossy(),
         )
         .expect("copy_dir 应成功");
 
@@ -646,9 +670,9 @@ mod tests {
         assert!(!dst.join("stale.txt").exists(), "先删后拷：多余文件应消失");
 
         // 源不存在 → Err
-        assert!(copy_dir(
-            base.join("missing").to_string_lossy().into_owned(),
-            dst.to_string_lossy().into_owned()
+        assert!(copy_dir_impl(
+            &base.join("missing").to_string_lossy(),
+            &dst.to_string_lossy()
         )
         .is_err());
 
@@ -716,8 +740,8 @@ mod tests {
     fn write_then_read_text_file_roundtrip() {
         let base = temp_dir("text-file");
         let file = base.join("nested").join("out.txt");
-        write_text_file(
-            file.to_string_lossy().into_owned(),
+        write_text_file_impl(
+            &file.to_string_lossy(),
             "内容 line1\nline2".to_string(),
         )
         .expect("写文件应成功（自动建父目录）");

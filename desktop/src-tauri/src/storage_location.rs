@@ -172,6 +172,19 @@ fn managed_paths(
     };
     paths.push((logs.join("diagnostics"), "logs/diagnostics"));
     paths.push((cache.join("updates"), "updates"));
+    // 工具目录（installed/projects/backups）与工具数据（tools/storage）默认
+    // 就在数据根的 tools/ 下——数据根迁移时它们必须跟着走，否则指针切了
+    // 数据没搬，用户会看到"工具数据没了"。工具位置指针
+    // （tools-location.json）指向别处时不跟：那里已经是用户选的位置。
+    let tools_at_default = fs::read_to_string(root.join("configuration").join("tools-location.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|value| value.get("toolRoot").and_then(|item| item.as_str()).map(|item| item.trim().to_owned()))
+        .map(|value| value.is_empty())
+        .unwrap_or(true);
+    if tools_at_default {
+        paths.push((root.join("tools"), "tools"));
+    }
     Ok(paths)
 }
 
@@ -181,7 +194,9 @@ fn file_hash(path: &Path) -> io::Result<[u8; 32]> {
     Ok(hash.finalize().into())
 }
 
-fn copy_verified(source: &Path, target: &Path) -> io::Result<()> {
+/// 逐文件 SHA-256 核验的复制。工具模块的目录/数据迁移（`tools/location.rs`）
+/// 也走这一条：两边对"拷贝完成"的定义必须一致——每个字节都验过。
+pub(crate) fn copy_verified(source: &Path, target: &Path) -> io::Result<()> {
     let kind = fs::symlink_metadata(source)?.file_type();
     if kind.is_dir() {
         fs::create_dir_all(target)?;
