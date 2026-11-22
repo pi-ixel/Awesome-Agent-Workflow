@@ -241,6 +241,16 @@ function passText(check: ToolProjectCheck): string {
     : "校验通过，可以预览验收了。";
 }
 
+/**
+ * 排队期间换了账号：这次操作必须整体作废，不能按"新账号"继续做完。
+ *
+ * 单独一个类是为了让 `purge` 这类"返回提示而不是抛错"的入口能区分两种情况：
+ * 这个错是**什么都没做**（可以原样重试），清理失败是**做了一半**（需要看提示）。
+ */
+class OwnerSwitchedError extends Error {
+  override readonly name = "OwnerSwitchedError";
+}
+
 export function createWorkshop(deps: {
   readonly tools: ToolsService;
   readonly project: ProjectService;
@@ -258,6 +268,30 @@ export function createWorkshop(deps: {
 }): WorkshopService {
   const { tools, project, host } = deps;
   const io = projectIO(host);
+
+  /**
+   * 落地前再确认一次"还是发起时那个人"。
+   *
+   * `serializeToolOp` 把操作推到"以后"执行，而"以后"可能已经是别人登录着：
+   * `tools.install / remove / setRunDir` 读的都是**当前账号**，目录却按发起时的
+   * owner 拼。不设这道边界，一次排队安装就会把记录写进别人的名下（目录还在前
+   * 一个人的分区里），一次排队卸载会删掉当前账号同 id 的记录与目录。
+   */
+  function assertOwner(origin: string | undefined): void {
+    if (deps.owner() !== origin) {
+      throw new OwnerSwitchedError("账号已切换，这次操作已取消。请在当前账号下重新操作。");
+    }
+  }
+
+  /**
+   * 卸载失败的两种说法要分开：换账号是"什么都没动，可以原样重试"，
+   * 清理失败是"可能删掉了一半，先看提示"。混成一句会让用户误判下一步。
+   */
+  function purgeFailureText(error: unknown): string {
+    return error instanceof OwnerSwitchedError
+      ? `卸载没有完成：${error.message}`
+      : `清理失败：${errorText(error)}`;
+  }
 
   /** 用户自定义的项目根目录：新建/迁移/列表的优先落点，不套账号段。 */
   let customRoot: string | null = deps.settings?.read() ?? null;
@@ -620,6 +654,9 @@ export function createWorkshop(deps: {
         // 装的是项目目录的一份**快照**：之后作者再改目录，已安装的工具不变。
         const staged = await stageVersion(io, { owner, tool, files });
         try {
+          // 写盘可能花几秒（大包 + node_modules）：落地前再确认账号，否则这份记录
+          // 会写进排队期间登录的另一个人名下。
+          assertOwner(owner);
           const outcome = tools.install(staged.tool, {
             replace: true,
             runDir: staged.dir,
@@ -659,6 +696,7 @@ export function createWorkshop(deps: {
     return serializeToolOp(`tool:${owner ?? ""}:${tool.id}`, async () => {
       const staged = await stageVersion(io, { owner, tool, files: contents });
       try {
+        assertOwner(owner);
         // ZIP / 文件夹导入没有开发来源：显式清掉上一次的来源，免得管理页
         // 指着一个已经不对应这一版的目录。
         const outcome = tools.install(staged.tool, { replace: true, runDir: staged.dir, sourceDir: null });
@@ -686,11 +724,15 @@ export function createWorkshop(deps: {
     if (entry.dir && entry.broken === undefined && await io.pathExists(entry.dir)) return entry.dir;
     const owner = deps.owner();
     return serializeToolOp(`tool:${owner ?? ""}:${id}`, async () => {
+      assertOwner(owner);
       const latest = tools.state.getState().find((item) => item.package.id === id);
       if (!latest) return undefined;
       // 排队期间可能已经被另一次安装/自愈补好了。
       if (latest.dir && await io.pathExists(latest.dir)) {
-        if (latest.broken !== undefined) tools.setRunDir(id, latest.dir);
+        if (latest.broken !== undefined) {
+          assertOwner(owner);
+          tools.setRunDir(id, latest.dir);
+        }
         return latest.dir;
       }
       const files = materializeToolFiles(latest.package);
@@ -701,7 +743,14 @@ export function createWorkshop(deps: {
         );
       }
       const staged = await stageVersion(io, { owner, tool: latest.package, files });
-      tools.setRunDir(id, staged.dir);
+      try {
+        assertOwner(owner);
+        tools.setRunDir(id, staged.dir);
+      } catch (error) {
+        // 没写进配置的副本没人引用：当场丢掉，别留成孤儿目录。
+        await staged.discard();
+        throw error;
+      }
       return staged.dir;
     });
   }
@@ -893,50 +942,61 @@ export function createWorkshop(deps: {
 
     resolveOpenDir,
     async purge(id) {
-      const owner = deps.owner() ?? "";
+      const origin = deps.owner();
+      const owner = origin ?? "";
       // 卸载也要排进这个工具的队列。各干各的时候，一次还在写盘的安装会把它的
       // 暂存目录暴露给卸载——卸载把 `.staging-*` 当残骸删掉，安装随即在回读
       // 校验时报"项目里没有 manifest.json"。用户刚点完"已卸载"，又收到一条
       // 完全对不上的错误。排队之后卸载一定看到安装的最终结果，再整份清掉。
       return serializeToolOp(`tool:${owner}:${id}`, async () => {
-        // 两个根都扫：自定义根目录下的项目也是这个工具的源码，删工具时不能留下。
-        const [defaultProjects, customProjects] = await Promise.all([
-          listToolProjectSummaries(io, { owner }),
-          customRoot ? listToolProjectSummaries(io, { parent: customRoot }).catch(() => []) : Promise.resolve([]),
-        ]);
-        const projectDirs = [...defaultProjects, ...customProjects]
-          .filter((entry) => entry.id === id)
-          .map((entry) => entry.dir);
-        /**
-         * 运行副本也一起清：ZIP 装进来的工具可能带着 `node_modules`（几十到几百 MB），
-         * 只删注册表等于把它们永久留在磁盘上。
-         *
-         * 每个版本是 `installed/<账号>/<id>/versions/<版本>` 下的独立目录，要逐个
-         * 交给宿主：宿主只删"清单 id 对得上"的目录，而 `<id>` 根目录里现在没有
-         * manifest.json，整条传过去会被跳过（等于什么都没删）。
-         *
-         * 只认两种来源，别的路径一概不传给宿主：
-         * - `projects/<账号>/<id>`：用户自己建的项目（在这里出现的才说明它就是这个工具）；
-         * - `installed/<账号>/<id>/versions/*` 与旧布局的 `installed/<账号>/<id>`。
-         * 用户把别处的目录设成来源（`sourceDir`）时，那条路径不会出现在这里，
-         * 所以永远不会被误删。
-         */
-        const root = await installedToolRoot(io, owner, id);
-        // 崩溃残留的暂存目录可能连清单都没写完：先走"只删这个目录"的窄命令
-        // （只校验路径形状，不认清单）；没有这个端口时才交给 toolPurge 按清单认领。
-        const orphans: string[] = [];
-        for (const dir of await listStagingDirs(io, owner, id)) {
-          if (io.dropStaging) {
-            try {
-              await io.dropStaging(dir);
-              continue;
-            } catch { /* 落到 toolPurge 再试一次 */ }
+        // 扫盘之前先确认身份：下面的清理会真的删目录，不能拿"新账号"的身份
+        // 继续做一次"旧账号发起的卸载"。
+        let dirs: string[];
+        try {
+          assertOwner(origin);
+          // 两个根都扫：自定义根目录下的项目也是这个工具的源码，删工具时不能留下。
+          const [defaultProjects, customProjects] = await Promise.all([
+            listToolProjectSummaries(io, { owner }),
+            customRoot ? listToolProjectSummaries(io, { parent: customRoot }).catch(() => []) : Promise.resolve([]),
+          ]);
+          const projectDirs = [...defaultProjects, ...customProjects]
+            .filter((entry) => entry.id === id)
+            .map((entry) => entry.dir);
+          /**
+           * 运行副本也一起清：ZIP 装进来的工具可能带着 `node_modules`（几十到几百 MB），
+           * 只删注册表等于把它们永久留在磁盘上。
+           *
+           * 每个版本是 `installed/<账号>/<id>/versions/<版本>` 下的独立目录，要逐个
+           * 交给宿主：宿主只删"清单 id 对得上"的目录，而 `<id>` 根目录里现在没有
+           * manifest.json，整条传过去会被跳过（等于什么都没删）。
+           *
+           * 只认两种来源，别的路径一概不传给宿主：
+           * - `projects/<账号>/<id>`：用户自己建的项目（在这里出现的才说明它就是这个工具）；
+           * - `installed/<账号>/<id>/versions/*` 与旧布局的 `installed/<账号>/<id>`。
+           * 用户把别处的目录设成来源（`sourceDir`）时，那条路径不会出现在这里，
+           * 所以永远不会被误删。
+           */
+          const root = await installedToolRoot(io, owner, id);
+          // 崩溃残留的暂存目录可能连清单都没写完：先走"只删这个目录"的窄命令
+          // （只校验路径形状，不认清单）；没有这个端口时才交给 toolPurge 按清单认领。
+          const orphans: string[] = [];
+          for (const dir of await listStagingDirs(io, owner, id)) {
+            if (io.dropStaging) {
+              try {
+                await io.dropStaging(dir);
+                continue;
+              } catch { /* 落到 toolPurge 再试一次 */ }
+            }
+            orphans.push(dir);
           }
-          orphans.push(dir);
+          dirs = [...projectDirs, ...await listVersionDirs(io, owner, id), ...orphans];
+          // 旧布局：`installed/<账号>/<id>` 本身就是运行副本，根目录里有清单。
+          if (await io.pathExists(joinPath(root, toolProjectFileNames.manifest))) dirs.push(root);
+          // 扫盘（尤其自定义根目录）可能很慢：删任何东西之前再看一眼。
+          assertOwner(origin);
+        } catch (error) {
+          return { text: purgeFailureText(error), error: true };
         }
-        const dirs = [...projectDirs, ...await listVersionDirs(io, owner, id), ...orphans];
-        // 旧布局：`installed/<账号>/<id>` 本身就是运行副本，根目录里有清单。
-        if (await io.pathExists(joinPath(root, toolProjectFileNames.manifest))) dirs.push(root);
         try {
           const report = await host.skills.toolPurge({ toolId: id, owner, projectDirs: dirs });
           const parts: string[] = [];
@@ -946,13 +1006,17 @@ export function createWorkshop(deps: {
           // 排队期间可能刚装好一版（那次提交把记录写回来了）。卸载是后点的那个
           // 意图：记录也要一起撤掉，否则界面留下一张指向已删目录的卡片。
           // 放在删除之后：清理失败时记录还在，用户可以再点一次，不必重新导入。
+          //
+          // 删记录写的是**当前账号**：删之前必须再确认一次还是发起时那个人，
+          // 否则会把别人同 id 的工具从列表里抹掉。
+          assertOwner(origin);
           try { tools.remove(id); } catch { /* 未登录等情况：没有记录可删 */ }
           if (store.getState().project && dirs.includes(store.getState().project!.dir))
             patch({ project: null, check: null, installed: false, drift: false, stalled: false, repairs: 0, missing: false, running: false });
           void refreshProjects();
           return { text: parts.length ? parts.join("；") + "。" : "没有找到需要清理的文件。" };
         } catch (error) {
-          return { text: `清理失败：${errorText(error)}`, error: true };
+          return { text: purgeFailureText(error), error: true };
         }
       });
     },

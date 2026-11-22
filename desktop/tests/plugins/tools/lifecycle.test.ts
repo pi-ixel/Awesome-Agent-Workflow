@@ -1090,3 +1090,122 @@ describe("工具模块的状态转换（并发与降级）", () => {
     await expectConsistent(app);
   });
 });
+
+/**
+ * 第五轮：事务边界。
+ *
+ * 前四轮都在验"同一个人、按顺序点按钮"。这一轮问三个更靠底层的问题：
+ *
+ * 1. 排队把操作推到"以后"执行，而"以后"可能换了个人登录——记录会被写到谁名下？
+ * 2. 卸载是"删目录 + 删记录"两件事，中间失败会留下什么？
+ * 3. 清理失败之后，用户还有没有重试的入口？
+ *
+ * 前两个的答案都必须是"要么全做，要么全不做"，否则就会出现"工具从列表里消失、
+ * 几十 MB 还在盘上"或者"记录跑到别人账下"这类没有界面的脏状态。
+ */
+describe("工具模块的状态转换（账号与事务边界）", () => {
+  it("安装进行中换了账号：这一版不会落到别人名下，也不留半份副本", async () => {
+    const app = await device();
+    const release = app.blockNextWrite((path) => path.includes(".staging-") && path.endsWith("index.html"));
+    const tool = packageOf("1.0.0", "<p>A 的页面</p>");
+    const installing = app.workshopOf().installArchive(tool, runtimeFiles(tool));
+    // 等它真的进到写盘那一步，再换人。
+    await app.settle(2);
+
+    app.loginAs({ name: "另一个人", employeeId: "lifecycle-other" });
+    await app.settle();
+    release();
+
+    // 落地前发现换了人：这次安装整体作废。
+    await expect(installing).rejects.toThrow(/账号已切换/);
+    // 新账号名下没有这条记录，也没有它的运行副本。
+    expect(app.tools().state.getState()).toEqual([]);
+    expect(app.savedEntries()).toEqual([]);
+
+    // 换回原账号：同样没有——既然取消，就不该留一份"装了一半"的东西。
+    app.loginAs({ name: "生命周期", employeeId: ownerId });
+    await app.settle();
+    expect(app.tools().state.getState()).toEqual([]);
+    expect(app.savedEntries()).toEqual([]);
+    expect(await app.versionDirs("notes")).toEqual([]);
+  });
+
+  it("卸载做到一半换了账号：谁的目录、谁的记录都不动", async () => {
+    const app = await device();
+    const mine = packageOf("1.0.0", "<p>A 的页面</p>");
+    await app.workshopOf().installArchive(mine, runtimeFiles(mine));
+    const dirA = app.tools().state.getState()[0]?.dir as string;
+
+    // 另一个人也装了同一个 id：卸载如果"按当前账号继续做"，会把他这份一起抹掉。
+    app.loginAs({ name: "另一个人", employeeId: "lifecycle-other" });
+    await app.settle();
+    const other = packageOf("2.0.0", "<p>B 的页面</p>");
+    await app.workshopOf().installArchive(other, runtimeFiles(other));
+    const dirB = app.tools().state.getState()[0]?.dir as string;
+    expect(dirB).not.toBe(dirA);
+
+    // 切回 A 发起卸载，并在"扫完盘、删之前"把它停住。
+    app.loginAs({ name: "生命周期", employeeId: ownerId });
+    await app.settle();
+    const originalExists = app.backend.pathExists.bind(app.backend);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let armed = true;
+    vi.spyOn(app.backend, "pathExists").mockImplementation(async (path: string) => {
+      if (armed && path.endsWith("/notes/manifest.json")) {
+        armed = false;
+        await gate;
+      }
+      return originalExists(path);
+    });
+    const purging = app.workshopOf().purge("notes");
+    for (let spin = 0; armed && spin < 60; spin += 1) await app.settle(1);
+    // 没停到预期位置就说明这条用例没测到它想测的时序，别让它"碰巧通过"。
+    expect(armed).toBe(false);
+
+    app.loginAs({ name: "另一个人", employeeId: "lifecycle-other" });
+    await app.settle();
+    release();
+    const note = await purging;
+
+    // 整体作废：两边的目录一个都没删，记录也都在。
+    expect(note.error).toBe(true);
+    expect(note.text).toContain("账号已切换");
+    expect(await app.exists(dirA)).toBe(true);
+    expect(await app.text(joinPath(dirA, "index.html"))).toBe("<p>A 的页面</p>");
+    expect(await app.exists(dirB)).toBe(true);
+    expect(app.savedEntries()[0]?.dir).toBe(dirB);
+    expect(app.tools().state.getState()[0]?.dir).toBe(dirB);
+
+    // 切回 A：记录与副本都还在，用户可以直接再点一次卸载。
+    app.loginAs({ name: "生命周期", employeeId: ownerId });
+    await app.settle();
+    expect(app.tools().state.getState()[0]?.dir).toBe(dirA);
+    expect(app.savedEntries()[0]?.dir).toBe(dirA);
+  });
+
+  it("卸载时磁盘清理失败：记录与卡片都留着，重试一次才真正删干净", async () => {
+    const app = await device();
+    const tool = packageOf("1.0.0", "<p>页面</p>");
+    await app.workshopOf().installArchive(tool, runtimeFiles(tool));
+    const dir = app.tools().state.getState()[0]?.dir as string;
+
+    // 目录被别的进程占着（Windows 上很常见）：清理抛错。
+    vi.spyOn(app.backend, "toolPurge").mockRejectedValueOnce(new Error("目录被占用"));
+
+    const failed = await app.workshopOf().purge("notes");
+    expect(failed.error).toBe(true);
+    expect(failed.text).toContain("清理失败");
+    // 记录不能被提前撤掉：撤了卡片就消失，用户再也没有入口重试。
+    expect(app.tools().state.getState()).toHaveLength(1);
+    expect(app.savedEntries()).toHaveLength(1);
+    expect(await app.text(joinPath(dir, "index.html"))).toBe("<p>页面</p>");
+
+    // 关掉占用它的程序再点一次：这次全清。
+    const again = await app.workshopOf().purge("notes");
+    expect(again.error).toBeUndefined();
+    expect(app.tools().state.getState()).toEqual([]);
+    expect(app.savedEntries()).toEqual([]);
+    expect(await app.exists(dir)).toBe(false);
+  });
+});

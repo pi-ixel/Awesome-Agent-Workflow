@@ -388,13 +388,22 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
 
   async function confirmRemove(id: string, files: boolean) {
     setRemoving(undefined);
-    run(() => service.remove(id));
-    // 卸载之后它的窗口不该继续活着（常驻工具尤其如此）：走同一个停止通道顺手关掉。
-    // 失败不影响卸载本身，最多是那个窗口留到用户自己关。
+    // 先停窗口：常驻工具不关就还在后台跑；Windows 下目录被占用也会让清理半途而废。
     if (host.isNative()) void host.stopTool(id).catch(() => {});
-    if (!files) return;
+    // 不带文件删除：只撤注册表，不需要排队，立即生效。
+    if (!files) {
+      run(() => service.remove(id));
+      return;
+    }
+    // 带文件删除：先清磁盘、成功后才撤记录。顺序反过来的话，清理失败（目录被占用、
+    // 权限不足）会让工具从列表里消失、几十上百 MB 却留在盘上，用户连重试的入口都没了。
+    setFeedback({ text: "正在清理工具目录…" });
     const note = await workshop.purge(id);
-    setFeedback({ text: `已卸载。${note.text}`, ...(note.error ? { error: true as const } : {}) });
+    if (note.error) {
+      setFeedback({ text: note.text, error: true });
+      return;
+    }
+    setFeedback({ text: `已卸载。${note.text}` });
   }
 
   if (managed) return <ToolManagement key={`${managed.package.id}:${JSON.stringify(managed.settings)}:${JSON.stringify(managed.package.settingsSchema)}`} entry={managed} busy={busy} feedback={feedback}
