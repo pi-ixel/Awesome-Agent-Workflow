@@ -82,9 +82,16 @@ pub fn run() {
             if webview.label() == "main" && browser::bench::output_path().is_some() {
                 return;
             }
+            #[cfg(windows)]
+            if matches!(webview.label(), "main" | "diagnostics")
+                && matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
+            {
+                resource_monitor::observe_webview(webview, false);
+            }
             // WebView 刷新不会保证 React 清理；原生监听随页面代次一并释放。
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
                 if webview.label() == "main" {
+                    resource_monitor::retire_main_page();
                     webview.state::<panel_files::PanelWatchers>().clear();
                     browser::host::retire_page(webview.app_handle(), "main");
                     webview.state::<mcp_management::ProxyHost>().retire(None);
@@ -183,6 +190,7 @@ pub fn run() {
             diagnostics::diagnostics_probe_request,
             diagnostics::diagnostics_probe_take,
             resource_monitor::diagnostics_resources,
+            resource_monitor::diagnostics_resource_turn,
             diagnostics::diagnostics_export,
             storage_preferences::storage_thresholds_read,
             storage_location::storage_location_read,

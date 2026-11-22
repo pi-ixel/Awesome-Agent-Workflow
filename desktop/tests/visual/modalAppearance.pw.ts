@@ -1,6 +1,33 @@
 import { expect, test, type Page } from "@playwright/test";
 import { color, ratio } from "./contrast.ts";
 
+test("诊断资源页在宽窗和窄窗展示 Desktop 的同一时刻工作集", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1380, height: 840 });
+  await page.goto("/tests/visual/fixture.html?diagnostics-window&resources", {
+    waitUntil: "domcontentloaded",
+  });
+  await page.getByRole("button", { name: "资源与连接" }).click();
+  const table = page.getByRole("table").filter({ hasText: "Desktop 合计" });
+  await expect(
+    table.getByRole("columnheader", { name: /峰值时刻/ }),
+  ).toBeVisible();
+  const browser = table.getByRole("row", { name: /内嵌浏览器/ });
+  await expect(browser.getByRole("cell").nth(1)).toContainText("1.12 GiB");
+  await expect(browser.getByRole("cell").nth(2)).toContainText("640 MiB");
+  await page.setViewportSize({ width: 800, height: 700 });
+  await expect(table).toBeInViewport();
+  expect(
+    await table.evaluate(
+      (element) => element.getBoundingClientRect().width <= element.parentElement!.clientWidth,
+    ),
+  ).toBe(true);
+  await page.getByText("工作集明细", { exact: true }).click();
+  await expect(table).toBeHidden();
+});
+
 const appearances = [
   ["暖白", 12],
   ["暗夜", 20],

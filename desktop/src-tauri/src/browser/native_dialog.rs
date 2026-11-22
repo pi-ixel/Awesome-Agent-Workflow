@@ -267,6 +267,7 @@ fn schedule_timeout(app: AppHandle, record: DialogRecord, dialogs: Arc<Mutex<Dia
                 && !is_cdp_dialog(&record.dialog_id)
             {
                 let cancelled = cancel_native(&record.dialog_id);
+                super::host::refresh_tab_memory(&main_app, &record.session_id, &record.tab_id);
                 let _ = main_app.emit(
                     "aaw://browser-dialog",
                     serde_json::json!({
@@ -285,6 +286,7 @@ fn schedule_timeout(app: AppHandle, record: DialogRecord, dialogs: Arc<Mutex<Dia
         match receiver.await {
             Ok(Some(record)) if is_cdp_dialog(&record.dialog_id) => {
                 let cancelled = decide_cdp(&record.dialog_id, false, None).await;
+                super::host::refresh_tab_memory(&timeout_app, &record.session_id, &record.tab_id);
                 let _ = timeout_app.emit(
                     "aaw://browser-dialog",
                     serde_json::json!({

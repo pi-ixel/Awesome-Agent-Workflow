@@ -1,4 +1,7 @@
 //! Process-wide diagnostic sampler. It owns its timer and bounded in-memory history.
+mod desktop;
+
+use desktop::{MemoryPoint, SessionKey, TurnMark, Turns};
 use serde::Serialize;
 use std::{
     collections::{HashMap, VecDeque},
@@ -40,6 +43,8 @@ struct GroupHistory {
 struct Frame {
     at: u64,
     groups: Vec<GroupHistory>,
+    #[serde(skip)]
+    desktop_memory: Option<MemoryPoint>,
 }
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,9 +61,15 @@ struct State {
     error: Option<String>,
     collection_ms: Option<u64>,
     exited: VecDeque<ExitedAgent>,
+    turns: Turns,
+    #[cfg(windows)]
+    webviews: HashMap<u32, (u64, desktop::WebviewRole, u64)>,
 }
 impl State {
-    fn record(&mut self, at: u64, groups: Vec<GroupSample>) {
+    fn record(&mut self, at: u64, groups: Vec<GroupSample>, desktop_memory: Option<MemoryPoint>) {
+        if let Some(point) = desktop_memory {
+            self.turns.observe(point);
+        }
         while self
             .exited
             .front()
@@ -68,6 +79,7 @@ impl State {
         }
         self.history.push_back(Frame {
             at,
+            desktop_memory,
             groups: groups
                 .iter()
                 .map(|g| GroupHistory {
@@ -86,7 +98,13 @@ impl State {
             .is_some_and(|frame| at.saturating_sub(frame.at) > 15 * 60 * 1000)
             || self.history.len() > 450
         {
-            self.history.pop_front();
+            if let Some(point) = self
+                .history
+                .pop_front()
+                .and_then(|frame| frame.desktop_memory)
+            {
+                self.turns.archive(point);
+            }
         }
         self.groups = groups;
         self.error = None;
@@ -126,7 +144,10 @@ pub fn agent_exited(handle: u32) {
 }
 
 #[tauri::command]
-pub fn diagnostics_resources(webview: tauri::Webview) -> Result<serde_json::Value, String> {
+pub fn diagnostics_resources(
+    webview: tauri::Webview,
+    session: Option<SessionKey>,
+) -> Result<serde_json::Value, String> {
     if !crate::diagnostics::is_diagnostics_view(webview.label()) {
         return Err("无权读取进程资源".into());
     }
@@ -134,8 +155,61 @@ pub fn diagnostics_resources(webview: tauri::Webview) -> Result<serde_json::Valu
     Ok(
         serde_json::json!({ "supported": cfg!(windows), "groups": state.groups,
         "history": state.history, "exited": state.exited, "error": state.error,
-        "collectionMs": state.collection_ms }),
+        "collectionMs": state.collection_ms,
+        "desktopMemory": state.history.back().and_then(|frame| frame.desktop_memory),
+        "turnMemory": session.as_ref().and_then(|session| state.turns.get(session)) }),
     )
+}
+
+#[tauri::command]
+pub(super) fn diagnostics_resource_turn(
+    webview: tauri::Webview,
+    mark: TurnMark,
+) -> Result<(), String> {
+    if webview.label() != "main" {
+        return Err("只有主窗口可以记录轮次资源".into());
+    }
+    if cfg!(windows)
+        && (1..=4096).contains(&mark.session.scope.len())
+        && (1..=1024).contains(&mark.session.session_id.len())
+    {
+        let mut state = state().lock().map_err(|e| e.to_string())?;
+        let State { turns, history, .. } = &mut *state;
+        turns.mark(mark, history);
+    }
+    Ok(())
+}
+
+pub(crate) fn retire_main_page() {
+    if cfg!(windows)
+        && let Ok(mut state) = state().lock()
+    {
+        state.turns.end_active(now());
+    }
+}
+
+#[cfg(windows)]
+pub(crate) fn observe_webview(view: &tauri::Webview, is_embedded_browser: bool) {
+    let _ = view.with_webview(move |platform| {
+        let mut pid = 0;
+        if unsafe {
+            platform
+                .controller()
+                .CoreWebView2()
+                .and_then(|core| core.BrowserProcessId(&mut pid))
+        }
+        .is_ok()
+            && let Some(birth) = platform::read_metrics(pid).and_then(|metrics| metrics.birth)
+            && let Ok(mut state) = state().lock()
+        {
+            let role = if is_embedded_browser {
+                desktop::WebviewRole::Browser
+            } else {
+                desktop::WebviewRole::Interface
+            };
+            state.webviews.insert(pid, (birth, role, now()));
+        }
+    });
 }
 
 pub fn start() {
@@ -157,6 +231,7 @@ pub fn start() {
 fn run() {
     let mut previous: HashMap<(u32, u64), (u64, Instant)> = HashMap::new();
     loop {
+        let sampled_at = now();
         let started = Instant::now();
         let agents = match state().lock() {
             Ok(state) => state.agents.clone(),
@@ -217,7 +292,37 @@ fn run() {
                 previous = next_previous;
                 if let Ok(mut state) = state().lock() {
                     state.collection_ms = Some(started.elapsed().as_millis() as u64);
-                    state.record(now(), groups);
+                    let births: HashMap<_, _> = processes
+                        .iter()
+                        .map(|process| {
+                            (
+                                process.pid,
+                                process.metrics.as_ref().and_then(|metrics| metrics.birth),
+                            )
+                        })
+                        .collect();
+                    state.webviews.retain(|pid, (birth, _, registered_at)| {
+                        *registered_at >= sampled_at
+                            || births
+                                .get(pid)
+                                .is_some_and(|actual| actual.is_none_or(|value| value == *birth))
+                    });
+                    let roles = state
+                        .webviews
+                        .iter()
+                        .filter_map(|(&pid, &(birth, role, _))| {
+                            (births.get(&pid) == Some(&Some(birth))).then_some((pid, role))
+                        })
+                        .collect();
+                    let desktop_memory =
+                        groups
+                            .iter()
+                            .find(|group| group.id == "desktop")
+                            .map(|group| MemoryPoint {
+                                at: sampled_at,
+                                memory: desktop::summarize(group, &roles),
+                            });
+                    state.record(sampled_at, groups, desktop_memory);
                 }
             }
             Err(error) => {
@@ -493,12 +598,12 @@ mod tests {
             observed_at: 1,
         });
         for index in 0..=450 {
-            state.record(index * 2000, Vec::new());
+            state.record(index * 2000, Vec::new(), None);
         }
         assert_eq!(state.history.len(), 450);
         assert_eq!(state.history.front().unwrap().at, 2000);
         assert_eq!(state.exited.len(), 1);
-        state.record(900_002, Vec::new());
+        state.record(900_002, Vec::new(), None);
         assert!(state.exited.is_empty());
     }
     fn process(pid: u32, parent: u32, birth: u64, cpu: u64, memory: u64) -> platform::Process {

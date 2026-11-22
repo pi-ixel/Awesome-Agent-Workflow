@@ -78,6 +78,66 @@ describe("TD-04-I03 轮次浏览器取消", () => {
 });
 
 describe("TD-024-A01 新轮次浏览器生命周期", () => {
+  it("浏览器开始通知或上下文读取失败时仍清理轮次", async () => {
+    for (const startFails of [true, false]) {
+      const { client, peer } = createTransportPair();
+      const agent = new EchoAgent();
+      agent.attach(peer);
+      const onPromptSettled = vi.fn();
+      const session = createOwnedSession(client, {
+        onPromptStart: () => {
+          if (startFails) throw new Error("浏览器预检失败");
+        },
+        onPromptContext: () => Promise.reject(new Error("浏览器预检失败")),
+        onPromptSettled,
+      });
+      await session.initialize();
+      const created = await session.newSession("D:/work");
+      await expect(session.prompt("开始新轮次")).rejects.toThrow(
+        "浏览器预检失败",
+      );
+      expect(onPromptSettled).toHaveBeenCalledExactlyOnceWith(
+        created.sessionId,
+      );
+      expect(
+        agent.receivedRequests.some(
+          (entry) => entry.method === "session/prompt",
+        ),
+      ).toBe(false);
+    }
+  });
+
+  it("同一会话重叠的准备和请求共用一个浏览器轮次", async () => {
+    const { client, peer } = createTransportPair();
+    const agent = new EchoAgent();
+    agent.attach(peer);
+    let releaseContext!: () => void;
+    const contextReady = new Promise<void>((resolve) => {
+      releaseContext = resolve;
+    });
+    const onPromptContext = vi.fn(() => Promise.resolve([]));
+    onPromptContext.mockImplementationOnce(async () => {
+      await contextReady;
+      return [];
+    });
+    const onPromptStart = vi.fn();
+    const onPromptSettled = vi.fn();
+    const session = createOwnedSession(client, {
+      onPromptStart,
+      onPromptContext,
+      onPromptSettled,
+    });
+    await session.initialize();
+    const created = await session.newSession("D:/work");
+    const first = session.prompt("先准备");
+    await session.prompt("先完成");
+    expect(onPromptSettled).not.toHaveBeenCalled();
+    releaseContext();
+    await first;
+    expect(onPromptStart).toHaveBeenCalledExactlyOnceWith(created.sessionId);
+    expect(onPromptSettled).toHaveBeenCalledExactlyOnceWith(created.sessionId);
+  });
+
   it("在真实 session/prompt 前通知开始，并在终态通知结束", async () => {
     const { client, peer } = createTransportPair();
     const agent = new EchoAgent();

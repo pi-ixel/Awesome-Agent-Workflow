@@ -39,6 +39,15 @@ type Channel = {
   closing: boolean;
   controller: AbortController;
 };
+let turnOrdinal = 0;
+
+interface TurnActivity {
+  readonly session: { readonly scope: string; readonly sessionId: string };
+  readonly ordinal: number;
+  readonly startedAt: number;
+  readonly endedAt: number | null;
+}
+
 /** Owns one transport and routes isolated protocol session channels. */
 export class AcpConnection implements AcpConnectionPort {
   private initialized = false;
@@ -143,6 +152,7 @@ export class AcpConnection implements AcpConnectionPort {
     maxConcurrent: number,
     diagnostics: Pick<JsonRpcConnectionOptions, "logger" | "recordRaw" | "diagnosticPrivacy"> = {},
     private readonly onDisposed: () => void = () => {},
+    private readonly markTurn?: (mark: TurnActivity) => void,
   ) {
     this.scheduler = new RequestScheduler(maxConcurrent);
     const failure = (reason: string) => {
@@ -236,6 +246,8 @@ export class AcpConnection implements AcpConnectionPort {
       c.id = id;
       this.routes.set(id, c);
     };
+    const diagnosticScope = options.diagnosticScope ?? this.rpc.id;
+    let turn: TurnActivity | undefined;
     const request: AcpSessionConnection["request"] = (
       method,
       params,
@@ -258,8 +270,19 @@ export class AcpConnection implements AcpConnectionPort {
           if (c.id) throw new Error("Session is already created");
           this.creating++;
         }
-        const prompt = method === "session/prompt" && c.id !== undefined;
-        if (prompt) c.activePrompts = (c.activePrompts ?? 0) + 1;
+        const promptSession = method === "session/prompt" ? c.id : undefined;
+        if (promptSession !== undefined) {
+          c.activePrompts = (c.activePrompts ?? 0) + 1;
+          if (this.markTurn && c.activePrompts === 1) {
+            turn = {
+              session: { scope: diagnosticScope, sessionId: promptSession },
+              ordinal: ++turnOrdinal,
+              startedAt: Date.now(),
+              endedAt: null,
+            };
+            this.markTurn(turn);
+          }
+        }
         try {
           const result = await this.rpc.request(method, params, {
             owner: c,
@@ -338,7 +361,13 @@ export class AcpConnection implements AcpConnectionPort {
           if (this.admissionError) this.reportUnavailable(this.admissionError);
           throw error;
         } finally {
-          if (prompt) c.activePrompts = (c.activePrompts ?? 1) - 1;
+          if (promptSession !== undefined) {
+            c.activePrompts = (c.activePrompts ?? 1) - 1;
+            if (!c.activePrompts && turn) {
+              this.markTurn?.({ ...turn, endedAt: Date.now() });
+              turn = undefined;
+            }
+          }
           if (isNew && --this.creating === 0) this.early.length = 0;
         }
       };
@@ -374,6 +403,7 @@ export class AcpConnection implements AcpConnectionPort {
       return execute();
     };
     const port: AcpSessionConnection = {
+      diagnosticScope,
       request,
       notify: (...args) => {
         if (c.closed || c.closing) throw new Error("Session is closed");

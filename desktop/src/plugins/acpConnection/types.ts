@@ -41,6 +41,7 @@ export type NotificationHandler = (
 ) => void;
 
 export interface AcpSessionConnection {
+  readonly diagnosticScope?: string;
   request(
     method: string,
     params?: Readonly<Record<string, unknown>>,
@@ -61,6 +62,7 @@ export interface AcpSessionConnection {
 }
 
 export interface AcpChannelOptions {
+  readonly diagnosticScope?: string;
   readonly background?: boolean;
   readonly elicitation?: boolean;
   readonly requestTimeoutMs?: number;

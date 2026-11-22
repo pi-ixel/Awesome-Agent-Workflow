@@ -40,6 +40,7 @@ export class AcpSessionPool {
     const binding: { session?: { invalidateConnection(): void } } = {};
     const lease = await this.connections.acquireChannel({
       background: options.background,
+      diagnosticScope: options.diagnosticScope,
       elicitation: !!options.onElicitation,
       project: options.project,
       requestTimeoutMs: options.requestTimeoutMs,
