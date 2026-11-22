@@ -15,7 +15,11 @@ pub mod restore;
 pub mod security;
 pub mod tool;
 #[cfg(windows)]
+mod profile;
+#[cfg(windows)]
 mod webview2;
+#[cfg(all(windows, feature = "webview2-profile-ci"))]
+pub mod bench;
 
 #[cfg(test)]
 mod tests;

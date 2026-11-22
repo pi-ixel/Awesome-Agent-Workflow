@@ -82,3 +82,11 @@ features = ["rustls-tls"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }
+
+[features]
+webview2-profile-ci = []
+
+[patch.crates-io]
+tauri = { path = "vendor/tauri-2.12.4" }
+tauri-runtime = { path = "vendor/tauri-runtime-2.12.2" }
+tauri-runtime-wry = { path = "vendor/tauri-runtime-wry-2.12.2" }

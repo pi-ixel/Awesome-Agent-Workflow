@@ -5,7 +5,7 @@ use webview2_com::{
     CoTaskMemPWSTR, HistoryChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
         COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL,
-        ICoreWebView2, ICoreWebView2_19,
+        ICoreWebView2, ICoreWebView2_13, ICoreWebView2_19,
     },
     SourceChangedEventHandler,
 };
@@ -26,6 +26,83 @@ async fn with_core(
         .await
         .map_err(|_| "WEBVIEW_DISPATCH_TIMEOUT")?
         .map_err(|_| "WEBVIEW_DISPATCH_FAILED")?
+}
+
+pub(super) async fn verify_profile(
+    webview: &Webview,
+    expected: String,
+    directory: std::path::PathBuf,
+) -> Result<(), String> {
+    with_core(webview, move |core| {
+        let profile = unsafe { core.cast::<ICoreWebView2_13>()?.Profile()? };
+        let mut name = PWSTR::null();
+        unsafe { profile.ProfileName(&mut name)? };
+        let name = CoTaskMemPWSTR::from(name).to_string();
+        let mut path = PWSTR::null();
+        unsafe { profile.ProfilePath(&mut path)? };
+        let path = std::path::PathBuf::from(CoTaskMemPWSTR::from(path).to_string());
+        let mut private = BOOL(0);
+        unsafe { profile.IsInPrivateModeEnabled(&mut private)? };
+        let matches_directory = path
+            .canonicalize()
+            .ok()
+            .zip(directory.canonicalize().ok())
+            .is_some_and(|(path, root)| path != root && path.starts_with(root));
+        if name == expected && !private.as_bool() && matches_directory {
+            Ok(())
+        } else {
+            Err(windows_core::Error::new(
+                windows_core::HRESULT(0x80004005u32 as i32),
+                "WEBVIEW2_PROFILE_MISMATCH",
+            ))
+        }
+    })
+    .await
+}
+
+pub(super) async fn reset_site_permissions(webview: &Webview, origin: &str) -> Result<(), String> {
+    use webview2_com::{
+        Microsoft::Web::WebView2::Win32::{
+            COREWEBVIEW2_PERMISSION_KIND_CAMERA, COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION,
+            COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS,
+            COREWEBVIEW2_PERMISSION_STATE_DEFAULT, ICoreWebView2Profile4,
+        },
+        SetPermissionStateCompletedHandler,
+    };
+    for kind in [
+        COREWEBVIEW2_PERMISSION_KIND_CAMERA,
+        COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION,
+        COREWEBVIEW2_PERMISSION_KIND_MICROPHONE,
+        COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS,
+    ] {
+        let origin: Vec<u16> = origin.encode_utf16().chain([0]).collect();
+        let (send, receive) = tokio::sync::oneshot::channel();
+        with_core(webview, move |core| {
+            let profile = unsafe { core.cast::<ICoreWebView2_13>()?.Profile()? };
+            let profile = profile.cast::<ICoreWebView2Profile4>()?;
+            let mut send = Some(send);
+            let callback = SetPermissionStateCompletedHandler::create(Box::new(move |result| {
+                if let Some(send) = send.take() {
+                    let _ = send.send(result.map_err(|error| error.to_string()));
+                }
+                Ok(())
+            }));
+            unsafe {
+                profile.SetPermissionState(
+                    kind,
+                    windows_core::PCWSTR(origin.as_ptr()),
+                    COREWEBVIEW2_PERMISSION_STATE_DEFAULT,
+                    &callback,
+                )
+            }
+        })
+        .await?;
+        tokio::time::timeout(std::time::Duration::from_secs(5), receive)
+            .await
+            .map_err(|_| "WEBVIEW_PERMISSION_TIMEOUT")?
+            .map_err(|_| "WEBVIEW_PERMISSION_FAILED")??;
+    }
+    Ok(())
 }
 
 pub(super) async fn register_navigation(

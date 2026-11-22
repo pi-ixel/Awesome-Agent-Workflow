@@ -1,0 +1,76 @@
+name: Windows WebView2 profile trial
+
+on:
+  push:
+    branches: [codex/webview2-shared-profiles]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: webview2-profile-trial-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Verify actual Desktop WebViews
+    runs-on: windows-2022
+    timeout-minutes: 50
+    defaults:
+      run:
+        working-directory: desktop
+        shell: pwsh
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Cache Rust compilation
+        uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a
+        with:
+          workspaces: |
+            desktop/src-tauri -> target
+            desktop/workflow-engine-rs -> target
+          cache-on-failure: true
+      - name: Build UI and sidecar
+        run: |
+          npm ci
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm run build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm run workflow:build:debug
+      - name: Test persisted profile choices
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --target x86_64-pc-windows-msvc --lib browser::profile::tests
+      - name: Build instrumented Desktop
+        run: cargo build --manifest-path src-tauri/Cargo.toml --locked --target x86_64-pc-windows-msvc --features tauri/custom-protocol,webview2-profile-ci
+      - name: Verify isolation and measure private memory
+        run: ./scripts/test-webview2-profile-trial.ps1 -Exe (Resolve-Path src-tauri/target/x86_64-pc-windows-msvc/debug/desktop.exe)
+      - name: Upload measurements and verification logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: windows-webview2-profile-results
+          path: ${{ runner.temp }}/aaw-webview2-profile-results
+          if-no-files-found: ignore
+      - name: Build portable trial without test hooks
+        run: |
+          cargo build --manifest-path src-tauri/Cargo.toml --locked --target x86_64-pc-windows-msvc --features tauri/custom-protocol
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $out = Join-Path $env:RUNNER_TEMP 'aaw-webview2-portable'
+          New-Item -ItemType Directory -Path $out | Out-Null
+          Copy-Item -LiteralPath src-tauri/target/x86_64-pc-windows-msvc/debug/desktop.exe -Destination $out
+          Copy-Item -LiteralPath docs/webview2-profile-trial.md -Destination $out
+      - name: Upload portable trial
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: AAW-Desktop-WebView2-trial-windows-x64
+          path: ${{ runner.temp }}/aaw-webview2-portable/*
+          if-no-files-found: error

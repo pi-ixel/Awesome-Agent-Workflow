@@ -199,7 +199,11 @@ pub struct DataCatalogEntry {
     pub occupancy: Occupancy,
 }
 
-fn partition_root(app: &AppHandle) -> Result<PathBuf, String> {
+pub(super) fn partition_root(app: &AppHandle) -> Result<PathBuf, String> {
+    #[cfg(all(windows, feature = "webview2-profile-ci"))]
+    if let Some(path) = super::bench::browser_root() {
+        return path;
+    }
     Ok(app
         .path()
         .data_dir()
@@ -228,6 +232,8 @@ pub fn register_partition(
     let root = partition_root(app)?;
     let partition_id = super::host::session_partition(session_id);
     let directory = validate_partition_path(&root, Path::new(&partition_id))?;
+    #[cfg(windows)]
+    super::profile::SessionProfile::for_session(app, session_id, true)?;
     let record = PartitionRecord {
         partition_id,
         workspace_id: workspace_id.into(),
@@ -236,6 +242,12 @@ pub fn register_partition(
         lifecycle: "active".into(),
     };
     let mut partitions = host.partitions.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+    #[cfg(windows)]
+    if partitions.is_empty() {
+        let existing: Vec<PartitionRecord> =
+            crate::storage_preferences::read_record(&root.join("partitions.json"))?;
+        partitions.extend(existing);
+    }
     partitions.retain(|item| item.session_id != session_id);
     partitions.insert(record.clone());
     persist_partitions(app, &partitions)?;
@@ -312,8 +324,16 @@ pub fn browser_data_catalog(
                         .count()
                 })
                 .unwrap_or(0);
+            #[cfg(windows)]
+            let occupancy = match super::profile::SessionProfile::for_session(&app, &partition.session_id, false) {
+                Ok(profile) if profile.name.is_some() => unknown_occupancy("共享 WebView2 目录无法按会话准确统计"),
+                Ok(profile) => directory_occupancy(&profile.directory),
+                Err(error) => unknown_occupancy(&error),
+            };
+            #[cfg(not(windows))]
+            let occupancy = directory_occupancy(Path::new(&partition.directory));
             DataCatalogEntry {
-                occupancy: directory_occupancy(Path::new(&partition.directory)),
+                occupancy,
                 partition,
                 active_tab_count,
             }
@@ -366,6 +386,8 @@ fn begin_cleanup<'a>(host: &'a BrowserHost, session_id: &str) -> Result<CleanupL
 struct PartitionWebview {
     webview: tauri::Webview,
     temporary: bool,
+    #[cfg(windows)]
+    shared: bool,
 }
 
 impl std::ops::Deref for PartitionWebview {
@@ -384,11 +406,13 @@ impl Drop for PartitionWebview {
     }
 }
 
-fn active_webview(
+async fn active_webview(
     app: &AppHandle,
     host: &BrowserHost,
     session_id: &str,
 ) -> Result<PartitionWebview, String> {
+    #[cfg(windows)]
+    let profile = super::profile::SessionProfile::for_session(app, session_id, false)?;
     let tab_id = host
         .labels
         .lock()
@@ -399,9 +423,14 @@ fn active_webview(
                 .map(str::to_owned)
         });
     if let Some(tab_id) = tab_id {
+        let webview = find_webview(app, host, session_id, &tab_id)?;
+        #[cfg(windows)]
+        profile.verify(&webview).await?;
         return Ok(PartitionWebview {
-            webview: find_webview(app, host, session_id, &tab_id)?,
+            webview,
             temporary: false,
+            #[cfg(windows)]
+            shared: profile.name.is_some(),
         });
     }
     use tauri::webview::WebviewBuilder;
@@ -409,27 +438,35 @@ fn active_webview(
     let window = app.get_window("main").ok_or("WINDOW_NOT_FOUND")?;
     let partition = super::host::session_partition(session_id);
     let label = format!("aaw-browser-maintenance-{partition}");
-    let directory = validate_partition_path(&partition_root(app)?, Path::new(&partition))?;
+    let builder = WebviewBuilder::new(
+        label,
+        WebviewUrl::External(tauri::Url::parse("about:blank").map_err(|_| "INVALID_URL")?),
+    );
+    #[cfg(windows)]
+    let builder = profile.configure(builder);
+    #[cfg(not(windows))]
+    let builder = builder.data_directory(validate_partition_path(&partition_root(app)?, Path::new(&partition))?);
     let webview = window
         .add_child(
-            WebviewBuilder::new(
-                label,
-                WebviewUrl::External(tauri::Url::parse("about:blank").map_err(|_| "INVALID_URL")?),
-            )
-            .data_directory(directory),
+            builder,
             LogicalPosition::new(0.0, 0.0),
             LogicalSize::new(1.0, 1.0),
         )
         .map_err(|error| error.to_string())?;
-    webview.hide().map_err(|error| error.to_string())?;
-    Ok(PartitionWebview {
+    let view = PartitionWebview {
         webview,
         temporary: true,
-    })
+        #[cfg(windows)]
+        shared: profile.name.is_some(),
+    };
+    view.webview.hide().map_err(|error| error.to_string())?;
+    #[cfg(windows)]
+    profile.verify(&view.webview).await?;
+    Ok(view)
 }
 
 #[cfg(windows)]
-async fn clear_browsing_data(webview: &tauri::Webview) -> Result<(), String> {
+async fn clear_browsing_data(webview: &tauri::Webview, _cache_only: bool) -> Result<(), String> {
     let (sender, receiver) = tokio::sync::oneshot::channel();
     let sender = std::sync::Arc::new(std::sync::Mutex::new(Some(sender)));
     let callback_sender = sender.clone();
@@ -463,7 +500,14 @@ async fn clear_browsing_data(webview: &tauri::Webview) -> Result<(), String> {
                         use windows_core::Interface;
                         profile.cast::<webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Profile2>()
                     })
-                    .and_then(|profile| profile.ClearBrowsingDataAll(&callback))
+                                        .and_then(|profile| {
+                        if _cache_only {
+                            use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_BROWSING_DATA_KINDS_DISK_CACHE;
+                            profile.ClearBrowsingData(COREWEBVIEW2_BROWSING_DATA_KINDS_DISK_CACHE, &callback)
+                        } else {
+                            profile.ClearBrowsingDataAll(&callback)
+                        }
+                    })
                     .map_err(|error| error.to_string())
             }
         })();
@@ -488,7 +532,7 @@ async fn clear_browsing_data(webview: &tauri::Webview) -> Result<(), String> {
 }
 
 #[cfg(not(windows))]
-async fn clear_browsing_data(webview: &tauri::Webview) -> Result<(), String> {
+async fn clear_browsing_data(webview: &tauri::Webview, _cache_only: bool) -> Result<(), String> {
     webview.clear_all_browsing_data().map_err(|error| error.to_string())
 }
 
@@ -510,8 +554,8 @@ async fn clear_session_partition(
     workspace_id: Option<String>,
 ) -> Result<String, String> {
     let _lease = begin_cleanup(state, &session_id)?;
-    let partition = active_webview(&app, &state, &session_id)?;
-    clear_browsing_data(&partition).await?;
+    let partition = active_webview(&app, &state, &session_id).await?;
+    clear_browsing_data(&partition, false).await?;
     let labels: Vec<(String, String)> = state
         .labels
         .lock()
@@ -597,20 +641,30 @@ pub async fn browser_clear_site_data(
     if !matches!(origin.scheme(), "http" | "https") {
         return Err("NAVIGATION_DENIED".into());
     }
-    let webview = active_webview(&app, &state, &session_id)?;
+    let webview = active_webview(&app, &state, &session_id).await?;
+    let normalized = origin.origin().ascii_serialization();
+    #[cfg(windows)]
+    let shared = webview.shared;
+    #[cfg(not(windows))]
+    let shared = false;
+    let cdp_origin = if shared { normalized.as_str() } else { origin.as_str() };
     call_cdp(
         &webview,
         "Storage.clearDataForOrigin",
-        serde_json::json!({"origin":origin.to_string(),"storageTypes":"all"}),
+        serde_json::json!({"origin":cdp_origin,"storageTypes":"all"}),
     )
     .await?;
-    call_cdp(
-        &webview,
-        "Browser.resetPermissions",
-        serde_json::json!({"origin":origin.to_string()}),
-    )
-    .await?;
-    let normalized = origin.origin().ascii_serialization();
+    if shared {
+        #[cfg(windows)]
+        super::webview2::reset_site_permissions(&webview, &normalized).await?;
+    } else {
+        call_cdp(
+            &webview,
+            "Browser.resetPermissions",
+            serde_json::json!({"origin":origin.to_string()}),
+        )
+        .await?;
+    }
     state
         .permissions
         .lock()
@@ -627,7 +681,12 @@ pub async fn browser_clear_cache(
     session_id: String,
 ) -> Result<String, String> {
     let _lease = begin_cleanup(&state, &session_id)?;
-    let webview = active_webview(&app, &state, &session_id)?;
+    let webview = active_webview(&app, &state, &session_id).await?;
+    #[cfg(windows)]
+    if webview.shared {
+        clear_browsing_data(&webview, true).await?;
+        return Ok("completed".into());
+    }
     call_cdp(&webview, "Network.clearBrowserCache", serde_json::json!({})).await?;
     Ok("completed".into())
 }

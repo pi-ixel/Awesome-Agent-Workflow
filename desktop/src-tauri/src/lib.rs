@@ -32,6 +32,22 @@ use tauri::{Emitter, Manager};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let context = tauri::generate_context!();
+    #[cfg(all(windows, feature = "webview2-profile-ci"))]
+    let context = {
+        let mut context = context;
+        if browser::bench::output_path().is_some() {
+            let config = context.config_mut();
+            config.identifier.push_str(".profile-ci");
+            for window in &mut config.app.windows {
+                if window.label == "main" {
+                    window.url = tauri::WebviewUrl::External(
+                        tauri::Url::parse("about:blank").expect("合法的空白页地址"),
+                    );
+                }
+            }
+        }
+        context
+    };
     tauri::Builder::default()
         .manage(panel_files::PanelWatchers::default())
         .manage(browser::host::BrowserHost::default())
@@ -43,6 +59,10 @@ pub fn run() {
         .manage(tray::TrayPreference::default())
         .manage(tray::SchedulerLease::default())
         .setup(|app| {
+            #[cfg(all(windows, feature = "webview2-profile-ci"))]
+            if browser::bench::start(app.handle()) {
+                return Ok(());
+            }
             storage_location::initialize(app.handle()).map_err(std::io::Error::other)?;
             browser::host::initialize_agent_control(app.handle());
             if let Err(error) = diagnostics::start(app.handle()) {
@@ -58,6 +78,10 @@ pub fn run() {
             Ok(())
         })
         .on_page_load(|webview, payload| {
+            #[cfg(all(windows, feature = "webview2-profile-ci"))]
+            if webview.label() == "main" && browser::bench::output_path().is_some() {
+                return;
+            }
             // WebView 刷新不会保证 React 清理；原生监听随页面代次一并释放。
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
                 if webview.label() == "main" {

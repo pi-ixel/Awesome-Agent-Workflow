@@ -18,6 +18,8 @@ export default tseslint.config(
       "src-tauri/target/**",
       "src-tauri/target-*/**",
       "src-tauri/gen/**",
+      // Tauri 原版脚本由 Rust 构建时填入模板变量，不参与本项目的 JS lint。
+      "src-tauri/vendor/**",
       "node_modules/**",
       // ZCode 本地运行时产物（workflow 草稿/运行脚本）与界面设计评审留档：
       // 均为本机生成、gitignore 不入库（见根 .gitignore 的 .zcode/ 与
