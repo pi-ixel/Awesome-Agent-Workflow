@@ -31,6 +31,7 @@ import {
 } from "../runtime/project.ts";
 import {
   installedToolRoot,
+  listStagingDirs,
   listVersionDirs,
   materializeToolFiles,
   missingEntryFiles,
@@ -916,7 +917,19 @@ export function createWorkshop(deps: {
        * 所以永远不会被误删。
        */
       const root = await installedToolRoot(io, owner, id);
-      const dirs = [...projectDirs, ...await listVersionDirs(io, owner, id)];
+      // 崩溃残留的暂存目录可能连清单都没写完：先走"只删这个目录"的窄命令
+      // （只校验路径形状，不认清单）；没有这个端口时才交给 toolPurge 按清单认领。
+      const orphans: string[] = [];
+      for (const dir of await listStagingDirs(io, owner, id)) {
+        if (io.dropStaging) {
+          try {
+            await io.dropStaging(dir);
+            continue;
+          } catch { /* 落到 toolPurge 再试一次 */ }
+        }
+        orphans.push(dir);
+      }
+      const dirs = [...projectDirs, ...await listVersionDirs(io, owner, id), ...orphans];
       // 旧布局：`installed/<账号>/<id>` 本身就是运行副本，根目录里有清单。
       if (await io.pathExists(joinPath(root, toolProjectFileNames.manifest))) dirs.push(root);
       try {
