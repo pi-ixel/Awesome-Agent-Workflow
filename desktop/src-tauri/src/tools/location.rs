@@ -228,6 +228,92 @@ impl MigrationState {
 #[derive(Default)]
 pub struct ToolHomeMigration(pub MigrationState);
 
+// ── 目标落点分类：残留 vs 真冲突 ─────────────────────────────────────────
+
+/// 目标落点的既有内容分类（Z-24）。
+///
+/// 迁移的切换点是"写账号指针"，它在本函数之后才发生——所以此刻目标处出现
+/// 我们的分区，**只可能是上次迁移中断留下的残骸**（指针写入失败、进程被杀、
+/// 回滚删除失败）。残骸留着不动的话，重试会永远撞"已存在 projects"，
+/// 报错又没说这是哪来的、能不能删——用户被逼进死角（2026-11-22 真机实测）。
+///
+/// 分类的两个特征，误伤概率可以忽略：
+/// - **≥2 个已知分区目录**（installed/projects/backups/storage）：正常迁移
+///   完成后指针就切走了，指针没切却凑齐多个分区，只能是中断产物；
+/// - **`.aaw-stage-*` 暂存目录**：那是复制中途被杀的现场，随机目录里不会
+///   自己长出来。
+#[derive(Debug)]
+enum DestinationState {
+    /// 干净，直接迁。
+    Vacant,
+    /// 上次迁移的残骸：这些目录可以安全删除（源数据原样在旧家）。
+    Leftover { paths: Vec<PathBuf> },
+    /// 真冲突：目标里有不像残骸的内容，报错让用户决定。
+    Conflict { name: &'static str, dest: PathBuf },
+}
+
+/// 单个已知分区落点的状态。
+enum PartitionOccupancy {
+    /// 不存在。
+    Absent,
+    /// 存在但为空（空壳，删除无损失）。
+    Shell,
+    /// 存在且有内容。
+    Occupied,
+}
+
+fn occupancy(dest: &Path) -> PartitionOccupancy {
+    if !dest.is_dir() {
+        return PartitionOccupancy::Absent;
+    }
+    let has_entries = fs::read_dir(dest).is_ok_and(|mut items| items.next().is_some());
+    if has_entries {
+        PartitionOccupancy::Occupied
+    } else {
+        PartitionOccupancy::Shell
+    }
+}
+
+fn has_stage_leftover(destinations: &[(&'static str, PathBuf)]) -> bool {
+    // 暂存目录建在每个落点的父目录里（家模式 = 目标家根本身）。
+    destinations.iter().any(|(_, dest)| {
+        let Some(parent) = dest.parent() else { return false };
+        fs::read_dir(parent).is_ok_and(|entries| {
+            entries.flatten().any(|entry| {
+                entry.file_name().to_string_lossy().starts_with(".aaw-stage-")
+            })
+        })
+    })
+}
+
+fn classify_destinations(destinations: &[(&'static str, PathBuf)]) -> DestinationState {
+    let mut occupied: Vec<(&'static str, &PathBuf)> = Vec::new();
+    let mut shells: Vec<PathBuf> = Vec::new();
+    for (name, dest) in destinations {
+        match occupancy(dest) {
+            PartitionOccupancy::Absent => {}
+            PartitionOccupancy::Shell => shells.push(dest.clone()),
+            PartitionOccupancy::Occupied => occupied.push((name, dest)),
+        }
+    }
+    let stage = has_stage_leftover(destinations);
+    if occupied.len() >= 2 || (occupied.len() == 1 && stage) {
+        // 残骸：已知落点（含空壳）一起清。删除失败不阻塞——后面归位前的
+        // 叶子检查仍会拦，报告里也说得清。
+        let mut paths: Vec<PathBuf> = occupied.iter().map(|(_, dest)| (*dest).clone()).collect();
+        paths.extend(shells);
+        return DestinationState::Leftover { paths };
+    }
+    if let Some((name, dest)) = occupied.first() {
+        return DestinationState::Conflict { name, dest: (*dest).clone() };
+    }
+    if !shells.is_empty() {
+        // 只剩空壳：删壳即可，不算冲突。
+        return DestinationState::Leftover { paths: shells };
+    }
+    DestinationState::Vacant
+}
+
 // ── 目标校验 ─────────────────────────────────────────────────────────────
 
 /// 迁移目标的公共校验：绝对路径、已存在、与任何已知根互不嵌套。
@@ -415,20 +501,46 @@ fn run_tool_home_migration(app: &AppHandle, target: Option<PathBuf>) -> Result<S
             target.join(name)
         }
     };
-    for name in PARTITIONS {
-        if destination_of(name).exists() {
-            return Err(format!("目标位置下已存在 {name}，请换一个空目录或先清理。"));
+    let destinations: Vec<(&'static str, PathBuf)> = PARTITIONS
+        .iter()
+        .chain(std::iter::once(&"storage"))
+        .map(|name| (*name, destination_of(name)))
+        .collect();
+    // 上次迁移的残骸先清掉（判据见 classify_destinations 文档），否则重试
+    // 会被自己上次的中断产物永久挡死；真冲突才报错，且报错带路径。
+    let mut residue_note = String::new();
+    match classify_destinations(&destinations) {
+        DestinationState::Vacant => {}
+        DestinationState::Leftover { paths } => {
+            residue_note = format!(
+                "检测到上次迁移在 {} 留下的残骸，已清理后继续。",
+                display_path(&target)
+            );
+            for path in &paths {
+                let _ = fs::remove_dir_all(path);
+            }
+        }
+        DestinationState::Conflict { name, dest } => {
+            return Err(format!(
+                "目标位置 {} 已有内容（{name}），看起来不是迁移残骸，不能自动覆盖：请换一个空目录；如果确认这些内容可以删除，清掉后重试即可。",
+                display_path(&dest)
+            ));
         }
     }
-    if destination_of("storage").exists() {
-        return Err("目标位置下已存在 storage，请换一个空目录或先清理。".into());
-    }
-    // 清掉上次失败可能留下的暂存目录（幂等重试的前提）。
-    if let Ok(entries) = fs::read_dir(&target) {
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            if name.to_string_lossy().starts_with(".aaw-stage-") {
-                let _ = fs::remove_dir_all(entry.path());
+    // 暂存目录无条件清理：复制中途进程被杀会留下 .aaw-stage-*，不清的话
+    // 每次重试都白背一份垃圾（幂等重试的前提）。落点的父目录（家模式下就
+    // 是目标家根本身）与目标家根都扫一遍。
+    let stage_parents: Vec<PathBuf> = destinations
+        .iter()
+        .filter_map(|(_, dest)| dest.parent().map(Path::to_path_buf))
+        .chain(std::iter::once(target.clone()))
+        .collect();
+    for parent in &stage_parents {
+        if let Ok(entries) = fs::read_dir(parent) {
+            for entry in entries.flatten() {
+                if entry.file_name().to_string_lossy().starts_with(".aaw-stage-") {
+                    let _ = fs::remove_dir_all(entry.path());
+                }
             }
         }
     }
@@ -504,6 +616,15 @@ fn run_tool_home_migration(app: &AppHandle, target: Option<PathBuf>) -> Result<S
     } else {
         format!("以下旧目录删除失败，请手动清理：{}。", leftover.join("、"))
     };
+    if !residue_note.is_empty() {
+        residue_note.push_str(&cleanup);
+        return Ok(format!(
+            "工具整体已迁移到 {}（{}）。{}",
+            display_path(&target),
+            if names.is_empty() { "没有需要搬的内容" } else { &names },
+            residue_note
+        ));
+    }
     Ok(format!(
         "工具整体已迁移到 {}（{}）。{}",
         display_path(&target),
@@ -517,7 +638,11 @@ fn run_tool_home_migration(app: &AppHandle, target: Option<PathBuf>) -> Result<S
 /// home 模式下叶子名就是分区名。
 fn move_subtree_named(source: &Path, parent: &Path, leaf: &str) -> Result<(), String> {
     if parent.join(leaf).exists() {
-        return Err(format!("目标位置下已存在 {leaf}，请换一个空目录或先清理。"));
+        // 分类漏掉的竞态兜底（比如两次迁移撞车）：报错带路径，用户知道去哪看。
+        return Err(format!(
+            "{} 已存在，无法归位：请换一个空目录或先清理后重试。",
+            display_path(&parent.join(leaf))
+        ));
     }
     move_subtree(source, leaf, parent)
 }
@@ -899,6 +1024,68 @@ mod tests {
         assert!(text.contains("D:/home/installed/pilot"), "{text}");
         assert!(text.contains("D:/home/projects/notes"), "{text}");
         assert!(!text.contains("C:/data/tools"), "{text}");
+    }
+
+    #[test]
+    fn classify_destinations_tells_residue_from_conflict() {
+        // ≥2 个非空已知分区 → 残骸，全部清理（含空壳）
+        let root = temp_root("classify-residue");
+        for name in ["installed", "projects"] {
+            fs::create_dir_all(root.join(name)).unwrap();
+            fs::write(root.join(name).join("marker"), b"x").unwrap();
+        }
+        fs::create_dir_all(root.join("backups")).unwrap(); // 空壳也算进清理
+        let destinations: Vec<(&'static str, PathBuf)> = PARTITIONS
+            .iter()
+            .map(|name| (*name, root.join(name)))
+            .collect();
+        match classify_destinations(&destinations) {
+            DestinationState::Leftover { paths } => {
+                assert_eq!(paths.len(), 3, "两个非空分区 + 一个空壳");
+                assert!(paths.contains(&root.join("backups")));
+            }
+            other => panic!("应为残骸，实际 {other:?}"),
+        }
+        // 单个非空分区且无暂存目录 → 真冲突
+        let root = temp_root("classify-conflict");
+        fs::create_dir_all(root.join("projects")).unwrap();
+        fs::write(root.join("projects/user-code.txt"), b"mine").unwrap();
+        let destinations: Vec<(&'static str, PathBuf)> = PARTITIONS
+            .iter()
+            .map(|name| (*name, root.join(name)))
+            .collect();
+        match classify_destinations(&destinations) {
+            DestinationState::Conflict { name, dest } => {
+                assert_eq!(name, "projects");
+                assert_eq!(dest, root.join("projects"));
+            }
+            other => panic!("应为冲突，实际 {other:?}"),
+        }
+        // 单个非空分区 + 暂存目录 → 残骸（暂存目录是复制被杀的现场）
+        fs::create_dir_all(root.join(".aaw-stage-projects-deadbeef")).unwrap();
+        match classify_destinations(&destinations) {
+            DestinationState::Leftover { paths } => assert_eq!(paths.len(), 1),
+            other => panic!("有暂存目录应为残骸，实际 {other:?}"),
+        }
+        // 全空壳 → 清壳不算冲突
+        let root = temp_root("classify-shell");
+        fs::create_dir_all(root.join("storage")).unwrap();
+        let destinations: Vec<(&'static str, PathBuf)> = PARTITIONS
+            .iter()
+            .chain(std::iter::once(&"storage"))
+            .map(|name| (*name, root.join(name)))
+            .collect();
+        match classify_destinations(&destinations) {
+            DestinationState::Leftover { paths } => assert_eq!(paths, vec![root.join("storage")]),
+            other => panic!("空壳应清掉，实际 {other:?}"),
+        }
+        // 什么都没有 → 干净
+        let root = temp_root("classify-vacant");
+        let destinations: Vec<(&'static str, PathBuf)> = PARTITIONS
+            .iter()
+            .map(|name| (*name, root.join(name)))
+            .collect();
+        assert!(matches!(classify_destinations(&destinations), DestinationState::Vacant));
     }
 
     #[test]

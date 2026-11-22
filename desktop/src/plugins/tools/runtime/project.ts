@@ -445,12 +445,21 @@ export async function migrateLegacyTools(
   options: { readonly parent?: string; readonly owner?: string } = {},
 ): Promise<LegacyMigration> {
   const root = options.parent ?? await defaultToolProjectsDir(io, options.owner);
+  // 设了自定义根时，默认根里已有的项目不算"没有"：项目列表同时扫两个根，
+  // 默认根里已有的工具不该在自定义根再克隆一份——否则同一个 id 两份源码，
+  // 改哪份、装哪份全是歧义（2026-11-22 真机：自定义根指到工具整体的家根，
+  // 面板每次重挂载都在家根下重生一份脚手架）。
+  const fallbackRoot = options.parent ? await defaultToolProjectsDir(io, options.owner) : null;
   const created: string[] = [];
   const skipped: string[] = [];
   for (const tool of tools) {
     const dir = joinPath(root, tool.id);
     if (await io.pathExists(joinPath(dir, toolProjectFileNames.manifest))) {
       skipped.push(dir);
+      continue;
+    }
+    if (fallbackRoot && await io.pathExists(joinPath(fallbackRoot, tool.id, toolProjectFileNames.manifest))) {
+      skipped.push(joinPath(fallbackRoot, tool.id));
       continue;
     }
     try {

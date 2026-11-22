@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { ActionButton } from "../../../shared/ui/controls.tsx";
-import { SettingCard, SettingRow } from "../../../shared/ui/SettingsPageParts.tsx";
+import {
+  SettingCard,
+  SettingRow,
+  settingsInputClass,
+} from "../../../shared/ui/SettingsPageParts.tsx";
 import { desktopManagedStorage } from "../../host/service.ts";
 
 /**
@@ -102,7 +106,8 @@ export function ToolsStorageSetting({
       )}
       <SettingRow
         label="工具整体"
-        desc={`工具本体（运行副本、源码项目、备份）与工具自己保存的数据作为一个整体存放在这里，只影响${account}；其他账号不受影响。「选择文件夹」后立即在线迁移：先逐文件核验复制，再切换位置并删除旧目录（数据也一并搬走）；迁移期间打开工具会被暂时拦下。`}
+        htmlFor="tools-home-path"
+        desc={`工具本体（运行副本、源码项目、备份）与工具自己保存的数据作为一个整体存放在下面这个目录，只影响${account}；其他账号不受影响。「选择文件夹」后立即在线迁移：先逐文件核验复制，再切换位置并删除旧目录（数据也一并搬走）；迁移期间打开工具会被暂时拦下。`}
         footerAlign="start"
         footer={
           migrating || status?.report ? (
@@ -124,47 +129,58 @@ export function ToolsStorageSetting({
           ) : undefined
         }
       >
-        <div className="flex w-full min-w-0 flex-wrap items-center gap-2">
-          {pickDirectory && (
+        <div className="flex w-full min-w-0 flex-col gap-2">
+          <input
+            id="tools-home-path"
+            className={settingsInputClass}
+            value={status?.home ?? ""}
+            placeholder={status ? undefined : "正在读取当前路径…"}
+            readOnly
+            disabled={!status || migrating}
+            aria-label="工具整体当前存储位置"
+          />
+          <div className="flex flex-wrap justify-end gap-2">
+            {pickDirectory && (
+              <ActionButton
+                tone="secondary"
+                type="button"
+                className="min-h-8 shrink-0 px-3 py-1 text-ui-base"
+                disabled={busy || migrating || !status?.home}
+                onClick={() => {
+                  void (async () => {
+                    const path = await pickDirectory?.();
+                    if (path) schedule(path);
+                  })();
+                }}
+              >
+                选择文件夹
+              </ActionButton>
+            )}
             <ActionButton
               tone="secondary"
               type="button"
               className="min-h-8 shrink-0 px-3 py-1 text-ui-base"
               disabled={busy || migrating || !status?.home}
               onClick={() => {
-                void (async () => {
-                  const path = await pickDirectory?.();
-                  if (path) schedule(path);
-                })();
+                void desktopManagedStorage
+                  .request("tools_storage_open", { path: status?.home })
+                  .catch(() => undefined);
               }}
             >
-              选择文件夹
+              打开文件夹
             </ActionButton>
-          )}
-          <ActionButton
-            tone="secondary"
-            type="button"
-            className="min-h-8 shrink-0 px-3 py-1 text-ui-base"
-            disabled={busy || migrating || !status?.home}
-            onClick={() => {
-              void desktopManagedStorage
-                .request("tools_storage_open", { path: status?.home })
-                .catch(() => undefined);
-            }}
-          >
-            打开文件夹
-          </ActionButton>
-          {status?.homeCustom && !migrating && (
-            <ActionButton
-              tone="secondary"
-              type="button"
-              className="min-h-8 shrink-0 px-3 py-1 text-ui-base"
-              disabled={busy}
-              onClick={() => schedule(null)}
-            >
-              迁回默认
-            </ActionButton>
-          )}
+            {status?.homeCustom && !migrating && (
+              <ActionButton
+                tone="secondary"
+                type="button"
+                className="min-h-8 shrink-0 px-3 py-1 text-ui-base"
+                disabled={busy}
+                onClick={() => schedule(null)}
+              >
+                迁回默认
+              </ActionButton>
+            )}
+          </div>
         </div>
       </SettingRow>
     </SettingCard>
