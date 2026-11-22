@@ -330,6 +330,19 @@ fn move_subtree(source: &Path, name: &str, target: &Path) -> Result<(), String> 
     outcome
 }
 
+/// 迁回默认位置时不留指针：指针缺省就是默认位置。若把默认路径写进指针，
+/// `custom = 指针存在` 的判定恒真，「迁回默认」按钮永远消不掉。
+fn settle_pointer(pointer: &Path, key: &str, target: &Path, default: &Path) -> Result<(), String> {
+    let target_key = canonical(target).unwrap_or_else(|| target.to_path_buf());
+    let default_key = canonical(default).unwrap_or_else(|| default.to_path_buf());
+    if target_key == default_key {
+        let _ = fs::remove_file(pointer);
+        Ok(())
+    } else {
+        write_pointer(pointer, key, target)
+    }
+}
+
 fn run_tool_root_migration(app: &AppHandle, target: PathBuf) -> Result<String, String> {
     let state = app.state::<ToolRootMigration>();
     let host = app.state::<ToolsHost>();
@@ -372,10 +385,11 @@ fn run_tool_root_migration(app: &AppHandle, target: PathBuf) -> Result<String, S
 
     // 指针是切换点：写成功之前一切可回滚（旧数据原样），写成功之后以新目录为准。
     state.0.stage("切换", "写入位置指针".into());
-    write_pointer(
+    settle_pointer(
         &data_root.join("configuration").join("tools-location.json"),
         "toolRoot",
         &target,
+        &data_root.join("tools"),
     )?;
 
     // 已打开窗口的运行目录登记重映射（窗口已关，通常表是空的，但 keepAlive
@@ -458,10 +472,11 @@ fn run_tool_data_migration(app: &AppHandle, target: PathBuf) -> Result<String, S
     }
 
     state.0.stage("切换", "写入位置指针".into());
-    write_pointer(
+    settle_pointer(
         &data_root.join("configuration").join("data-location.json"),
         "storageRoot",
         &target,
+        &data_root.join("tools").join("storage"),
     )?;
     // 用户明确要求：数据迁移**只拷贝不删**。旧位置原样保留，文案必须把旧
     // 路径原文写出来，让用户知道去哪里手动清理。
@@ -592,8 +607,13 @@ pub async fn tools_location_schedule(
             if canonical(&tool_root(&data_root)).is_some_and(|value| Some(value) == canonical(&fallback)) {
                 return Err("工具目录已经在默认位置，无需迁移。".into());
             }
-            if fallback.exists() && fs::read_dir(&fallback).is_ok_and(|mut items| items.next().is_some()) {
-                return Err("默认位置已有内容，无法迁回。".into());
+            // 只拒绝真正冲突的分区。不能拿整个 tools/ 的非空性做判据：
+            // 工具数据默认就住在 tools/storage 下面（Z-22 用户实测撞上），
+            // 那份内容不归这次迁移搬，存在不影响迁回。
+            for name in ["installed", "projects", "backups"] {
+                if fallback.join(name).exists() {
+                    return Err(format!("默认位置下已存在 {name}，无法迁回。"));
+                }
             }
             fallback
         }

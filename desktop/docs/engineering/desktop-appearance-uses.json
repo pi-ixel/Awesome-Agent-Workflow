@@ -37,9 +37,6 @@
   "plugins/diagnostics/ui/StorageSettings.tsx": [
     "ThresholdInput · <input>"
   ],
-  "plugins/diagnostics/ui/ToolsStorageSetting.tsx": [
-    "LocationRow · <input>"
-  ],
   "plugins/diagnostics/ui/perf/MemoryChart.tsx": [
     "MemoryChart · <svg>"
   ],

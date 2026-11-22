@@ -1,10 +1,6 @@
 import { useEffect, useState } from "react";
 import { ActionButton } from "../../../shared/ui/controls.tsx";
-import {
-  SettingCard,
-  SettingRow,
-  settingsInputClass,
-} from "../../../shared/ui/SettingsPageParts.tsx";
+import { SettingCard, SettingRow } from "../../../shared/ui/SettingsPageParts.tsx";
 import { desktopManagedStorage } from "../../host/service.ts";
 
 /**
@@ -34,9 +30,13 @@ async function readStatus(): Promise<ToolLocationStatus> {
   return desktopManagedStorage.request<ToolLocationStatus>("tools_location_read");
 }
 
-/** 一行位置设置的通用交互：输入目标 → 调度迁移 → 轮询到结束。 */
+/**
+ * 一行位置设置的通用交互：选择文件夹 → 立即开始迁移；打开文件夹查看内容。
+ *
+ * 不展示路径文本框（Z-22 用户反馈）：窄列里长路径只露出首字母，展示意义
+ * 为零；目标位置一律通过系统文件夹选择器给出，选完即迁。
+ */
 function LocationRow({
-  id,
   label,
   desc,
   currentPath,
@@ -48,7 +48,6 @@ function LocationRow({
   pickDirectory,
   schedule,
 }: {
-  readonly id: string;
   readonly label: string;
   readonly desc: string;
   readonly currentPath: string;
@@ -60,11 +59,9 @@ function LocationRow({
   readonly pickDirectory?: () => Promise<string | null>;
   readonly schedule: (target: string | null) => void;
 }) {
-  const [draft, setDraft] = useState<string>();
   return (
     <SettingRow
       label={label}
-      htmlFor={id}
       desc={desc}
       footerAlign="start"
       footer={
@@ -85,30 +82,16 @@ function LocationRow({
       }
     >
       <div className="flex w-full min-w-0 flex-wrap items-center gap-2">
-        <input
-          id={id}
-          className={`${settingsInputClass} min-w-0 flex-1`}
-          data-hint={currentPath}
-          value={draft ?? currentPath}
-          placeholder={currentPath ? undefined : "正在读取当前路径…"}
-          disabled={!currentPath || busy || migrating}
-          onChange={(event) => setDraft(event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !busy && !migrating && draft?.trim()) {
-              schedule(draft.trim());
-            }
-          }}
-        />
         {pickDirectory && (
           <ActionButton
             tone="secondary"
             type="button"
             className="min-h-8 shrink-0 px-3 py-1 text-ui-base"
-            disabled={busy || migrating}
+            disabled={!currentPath || busy || migrating}
             onClick={() => {
               void (async () => {
                 const path = await pickDirectory?.();
-                if (path) setDraft(path);
+                if (path) schedule(path);
               })();
             }}
           >
@@ -139,19 +122,6 @@ function LocationRow({
             迁回默认
           </ActionButton>
         )}
-        <ActionButton
-          tone="secondary"
-          type="submit"
-          className="min-h-8 shrink-0 px-3 py-1 text-ui-base"
-          disabled={busy || migrating || !draft?.trim() || draft.trim() === currentPath}
-          onClick={() => {
-            if (!busy && draft?.trim()) {
-              schedule(draft.trim());
-            }
-          }}
-        >
-          保存
-        </ActionButton>
       </div>
     </SettingRow>
   );
@@ -227,7 +197,6 @@ export function ToolsStorageSetting({
         </p>
       )}
       <LocationRow
-        id="tools-location-path"
         label="工具目录"
         desc="工具的运行副本、源码项目与备份存放在这里。修改后立即在线迁移：先逐文件核验复制，再切换位置并删除旧目录；迁移期间打开工具会被暂时拦下。"
         currentPath={status?.toolRoot ?? ""}
@@ -240,7 +209,6 @@ export function ToolsStorageSetting({
         schedule={(target) => schedule("tools_location_schedule", target)}
       />
       <LocationRow
-        id="tools-data-location-path"
         label="工具数据"
         desc="工具自己保存的键值数据（设置、记录）存放在这里。修改后只拷贝不删除：旧位置的数据会原样保留，确认无用后手动清理。"
         currentPath={status?.storageRoot ?? ""}
