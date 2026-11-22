@@ -30,7 +30,7 @@ use windows_sys::Win32::{
 const PAGE: &str =
     "<!doctype html><title>AAW WebView2 bench</title><p>Same local test page for all sessions</p>";
 
-pub(crate) fn output_path() -> Option<PathBuf> {
+pub fn output_path() -> Option<PathBuf> {
     std::env::var_os("AAW_WEBVIEW2_BENCH_OUT").map(PathBuf::from)
 }
 

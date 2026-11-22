@@ -41,7 +41,7 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           npm run workflow:build:debug
       - name: Test persisted profile choices
-        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib browser::profile::tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --target x86_64-pc-windows-msvc --lib browser::profile::tests
       - name: Build instrumented Desktop
         run: cargo build --manifest-path src-tauri/Cargo.toml --locked --target x86_64-pc-windows-msvc --features tauri/custom-protocol,webview2-profile-ci
       - name: Verify isolation and measure private memory
