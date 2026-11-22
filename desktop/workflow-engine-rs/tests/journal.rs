@@ -850,11 +850,14 @@ fn waiting_only_counts_while_the_run_is_executing() {
     assert!(before >= 20, "停下前的等待已计入：{before}");
     std::thread::sleep(std::time::Duration::from_millis(80));
     assert_eq!(node(&db).waited_ms, before, "停着的时间不计");
-    // 继续运行后，你接着说了：停着的那段不算进这次等待。
+    // 继续运行后，你接着说了：停着的那段不算进这次等待——多出来的只有继续之后
+    // 实际过去的时间（与机器快慢无关；停着的 80ms 若被算进去就会超出）。
+    let resumed = std::time::Instant::now();
     db.claim("r", "project", "owner").unwrap();
     db.record_session_state("s", &state(3, Some(3), Some((1, TurnOutcome::Completed)))).unwrap();
+    let since_resume = resumed.elapsed().as_millis() as i64;
     let waited = node(&db).waited_ms;
-    assert!(waited >= before && waited < before + 60, "停着的 80ms 不算：{before} → {waited}");
+    assert!(waited >= before && waited - before <= since_resume + 2, "停着的 80ms 不算：{before} → {waited}（继续后过了 {since_resume}ms）");
     drop(db);
     std::fs::remove_file(file).unwrap();
 }
