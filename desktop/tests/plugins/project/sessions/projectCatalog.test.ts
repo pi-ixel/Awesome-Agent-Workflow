@@ -91,3 +91,26 @@ it("uses the conversation or cached title when the Agent lists browser context a
     ["valid", "怎样使用 AAW 浏览器工具"],
   ]);
 });
+
+it("cleans old browser titles from entries omitted by the Agent without losing manually named sessions", () => {
+  const workspacePath = "D:/project";
+  const owner = { workspacePath, agentKey: "chrys" };
+  const browserTitle = "AAW 内嵌浏览器工具当前不可用";
+  const omitted = { id: "omitted", title: browserTitle, updatedAt: null };
+  const manual = { id: "manual", title: "浏览器排查笔记", nativeTitle: browserTitle, updatedAt: null };
+  const retained = { id: "retained", title: browserTitle, updatedAt: null };
+  const catalog = { ...emptyCatalog, agentKey: owner.agentKey, sessionsByPath: { [workspacePath]: [manual] } };
+  const entries = sessionListEntries(
+    { sessionsByPath: { [workspacePath]: [omitted] }, items: [] },
+    [],
+    null,
+    owner,
+    [retained],
+    catalog,
+  );
+  expect(entries).toEqual([
+    { ...manual, nativeTitle: "会话" },
+    { ...omitted, title: "会话", nativeTitle: "会话" },
+    { ...retained, title: "会话", nativeTitle: "会话" },
+  ]);
+});

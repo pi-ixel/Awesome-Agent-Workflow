@@ -18,6 +18,8 @@ import { listen } from "@tauri-apps/api/event";
 import { AcpWriteError } from "../../../src/plugins/host/service.ts";
 import { createTauriStdioTransport as createTransport } from "../../../src/plugins/acpConnection/protocol/transport/tauriStdioTransport.ts";
 import { createTauriAcpProcessHost } from "../../../src/plugins/host/process/acpProcess.ts";
+import { createAgentTransport } from "../../../src/plugins/agents/launch/agentTransport.ts";
+import { findAgentAdapter } from "../../../src/plugins/agents/registry/registry.ts";
 
 const createTauriStdioTransport = (options: AcpTransportLaunchOptions) =>
   createTransport(options, createTauriAcpProcessHost());
@@ -80,6 +82,24 @@ beforeEach(() => {
 });
 
 describe("createTauriStdioTransport", () => {
+  it("只将 iCode 的回环代理策略传到原生 ACP 启动命令", async () => {
+    const context = { workspacePath: "D:/project" };
+    const start = (agent: string) =>
+      createAgentTransport(findAgentAdapter(agent)!.buildLaunch(context), {
+        createTransport: createTauriStdioTransport,
+        commands: {} as never,
+      });
+    await start("chrys");
+    expect(lastInvoke("acp_spawn")).toMatchObject({
+      cwd: context.workspacePath,
+      proxyPolicy: "pythonHttpxLoopback",
+    });
+    await start("codeagent");
+    expect(lastInvoke("acp_spawn")).toMatchObject({
+      cwd: context.workspacePath,
+    });
+    expect(lastInvoke("acp_spawn")).not.toHaveProperty("proxyPolicy");
+  });
   it("独立探查标记传到宿主，避免回收项目会话", async () => {
     await createTauriStdioTransport({
       command: ["agent", "acp"],

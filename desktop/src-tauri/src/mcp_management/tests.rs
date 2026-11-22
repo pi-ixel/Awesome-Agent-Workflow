@@ -18,6 +18,69 @@ fn revision_of(snapshot: impl Serialize) -> String {
 }
 
 #[test]
+fn inspection_results_keep_versions_separate_and_reject_invalid_updates() {
+    let root = tempfile::tempdir().unwrap();
+    let first = "chrys/Code/managed/docs/version-1".to_owned();
+    let second = "chrys/Code/managed/docs/version-2".to_owned();
+    let row = |ok, time| inspection::Inspection {
+        ok,
+        message: if ok { "已连接" } else { "连接失败" }.into(),
+        checked_at: time,
+        duration_ms: 5,
+        tools: Some(inspection::tools(&[json!({"name":"docs_search"})])),
+    };
+    inspection::save_result(root.path(), first.clone(), row(true, 1)).unwrap();
+    inspection::save_result(root.path(), second.clone(), row(false, 2)).unwrap();
+    inspection::save_result(root.path(), first.clone(), row(true, 3)).unwrap();
+    let mut invalid = row(false, 4);
+    invalid.message = "x".repeat(1_025);
+    assert!(inspection::save_result(root.path(), first.clone(), invalid).is_err());
+    let versions = inspection::read_results(root.path(), &[first.clone(), second.clone()]).unwrap();
+    assert_eq!(versions[&first].checked_at, 3);
+    assert!(versions[&first].ok);
+    assert_eq!(versions[&second].checked_at, 2);
+    assert!(!versions[&second].ok);
+    let selected =
+        inspection::read_results(root.path(), &[first.clone(), "missing".into()]).unwrap();
+    assert_eq!(selected.keys().collect::<Vec<_>>(), vec![&first]);
+    assert_eq!(
+        serde_json::to_value(&selected[&first]).unwrap()["tools"][0]["name"],
+        "docs_search"
+    );
+}
+
+#[test]
+fn browser_tool_permissions_persist_and_invalid_edits_leave_them_intact() {
+    let root = tempfile::tempdir().unwrap();
+    let names = vec!["browser_open".to_owned()];
+    assert!(
+        inspection::browser_disabled(root.path())
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        inspection::set_browser_tools(root.path(), names.clone(), false).unwrap(),
+        names
+    );
+    assert!(
+        inspection::set_browser_tools(root.path(), vec!["unknown_browser_tool".into()], false)
+            .is_err()
+    );
+    let read = serde_json::to_value(inspection::browser_tools(root.path()).unwrap()).unwrap();
+    assert_eq!(read["disabledTools"], json!(names));
+    assert!(
+        inspection::set_browser_tools(root.path(), names, true)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        inspection::browser_disabled(root.path())
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
 fn native_edit_preserves_other_yaml_sections_and_refuses_a_stale_snapshot() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("Code.yaml");

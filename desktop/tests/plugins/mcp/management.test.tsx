@@ -21,6 +21,7 @@ import { BrowserAgentControlSettings } from "../../../src/plugins/browser/servic
 import { codeAgentAdapter } from "../../../src/plugins/agents/enhancements/codeagent/adapter.ts";
 import type { ProjectService } from "../../../src/plugins/project/service.ts";
 import { createTestBrowserHost } from "../../helpers/browserHost.ts";
+import { createSessionTools } from "../../../src/plugins/project/sessions/sessionTools.ts";
 import { createStore } from "zustand";
 
 afterEach(cleanup);
@@ -363,12 +364,15 @@ function fixture(nativeEntries: readonly NativeMcpEntry[] = []) {
         }),
     ),
     commitInstall: vi.fn(() => Promise.resolve({ applied: [], skipped: [] })),
-    managedResolve: vi.fn(() =>
+    managedResolve: vi.fn<McpManagementHost["managedResolve"]>(() =>
       Promise.resolve({
         revision: managed.revision,
         servers: [server],
         skipped: [],
       }),
+    ),
+    retireManaged: vi.fn<NonNullable<McpManagementHost["retireManaged"]>>(() =>
+      Promise.resolve(),
     ),
     testConfig: vi.fn(() => Promise.resolve(server)),
   } satisfies McpManagementHost;
@@ -473,6 +477,75 @@ it("uses the archived Profile for a restored session and keeps other Agents isol
     }),
   ).toEqual([]);
   expect(host.managedResolve).toHaveBeenCalledTimes(2);
+});
+
+it("释放会话时只注销该会话的托管 MCP 代理，重复释放不影响其他会话", async () => {
+  const { service, host, request, warn } = fixture();
+  const tools = createSessionTools({ warn } as never);
+  tools.register(service.sessionTools);
+  const context = {
+    agentId: "chrys",
+    agentKey: "chrys",
+    workspacePath: workspace,
+    agent: {
+      protocolVersion: 1,
+      agentInfo: { name: "iCode" },
+      agentCapabilities: capabilities,
+    },
+    requestExtension: request,
+  };
+  const first = await tools.resolve({ ...context, sessionId: "first" });
+  const second = await tools.resolve({ ...context, sessionId: "second" });
+  const [firstGeneration, secondGeneration] =
+    host.managedResolve.mock.calls.map((call) => call[2]);
+  expect(firstGeneration).toEqual(expect.any(String));
+  expect(secondGeneration).not.toBe(firstGeneration);
+  expect(first.servers.map(({ name }) => name)).toEqual(["managed-tools"]);
+  await first.dispose?.();
+  await first.dispose?.();
+  expect(host.retireManaged.mock.calls).toEqual([[firstGeneration]]);
+  await second.dispose?.();
+  expect(host.retireManaged.mock.calls).toEqual([
+    [firstGeneration],
+    [secondGeneration],
+  ]);
+});
+
+it("会话已超时时回收迟到的托管 MCP 代理", async () => {
+  const { service, host, request } = fixture();
+  type Result = Awaited<ReturnType<McpManagementHost["managedResolve"]>>;
+  let finish!: (result: Result) => void;
+  const delayed = new Promise<Result>((resolve) => {
+    finish = resolve;
+  });
+  const onDispose = vi.fn();
+  host.managedResolve.mockReturnValueOnce(delayed);
+  vi.useFakeTimers();
+  try {
+    const pending = service.sessionTools({
+      agentId: "chrys",
+      agentKey: "chrys",
+      workspacePath: workspace,
+      sessionId: "late",
+      agent: {
+        protocolVersion: 1,
+        agentInfo: { name: "iCode" },
+        agentCapabilities: capabilities,
+      },
+      requestExtension: request,
+      onDispose,
+    });
+    await vi.advanceTimersByTimeAsync(6_000);
+    await expect(pending).resolves.toEqual([]);
+    const generation = host.managedResolve.mock.calls[0]?.[2];
+    expect(generation).toEqual(expect.any(String));
+    finish({ revision: "managed-rev", servers: [], skipped: [] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(host.retireManaged).toHaveBeenCalledExactlyOnceWith(generation);
+    expect(onDispose).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("tests the unsaved HTTP draft from the unified card editor and confirms deletion", async () => {
