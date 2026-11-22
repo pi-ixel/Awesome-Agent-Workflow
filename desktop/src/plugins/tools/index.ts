@@ -279,6 +279,9 @@ export function apply(ctx: Context): void {
     if (!repairs.length) return;
     // 物化是异步的，期间可能换了账号：这时写回会落到别人的账下。
     if (owner() !== current) return;
+    // 先把这批目录从"丢失"集合里撤掉再写配置：`update()` 会触发配置订阅重放
+    // `readCurrent()`，顺序反了就会带着旧标记重放一次，卡片一直说它坏了。
+    for (const repair of repairs) missingDirs.delete(repair.dir);
     try {
       update((list) => list.map((entry) => {
         const repair = repairs.find((item) => item.id === entry.package.id);
@@ -286,7 +289,6 @@ export function apply(ctx: Context): void {
         const clean = entry.broken?.kind === "missing-dir" ? withoutKey(entry, "broken") : entry;
         return { ...clean, dir: repair.dir };
       }));
-      for (const repair of repairs) missingDirs.delete(repair.dir);
     } catch { /* 配置写不进去不该影响启动 */ }
   }
 
@@ -412,6 +414,10 @@ export function apply(ctx: Context): void {
       });
     },
     setRunDir(id, dir) {
+      // 重建常常落回同一个路径（同名版本目录空了就复用）。启动探测留下的
+      // "丢失"记录还记着它，不先撤掉，下面这次配置重放会立刻把坏标记贴回去：
+      // 用户点开能用，卡片却永久显示"目录已丢失"。
+      missingDirs.delete(dir);
       update((current) => current.map((entry) => {
         if (entry.package.id !== id) return entry;
         // 目录重建成功了，"目录丢失"这个标记就该消失，否则卡片会一直说它坏了。

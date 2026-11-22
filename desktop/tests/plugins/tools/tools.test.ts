@@ -329,3 +329,32 @@ it("ignores a retained copy that no longer belongs to the tool", async () => {
     expect(await host.archives.readTextFile(`${tools.state.getState()[0]?.dir}/index.html`)).toContain("Run");
   });
 });
+
+/**
+ * 开发来源（`sourceDir`）不跟着版本走：更新、退版都该留着它，只有导入 ZIP /
+ * 显式清空时才消失。
+ *
+ * 管理页用这个字段显示"这个工具从哪个目录装进来的"。退版时把它一起丢掉，
+ * 用户就再也找不到自己的源码目录了——而这正是他退版之后最想去改的地方。
+ */
+it("keeps the authoring source across updates and rollbacks, clears it only on request", async () => {
+  await withContext(async ({ tools, host }) => {
+    await seedRunDir(host, "E:/run/v1", "notes", "1.0.0", "<p>v1</p>");
+    await seedRunDir(host, "E:/run/v2", "notes", "2.0.0", "<p>v2</p>");
+    tools.install(makeTool("notes"), { runDir: "E:/run/v1", sourceDir: "E:/dev/notes" });
+    expect(tools.state.getState()[0]?.sourceDir).toBe("E:/dev/notes");
+
+    // 从工坊再装一版（只给运行副本，没提来源）：来源沿用，不该被空值覆盖。
+    tools.install({ ...makeTool("notes"), version: "2.0.0" }, { replace: true, runDir: "E:/run/v2" });
+    expect(tools.state.getState()[0]?.sourceDir).toBe("E:/dev/notes");
+
+    // 退版同理：退回的是代码，来源还是那个目录。
+    await tools.rollback("notes");
+    expect(tools.state.getState()[0]?.dir).toBe("E:/run/v1");
+    expect(tools.state.getState()[0]?.sourceDir).toBe("E:/dev/notes");
+
+    // 显式 null（ZIP 导入没有开发来源）才真的清掉。
+    tools.install({ ...makeTool("notes"), version: "3.0.0" }, { replace: true, runDir: "E:/run/v1", sourceDir: null });
+    expect(tools.state.getState()[0]?.sourceDir).toBeUndefined();
+  });
+});
