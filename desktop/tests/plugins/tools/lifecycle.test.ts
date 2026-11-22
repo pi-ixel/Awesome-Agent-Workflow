@@ -1405,4 +1405,24 @@ describe("工具模块的版本副本回收", () => {
     expect(await app.versionDirs("notes")).toEqual(["1.0.0"]);
     await expectConsistent(app);
   });
+
+  /**
+   * 第一次安装就崩了：磁盘上有 `versions/` 与写了一半的暂存目录，配置里
+   * **没有**这个 id。启动自愈以前按条目遍历，这种"没有条目的工具"永远轮不到
+   * ——而卸载也只能从卡片发起，卡片根本不存在。于是它一直占着盘（带依赖树的
+   * 包就是几百 MB），没有任何入口能清。
+   */
+  it("收掉没有安装记录的暂存目录（首次安装中途崩溃）", async () => {
+    const app = await device();
+    // 只布置磁盘，不装任何工具：这就是"写盘完成前进程被杀"的样子。
+    const orphan = joinPath(installedRoot, "halftool", "versions", ".staging-crash");
+    app.backend.addDir(orphan);
+    await app.backend.writeTextFile(joinPath(orphan, "manifest.json"), "{}");
+    expect(await app.stagingLeftovers("halftool")).toEqual([".staging-crash"]);
+
+    await app.restart();
+    expect(await app.stagingLeftovers("halftool")).toEqual([]);
+    // 没记录的工具不该因为这次扫描凭空多出一条安装记录。
+    expect(app.tools().state.getState()).toEqual([]);
+  });
 });

@@ -87,11 +87,26 @@ export interface ToolPurgeInput {
 
 export interface ToolPurgeReport {
   readonly removedDirs: readonly string[];
-  /** 校验没过或删除失败的目录，界面要如实告诉用户"这几个没删掉"。 */
+  /** **不该删**的目录（清单读不出来、或 id 对不上）。跳过属于正常，界面如实报数即可。 */
   readonly skippedDirs: readonly string[];
+  /**
+   * **该删但没删掉**的目录（被占用、权限不足）。
+   *
+   * 必须与 `skippedDirs` 分开：两者的处理相反。前者可以放心撤记录，后者一撤
+   * 就变成"盘上留着几十 MB、卡片没了、再没有重试入口"。有这一项时界面要留住
+   * 记录，让用户关掉占用它的程序再点一次。
+   */
+  readonly failedDirs: readonly string[];
   readonly removedData: boolean;
   /** `backups/<账号>/<id>`（只有一份上一版清单）是否删掉了。 */
   readonly removedBackup: boolean;
+  /**
+   * `secrets/<账号>/<id>.json`（工具存下的加密凭据）是否删掉了。
+   *
+   * 它不属于"工具数据"那份 JSON，却同样敏感：卸载后留在盘上，重装一个同 id
+   * 的工具就能读到。卸载必须一起清。
+   */
+  readonly removedSecrets: boolean;
 }
 
 /** `tool_prune_versions` 的报告（与 Rust 侧 `ToolPruneReport` 一一对应）。 */

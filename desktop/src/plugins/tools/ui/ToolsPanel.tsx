@@ -411,11 +411,18 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
     onOpen={() => void openTool(managed.package.id)} onExport={() => void exportTool(managed.package, managed.dir)}
     onRollback={() => void rollbackTool(managed.package.id)}
     onSave={(values) => { try { service.saveSettings(managed.package.id, values); setFeedback({ text: "设置已保存，重新打开插件后生效。" }); return true; } catch (error) { setFeedback({ text: errorText(error), error: true }); return false; } }}
-    onRemove={() => {
-      run(() => { service.remove(managed.package.id); setView({ kind: "library" }); });
+    onRemove={() => { void (async () => {
+      const id = managed.package.id;
       // 管理页也是卸载入口，同样要把它的窗口关掉——常驻工具不关就还在后台跑。
-      if (host.isNative()) void host.stopTool(managed.package.id).catch(() => {});
-    }}
+      if (host.isNative()) void host.stopTool(id).catch(() => {});
+      // 与列表页「卸载（同时删除文件）」走同一条链：先清盘、成功后才撤记录。
+      // 以前这里只 `service.remove`：运行副本（可能带着 node_modules）、工具数据、
+      // 加密密钥与备份清单都留在盘上，而记录一没，界面上再没有能清掉它们的入口。
+      const note = await workshop.purge(id);
+      if (note.error) { setFeedback({ text: note.text, error: true }); return; }
+      setView({ kind: "library" });
+      setFeedback({ text: `已卸载。${note.text}` });
+    })(); }}
     onUpdate={(file) => { void (async () => { try {
       const upload = await readToolUpload(file);
       if (upload.tool.id !== managed.package.id) throw new Error("更新包的插件 ID 必须与当前插件一致。");

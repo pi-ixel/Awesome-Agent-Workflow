@@ -113,9 +113,11 @@ it("opens the tool directly, routes Manage separately, saves settings and export
   const open = vi.fn().mockResolvedValue(undefined);
   const write = vi.fn().mockResolvedValue(undefined);
   const stop = vi.fn().mockResolvedValue(undefined);
+  // 管理页卸载也走 purge（先清盘、成功后才撤记录），这里只断言它被调用。
+  const purge = vi.fn().mockResolvedValue({ text: "已删除 2 个目录。" });
   const host = { isNative: () => true, openTool: open, writeToolArchive: write, stopTool: stop,
     dialogs: { saveFile: vi.fn().mockResolvedValue("E:/export.zip") } } as unknown as HostService;
-  render(<ToolsPanel service={service} host={host} workshop={fakeWorkshop()} />);
+  render(<ToolsPanel service={service} host={host} workshop={{ ...fakeWorkshop(), purge }} />);
   fireEvent.click(screen.getByRole("button", { name: "打开 JSON 格式化" }));
   // openTool 现在带安装记录里的运行副本目录（fakeWorkshop 默认合成一个）。
   await waitFor(() => expect(open).toHaveBeenCalledWith(sampleTool.id, `E:/AAW/tools/installed/${sampleTool.id}`));
@@ -142,9 +144,14 @@ it("opens the tool directly, routes Manage separately, saves settings and export
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("导出失败：磁盘无法写入"));
   expandSection(/卸载插件/);
   fireEvent.click(screen.getByRole("button", { name: "卸载" }));
-  expect(service.remove).not.toHaveBeenCalled();
+  expect(purge).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "确认卸载" }));
-  expect(service.remove).toHaveBeenCalledWith(sampleTool.id);
+  // 管理页的「卸载」与列表页勾了「同时删除文件」是同一件事：走 purge 先清盘，
+  // 由它成功后再撤记录。以前这里只调 `service.remove`，运行副本、工具数据、
+  // 密钥与备份全留在盘上——记录一没，界面上再没有能清掉它们的入口。
+  await waitFor(() => expect(purge).toHaveBeenCalledWith(sampleTool.id));
+  expect(service.remove).not.toHaveBeenCalled();
+  expect(screen.getByRole("status")).toHaveTextContent("已卸载");
   // 卸载之后窗口不该继续活着：顺手走同一个停止通道把它关掉。
   expect(stop).toHaveBeenCalledWith(sampleTool.id);
 });

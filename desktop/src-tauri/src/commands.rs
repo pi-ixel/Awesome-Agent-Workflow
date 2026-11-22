@@ -376,10 +376,17 @@ pub fn list_tool_files(root: String, limit: Option<usize>) -> Result<Vec<String>
 #[serde(rename_all = "camelCase")]
 pub struct ToolPurgeReport {
     pub removed_dirs: Vec<String>,
+    /// **不该删**的目录：清单读不出来、或清单 id 不是这个工具。属于正常跳过。
     pub skipped_dirs: Vec<String>,
+    /// **该删但没删掉**的目录：被占用、权限不足。与 `skipped_dirs` 分开，
+    /// 因为前端对两者的处理相反——前者可以放心撤记录，后者撤了记录就等于
+    /// 把一堆删不掉的文件永久留在盘上（卡片没了，再没有重试入口）。
+    pub failed_dirs: Vec<String>,
     pub removed_data: bool,
     /// `backups/<账号>/<id>` 是否删掉了（只含一份 `previous.json`）。
     pub removed_backup: bool,
+    /// `secrets/<账号>/<id>.json` 是否删掉了。
+    pub removed_secrets: bool,
 }
 
 /// 判断一个目录是不是某工具的项目目录：必须有 manifest.json 且其中的 id 与
@@ -390,8 +397,57 @@ fn is_tool_project_dir(dir: &std::path::Path, tool_id: &str) -> bool {
     let Ok(text) = std::fs::read_to_string(manifest) else {
         return false;
     };
-    // 只做字符串层面的一致性检查：这里不解析 JSON，避免为一个守卫引入解析分支。
-    text.contains(&format!("\"id\": \"{tool_id}\"")) || text.contains(&format!("\"id\":\"{tool_id}\""))
+    // 解析后比 id，不比字符串：以前按 `"id": "..."` 的字面量匹配，作者用
+    // `"id" : "x"` 这种格式（或任何别的排版）写出来的清单会匹配不上，
+    // 卸载时整个目录被跳过，记录一撤就再没有入口能清它。
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return false;
+    };
+    value.get("id").and_then(|id| id.as_str()) == Some(tool_id)
+}
+
+/// 删一个目录，给刚被终止的进程一点时间松手。
+///
+/// Windows 上 `TerminateProcess` 返回不等于文件句柄已释放：卸载正在运行的
+/// 工具时第一次 `remove_dir_all` 常常卡在那个 exe / dll 上失败。以前一次
+/// 失败就当"跳过"，而记录随后就被撤掉——目录留在盘上，界面上再没有任何
+/// 入口能清它。重试几次的成本是几十毫秒，比留一地删不掉的目录便宜。
+fn remove_dir_all_settling(dir: &std::path::Path) -> bool {
+    for attempt in 0..4 {
+        if std::fs::remove_dir_all(dir).is_ok() {
+            return true;
+        }
+        if attempt < 3 {
+            std::thread::sleep(std::time::Duration::from_millis(60));
+        }
+    }
+    // 最后一次仍报错，也可能已经有别处把它删掉了。
+    !dir.exists()
+}
+
+/// 卸载时清掉"按工具 id 存在宿主管辖分区里的私有物"：上一版清单与加密凭据。
+///
+/// 返回 `(上一版清单目录删掉了没有, 密钥文件删掉了没有)`。分区一律走
+/// `location::tool_partition`（账号段、迁盘指针、自定义家都在那里解析），
+/// 不在这里手拼——工具库搬到别的盘之后手拼的路径会删错位置。
+///
+/// 单独成函数是为了能单测：`tool_purge` 要 `AppHandle`，这里只要一个数据根。
+fn purge_tool_private(data: &std::path::Path, owner: &str, tool_id: &str) -> (bool, bool) {
+    let mut backup = false;
+    let mut secrets = false;
+    if let Ok(base) = crate::tools::location::tool_partition(data, owner, "backups") {
+        let dir = base.join(tool_id);
+        if dir.is_dir() {
+            backup = remove_dir_all_settling(&dir);
+        }
+    }
+    if let Ok(base) = crate::tools::location::tool_partition(data, owner, "secrets") {
+        let path = base.join(format!("{tool_id}.json"));
+        if path.is_file() {
+            secrets = std::fs::remove_file(&path).is_ok();
+        }
+    }
+    (backup, secrets)
 }
 
 /// 删除一个工具留下的痕迹：项目目录 + `aawStore` 数据文件。
@@ -400,8 +456,12 @@ fn is_tool_project_dir(dir: &std::path::Path, tool_id: &str) -> bool {
 /// 看不到也清不掉。落点：项目目录由前端传入（可能在他选的位置），数据文件
 /// 固定在 `%LOCALAPPDATA%/com.aaw.desktop/tools/storage/<owner>/<id>.json`
 /// ——和 tools-runtime 的 `tool-storage.mjs` 保持同一口径。
+///
+/// **异步命令**：这个命令要删的是几十到几百 MB 的目录（带 `node_modules`
+/// 的工具），同步命令跑在主线程上，删的整段时间界面不响应。与"建窗命令必须
+/// async"是同一条纪律。
 #[tauri::command]
-pub fn tool_purge(
+pub async fn tool_purge(
     app: tauri::AppHandle,
     tool_id: String,
     owner: String,
@@ -417,11 +477,26 @@ pub fn tool_purge(
     if !valid_id(&tool_id) || !valid_id(&owner) {
         return Err("工具 ID 或账号标识不合法".into());
     }
+    // **先停、再删**。反过来的话，正在运行的工具握着 exe/dll 的句柄，删除
+    // 会失败并被记成"跳过"，而记录随后照样被撤掉——窗口还开着（页面文件已
+    // 被删了一半），卡片却没了，用户既关不掉也重开不了。
+    if let Some(host) = tauri::Manager::try_state::<crate::tools::ToolsHost>(&app) {
+        // 卸载后运行目录登记不再有意义：清掉，避免下次重装同名工具时协议层
+        // 还查到指向旧目录的悬空项。
+        host.clear_runtime_dir(&tool_id);
+        host.remove_process(&tool_id);
+        // 窗口留着就是一片白：它的页面、样式、依赖都随版本目录被删了。
+        if let Some(window) = tauri::Manager::get_webview_window(&app, &format!("tool-{tool_id}")) {
+            let _ = window.destroy();
+        }
+    }
     let mut report = ToolPurgeReport {
         removed_dirs: Vec::new(),
         skipped_dirs: Vec::new(),
+        failed_dirs: Vec::new(),
         removed_data: false,
         removed_backup: false,
+        removed_secrets: false,
     };
     for raw in project_dirs {
         let dir = std::path::Path::new(&raw);
@@ -429,9 +504,11 @@ pub fn tool_purge(
             report.skipped_dirs.push(raw);
             continue;
         }
-        match std::fs::remove_dir_all(dir) {
-            Ok(()) => report.removed_dirs.push(raw),
-            Err(_) => report.skipped_dirs.push(raw),
+        if remove_dir_all_settling(dir) {
+            report.removed_dirs.push(raw);
+        } else {
+            // 是这个工具的目录，却删不掉：交给前端决定"先别撤记录"。
+            report.failed_dirs.push(raw);
         }
     }
     // 工具数据文件：路径由 ToolStore 统一解析（含 data-location.json 指针与
@@ -447,22 +524,17 @@ pub fn tool_purge(
         // 上一版清单（`backups/<账号>/<id>/previous.json`）在卸载后不会再被
         // 任何记录引用。以前它永远留在盘上：用户看不到，也没有入口删。
         //
-        // 分区由 location 按账号解析——以前这类路径一律手拼，工具目录迁到别的
-        // 盘（或账号家在自定义位置）之后就会删错地方。只删整个 `<id>` 目录：
-        // 那下面按设计只有这一份清单。
+        // 工具存的密钥（`secrets/<账号>/<id>.json`，内容是加密后的 token）同理：
+        // 界面上勾的「同时删除项目目录与工具数据」不包含这一份，于是用户以为
+        // 清干净了，磁盘上还留着密文；再装一个同 id 的工具能直接读到。
+        //
+        // 两处分区都由 location 按账号解析——以前这类路径一律手拼，工具目录
+        // 迁到别的盘（或账号家在自定义位置）之后就会删错地方。
         if let Ok(data) = host.data_root() {
-            if let Ok(base) = crate::tools::location::tool_partition(&data, &owner, "backups") {
-                let dir = base.join(&tool_id);
-                if dir.is_dir() {
-                    report.removed_backup = std::fs::remove_dir_all(&dir).is_ok();
-                }
-            }
+            let (backup, secrets) = purge_tool_private(&data, &owner, &tool_id);
+            report.removed_backup = backup;
+            report.removed_secrets = secrets;
         }
-    }
-    // 卸载后运行目录登记不再有意义：清掉，避免下次重装同名工具时协议层
-    // 还查到指向旧目录的悬空项。
-    if let Some(host) = tauri::Manager::try_state::<crate::tools::ToolsHost>(&app) {
-        host.clear_runtime_dir(&tool_id);
     }
     Ok(report)
 }
@@ -491,8 +563,11 @@ pub struct ToolPruneReport {
 /// 边界刻意收窄：只扫 `versions/` 的直接子目录（别处的路径一概不碰）；
 /// 跳过 `.staging-*`（那是"安装失败清理"自己的活）与符号链接；记录读不出来
 /// 时一个都不删——"解析失败"不等于"没人引用"。
+///
+/// **异步命令**：一次可能删掉几百 MB（上一版带的 `node_modules`），同步命令
+/// 会把主线程占住，界面在回收期间不响应。
 #[tauri::command]
-pub fn tool_prune_versions(
+pub async fn tool_prune_versions(
     app: tauri::AppHandle,
     tool_id: String,
     owner: String,
@@ -1065,6 +1140,74 @@ mod tests {
 
         let store = crate::tools::store::ToolStore::new(&root);
         assert!(referenced_version_dirs(&store, "alice", "notes").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 卸载要把"按 id 存的私有物"清干净：上一版清单与加密凭据。
+    ///
+    /// 这两样都不在 `storage/<id>.json` 里，界面上勾的「删除工具数据」也
+    /// 覆盖不到它们。少删一份，用户以为清干净了，盘上还留着密文。
+    #[test]
+    fn purge_private_removes_backup_and_secrets_only_for_this_tool() {
+        let root = temp_dir("purge-private");
+        let backups = root.join("tools/backups/alice");
+        let secrets = root.join("tools/secrets/alice");
+        std::fs::create_dir_all(backups.join("notes")).unwrap();
+        std::fs::create_dir_all(backups.join("timer")).unwrap();
+        std::fs::create_dir_all(&secrets).unwrap();
+        std::fs::write(backups.join("notes/previous.json"), "{}").unwrap();
+        std::fs::write(backups.join("timer/previous.json"), "{}").unwrap();
+        std::fs::write(secrets.join("notes.json"), "{}").unwrap();
+        std::fs::write(secrets.join("timer.json"), "{}").unwrap();
+
+        let (backup, secrets_removed) = purge_tool_private(&root, "alice", "notes");
+
+        assert!(backup && secrets_removed);
+        assert!(!backups.join("notes").exists());
+        assert!(!secrets.join("notes.json").exists());
+        // 同账号的另一个工具一个字节都不该动。
+        assert!(backups.join("timer/previous.json").is_file());
+        assert!(secrets.join("timer.json").is_file());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn purge_private_reports_nothing_when_absent() {
+        // 没存过密钥、没做过更新：两份都不存在，报告必须是 false，而不是报错。
+        let root = temp_dir("purge-private-empty");
+        std::fs::create_dir_all(&root).unwrap();
+        let (backup, secrets) = purge_tool_private(&root, "alice", "notes");
+        assert!(!backup && !secrets);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 删除前的认领判据必须是"解析出来的 id"，不是字符串包含。
+    ///
+    /// 作者用 `"id" : "notes"`（冒号前有空格）这种排版写清单时，以前那种
+    /// `contains("\"id\": \"notes\"")` 会判定"不是这个工具的目录"而跳过；
+    /// 记录随即被撤掉，那个目录（可能带 node_modules）就再没有入口能清。
+    #[test]
+    fn purge_guard_parses_manifest_instead_of_matching_text() {
+        let root = temp_dir("purge-guard");
+        let write = |name: &str, body: &str| {
+            let dir = root.join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("manifest.json"), body).unwrap();
+            dir
+        };
+        let spaced = write("spaced", "{ \"id\" : \"notes\", \"name\": \"Notes\" }");
+        let minified = write("minified", "{\"id\":\"notes\",\"name\":\"Notes\"}");
+        let other = write("other", "{ \"id\": \"timer\", \"name\": \"Timer\" }");
+        let odd = write("odd", "{ \"id\": \"notes-2\" }");
+        let bare = root.join("bare");
+        std::fs::create_dir_all(&bare).unwrap();
+
+        assert!(is_tool_project_dir(&spaced, "notes"));
+        assert!(is_tool_project_dir(&minified, "notes"));
+        assert!(!is_tool_project_dir(&other, "notes"));
+        // 前缀相同但 id 不同：按子串匹配会误删，按解析比不会。
+        assert!(!is_tool_project_dir(&odd, "notes"));
+        assert!(!is_tool_project_dir(&bare, "notes"));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

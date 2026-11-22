@@ -573,8 +573,6 @@ export function createWorkshop(deps: {
     // （新建 / 安装 / 改名 / 继续开发）。
     try { await readCheck(dir); }
     catch (error) { patch({ note: { text: errorText(error), error: true } }); }
-    try { await readCheck(dir); }
-    catch (error) { patch({ note: { text: errorText(error), error: true } }); }
     // 选中后立刻刷新一次列表：目录可能是 AI 刚写完、列表还是旧的。
     void refreshProjects();
   }
@@ -1009,7 +1007,19 @@ export function createWorkshop(deps: {
           const parts: string[] = [];
           if (report.removedDirs.length) parts.push(`已删除 ${report.removedDirs.length} 个目录（源码或运行副本，含 node_modules）`);
           if (report.removedData) parts.push("已删除工具数据");
+          // 密钥单独说一句：它不在"工具数据"那份 JSON 里，用户有权知道凭据
+          // 也被清掉了（反过来说，删失败时他得知道还留在盘上）。
+          if (report.removedSecrets) parts.push("已删除工具保存的密钥");
           if (report.skippedDirs.length) parts.push(`${report.skippedDirs.length} 个目录没有删除（不在受管目录内，或不是这个工具）`);
+          // **删不掉就不是卸载成功**：记录一撤，卡片消失，盘上那几十 MB 再没有
+          // 入口能清（"先清盘、成功后才删记录"）。宿主把"该删但没删掉"单独报
+          // 回来，正是为了在这里留住记录——用户关掉占用它的程序再点一次即可。
+          if (report.failedDirs.length) {
+            return {
+              text: `有 ${report.failedDirs.length} 个目录没删掉（多半正被占用）。工具记录先留着，关掉相关窗口或程序后再点一次「卸载」。`,
+              error: true,
+            };
+          }
           // 排队期间可能刚装好一版（那次提交把记录写回来了）。卸载是后点的那个
           // 意图：记录也要一起撤掉，否则界面留下一张指向已删目录的卡片。
           // 放在删除之后：清理失败时记录还在，用户可以再点一次，不必重新导入。
@@ -1061,9 +1071,18 @@ export function createWorkshop(deps: {
       try {
         // 带上目录里的其余文件（依赖、图片等），与 ZIP 导入走同一条安装链路。
         const extra = await readToolDirFiles(io, dir);
+        // 读不全就不装。装一份"少了几个依赖"的副本，打开不报错、点哪儿都空白，
+        // 比当场失败难查得多——这条纪律「确认安装」那一路（`installFiles`）一直
+        // 守着，这里以前只把数量写进提示、照样装了进去。
+        if (extra.skipped.length) {
+          const names = extra.skipped.slice(0, 3).join("、");
+          return {
+            text: `项目里有 ${extra.skipped.length} 个文件读不出来或超过单包上限（${names}${extra.skipped.length > 3 ? " 等" : ""}），这次没有导入。处理掉这些文件，或改用「导入工具 → ZIP 包」逐个确认。`,
+            error: true,
+          };
+        }
         const outcome = await installArchive(check.tool, extra.files);
-        const skipped = extra.skipped.length ? `（${extra.skipped.length} 个文件超过单包上限没带走）` : "";
-        return { text: describeInstall(outcome, check.tool.name) + skipped };
+        return { text: describeInstall(outcome, check.tool.name) };
       } catch (error) {
         return { text: errorText(error), error: true };
       }

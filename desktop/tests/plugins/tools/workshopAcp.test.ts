@@ -34,7 +34,7 @@ function harness() {
       listToolFiles: () => Promise.resolve([]),
       readBinaryFile: () => Promise.reject(new Error("本用例不读二进制")),
       writeBinaryFile: () => Promise.resolve(),
-      toolPurge: () => Promise.resolve({ removedDirs: [], removedData: false, skippedDirs: [] }),
+      toolPurge: () => Promise.resolve({ removedDirs: [], skippedDirs: [], failedDirs: [], removedData: false, removedBackup: false, removedSecrets: false }),
     },
     archives: { readTextFile: (path: string) => io.readTextFile(path) },
     files: { openInFileManager: vi.fn() },
