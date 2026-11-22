@@ -3,6 +3,7 @@ import type { Context } from "cordis";
 import { createStore } from "zustand";
 import { createTestDesktopRuntime } from "../../helpers/desktopRuntime.ts";
 import type { HostService } from "../../../src/plugins/host/service.ts";
+import type { ToolPurgeReport } from "../../../src/plugins/host/types.ts";
 import type { ProjectService } from "../../../src/plugins/project/service.ts";
 import { hostToolIO, memoryToolIO } from "../../../src/plugins/tools/runtime/io.ts";
 import { parseToolPackage } from "../../../src/plugins/tools/runtime/package.ts";
@@ -22,7 +23,10 @@ function harness(options: { native?: boolean; settings?: { read: () => string | 
   const openInFileManager = vi.fn().mockResolvedValue(undefined);
   // 二进制端口的最小实现：导入/导出文件夹时 listToolFiles / readBinaryFile 会用到。
   const binaries = new Map<string, string>();
+  /** 列得出来但读不出来的文件：模拟"超过单包上限 / 被占用"。 */
+  const unreadable = new Set<string>();
   const readBinaryFile = (path: string) => {
+    if (unreadable.has(path)) return Promise.reject(new Error("这个文件读不出来"));
     // 二进制端口存的就是 base64 原文：不能再编码一次，否则读回来的是它的 base64。
     const saved = binaries.get(path);
     if (saved !== undefined) return Promise.resolve(saved);
@@ -34,7 +38,9 @@ function harness(options: { native?: boolean; settings?: { read: () => string | 
     for (const byte of bytes) binary += String.fromCharCode(byte);
     return Promise.resolve(btoa(binary));
   };
-  const toolPurge = vi.fn(() => Promise.resolve({ removedDirs: [], removedData: false, skippedDirs: [] }));
+  // 返回类型必须显式写上：否则 `[]` 会被推成 `never[]`，单个用例里
+  // `mockResolvedValue({ removedDirs: ["/x"] })` 就报 TS2322。
+  const toolPurge = vi.fn((): Promise<ToolPurgeReport> => Promise.resolve({ removedDirs: [], skippedDirs: [], failedDirs: [], removedData: false, removedBackup: false, removedSecrets: false }));
   const host = {
     isNative: () => options.native ?? true,
     skills: {
@@ -79,15 +85,24 @@ function harness(options: { native?: boolean; settings?: { read: () => string | 
   const setRunDir = vi.fn();
   const setSourceDir = vi.fn();
   const toolStore = createStore<readonly PersonalTool[]>(() => []);
+  /** 真正写进安装记录的那些包：断言"什么都没装"比断言 mock 被调用更直接。 */
+  const installs: unknown[] = [];
+  /** 真正被撤掉的记录 id（卸载成功才会往里写）。 */
+  const removes: string[] = [];
   const tools = {
     state: toolStore,
     // 返回真实的 InstallOutcome：installArchive 之后 describeInstall 要读它。
-    install: vi.fn((tool: { version: string }) => ({ version: tool.version, updated: false, versionChanged: false })),
+    install: vi.fn((tool: { version: string }) => {
+      installs.push(tool);
+      return { version: tool.version, updated: false, versionChanged: false };
+    }),
     rollback: vi.fn(),
     setRunDir,
     setSourceDir,
     open: vi.fn(),
-    remove: vi.fn(),
+    // 真正被撤掉的记录 id：断言"记录还在"比断言 mock 没被调用更直接
+    // （且不必引用 mock 方法，避开 unbound-method 规则）。
+    remove: vi.fn((id: string) => { removes.push(id); }),
     saveSettings: vi.fn(),
   } as unknown as ToolsService;
   const service = options.toolsService ?? tools;
@@ -116,7 +131,7 @@ function harness(options: { native?: boolean; settings?: { read: () => string | 
   } as unknown as ProjectService;
 
   const workshop = createWorkshop({ tools: service, project, host, owner: options.owner ?? (() => "u1"), ...(options.settings ? { settings: options.settings } : {}) });
-  return { workshop, io, dir, send, openInFileManager, session, setRunDir, setSourceDir, project, startNewSession, pickDirectory, tools: service, fakeTools: tools, toolStore, host, toolPurge, workspace };
+  return { workshop, io, dir, send, openInFileManager, session, setRunDir, setSourceDir, project, startNewSession, pickDirectory, tools: service, fakeTools: tools, toolStore, host, toolPurge, workspace, unreadable, installs, removes };
 }
 
 /** 让 AI 停下来：工坊的回调是订阅里发的，不等它跑完就断言会读到旧状态。 */
@@ -751,4 +766,87 @@ it("refuses a package that only carries the manifest", async () => {
       expect(tools.state.getState()).toEqual([]);
     } finally { h.workshop.dispose(); }
   });
+});
+
+/**
+ * 导入文件夹：只要有文件读不出来（超上限 / 被占用），整体不装。
+ *
+ * 以前这里只把数量写进成功提示、照样把读到的部分装进去。少几个依赖的副本
+ * 打开不报错、点哪儿都空白——比当场失败难查得多。「确认安装」那条路
+ * （`installFiles`）一直守着这条纪律，两条入口不该有两个标准。
+ */
+it("refuses to import a folder when any file cannot be read", async () => {
+  const h = harness();
+  try {
+    await h.io.writeTextFile(`${h.dir}/manifest.json`, JSON.stringify({
+      schemaVersion: 1, id: "demo", name: "演示", version: "1.0.0",
+    }));
+    await h.io.writeTextFile(`${h.dir}/index.html`, "<p>demo</p>");
+    await h.io.writeTextFile(`${h.dir}/assets/logo.png`, "binary");
+    h.unreadable.add(`${h.dir}/assets/logo.png`);
+    h.pickDirectory.mockResolvedValue(h.dir);
+
+    const note = await h.workshop.importFromFolder();
+
+    expect(note.error).toBe(true);
+    expect(note.text).toContain("这次没有导入");
+    expect(note.text).toContain("logo.png");
+    expect(h.installs).toEqual([]);
+  } finally {
+    h.workshop.dispose();
+  }
+});
+
+/**
+ * 卸载报告要把"密钥也清了"单独说出来。
+ *
+ * 密钥不在 `storage/<id>.json` 里，用户勾的「删除工具数据」在他理解中覆盖不到
+ * 这一份。只在删掉时提一句，删失败时这句话不出现——不能拿一句笼统的
+ * "已清理"糊过去。
+ */
+it("says so when uninstall also removed the tool's stored secrets", async () => {
+  const h = harness();
+  h.toolPurge.mockResolvedValue({
+    removedDirs: ["E:/AAW/tools/installed/u1/demo"],
+    skippedDirs: [],
+    failedDirs: [],
+    removedData: true,
+    removedBackup: true,
+    removedSecrets: true,
+  });
+  try {
+    const note = await h.workshop.purge("demo");
+    expect(note.error).toBeUndefined();
+    expect(note.text).toContain("已删除工具数据");
+    expect(note.text).toContain("密钥");
+  } finally {
+    h.workshop.dispose();
+  }
+});
+
+/**
+ * "该删但没删掉"不等于卸载成功。
+ *
+ * 记录一撤，卡片就从列表里消失；盘上那几十 MB（被占用、权限不足）再没有任何
+ * 入口能清，用户连重试的按钮都没有。所以这一路必须留住记录并明说原因——
+ * 与"校验没过、本来就该跳过的目录"要分开处理。
+ */
+it("keeps the record when a directory could not be deleted", async () => {
+  const h = harness();
+  h.toolPurge.mockResolvedValue({
+    removedDirs: [],
+    skippedDirs: [],
+    failedDirs: ["E:/AAW/tools/installed/u1/demo/versions/1.0.0"],
+    removedData: false,
+    removedBackup: false,
+    removedSecrets: false,
+  });
+  try {
+    const note = await h.workshop.purge("demo");
+    expect(note.error).toBe(true);
+    expect(note.text).toContain("没删掉");
+    expect(h.removes).toEqual([]);
+  } finally {
+    h.workshop.dispose();
+  }
 });

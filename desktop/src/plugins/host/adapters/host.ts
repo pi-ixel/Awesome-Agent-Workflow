@@ -505,9 +505,16 @@ export function createDemoHost(): DemoHost {
         const segments = normalizeKey(dir);
         const node = nodeAt(segments);
         const manifest = nodeAt([...segments, "manifest.json"]);
-        const owns = node?.type === "dir" && manifest?.type === "file"
-          && (manifest.contents.includes(`"id": "${input.toolId}"`)
-            || manifest.contents.includes(`"id":"${input.toolId}"`));
+        // 按解析后的 id 认领，不按字面量匹配：作者用别的排版写清单（`"id" : "x"`）
+        // 时，字符串包含判断会漏掉，卸载就留下一个再没人能清的目录。
+        let owns = false;
+        if (node?.type === "dir" && manifest?.type === "file") {
+          try {
+            const parsed: unknown = JSON.parse(manifest.contents);
+            owns = !!parsed && typeof parsed === "object"
+              && (parsed as Record<string, unknown>)["id"] === input.toolId;
+          } catch { owns = false; }
+        }
         if (!owns) {
           skippedDirs.push(dir);
           continue;
@@ -518,13 +525,18 @@ export function createDemoHost(): DemoHost {
       const dataSegments = ["%LOCALAPPDATA%", "com.aaw.desktop", "tools", "storage", input.owner, `${input.toolId}.json`];
       const removedData = nodeAt(dataSegments)?.type === "file";
       if (removedData) removeAt(dataSegments);
+      // 工具存的密钥：与数据文件同一个根，按工具 id 一个 json。
+      const secretSegments = ["%LOCALAPPDATA%", "com.aaw.desktop", "tools", "secrets", input.owner, `${input.toolId}.json`];
+      const removedSecrets = nodeAt(secretSegments)?.type === "file";
+      if (removedSecrets) removeAt(secretSegments);
       // 上一版清单同样落在一个独立目录里，卸载后没有任何记录指它。预览环境
       // 不按账号分区（`userDataDir` 就是 `%APPDATA%/tools/backups`），所以这里
       // 少一层账号段——按真实宿主的布局删会删空。
       const backupSegments = ["%APPDATA%", "tools", "backups", input.toolId];
       const removedBackup = nodeAt(backupSegments)?.type === "dir";
       if (removedBackup) removeAt(backupSegments);
-      return Promise.resolve({ removedDirs, skippedDirs, removedData, removedBackup });
+      // 预览环境是一棵内存树，`removeAt` 不会失败：没有"该删但没删掉"这一类。
+      return Promise.resolve({ removedDirs, skippedDirs, failedDirs: [], removedData, removedBackup, removedSecrets });
     },
     pruneToolVersions() {
       // 预览环境没有安装记录，也就没有"谁引用了哪份副本"这回事。按路径猜着删

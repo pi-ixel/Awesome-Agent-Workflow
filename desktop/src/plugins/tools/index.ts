@@ -8,7 +8,7 @@ import { checkCompatibility, readToolPackage, readToolPackageV1, ToolPackageErro
 import { resolveToolSettings, validateToolSettings } from "./runtime/settings.ts";
 import { createBackupQueue, readToolBackup } from "./runtime/backup.ts";
 import { hostToolIO } from "./runtime/io.ts";
-import { readToolProject } from "./runtime/project.ts";
+import { defaultInstalledToolsDir, readToolProject } from "./runtime/project.ts";
 import {
   canRunToolDir,
   materializeToolFiles,
@@ -241,7 +241,7 @@ export function apply(ctx: Context): void {
    * 只在**能确定凑齐运行文件**时才动手：缺 `build.out` / 进程入口的工具
    * 留着坏标记，让"重新导入"的提示说话，不塞一个跑不起来的空壳进去。
    */
-  async function ensureRunCopies(): Promise<void> {
+  async function ensureRunCopies(sweepUnrecorded = false): Promise<void> {
     const current = owner();
     if (!current) return;
     let entries: readonly PersonalTool[];
@@ -267,6 +267,29 @@ export function apply(ctx: Context): void {
           if (alive) await pruneOrphanVersions(io, current, entry.package.id);
         });
       } catch { /* 清不掉不影响启动，下次再试 */ }
+    }
+    // 上面按条目走，覆盖不到"第一次安装就崩了"的那类残余：安装没写完配置，
+    // 所以这个工具根本没有条目，循环永远轮不到它，而 `versions/` 下那份
+    // `.staging-*`（可能带着 node_modules）就再也没有人去收——卸载也进不去，
+    // 因为卸载是从卡片发起的。这里补一遍没有条目的 id。
+    //
+    // **只在启动时做**（`sweepUnrecorded`）。换账号也会走这个函数，而那一刻
+    // 可能正有一次安装在写盘：它的暂存目录此刻同样"没有条目指向"，顺手扫
+    // 就会删掉别人正在写的东西，安装随即报"项目里没有 manifest.json"。
+    // 崩溃残留只可能出现在下次启动，所以启动扫一遍就够。
+    const known = new Set(entries.map((entry) => entry.package.id));
+    let libraryDirs: readonly string[] = [];
+    if (sweepUnrecorded) {
+      try {
+        libraryDirs = await io.listDirNames(await defaultInstalledToolsDir(io, current));
+      } catch { /* 工具库还没建 / 宿主没有列目录端口：没有可收的 */ }
+    }
+    for (const id of libraryDirs) {
+      if (known.has(id)) continue;
+      try {
+        await serializeToolOp(`tool:${current}:${id}`, () =>
+          sweepStagingDirs(io, current, id));
+      } catch { /* 下次启动再试 */ }
     }
     for (const entry of entries) {
       // 不兼容的条目不重建：那不是文件问题，重建了也跑不了。
@@ -488,7 +511,8 @@ export function apply(ctx: Context): void {
     auditBroken();
     void (async () => {
       // 先自愈再探测：刚补齐的目录不该被报成"丢失"。
-      await ensureRunCopies();
+      // 启动这一轮顺带收"没有安装记录"的暂存目录（首次安装崩在中途的残留）。
+      await ensureRunCopies(true);
       await auditMissingDirs();
     })();
     const offState = account.subscribe((next, previous) => {

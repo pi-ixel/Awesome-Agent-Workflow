@@ -590,33 +590,45 @@ fn serve(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
 pub fn open_tool(app: &AppHandle, tool_id: &str, hint: Option<&str>) -> Result<(), String> {
     let label = format!("tool-{tool_id}");
     let host = app.state::<ToolsHost>();
+    // 这次应该打开哪个目录。窗口已经存在时也要先算出来：更新/重装之后安装
+    // 记录的 `dir` 换到了新版本目录，而窗口还停在旧的那一份——不比对就会
+    // 一直给用户看更新前的界面，而他点「打开」正是想刷新。
+    let target = hint
+        .map(std::path::PathBuf::from)
+        .filter(|dir| dir.is_dir())
+        .or_else(|| host.tool_dir(tool_id).ok());
     if let Some(window) = app.get_webview_window(&label) {
-        // 「停止后台运行」只杀进程、不关窗；之后用户点「打开」会在这里提前
-        // 返回。不重生进程的话，窗口是活的、工具是死的——用户看到的就是
-        // "重新打开了还是不能用"（2026-11-22 真机验收发现）。
-        process_host::respawn(app, &host, tool_id)?;
         if let Some((dir, created_with, name)) = session_baseline(&host, &label) {
-            let current = manifest::read(&dir)
+            // 设置比对也要用**目标目录**的清单：拿旧目录算，更新后清单里新增的
+            // 默认值永远对不上，窗口会莫名其妙重建一次。
+            let moved = target
+                .as_deref()
+                .is_some_and(|target| !same_dir(&dir, target));
+            let current = manifest::read(target.as_deref().unwrap_or(&dir))
                 .map(|manifest| settings_json(&resolve_settings(&host, tool_id, &manifest)))
                 .unwrap_or_default();
-            if current != created_with {
-                // 设置变了：按新值重建窗口。
+            if moved || current != created_with {
+                // 复用旧窗口只能拿到旧页面：版本目录换了，页面、样式、依赖都在
+                // 新目录里；而 `aawSettings` 是建窗时烘焙进去的常量，reload 也
+                // 还是旧值。只能按新目录重建。
                 //
-                // 为什么只能重建：`aawSettings` 是建窗时烘焙进
-                // `initialization_script` 的常量，页面在加载时同步读一次。
-                // 复用旧窗口、或者 reload，注入的都还是上一组值——用户保存了
-                // 设置，打开还是旧值。
-                //
-                // 代价是工具自己的未保存状态会没。这一步只在"设置真的变了、
-                // 用户又点开工具"时发生，与界面承诺的"保存后重新打开生效"
-                // 一致；给一句系统提示，免得他把界面重置当成故障。
+                // 代价是工具里没保存的内容会没。这一步只在"版本或设置真的变了、
+                // 用户又点开工具"时发生，与界面上写的"保存后重新打开生效"一致。
                 host.remove_process(tool_id);
                 window.destroy().ok();
-                notify_settings_applied(app, &name);
+                if moved {
+                    notify_version_applied(app, &name);
+                } else {
+                    notify_settings_applied(app, &name);
+                }
             }
         }
         // 窗口还在（设置没变，或重建被同一轮建窗接手）就是唤醒它。
         if let Some(window) = app.get_webview_window(&label) {
+            // 「停止后台运行」只杀进程、不关窗；之后用户点「打开」会在这里提前
+            // 返回。不重生进程的话，窗口是活的、工具是死的——用户看到的就是
+            // "重新打开了还是不能用"（2026-11-22 真机验收发现）。
+            process_host::respawn(app, &host, tool_id)?;
             window.show().ok();
             window.set_focus().ok();
             return Ok(());
@@ -695,6 +707,38 @@ fn notify_settings_applied(app: &AppHandle, name: &str) {
         .title("工具已按新设置重新打开")
         .body(format!("{name}：这次打开用的是刚保存的设置；界面里没保存的内容会重置。"))
         .show();
+}
+
+/// 版本换了导致窗口重建时给一句系统提示。
+///
+/// 用户点「打开」的预期是"看到现在这一版"。窗口被他一直开着、更新之后又没
+/// 关掉时，只能重建；这一步会丢掉工具里没保存的内容，必须说一声。
+fn notify_version_applied(app: &AppHandle, name: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app
+        .notification()
+        .builder()
+        .title("工具已换到当前版本")
+        .body(format!("{name}：安装记录里的版本变了，窗口按新版本重新打开；界面里没保存的内容会重置。"))
+        .show();
+}
+
+/// 两个路径是不是同一个目录。
+///
+/// 先 `canonicalize` 再比，是为了让 `C:\a\b` 与 `c:/a/b/`、以及经过 junction
+/// 的写法都算同一个位置；拿不到（目录刚被删）就退回字面量比较。Windows 上
+/// 路径大小写不敏感，这条也要跟着。
+fn same_dir(left: &std::path::Path, right: &std::path::Path) -> bool {
+    let normalize = |path: &std::path::Path| {
+        std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    };
+    let (left, right) = (normalize(left), normalize(right));
+    if cfg!(windows) {
+        left.to_string_lossy()
+            .eq_ignore_ascii_case(right.to_string_lossy().as_ref())
+    } else {
+        left == right
+    }
 }
 
 /// 开一个页面工具窗口（L1/L2，以及带界面的 L3）。
@@ -1139,5 +1183,32 @@ mod tests {
         host.set_runtime_dir("quick-notes", &dir);
         host.clear_runtime_dir("quick-notes");
         assert!(host.resolve_runtime_dir("quick-notes").is_none());
+    }
+
+    /// "窗口跑的还是不是当前这一版"靠路径比对，比对错了就会要么每次都重建
+    /// 窗口（用户正在用的界面被莫名重置），要么永远不重建（更新后一直看旧版）。
+    #[test]
+    fn same_dir_treats_one_directory_spelled_differently_as_same() {
+        let root = std::env::temp_dir().join("aaw-same-dir-test");
+        let dir = root.join("versions").join("1.0.0");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // 同一个目录：正斜杠写法、大小写不同（Windows）都算同一个。
+        assert!(same_dir(&dir, &dir));
+        let slashes = std::path::PathBuf::from(dir.to_string_lossy().replace('\\', "/"));
+        assert!(same_dir(&dir, &slashes));
+        if cfg!(windows) {
+            let upper = root.join("VERSIONS").join("1.0.0");
+            assert!(same_dir(&dir, &upper));
+        }
+
+        // 不同版本目录：必须判为不同——这是"更新后重建窗口"的唯一依据。
+        let other = root.join("versions").join("1.1.0");
+        std::fs::create_dir_all(&other).unwrap();
+        assert!(!same_dir(&dir, &other));
+
+        // 目录已经不在（被删/被移走）：退回字面量比较，不能 panic。
+        assert!(!same_dir(&dir, &root.join("versions").join("gone")));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
