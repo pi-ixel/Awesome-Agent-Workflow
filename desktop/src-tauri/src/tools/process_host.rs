@@ -414,7 +414,15 @@ pub fn respawn(app: &AppHandle, host: &ToolsHost, tool_id: &str) -> Result<(), S
     if host.process(tool_id).is_some() {
         return Ok(());
     }
-    let dir = host.tool_dir(tool_id)?;
+    // 目录优先用"打开时登记的运行目录"：能走到这里说明窗口还在，那就有这一条。
+    // 退回去查安装记录（`tool_dir`）会在两种情况下白报错——记录里没有这个 id
+    // （临时目录、开发期直接开某个目录），或者记录刚被别处改过；而这里只是想把
+    // 进程重新拉起来，不该因为"查不到目录"把整次「打开」判失败，那会把已经
+    // 唤醒的窗口一起挡在门外。
+    let dir = match host.resolve_runtime_dir(tool_id) {
+        Some(dir) => dir,
+        None => host.tool_dir(tool_id)?,
+    };
     let manifest = super::manifest::read(&dir)?;
     if !manifest.is_process() {
         return Ok(());

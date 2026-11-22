@@ -282,7 +282,7 @@ impl ToolsHost {
     /// 更接近事实——前端物化、ZIP 导入的副本都记在这里）；登记的目录不在了
     /// 才退回旧路径。`runtime_dir` 只在 open 成功后存在，返回 `None` 时让
     /// 调用方走 `tool_dir` 的兼容路径与报错文案。
-    fn resolve_runtime_dir(&self, tool_id: &str) -> Option<PathBuf> {
+    pub(crate) fn resolve_runtime_dir(&self, tool_id: &str) -> Option<PathBuf> {
         let dir = self.runtime_dirs.lock().ok()?.get(tool_id).cloned()?;
         // 目录被移动/删除后登记就成了悬空项：当作没有，别拿它 404。
         if dir.is_dir() { Some(dir) } else { None }
@@ -621,9 +621,31 @@ pub fn open_tool(app: &AppHandle, tool_id: &str, hint: Option<&str>) -> Result<(
                 } else {
                     notify_settings_applied(app, &name);
                 }
+                // `destroy()` 只是投一次销毁请求：窗口表里那条要等事件循环跑
+                // 一拍才消失。同一拍里再走一次打开，`open_page_window` 会看到
+                // "窗口已经开着"，show 一下直接返回 Ok——旧窗已销毁、新窗没建，
+                // 用户看到的是"点了打开，工具窗口没了"（2026-11-22 真机复现）。
+                //
+                // 所以重建放到后台线程：等 label 真的空出来，再完整走一遍打开。
+                // 不在当前线程里等——这条路也可能跑在主线程上（启动器热键），
+                // 主线程一睡，销毁请求就永远没人处理。
+                let app = app.clone();
+                let tool_id = tool_id.to_string();
+                let hint = target.as_ref().map(|dir| dir.to_string_lossy().into_owned());
+                std::thread::spawn(move || {
+                    for _ in 0..200 {
+                        if app.get_webview_window(&format!("tool-{tool_id}")).is_none() {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    if let Err(error) = open_tool(&app, &tool_id, hint.as_deref()) {
+                        eprintln!("[aaw-tools] 重建工具窗口失败：{error}");
+                    }
+                });
+                return Ok(());
             }
         }
-        // 窗口还在（设置没变，或重建被同一轮建窗接手）就是唤醒它。
         if let Some(window) = app.get_webview_window(&label) {
             // 「停止后台运行」只杀进程、不关窗；之后用户点「打开」会在这里提前
             // 返回。不重生进程的话，窗口是活的、工具是死的——用户看到的就是
