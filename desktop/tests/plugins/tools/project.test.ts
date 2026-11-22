@@ -109,6 +109,21 @@ it("migrates legacy tools once and never overwrites an existing project", async 
   expect(files.get("/data/tools/projects/u1/legacy/index.html")).toBe("<p>改过</p>");
 });
 
+it("does not clone a tool into the custom root when the default root already has it", async () => {
+  const { io, files } = memoryIO();
+  const tool = parseToolPackage(JSON.stringify({
+    schemaVersion: 1, id: "legacy", name: "旧工具", version: "1.0.0", html: page,
+  }));
+  // 默认根里已经有这个项目（正常迁移/创建的产物）。
+  const existing = await createToolProject(io, { id: "legacy", name: "旧工具", owner: "u1" });
+  // 自定义根指到别处（真机事故里是"工具整体的家根"）：不允许在那里再克隆一份，
+  // 否则同一个 id 两份源码，改哪份、装哪份全是歧义。
+  const result = await migrateLegacyTools(io, [tool], { owner: "u1", parent: "/custom/root" });
+  expect(result.created).toEqual([]);
+  expect(result.skipped).toEqual([existing.dir]);
+  expect(files.has("/custom/root/legacy/manifest.json")).toBe(false);
+});
+
 it("lists projects and reads one back through the same contract as installing", async () => {
   const { io } = memoryIO();
   const { dir } = await createToolProject(io, { id: "one", name: "一", owner: "u1" });
