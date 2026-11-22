@@ -31,7 +31,6 @@ import {
 } from "../runtime/project.ts";
 import { checkCompatibility, ToolPackageError } from "../runtime/package.ts";
 import { hostToolIO } from "../runtime/io.ts";
-import { desktopManagedStorage } from "../../host/service.ts";
 import type { InstallOutcome, ToolsService } from "../service.ts";
 import type { ToolPackage } from "../types.ts";
 
@@ -41,17 +40,6 @@ import type { ToolPackage } from "../types.ts";
  * Rust 侧也有硬闸（`tools_open` 拒绝、写盘命令按路径前缀拒绝），这里提前拦
  * 是为了给用户一句能看懂的话，而不是等到 IPC 报错。
  */
-async function migrationBlock(): Promise<string | null> {
-  try {
-    if (!desktopManagedStorage.available()) return null;
-    const status = await desktopManagedStorage.request<{ migrating: boolean }>("tools_location_read");
-    if (status.migrating) return "工具存储正在迁移，请等迁移完成后再试。";
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 /** 一轮最多几次自动回灌。超过就把问题摊给用户——AI 卡住时人得能接管。 */
 const maxRepairRounds = 3;
 
@@ -607,8 +595,6 @@ export function createWorkshop(deps: {
   }
 
   async function installArchive(tool: ToolPackage, files?: Readonly<Record<string, Uint8Array>>): Promise<InstallOutcome> {
-    const migrating = await migrationBlock();
-    if (migrating) throw new Error(migrating);
     // 闸门提前到写盘之前。`tools.install()` 里那道契约校验只依赖清单的
     // `requires`，不需要磁盘；等它拦下来时目录已经解压完了，installed/<账号>/<id>/
     // 会留一个注册表里查不到的空壳——用户看不见、卸载清不到、白占空间。
@@ -639,8 +625,6 @@ export function createWorkshop(deps: {
    * 的清单时会报错——那是真正的目录冲突，不能静默覆盖。
    */
   async function resolveOpenDir(id: string): Promise<string | undefined> {
-    const migrating = await migrationBlock();
-    if (migrating) throw new Error(migrating);
     const entry = tools.state.getState().find((item) => item.package.id === id);
     if (!entry) return undefined;
     // 目录在、条目没被标坏：直接用，不动磁盘。 broken（目录丢失）的条目
@@ -752,8 +736,6 @@ export function createWorkshop(deps: {
         return { text: "这个工具已经装进工具中心了。改目录名会换掉它的身份（设置与数据都按 id 存），先在「已安装」里卸载再改；只改显示名不受影响。", error: true };
       if (nextId && nextId !== previousId && isForeground(dir))
         return { text: "这个项目正开着，会话历史挂在当前路径上——改目录名会让它接不上。先在侧栏换到别的项目再改名；只改显示名不受影响。", error: true };
-      const blocked = await migrationBlock();
-      if (blocked) return { text: blocked, error: true };
       try {
         const result = await renameToolProject(io, { dir, ...input });
         // 改名会换目录：把它当成"刚动过"，排序里留在前面。
@@ -882,8 +864,6 @@ export function createWorkshop(deps: {
 
     async importFromFolder() {
       if (!host.isNative()) return { text: "导入文件夹需要桌面版。", error: true };
-      const blocked = await migrationBlock();
-      if (blocked) return { text: blocked, error: true };
       const dir = await project.projects.pickDirectory();
       if (!dir) return { text: "已取消导入。" };
       if (!await io.pathExists(joinPath(dir, toolProjectFileNames.manifest)))

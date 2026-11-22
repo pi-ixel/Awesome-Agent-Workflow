@@ -1,955 +1,621 @@
-//! 工具**整体**（本体 installed/projects/backups + 数据 storage）的位置：
-//! 按账号单指针 + 在线迁移事务。
-//!
-//! # 为什么是"整体"和"按账号"
-//!
-//! 上一版是两个全局指针（tools-location.json 管本体、data-location.json 管
-//! 数据），被两个结构性问题推翻：
-//!
-//! 1. 工具数据默认住在工具目录默认根内（`tools/storage`），两个根互相嵌套，
-//!    迁回校验会被自家兄弟分区挡死（Z-22）；
-//! 2. 指针全局一份——张三迁移会改写李四的落点，多账号互相串门。
-//!
-//! 现在：**一个账号一个指针**（`configuration/tool-locations/<账号>.json`），
-//! 指向该账号的"工具整体家"（本体 + 数据必须在同一处）；迁移一次搬完、
-//! 一次切指针、一次清理，任何时刻不存在"工具在 A 盘、数据在 B 盘"的分裂态。
-//!
-//! # 落点与解析（每次解析重读指针——在线迁移即时生效的前提）
-//!
-//! | 内容 | 有账号指针（home = H） | 默认（无指针） |
-//! |---|---|---|
-//! | 安装副本 | `H/installed/<工具id>` | `<数据根>/tools/installed/<账号>/<工具id>` |
-//! | 源码项目 | `H/projects/<工具id>` | `<数据根>/tools/projects/<账号>/<工具id>` |
-//! | 备份 | `H/backups/` | `<数据根>/tools/backups/<账号>/` |
-//! | 工具数据 | `H/storage/<工具id>.json` | `<数据根>/tools/storage/<账号>/<工具id>.json` |
-//!
-//! 逻辑：默认位置是**多账号共享的家**，必须带账号层；自定义 home 是**账号
-//! 私有的家**，目录即本人，不套账号层。`aawStore` 的 `file()`、`tool_dir()`、
-//! 前端 `tools_root_dir` 全部走这张表。
-//!
-//! 指针文件放 `configuration/tool-locations/` 里：数据根迁移
-//! （`storage_location.rs`）把整个 `configuration` 搬走，指针自然跟着走。
-//!
-//! # 迁移的事务性
-//!
-//! 复用 `storage_location::copy_verified`（逐文件 SHA-256 核验）：拷贝进目标
-//! 暂存目录 → 全部成功后 rename 归位 → 原子写账号指针 → **本体与数据都删旧**
-//! （用户拍板：整体搬家不留残留，报告写明删了什么）。任何一步失败，指针未动、
-//! 旧数据完好、可重试。
-//!
-//! # 升级收编
-//!
-//! 旧模型的全局指针（tools-location.json / data-location.json）在启动时收编成
-//! 账号指针：本体所在的 home 归属给当前账号，数据拷进 `H/storage/` 团聚；
-//! 全局指针删除。收编幂等——指针没删成就重来。
+//! 工具位置是本机设置。重启时在桌面数据锁保护下复制并核验资源，
+//! 同一次 preferences 写入切换位置及安装记录。旧目录保留供恢复。
 
+use super::{ToolsHost, store::ToolStore};
+use crate::storage_location::{copy_verified, same_data};
+use crate::storage_preferences::{read_record, write_record};
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
-use std::time::Duration;
+use serde_json::Value;
+use std::collections::BTreeMap;
+use std::fs::{self, OpenOptions};
+use std::io;
+use std::path::{Component, Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
-use crate::storage_location::copy_verified;
+const PARTITIONS: [&str; 5] = ["installed", "projects", "backups", "storage", "secrets"];
+const LOCATION_KEY: &str = "aaw-desktop.tool-storage.v2";
+const LIBRARY_MARKER: &str = ".aaw-tool-library";
+pub(crate) const DEFAULT_VERSIONS: &str = "tool-library";
+type Preferences = BTreeMap<String, Option<String>>;
+type PathChanges = Vec<(PathBuf, PathBuf)>;
 
-use super::store::{ToolStore, WRITE_LOCK};
-use super::ToolsHost;
-
-pub(crate) const PARTITIONS: [&str; 3] = ["installed", "projects", "backups"];
-
-// ── 指针文件 ─────────────────────────────────────────────────────────────
-
-#[derive(Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-struct HomePointer {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tool_home: Option<String>,
+#[derive(Clone, Serialize, Deserialize)]
+struct Home {
+    id: String,
+    custom: Option<PathBuf>,
 }
 
-fn home_pointer_path(data_root: &Path, owner: &str) -> PathBuf {
-    data_root
-        .join("configuration")
-        .join("tool-locations")
-        .join(format!("{owner}.json"))
-}
-
-/// 读指针里的路径。空串/缺失/解析失败一律按"没设置"处理，返回 `None` 让
-/// 调用方用默认值——指针坏了不能把工具整个弄丢。
-fn read_home_pointer(pointer: &Path) -> Option<String> {
-    let text = fs::read_to_string(pointer).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let path = value.get("toolHome")?.as_str()?.trim().to_string();
-    (!path.is_empty()).then_some(path)
-}
-
-/// 原子写指针：临时文件 + rename，断电不留半个 JSON。统一正斜杠——前端
-/// 记录（安装记录的 dir、排除列表）都是 / 分隔，混着存会让前缀比较与展示
-/// 出现两套路径。
-fn write_home_pointer(pointer: &Path, target: &Path) -> Result<(), String> {
-    if let Some(parent) = pointer.parent() {
-        fs::create_dir_all(parent).map_err(|error| format!("建目录失败：{error}"))?;
+impl Home {
+    fn path(&self, data: &Path) -> PathBuf {
+        self.custom
+            .clone()
+            .unwrap_or_else(|| data.join(DEFAULT_VERSIONS).join(&self.id))
     }
-    let value = HomePointer {
-        tool_home: Some(target.to_string_lossy().replace('\\', "/")),
-    };
-    let temp = super::unique_temp(pointer);
-    let body = serde_json::to_vec(&value).map_err(|error| format!("序列化失败：{error}"))?;
-    fs::write(&temp, body).map_err(|error| format!("写入失败：{error}"))?;
-    fs::rename(&temp, pointer).map_err(|error| format!("落盘失败：{error}"))
-}
 
-/// 当前账号的工具整体家：指针优先，默认 `<数据根>/tools`。
-pub fn tool_home(data_root: &Path, owner: &str) -> PathBuf {
-    tool_home_pointer(data_root, owner).unwrap_or_else(|| default_tool_root(data_root))
-}
-
-/// 账号指针（`None` = 用默认位置）。
-pub fn tool_home_pointer(data_root: &Path, owner: &str) -> Option<PathBuf> {
-    read_home_pointer(&home_pointer_path(data_root, owner)).map(PathBuf::from)
-}
-
-/// 默认工具根：多账号共享的家，分区下带账号层。
-pub fn default_tool_root(data_root: &Path) -> PathBuf {
-    data_root.join("tools")
-}
-
-/// 账号的分区目录（installed / projects / backups）。
-///
-/// 默认位置带账号层（多账号共享的家）；自定义 home 不带（账号私有家）。
-/// 前端 `tools_root_dir` 与 Rust `tool_dir` 都走这里——两条路同一个解析，
-/// 不再有两套口径。
-pub fn tool_partition(data_root: &Path, owner: &str, partition: &str) -> PathBuf {
-    match tool_home_pointer(data_root, owner) {
-        Some(home) => home.join(partition),
-        None => default_tool_root(data_root).join(partition).join(owner),
-    }
-}
-
-/// 账号的工具数据目录（aawStore 键值文件的父目录）。
-pub fn tool_storage_root(data_root: &Path, owner: &str) -> PathBuf {
-    match tool_home_pointer(data_root, owner) {
-        Some(home) => home.join("storage"),
-        None => default_tool_root(data_root).join("storage").join(owner),
-    }
-}
-
-/// 其他账号的自定义 home（冲突检测用）：两个账号不能选同一个目录。
-fn other_homes(data_root: &Path, current_owner: &str) -> Vec<(PathBuf, String)> {
-    let dir = data_root.join("configuration").join("tool-locations");
-    let mut result = Vec::new();
-    if let Ok(entries) = fs::read_dir(&dir) {
-        for entry in entries.flatten() {
-            let name = entry
-                .file_name()
-                .to_string_lossy()
-                .trim_end_matches(".json")
-                .to_string();
-            if name == current_owner || name.is_empty() {
-                continue;
-            }
-            if let Some(home) = read_home_pointer(&entry.path()) {
-                result.push((PathBuf::from(home), format!("账号 {name} 的工具目录")));
-            }
+    fn validate(&self) -> Result<(), String> {
+        if uuid::Uuid::parse_str(&self.id).is_err()
+            || self.custom.as_ref().is_some_and(|path| !path.is_absolute())
+        {
+            return Err("工具存储路径无效。".into());
         }
-    }
-    result
-}
-
-/// 展示用路径：剥掉 Windows canonicalize 的 `\\?\` 前缀，统一正斜杠。
-fn display_path(path: &Path) -> String {
-    let value = path.to_string_lossy();
-    let value = if cfg!(windows) {
-        value
-            .strip_prefix(r"\\?\UNC\")
-            .map(|unc| format!(r"\\{unc}"))
-            .or_else(|| value.strip_prefix(r"\\?\").map(str::to_owned))
-            .unwrap_or_else(|| value.into_owned())
-    } else {
-        value.into_owned()
-    };
-    value.replace('\\', "/")
-}
-
-fn canonical(path: &Path) -> Option<PathBuf> {
-    path.canonicalize().ok()
-}
-
-fn revision() -> String {
-    uuid::Uuid::new_v4().simple().to_string()
-}
-
-// ── 迁移状态与进度 ───────────────────────────────────────────────────────
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Progress {
-    pub stage: String,
-    pub detail: String,
-}
-
-/// 一次迁移的生命周期状态。`running` 同时是并发闸：迁移进行中不允许第二个
-/// 迁移（也不允许打开工具——目录正在被搬走）。
-#[derive(Default)]
-pub struct MigrationState {
-    running: AtomicBool,
-    progress: Mutex<Option<Progress>>,
-    last_report: Mutex<Option<String>>,
-}
-
-impl MigrationState {
-    fn begin(&self) {
-        self.running.store(true, Ordering::SeqCst);
-        if let Ok(mut slot) = self.progress.lock() {
-            *slot = Some(Progress { stage: "校验".into(), detail: String::new() });
-        }
-    }
-    fn stage(&self, stage: &str, detail: String) {
-        if let Ok(mut slot) = self.progress.lock() {
-            *slot = Some(Progress { stage: stage.into(), detail });
-        }
-    }
-    fn finish(&self, report: String) {
-        self.running.store(false, Ordering::SeqCst);
-        if let Ok(mut slot) = self.progress.lock() {
-            *slot = None;
-        }
-        if let Ok(mut slot) = self.last_report.lock() {
-            *slot = Some(report);
-        }
-    }
-    pub(crate) fn is_running(&self) -> bool {
-        self.running.load(Ordering::SeqCst)
-    }
-}
-
-/// 工具整体（本体 + 数据）的迁移状态。`running` 期间 `tools_open` 与工具域
-/// 内的写盘被拒；数据拷贝全程持 `WRITE_LOCK`。
-#[derive(Default)]
-pub struct ToolHomeMigration(pub MigrationState);
-
-// ── 目标落点分类：残留 vs 真冲突 ─────────────────────────────────────────
-
-/// 目标落点的既有内容分类（Z-24）。
-///
-/// 迁移的切换点是"写账号指针"，它在本函数之后才发生——所以此刻目标处出现
-/// 我们的分区，**只可能是上次迁移中断留下的残骸**（指针写入失败、进程被杀、
-/// 回滚删除失败）。残骸留着不动的话，重试会永远撞"已存在 projects"，
-/// 报错又没说这是哪来的、能不能删——用户被逼进死角（2026-11-22 真机实测）。
-///
-/// 目标落点分类。残骸判定只认一样东西：**迁移标记**（Z-25 教训——旧的
-/// "目标里有 ≥2 个已知分区目录就算残骸"是形状猜测：迁回默认时默认根下
-/// 别的账号数据不归本账号管、动不得；选自定义目录时选中文件夹里若躺着
-/// 别的账号的旧工具数据，会被静默误删）。标记在迁移复制开始前写入目标、
-/// 整体成功收尾才删除：有本账号标记 = 目标内容确属本账号上次中断的迁移
-/// 现场（源数据原样在旧家，复制阶段 move_subtree 不动源），清理目标安全；
-/// 没标记一律当真冲突报错，让用户自己决定，绝不凭目录形状猜。
-#[derive(Debug)]
-enum DestinationState {
-    /// 干净（或只有空壳），直接迁。
-    Vacant,
-    /// 上次迁移的残骸：这些目录可以安全删除（源数据原样在旧家）。
-    Leftover { paths: Vec<PathBuf> },
-    /// 真冲突：目标里有无法证实是残骸的内容，报错让用户决定。
-    Conflict { name: &'static str, dest: PathBuf },
-}
-
-/// 单个已知分区落点的状态。
-enum PartitionOccupancy {
-    /// 不存在。
-    Absent,
-    /// 存在但为空（空壳，删除无损失）。
-    Shell,
-    /// 存在且有内容。
-    Occupied,
-}
-
-fn occupancy(dest: &Path) -> PartitionOccupancy {
-    if !dest.is_dir() {
-        return PartitionOccupancy::Absent;
-    }
-    let has_entries = fs::read_dir(dest).is_ok_and(|mut items| items.next().is_some());
-    if has_entries {
-        PartitionOccupancy::Occupied
-    } else {
-        PartitionOccupancy::Shell
-    }
-}
-
-/// 迁移标记的落点。家模式的目标目录按约定账号私有，固定文件名即可；
-/// 默认模式的 `<tools>` 根是多账号共享的，文件名必须带账号——只认自己
-/// 名下的现场，别人的标记不动也不认。
-fn migration_marker_path(to_default: bool, target: &Path, owner: &str) -> PathBuf {
-    if to_default {
-        target.join(format!(".aaw-migration-{owner}.json"))
-    } else {
-        target.join(".aaw-migration.json")
-    }
-}
-
-fn write_migration_marker(path: &Path, owner: &str) {
-    let started = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|value| value.as_millis())
-        .unwrap_or_default();
-    let body = serde_json::json!({ "owner": owner, "startedAt": started });
-    let temp = path.with_extension(format!("tmp-{}", std::process::id()));
-    if fs::write(&temp, body.to_string()).is_ok() {
-        let _ = fs::rename(&temp, path);
-    }
-}
-
-/// 标记里登记的账号；文件损坏或读不出归属都按"无标记"处理。
-fn read_migration_owner(path: &Path) -> Option<String> {
-    let text = fs::read_to_string(path).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-    value.get("owner")?.as_str().map(str::to_owned)
-}
-
-/// `own_marker`：目标处存在本账号的迁移标记（见 migration_marker_path）。
-fn classify_destinations(destinations: &[(&'static str, PathBuf)], own_marker: bool) -> DestinationState {
-    let mut occupied: Vec<(&'static str, &PathBuf)> = Vec::new();
-    let mut shells: Vec<PathBuf> = Vec::new();
-    for (name, dest) in destinations {
-        match occupancy(dest) {
-            PartitionOccupancy::Absent => {}
-            PartitionOccupancy::Shell => shells.push(dest.clone()),
-            PartitionOccupancy::Occupied => occupied.push((name, dest)),
-        }
-    }
-    if let Some((name, dest)) = occupied.first() {
-        if own_marker {
-            // 残骸：已知落点（含空壳）一起清。删除失败不阻塞——后面归位前
-            // 的叶子检查仍会拦，报告里也说得清。
-            let mut paths: Vec<PathBuf> =
-                occupied.iter().map(|(_, dest)| (*dest).clone()).collect();
-            paths.extend(shells);
-            return DestinationState::Leftover { paths };
-        }
-        return DestinationState::Conflict {
-            name: *name,
-            dest: (*dest).clone(),
-        };
-    }
-    if !shells.is_empty() {
-        // 只剩空壳：删壳即可，不算冲突（空目录里没有可丢的数据）。
-        return DestinationState::Leftover { paths: shells };
-    }
-    DestinationState::Vacant
-}
-
-// ── 目标校验 ─────────────────────────────────────────────────────────────
-
-/// 迁移目标的公共校验：绝对路径、已存在、与任何已知根互不嵌套。
-/// `forbidden` 每项带名字：同名的是“当前根”（撞上=没变化），异名的是别的
-/// 受保护根（撞上=撞车，各自报各自的文案——Z-23 用户实测：撞了工具目录
-/// 却被误报成“没有变化”，用户完全看不懂）。
-fn validate_target(input: &str, forbidden: &[(PathBuf, String)], label: &str) -> Result<PathBuf, String> {
-    let target = PathBuf::from(input.trim());
-    if !target.is_absolute() {
-        return Err("请选择绝对路径下的文件夹。".into());
-    }
-    if !target.is_dir() {
-        return Err("请选择一个已存在的文件夹。".into());
-    }
-    let Some(canon) = canonical(&target) else {
-        return Err("无法访问所选目录。".into());
-    };
-    for (root, name) in forbidden {
-        if let Some(root) = canonical(root) {
-            if canon == root {
-                if name == label {
-                    return Err(format!("{label}没有变化，无需迁移。"));
-                }
-                return Err(format!(
-                    "所选文件夹与「{name}」是同一个位置，两者不能混在一起：请换一个单独的文件夹。"
-                ));
-            }
-            if canon.starts_with(&root) {
-                return Err(format!("所选文件夹位于「{name}」内部，请换一个它以外的文件夹。"));
-            }
-            if root.starts_with(&canon) {
-                return Err(format!("「{name}」位于所选文件夹内部，这样迁移会互相嵌套。"));
-            }
-        }
-    }
-    Ok(target)
-}
-
-// ── 迁移执行 ─────────────────────────────────────────────────────────────
-
-/// 关掉所有工具窗口并等会话表清空。迁移期间工具目录正在被搬走，
-/// 留着任何持句柄的窗口都会让复制/删除失败。
-fn close_tool_windows(app: &AppHandle) {
-    for (label, window) in app.webview_windows() {
-        if label.starts_with("tool-") {
-            let _ = window.destroy();
-        }
-    }
-    // Destroyed 事件走主线程消息循环，这里轮询等它清账。
-    for _ in 0..20 {
-        let remaining = app
-            .state::<ToolsHost>()
-            .sessions
-            .lock()
-            .map(|sessions| sessions.len())
-            .unwrap_or(0);
-        if remaining == 0 {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(150));
-    }
-    // 兜底：任何没被窗口销毁路径带走的 L3 进程直接杀。
-    super::shutdown_all_processes(app);
-}
-
-/// 拷贝 + 归位一棵子树。暂存目录放在目标内（同一卷，rename 才是原子的）。
-fn move_subtree(source: &Path, name: &str, target: &Path) -> Result<(), String> {
-    let stage = target.join(format!(".aaw-stage-{name}-{}", revision()));
-    let outcome = (|| {
-        copy_verified(source, &stage)
-            .map_err(|error| format!("复制 {name} 失败：{error}"))?;
-        fs::rename(&stage, target.join(name))
-            .map_err(|error| format!("切换 {name} 失败：{error}"))?;
         Ok(())
-    })();
-    if outcome.is_err() {
-        let _ = fs::remove_dir_all(&stage);
     }
-    outcome
-}
 
-/// 删一棵目录树；删完父目录若已空，把壳也清掉（默认位置的账号层目录、
-/// 旧 home 本身都按此处理——空壳留着只会让人误以为还有东西）。
-fn remove_tree_and_shell(tree: &Path, shell: &Path) -> bool {
-    let removed = fs::remove_dir_all(tree).is_ok();
-    if shell != tree && shell.is_dir() {
-        let empty = fs::read_dir(shell).is_ok_and(|mut items| items.next().is_none());
-        if empty {
-            let _ = fs::remove_dir(shell);
-        }
-    }
-    removed
-}
-
-/// 结构性重映射规则集：账号层变化不能靠纯前缀替换——默认家有账号层、
-/// 自定义 home 没有。按分区生成配对，preferences 文本与运行目录注册表共用。
-pub(crate) fn structural_pairs(
-    owner: &str,
-    from_home: &Path,
-    to_home: &Path,
-    from_default: bool,
-    to_default: bool,
-) -> Vec<(String, String)> {
-    let mut pairs = Vec::new();
-    for partition in PARTITIONS {
-        let from = if from_default {
-            display_path(&from_home.join(partition).join(owner))
-        } else {
-            display_path(&from_home.join(partition))
-        };
-        let to = if to_default {
-            display_path(&to_home.join(partition).join(owner))
-        } else {
-            display_path(&to_home.join(partition))
-        };
-        // 带尾分隔符匹配，防止账号段前缀撞上别的账号（"u1" vs "u1x"）。
-        pairs.push((format!("{from}/"), format!("{to}/")));
-        pairs.push((format!("{}\\", from.replace('/', "\\")), format!("{}\\", to.replace('/', "\\"))));
-    }
-    pairs
-}
-
-/// 把 preferences.json 里命中规则的路径改写（安装记录的 dir、排除列表等）。
-fn remap_preferences(data_root: &Path, pairs: &[(String, String)]) {
-    let file = data_root.join("configuration").join("preferences.json");
-    let Ok(text) = fs::read_to_string(&file) else { return };
-    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&text) else { return };
-    fn walk(value: &mut serde_json::Value, pairs: &[(String, String)]) {
-        match value {
-            serde_json::Value::String(text) => {
-                for (from, to) in pairs {
-                    if text.starts_with(from.as_str()) {
-                        *text = format!("{to}{}", &text[from.len()..]);
-                    }
-                }
-            }
-            serde_json::Value::Array(items) => items.iter_mut().for_each(|item| walk(item, pairs)),
-            serde_json::Value::Object(map) => map.values_mut().for_each(|item| walk(item, pairs)),
-            _ => {}
-        }
-    }
-    walk(&mut value, pairs);
-    let body = match serde_json::to_vec(&value) {
-        Ok(body) => body,
-        Err(_) => return,
-    };
-    let temp = super::unique_temp(&file);
-    if fs::write(&temp, body).is_ok() {
-        let _ = fs::rename(&temp, &file);
-    }
-}
-
-/// 工具整体的在线迁移。`target` 为 `None` 表示迁回默认位置。
-fn run_tool_home_migration(app: &AppHandle, target: Option<PathBuf>) -> Result<String, String> {
-    let state = app.state::<ToolHomeMigration>();
-    let host = app.state::<ToolsHost>();
-    let data_root = host.data_root()?;
-    let owner = ToolStore::new(&data_root).owner()?;
-    let from_home = tool_home(&data_root, &owner);
-    let from_default = tool_home_pointer(&data_root, &owner).is_none();
-    let to_default = target.is_none();
-    let target = target.unwrap_or_else(|| default_tool_root(&data_root));
-
-    state.0.stage("校验", format!("检查 {}", display_path(&target)));
-    // 源分区与目标分区。同一张表（tool_partition / tool_storage_root）在
-    // 指针切换前解析出"源"、以目标家手工拼出"目标"——切换点只有指针。
-    let sources: Vec<(PathBuf, &'static str)> = PARTITIONS
-        .iter()
-        .map(|name| (tool_partition(&data_root, &owner, name), *name))
-        .chain(std::iter::once((
-            tool_storage_root(&data_root, &owner),
-            "storage",
-        )))
-        .filter(|(source, _)| source.is_dir())
-        .collect();
-    if canonical(&from_home).is_some_and(|value| Some(value) == canonical(&target)) {
-        // 已在目标 = 上次迁移至少完成了切换点；顺带清掉可能残留的迁移标记
-        // （上次跑到切换点之后、删标记之前被杀，标记会留在目标处）。
-        let marker = migration_marker_path(to_default, &target, &owner);
-        if read_migration_owner(&marker).is_some_and(|value| value == owner) {
-            let _ = fs::remove_file(&marker);
-        }
-        return Ok(format!("工具整体已在 {}，无需迁移。", display_path(&target)));
-    }
-    // 目标分区：home 模式 <home>/<partition>；默认模式 <tools>/<partition>/<owner>
-    // （默认家带账号层）。storage 同一规则——home 模式归 <home>/storage。
-    let destination_of = |name: &str| -> PathBuf {
-        if to_default {
-            default_tool_root(&data_root).join(name).join(&owner)
-        } else {
-            target.join(name)
-        }
-    };
-    let destinations: Vec<(&'static str, PathBuf)> = PARTITIONS
-        .iter()
-        .chain(std::iter::once(&"storage"))
-        .map(|name| (*name, destination_of(name)))
-        .collect();
-    // 上次迁移的残骸先清掉。残骸判定只认迁移标记：有本账号标记才允许
-    // 自动清理目标（源数据原样在旧家，删目标无损失）；没标记一律当真
-    // 冲突报错让用户决定——默认根下有别的账号的数据、选中文件夹里躺着
-    // 别人的旧家，都不能凭“形状像分区”就动手（Z-25）。
-    let marker = migration_marker_path(to_default, &target, &owner);
-    let own_marker = read_migration_owner(&marker).is_some_and(|value| value == owner);
-    let mut residue_note = String::new();
-    match classify_destinations(&destinations, own_marker) {
-        DestinationState::Vacant => {}
-        DestinationState::Leftover { paths } => {
-            residue_note = format!(
-                "检测到本账号上次迁移在 {} 留下的残骸（有迁移标记），已清理后继续。",
-                display_path(&target)
-            );
-            for path in &paths {
-                let _ = fs::remove_dir_all(path);
-            }
-        }
-        DestinationState::Conflict { name, dest } => {
+    fn accessible_path(&self, data: &Path) -> Result<PathBuf, String> {
+        let path = self.path(data);
+        if fs::read_to_string(path.join(LIBRARY_MARKER))
+            .as_deref()
+            .ok()
+            != Some(self.id.as_str())
+        {
             return Err(format!(
-                "目标位置 {} 已有内容（{name}），且没有本账号的迁移标记，不能自动覆盖：请换一个空目录；如果确认这是上次中断迁移留下的残骸、这些内容可以删除，手动清掉后重试即可。",
-                display_path(&dest)
+                "无法确认工具库存储位置 {}。请检查磁盘是否已连接。",
+                display_path(&path)
+            ));
+        }
+        Ok(path)
+    }
+}
+
+fn configuration(data: &Path, name: &str) -> PathBuf {
+    data.join("configuration").join(name)
+}
+
+fn preferences(data: &Path) -> Result<Preferences, String> {
+    read_record(&configuration(data, "preferences.json"))
+}
+
+fn parse_home(text: &str) -> Result<Home, String> {
+    let home: Home =
+        serde_json::from_str(text).map_err(|error| format!("工具存储配置无效：{error}"))?;
+    home.validate()?;
+    Ok(home)
+}
+
+fn display_path(path: &Path) -> String {
+    let value = path.to_string_lossy().replace('\\', "/");
+    if let Some(unc) = value.strip_prefix("//?/UNC/") {
+        return format!("//{unc}");
+    }
+    value.strip_prefix("//?/").unwrap_or(&value).to_owned()
+}
+
+fn selected(prefs: &Preferences) -> Result<Option<Home>, String> {
+    prefs
+        .get(LOCATION_KEY)
+        .and_then(Option::as_deref)
+        .map(|text| parse_home(text))
+        .transpose()
+}
+
+pub fn default_tool_root(data: &Path) -> PathBuf {
+    data.join("tools")
+}
+
+pub fn tool_home(data: &Path) -> Result<PathBuf, String> {
+    Ok(selected(&preferences(data)?)?
+        .map_or_else(|| default_tool_root(data), |home| home.path(data)))
+}
+
+fn checked_pointer(path: &Path, field: &str) -> Result<Option<PathBuf>, String> {
+    let record: Value = read_record(path)?;
+    let Some(raw) = record
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let value = PathBuf::from(raw);
+    if !value.is_absolute() {
+        return Err(format!("旧工具位置不是绝对路径：{}", path.display()));
+    }
+    Ok(Some(value))
+}
+
+fn legacy_root() -> Option<PathBuf> {
+    let (variable, folder) = if cfg!(windows) {
+        ("APPDATA", "tools")
+    } else {
+        ("HOME", ".tools")
+    };
+    std::env::var_os(variable)
+        .filter(|value| !value.is_empty())
+        .map(|path| PathBuf::from(path).join(folder))
+}
+
+fn legacy_account_home(data: &Path, owner: &str) -> Result<Option<PathBuf>, String> {
+    checked_pointer(
+        &data
+            .join("configuration/tool-locations")
+            .join(format!("{owner}.json")),
+        "toolHome",
+    )
+}
+
+pub fn tool_partition(data: &Path, owner: &str, partition: &str) -> Result<PathBuf, String> {
+    if let Some(home) = selected(&preferences(data)?)? {
+        return Ok(home.accessible_path(data)?.join(partition).join(owner));
+    }
+    let default = default_tool_root(data).join(partition).join(owner);
+    // 升级后的首次搬家之前仍能打开旧工具。同一个账号的旧位置保持原解析规则。
+    if partition != "secrets" {
+        if let Some(home) = legacy_account_home(data, owner)? {
+            return Ok(home.join(partition));
+        }
+    }
+    let old = match partition {
+        "storage" => checked_pointer(&configuration(data, "data-location.json"), "storageRoot")?
+            .map(|root| root.join(owner)),
+        "secrets" => None,
+        _ => checked_pointer(&configuration(data, "tools-location.json"), "toolRoot")?
+            .map(|root| root.join(partition).join(owner)),
+    };
+    if let Some(old) = old {
+        return Ok(old);
+    }
+    if !default.try_exists().map_err(|error| error.to_string())? {
+        if let Some(old) = legacy_root().map(|root| root.join(partition).join(owner)) {
+            if old.is_dir() {
+                return Ok(old);
+            }
+        }
+    }
+    Ok(default)
+}
+
+fn legacy_accounts(data: &Path) -> Result<BTreeMap<String, PathBuf>, String> {
+    let dir = data.join("configuration/tool-locations");
+    let mut accounts = BTreeMap::new();
+    let entries = match fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(accounts),
+        Err(error) => return Err(error.to_string()),
+    };
+    for entry in entries {
+        let path = entry.map_err(|error| error.to_string())?.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
+        let name = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .ok_or("旧工具位置文件名无效。")?;
+        if !matches!(
+            (
+                Path::new(name).components().next(),
+                Path::new(name).components().count()
+            ),
+            (Some(Component::Normal(_)), 1)
+        ) {
+            return Err(format!("旧账号目录名无效：{name}"));
+        }
+        if let Some(home) = checked_pointer(&path, "toolHome")? {
+            accounts.insert(name.to_owned(), home);
+        }
+    }
+    Ok(accounts)
+}
+
+fn relocation_sources(
+    data: &Path,
+    active: Option<&Home>,
+    roaming: Option<&Path>,
+    target: &Path,
+) -> Result<PathChanges, String> {
+    let mut paths = Vec::new();
+    if let Some(active) = active {
+        return Ok(PARTITIONS
+            .into_iter()
+            .map(|partition| (active.path(data).join(partition), target.join(partition)))
+            .collect());
+    }
+    let accounts = legacy_accounts(data)?;
+    let old_tools = checked_pointer(&configuration(data, "tools-location.json"), "toolRoot")?;
+    let old_storage = checked_pointer(&configuration(data, "data-location.json"), "storageRoot")?;
+    let mut claimed = Vec::new();
+    for home in old_tools.iter().chain(old_storage.iter()) {
+        if !home.is_dir() {
+            return Err(format!("无法访问旧工具位置 {}。", display_path(home)));
+        }
+    }
+    let default = default_tool_root(data);
+    for (owner, home) in &accounts {
+        let resolved = home.canonicalize().map_err(|error| {
+            format!(
+                "无法访问账号 {owner} 的旧位置 {}：{error}",
+                display_path(home)
+            )
+        })?;
+        if [
+            Some(default.as_path()),
+            roaming,
+            old_tools.as_deref(),
+            old_storage.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .filter_map(|root| root.canonicalize().ok())
+        .chain(claimed.iter().cloned())
+        .any(|root| resolved.starts_with(&root) || root.starts_with(&resolved))
+        {
+            return Err(format!(
+                "账号 {owner} 的旧位置 {} 与其他存储范围重叠，无法确定归属。所有原目录已保留。",
+                display_path(home)
+            ));
+        }
+        claimed.push(resolved);
+    }
+    for partition in PARTITIONS {
+        let dest = target.join(partition);
+        paths.push((default_tool_root(data).join(partition), dest.clone()));
+        if let Some(root) = roaming {
+            paths.push((root.join(partition), dest.clone()));
+        }
+        let old = match partition {
+            "storage" => old_storage.clone(),
+            "secrets" => None,
+            _ => old_tools.as_ref().map(|root| root.join(partition)),
+        };
+        if let Some(old) = old {
+            paths.push((old, dest.clone()));
+        }
+        if partition != "secrets" {
+            for (owner, home) in &accounts {
+                let source = home.join(partition);
+                check_legacy_account_layout(&source, partition)?;
+                paths.push((source, dest.join(owner)));
+            }
+        }
+    }
+    Ok(paths)
+}
+
+/// 旧版可能只把全局指针换成账号指针，磁盘上依然是分区/账号/工具。
+/// 这种目录不能按账号独占的扁平布局复制，否则会把其他人的文件一并归给指针持有人。
+fn check_legacy_account_layout(source: &Path, partition: &str) -> Result<(), String> {
+    let entries = match fs::read_dir(source) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("{}：{error}", display_path(source))),
+    };
+    let marker = if partition == "backups" {
+        "previous.json"
+    } else {
+        "manifest.json"
+    };
+    for entry in entries {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if !entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_dir()
+        {
+            continue;
+        }
+        let path = entry.path();
+        let nested = partition == "storage"
+            || (!path.join(marker).is_file()
+                && fs::read_dir(&path)
+                    .map_err(|error| error.to_string())?
+                    .any(|item| item.map_or(true, |item| item.path().join(marker).is_file())));
+        if nested {
+            return Err(format!(
+                "旧位置 {} 仍包含账号子目录，无法按账号独占目录归并。原数据已保留。",
+                display_path(&path)
             ));
         }
     }
-    // 暂存目录无条件清理：复制中途进程被杀会留下 .aaw-stage-*，不清的话
-    // 每次重试都白背一份垃圾（幂等重试的前提）。落点的父目录（家模式下就
-    // 是目标家根本身）与目标家根都扫一遍。
-    let stage_parents: Vec<PathBuf> = destinations
-        .iter()
-        .filter_map(|(_, dest)| dest.parent().map(Path::to_path_buf))
-        .chain(std::iter::once(target.clone()))
-        .collect();
-    for parent in &stage_parents {
-        if let Ok(entries) = fs::read_dir(parent) {
-            for entry in entries.flatten() {
-                if entry.file_name().to_string_lossy().starts_with(".aaw-stage-") {
-                    let _ = fs::remove_dir_all(entry.path());
-                }
-            }
+    Ok(())
+}
+
+/// 归并旧目录只接受相同文件。遇到差异时停在暂存区，所有旧源保持原样。
+fn merge_verified(source: &Path, target: &Path) -> io::Result<()> {
+    let meta = match fs::symlink_metadata(source) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if meta.is_symlink() {
+        return Err(io::Error::other(format!(
+            "不能迁移链接：{}",
+            source.display()
+        )));
+    }
+    if !target.try_exists()? {
+        return copy_verified(source, target);
+    }
+    if meta.is_dir() && target.is_dir() {
+        for entry in fs::read_dir(source)? {
+            let entry = entry?;
+            merge_verified(&entry.path(), &target.join(entry.file_name()))?;
         }
+        return Ok(());
     }
-
-    // 标记从这一刻起代表“本账号迁移进行中”：写在复制之前，整体成功收尾
-    // 才删。中途被杀，重试凭它识别现场并自动清理；已有本账号标记（重试）
-    // 不重写，保持原现场。
-    if !own_marker {
-        write_migration_marker(&marker, &owner);
+    if meta.is_file() && target.is_file() && same_data(source, target)? {
+        return Ok(());
     }
+    Err(io::Error::other(format!(
+        "旧位置有不同内容，未覆盖：{}",
+        source.display()
+    )))
+}
 
-    state.0.stage("关窗", "关闭打开的工具窗口".into());
-    close_tool_windows(app);
-
-    state.0.stage("拷贝", format!("复制到 {}", display_path(&target)));
-    // 全程持写锁：工具窗口已关、L3 进程已杀，实际没有争用方；锁保证万一
-    // 有 keepAlive 的隐藏通道在写数据，也不会出现"拷了一半又有新写入"。
-    let guard = WRITE_LOCK.lock().map_err(|error| error.to_string())?;
-    let mut moved: Vec<(&'static str, PathBuf)> = Vec::new();
-    let mut copy_error: Option<String> = None;
-    for (source, name) in &sources {
-        // move_subtree 的目标叶子：默认模式下账号层是叶子（<tools>/<name>/<owner>），
-        // home 模式下分区名就是叶子（<home>/<name>）。
-        let (stage_parent, leaf) = if to_default {
-            (default_tool_root(&data_root).join(name), owner.as_str())
-        } else {
-            (target.clone(), *name)
-        };
-        match move_subtree_named(source, &stage_parent, leaf) {
-            Ok(()) => moved.push((name, source.clone())),
-            Err(error) => {
-                copy_error = Some(error);
-                break;
-            }
-        }
-    }
-    drop(guard);
-    if let Some(error) = copy_error {
-        // 回滚：删掉已归位的目标分区（指针没动，旧数据完好）。
-        for (name, _) in &moved {
-            let _ = fs::remove_dir_all(destination_of(name));
-        }
-        return Err(format!("{error}（原目录未动，可重试）"));
-    }
-
-    // 指针是切换点：写成功之前一切可回滚（旧数据原样），写成功之后以新家为准。
-    state.0.stage("切换", "写入位置指针".into());
-    let pointer = home_pointer_path(&data_root, &owner);
-    if to_default {
-        // 迁回默认时不留指针：指针缺省即默认位置，留着会把「迁回默认」
-        // 按钮钉死在界面上。
-        let _ = fs::remove_file(&pointer);
-    } else if let Err(error) = write_home_pointer(&pointer, &target) {
-        return Err(format!("{error}（原目录未动，可重试）"));
-    }
-    // 指针已切换 = 迁移已提交，标记完成使命。这之后的任何失败重试都会走
-    // 上面“已在目标”分支并顺带删标记。
-    let _ = fs::remove_file(&marker);
-
-    // 重映射：安装记录里的 dir、排除列表、运行目录登记都跟着搬。账号层
-    // 变化是结构性的（默认家带账号层、home 不带），不能纯前缀替换。
-    state.0.stage("切换", "改写路径记录".into());
-    let pairs = structural_pairs(&owner, &from_home, &target, from_default, to_default);
-    remap_preferences(&data_root, &pairs);
-    host.remap_runtime_dirs_with(&pairs);
-
-    // 清理（都删旧）：源分区子树 + 源数据目录；删完的空壳一并清掉。
-    state.0.stage("清理", format!("删除 {}", display_path(&from_home)));
-    let mut leftover = Vec::new();
-    for (_, source) in &moved {
-        let shell = if from_default { source.parent().unwrap() } else { &from_home };
-        if !remove_tree_and_shell(source, shell) {
-            leftover.push(display_path(source));
-        }
-    }
-    let names = moved
-        .iter()
-        .map(|(name, _)| *name)
-        .collect::<Vec<_>>()
-        .join("、");
-    let cleanup = if leftover.is_empty() {
-        "旧位置已删除。".to_string()
+fn comparable(path: &Path) -> String {
+    let value = display_path(path);
+    if cfg!(windows) {
+        value.to_ascii_lowercase()
     } else {
-        format!("以下旧目录删除失败，请手动清理：{}。", leftover.join("、"))
-    };
-    if !residue_note.is_empty() {
-        residue_note.push_str(&cleanup);
-        return Ok(format!(
-            "工具整体已迁移到 {}（{}）。{}",
-            display_path(&target),
-            if names.is_empty() { "没有需要搬的内容" } else { &names },
-            residue_note
-        ));
+        value
     }
-    Ok(format!(
-        "工具整体已迁移到 {}（{}）。{}",
-        display_path(&target),
-        if names.is_empty() { "没有需要搬的内容" } else { &names },
-        cleanup
-    ))
 }
 
-/// move_subtree 的变体：目标叶子名与暂存目录所在父目录分开给——默认模式
-/// 下"目标分区目录"是 `<tools>/<partition>/<owner>`（owner 是叶子名），
-/// home 模式下叶子名就是分区名。
-fn move_subtree_named(source: &Path, parent: &Path, leaf: &str) -> Result<(), String> {
-    if parent.join(leaf).exists() {
-        // 分类漏掉的竞态兜底（比如两次迁移撞车）：报错带路径，用户知道去哪看。
-        return Err(format!(
-            "{} 已存在，无法归位：请换一个空目录或先清理后重试。",
-            display_path(&parent.join(leaf))
-        ));
-    }
-    move_subtree(source, leaf, parent)
-}
-
-// ── 升级收编与旧落点搬迁 ────────────────────────────────────────────────
-
-/// 升级前的旧落点：`user_data_dir` 命令的 `tools` namespace 拼出来的目录。
-fn legacy_tools_root() -> Option<PathBuf> {
-    #[cfg(windows)]
-    let base = std::env::var("APPDATA").ok().filter(|s| !s.is_empty())?;
-    #[cfg(not(windows))]
-    let base = std::env::var("HOME").ok().filter(|s| !s.is_empty())?;
-    let folder = if cfg!(windows) { "tools" } else { ".tools" };
-    let path = PathBuf::from(base).join(folder);
-    path.is_dir().then_some(path)
-}
-
-/// 旧目录里是否还有未搬完的分区（任一存在即算）。
-fn legacy_pending() -> Option<String> {
-    let legacy = legacy_tools_root()?;
-    PARTITIONS
+fn rewrite_path(text: &mut String, changes: &PathChanges) {
+    let value = display_path(Path::new(text));
+    let key = comparable(Path::new(&value));
+    if let Some((source, target)) = changes
         .iter()
-        .any(|name| legacy.join(name).is_dir())
-        .then(|| display_path(&legacy))
+        .filter(|(from, _)| {
+            let from = comparable(from);
+            key == from
+                || key
+                    .strip_prefix(&from)
+                    .is_some_and(|tail| tail.starts_with('/'))
+        })
+        .max_by_key(|(from, _)| comparable(from).len())
+    {
+        let from = comparable(source);
+        *text = format!("{}{}", display_path(target), &value[from.len()..]);
+    }
 }
 
-/// 启动时把旧版裸 `tools` 目录的内容搬进默认落点。幂等：搬过的分区源目录
-/// 已删，下次启动直接跳过；目标已有同名分区时不覆盖，标记待处理让 UI 提示。
-/// 裸目录结构带账号层（与默认家同构），整棵 rename 即可。
-pub fn migrate_legacy_root(app: &AppHandle) {
-    let host = app.state::<ToolsHost>();
-    let Ok(data_root) = host.data_root() else { return };
-    let Some(legacy) = legacy_tools_root() else { return };
-    let target = default_tool_root(&data_root);
-    if canonical(&legacy).is_some_and(|value| Some(value) == canonical(&target)) {
-        return; // 已经是同一个地方（理论上不可能，防御一下）
-    }
-    let mut pending = false;
-    let mut moved_any = false;
-    for name in PARTITIONS {
-        let source = legacy.join(name);
-        if !source.is_dir() {
-            continue;
-        }
-        let destination = target.join(name);
-        if destination.exists() {
-            pending = true; // 新位置已有内容：不覆盖，留给用户处理
-            continue;
-        }
-        match move_subtree(&source, name, &target) {
-            Ok(()) => {
-                let _ = fs::remove_dir_all(&source);
-                moved_any = true;
+fn rewrite_preferences(prefs: &mut Preferences, changes: &PathChanges) -> Result<(), String> {
+    fn rewrite_fields(value: &mut Value, fields: &[&str], changes: &PathChanges) {
+        match value {
+            Value::Object(values) => {
+                for (key, value) in values {
+                    if fields.contains(&key.as_str()) {
+                        match value {
+                            Value::String(path) => rewrite_path(path, changes),
+                            Value::Array(paths) => {
+                                for path in paths {
+                                    if let Value::String(text) = path {
+                                        rewrite_path(text, changes);
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        rewrite_fields(value, fields, changes);
+                    }
+                }
             }
-            Err(_) => {
-                pending = true;
-                break; // 搬不动就停，下次启动再试
+            Value::Array(items) => items
+                .iter_mut()
+                .for_each(|item| rewrite_fields(item, fields, changes)),
+            _ => {}
+        }
+    }
+
+    if let Some(Some(text)) = prefs.get_mut("aaw-desktop.personal-tools.v1") {
+        let mut library: Value =
+            serde_json::from_str(text).map_err(|error| format!("无法读取工具清单：{error}"))?;
+        let accounts = library.as_object_mut().ok_or("工具清单格式无效。")?;
+        for entries in accounts.values_mut().filter_map(Value::as_array_mut) {
+            for entry in entries {
+                if let Some(Value::String(path)) = entry.get_mut("dir") {
+                    rewrite_path(path, changes);
+                }
+            }
+        }
+        *text = library.to_string();
+    }
+    if let Some(Some(text)) = prefs.get_mut("aaw-desktop/workspace/v1") {
+        let mut workspace: Value =
+            serde_json::from_str(text).map_err(|error| format!("无法读取工作区设置：{error}"))?;
+        rewrite_fields(&mut workspace, &["recentExclusions", "path"], changes);
+        *text = workspace.to_string();
+    }
+    Ok(())
+}
+
+/// AAW 改数据根时，默认工具目录随之复制，安装清单的绝对地址也一起更新。
+pub(crate) fn remap_after_app_move(from: &Path, to: &Path) -> Result<(), String> {
+    let mut prefs = preferences(to)?;
+    let changes = [default_tool_root(from), from.join(DEFAULT_VERSIONS)]
+        .into_iter()
+        .zip([default_tool_root(to), to.join(DEFAULT_VERSIONS)])
+        .collect();
+    rewrite_preferences(&mut prefs, &changes)?;
+    write_record(&configuration(to, "preferences.json"), &prefs)
+}
+
+fn execute(data: &Path, plan: &Home, roaming: Option<&Path>) -> Result<(), String> {
+    plan.validate()?;
+    let mut prefs = preferences(data)?;
+    let active = selected(&prefs)?;
+    if active.as_ref().is_some_and(|current| current.id == plan.id) {
+        return Ok(());
+    }
+    let target = plan.path(data);
+    let parent = target.parent().ok_or("工具存储路径无效。")?;
+    if plan.custom.is_none() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    if target.try_exists().map_err(|error| error.to_string())? {
+        return Err(format!(
+            "目标 {} 已存在，已保留原样。请取消计划并重新选择位置。",
+            target.display()
+        ));
+    }
+    if let Some(active) = &active {
+        active.accessible_path(data)?;
+    }
+    let sources = relocation_sources(data, active.as_ref(), roaming, &target)?;
+    let canonical_parent = parent.canonicalize().map_err(|error| error.to_string())?;
+    let canonical_target = canonical_parent.join(target.file_name().ok_or("工具存储路径无效。")?);
+    for (source, _) in &sources {
+        if let Ok(source) = source.canonicalize() {
+            if canonical_target.starts_with(source) {
+                return Err("目标工具目录位于源目录内，请选择独立的位置。".into());
             }
         }
     }
-    if moved_any && !pending {
-        let from = display_path(&legacy);
-        let to = display_path(&target);
-        remap_preferences(&data_root, &[(format!("{from}/"), format!("{to}/"))]);
-    }
-    if pending {
-        eprintln!(
-            "[aaw-tools] 旧工具目录 {} 有内容未能自动搬迁（目标位置已有同名分区），已保留原样",
-            display_path(&legacy)
+    rewrite_preferences(&mut prefs, &sources)?;
+    prefs.insert(
+        LOCATION_KEY.to_owned(),
+        Some(serde_json::to_string(plan).map_err(|error| error.to_string())?),
+    );
+
+    let stage = tempfile::Builder::new()
+        .prefix(".aaw-tool-move-")
+        .tempdir_in(parent)
+        .map_err(|error| error.to_string())?;
+    let staging_library = stage.path().join("library");
+    fs::create_dir(&staging_library).map_err(|error| error.to_string())?;
+    for (source, dest) in &sources {
+        let path = staging_library.join(
+            dest.strip_prefix(&target)
+                .map_err(|error| error.to_string())?,
         );
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        merge_verified(source, &path).map_err(|error| format!("{}：{error}", source.display()))?;
     }
+    fs::write(staging_library.join(LIBRARY_MARKER), &plan.id).map_err(|error| error.to_string())?;
+    fs::rename(&staging_library, &target).map_err(|error| error.to_string())?;
+    write_record(&configuration(data, "preferences.json"), &prefs)
 }
 
-/// 把旧模型的全局双指针收编成按账号指针。启动时调用一次，幂等：
-/// 全局指针删掉后此函数直接返回。
-///
-/// 场景表见设计稿 §4。关键动作：本体所在的 home 归属给当前账号；数据拷进
-/// `H/storage/` 团聚；全局指针删除。数据拷贝**不删旧**（收编是自动动作，
-/// 数据安全第一，旧位置留给用户手动清）。
-pub fn collect_legacy_pointers(app: &AppHandle) {
-    let host = app.state::<ToolsHost>();
-    let Ok(data_root) = host.data_root() else { return };
-    let config = data_root.join("configuration");
-    // 旧模型的全局指针用的是 toolRoot / storageRoot 键，单独读。
-    let global_tool = old_pointer_value(&config.join("tools-location.json"), "toolRoot");
-    let global_data = old_pointer_value(&config.join("data-location.json"), "storageRoot");
-    let Some(owner) = ToolStore::new(&data_root).owner().ok() else {
-        // 拿不到账号不能瞎归属：留着指针下次启动再收编。
-        return;
+fn pending_path(data: &Path) -> PathBuf {
+    configuration(data, "tool-storage-migration.json")
+}
+
+/// 由桌面启动独占锁调用。失败保留计划和原始数据，设置页显示原因。
+pub(crate) fn apply_pending(data: &Path) -> Result<(), String> {
+    let Some(plan) = read_record::<Option<Home>>(&pending_path(data))? else {
+        return Ok(());
     };
-    let default_storage_owner = default_tool_root(&data_root).join("storage").join(&owner);
-    match (global_tool, global_data) {
-        (Some(home), data_opt) => {
-            let home = PathBuf::from(&home);
-            // 数据团聚：源 = 旧数据指针位置（若有）或默认 storage/<owner>。
-            let source_storage = data_opt
-                .map(|value| PathBuf::from(value).join(&owner))
-                .unwrap_or_else(|| default_storage_owner.clone());
-            let target_storage = home.join("storage");
-            if source_storage.is_dir() {
-                if target_storage.exists() {
-                    eprintln!(
-                        "[aaw-tools] 收编：{} 已有内容，旧数据 {} 保留未动",
-                        display_path(&target_storage),
-                        display_path(&source_storage)
-                    );
-                } else if let Err(error) = copy_verified(&source_storage, &target_storage) {
-                    eprintln!("[aaw-tools] 收编：数据团聚失败（{error}），指针已写、下次启动重试");
-                    return;
-                }
-            }
-            if write_home_pointer(&home_pointer_path(&data_root, &owner), &home).is_err() {
-                return;
-            }
-            let _ = fs::remove_file(config.join("tools-location.json"));
-            let _ = fs::remove_file(config.join("data-location.json"));
-        }
-        (None, Some(storage)) => {
-            // 只有数据被迁过：搬回默认 storage/<owner>（不覆盖已有），删指针。
-            let source = PathBuf::from(&storage).join(&owner);
-            if source.is_dir() && !default_storage_owner.exists() {
-                if copy_verified(&source, &default_storage_owner).is_err() {
-                    return; // 搬不动留着下次
-                }
-            }
-            let _ = fs::remove_file(config.join("data-location.json"));
-        }
-        (None, None) => {}
+    execute(data, &plan, legacy_root().as_deref())?;
+    // 配置已指向新位置。计划文件留存时，下次启动按 id 识别为已完成。
+    if let Err(error) = fs::remove_file(pending_path(data)) {
+        eprintln!("已完成工具迁移，待清理迁移计划：{error}");
     }
+    Ok(())
 }
-
-fn old_pointer_value(pointer: &Path, key: &str) -> Option<String> {
-    let text = fs::read_to_string(pointer).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let path = value.get(key)?.as_str()?.trim().to_string();
-    (!path.is_empty()).then_some(path)
-}
-
-// ── 状态读取与命令 ───────────────────────────────────────────────────────
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolLocationStatus {
-    data_root: String,
-    /// 当前登录账号（解析失败的场合为空串，前端显示"未登录"）。
-    owner: String,
-    /// 工具整体当前位置（home 或默认根）。
     home: String,
     home_custom: bool,
-    /// 旧版裸 `tools` 目录里还有没搬完的内容时给出路径，UI 提示用户。
-    legacy_root: Option<String>,
-    migrating: bool,
-    progress: Option<Progress>,
-    report: Option<String>,
+    legacy_locations: bool,
+    pending_path: Option<String>,
+    migration_error: Option<String>,
 }
 
-pub fn status(app: &AppHandle) -> Result<ToolLocationStatus, String> {
-    let host = app.state::<ToolsHost>();
-    let data_root = host.data_root()?;
-    let owner = ToolStore::new(&data_root).owner().unwrap_or_default();
-    let (home, home_custom) = if owner.is_empty() {
-        (default_tool_root(&data_root), false)
-    } else {
-        (
-            tool_home(&data_root, &owner),
-            tool_home_pointer(&data_root, &owner).is_some(),
-        )
-    };
-    let migration = app.try_state::<ToolHomeMigration>();
-    let migrating = migration
-        .as_ref()
-        .is_some_and(|state| state.0.is_running());
-    let progress = if migrating {
-        migration
-            .as_ref()
-            .and_then(|state| state.0.progress.lock().ok().and_then(|slot| slot.clone()))
-    } else {
-        None
-    };
-    // 空闲时也要能读到上一次的报告：迁移从设置页发起，发起后组件靠轮询
-    // 读到最终结果。
-    let report = migration
-        .as_ref()
-        .and_then(|state| state.0.last_report.lock().ok().and_then(|slot| slot.clone()));
+fn status(app: &AppHandle) -> Result<ToolLocationStatus, String> {
+    let data = app.state::<ToolsHost>().data_root()?;
+    let active = selected(&preferences(&data)?)?;
+    let pending = read_record::<Option<Home>>(&pending_path(&data))?
+        .filter(|plan| !active.as_ref().is_some_and(|home| home.id == plan.id));
+    let legacy = active.is_none()
+        && (!legacy_accounts(&data)?.is_empty()
+            || checked_pointer(&configuration(&data, "tools-location.json"), "toolRoot")?
+                .is_some()
+            || checked_pointer(&configuration(&data, "data-location.json"), "storageRoot")?
+                .is_some()
+            || legacy_root()
+                .is_some_and(|root| PARTITIONS.iter().any(|name| root.join(name).is_dir())));
     Ok(ToolLocationStatus {
-        data_root: display_path(&data_root),
-        owner,
-        home: display_path(&home),
-        home_custom,
-        legacy_root: legacy_pending(),
-        migrating,
-        progress,
-        report,
+        home: display_path(
+            &active
+                .as_ref()
+                .map_or_else(|| default_tool_root(&data), |home| home.path(&data)),
+        ),
+        home_custom: active.is_some_and(|home| home.custom.is_some()),
+        legacy_locations: legacy,
+        pending_path: pending.map(|home| display_path(&home.path(&data))),
+        migration_error: crate::storage_location::tool_migration_error(app),
     })
 }
 
 #[tauri::command]
-pub async fn tools_location_read(app: AppHandle) -> Result<ToolLocationStatus, String> {
+pub fn tools_location_read(app: AppHandle) -> Result<ToolLocationStatus, String> {
     status(&app)
 }
 
-/// 迁移当前账号的工具整体（本体 + 数据一起走）。`target` 传 `None` 表示
-/// 迁回默认位置。立即返回，迁移在后台线程执行；进度与结果靠
-/// `tools_location_read` 轮询。
 #[tauri::command]
-pub async fn tools_location_schedule(
+pub fn tools_location_schedule(
     window: tauri::WebviewWindow,
     app: AppHandle,
     target: Option<String>,
+    cancel: Option<bool>,
 ) -> Result<ToolLocationStatus, String> {
     if window.label() != "main" {
         return Err("只有主窗口可以修改工具存储位置。".into());
     }
-    let host = app.state::<ToolsHost>();
-    let data_root = host.data_root()?;
-    let state = app.state::<ToolHomeMigration>();
-    if state.0.is_running() {
-        return Err("已有一个迁移在进行，请等它结束。".into());
+    let data = app.state::<ToolsHost>().data_root()?;
+    let pending = pending_path(&data);
+    let lock_path = configuration(&data, "tool-storage-schedule.lock");
+    fs::create_dir_all(lock_path.parent().ok_or("工具配置路径无效。")?)
+        .map_err(|error| error.to_string())?;
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(lock_path)
+        .map_err(|error| error.to_string())?;
+    lock.lock().map_err(|error| error.to_string())?;
+    if cancel == Some(true) {
+        match fs::remove_file(&pending) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
+    } else {
+        let custom = target
+            .map(|text| -> Result<PathBuf, String> {
+                let parent = PathBuf::from(text.trim());
+                if !parent.is_absolute() || !parent.is_dir() {
+                    return Err("请选择一个已存在的绝对目录。".into());
+                }
+                let parent = parent.canonicalize().map_err(|error| error.to_string())?;
+                let data = data.canonicalize().map_err(|error| error.to_string())?;
+                if parent.starts_with(&data) {
+                    return Err("请选择 AAW 数据目录以外的位置，或使用「迁回默认」。".into());
+                }
+                let mut folder = parent.join("aaw-tools");
+                let mut number = 2;
+                while folder.try_exists().map_err(|error| error.to_string())? {
+                    folder = parent.join(format!("aaw-tools-{number}"));
+                    number += 1;
+                }
+                Ok(folder)
+            })
+            .transpose()?;
+        let plan = Home {
+            id: uuid::Uuid::new_v4().to_string(),
+            custom,
+        };
+        write_record(&pending, &plan)?;
     }
-    let owner = ToolStore::new(&data_root).owner()?;
-    let current_home = tool_home(&data_root, &owner);
-    let target = match target.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
-        Some(input) => {
-            let mut forbidden: Vec<(PathBuf, String)> = vec![
-                (current_home.clone(), "工具整体当前位置".into()),
-                (data_root.clone(), "数据根".into()),
-            ];
-            for (home, name) in other_homes(&data_root, &owner) {
-                forbidden.push((home, name));
-            }
-            validate_target(input, &forbidden, "工具整体当前位置")?
-        }
-        None => {
-            if tool_home_pointer(&data_root, &owner).is_none() {
-                return Err("工具整体已在默认位置，无需迁移。".into());
-            }
-            default_tool_root(&data_root)
-        }
-    };
-    state.0.begin();
-    let worker = app.clone();
-    std::thread::spawn(move || {
-        match run_tool_home_migration(&worker, Some(target)) {
-            Ok(report) => worker.state::<ToolHomeMigration>().0.finish(report),
-            Err(error) => worker.state::<ToolHomeMigration>().0.finish(format!("迁移失败：{error}")),
-        }
-    });
+    crate::storage_location::clear_tool_migration_error(&app);
     status(&app)
 }
 
-/// 前端解析工具分区目录（projects / installed / backups）。返回的路径已经
-/// 按当前账号解析好（自定义 home 无账号层、默认位置带账号层）——前端不再
-/// 自己拼账号段。取代 `user_data_dir("tools", …)`：那个命令是共享基础设施，
-/// 不能为工具单独改行为。
 #[tauri::command]
-pub async fn tools_root_dir(app: AppHandle, directory: String) -> Result<String, String> {
+pub fn tools_root_dir(app: AppHandle, directory: String) -> Result<String, String> {
     if !matches!(directory.as_str(), "projects" | "installed" | "backups") {
-        return Err(format!("未知的工具目录类型：{directory}"));
+        return Err("未知的工具目录类型。".into());
     }
-    let host = app.state::<ToolsHost>();
-    let data_root = host.data_root()?;
-    let owner = ToolStore::new(&data_root).owner()?;
-    Ok(display_path(&tool_partition(&data_root, &owner, &directory)))
+    let data = app.state::<ToolsHost>().data_root()?;
+    let owner = ToolStore::new(&data).owner()?;
+    Ok(display_path(&tool_partition(&data, &owner, &directory)?))
 }
 
 /// 在文件管理器里打开一个目录（设置页「打开文件夹」按钮）。
@@ -962,211 +628,214 @@ pub async fn tools_storage_open(window: tauri::WebviewWindow, path: String) -> R
     if !path.is_dir() {
         return Err("目录不存在。".into());
     }
-    tauri_plugin_opener::open_path(path, None::<&str>)
-        .map_err(|error| format!("打开失败：{error}"))
+    tauri_plugin_opener::open_path(path, None::<&str>).map_err(|error| format!("打开失败：{error}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
-    fn temp_root(name: &str) -> PathBuf {
-        let root = std::env::temp_dir().join(format!("aaw-tools-loc-{name}-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&root).unwrap();
-        root
+    fn put(path: &Path, value: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, value).unwrap();
     }
 
-    fn write_home_pointer_file(data_root: &Path, owner: &str, home: Option<&str>) {
-        let dir = data_root.join("configuration").join("tool-locations");
-        fs::create_dir_all(&dir).unwrap();
-        let body = match home {
-            Some(home) => serde_json::json!({ "toolHome": home }).to_string(),
-            None => serde_json::json!({}).to_string(),
-        };
-        fs::write(dir.join(format!("{owner}.json")), body).unwrap();
-    }
-
-    #[test]
-    fn pointer_overrides_default_per_account_and_empty_value_falls_back() {
-        let root = temp_root("pointer");
-        // 无指针：默认位置，分区带账号层
-        assert_eq!(tool_home(&root, "u1"), root.join("tools"));
-        assert_eq!(
-            tool_partition(&root, "u1", "installed"),
-            root.join("tools").join("installed").join("u1")
-        );
-        assert_eq!(
-            tool_storage_root(&root, "u1"),
-            root.join("tools").join("storage").join("u1")
-        );
-        // 指针指向自定义家：分区不带账号层
-        write_home_pointer_file(&root, "u1", Some("D:/AAW-home"));
-        assert_eq!(tool_home(&root, "u1"), PathBuf::from("D:/AAW-home"));
-        assert_eq!(tool_partition(&root, "u1", "installed"), PathBuf::from("D:/AAW-home/installed"));
-        assert_eq!(tool_storage_root(&root, "u1"), PathBuf::from("D:/AAW-home/storage"));
-        // 空值 = 没设置
-        write_home_pointer_file(&root, "u1", Some("  "));
-        assert_eq!(tool_home(&root, "u1"), root.join("tools"));
-        // 账号隔离：u2 没指针，不受 u1 影响
-        write_home_pointer_file(&root, "u1", Some("D:/AAW-home"));
-        assert_eq!(tool_home(&root, "u2"), root.join("tools"));
-    }
-
-    #[test]
-    fn structural_pairs_moves_account_layer_across_styles() {
-        // 默认家 → 自定义家：去掉账号层
-        let pairs = structural_pairs(
-            "u1",
-            Path::new("C:/data/tools"),
-            Path::new("D:/home"),
-            true,
-            false,
-        );
-        let installed = pairs.iter().find(|(from, _)| from.contains("installed")).unwrap();
-        assert_eq!(installed.0, "C:/data/tools/installed/u1/");
-        assert_eq!(installed.1, "D:/home/installed/");
-        assert!(pairs.iter().any(|(from, _)| from.ends_with("installed\\u1\\")));
-        // 自定义家 → 默认家：加回账号层
-        let pairs = structural_pairs(
-            "u1",
-            Path::new("D:/home"),
-            Path::new("C:/data/tools"),
-            false,
-            true,
-        );
-        let projects = pairs.iter().find(|(from, _)| from.contains("projects")).unwrap();
-        assert_eq!(projects.0, "D:/home/projects/");
-        assert_eq!(projects.1, "C:/data/tools/projects/u1/");
-    }
-
-    #[test]
-    fn subtree_move_verifies_and_cleans_stage_on_failure() {
-        let source = temp_root("src");
-        fs::create_dir_all(source.join("installed")).unwrap();
-        fs::write(source.join("installed/a.json"), b"alpha").unwrap();
-        let target = temp_root("dst");
-        // 正常路径：拷贝 + 归位
-        move_subtree(&source.join("installed"), "installed", &target).unwrap();
-        assert_eq!(fs::read(target.join("installed/a.json")).unwrap(), b"alpha");
-        // 源不动（删旧是迁移自己的事）
-        assert!(source.join("installed/a.json").exists());
-    }
-
-    #[test]
-    fn remap_preferences_rewrites_structural_prefixes() {
-        let root = temp_root("remap");
-        let config = root.join("configuration");
-        fs::create_dir_all(&config).unwrap();
-        let prefs = serde_json::json!({
-            "aaw-desktop.tools.v1": [{ "dir": "C:/data/tools/installed/u1/pilot" }],
-            "aaw-desktop/workspace/v1": { "recentExclusions": ["C:/data/tools/projects/u1/notes"] },
-        });
-        fs::write(config.join("preferences.json"), prefs.to_string()).unwrap();
-        let pairs = structural_pairs("u1", Path::new("C:/data/tools"), Path::new("D:/home"), true, false);
-        remap_preferences(&root, &pairs);
-        let text = fs::read_to_string(config.join("preferences.json")).unwrap();
-        assert!(text.contains("D:/home/installed/pilot"), "{text}");
-        assert!(text.contains("D:/home/projects/notes"), "{text}");
-        assert!(!text.contains("C:/data/tools"), "{text}");
-    }
-
-    #[test]
-    fn classify_destinations_requires_migration_marker() {
-        // 目标里有分区状内容但没有本账号标记 → 一律真冲突，绝不凭形状猜
-        // （Z-25：形状判据会误删别的账号留在目标目录里的工具数据）。
-        let root = temp_root("classify-no-marker");
-        for name in ["installed", "projects"] {
-            fs::create_dir_all(root.join(name)).unwrap();
-            fs::write(root.join(name).join("leftover"), b"x").unwrap();
+    fn plan(custom: Option<PathBuf>) -> Home {
+        Home {
+            id: uuid::Uuid::new_v4().to_string(),
+            custom,
         }
-        let destinations: Vec<(&'static str, PathBuf)> = PARTITIONS
-            .iter()
-            .map(|name| (*name, root.join(name)))
-            .collect();
-        match classify_destinations(&destinations, false) {
-            DestinationState::Conflict { name, dest } => {
-                assert_eq!(name, "installed");
-                assert_eq!(dest, root.join("installed"));
-            }
-            other => panic!("无标记应为冲突，实际 {other:?}"),
-        }
-        // 有本账号标记 → 残骸，全部清理（含空壳）
-        fs::create_dir_all(root.join("backups")).unwrap(); // 空壳也算进清理
-        match classify_destinations(&destinations, true) {
-            DestinationState::Leftover { paths } => {
-                assert_eq!(paths.len(), 3, "两个非空分区 + 一个空壳");
-                assert!(paths.contains(&root.join("backups")));
-            }
-            other => panic!("有标记应为残骸，实际 {other:?}"),
-        }
-        // 只剩空壳 → 清壳不算冲突（空目录里没有可丢的数据，与标记无关）
-        let root = temp_root("classify-shell");
-        fs::create_dir_all(root.join("storage")).unwrap();
-        let destinations: Vec<(&'static str, PathBuf)> = PARTITIONS
-            .iter()
-            .chain(std::iter::once(&"storage"))
-            .map(|name| (*name, root.join(name)))
-            .collect();
-        match classify_destinations(&destinations, false) {
-            DestinationState::Leftover { paths } => assert_eq!(paths, vec![root.join("storage")]),
-            other => panic!("空壳应清掉，实际 {other:?}"),
-        }
-        // 什么都没有 → 干净
-        let root = temp_root("classify-vacant");
-        let destinations: Vec<(&'static str, PathBuf)> = PARTITIONS
-            .iter()
-            .map(|name| (*name, root.join(name)))
-            .collect();
-        assert!(matches!(classify_destinations(&destinations, false), DestinationState::Vacant));
     }
 
-    #[test]
-    fn migration_marker_is_owner_scoped() {
-        let target = temp_root("marker-path");
-        // 家模式目标账号私有 → 固定文件名；默认模式 <tools> 根多账号共享
-        // → 文件名必须带账号，认不出别人的现场。
-        assert_eq!(
-            migration_marker_path(false, &target, "u1"),
-            target.join(".aaw-migration.json")
-        );
-        assert_eq!(
-            migration_marker_path(true, &target, "u1"),
-            target.join(".aaw-migration-u1.json")
-        );
-        // 读写往返；损坏内容按无标记处理
-        let marker = migration_marker_path(true, &target, "u1");
-        write_migration_marker(&marker, "u1");
-        assert_eq!(read_migration_owner(&marker).as_deref(), Some("u1"));
-        fs::write(&marker, "not json").unwrap();
-        assert_eq!(read_migration_owner(&marker), None);
-    }
-
-    #[test]
-    fn validate_target_distinguishes_collision_from_no_change() {
-        let mine = temp_root("collision-mine");
-        let other = temp_root("collision-other");
-        let same_as_other = format!("{}", other.display());
-        // 与别的受保护根相同 → 撞车文案，不含「没有变化」
-        let error = validate_target(
-            &same_as_other,
-            &[
-                (mine.clone(), "工具整体当前位置".into()),
-                (other.clone(), "账号 x 的工具目录".into()),
-            ],
-            "工具整体当前位置",
+    fn installed_dirs(data: &Path) -> Value {
+        serde_json::from_str(
+            preferences(data).unwrap()["aaw-desktop.personal-tools.v1"]
+                .as_deref()
+                .unwrap(),
         )
-        .unwrap_err();
-        assert!(error.contains("账号 x") && !error.contains("没有变化"), "{error}");
-        // 与当前根相同 → 才是「没有变化」
-        let error = validate_target(
-            &mine.display().to_string(),
-            &[
-                (mine, "工具整体当前位置".into()),
-                (other, "账号 x 的工具目录".into()),
-            ],
-            "工具整体当前位置",
+        .unwrap()
+    }
+
+    #[test]
+    fn two_accounts_move_together_and_return_to_the_app_root() {
+        let fixture = tempfile::tempdir().unwrap();
+        let data = fixture.path().join("app");
+        let legacy = fixture.path().join("alice-old");
+        let bob = default_tool_root(&data).join("installed/bob/notes");
+        let alice = legacy.join("installed/notes");
+        put(&alice.join("index.html"), "alice tool");
+        put(&bob.join("index.html"), "bob tool");
+        put(&legacy.join("projects/notes/src.js"), "author source");
+        put(
+            &legacy.join("backups/notes/previous.json"),
+            "previous version",
+        );
+        put(&legacy.join("storage/notes.json"), "alice state");
+        put(
+            &default_tool_root(&data).join("storage/bob/notes.json"),
+            "bob state",
+        );
+        put(
+            &default_tool_root(&data).join("secrets/alice/notes.json"),
+            "ciphertext",
+        );
+        write_record(
+            &configuration(&data, "tool-locations/alice.json"),
+            &json!({"toolHome":legacy}),
         )
-        .unwrap_err();
-        assert!(error.contains("没有变化"), "{error}");
+        .unwrap();
+        let prefs = Preferences::from([
+            (
+                "aaw-desktop.personal-tools.v1".into(),
+                Some(
+                    json!({
+                        "user:alice":[{"dir":display_path(&alice),"settings":{"tag":"alice"}}],
+                        "user:bob":[{"dir":display_path(&bob),"settings":{"tag":"bob"}}]
+                    })
+                    .to_string(),
+                ),
+            ),
+            (
+                "aaw-desktop/workspace/v1".into(),
+                Some(
+                    json!({
+                        "recentExclusions":[display_path(&legacy.join("projects"))],
+                        "recent":[{"path":display_path(&legacy.join("projects/notes"))}]
+                    })
+                    .to_string(),
+                ),
+            ),
+        ]);
+        write_record(&configuration(&data, "preferences.json"), &prefs).unwrap();
+        let custom = fixture.path().join("aaw-tools");
+        execute(&data, &plan(Some(custom.clone())), None).unwrap();
+        assert_eq!(tool_home(&data).unwrap(), custom);
+        for (part, content) in [
+            ("installed/alice/notes/index.html", "alice tool"),
+            ("installed/bob/notes/index.html", "bob tool"),
+            ("projects/alice/notes/src.js", "author source"),
+            ("backups/alice/notes/previous.json", "previous version"),
+            ("storage/alice/notes.json", "alice state"),
+            ("storage/bob/notes.json", "bob state"),
+            ("secrets/alice/notes.json", "ciphertext"),
+        ] {
+            assert_eq!(fs::read_to_string(custom.join(part)).unwrap(), content);
+        }
+        assert_eq!(
+            installed_dirs(&data)["user:alice"][0]["dir"],
+            display_path(&custom.join("installed/alice/notes"))
+        );
+        assert_eq!(
+            installed_dirs(&data)["user:bob"][0]["settings"]["tag"],
+            "bob"
+        );
+        assert!(alice.join("index.html").is_file());
+        assert!(bob.join("index.html").is_file());
+        let default = plan(None);
+        execute(&data, &default, None).unwrap();
+        let home = default.path(&data);
+        assert!(home.starts_with(data.join(DEFAULT_VERSIONS)));
+        assert_eq!(
+            tool_partition(&data, "bob", "storage").unwrap(),
+            home.join("storage/bob")
+        );
+        assert_eq!(
+            installed_dirs(&data)["user:bob"][0]["dir"],
+            display_path(&home.join("installed/bob/notes"))
+        );
+        assert!(custom.join("storage/bob/notes.json").is_file());
+        put(&home.join(LIBRARY_MARKER), "different library");
+        assert!(tool_partition(&data, "bob", "storage").is_err());
+    }
+
+    #[test]
+    fn conflicting_legacy_copies_do_not_replace_sources_or_commit_destination() {
+        let fixture = tempfile::tempdir().unwrap();
+        let data = fixture.path().join("app");
+        let legacy = fixture.path().join("storage-old");
+        let old_file = legacy.join("bob/tool.json");
+        let default_file = default_tool_root(&data).join("storage/bob/tool.json");
+        put(&old_file, "old");
+        put(&default_file, "default");
+        write_record(
+            &configuration(&data, "data-location.json"),
+            &json!({"storageRoot":legacy}),
+        )
+        .unwrap();
+        let custom = fixture.path().join("aaw-tools");
+
+        let failure = execute(&data, &plan(Some(custom.clone())), None).unwrap_err();
+        assert!(failure.contains("未覆盖"));
+        assert!(!custom.exists());
+        assert!(selected(&preferences(&data).unwrap()).unwrap().is_none());
+        assert_eq!(fs::read_to_string(old_file).unwrap(), "old");
+        assert_eq!(fs::read_to_string(default_file).unwrap(), "default");
+    }
+
+    #[test]
+    fn account_pointer_to_shared_legacy_root_cannot_claim_all_accounts() {
+        let fixture = tempfile::tempdir().unwrap();
+        let data = fixture.path().join("app");
+        let shared = default_tool_root(&data);
+        put(&shared.join("storage/bob/tool.json"), "bob");
+        write_record(
+            &configuration(&data, "tool-locations/alice.json"),
+            &json!({"toolHome":shared}),
+        )
+        .unwrap();
+        let custom = fixture.path().join("aaw-tools");
+        let failure = execute(&data, &plan(Some(custom.clone())), None).unwrap_err();
+        assert!(failure.contains("无法确定归属"));
+        assert!(!custom.exists());
+        assert_eq!(
+            fs::read_to_string(shared.join("storage/bob/tool.json")).unwrap(),
+            "bob"
+        );
+    }
+
+    #[test]
+    fn account_pointer_does_not_claim_an_old_global_partition() {
+        let fixture = tempfile::tempdir().unwrap();
+        let data = fixture.path().join("app");
+        let home = fixture.path().join("formerly-global");
+        let bob = home.join("installed/bob/notes/manifest.json");
+        put(&bob, "bob's manifest");
+        write_record(
+            &configuration(&data, "tool-locations/alice.json"),
+            &json!({"toolHome":home}),
+        )
+        .unwrap();
+        let custom = fixture.path().join("aaw-tools");
+        let failure = execute(&data, &plan(Some(custom.clone())), None).unwrap_err();
+        assert!(failure.contains("账号子目录"));
+        assert!(!custom.exists());
+        assert_eq!(fs::read_to_string(bob).unwrap(), "bob's manifest");
+    }
+
+    #[test]
+    fn app_move_rewrites_native_string_records_and_leaves_external_paths() {
+        let fixture = tempfile::tempdir().unwrap();
+        let from = fixture.path().join("old-aaw");
+        let to = fixture.path().join("new-aaw");
+        let home = plan(None);
+        let old_dir = home.path(&from).join("installed/alice/notes");
+        let external = fixture.path().join("other/project");
+        let prefs = Preferences::from([
+            (LOCATION_KEY.into(), Some(serde_json::to_string(&home).unwrap())),
+            ("aaw-desktop.personal-tools.v1".into(), Some(json!({
+                "user:alice":[{"dir":display_path(&old_dir)},{"dir":display_path(&external)}]
+            }).to_string())),
+        ]);
+        write_record(&configuration(&to, "preferences.json"), &prefs).unwrap();
+        remap_after_app_move(&from, &to).unwrap();
+        remap_after_app_move(&from, &to).unwrap();
+        let library = installed_dirs(&to);
+        assert_eq!(
+            library["user:alice"][0]["dir"],
+            display_path(&home.path(&to).join("installed/alice/notes"))
+        );
+        assert_eq!(library["user:alice"][1]["dir"], display_path(&external));
+        assert_eq!(tool_home(&to).unwrap(), home.path(&to));
     }
 }
