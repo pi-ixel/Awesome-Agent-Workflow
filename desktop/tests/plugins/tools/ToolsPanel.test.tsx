@@ -112,10 +112,9 @@ it("opens the tool directly, routes Manage separately, saves settings and export
   const service = { state, install: vi.fn(), rollback: vi.fn(), setRunDir: vi.fn(), setSourceDir: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn((_id: string, values: ToolSettings) => state.setState([{ package: sampleTool, settings: values }], true)) } satisfies ToolsService;
   const open = vi.fn().mockResolvedValue(undefined);
   const write = vi.fn().mockResolvedValue(undefined);
-  const stop = vi.fn().mockResolvedValue(undefined);
-  // 管理页卸载也走 purge（先清盘、成功后才撤记录），这里只断言它被调用。
+  // 管理页和勾选删除文件的列表页使用同一条卸载入口。
   const purge = vi.fn().mockResolvedValue({ text: "已删除 2 个目录。" });
-  const host = { isNative: () => true, openTool: open, writeToolArchive: write, stopTool: stop,
+  const host = { isNative: () => true, openTool: open, writeToolArchive: write,
     dialogs: { saveFile: vi.fn().mockResolvedValue("E:/export.zip") } } as unknown as HostService;
   render(<ToolsPanel service={service} host={host} workshop={{ ...fakeWorkshop(), purge }} />);
   fireEvent.click(screen.getByRole("button", { name: "打开 JSON 格式化" }));
@@ -146,14 +145,9 @@ it("opens the tool directly, routes Manage separately, saves settings and export
   fireEvent.click(screen.getByRole("button", { name: "卸载" }));
   expect(purge).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "确认卸载" }));
-  // 管理页的「卸载」与列表页勾了「同时删除文件」是同一件事：走 purge 先清盘，
-  // 由它成功后再撤记录。以前这里只调 `service.remove`，运行副本、工具数据、
-  // 密钥与备份全留在盘上——记录一没，界面上再没有能清掉它们的入口。
-  await waitFor(() => expect(purge).toHaveBeenCalledWith(sampleTool.id));
+  await waitFor(() => expect(purge).toHaveBeenCalledWith(sampleTool.id, true));
   expect(service.remove).not.toHaveBeenCalled();
   expect(screen.getByRole("status")).toHaveTextContent("已卸载");
-  // 卸载之后窗口不该继续活着：顺手走同一个停止通道把它关掉。
-  expect(stop).toHaveBeenCalledWith(sampleTool.id);
 });
 
 /** 分区默认收起，只留摘要；来源目录是文本胶囊，界面不再写死不存在的文件。 */
@@ -413,7 +407,7 @@ it("keeps the tool listed when file cleanup fails during uninstall", async () =>
   fireEvent.click(screen.getByRole("button", { name: "卸载" }));
 
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("清理失败：目录被占用"));
-  expect(purge).toHaveBeenCalledWith(sampleTool.id);
+  expect(purge).toHaveBeenCalledWith(sampleTool.id, true);
   // 记录不能先撤：撤了列表就空了，用户没地方重试。
   expect(service.remove).not.toHaveBeenCalled();
   expect(screen.getByRole("list", { name: "已安装工具" })).toBeVisible();

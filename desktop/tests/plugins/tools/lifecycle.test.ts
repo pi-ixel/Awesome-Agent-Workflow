@@ -1767,13 +1767,15 @@ describe("工具模块的状态转换（第七轮：配置落盘失败）", () =
     const app = await device();
     const tool = packageOf("1.0.0", "<p>页面</p>");
     await app.workshopOf().installArchive(tool, runtimeFiles(tool));
+    const dir = app.savedEntries()[0]?.dir as string;
 
     breakDisk("配置文件被占用");
     const note = await app.workshopOf().purge("notes");
     expect(note.error).toBe(true);
-    expect(note.text).toContain("安装记录没删掉");
-    // 记录还在（文件已经删了，重启后再点一次即可）——绝不能无声消失。
+    expect(note.text).toContain("卸载失败：安装记录没有保存成功");
     expect(app.tools().state.getState()).toHaveLength(1);
-    expect(app.savedEntries()).toHaveLength(1);
+    expect(app.savedEntries()[0]?.dir).toBe(dir);
+    expect(await app.text(joinPath(dir, "index.html"))).toBe("<p>页面</p>");
+    await expectConsistent(app);
   });
 });

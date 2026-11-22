@@ -103,6 +103,7 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {
             Ok(())
         };
         let result = (|| {
+            crate::tools::uninstall::recover_at(state.active.as_deref().unwrap_or(&default))?;
             finish_tool_paths(&mut state)?;
             if let Some(pending) = &state.pending {
                 let from = state.active.as_deref().unwrap_or(&default);

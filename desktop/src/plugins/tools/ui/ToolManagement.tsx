@@ -177,7 +177,7 @@ export function ToolManagement({ entry, onBack, onOpen, onExport, onUpdate, onSa
           </Section>
 
           <Section id="remove" title="卸载插件" description="移除本账号中的插件与设置，可先导出源码保留项目" open={open.remove} onToggle={() => toggle("remove")} last>
-            <div className="mg-content mg-remove">{confirmRemove ? <div className="mg-actions"><button type="button" className={btnGhost} onClick={() => setConfirmRemove(false)}>取消</button><DangerButton onClick={onRemove}>确认卸载</DangerButton></div> : <button type="button" className={`${btnGhost} remove-button`} onClick={() => setConfirmRemove(true)}>卸载</button>}</div>
+            <div className="mg-content mg-remove">{confirmRemove ? <div className="mg-actions"><button type="button" className={btnGhost} onClick={() => setConfirmRemove(false)}>取消</button><DangerButton disabled={busy} onClick={onRemove}>确认卸载</DangerButton></div> : <button type="button" className={`${btnGhost} remove-button`} disabled={busy} onClick={() => setConfirmRemove(true)}>卸载</button>}</div>
           </Section>
         </div>
       </div>

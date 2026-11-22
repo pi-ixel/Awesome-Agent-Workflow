@@ -82,6 +82,10 @@ export class DesktopHost implements HostService {
       if (!isTauriEnv()) throw new Error("请在 AAW 桌面版中停止后台工具。");
       await this.invoke("launcher_stop", { toolId });
     });
+  readonly closeTool = (toolId: string): Promise<void> =>
+    this.resources.run(async () => {
+      if (isTauriEnv()) await this.invoke("tools_close", { toolId });
+    });
   readonly openToolsGuide: HostService["openToolsGuide"] = () =>
     this.resources.run(async () => {
       if (!isTauriEnv()) throw new Error("请在 AAW 桌面版中打开工具开发指导。");
@@ -351,6 +355,10 @@ export class DesktopHost implements HostService {
       writeTextFile: (path, text) =>
         this.resources.run(() => backend.writeTextFile(path, text)),
       toolPurge: (input) => this.resources.run(() => backend.toolPurge(input)),
+      ...(backend.finishToolPurge ? {
+        finishToolPurge: (toolId: string, owner: string, commit: boolean) =>
+          this.resources.run(() => backend.finishToolPurge!(toolId, owner, commit)),
+      } : {}),
       moveToolPath: (from, to) =>
         this.resources.run(() => backend.moveToolPath(from, to)),
       // 二进制与整树列举：带 node_modules / 图片 / wasm 的工具要按字节落盘，

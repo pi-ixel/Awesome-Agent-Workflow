@@ -72,6 +72,19 @@ impl GuideDirty {
     }
 }
 
+/// 退出整个应用前沿用指导窗口自己的未保存确认。
+pub(crate) fn defer_exit_for_editor(app: &tauri::AppHandle) -> bool {
+    app.try_state::<GuideDirty>().is_some_and(|state| state.get())
+        && app.get_webview_window(LABEL).is_some_and(|window| {
+            if !window_alive(&window) {
+                return false;
+            }
+            let _ = window.show();
+            let _ = window.set_focus();
+            window.close().is_ok()
+        })
+}
+
 /// 窗口是不是还真实存在。
 ///
 /// 这里踩了两个坑，都实测过（2026-11-21）：

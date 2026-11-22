@@ -160,7 +160,7 @@ export interface WorkshopService {
    */
   migrateLegacy(tools: readonly PersonalTool[]): Promise<LegacyMigration>;
   /** 卸载清理：删目录与工具数据。返回给用户看的一句话。 */
-  purge(id: string): Promise<WorkshopNote>;
+  purge(id: string, files?: boolean): Promise<WorkshopNote>;
   /**
    * 解析「打开」应该用的运行副本目录。
    *
@@ -946,103 +946,79 @@ export function createWorkshop(deps: {
     },
 
     resolveOpenDir,
-    async purge(id) {
+    async purge(id, files = true) {
       const origin = deps.owner();
       const owner = origin ?? "";
-      // 卸载也要排进这个工具的队列。各干各的时候，一次还在写盘的安装会把它的
-      // 暂存目录暴露给卸载——卸载把 `.staging-*` 当残骸删掉，安装随即在回读
-      // 校验时报"项目里没有 manifest.json"。用户刚点完"已卸载"，又收到一条
-      // 完全对不上的错误。排队之后卸载一定看到安装的最终结果，再整份清掉。
       return serializeToolOp(`tool:${owner}:${id}`, async () => {
-        // 扫盘之前先确认身份：下面的清理会真的删目录，不能拿"新账号"的身份
-        // 继续做一次"旧账号发起的卸载"。
-        let dirs: string[];
+        let dirs: string[] = [];
         try {
           assertOwner(origin);
-          // 两个根都扫：自定义根目录下的项目也是这个工具的源码，删工具时不能留下。
-          const [defaultProjects, customProjects] = await Promise.all([
-            listToolProjectSummaries(io, { owner }),
-            customRoot ? listToolProjectSummaries(io, { parent: customRoot }).catch(() => []) : Promise.resolve([]),
-          ]);
-          const projectDirs = [...defaultProjects, ...customProjects]
-            .filter((entry) => entry.id === id)
-            .map((entry) => entry.dir);
-          /**
-           * 运行副本也一起清：ZIP 装进来的工具可能带着 `node_modules`（几十到几百 MB），
-           * 只删注册表等于把它们永久留在磁盘上。
-           *
-           * 每个版本是 `installed/<账号>/<id>/versions/<版本>` 下的独立目录，要逐个
-           * 交给宿主：宿主只删"清单 id 对得上"的目录，而 `<id>` 根目录里现在没有
-           * manifest.json，整条传过去会被跳过（等于什么都没删）。
-           *
-           * 只认两种来源，别的路径一概不传给宿主：
-           * - `projects/<账号>/<id>`：用户自己建的项目（在这里出现的才说明它就是这个工具）；
-           * - `installed/<账号>/<id>/versions/*` 与旧布局的 `installed/<账号>/<id>`。
-           * 用户把别处的目录设成来源（`sourceDir`）时，那条路径不会出现在这里，
-           * 所以永远不会被误删。
-           */
-          const root = await installedToolRoot(io, owner, id);
-          // 崩溃残留的暂存目录可能连清单都没写完：先走"只删这个目录"的窄命令
-          // （只校验路径形状，不认清单）；没有这个端口时才交给 toolPurge 按清单认领。
-          const orphans: string[] = [];
-          for (const dir of await listStagingDirs(io, owner, id)) {
-            if (io.dropStaging) {
-              try {
-                await io.dropStaging(dir);
-                continue;
-              } catch { /* 落到 toolPurge 再试一次 */ }
-            }
-            orphans.push(dir);
+          if (files) {
+            const [defaultProjects, customProjects] = await Promise.all([
+              listToolProjectSummaries(io, { owner }),
+              customRoot ? listToolProjectSummaries(io, { parent: customRoot }) : Promise.resolve([]),
+            ]);
+            const projectDirs = [...defaultProjects, ...customProjects]
+              .filter((entry) => entry.id === id)
+              .map((entry) => entry.dir);
+            const root = await installedToolRoot(io, owner, id);
+            dirs = [...projectDirs, ...await listVersionDirs(io, owner, id), ...await listStagingDirs(io, owner, id)];
+            // 旧版布局的运行副本直接放在工具根目录下。
+            if (await io.pathExists(joinPath(root, toolProjectFileNames.manifest))) dirs.push(root);
           }
-          dirs = [...projectDirs, ...await listVersionDirs(io, owner, id), ...orphans];
-          // 旧布局：`installed/<账号>/<id>` 本身就是运行副本，根目录里有清单。
-          if (await io.pathExists(joinPath(root, toolProjectFileNames.manifest))) dirs.push(root);
-          // 扫盘（尤其自定义根目录）可能很慢：删任何东西之前再看一眼。
           assertOwner(origin);
-        } catch (error) {
-          return { text: purgeFailureText(error), error: true };
-        }
-        try {
-          const report = await host.skills.toolPurge({ toolId: id, owner, projectDirs: dirs });
-          const parts: string[] = [];
-          if (report.removedDirs.length) parts.push(`已删除 ${report.removedDirs.length} 个目录（源码或运行副本，含 node_modules）`);
-          if (report.removedData) parts.push("已删除工具数据");
-          // 密钥单独说一句：它不在"工具数据"那份 JSON 里，用户有权知道凭据
-          // 也被清掉了（反过来说，删失败时他得知道还留在盘上）。
-          if (report.removedSecrets) parts.push("已删除工具保存的密钥");
-          if (report.skippedDirs.length) parts.push(`${report.skippedDirs.length} 个目录没有删除（不在受管目录内，或不是这个工具）`);
-          // **删不掉就不是卸载成功**：记录一撤，卡片消失，盘上那几十 MB 再没有
-          // 入口能清（"先清盘、成功后才删记录"）。宿主把"该删但没删掉"单独报
-          // 回来，正是为了在这里留住记录——用户关掉占用它的程序再点一次即可。
-          if (report.failedDirs.length) {
+          const finish = host.skills.finishToolPurge;
+          const report = files
+            ? await host.skills.toolPurge({ toolId: id, owner, projectDirs: dirs, stage: finish !== undefined })
+            : undefined;
+          if (report?.failedDirs.length) {
             return {
-              text: `有 ${report.failedDirs.length} 个目录没删掉（多半正被占用）。工具记录先留着，关掉相关窗口或程序后再点一次「卸载」。`,
+              text: `有 ${report.failedDirs.length} 个目录没删掉。请关掉占用文件的程序后再试。`,
               error: true,
             };
           }
-          // 排队期间可能刚装好一版（那次提交把记录写回来了）。卸载是后点的那个
-          // 意图：记录也要一起撤掉，否则界面留下一张指向已删目录的卡片。
-          // 放在删除之后：清理失败时记录还在，用户可以再点一次，不必重新导入。
-          //
-          // 删记录写的是**当前账号**：删之前必须再确认一次还是发起时那个人，
-          // 否则会把别人同 id 的工具从列表里抹掉。
-          assertOwner(origin);
           try {
+            assertOwner(origin);
             await tools.remove(id);
           } catch (error) {
-            // 未登录时本来就没有记录可删，忽略（历史行为）。其余情况是"配置没
-            // 写进去"——文件已经删了，记录留着会变成一张指向空目录的卡片，
-            // 得如实告诉用户下次启动再点一次，而不是报"已卸载"。
-            const message = error instanceof Error ? error.message : String(error);
-            if (message.includes("请先登录")) {
-              /* 没有记录可删 */
-            } else {
-              return { text: `文件已删除，但安装记录没删掉：${message} 重启后再点一次「卸载」即可。`, error: true };
+            if (report?.staged && finish) {
+              try {
+                await finish(id, owner, false);
+              } catch (restore) {
+                return {
+                  text: `卸载失败：${errorText(error)} 暂存文件未能恢复（${errorText(restore)}），请重启 AAW 后重试。`,
+                  error: true,
+                };
+              }
             }
+            return { text: `卸载失败：${errorText(error)} 恢复写入后请重试卸载。`, error: true };
+          }
+          if (!report) {
+            try {
+              await host.closeTool(id);
+            } catch (error) {
+              return { text: `安装记录已移除，工具窗口关闭失败：${errorText(error)}`, error: true };
+            }
+            return { text: "文件与工具数据已保留。" };
           }
           if (store.getState().project && dirs.includes(store.getState().project!.dir))
-            patch({ project: null, check: null, installed: false, drift: false, stalled: false, repairs: 0, missing: false, running: false });
+            patch({ project: null, check: null, installed: false, drift: false, note: undefined, stalled: false, repairs: 0, missing: false, running: false });
           void refreshProjects();
+          if (report.staged && finish) {
+            try {
+              await finish(id, owner, true);
+            } catch (error) {
+              return {
+                text: `安装记录已移除，暂存文件清理未完成：${errorText(error)}。重启 AAW 后会重试清理。`,
+                error: true,
+              };
+            }
+          }
+          const parts: string[] = [];
+          if (report.removedDirs.length) parts.push(`已删除 ${report.removedDirs.length} 个目录（源码或运行副本，含 node_modules）`);
+          if (report.removedData) parts.push("已删除工具数据");
+          if (report.removedSecrets) parts.push("已删除工具保存的密钥");
+          if (report.skippedDirs.length) parts.push(`${report.skippedDirs.length} 个目录没有删除（不在受管目录内，或不是这个工具）`);
           return { text: parts.length ? parts.join("；") + "。" : "没有找到需要清理的文件。" };
         } catch (error) {
           return { text: purgeFailureText(error), error: true };

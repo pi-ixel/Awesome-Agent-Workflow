@@ -142,6 +142,9 @@ export function createTauriHost(invoke: NativeInvoke = defaultInvoke): HostRunti
         projectDirs: [...input.projectDirs],
       });
     },
+    async finishToolPurge(toolId, owner, commit) {
+      await invoke<null>("tool_purge_finish", { toolId, owner, commit });
+    },
     async moveToolPath(from, to) {
       await invoke<null>("tool_move_path", { from, to });
     },
@@ -289,6 +292,7 @@ export function createDemoHost(): DemoHost {
   const root = demoDir();
   const scripts = new Map<string, CommandResult>();
   const dataDirs = new Map<string, string>();
+  const stagedRemovals = new Map<string, Array<{ segments: string[]; node: DemoNode }>>();
   const ssoPollScript: (SsoLoginPollWire | Error)[] = [];
 
   function nodeAt(segments: readonly string[]): DemoNode | undefined {
@@ -501,10 +505,18 @@ export function createDemoHost(): DemoHost {
     toolPurge(input) {
       const removedDirs: string[] = [];
       const skippedDirs: string[] = [];
+      const staged: Array<{ segments: string[]; node: DemoNode }> = [];
+      const remove = (segments: string[]) => {
+        const node = nodeAt(segments);
+        if (input.stage && node) staged.push({ segments, node });
+        removeAt(segments);
+      };
       for (const dir of input.projectDirs) {
         const segments = normalizeKey(dir);
         const node = nodeAt(segments);
         const manifest = nodeAt([...segments, "manifest.json"]);
+        const staging = segments.at(-1)?.startsWith(".staging-") === true
+          && segments.at(-2) === "versions" && segments.at(-3) === input.toolId;
         // 按解析后的 id 认领，不按字面量匹配：作者用别的排版写清单（`"id" : "x"`）
         // 时，字符串包含判断会漏掉，卸载就留下一个再没人能清的目录。
         let owns = false;
@@ -515,28 +527,41 @@ export function createDemoHost(): DemoHost {
               && (parsed as Record<string, unknown>)["id"] === input.toolId;
           } catch { owns = false; }
         }
-        if (!owns) {
+        if (!owns && !(staging && node?.type === "dir")) {
           skippedDirs.push(dir);
           continue;
         }
-        removeAt(segments);
+        remove(segments);
         removedDirs.push(dir);
       }
       const dataSegments = ["%LOCALAPPDATA%", "com.aaw.desktop", "tools", "storage", input.owner, `${input.toolId}.json`];
       const removedData = nodeAt(dataSegments)?.type === "file";
-      if (removedData) removeAt(dataSegments);
+      if (removedData) remove(dataSegments);
       // 工具存的密钥：与数据文件同一个根，按工具 id 一个 json。
       const secretSegments = ["%LOCALAPPDATA%", "com.aaw.desktop", "tools", "secrets", input.owner, `${input.toolId}.json`];
       const removedSecrets = nodeAt(secretSegments)?.type === "file";
-      if (removedSecrets) removeAt(secretSegments);
+      if (removedSecrets) remove(secretSegments);
       // 上一版清单同样落在一个独立目录里，卸载后没有任何记录指它。预览环境
       // 不按账号分区（`userDataDir` 就是 `%APPDATA%/tools/backups`），所以这里
       // 少一层账号段——按真实宿主的布局删会删空。
       const backupSegments = ["%APPDATA%", "tools", "backups", input.toolId];
       const removedBackup = nodeAt(backupSegments)?.type === "dir";
-      if (removedBackup) removeAt(backupSegments);
+      if (removedBackup) remove(backupSegments);
       // 预览环境是一棵内存树，`removeAt` 不会失败：没有"该删但没删掉"这一类。
-      return Promise.resolve({ removedDirs, skippedDirs, failedDirs: [], removedData, removedBackup, removedSecrets });
+      if (input.stage) stagedRemovals.set(`${input.owner}/${input.toolId}`, staged);
+      return Promise.resolve({ removedDirs, skippedDirs, failedDirs: [], removedData, removedBackup, removedSecrets, staged: input.stage === true });
+    },
+    finishToolPurge(toolId, owner, commit) {
+      const key = `${owner}/${toolId}`;
+      const staged = stagedRemovals.get(key);
+      if (!commit && staged) {
+        for (const { segments, node } of staged.reverse()) {
+          const leaf = segments.at(-1);
+          if (leaf) ensureDir(segments.slice(0, -1)).children.set(leaf, node);
+        }
+      }
+      stagedRemovals.delete(key);
+      return Promise.resolve();
     },
     pruneToolVersions() {
       // 预览环境没有安装记录，也就没有"谁引用了哪份副本"这回事。按路径猜着删

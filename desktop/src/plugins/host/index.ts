@@ -42,6 +42,7 @@ export function apply(ctx: Context, options?: HostOptions): void {
     opsSidecar: host.opsSidecar,
     openTool: host.openTool,
     stopTool: host.stopTool,
+    closeTool: host.closeTool,
     openToolsGuide: host.openToolsGuide,
     writeToolArchive: host.writeToolArchive,
     listenLauncher: host.listenLauncher,
