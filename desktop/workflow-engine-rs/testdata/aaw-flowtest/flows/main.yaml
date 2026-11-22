@@ -1,0 +1,217 @@
+label: 快速复测
+entry: ask
+
+steps:
+
+  # 检查点：会话里提问 → 等你回复；去向要你确认 → 等你确认。
+  ask:
+    stage: prepare
+    agent:
+      label: 确认标题
+      why: 先和你确认这次的标题，后面的卡片和清单都用它。
+      delivers: 这次的标题和两张卡片的内容
+      role: 主持
+      prompt: |-
+        这是复测流程的第一步，活很小，照下面做：
+        1. 在会话里问用户一句：「这次清单的标题用什么？」然后停下等用户回复，先不要提交结果。
+        2. 用户回复后，用回复作为标题；按本次运行输入里的主题想两张卡片，卡片 id 固定为 a 和 b，每张一句不超过 15 个字的文字。
+        3. 提交结果。不要创建或修改任何文件。
+      knowledge: [host-tools.md]
+      does:
+        - 在会话里问你标题
+        - 定下两张卡片
+      result:
+        title: string
+        cards:
+          list:
+            id: string
+            text: string
+      labels:
+        title: 标题
+        cards: 卡片
+    next:
+      - to: build
+        explain: 标题和两张卡片都定下了
+        confirm: must
+        label: 开始制作
+        when: nonempty(ask.title) && len(ask.cards) == 2
+        set:
+          plan: ask
+      - to: $blocked
+        explain: 没能定下标题和两张卡片
+        reason: 在「确认标题」的会话里补充说明后，从这一步重跑。
+
+  # 检查点：并行子流程（两个实例各自一个会话）。
+  build:
+    stage: build
+    call: card
+    foreach:
+      items: vars.plan.cards
+      concurrency: 2
+    inputs: '{card: item}'
+    next:
+      - to: assemble
+
+  assemble:
+    stage: build
+    agent:
+      label: 汇总清单
+      why: 把两张卡片收成一份清单，给评审一个明确的检查对象。
+      delivers: 一份清单文件
+      role: 汇总
+      prompt: |-
+        在项目的 trial/flowtest/ 下写 list.md（已存在就覆盖），内容只有这几行：
+        第一行「# 标题」；之后每张卡片一行「- id：卡片文件里的文字」，卡片文件是 trial/flowtest/card-<id>.txt。
+        只写这些行，不要加任何别的内容。file 填 trial/flowtest/list.md。
+      knowledge: [host-tools.md]
+      reads:
+        plan: 这次的标题和卡片
+      does:
+        - 把卡片汇总成清单
+      result:
+        file: string
+      labels:
+        file: 清单文件
+    next:
+      - to: review
+        set:
+          list: assemble
+
+  # 检查点：评审判整改 → 整改（与汇总同一会话）→ 回到评审（同一会话里第 2 次，只收返工提示）。
+  review:
+    stage: review
+    max_visits: 3
+    agent:
+      label: 评审清单
+      why: 演练评审与复核：同一位评审员先评审，整改后再复核。
+      delivers: 一份评审结论
+      role: 评审员
+      prompt: |-
+        只检查一条：清单文件的最后一个非空行是不是正好是「END」。
+        是 → decision 填 pass；不是 → decision 填 revise，issues 写「清单末尾缺少 END 行」。
+        不要修改任何文件。
+      knowledge: [host-tools.md]
+      reads:
+        list: 要评审的清单文件
+      does:
+        - 检查清单末尾
+      result:
+        decision: [pass, revise]
+        issues?: string
+      labels:
+        decision: 结论
+        decision.pass: 通过
+        decision.revise: 需要整改
+        issues: 问题
+    next:
+      - to: check
+        explain: 评审通过
+        when: review.decision == "pass"
+      - to: fix
+        explain: 评审要求整改，整改不到 2 轮
+        label: 需要整改
+        when: review.decision == "revise" && vars.reviewRounds < 2
+        set:
+          reviewRounds: vars.reviewRounds + 1
+          findings: review
+      - to: $blocked
+        explain: 整改 2 轮后评审仍未通过
+        reason: 打开「评审清单」看问题，手工改好清单后从「评审清单」重跑。
+
+  fix:
+    stage: review
+    agent:
+      label: 整改清单
+      why: 按评审意见改清单。
+      delivers: 改好的清单文件
+      role: 汇总
+      prompt: 按评审意见修改清单文件，只改评审指出的问题，其他内容不动。file 填清单文件的路径。
+      knowledge: [host-tools.md]
+      reads:
+        list: 要整改的清单文件
+        findings: 评审意见
+      does:
+        - 按评审意见整改
+      result:
+        file: string
+      labels:
+        file: 清单文件
+    next:
+      - to: review
+        set:
+          list: fix
+
+  # 检查点：Python 节点（脚本信任、结果字段）。
+  check:
+    stage: finish
+    python:
+      label: 检查清单格式
+      why: 用脚本确认清单的格式，不依赖 Agent 的判断。
+      delivers: 清单是否合格、共几行
+      script: scripts/check_list.py
+      does:
+        - 检查清单首行和末行
+      result:
+        ok: boolean
+        lines: integer
+        problem?: string
+      labels:
+        ok: 合格
+        lines: 行数
+        problem: 问题
+    next:
+      - to: handoff
+        explain: 清单格式合格
+        when: check.ok
+      - to: $blocked
+        explain: 清单格式不合格
+        reason: 看「检查清单格式」的问题说明，改好清单后从「检查清单格式」重跑。
+
+  handoff:
+    stage: finish
+    agent:
+      label: 交接
+      why: 用一两句话告诉你这次做了什么。
+      delivers: 一段交接说明
+      role: 交接
+      prompt: 读清单文件，用一两句话说明这次做了什么、文件在哪。不要修改任何文件。
+      knowledge: [host-tools.md]
+      reads:
+        plan: 这次的标题和卡片
+        list: 最终的清单文件
+      does:
+        - 写交接说明
+      result:
+        summary: string
+      labels:
+        summary: 交接说明
+    next:
+      - to: $complete
+
+  # 阻塞复测的起点：一步之后按设计停下。
+  block_probe:
+    stage: prepare
+    agent:
+      label: 阻塞演练
+      why: 让流程按设计停下，用来看「已阻塞」在各处的呈现。
+      delivers: 一个「停下」的结论
+      role: 阻塞演练
+      prompt: 这是阻塞演练，不需要做任何事，也不要创建或修改文件：直接提交结果，status 填 stop，note 写「演练阻塞」。
+      knowledge: [host-tools.md]
+      does:
+        - 直接要求停下
+      result:
+        status: [go, stop]
+        note?: string
+      labels:
+        status: 结论
+        status.go: 继续
+        status.stop: 停下
+        note: 说明
+    next:
+      - to: $complete
+        explain: 演练选择继续
+        when: block_probe.status == "go"
+      - to: $blocked
+        explain: 演练要求停下
+        reason: 这是阻塞演练：确认面板横幅、运行列表、侧栏都说「已阻塞」，然后归档这次运行。
