@@ -56,7 +56,7 @@ fn valid_owner(owner: &str) -> bool {
 /// 为什么要换掉非法字符而不是直接拒绝：账号 id 可能来自 SSO，含 `@` 之类很常见。
 /// 但换完之后如果是空的，就必须报错——静默写进一个用户看不见的目录，等于数据
 /// 凭空消失（`tool-storage.mjs` 曾经踩过这个坑，注释里写着"不能静默降级"）。
-fn owner_segment(user_id: Option<&str>) -> Result<String, String> {
+pub(crate) fn owner_segment(user_id: Option<&str>) -> Result<String, String> {
     let raw = user_id.map(str::trim).unwrap_or("");
     if raw.is_empty() {
         return Err("工具需要有效的账号才能确定存储位置，请先登录 AAW。".into());

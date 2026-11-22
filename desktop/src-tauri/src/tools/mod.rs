@@ -43,6 +43,7 @@ pub mod native;
 pub mod process_host;
 pub mod protocol;
 pub mod store;
+pub(crate) mod uninstall;
 
 // 只要 trait 在作用域里，`decode` 才是 `STANDARD` 的方法；别名成 `_`
 // 是为了不让它出现在需要具名引用的地方。
@@ -590,6 +591,9 @@ fn serve(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
 pub fn open_tool(app: &AppHandle, tool_id: &str, hint: Option<&str>) -> Result<(), String> {
     let label = format!("tool-{tool_id}");
     let host = app.state::<ToolsHost>();
+    if uninstall::pending(&host, tool_id)? {
+        return Err("这个工具正在卸载，暂时无法打开。".into());
+    }
     // 这次应该打开哪个目录。窗口已经存在时也要先算出来：更新/重装之后安装
     // 记录的 `dir` 换到了新版本目录，而窗口还停在旧的那一份——不比对就会
     // 一直给用户看更新前的界面，而他点「打开」正是想刷新。
@@ -686,6 +690,32 @@ pub fn open_tool(app: &AppHandle, tool_id: &str, hint: Option<&str>) -> Result<(
         return process_host::open(app, tool_id, &dir, &manifest);
     }
     open_page_window(app, tool_id, &dir, &manifest, "page")
+}
+
+pub(crate) async fn close_tool(app: &AppHandle, tool_id: &str) -> Result<(), String> {
+    let host = app.state::<ToolsHost>();
+    let label = format!("tool-{tool_id}");
+    host.remove_process(tool_id);
+    if let Some(window) = app.get_webview_window(&label) {
+        window.destroy().map_err(|error| error.to_string())?;
+        let expires = Instant::now() + Duration::from_secs(2);
+        while app.get_webview_window(&label).is_some() {
+            if Instant::now() >= expires {
+                return Err("工具窗口还没有关闭，请稍后重试。".into());
+            }
+            tokio::time::sleep(Duration::from_millis(15)).await;
+        }
+    }
+    host.clear_runtime_dir(tool_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn tools_close(window: tauri::WebviewWindow, tool_id: String) -> Result<(), String> {
+    if window.label() != "main" || !valid_tool_id(&tool_id) {
+        return Err("无效的关闭工具请求。".into());
+    }
+    close_tool(window.app_handle(), &tool_id).await
 }
 
 /// 一个工具**现在生效**的设置：清单默认值打底，用户存过的值覆盖。

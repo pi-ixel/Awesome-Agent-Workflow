@@ -72,6 +72,8 @@ export interface HostService {
   openTool(this: void, toolId?: string, dir?: string): Promise<void>;
   /** 彻底停止一个常驻后台的工具（关窗只是隐藏，这条才是真退出）。 */
   stopTool(this: void, toolId: string): Promise<void>;
+  /** 卸载时销毁独立窗口并停止进程。 */
+  closeTool(this: void, toolId: string): Promise<void>;
   /** 打开「工具开发指导」窗口（内容与 AI 读的规范同源）。 */
   openToolsGuide(this: void): Promise<void>;
   writeToolArchive(this: void, path: string, bytes: Uint8Array): Promise<void>;

@@ -36,6 +36,7 @@ export function apply(ctx: Context, options?: HostOptions): void {
     workflowEngine: host.workflowEngine,
     openTool: host.openTool,
     stopTool: host.stopTool,
+    closeTool: host.closeTool,
     openToolsGuide: host.openToolsGuide,
     writeToolArchive: host.writeToolArchive,
     listenLauncher: host.listenLauncher,

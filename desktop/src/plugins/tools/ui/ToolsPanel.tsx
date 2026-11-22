@@ -141,15 +141,6 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
     })();
   }, [host, project, tools, workshop]);
 
-  function run(action: () => void) {
-    setFeedback(undefined);
-    try {
-      action();
-    } catch (error) {
-      setFeedback({ text: errorText(error), error: true });
-    }
-  }
-
   /** 彻底停掉常驻工具：关窗只是隐藏，这条才真的退出。 */
   async function stopBackground(id: string) {
     if (busy) return;
@@ -387,23 +378,21 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
   }
 
   async function confirmRemove(id: string, files: boolean) {
+    if (busy) return;
     setRemoving(undefined);
-    // 先停窗口：常驻工具不关就还在后台跑；Windows 下目录被占用也会让清理半途而废。
-    if (host.isNative()) void host.stopTool(id).catch(() => {});
-    // 不带文件删除：只撤注册表，不需要排队，立即生效。
-    if (!files) {
-      run(() => service.remove(id));
-      return;
+    setBusy(true);
+    setFeedback({ text: "正在卸载工具…" });
+    try {
+      const note = await workshop.purge(id, files);
+      if (note.error) {
+        setFeedback({ text: note.text, error: true });
+        return;
+      }
+      setView({ kind: "library" });
+      setFeedback({ text: `已卸载。${note.text}` });
+    } finally {
+      setBusy(false);
     }
-    // 带文件删除：先清磁盘、成功后才撤记录。顺序反过来的话，清理失败（目录被占用、
-    // 权限不足）会让工具从列表里消失、几十上百 MB 却留在盘上，用户连重试的入口都没了。
-    setFeedback({ text: "正在清理工具目录…" });
-    const note = await workshop.purge(id);
-    if (note.error) {
-      setFeedback({ text: note.text, error: true });
-      return;
-    }
-    setFeedback({ text: `已卸载。${note.text}` });
   }
 
   if (managed) return <ToolManagement key={`${managed.package.id}:${JSON.stringify(managed.settings)}:${JSON.stringify(managed.package.settingsSchema)}`} entry={managed} busy={busy} feedback={feedback}
@@ -411,18 +400,7 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
     onOpen={() => void openTool(managed.package.id)} onExport={() => void exportTool(managed.package, managed.dir)}
     onRollback={() => void rollbackTool(managed.package.id)}
     onSave={(values) => { try { service.saveSettings(managed.package.id, values); setFeedback({ text: "设置已保存，重新打开插件后生效。" }); return true; } catch (error) { setFeedback({ text: errorText(error), error: true }); return false; } }}
-    onRemove={() => { void (async () => {
-      const id = managed.package.id;
-      // 管理页也是卸载入口，同样要把它的窗口关掉——常驻工具不关就还在后台跑。
-      if (host.isNative()) void host.stopTool(id).catch(() => {});
-      // 与列表页「卸载（同时删除文件）」走同一条链：先清盘、成功后才撤记录。
-      // 以前这里只 `service.remove`：运行副本（可能带着 node_modules）、工具数据、
-      // 加密密钥与备份清单都留在盘上，而记录一没，界面上再没有能清掉它们的入口。
-      const note = await workshop.purge(id);
-      if (note.error) { setFeedback({ text: note.text, error: true }); return; }
-      setView({ kind: "library" });
-      setFeedback({ text: `已卸载。${note.text}` });
-    })(); }}
+    onRemove={() => void confirmRemove(managed.package.id, true)}
     onUpdate={(file) => { void (async () => { try {
       const upload = await readToolUpload(file);
       if (upload.tool.id !== managed.package.id) throw new Error("更新包的插件 ID 必须与当前插件一致。");
@@ -528,7 +506,7 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
                 ) : (
                   <div className="tool-row-actions">
                     <button type="button" className="tool-row-open" aria-label={`打开 ${tool.name}`} disabled={busy || (broken !== undefined && broken.kind !== "missing-dir")} data-hint={broken?.hint} onClick={() => void openTool(tool.id)}>打开</button>
-                    <button type="button" className="tool-row-more" aria-label={`更多操作：${tool.name}`} aria-haspopup="menu" aria-expanded={cardMenu.menu?.id === tool.id} onClick={(event) => openCardMenu(event, tool)}>⋯</button>
+                    <button type="button" className="tool-row-more" aria-label={`更多操作：${tool.name}`} disabled={busy} aria-haspopup="menu" aria-expanded={cardMenu.menu?.id === tool.id} onClick={(event) => openCardMenu(event, tool)}>⋯</button>
                   </div>
                 )}
               </li>

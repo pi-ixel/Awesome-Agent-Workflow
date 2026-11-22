@@ -30,6 +30,7 @@ export function ToolProjectList({ workshop, installed, available, onPreview }: {
 }) {
   const snapshot = useStore(workshop.state);
   const [confirming, setConfirming] = useState<string>();
+  const [removal, setRemoval] = useState<{ dir: string; note?: string }>();
   const [renaming, setRenaming] = useState<{ dir: string; name: string; id: string; note?: string }>();
   const { projects, projectsLoading, projectsRoot, customRoot, busy, project: active } = snapshot;
   const root = customRoot ?? projectsRoot;
@@ -74,6 +75,13 @@ export function ToolProjectList({ workshop, installed, available, onPreview }: {
     });
     if (note.error) setRenaming({ ...renaming, note: note.text });
     else setRenaming(undefined);
+  }
+
+  async function removeProject(project: ToolProjectSummary) {
+    setRemoval({ dir: project.dir });
+    const note = await workshop.purge(project.id ?? project.dirName);
+    setRemoval(note.error ? { dir: project.dir, note: note.text } : undefined);
+    if (!note.error) setConfirming(undefined);
   }
 
   return <>
@@ -160,11 +168,9 @@ export function ToolProjectList({ workshop, installed, available, onPreview }: {
             ) : confirming === project.dir ? (
               <div className="build-project-actions build-confirm">
                 <span className="build-hint">删除会移除项目目录与工具数据，不可恢复。</span>
-                <button type="button" className={btnGhost} onClick={() => setConfirming(undefined)}>取消</button>
-                <DangerButton onClick={() => {
-                  setConfirming(undefined);
-                  void workshop.purge(project.id ?? project.dirName);
-                }}>确认删除</DangerButton>
+                <button type="button" className={btnGhost} disabled={removal !== undefined && removal.note === undefined} onClick={() => { setRemoval(undefined); setConfirming(undefined); }}>取消</button>
+                <DangerButton disabled={removal !== undefined && removal.note === undefined} onClick={() => void removeProject(project)}>确认删除</DangerButton>
+                {removal?.dir === project.dir && removal.note && <span role="alert" className="build-hint is-error">{removal.note}</span>}
               </div>
             ) : (
               // 改名与删除是低频 + 破坏性动作，放在展开后的页脚，不占收起的行。

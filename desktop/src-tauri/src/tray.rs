@@ -94,7 +94,7 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
             }
             "desktop-quit" => {
                 let _ = show_main(app);
-                let _ = app.emit("aaw://close-requested", ());
+                crate::request_window_exit(app);
             }
             _ => {}
         })

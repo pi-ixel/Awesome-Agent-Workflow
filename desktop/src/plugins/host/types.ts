@@ -79,13 +79,16 @@ export interface CommandResult {
 /** 卸载清理：删掉某工具的项目目录与用户数据。 */
 export interface ToolPurgeInput {
   readonly toolId: string;
-  /** 账号标识（已规整过的目录段）。 */
+  /** 配置中的账号标识，磁盘目录段由宿主转换。 */
   readonly owner: string;
   /** 要删除的项目目录；宿主会校验每个目录确实含该工具的 manifest.json。 */
   readonly projectDirs: readonly string[];
+  readonly stage?: boolean;
 }
 
 export interface ToolPurgeReport {
+  /** 已暂存的文件须等安装记录提交后才能删除。 */
+  readonly staged?: boolean;
   readonly removedDirs: readonly string[];
   /** **不该删**的目录（清单读不出来、或 id 对不上）。跳过属于正常，界面如实报数即可。 */
   readonly skippedDirs: readonly string[];
@@ -175,6 +178,7 @@ export interface HostRuntime {
    * 工具，对不上就跳过并在报告里返回，避免误删用户选过的父目录。
    */
   toolPurge(input: ToolPurgeInput): Promise<ToolPurgeReport>;
+  finishToolPurge?(toolId: string, owner: string, commit: boolean): Promise<void>;
   /**
    * 移动文件或目录（目标必须不存在）。工具项目改名用它——同盘原子移动，
    * 不复制、不删除、不碰工具数据。
@@ -403,7 +407,7 @@ export type {
 } from "./filesystem/skillLibrary.ts";
 export type SkillFiles = Pick<
   HostRuntime,
-  | "userDataDir" | "listDirNames" | "pathExists" | "copyDir" | "writeTextFile" | "toolPurge" | "moveToolPath"
+  | "userDataDir" | "listDirNames" | "pathExists" | "copyDir" | "writeTextFile" | "toolPurge" | "finishToolPurge" | "moveToolPath"
   // 安装失败清理：只删工具库 versions/ 下的副本目录
   | "dropToolStaging"
   // 孤儿版本副本回收：判断在宿主（安装记录 + 窗口表），前端只发起

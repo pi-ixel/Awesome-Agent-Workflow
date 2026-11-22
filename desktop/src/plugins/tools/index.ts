@@ -451,7 +451,10 @@ export function apply(ctx: Context): void {
         throw error;
       }
       // 配置真的落盘了：这一版确实成了"上一版"，这时候留备份才有意义。
-      if (displaced) backups.enqueue(displaced);
+      if (displaced) {
+        backups.enqueue(displaced);
+        await backups.settled();
+      }
       return outcome;
     },
     async rollback(id) {

@@ -30,6 +30,12 @@ mod workflow_service;
 
 use tauri::{Emitter, Manager};
 
+fn request_window_exit(app: &tauri::AppHandle) {
+    if !tools::guide::defer_exit_for_editor(app) {
+        let _ = app.emit("aaw://close-requested", ());
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let context = tauri::generate_context!();
@@ -305,7 +311,9 @@ pub fn run() {
             commands::read_binary_file,
             commands::write_binary_file,
             commands::user_data_dir,
-            commands::tool_purge,
+            tools::uninstall::tool_purge,
+            tools::uninstall::tool_purge_finish,
+            tools::tools_close,
             commands::tool_move_path,
             commands::tool_drop_staging,
             // 回收孤儿版本副本（判断在宿主：它同时看得到安装记录与窗口表）
@@ -352,7 +360,7 @@ pub fn run() {
             // 关闭守卫的 Rust 半边：CloseRequested 一律拦下转交前端——
             // 统一确认弹窗（忙闲双变体），确认后前端先收口 agent 进程树
             // （忙路径直杀、闲路径优雅关闭，均带 10s 预算），再经
-            // force_close（destroy）真正关窗——默认的直接销毁会把 agent
+            // force_close 退出整个应用——默认的直接销毁会把 agent
             // 进程树变成孤儿，抱着 chrys 的锁拖慢下一次启动（Job Object
             // 是它死透时的兜底，不是许可）。
             if matches!(event, tauri::WindowEvent::Destroyed) {
@@ -378,26 +386,21 @@ pub fn run() {
                 terminal_pty::retire_page(window.label().to_owned());
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // 诊断窗、SSO 登录窗与工具窗口直接放行：无 agent 资源需要收口。
-                // 工具窗口（`tool-*`）尤其不能被拦——它的关闭是用户明确动作，
-                // 拦住会变成"怎么点都关不掉"。
-                if window.label() == "diagnostics"
-                    || window.label().starts_with(sso_login::SSO_LOGIN_WINDOW_PREFIX)
-                    || window.label().starts_with("tool-")
-                {
+                // 辅助窗口各自处理关闭；只有主窗口的关闭会请求退出应用。
+                if window.label() != "main" {
                     return;
                 }
                 if window.state::<desktop_update::Updates>().installing() {
                     api.prevent_close();
                     return;
                 }
-                if window.label() == "main" && window.state::<tray::TrayPreference>().hide_on_close() {
+                if window.state::<tray::TrayPreference>().hide_on_close() {
                     api.prevent_close();
                     let _ = window.hide();
                     return;
                 }
-                let _ = window.app_handle().emit("aaw://close-requested", ());
                 api.prevent_close();
+                request_window_exit(window.app_handle());
             }
         });
 
