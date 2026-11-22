@@ -12,8 +12,16 @@ import { ToolPreview } from "./ToolPreview.tsx";
 
 type State =
   | { readonly kind: "loading" }
-  | { readonly kind: "ready"; readonly tool: ToolPackage; readonly warnings: readonly ToolViolation[] }
-  | { readonly kind: "broken"; readonly message: string; readonly blocking: readonly ToolViolation[] };
+  | {
+      readonly kind: "ready";
+      readonly tool: ToolPackage;
+      readonly warnings: readonly ToolViolation[];
+    }
+  | {
+      readonly kind: "broken";
+      readonly message: string;
+      readonly blocking: readonly ToolViolation[];
+    };
 
 /**
  * 右栏里的工具预览：会话在中间，工具在右边，改完就能看。
@@ -25,7 +33,13 @@ type State =
  * 内容从磁盘读，而不是从安装记录读：这里看的是"项目现在长什么样"，不是
  * "装进去的那一版"。AI 一停下就自动重读一次——用户不需要再点"刷新"。
  */
-export function ToolPreviewTab({ dir, host, project, tools, revision = 0 }: {
+export function ToolPreviewTab({
+  dir,
+  host,
+  project,
+  tools,
+  revision = 0,
+}: {
   dir: string;
   host: HostService;
   /** 用来监听"AI 停了"：同一工作区停下时自动重读。 */
@@ -61,9 +75,15 @@ export function ToolPreviewTab({ dir, host, project, tools, revision = 0 }: {
             setContentRevision((value) => value + 1);
           }
         }
-        setState(check.tool
-          ? { kind: "ready", tool: check.tool, warnings: check.warnings }
-          : { kind: "broken", message: "这个项目现在读不出可预览的工具。", blocking: check.blocking });
+        setState(
+          check.tool
+            ? { kind: "ready", tool: check.tool, warnings: check.warnings }
+            : {
+                kind: "broken",
+                message: "这个项目现在读不出可预览的工具。",
+                blocking: check.blocking,
+              },
+        );
       } catch (error) {
         if (cancelled) return;
         setState({
@@ -73,7 +93,9 @@ export function ToolPreviewTab({ dir, host, project, tools, revision = 0 }: {
         });
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [dir, host, revision, reloads]);
 
   // AI 在这个项目里停下 → 内容可能变了，安静地重读一次。
@@ -90,7 +112,8 @@ export function ToolPreviewTab({ dir, host, project, tools, revision = 0 }: {
       running = next.isAgentRunning;
       if (!stopped) return;
       const active = project.projects.workspace.getState().activePath;
-      if (active && pathKey(active) === pathKey(dir)) setReloads((value) => value + 1);
+      if (active && pathKey(active) === pathKey(dir))
+        setReloads((value) => value + 1);
     });
   }, [project, dir]);
 
@@ -98,41 +121,56 @@ export function ToolPreviewTab({ dir, host, project, tools, revision = 0 }: {
     return <p className="build-hint p-3">正在读取 {dir} …</p>;
 
   if (state.kind === "broken")
-    return <div className="p-3">
-      <p className="build-hint is-error">{state.message}</p>
-      {state.blocking.length > 0 && <ul className="build-violations">
-        {state.blocking.slice(0, 6).map((problem, index) => (
-          <li key={index} className="is-block"><span>{problem.ruleId}</span>
-            <div><strong>{problem.message}</strong><small>{problem.hint}</small></div>
-          </li>
-        ))}
-      </ul>}
-      <button type="button" className={btnSecondary} onClick={reread}>重新读取</button>
-    </div>;
+    return (
+      <div className="p-3">
+        <p className="build-hint is-error">{state.message}</p>
+        {state.blocking.length > 0 && (
+          <ul className="build-violations">
+            {state.blocking.slice(0, 6).map((problem, index) => (
+              <li key={index} className="is-block">
+                <span>{problem.ruleId}</span>
+                <div>
+                  <strong>{problem.message}</strong>
+                  <small>{problem.hint}</small>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        <button type="button" className={btnSecondary} onClick={reread}>
+          重新读取
+        </button>
+      </div>
+    );
 
   const entry = installed.find((item) => item.package.id === state.tool.id);
   // 与工坊同一口径：版本、正文、动作、设置……任何影响行为的变化都算“没装最新”。
   const stale = !!entry && toolContentDiffers(entry.package, state.tool);
 
-  return <div className="flex h-full min-h-0 flex-col">
-    {/* 预览看的是磁盘，工具中心看的是快照：不说清楚，用户会以为已经装上了。 */}
-    <p className="build-hint px-3 pt-2">
-      {!entry
-        ? "这是项目里的版本，还没安装——满意后回工具中心点「安装」。"
-        : stale
-          ? `预览的是项目最新内容；工具中心里还是 v${entry.package.version}，点「安装」才会更新。`
-          : null}
-    </p>
-    {state.warnings.length > 0 && (
-      <p className="build-hint px-3 pt-2">{state.warnings.length} 条建议（不影响运行），完整列表在「开发工具」里。</p>
-    )}
-    <div className="min-h-0 flex-1">
-      <ToolPreview
-        embedded
-        tool={state.tool}
-        revision={contentRevision}
-        onReload={reread}
-      />
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      {/* 预览看的是磁盘，工具中心看的是快照：不说清楚，用户会以为已经装上了。 */}
+      <p className="build-hint px-3 pt-2">
+        {!entry
+          ? "这是项目里的版本，还没安装——满意后回工具中心点「安装」。"
+          : stale
+            ? `预览的是项目最新内容；工具中心里还是 v${entry.package.version}，点「安装」才会更新。`
+            : null}
+      </p>
+      {state.warnings.length > 0 && (
+        <p className="build-hint px-3 pt-2">
+          {state.warnings.length}{" "}
+          条建议（不影响运行），完整列表在「开发工具」里。
+        </p>
+      )}
+      <div className="min-h-0 flex-1">
+        <ToolPreview
+          embedded
+          tool={state.tool}
+          revision={contentRevision}
+          onReload={reread}
+        />
+      </div>
     </div>
-  </div>;
+  );
 }

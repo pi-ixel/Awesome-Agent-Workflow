@@ -15,11 +15,16 @@ import { toolLimits } from "../../../src/plugins/tools/runtime/limits.ts";
  * 所以这里直接把 `limits.rs` 的数字抠出来比。丑，但比在两边注释里写"记得同步"
  * 有用得多——注释不会失败。
  */
-const rust = readFileSync(resolve(process.cwd(), "src-tauri/src/tools/limits.rs"), "utf8");
+const rust = readFileSync(
+  resolve(process.cwd(), "src-tauri/src/tools/limits.rs"),
+  "utf8",
+);
 
 /** 取出 `pub const LIMITS: Limits = Limits { … };` 里的 `字段: 表达式`。 */
 function rustLimits(): Record<string, number> {
-  const block = /pub const LIMITS: Limits = Limits \{([\s\S]*?)\n\};/.exec(rust)?.[1];
+  const block = /pub const LIMITS: Limits = Limits \{([\s\S]*?)\n\};/.exec(
+    rust,
+  )?.[1];
   if (!block) throw new Error("没找到 LIMITS 常量");
   const values: Record<string, number> = {};
   for (const line of block.split("\n")) {
@@ -41,13 +46,24 @@ function evaluate(raw: string): number {
   const seconds = /^Duration::from_secs\((\d+)\)$/.exec(raw.trim());
   if (seconds) return Number(seconds[1]) * 1000;
   const product = /^\d+(?:\s*\*\s*\d+)*$/.exec(raw.trim());
-  if (product) return raw.split("*").reduce((total, part) => total * Number(part.trim()), 1);
+  if (product)
+    return raw
+      .split("*")
+      .reduce((total, part) => total * Number(part.trim()), 1);
   throw new Error(`不认识的字面量：${raw}`);
 }
 
 it("parses every limit the frontend mirrors", () => {
   const values = rustLimits();
-  for (const field of ["action_timeout", "result_bytes", "store_bytes", "source_files", "source_bytes", "package_bytes", "archive_bytes"])
+  for (const field of [
+    "action_timeout",
+    "result_bytes",
+    "store_bytes",
+    "source_files",
+    "source_bytes",
+    "package_bytes",
+    "archive_bytes",
+  ])
     expect(values[field], `limits.rs 缺 ${field}`).toBeTypeOf("number");
 });
 

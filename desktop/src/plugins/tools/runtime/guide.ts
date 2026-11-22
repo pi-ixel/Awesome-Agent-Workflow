@@ -7,7 +7,12 @@
  * 完整版在仓库 `skills/tool-dev/SKILL.md`（给人看、给技能安装器用）；这里是
  * 精简版，红线表由 `rules.ts` 生成，保证两边编号永远一致。
  */
-import { platformFrameworkFiles, ruleGuidance, ruleIds, type RuleId } from "./rules.ts";
+import {
+  platformFrameworkFiles,
+  ruleGuidance,
+  ruleIds,
+  type RuleId,
+} from "./rules.ts";
 import { toolContractVersion } from "./contract.ts";
 import type { ToolViolation } from "../types.ts";
 
@@ -72,7 +77,11 @@ export function guideBodyFromDoc(doc: string): string | undefined {
 
 /** 把通用正文里的占位符换成具体项目。`split/join` 而不是正则：占位符是字面量。 */
 function applyGuideContext(body: string, context: ToolGuideContext): string {
-  return body.split("<工具 id>").join(context.id).split("<工具名>").join(context.name);
+  return body
+    .split("<工具 id>")
+    .join(context.id)
+    .split("<工具名>")
+    .join(context.name);
 }
 
 /**
@@ -81,7 +90,10 @@ function applyGuideContext(body: string, context: ToolGuideContext): string {
  * 有正文且能定位到项目段落 → 用它（用户改过的规范跟着生效）；
  * 否则返回 undefined，调用方退回编译模板（`toolGuide`）。
  */
-export function toolGuideFromDoc(doc: string, context: ToolGuideContext): string | undefined {
+export function toolGuideFromDoc(
+  doc: string,
+  context: ToolGuideContext,
+): string | undefined {
   const body = guideBodyFromDoc(doc);
   if (body === undefined) return undefined;
   // 尾部的两个换行与编译模板（`toolGuide`）逐字对齐：默认文档走这条链
@@ -393,7 +405,10 @@ ${body}
 }
 
 /** 占位上下文：技能目录面向"还没建项目的会话"，id 与名字保持通用形态。 */
-const genericGuideContext: ToolGuideContext = { id: "<工具 id>", name: "<工具名>" };
+const genericGuideContext: ToolGuideContext = {
+  id: "<工具 id>",
+  name: "<工具名>",
+};
 
 /** 编译模板版。 */
 export function toolGuideSkill(): string {
@@ -407,7 +422,9 @@ export function toolGuideSkill(): string {
  * 与 AGENTS.md 同一条传播链，同一个回退（定位不到项目段落就退编译模板）。
  */
 export function toolGuideSkillFromDoc(doc: string): string {
-  const body = toolGuideFromDoc(doc, genericGuideContext) ?? toolGuide(genericGuideContext);
+  const body =
+    toolGuideFromDoc(doc, genericGuideContext) ??
+    toolGuide(genericGuideContext);
   return skillDocument(body);
 }
 
@@ -429,6 +446,9 @@ export function repairMessage(problems: readonly ToolViolation[]): string {
 }
 
 /** 校验通过的收尾消息。 */
-export function acceptedMessage(tool: { readonly name: string; readonly version: string }): string {
+export function acceptedMessage(tool: {
+  readonly name: string;
+  readonly version: string;
+}): string {
   return `校验通过：${tool.name} v${tool.version} 已生成预览，等用户验收。`;
 }

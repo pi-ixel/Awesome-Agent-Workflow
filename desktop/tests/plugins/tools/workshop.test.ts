@@ -5,19 +5,38 @@ import { createTestDesktopRuntime } from "../../helpers/desktopRuntime.ts";
 import type { HostService } from "../../../src/plugins/host/service.ts";
 import type { ToolPurgeReport } from "../../../src/plugins/host/types.ts";
 import type { ProjectService } from "../../../src/plugins/project/service.ts";
-import { hostToolIO, memoryToolIO } from "../../../src/plugins/tools/runtime/io.ts";
+import {
+  hostToolIO,
+  memoryToolIO,
+} from "../../../src/plugins/tools/runtime/io.ts";
 import { parseToolPackage } from "../../../src/plugins/tools/runtime/package.ts";
-import { readToolDirFiles, runtimeFiles } from "../../../src/plugins/tools/runtime/project.ts";
+import {
+  readToolDirFiles,
+  runtimeFiles,
+} from "../../../src/plugins/tools/runtime/project.ts";
 import type { ToolsService } from "../../../src/plugins/tools/service.ts";
 import type { PersonalTool } from "../../../src/plugins/tools/types.ts";
-import { createWorkshop, syncToolGuide } from "../../../src/plugins/tools/ui/workshop.ts";
+import {
+  createWorkshop,
+  syncToolGuide,
+} from "../../../src/plugins/tools/ui/workshop.ts";
 
 /**
  * 工坊的"人接手"路径：AI 回灌 3 轮还修不好时，必须把选择权交回用户——
  * 状态里留着项目路径（UI 用它渲染可复制的文本）和"重新校验"入口。
  * 只写一句"或直接改文件"等于把死路当结论（见 docs 22 §4 P0-2）。
  */
-function harness(options: { native?: boolean; settings?: { read: () => string | undefined; write: (value: string | undefined) => void }; toolsService?: ToolsService; owner?: () => string | undefined } = {}) {
+function harness(
+  options: {
+    native?: boolean;
+    settings?: {
+      read: () => string | undefined;
+      write: (value: string | undefined) => void;
+    };
+    toolsService?: ToolsService;
+    owner?: () => string | undefined;
+  } = {},
+) {
   const io = memoryToolIO();
   const dir = "/data/tools/projects/u1/demo";
   const openInFileManager = vi.fn().mockResolvedValue(undefined);
@@ -26,12 +45,14 @@ function harness(options: { native?: boolean; settings?: { read: () => string | 
   /** 列得出来但读不出来的文件：模拟"超过单包上限 / 被占用"。 */
   const unreadable = new Set<string>();
   const readBinaryFile = (path: string) => {
-    if (unreadable.has(path)) return Promise.reject(new Error("这个文件读不出来"));
+    if (unreadable.has(path))
+      return Promise.reject(new Error("这个文件读不出来"));
     // 二进制端口存的就是 base64 原文：不能再编码一次，否则读回来的是它的 base64。
     const saved = binaries.get(path);
     if (saved !== undefined) return Promise.resolve(saved);
     const raw = io.files.get(path);
-    if (raw === undefined) return Promise.reject(new Error(`文件不存在：${path}`));
+    if (raw === undefined)
+      return Promise.reject(new Error(`文件不存在：${path}`));
     // 文本要走 UTF-8 字节再转 base64：btoa 遇到中文直接抛（真实宿主读的是原始字节，无此问题）。
     const bytes = new TextEncoder().encode(raw);
     let binary = "";
@@ -40,7 +61,16 @@ function harness(options: { native?: boolean; settings?: { read: () => string | 
   };
   // 返回类型必须显式写上：否则 `[]` 会被推成 `never[]`，单个用例里
   // `mockResolvedValue({ removedDirs: ["/x"] })` 就报 TS2322。
-  const toolPurge = vi.fn((): Promise<ToolPurgeReport> => Promise.resolve({ removedDirs: [], skippedDirs: [], failedDirs: [], removedData: false, removedBackup: false, removedSecrets: false }));
+  const toolPurge = vi.fn((): Promise<ToolPurgeReport> =>
+    Promise.resolve({
+      removedDirs: [],
+      skippedDirs: [],
+      failedDirs: [],
+      removedData: false,
+      removedBackup: false,
+      removedSecrets: false,
+    }),
+  );
   const host = {
     isNative: () => options.native ?? true,
     skills: {
@@ -48,14 +78,20 @@ function harness(options: { native?: boolean; settings?: { read: () => string | 
       toolPurge,
       // 模拟新契约：tools 分区由 Rust 按当前账号（u1）解析好。
       userDataDir: (namespace: string, directory: string) =>
-        io.userDataDir(namespace, namespace === "tools" ? `${directory}/u1` : directory),
+        io.userDataDir(
+          namespace,
+          namespace === "tools" ? `${directory}/u1` : directory,
+        ),
       pathExists: (path: string) => io.pathExists(path),
       listDirNames: (path: string) => io.listDirNames(path),
-      writeTextFile: (path: string, contents: string) => io.writeTextFile(path, contents),
+      writeTextFile: (path: string, contents: string) =>
+        io.writeTextFile(path, contents),
       listToolFiles: (root: string) =>
-        Promise.resolve([...io.files.keys(), ...binaries.keys()]
-          .filter((path) => path.startsWith(`${root}/`))
-          .map((path) => path.slice(root.length + 1))),
+        Promise.resolve(
+          [...io.files.keys(), ...binaries.keys()]
+            .filter((path) => path.startsWith(`${root}/`))
+            .map((path) => path.slice(root.length + 1)),
+        ),
       readBinaryFile,
       writeBinaryFile: (path: string, base64: string) => {
         binaries.set(path, base64);
@@ -102,20 +138,25 @@ function harness(options: { native?: boolean; settings?: { read: () => string | 
     open: vi.fn(),
     // 真正被撤掉的记录 id：断言"记录还在"比断言 mock 没被调用更直接
     // （且不必引用 mock 方法，避开 unbound-method 规则）。
-    remove: vi.fn((id: string) => { removes.push(id); }),
+    remove: vi.fn((id: string) => {
+      removes.push(id);
+    }),
     saveSettings: vi.fn(),
   } as unknown as ToolsService;
   const service = options.toolsService ?? tools;
 
   // 会话是否在跑由测试推：工坊订阅的是"true → false"这个沿。
-  const session = createStore<{ isAgentRunning: boolean; activeSessionId: string }>(
-    () => ({ isAgentRunning: false, activeSessionId: "s1" }),
-  );
+  const session = createStore<{
+    isAgentRunning: boolean;
+    activeSessionId: string;
+  }>(() => ({ isAgentRunning: false, activeSessionId: "s1" }));
   const send = vi.fn();
   const startNewSession = vi.fn();
   const pickDirectory = vi.fn();
   // 前台工作区单独持有：测试要能模拟"用户切到了别的项目"。
-  const workspace = createStore<{ activePath: string | null }>(() => ({ activePath: dir }));
+  const workspace = createStore<{ activePath: string | null }>(() => ({
+    activePath: dir,
+  }));
   const project = {
     projects: {
       workspace,
@@ -130,8 +171,35 @@ function harness(options: { native?: boolean; settings?: { read: () => string | 
     conversation: { send, foreground: { session } },
   } as unknown as ProjectService;
 
-  const workshop = createWorkshop({ tools: service, project, host, owner: options.owner ?? (() => "u1"), ...(options.settings ? { settings: options.settings } : {}) });
-  return { workshop, io, dir, send, openInFileManager, session, setRunDir, setSourceDir, project, startNewSession, pickDirectory, tools: service, fakeTools: tools, toolStore, host, toolPurge, workspace, unreadable, installs, removes };
+  const workshop = createWorkshop({
+    tools: service,
+    project,
+    host,
+    owner: options.owner ?? (() => "u1"),
+    ...(options.settings ? { settings: options.settings } : {}),
+  });
+  return {
+    workshop,
+    io,
+    dir,
+    send,
+    openInFileManager,
+    session,
+    setRunDir,
+    setSourceDir,
+    project,
+    startNewSession,
+    pickDirectory,
+    tools: service,
+    fakeTools: tools,
+    toolStore,
+    host,
+    toolPurge,
+    workspace,
+    unreadable,
+    installs,
+    removes,
+  };
 }
 
 /** 让 AI 停下来：工坊的回调是订阅里发的，不等它跑完就断言会读到旧状态。 */
@@ -142,10 +210,23 @@ function stopAgent(session: ReturnType<typeof harness>["session"]) {
 
 it("hands over to the user after three repair rounds, with both actions wired", async () => {
   const { workshop, io, dir, send, session } = harness();
-  await io.writeTextFile(`${dir}/manifest.json`, JSON.stringify({
-    schemaVersion: 1, id: "demo", name: "演示", version: "1.0.0", html: "",
-    actions: [{ id: "run", description: "跑", inputSchema: { type: "object", properties: {} } }],
-  }));
+  await io.writeTextFile(
+    `${dir}/manifest.json`,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "demo",
+      name: "演示",
+      version: "1.0.0",
+      html: "",
+      actions: [
+        {
+          id: "run",
+          description: "跑",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ],
+    }),
+  );
   await io.writeTextFile(`${dir}/index.html`, "<p>没有实现</p>");
   await workshop.select(dir);
   expect(workshop.state.getState().check?.ready).toBe(false);
@@ -168,7 +249,10 @@ it("hands over to the user after three repair rounds, with both actions wired", 
   // 交接时项目路径还在状态里：UI 靠它渲染可复制的路径文本，不需要再打开目录。
   expect(workshop.state.getState().project?.dir).toBe(dir);
 
-  await io.writeTextFile(`${dir}/index.html`, "<p>改好了</p><script>window.aawActions={run:async()=>({ok:true})}</script>");
+  await io.writeTextFile(
+    `${dir}/index.html`,
+    "<p>改好了</p><script>window.aawActions={run:async()=>({ok:true})}</script>",
+  );
   await workshop.verify();
   expect(workshop.state.getState().stalled).toBe(false);
   expect(workshop.state.getState().note?.text).toContain("校验通过");
@@ -181,7 +265,9 @@ it("hands over to the user after three repair rounds, with both actions wired", 
  */
 it("silently installs the same guide into the skill directory on startup", async () => {
   const { workshop, io } = harness();
-  await vi.waitFor(() => expect(io.files.get("chrys/skills/tool-dev/SKILL.md")).toBeTruthy());
+  await vi.waitFor(() =>
+    expect(io.files.get("chrys/skills/tool-dev/SKILL.md")).toBeTruthy(),
+  );
   const skill = io.files.get("chrys/skills/tool-dev/SKILL.md")!;
   expect(skill).toContain("R9");
   expect(skill).toContain("aawClipboard");
@@ -192,9 +278,10 @@ it("silently installs the same guide into the skill directory on startup", async
 it("syncToolGuide writes the guide through the narrow file port", async () => {
   const io = memoryToolIO();
   await syncToolGuide(io);
-  expect(io.files.get("chrys/skills/tool-dev/SKILL.md")).toContain("name: tool-dev");
+  expect(io.files.get("chrys/skills/tool-dev/SKILL.md")).toContain(
+    "name: tool-dev",
+  );
 });
-
 
 /**
  * 从 ZIP 装进来的工具解到 `tools/installed/`，不进 `tools/projects/`。
@@ -206,19 +293,39 @@ it("syncToolGuide writes the guide through the narrow file port", async () => {
  */
 it("extracts an imported archive into installed/, never into the author's projects", async () => {
   const { workshop, io } = harness();
-  const manifest = JSON.stringify({ schemaVersion: 1, id: "demo", name: "Demo", version: "1.0.0" });
+  const manifest = JSON.stringify({
+    schemaVersion: 1,
+    id: "demo",
+    name: "Demo",
+    version: "1.0.0",
+  });
   const installer = new TextEncoder();
   await workshop.installArchive(
-    { schemaVersion: 1, id: "demo", name: "Demo", version: "1.0.0", html: "<p>hi</p>" },
-    { "manifest.json": installer.encode(manifest), "index.html": installer.encode("<p>hi</p>") },
+    {
+      schemaVersion: 1,
+      id: "demo",
+      name: "Demo",
+      version: "1.0.0",
+      html: "<p>hi</p>",
+    },
+    {
+      "manifest.json": installer.encode(manifest),
+      "index.html": installer.encode("<p>hi</p>"),
+    },
   );
   const written = [...io.files.keys()];
   // 只关心工具落盘那部分：建工坊时还会往技能目录静默写一份开发规范。
   const toolFiles = written.filter((path) => path.startsWith("tools/"));
   expect(toolFiles.length).toBeGreaterThan(0);
-  expect(toolFiles.filter((path) => path.startsWith("tools/projects/"))).toEqual([]);
+  expect(
+    toolFiles.filter((path) => path.startsWith("tools/projects/")),
+  ).toEqual([]);
   // 落点是 `versions/<版本>/`：一次安装一个独立目录，不再往同一个目录叠盖。
-  expect(toolFiles.every((path) => path.startsWith("tools/installed/u1/demo/versions/"))).toBe(true);
+  expect(
+    toolFiles.every((path) =>
+      path.startsWith("tools/installed/u1/demo/versions/"),
+    ),
+  ).toBe(true);
   workshop.dispose();
 });
 
@@ -231,16 +338,34 @@ it("extracts an imported archive into installed/, never into the author's projec
  */
 it("rejects an incompatible archive before creating any directory", async () => {
   const { workshop, io } = harness();
-  const tool = parseToolPackage(JSON.stringify({
-    schemaVersion: 1, id: "future", name: "未来版工具", version: "1.0.0",
-    html: "<p>hi</p>", requires: { contract: 99 },
-  }));
+  const tool = parseToolPackage(
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "future",
+      name: "未来版工具",
+      version: "1.0.0",
+      html: "<p>hi</p>",
+      requires: { contract: 99 },
+    }),
+  );
   const encoder = new TextEncoder();
-  await expect(workshop.installArchive(tool, {
-    "manifest.json": encoder.encode(JSON.stringify({ schemaVersion: 1, id: "future", name: "未来版工具", version: "1.0.0", requires: { contract: 99 } })),
-    "index.html": encoder.encode("<p>hi</p>"),
-  })).rejects.toThrow(/第 99 代/);
-  expect([...io.files.keys()].filter((path) => path.startsWith("tools/installed/"))).toEqual([]);
+  await expect(
+    workshop.installArchive(tool, {
+      "manifest.json": encoder.encode(
+        JSON.stringify({
+          schemaVersion: 1,
+          id: "future",
+          name: "未来版工具",
+          version: "1.0.0",
+          requires: { contract: 99 },
+        }),
+      ),
+      "index.html": encoder.encode("<p>hi</p>"),
+    }),
+  ).rejects.toThrow(/第 99 代/);
+  expect(
+    [...io.files.keys()].filter((path) => path.startsWith("tools/installed/")),
+  ).toEqual([]);
   workshop.dispose();
 });
 
@@ -254,16 +379,29 @@ it("rejects an incompatible archive before creating any directory", async () => 
  */
 it("migrates legacy tools into the signed-in account, not into anonymous", async () => {
   const { workshop, io, setRunDir, setSourceDir } = harness();
-  const tool = parseToolPackage(JSON.stringify({
-    schemaVersion: 1, id: "legacy", name: "旧工具", version: "1.0.0", html: "<p>hi</p>",
-  }));
+  const tool = parseToolPackage(
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "legacy",
+      name: "旧工具",
+      version: "1.0.0",
+      html: "<p>hi</p>",
+    }),
+  );
   const result = await workshop.migrateLegacy([{ package: tool }]);
   expect(result.created).toEqual(["tools/projects/u1/legacy"]);
-  expect(await io.pathExists("tools/projects/u1/legacy/manifest.json")).toBe(true);
-  expect(await io.pathExists("tools/projects/anonymous/legacy/manifest.json")).toBe(false);
+  expect(await io.pathExists("tools/projects/u1/legacy/manifest.json")).toBe(
+    true,
+  );
+  expect(
+    await io.pathExists("tools/projects/anonymous/legacy/manifest.json"),
+  ).toBe(false);
   // 迁出来的目录只登记成**开发来源**：运行副本还是安装记录里那一份。
   // 以前这里顺手指了运行目录，带二进制附件的工具当场读不到附件。
-  expect(setSourceDir).toHaveBeenCalledWith("legacy", "tools/projects/u1/legacy");
+  expect(setSourceDir).toHaveBeenCalledWith(
+    "legacy",
+    "tools/projects/u1/legacy",
+  );
   expect(setRunDir).not.toHaveBeenCalled();
   workshop.dispose();
 });
@@ -278,22 +416,42 @@ it("migrates legacy tools into the signed-in account, not into anonymous", async
 it("scans both roots and creates into the custom root", async () => {
   let stored: string | undefined;
   stored = "custom/root";
-  const second = harness({ settings: { read: () => stored, write: (value) => { stored = value; } } });
+  const second = harness({
+    settings: {
+      read: () => stored,
+      write: (value) => {
+        stored = value;
+      },
+    },
+  });
   second.startNewSession.mockResolvedValue({ ok: true });
 
   // 默认位置里先放一个旧项目。
-  await second.io.writeTextFile("tools/projects/u1/other/manifest.json", JSON.stringify({
-    schemaVersion: 1, id: "other", name: "别的", version: "1.0.0",
-  }));
-  await second.io.writeTextFile("tools/projects/u1/other/index.html", "<p>x</p>");
+  await second.io.writeTextFile(
+    "tools/projects/u1/other/manifest.json",
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "other",
+      name: "别的",
+      version: "1.0.0",
+    }),
+  );
+  await second.io.writeTextFile(
+    "tools/projects/u1/other/index.html",
+    "<p>x</p>",
+  );
 
   // 不选目录直接新建：应落在自定义根目录（不套账号段）。
   second.workshop.setBrief("make a thing");
   await second.workshop.create();
-  expect(await second.io.pathExists("custom/root/make-a-thing/manifest.json")).toBe(true);
+  expect(
+    await second.io.pathExists("custom/root/make-a-thing/manifest.json"),
+  ).toBe(true);
 
   await second.workshop.refreshProjects();
-  const dirs = second.workshop.state.getState().projects.map((entry) => entry.dir);
+  const dirs = second.workshop.state
+    .getState()
+    .projects.map((entry) => entry.dir);
   expect(dirs).toContain("tools/projects/u1/other");
   expect(dirs).toContain("custom/root/make-a-thing");
 
@@ -325,9 +483,15 @@ it("refuses to resume when the directory no longer has a manifest", async () => 
 it("imports a tool from a folder through the same archive pipeline", async () => {
   const { workshop, io, pickDirectory, startNewSession } = harness();
   const source = "E:/somewhere/my-tool";
-  await io.writeTextFile(`${source}/manifest.json`, JSON.stringify({
-    schemaVersion: 1, id: "demo", name: "演示", version: "1.0.0",
-  }));
+  await io.writeTextFile(
+    `${source}/manifest.json`,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "demo",
+      name: "演示",
+      version: "1.0.0",
+    }),
+  );
   await io.writeTextFile(`${source}/index.html`, "<p>hi</p>");
   await io.writeTextFile(`${source}/assets/data.txt`, "数据");
   pickDirectory.mockResolvedValue(source);
@@ -336,8 +500,14 @@ it("imports a tool from a folder through the same archive pipeline", async () =>
   expect(note.error).toBeUndefined();
   // 文件都写进了 installed/ 下的版本副本（含附件），不碰用户项目区。
   expect(startNewSession).not.toHaveBeenCalled();
-  expect(await io.pathExists("tools/installed/u1/demo/versions/1.0.0/index.html")).toBe(true);
-  expect(await io.pathExists("tools/installed/u1/demo/versions/1.0.0/assets/data.txt")).toBe(true);
+  expect(
+    await io.pathExists("tools/installed/u1/demo/versions/1.0.0/index.html"),
+  ).toBe(true);
+  expect(
+    await io.pathExists(
+      "tools/installed/u1/demo/versions/1.0.0/assets/data.txt",
+    ),
+  ).toBe(true);
   workshop.dispose();
 });
 
@@ -357,10 +527,20 @@ it("folder import fails clearly when there is no manifest", async () => {
 it("ignores a late check result after the user switched projects", async () => {
   const { workshop, io, dir } = harness();
   const other = "/data/tools/projects/u1/other";
-  for (const [path, id] of [[dir, "demo"], [other, "other"]] as const) {
-    await io.writeTextFile(`${path}/manifest.json`, JSON.stringify({
-      schemaVersion: 1, id, name: id, version: "1.0.0", html: "",
-    }));
+  for (const [path, id] of [
+    [dir, "demo"],
+    [other, "other"],
+  ] as const) {
+    await io.writeTextFile(
+      `${path}/manifest.json`,
+      JSON.stringify({
+        schemaVersion: 1,
+        id,
+        name: id,
+        version: "1.0.0",
+        html: "",
+      }),
+    );
     await io.writeTextFile(`${path}/index.html`, "<p>hi</p>");
   }
   // 让第一个项目的读取慢下来，确保它的结果一定落在第二个之后。
@@ -371,7 +551,9 @@ it("ignores a late check result after the user switched projects", async () => {
   });
   void workshop.select(dir);
   await workshop.select(other);
-  await vi.waitFor(() => expect(workshop.state.getState().check?.tool?.id).toBe("other"));
+  await vi.waitFor(() =>
+    expect(workshop.state.getState().check?.tool?.id).toBe("other"),
+  );
   await new Promise((done) => setTimeout(done, 40));
   expect(workshop.state.getState().project?.dir).toBe(other);
   expect(workshop.state.getState().check?.tool?.id).toBe("other");
@@ -384,15 +566,42 @@ it("ignores a late check result after the user switched projects", async () => {
 it("flags drift when only the manifest changed, not the html or version", async () => {
   const { workshop, io, dir, toolStore } = harness();
   const manifest = {
-    schemaVersion: 1 as const, id: "demo", name: "演示", version: "1.0.0", html: "",
-    actions: [{ id: "run", description: "跑", inputSchema: { type: "object", properties: {} } }],
+    schemaVersion: 1 as const,
+    id: "demo",
+    name: "演示",
+    version: "1.0.0",
+    html: "",
+    actions: [
+      {
+        id: "run",
+        description: "跑",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
   };
   await io.writeTextFile(`${dir}/manifest.json`, JSON.stringify(manifest));
-  await io.writeTextFile(`${dir}/index.html`, "<p>hi</p><script>window.aawActions={run:async()=>({ok:true})}</script>");
+  await io.writeTextFile(
+    `${dir}/index.html`,
+    "<p>hi</p><script>window.aawActions={run:async()=>({ok:true})}</script>",
+  );
   // 装进去的那份只有动作不一样——版本与 html 完全相同。
-  toolStore.setState([{
-    package: { ...manifest, actions: [{ id: "other", description: "另一个", inputSchema: { type: "object", properties: {} } }] },
-  }], true);
+  toolStore.setState(
+    [
+      {
+        package: {
+          ...manifest,
+          actions: [
+            {
+              id: "other",
+              description: "另一个",
+              inputSchema: { type: "object", properties: {} },
+            },
+          ],
+        },
+      },
+    ],
+    true,
+  );
   await workshop.select(dir);
   expect(workshop.state.getState().installed).toBe(true);
   expect(workshop.state.getState().drift).toBe(true);
@@ -401,9 +610,16 @@ it("flags drift when only the manifest changed, not the html or version", async 
 /** 切会话不是「AI 停了」：新会话的空闲状态不该触发自动校验与回灌。 */
 it("does not mistake switching sessions for the agent stopping", async () => {
   const { workshop, io, dir, session, send } = harness();
-  await io.writeTextFile(`${dir}/manifest.json`, JSON.stringify({
-    schemaVersion: 1, id: "demo", name: "演示", version: "1.0.0", html: "",
-  }));
+  await io.writeTextFile(
+    `${dir}/manifest.json`,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "demo",
+      name: "演示",
+      version: "1.0.0",
+      html: "",
+    }),
+  );
   await workshop.select(dir);
   session.setState({ isAgentRunning: true });
   session.setState({ activeSessionId: "s2", isAgentRunning: false });
@@ -415,9 +631,16 @@ it("does not mistake switching sessions for the agent stopping", async () => {
 /** 连点「继续开发」只开一条会话：同步标志位挡住 await 窗口里的第二次点击。 */
 it("resumes once even if the button is double-clicked", async () => {
   const { workshop, io, dir, startNewSession } = harness();
-  await io.writeTextFile(`${dir}/manifest.json`, JSON.stringify({
-    schemaVersion: 1, id: "demo", name: "演示", version: "1.0.0", html: "",
-  }));
+  await io.writeTextFile(
+    `${dir}/manifest.json`,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "demo",
+      name: "演示",
+      version: "1.0.0",
+      html: "",
+    }),
+  );
   startNewSession.mockResolvedValue({ ok: true });
   await Promise.all([workshop.resume(dir), workshop.resume(dir)]);
   expect(startNewSession).toHaveBeenCalledOnce();
@@ -427,14 +650,28 @@ it("resumes once even if the button is double-clicked", async () => {
 it("purges the project under a custom root too", async () => {
   let stored: string | undefined = "/data/custom";
   const { workshop, io, toolPurge } = harness({
-    settings: { read: () => stored, write: (value) => { stored = value; } },
+    settings: {
+      read: () => stored,
+      write: (value) => {
+        stored = value;
+      },
+    },
   });
-  await io.writeTextFile("/data/custom/demo/manifest.json", JSON.stringify({
-    schemaVersion: 1, id: "demo", name: "演示", version: "1.0.0", html: "",
-  }));
+  await io.writeTextFile(
+    "/data/custom/demo/manifest.json",
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "demo",
+      name: "演示",
+      version: "1.0.0",
+      html: "",
+    }),
+  );
   await io.writeTextFile("/data/custom/demo/index.html", "<p>hi</p>");
   await workshop.purge("demo");
-  expect(toolPurge).toHaveBeenCalledWith(expect.objectContaining({ projectDirs: ["/data/custom/demo"] }));
+  expect(toolPurge).toHaveBeenCalledWith(
+    expect.objectContaining({ projectDirs: ["/data/custom/demo"] }),
+  );
 });
 
 /**
@@ -445,9 +682,16 @@ it("purges the project under a custom root too", async () => {
  */
 it("collapses the tracked project without touching the disk", async () => {
   const { workshop, io, dir } = harness();
-  await io.writeTextFile(`${dir}/manifest.json`, JSON.stringify({
-    schemaVersion: 1, id: "demo", name: "演示", version: "1.0.0", html: "",
-  }));
+  await io.writeTextFile(
+    `${dir}/manifest.json`,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "demo",
+      name: "演示",
+      version: "1.0.0",
+      html: "",
+    }),
+  );
   await workshop.select(dir);
   expect(workshop.state.getState().project?.dir).toBe(dir);
 
@@ -465,9 +709,16 @@ it("collapses the tracked project without touching the disk", async () => {
  */
 it("drops the project when its directory disappears", async () => {
   const { workshop, io, dir } = harness();
-  await io.writeTextFile(`${dir}/manifest.json`, JSON.stringify({
-    schemaVersion: 1, id: "demo", name: "演示", version: "1.0.0", html: "",
-  }));
+  await io.writeTextFile(
+    `${dir}/manifest.json`,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "demo",
+      name: "演示",
+      version: "1.0.0",
+      html: "",
+    }),
+  );
   await io.writeTextFile(`${dir}/index.html`, "<p>hi</p>");
   await workshop.select(dir);
 
@@ -484,9 +735,16 @@ it("drops the project when its directory disappears", async () => {
 /** AI 写完那一刻目录也没了：同样收敛成"移除 + 说明"，而不是"没修好"。 */
 it("does not report a deleted project as unfixed work", async () => {
   const { workshop, io, dir, session } = harness();
-  await io.writeTextFile(`${dir}/manifest.json`, JSON.stringify({
-    schemaVersion: 1, id: "demo", name: "演示", version: "1.0.0", html: "",
-  }));
+  await io.writeTextFile(
+    `${dir}/manifest.json`,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "demo",
+      name: "演示",
+      version: "1.0.0",
+      html: "",
+    }),
+  );
   await workshop.select(dir);
   io.files.delete(`${dir}/manifest.json`);
 
@@ -504,9 +762,16 @@ it("does not report a deleted project as unfixed work", async () => {
  */
 it("reports running only for the project the foreground session is on", async () => {
   const { workshop, io, dir, session, workspace } = harness();
-  await io.writeTextFile(`${dir}/manifest.json`, JSON.stringify({
-    schemaVersion: 1, id: "demo", name: "演示", version: "1.0.0", html: "",
-  }));
+  await io.writeTextFile(
+    `${dir}/manifest.json`,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "demo",
+      name: "演示",
+      version: "1.0.0",
+      html: "",
+    }),
+  );
   await workshop.select(dir);
   session.setState({ isAgentRunning: true });
   expect(workshop.state.getState().running).toBe(true);
@@ -526,10 +791,23 @@ it("reports running only for the project the foreground session is on", async ()
  */
 it("drops the previous project's note when switching projects", async () => {
   const { workshop, io, dir } = harness();
-  await io.writeTextFile(`${dir}/manifest.json`, JSON.stringify({
-    schemaVersion: 1, id: "demo", name: "演示", version: "1.0.0", html: "",
-    actions: [{ id: "run", description: "跑", inputSchema: { type: "object", properties: {} } }],
-  }));
+  await io.writeTextFile(
+    `${dir}/manifest.json`,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "demo",
+      name: "演示",
+      version: "1.0.0",
+      html: "",
+      actions: [
+        {
+          id: "run",
+          description: "跑",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ],
+    }),
+  );
   await io.writeTextFile(`${dir}/index.html`, "<p>没有实现</p>");
   await workshop.select(dir);
   await workshop.verify();
@@ -537,9 +815,16 @@ it("drops the previous project's note when switching projects", async () => {
 
   // 切到一个真实存在的另一个项目：note 属于上一个项目，不该带过来。
   const other = "/data/tools/projects/u1/other";
-  await io.writeTextFile(`${other}/manifest.json`, JSON.stringify({
-    schemaVersion: 1, id: "other", name: "另一个", version: "1.0.0", html: "",
-  }));
+  await io.writeTextFile(
+    `${other}/manifest.json`,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "other",
+      name: "另一个",
+      version: "1.0.0",
+      html: "",
+    }),
+  );
   await workshop.select(other);
   expect(workshop.state.getState().project?.dir).toBe(other);
   expect(workshop.state.getState().note).toBeNull();
@@ -554,11 +839,24 @@ it("drops the previous project's note when switching projects", async () => {
 it("re-reads the installed badge when the tool leaves the installed list", async () => {
   const { workshop, io, dir, toolStore } = harness();
   const pack = {
-    schemaVersion: 1, id: "demo", name: "演示", version: "1.0.0", html: "",
-    actions: [{ id: "run", description: "跑", inputSchema: { type: "object", properties: {} } }],
+    schemaVersion: 1,
+    id: "demo",
+    name: "演示",
+    version: "1.0.0",
+    html: "",
+    actions: [
+      {
+        id: "run",
+        description: "跑",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
   };
   await io.writeTextFile(`${dir}/manifest.json`, JSON.stringify(pack));
-  await io.writeTextFile(`${dir}/index.html`, "<script>window.aawActions={run:async()=>({ok:true})}</script>");
+  await io.writeTextFile(
+    `${dir}/index.html`,
+    "<script>window.aawActions={run:async()=>({ok:true})}</script>",
+  );
   await workshop.select(dir);
   await workshop.install();
   expect(workshop.state.getState().installed).toBe(true);
@@ -578,12 +876,26 @@ it("re-reads the installed badge when the tool leaves the installed list", async
 it("does not pour one project's verdict onto another after a switch", async () => {
   const { workshop, io, dir } = harness();
   const other = "/data/tools/projects/u1/other";
-  await io.writeTextFile(`${dir}/manifest.json`, JSON.stringify({
-    schemaVersion: 1, id: "demo", name: "演示", version: "1.0.0", html: "",
-  }));
-  await io.writeTextFile(`${other}/manifest.json`, JSON.stringify({
-    schemaVersion: 1, id: "other", name: "另一个", version: "1.0.0", html: "",
-  }));
+  await io.writeTextFile(
+    `${dir}/manifest.json`,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "demo",
+      name: "演示",
+      version: "1.0.0",
+      html: "",
+    }),
+  );
+  await io.writeTextFile(
+    `${other}/manifest.json`,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "other",
+      name: "另一个",
+      version: "1.0.0",
+      html: "",
+    }),
+  );
   await workshop.select(dir);
 
   // 切到 B（它是好的），然后给 A 点重新校验：A 的目录已经不在了。
@@ -616,15 +928,24 @@ it("reads the new project right after creating it", async () => {
   // 脚手架只写清单，页面内容留给 AI：所以这一刻读得出"清单合法、html 还是空的"。
   // 重点是 check 有值——没有它，展开行是一整块灰按钮。
   expect(state.check).not.toBeNull();
-  expect(state.check?.blocking.some((problem) => problem.where === "html")).toBe(true);
+  expect(
+    state.check?.blocking.some((problem) => problem.where === "html"),
+  ).toBe(true);
   expect(state.note?.error).toBeUndefined();
 });
 
 /* ─────────────────────────────────────────────── 组合操作回归（2026-11-22 审计）*/
 
-const combo = (version: string, id = "combo") => parseToolPackage(JSON.stringify({
-  schemaVersion: 1, id, name: "组合操作", version, html: `<p>runtime-${version}</p>`,
-}));
+const combo = (version: string, id = "combo") =>
+  parseToolPackage(
+    JSON.stringify({
+      schemaVersion: 1,
+      id,
+      name: "组合操作",
+      version,
+      html: `<p>runtime-${version}</p>`,
+    }),
+  );
 
 /** 真工具服务 + 工坊：安装记录、版本目录、备份都是真的，只有宿主是内存实现。 */
 async function withRealTools(run: (context: Context) => Promise<void>) {
@@ -633,12 +954,17 @@ async function withRealTools(run: (context: Context) => Promise<void>) {
   const runtime = createTestDesktopRuntime(
     { attachPreloading: () => () => {}, close: () => Promise.resolve() },
     undefined,
-    (value) => { context = value; },
+    (value) => {
+      context = value;
+    },
   );
   try {
     await runtime.ready;
     if (!context) throw new Error("缺少桌面上下文");
-    context.account.loginAsDev({ name: "工坊回归", employeeId: "tools-workshop-regression" });
+    context.account.loginAsDev({
+      name: "工坊回归",
+      employeeId: "tools-workshop-regression",
+    });
     await run(context);
   } finally {
     await runtime.shutdown();
@@ -653,23 +979,36 @@ async function withRealTools(run: (context: Context) => Promise<void>) {
  */
 it("a failed update leaves the live version and its page untouched", async () => {
   await withRealTools(async ({ tools, account }) => {
-    const h = harness({ toolsService: tools, owner: () => account.state.getState().currentUser?.id });
+    const h = harness({
+      toolsService: tools,
+      owner: () => account.state.getState().currentUser?.id,
+    });
     try {
       const v1 = combo("1.0.0");
       const installed = await h.workshop.installArchive(v1, runtimeFiles(v1));
-      vi.spyOn(h.host.skills, "writeBinaryFile").mockRejectedValueOnce(new Error("模拟附件写入失败"));
-      await expect(h.workshop.installArchive(combo("2.0.0"), {
-        ...runtimeFiles(combo("2.0.0")),
-        "assets/stop.bin": Uint8Array.of(255),
-      })).rejects.toThrow("模拟附件写入失败");
+      vi.spyOn(h.host.skills, "writeBinaryFile").mockRejectedValueOnce(
+        new Error("模拟附件写入失败"),
+      );
+      await expect(
+        h.workshop.installArchive(combo("2.0.0"), {
+          ...runtimeFiles(combo("2.0.0")),
+          "assets/stop.bin": Uint8Array.of(255),
+        }),
+      ).rejects.toThrow("模拟附件写入失败");
 
       const entry = tools.state.getState()[0];
       expect(entry?.package.version).toBe("1.0.0");
       expect(entry?.dir).toBe(installed.dir);
-      expect(await h.io.readTextFile(`${entry?.dir}/index.html`)).toContain("runtime-1.0.0");
+      expect(await h.io.readTextFile(`${entry?.dir}/index.html`)).toContain(
+        "runtime-1.0.0",
+      );
       // 失败的那次只留下清理干净的暂存：别在磁盘上留一份孤儿副本。
-      expect([...h.io.files.keys()].filter((path) => path.includes(".staging-"))).toEqual([]);
-    } finally { h.workshop.dispose(); }
+      expect(
+        [...h.io.files.keys()].filter((path) => path.includes(".staging-")),
+      ).toEqual([]);
+    } finally {
+      h.workshop.dispose();
+    }
   });
 });
 
@@ -681,20 +1020,33 @@ it("a failed update leaves the live version and its page untouched", async () =>
  */
 it("exports only the files this version actually installed", async () => {
   await withRealTools(async ({ tools, account }) => {
-    const h = harness({ toolsService: tools, owner: () => account.state.getState().currentUser?.id });
+    const h = harness({
+      toolsService: tools,
+      owner: () => account.state.getState().currentUser?.id,
+    });
     try {
       const v1 = combo("1.0.0");
       const stale = "assets/v1-only.txt";
-      await h.workshop.installArchive(v1, { ...runtimeFiles(v1), [stale]: new TextEncoder().encode("v1 only") });
-      const newer = await h.workshop.installArchive(combo("2.0.0"), runtimeFiles(combo("2.0.0")));
+      await h.workshop.installArchive(v1, {
+        ...runtimeFiles(v1),
+        [stale]: new TextEncoder().encode("v1 only"),
+      });
+      const newer = await h.workshop.installArchive(
+        combo("2.0.0"),
+        runtimeFiles(combo("2.0.0")),
+      );
 
       const exported = await readToolDirFiles(hostToolIO(h.host), newer.dir!);
       expect(exported.files[stale]).toBeUndefined();
       expect(tools.state.getState()[0]?.package.version).toBe("2.0.0");
       // 两版各占一个目录：上一版还在，退版有东西可切（切目录的断言在 tools.test.ts）。
       expect(newer.dir).not.toBe(tools.state.getState()[0]?.previousDir);
-      expect(await h.io.pathExists(tools.state.getState()[0]!.previousDir!)).toBe(true);
-    } finally { h.workshop.dispose(); }
+      expect(
+        await h.io.pathExists(tools.state.getState()[0]!.previousDir!),
+      ).toBe(true);
+    } finally {
+      h.workshop.dispose();
+    }
   });
 });
 
@@ -706,11 +1058,20 @@ it("exports only the files this version actually installed", async () => {
  */
 it("keeps reading the installed snapshot after the author edits the project", async () => {
   await withRealTools(async ({ tools, account }) => {
-    const h = harness({ toolsService: tools, owner: () => account.state.getState().currentUser?.id });
+    const h = harness({
+      toolsService: tools,
+      owner: () => account.state.getState().currentUser?.id,
+    });
     try {
-      await h.io.writeTextFile(`${h.dir}/manifest.json`, JSON.stringify({
-        schemaVersion: 1, id: "demo", name: "演示", version: "1.0.0",
-      }));
+      await h.io.writeTextFile(
+        `${h.dir}/manifest.json`,
+        JSON.stringify({
+          schemaVersion: 1,
+          id: "demo",
+          name: "演示",
+          version: "1.0.0",
+        }),
+      );
       await h.io.writeTextFile(`${h.dir}/index.html`, "<p>runtime-1.0.0</p>");
       await h.workshop.select(h.dir);
       expect(await h.workshop.install()).toBe(true);
@@ -719,10 +1080,14 @@ it("keeps reading the installed snapshot after the author edits the project", as
       await h.io.writeTextFile(`${h.dir}/index.html`, "<p>还没装的草稿</p>");
       const opened = await h.workshop.resolveOpenDir("demo");
       expect(opened).not.toBe(h.dir);
-      expect(await h.io.readTextFile(`${opened}/index.html`)).toContain("runtime-1.0.0");
+      expect(await h.io.readTextFile(`${opened}/index.html`)).toContain(
+        "runtime-1.0.0",
+      );
       // 来源另存一份：管理页仍能指出"从哪儿装的"，但它不参与运行。
       expect(tools.state.getState()[0]?.sourceDir).toBe(h.dir);
-    } finally { h.workshop.dispose(); }
+    } finally {
+      h.workshop.dispose();
+    }
   });
 });
 
@@ -734,7 +1099,10 @@ it("keeps reading the installed snapshot after the author edits the project", as
  */
 it("migrating legacy records never repoints a working runtime copy", async () => {
   await withRealTools(async ({ tools, account }) => {
-    const h = harness({ toolsService: tools, owner: () => account.state.getState().currentUser?.id });
+    const h = harness({
+      toolsService: tools,
+      owner: () => account.state.getState().currentUser?.id,
+    });
     try {
       const tool = combo("1.0.0");
       const installed = await h.workshop.installArchive(tool, {
@@ -744,27 +1112,46 @@ it("migrating legacy records never repoints a working runtime copy", async () =>
       await h.workshop.migrateLegacy(tools.state.getState());
       const dir = await h.workshop.resolveOpenDir(tool.id);
       expect(dir).toBe(installed.dir);
-      expect(await h.host.skills.readBinaryFile!(`${dir}/assets/probe.bin`, 64)).toBe("/4AB");
+      expect(
+        await h.host.skills.readBinaryFile!(`${dir}/assets/probe.bin`, 64),
+      ).toBe("/4AB");
 
       // 再进一次面板：不重复生成项目、不重复写记录。
       await h.workshop.migrateLegacy(tools.state.getState());
-      expect(await h.io.pathExists("tools/projects/u1/combo/manifest.json")).toBe(false);
-    } finally { h.workshop.dispose(); }
+      expect(
+        await h.io.pathExists("tools/projects/u1/combo/manifest.json"),
+      ).toBe(false);
+    } finally {
+      h.workshop.dispose();
+    }
   });
 });
 
 /** 只带清单、缺运行入口的包明确拒绝，而不是装一个点不动的空壳。 */
 it("refuses a package that only carries the manifest", async () => {
   await withRealTools(async ({ tools, account }) => {
-    const h = harness({ toolsService: tools, owner: () => account.state.getState().currentUser?.id });
+    const h = harness({
+      toolsService: tools,
+      owner: () => account.state.getState().currentUser?.id,
+    });
     try {
-      const bundled = parseToolPackage(JSON.stringify({
-        schemaVersion: 1, id: "bundled", name: "打包页", version: "1.0.0",
-        html: '<script src="./app.js"></script>', build: { out: "app.js" },
-      }));
-      await expect(h.workshop.installArchive(bundled)).rejects.toThrow("app.js");
+      const bundled = parseToolPackage(
+        JSON.stringify({
+          schemaVersion: 1,
+          id: "bundled",
+          name: "打包页",
+          version: "1.0.0",
+          html: '<script src="./app.js"></script>',
+          build: { out: "app.js" },
+        }),
+      );
+      await expect(h.workshop.installArchive(bundled)).rejects.toThrow(
+        "app.js",
+      );
       expect(tools.state.getState()).toEqual([]);
-    } finally { h.workshop.dispose(); }
+    } finally {
+      h.workshop.dispose();
+    }
   });
 });
 
@@ -778,9 +1165,15 @@ it("refuses a package that only carries the manifest", async () => {
 it("refuses to import a folder when any file cannot be read", async () => {
   const h = harness();
   try {
-    await h.io.writeTextFile(`${h.dir}/manifest.json`, JSON.stringify({
-      schemaVersion: 1, id: "demo", name: "演示", version: "1.0.0",
-    }));
+    await h.io.writeTextFile(
+      `${h.dir}/manifest.json`,
+      JSON.stringify({
+        schemaVersion: 1,
+        id: "demo",
+        name: "演示",
+        version: "1.0.0",
+      }),
+    );
     await h.io.writeTextFile(`${h.dir}/index.html`, "<p>demo</p>");
     await h.io.writeTextFile(`${h.dir}/assets/logo.png`, "binary");
     h.unreadable.add(`${h.dir}/assets/logo.png`);

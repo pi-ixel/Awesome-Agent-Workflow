@@ -14,37 +14,102 @@ const params = new URLSearchParams(location.search);
 if (params.has("warm")) document.documentElement.classList.add("theme-warm");
 // `?empty` 摆出"一个工具都没有"的首次使用现场：空状态不是一行灰字就够，
 // 得在真实渲染里看三步引导挤不挤、主按钮够不够醒目。
-const entries: PersonalTool[] = params.has("empty") ? [] : [
-  { package: { ...sampleTool, settingsSchema: [
-    ...sampleTool.settingsSchema!,
-    { id: "label", label: "工作区名称", type: "text", default: "我的工作区" },
-    { id: "sort", label: "排序方式", type: "select", default: "original", options: [{ value: "original", label: "保持原序" }, { value: "alpha", label: "按名称排序" }] },
-    { id: "copy", label: "处理后自动复制", type: "boolean", default: false },
-  ] },
-    // 从开发项目安装时，管理页显示开发来源，工具窗口使用独立运行副本。
-    dir: "E:/AAW/tools/installed/visual-owner/json-formatter/versions/1.0.0",
-    sourceDir: "E:/AAW/tools/projects/visual-owner/long-source-directory-without-any-break-points/json-formatter" },
-  { package: { ...sampleTool, id: "legacy-tool", name: "未声明设置的工具", settingsSchema: [] } },
-  // 再多几个：紧凑列表的价值就在于"一屏能看七八个"，只有三个工具看不出密度。
-  ...["Markdown 导出", "CSV 拆分", "时间戳转换", "正则测试", "颜色取值", "URL 解析"].map((name, at) => ({
-    package: { ...sampleTool, id: `extra-tool-${at + 1}`, name, settingsSchema: [] },
-  })),
-];
+const entries: PersonalTool[] = params.has("empty")
+  ? []
+  : [
+      {
+        package: {
+          ...sampleTool,
+          settingsSchema: [
+            ...sampleTool.settingsSchema!,
+            {
+              id: "label",
+              label: "工作区名称",
+              type: "text",
+              default: "我的工作区",
+            },
+            {
+              id: "sort",
+              label: "排序方式",
+              type: "select",
+              default: "original",
+              options: [
+                { value: "original", label: "保持原序" },
+                { value: "alpha", label: "按名称排序" },
+              ],
+            },
+            {
+              id: "copy",
+              label: "处理后自动复制",
+              type: "boolean",
+              default: false,
+            },
+          ],
+        },
+        // 从开发项目安装时，管理页显示开发来源，工具窗口使用独立运行副本。
+        dir: "E:/AAW/tools/installed/visual-owner/json-formatter/versions/1.0.0",
+        sourceDir:
+          "E:/AAW/tools/projects/visual-owner/long-source-directory-without-any-break-points/json-formatter",
+      },
+      {
+        package: {
+          ...sampleTool,
+          id: "legacy-tool",
+          name: "未声明设置的工具",
+          settingsSchema: [],
+        },
+      },
+      // 再多几个：紧凑列表的价值就在于"一屏能看七八个"，只有三个工具看不出密度。
+      ...[
+        "Markdown 导出",
+        "CSV 拆分",
+        "时间戳转换",
+        "正则测试",
+        "颜色取值",
+        "URL 解析",
+      ].map((name, at) => ({
+        package: {
+          ...sampleTool,
+          id: `extra-tool-${at + 1}`,
+          name,
+          settingsSchema: [],
+        },
+      })),
+    ];
 const state = createStore<readonly PersonalTool[]>(() => entries);
 const service: ToolsService = {
   state,
   // 真的写进状态：视觉用例要能验证「载入示例工具」之后列表确实长出来。
   install: (tool) => {
-    state.setState((current) => current.some((entry) => entry.package.id === tool.id)
-      ? current
-      : [...current, { package: tool, installedAt: Date.now() }], true);
-    return Promise.resolve({ version: tool.version, updated: false, versionChanged: false });
+    state.setState(
+      (current) =>
+        current.some((entry) => entry.package.id === tool.id)
+          ? current
+          : [...current, { package: tool, installedAt: Date.now() }],
+      true,
+    );
+    return Promise.resolve({
+      version: tool.version,
+      updated: false,
+      versionChanged: false,
+    });
   },
   rollback: () => Promise.resolve(undefined),
   setRunDir: () => {},
   setSourceDir: () => {},
-  open: () => {}, remove: () => Promise.resolve(),
-  saveSettings: (id, values) => state.setState(state.getState().map((entry) => entry.package.id === id ? { ...entry, settings: resolveToolSettings(entry.package, values) } : entry), true),
+  open: () => {},
+  remove: () => Promise.resolve(),
+  saveSettings: (id, values) =>
+    state.setState(
+      state
+        .getState()
+        .map((entry) =>
+          entry.package.id === id
+            ? { ...entry, settings: resolveToolSettings(entry.package, values) }
+            : entry,
+        ),
+      true,
+    ),
 };
 const host = {
   isNative: () => !new URLSearchParams(location.search).has("web"),
@@ -64,40 +129,88 @@ const jsonTable = {
   network: false,
 };
 const otherProjects = [
-  { dir: "E:/AAW/tools/projects/u1/markdown-export", dirName: "markdown-export", id: "markdown-export", name: "Markdown 导出", version: "0.3.1", hasHtml: true, network: false },
-  { dir: "E:/AAW/tools/projects/u1/timestamp", dirName: "timestamp", id: "timestamp", name: "时间戳转换", version: "", hasHtml: false, network: false },
+  {
+    dir: "E:/AAW/tools/projects/u1/markdown-export",
+    dirName: "markdown-export",
+    id: "markdown-export",
+    name: "Markdown 导出",
+    version: "0.3.1",
+    hasHtml: true,
+    network: false,
+  },
+  {
+    dir: "E:/AAW/tools/projects/u1/timestamp",
+    dirName: "timestamp",
+    id: "timestamp",
+    name: "时间戳转换",
+    version: "",
+    hasHtml: false,
+    network: false,
+  },
 ];
-const workshopFixture = fakeWorkshop(params.has("stalled") ? {
-  project: { dir: jsonTable.dir, id: jsonTable.id, name: jsonTable.name },
-  stalled: true,
-  note: { text: "还有 2 个问题，AI 试了 3 轮也没修好。", error: true },
-  projects: [jsonTable],
-  check: {
-    tool: sampleTool,
-    ready: false,
-    blocking: [
-      { ruleId: "R3", level: "block", where: "index.html", message: "清单里声明了动作 run，页面里没有实现", hint: "在页面里挂 window.aawActions.run" },
-      { ruleId: "R1", level: "block", message: "改了 id", hint: "别改 id" },
-    ],
-    warnings: [],
-  },
-} : params.has("projects") ? {
-  // 多项目现场：只展开一行，其余收起后只剩标题 + 两个最常做的动作。
-  project: { dir: jsonTable.dir, id: jsonTable.id, name: jsonTable.name },
-  projects: [jsonTable, ...otherProjects],
-  check: {
-    tool: { ...sampleTool, id: jsonTable.id, name: jsonTable.name, version: jsonTable.version },
-    ready: true,
-    blocking: [],
-    warnings: [],
-  },
-} : params.has("blank") ? {
-  // 刚建好的项目：目录已经写出来了，列表扫描还没回来（所以是合成行），
-  // 结论也还没到。这是最容易变成"一整块灰按钮 + 还没有 index.html"的一刻。
-  project: { dir: jsonTable.dir, id: jsonTable.id, name: jsonTable.name },
-  projects: [...otherProjects],
-  check: null,
-} : {});
+const workshopFixture = fakeWorkshop(
+  params.has("stalled")
+    ? {
+        project: { dir: jsonTable.dir, id: jsonTable.id, name: jsonTable.name },
+        stalled: true,
+        note: { text: "还有 2 个问题，AI 试了 3 轮也没修好。", error: true },
+        projects: [jsonTable],
+        check: {
+          tool: sampleTool,
+          ready: false,
+          blocking: [
+            {
+              ruleId: "R3",
+              level: "block",
+              where: "index.html",
+              message: "清单里声明了动作 run，页面里没有实现",
+              hint: "在页面里挂 window.aawActions.run",
+            },
+            {
+              ruleId: "R1",
+              level: "block",
+              message: "改了 id",
+              hint: "别改 id",
+            },
+          ],
+          warnings: [],
+        },
+      }
+    : params.has("projects")
+      ? {
+          // 多项目现场：只展开一行，其余收起后只剩标题 + 两个最常做的动作。
+          project: {
+            dir: jsonTable.dir,
+            id: jsonTable.id,
+            name: jsonTable.name,
+          },
+          projects: [jsonTable, ...otherProjects],
+          check: {
+            tool: {
+              ...sampleTool,
+              id: jsonTable.id,
+              name: jsonTable.name,
+              version: jsonTable.version,
+            },
+            ready: true,
+            blocking: [],
+            warnings: [],
+          },
+        }
+      : params.has("blank")
+        ? {
+            // 刚建好的项目：目录已经写出来了，列表扫描还没回来（所以是合成行），
+            // 结论也还没到。这是最容易变成"一整块灰按钮 + 还没有 index.html"的一刻。
+            project: {
+              dir: jsonTable.dir,
+              id: jsonTable.id,
+              name: jsonTable.name,
+            },
+            projects: [...otherProjects],
+            check: null,
+          }
+        : {},
+);
 const workshop = {
   ...workshopFixture,
   // 工具中心通过工坊安装示例。夹具让该入口更新真实渲染所用的服务状态。

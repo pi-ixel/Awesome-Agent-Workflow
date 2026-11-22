@@ -71,18 +71,102 @@ export interface ToolCapability {
  * `entry` 为空表示它不是 `window` 上的对象，而是一种"声明式授权"（例如网络）。
  */
 export const toolCapabilities: readonly ToolCapability[] = [
-  { name: "settings", entry: "aawSettings", direction: "down", since: 1, carrier: "both", summary: "读取用户在工具中心里填的设置（只读）" },
-  { name: "store", entry: "aawStore", direction: "down", since: 1, carrier: "both", summary: "按工具隔离的键值存储，5 MB" },
-  { name: "sharedStore", entry: "aawStore.scope", direction: "down", since: 1, carrier: "both", summary: "用户级共享存储，供多个工具串起来用" },
-  { name: "files", entry: "aawFiles", direction: "down", since: 1, carrier: "both", summary: "用户亲手选中的文件：文本 / 二进制 / 多选 / 目录 / 拖放" },
-  { name: "clipboard", entry: "aawClipboard", direction: "down", since: 1, carrier: "both", summary: "剪切板文本与图片" },
-  { name: "actions", entry: "aawActions", direction: "up", since: 1, carrier: "both", summary: "向上暴露动作给 AI 调用（工具赋值、宿主读取）" },
-  { name: "system", entry: "aawSystem", direction: "down", since: 1, carrier: "both", summary: "只读系统信息：平台、CPU、内存、磁盘" },
-  { name: "secrets", entry: "aawSecrets", direction: "down", since: 1, carrier: "both", summary: "系统加密存储的密钥，不落明文" },
-  { name: "lifecycle", entry: "aawLifecycle", direction: "down", since: 1, carrier: "both", summary: "系统通知、常驻与定时（需在清单声明）" },
-  { name: "context", entry: "aawContext", direction: "down", since: 1, carrier: "both", summary: "唤起上下文：来源与可用文本" },
-  { name: "bus", entry: "aawBus", direction: "down", since: 1, carrier: "both", summary: "工具间在线事件广播" },
-  { name: "network", entry: "", direction: "none", since: 1, carrier: "both", summary: "联网（在清单 permissions 里声明，可限定域名）" },
+  {
+    name: "settings",
+    entry: "aawSettings",
+    direction: "down",
+    since: 1,
+    carrier: "both",
+    summary: "读取用户在工具中心里填的设置（只读）",
+  },
+  {
+    name: "store",
+    entry: "aawStore",
+    direction: "down",
+    since: 1,
+    carrier: "both",
+    summary: "按工具隔离的键值存储，5 MB",
+  },
+  {
+    name: "sharedStore",
+    entry: "aawStore.scope",
+    direction: "down",
+    since: 1,
+    carrier: "both",
+    summary: "用户级共享存储，供多个工具串起来用",
+  },
+  {
+    name: "files",
+    entry: "aawFiles",
+    direction: "down",
+    since: 1,
+    carrier: "both",
+    summary: "用户亲手选中的文件：文本 / 二进制 / 多选 / 目录 / 拖放",
+  },
+  {
+    name: "clipboard",
+    entry: "aawClipboard",
+    direction: "down",
+    since: 1,
+    carrier: "both",
+    summary: "剪切板文本与图片",
+  },
+  {
+    name: "actions",
+    entry: "aawActions",
+    direction: "up",
+    since: 1,
+    carrier: "both",
+    summary: "向上暴露动作给 AI 调用（工具赋值、宿主读取）",
+  },
+  {
+    name: "system",
+    entry: "aawSystem",
+    direction: "down",
+    since: 1,
+    carrier: "both",
+    summary: "只读系统信息：平台、CPU、内存、磁盘",
+  },
+  {
+    name: "secrets",
+    entry: "aawSecrets",
+    direction: "down",
+    since: 1,
+    carrier: "both",
+    summary: "系统加密存储的密钥，不落明文",
+  },
+  {
+    name: "lifecycle",
+    entry: "aawLifecycle",
+    direction: "down",
+    since: 1,
+    carrier: "both",
+    summary: "系统通知、常驻与定时（需在清单声明）",
+  },
+  {
+    name: "context",
+    entry: "aawContext",
+    direction: "down",
+    since: 1,
+    carrier: "both",
+    summary: "唤起上下文：来源与可用文本",
+  },
+  {
+    name: "bus",
+    entry: "aawBus",
+    direction: "down",
+    since: 1,
+    carrier: "both",
+    summary: "工具间在线事件广播",
+  },
+  {
+    name: "network",
+    entry: "",
+    direction: "none",
+    since: 1,
+    carrier: "both",
+    summary: "联网（在清单 permissions 里声明，可限定域名）",
+  },
 ];
 
 /**
@@ -92,10 +176,18 @@ export const toolCapabilities: readonly ToolCapability[] = [
  * 能自己写文件，但自己写的 store 卸载时清不掉（`04 §5` 的清理约定当场破产），
  * 自己存的密钥没有系统加密，自己读的设置和用户在工具中心改的那份不是一份。
  */
-export const hostOwnedCapabilities: readonly string[] = ["store", "sharedStore", "secrets", "settings"];
+export const hostOwnedCapabilities: readonly string[] = [
+  "store",
+  "sharedStore",
+  "secrets",
+  "settings",
+];
 
 /** 某个能力在指定载体里有没有。进程工具的校验器用它提示"改走 aaw.call"。 */
-export function capabilityAvailableIn(name: string, carrier: "page" | "process"): boolean {
+export function capabilityAvailableIn(
+  name: string,
+  carrier: "page" | "process",
+): boolean {
   const capability = byName.get(name);
   if (!capability) return false;
   return capability.carrier === "both" || capability.carrier === carrier;
@@ -109,11 +201,16 @@ export function readCapability(name: string): ToolCapability | undefined {
 
 /** 某个契约代际下可用的能力名——用于安装时校验 `requires.capabilities`。 */
 export function capabilitiesAt(version: number): readonly string[] {
-  return toolCapabilities.filter((item) => item.since <= version).map((item) => item.name);
+  return toolCapabilities
+    .filter((item) => item.since <= version)
+    .map((item) => item.name);
 }
 
 /** 手册里"能用哪些 window 接口"那段用的清单（只列宿主注入给工具的那些）。 */
-export function capabilityEntries(): readonly { entry: string; summary: string }[] {
+export function capabilityEntries(): readonly {
+  entry: string;
+  summary: string;
+}[] {
   return toolCapabilities
     .filter((item) => item.direction === "down" && item.entry)
     .map((item) => ({ entry: item.entry, summary: item.summary }));

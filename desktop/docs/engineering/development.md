@@ -31,4 +31,3 @@ Windows 上"上一次没退干净"会让下一次 `tauri dev` 直接失败，而
 | 一启动就报 `创建 WebView2 失败` / `Failed to create webview`，窗口根本不出现 | 与业务代码无关，只有四种可能：运行时缺失、`WEBVIEW2_BROWSER_EXECUTABLE_FOLDER` 指错、组策略限定了允许列表、用户数据目录写不进去或被残留进程占着 | 跑 `npm run dev:doctor` 看它指出哪一项；目录被占就先退出所有 `desktop` / `msedgewebview2`，仍失败把 `EBWebView` 改名成 `EBWebView.bak` 让它重建（会丢登录态和缓存） |
 
 仓库外的 AAW Desktop（安装版或便携版）不会锁 `target/`，与开发版共用同一个 WebView2 用户数据目录，doctor 只提醒不杀——它可能是你自己正在用的那份。
-

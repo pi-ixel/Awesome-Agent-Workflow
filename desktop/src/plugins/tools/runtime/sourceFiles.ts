@@ -7,7 +7,10 @@
  */
 import { toolLimits } from "./limits.ts";
 
-export const sourceFileLimit = { files: toolLimits.sourceFiles, bytes: toolLimits.sourceBytes } as const;
+export const sourceFileLimit = {
+  files: toolLimits.sourceFiles,
+  bytes: toolLimits.sourceBytes,
+} as const;
 
 /**
  * `bin/` 里的东西是 L3 的运行时（可执行文件 + 它自己的依赖）。
@@ -26,20 +29,43 @@ export function safeSourcePath(path: string): boolean {
   // （`node_modules/@babel/plugin-transform-xxx/lib/helpers/yyy.js` 这种）。
   // 再长就接近 Windows 的 260 字符路径上限了，那时候问题在文件系统，
   // 不是在路径校验。
-  return path.length > 0 && path.length <= 320 && !/[\\:<>"|?*]/.test(path) && ![...path].some((ch) => ch.charCodeAt(0) < 32)
-    && path.split("/").every((part) => part && part !== "." && part !== ".."
-      && !/[. ]$/.test(part) && !/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(part)
-      && !["__proto__", "prototype", "constructor"].includes(part));
+  return (
+    path.length > 0 &&
+    path.length <= 320 &&
+    !/[\\:<>"|?*]/.test(path) &&
+    ![...path].some((ch) => ch.charCodeAt(0) < 32) &&
+    path
+      .split("/")
+      .every(
+        (part) =>
+          part &&
+          part !== "." &&
+          part !== ".." &&
+          !/[. ]$/.test(part) &&
+          !/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(part) &&
+          !["__proto__", "prototype", "constructor"].includes(part),
+      )
+  );
 }
 
-export function readSourceFiles(value: unknown): Readonly<Record<string, string>> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+export function readSourceFiles(
+  value: unknown,
+): Readonly<Record<string, string>> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
   const entries = Object.entries(value);
   if (entries.length > sourceFileLimit.files) return undefined;
   const paths = new Set<string>();
   let bytes = 0;
   for (const [path, source] of entries) {
-    if (!safeSourcePath(path) || paths.has(path.toLowerCase()) || ["manifest.json", "index.html"].includes(path.toLowerCase()) || isRuntimeBinPath(path) || typeof source !== "string") return undefined;
+    if (
+      !safeSourcePath(path) ||
+      paths.has(path.toLowerCase()) ||
+      ["manifest.json", "index.html"].includes(path.toLowerCase()) ||
+      isRuntimeBinPath(path) ||
+      typeof source !== "string"
+    )
+      return undefined;
     paths.add(path.toLowerCase());
     bytes += new TextEncoder().encode(source).length;
     if (bytes > sourceFileLimit.bytes) return undefined;

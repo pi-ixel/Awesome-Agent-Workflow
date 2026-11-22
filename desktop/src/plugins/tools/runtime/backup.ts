@@ -58,7 +58,10 @@ export async function writeToolBackup(
   owner: string | undefined,
   tool: ToolPackage,
 ): Promise<void> {
-  await io.writeTextFile(await toolBackupPath(io, owner, tool.id), JSON.stringify(tool));
+  await io.writeTextFile(
+    await toolBackupPath(io, owner, tool.id),
+    JSON.stringify(tool),
+  );
 }
 
 /**
@@ -69,7 +72,10 @@ export async function writeToolBackup(
  * "装完立刻点退回"也能读到刚写下的那一版。写失败只吞掉——备份是兜底，
  * 不能反过来让安装失败。
  */
-export function createBackupQueue(io: ToolProjectIO, owner: () => string | undefined) {
+export function createBackupQueue(
+  io: ToolProjectIO,
+  owner: () => string | undefined,
+) {
   let chain: Promise<void> = Promise.resolve();
   return {
     enqueue(tool: ToolPackage): void {

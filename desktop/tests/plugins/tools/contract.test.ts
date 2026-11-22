@@ -24,10 +24,12 @@ import { readToolPackageV1 } from "../../../src/plugins/tools/runtime/package.ts
  * 判据仍是"声明的能力 = 实际暴露的入口"。谁加了能力却没进表（或反过来），这里
  * 直接失败。
  */
-const read = (path: string) => readFileSync(resolve(process.cwd(), "src-tauri/src/tools", path), "utf8");
+const read = (path: string) =>
+  readFileSync(resolve(process.cwd(), "src-tauri/src/tools", path), "utf8");
 
 /** 去掉测试模块再扫：那里会出现 `"window.aawActions ="` 这样的字符串字面量。 */
-const withoutTests = (source: string) => source.split("\n#[cfg(test)]")[0] ?? source;
+const withoutTests = (source: string) =>
+  source.split("\n#[cfg(test)]")[0] ?? source;
 
 /**
  * 去掉 `//` 注释行。
@@ -37,7 +39,10 @@ const withoutTests = (source: string) => source.split("\n#[cfg(test)]")[0] ?? so
  * 有用的注释删掉。
  */
 const withoutComments = (source: string) =>
-  source.split("\n").filter((line) => !line.trimStart().startsWith("//")).join("\n");
+  source
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("//"))
+    .join("\n");
 
 const inject = withoutTests(read("inject.rs"));
 const injectCode = withoutComments(inject);
@@ -66,16 +71,30 @@ describe("工具运行契约", () => {
 
   it("上行能力不出现在注入脚本里", () => {
     // `aawActions` 是作者定义、宿主调用，注入它就等于给页面一个能覆盖的钩子。
-    for (const capability of toolCapabilities.filter((item) => item.direction === "up"))
-      expect(injectCode, `${capability.entry} 不该被注入`).not.toContain(`window.${baseEntry(capability.entry)} =`);
+    for (const capability of toolCapabilities.filter(
+      (item) => item.direction === "up",
+    ))
+      expect(injectCode, `${capability.entry} 不该被注入`).not.toContain(
+        `window.${baseEntry(capability.entry)} =`,
+      );
   });
 
   it("每个能力都写清了 since 与 summary", () => {
     for (const capability of toolCapabilities) {
-      expect(capability.name, "能力名不能为空").toMatch(/^[a-z][a-zA-Z.]{0,31}$/);
-      expect(capability.since, `${capability.name} 需要 since`).toBeGreaterThanOrEqual(1);
-      expect(capability.since, `${capability.name} 的 since 不能超过当前契约版本`).toBeLessThanOrEqual(toolContractVersion);
-      expect(capability.summary.trim(), `${capability.name} 需要说明`).not.toBe("");
+      expect(capability.name, "能力名不能为空").toMatch(
+        /^[a-z][a-zA-Z.]{0,31}$/,
+      );
+      expect(
+        capability.since,
+        `${capability.name} 需要 since`,
+      ).toBeGreaterThanOrEqual(1);
+      expect(
+        capability.since,
+        `${capability.name} 的 since 不能超过当前契约版本`,
+      ).toBeLessThanOrEqual(toolContractVersion);
+      expect(capability.summary.trim(), `${capability.name} 需要说明`).not.toBe(
+        "",
+      );
     }
   });
 
@@ -86,11 +105,18 @@ describe("工具运行契约", () => {
 
   it("capabilitiesAt 按代际过滤", () => {
     expect(capabilitiesAt(0)).toEqual([]);
-    expect(capabilitiesAt(toolContractVersion)).toEqual(toolCapabilities.map((item) => item.name));
+    expect(capabilitiesAt(toolContractVersion)).toEqual(
+      toolCapabilities.map((item) => item.name),
+    );
   });
 
   it("快照：能力表（改动会在这里显形）", () => {
-    expect(toolCapabilities.map((item) => `${item.name}|${item.entry}|${item.direction}|${item.since}|${item.carrier}`)).toMatchInlineSnapshot(`
+    expect(
+      toolCapabilities.map(
+        (item) =>
+          `${item.name}|${item.entry}|${item.direction}|${item.since}|${item.carrier}`,
+      ),
+    ).toMatchInlineSnapshot(`
       [
         "settings|aawSettings|down|1|both",
         "store|aawStore|down|1|both",
@@ -113,7 +139,9 @@ describe("工具运行契约", () => {
     // 拿到 `undefined`，而且错得无声无息。
     expect(inject).toContain("window.aawSettings = Object.freeze(");
     expect(inject).toContain("window.aawContext = Object.freeze(");
-    expect(inject).not.toMatch(/window\.aawSettings\s*=\s*(?:call\(|Promise|fetch\()/);
+    expect(inject).not.toMatch(
+      /window\.aawSettings\s*=\s*(?:call\(|Promise|fetch\()/,
+    );
   });
 
   it("能力通道只走同源 fetch，页面里没有任何 Tauri 内网入口", () => {
@@ -133,7 +161,9 @@ describe("工具运行契约", () => {
     expect(protocol).toContain("object-src 'none'");
     // connect-src 不能进 BASE_POLICY 那个数组：它是唯一按工具声明拼出来的指令。
     // 只取数组字面量本身，别把下面 `policy_for` 的注释也算进来。
-    const base = /pub const BASE_POLICY[^=]*=\s*\[([\s\S]*?)\];/.exec(protocol)?.[1];
+    const base = /pub const BASE_POLICY[^=]*=\s*\[([\s\S]*?)\];/.exec(
+      protocol,
+    )?.[1];
     expect(base, "BASE_POLICY 数组没找到").toBeTruthy();
     expect(base).not.toContain("connect-src");
   });
@@ -152,7 +182,13 @@ describe("工具运行契约", () => {
       version: "0.9.0",
       icon: "图",
       html: "<button>旧</button>",
-      actions: [{ id: "run", description: "跑", inputSchema: { type: "object", properties: {} } }],
+      actions: [
+        {
+          id: "run",
+          description: "跑",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ],
       requires: { contract: 1, capabilities: ["store", "files"] },
       permissions: { network: { hosts: ["*.corp.example.com"] } },
       sourceFiles: { "src/main.js": "// 作者源码" },
@@ -199,6 +235,9 @@ describe("工具运行契约", () => {
     // 故意带一条"看起来将来可能被收紧"的写法：author 超长带空格。今天的 v1
     // 规则要求 author 是 1–200 字字符串——它合法；若明天规则想收紧格式，
     // 这一行就是提醒：收紧要落在现行规则上，v1 分支保持原样。
-    expect(readToolPackageV1({ ...fixture, id: "lenient", author: "  张三  " })?.author).toBe("张三");
+    expect(
+      readToolPackageV1({ ...fixture, id: "lenient", author: "  张三  " })
+        ?.author,
+    ).toBe("张三");
   });
 });

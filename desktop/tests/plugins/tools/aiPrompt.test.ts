@@ -1,5 +1,8 @@
 import { expect, it } from "vitest";
-import { developerPrompt, extractToolPackage } from "../../../src/plugins/tools/ui/aiPrompt.ts";
+import {
+  developerPrompt,
+  extractToolPackage,
+} from "../../../src/plugins/tools/ui/aiPrompt.ts";
 import { parseToolPackage } from "../../../src/plugins/tools/runtime/package.ts";
 
 const tool = {
@@ -48,7 +51,17 @@ it("explains what went wrong instead of failing silently", () => {
 
 it("ships a prompt whose embedded example is itself a valid package", () => {
   const prompt = developerPrompt();
-  for (const field of ["schemaVersion", "id", "name", "version", "html", "actions", "settingsSchema", "window.aawActions", "window.aawSettings"])
+  for (const field of [
+    "schemaVersion",
+    "id",
+    "name",
+    "version",
+    "html",
+    "actions",
+    "settingsSchema",
+    "window.aawActions",
+    "window.aawSettings",
+  ])
     expect(prompt).toContain(field);
   const fenced = /```json\s*\n([\s\S]*?)```/.exec(prompt)?.[1]?.trim();
   expect(fenced).toBeTruthy();

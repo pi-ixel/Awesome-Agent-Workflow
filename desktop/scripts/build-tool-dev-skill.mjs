@@ -12,6 +12,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { build } from "esbuild";
+import { format, resolveConfig } from "prettier";
 
 const desktop = fileURLToPath(new URL("../", import.meta.url));
 // 中间产物放缓存目录。以前借 `tools-runtime/dist` 用，P3 删掉那个目录后
@@ -20,7 +21,9 @@ const staged = join(desktop, "node_modules", ".cache", "aaw-guide");
 mkdirSync(staged, { recursive: true });
 const entry = join(staged, "skill-entry.mjs");
 await build({
-  entryPoints: [join(desktop, "src", "plugins", "tools", "runtime", "guideEntry.ts")],
+  entryPoints: [
+    join(desktop, "src", "plugins", "tools", "runtime", "guideEntry.ts"),
+  ],
   outfile: entry,
   bundle: true,
   format: "esm",
@@ -29,7 +32,9 @@ const { markdown } = await import(pathToFileURL(entry).href);
 // toolGuideSkill 不进 guideEntry（构建期只需要 markdown），这里单独 bundle。
 const skillEntry = join(staged, "skill-only.mjs");
 await build({
-  entryPoints: [join(desktop, "src", "plugins", "tools", "runtime", "guide.ts")],
+  entryPoints: [
+    join(desktop, "src", "plugins", "tools", "runtime", "guide.ts"),
+  ],
   outfile: skillEntry,
   bundle: true,
   format: "esm",
@@ -44,5 +49,10 @@ writeFileSync(target, skillMd);
 // 与"AI 读到的"不一致。
 const publicGuide = join(desktop, "public", "guide");
 mkdirSync(publicGuide, { recursive: true });
-writeFileSync(join(publicGuide, "guide.md"), markdown);
+const guidePath = join(publicGuide, "guide.md");
+const formatterOptions = await resolveConfig(guidePath);
+writeFileSync(
+  guidePath,
+  await format(markdown, { ...formatterOptions, filepath: guidePath }),
+);
 console.log(`skill manual written: ${target} (${skillMd.length} chars)`);

@@ -29,12 +29,19 @@
   --code: #f0f2f6;
 }
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 
 /* `hidden` 必须压得住 `display: flex`——否则"隐藏"的编辑器照样占满一屏。 */
-[hidden] { display: none !important; }
+[hidden] {
+  display: none !important;
+}
 
-html, body { height: 100%; }
+html,
+body {
+  height: 100%;
+}
 
 body {
   margin: 0;
@@ -43,7 +50,11 @@ body {
   overflow: hidden;
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.75 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+  font:
+    14px/1.75 system-ui,
+    "Segoe UI",
+    "Microsoft YaHei",
+    sans-serif;
 }
 
 /* ── 顶栏 ─────────────────────────────────────────────────────────────── */
@@ -58,7 +69,10 @@ body {
   border-bottom: 1px solid var(--line);
 }
 
-.bar-title { font-weight: 600; white-space: nowrap; }
+.bar-title {
+  font-weight: 600;
+  white-space: nowrap;
+}
 
 .badge {
   font-size: 12px;
@@ -81,7 +95,9 @@ body {
   white-space: nowrap;
 }
 
-.spacer { flex: 1 1 auto; }
+.spacer {
+  flex: 1 1 auto;
+}
 
 button {
   font: inherit;
@@ -97,11 +113,22 @@ button {
 }
 
 /* 按钮不参与压缩：窗口窄到 720 时，宁可状态文字被截断，也不能让按钮变形。 */
-.bar > button, .editor-bar > button { flex: 0 0 auto; }
+.bar > button,
+.editor-bar > button {
+  flex: 0 0 auto;
+}
 
-button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-button:disabled { opacity: 0.45; cursor: default; }
-button.ghost { background: transparent; }
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+button.ghost {
+  background: transparent;
+}
 
 /* ── 主体：目录 + 正文 ─────────────────────────────────────────────────── */
 
@@ -119,7 +146,11 @@ button.ghost { background: transparent; }
   border-right: 1px solid var(--line);
 }
 
-.toc-empty { margin: 0 0 0 6px; color: var(--muted); font-size: 12px; }
+.toc-empty {
+  margin: 0 0 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
 
 .toc-item {
   display: block;
@@ -135,10 +166,21 @@ button.ghost { background: transparent; }
   text-overflow: ellipsis;
 }
 
-.toc-item:hover { color: var(--text); background: var(--bg); }
-.toc-level-1 { color: var(--text); font-weight: 600; }
-.toc-level-2 { padding-left: 14px; }
-.toc-level-3 { padding-left: 26px; font-size: 12.5px; }
+.toc-item:hover {
+  color: var(--text);
+  background: var(--bg);
+}
+.toc-level-1 {
+  color: var(--text);
+  font-weight: 600;
+}
+.toc-level-2 {
+  padding-left: 14px;
+}
+.toc-level-3 {
+  padding-left: 26px;
+  font-size: 12.5px;
+}
 
 /* 当前章节：只有一条，避免整列都在发光 */
 .toc-item.active {
@@ -166,26 +208,58 @@ main {
 /* 宽窗口下列宽跟着放大，别让大屏两侧都是大片空白；上限 1024 仍然
  * 保住可读行宽（超过 ~70 汉字一行，扫到行尾会丢行）。 */
 @media (min-width: 1440px) {
-  .doc-body { max-width: 1024px; }
+  .doc-body {
+    max-width: 1024px;
+  }
 }
 
 /* ── 正文排版 ──────────────────────────────────────────────────────────── */
 
-h1 { font-size: 24px; margin: 0 0 20px; letter-spacing: -0.01em; }
-h2 { font-size: 18px; margin: 34px 0 12px; padding-top: 12px; border-top: 1px solid var(--line); }
-h3 { font-size: 15px; margin: 24px 0 8px; }
-h4 { font-size: 14px; margin: 18px 0 6px; color: var(--muted); }
+h1 {
+  font-size: 24px;
+  margin: 0 0 20px;
+  letter-spacing: -0.01em;
+}
+h2 {
+  font-size: 18px;
+  margin: 34px 0 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+h3 {
+  font-size: 15px;
+  margin: 24px 0 8px;
+}
+h4 {
+  font-size: 14px;
+  margin: 18px 0 6px;
+  color: var(--muted);
+}
 
-p { margin: 10px 0; }
-a { color: var(--accent); }
+p {
+  margin: 10px 0;
+}
+a {
+  color: var(--accent);
+}
 
 /* 正文里的长串（URL、哈希、一长串没有空格的标识符）必须能在容器内断开。
  * 没有这条，一个 200 字符的链接就会把整个正文顶出横向滚动条——目录还在，
  * 右边内容却要拖着看，是很明显但很容易漏的排版事故。 */
-p, li, td, th, blockquote { overflow-wrap: anywhere; }
+p,
+li,
+td,
+th,
+blockquote {
+  overflow-wrap: anywhere;
+}
 
 code {
-  font: 12.5px/1.5 ui-monospace, Consolas, "Cascadia Mono", monospace;
+  font:
+    12.5px/1.5 ui-monospace,
+    Consolas,
+    "Cascadia Mono",
+    monospace;
   background: var(--code);
   border: 1px solid var(--line);
   border-radius: 5px;
@@ -200,7 +274,11 @@ pre {
   overflow-x: auto;
 }
 
-pre code { background: none; border: 0; padding: 0; }
+pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+}
 
 /* 表格单独一层横向滚动容器：列多时在**表格内部**左右滚，
  * 而不是把整页顶宽。`width: auto` 让内容决定宽度、`min-width: 100%`
@@ -217,19 +295,31 @@ table {
   font-size: 13px;
 }
 
-.table-wrap table { margin: 0; }
+.table-wrap table {
+  margin: 0;
+}
 
-th, td {
+th,
+td {
   border: 1px solid var(--line);
   padding: 8px 10px;
   text-align: left;
   vertical-align: top;
 }
 
-th { background: var(--panel); font-weight: 600; }
+th {
+  background: var(--panel);
+  font-weight: 600;
+}
 
-ul, ol { margin: 10px 0; padding-left: 22px; }
-li { margin: 4px 0; }
+ul,
+ol {
+  margin: 10px 0;
+  padding-left: 22px;
+}
+li {
+  margin: 4px 0;
+}
 
 blockquote {
   margin: 14px 0;
@@ -240,7 +330,11 @@ blockquote {
   border-radius: 0 8px 8px 0;
 }
 
-hr { border: 0; border-top: 1px solid var(--line); margin: 28px 0; }
+hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 28px 0;
+}
 
 /* ── 编辑态 ────────────────────────────────────────────────────────────── */
 
@@ -260,7 +354,11 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 28px 0; }
   padding: 20px clamp(18px, 4vw, 40px);
   background: var(--bg);
   color: var(--text);
-  font: 13px/1.75 ui-monospace, Consolas, "Cascadia Mono", monospace;
+  font:
+    13px/1.75 ui-monospace,
+    Consolas,
+    "Cascadia Mono",
+    monospace;
 }
 
 .editor-bar {
@@ -283,7 +381,9 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 28px 0; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.editor-hint code { font-size: 11px; }
+.editor-hint code {
+  font-size: 11px;
+}
 
 /* ── 页内确认条 ────────────────────────────────────────────────────────── */
 
@@ -306,20 +406,38 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 28px 0; }
   z-index: 20;
 }
 
-.ask-text { font-size: 13px; }
+.ask-text {
+  font-size: 13px;
+}
 
 /* 窗口最小宽 720：到这一步目录收窄但**不消失**——用户抱怨过"没有侧边导航"，
  * 在小窗口里把导航藏起来等于把这个抱怨换个条件重现。 */
 @media (max-width: 860px) {
-  .toc { flex-basis: 178px; font-size: 12.5px; }
-  .toc-item { font-size: 12.5px; }
-  .doc-body { padding-left: 18px; padding-right: 18px; }
+  .toc {
+    flex-basis: 178px;
+    font-size: 12.5px;
+  }
+  .toc-item {
+    font-size: 12.5px;
+  }
+  .doc-body {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
 }
 
 /* ── 状态 ──────────────────────────────────────────────────────────────── */
 
-.loading { color: var(--muted); }
+.loading {
+  color: var(--muted);
+}
 
 /* 失败态要一眼看出来：红色 + 一条说明，与"正在加载"的灰色文字区分开。 */
-.error { color: #e5534b; font-weight: 500; }
-.hint { color: var(--muted); font-size: 13px; }
+.error {
+  color: #e5534b;
+  font-weight: 500;
+}
+.hint {
+  color: var(--muted);
+  font-size: 13px;
+}

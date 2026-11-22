@@ -2,13 +2,29 @@ import type { Context } from "cordis";
 import { createStore } from "zustand";
 import { createSnapshotView } from "../../shared/state/readonlySnapshot.ts";
 import { pathKey } from "../../shared/panelPaths.ts";
-import type { InstallOptions, InstallOutcome, ToolsService } from "./service.ts";
+import type {
+  InstallOptions,
+  InstallOutcome,
+  ToolsService,
+} from "./service.ts";
 import type { PersonalTool, ToolPackage } from "./types.ts";
-import { checkCompatibility, readToolPackage, readToolPackageV1, ToolPackageError, toolContractVersion } from "./runtime/package.ts";
-import { resolveToolSettings, validateToolSettings } from "./runtime/settings.ts";
+import {
+  checkCompatibility,
+  readToolPackage,
+  readToolPackageV1,
+  ToolPackageError,
+  toolContractVersion,
+} from "./runtime/package.ts";
+import {
+  resolveToolSettings,
+  validateToolSettings,
+} from "./runtime/settings.ts";
 import { createBackupQueue, readToolBackup } from "./runtime/backup.ts";
 import { hostToolIO } from "./runtime/io.ts";
-import { defaultInstalledToolsDir, readToolProject } from "./runtime/project.ts";
+import {
+  defaultInstalledToolsDir,
+  readToolProject,
+} from "./runtime/project.ts";
 import {
   canRunToolDir,
   materializeToolFiles,
@@ -27,7 +43,9 @@ export async function installWorkbench(ctx: Context): Promise<void> {
 }
 
 function finiteNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function text(value: unknown): string | undefined {
@@ -46,11 +64,17 @@ interface ReadToolsResult {
 }
 
 /** 读不出来时用来占位的包：保留 id 与名字，让用户能认出是哪个工具。 */
-function placeholderPackage(raw: Record<string, unknown> | undefined, id: string): ToolPackage {
+function placeholderPackage(
+  raw: Record<string, unknown> | undefined,
+  id: string,
+): ToolPackage {
   return {
     schemaVersion: 1,
     id,
-    name: typeof raw?.name === "string" && raw.name.trim() ? raw.name : "无法读取的工具",
+    name:
+      typeof raw?.name === "string" && raw.name.trim()
+        ? raw.name
+        : "无法读取的工具",
     version: typeof raw?.version === "string" ? raw.version : "0.0.0",
     html: "",
   };
@@ -65,7 +89,10 @@ function placeholderPackage(raw: Record<string, unknown> | undefined, id: string
  *
  * 导出是为了单测：目录丢失的标记是纯逻辑，不值得为它搭一整套假宿主。
  */
-export function readTools(value: unknown, missingDirs: ReadonlySet<string> = new Set()): ReadToolsResult {
+export function readTools(
+  value: unknown,
+  missingDirs: ReadonlySet<string> = new Set(),
+): ReadToolsResult {
   if (!Array.isArray(value)) return { tools: [], broken: 0 };
   const tools: PersonalTool[] = [];
   const ids = new Set<string>();
@@ -74,15 +101,18 @@ export function readTools(value: unknown, missingDirs: ReadonlySet<string> = new
     if (!entry || typeof entry !== "object") continue;
     const fields = entry as Record<string, unknown>;
     const candidate = fields.package;
-    const raw = candidate && typeof candidate === "object" && !Array.isArray(candidate)
-      ? candidate as Record<string, unknown>
-      : undefined;
+    const raw =
+      candidate && typeof candidate === "object" && !Array.isArray(candidate)
+        ? (candidate as Record<string, unknown>)
+        : undefined;
     // 安装时记录的 schema 代际；旧数据缺字段时视为 1（设计稿 §9 的迁移策略）。
-    const installedSchemaVersion = finiteNumber(fields.installedSchemaVersion)
-      ?? (typeof raw?.schemaVersion === "number" ? raw.schemaVersion : 1);
+    const installedSchemaVersion =
+      finiteNumber(fields.installedSchemaVersion) ??
+      (typeof raw?.schemaVersion === "number" ? raw.schemaVersion : 1);
     const recordedDir = text(fields.dir);
     // 目录丢失是启动阶段异步探测的结果；读配置时先把已知丢目录的条目标出来。
-    const dirMissing = recordedDir !== undefined && missingDirs.has(recordedDir);
+    const dirMissing =
+      recordedDir !== undefined && missingDirs.has(recordedDir);
     let tool = readToolPackage(fields.package);
     if (!tool && installedSchemaVersion === 1 && raw) {
       // 读取问题与运行问题分开（设计稿 §6.4）：清单按**现行规则**读不出来时，
@@ -123,24 +153,29 @@ export function readTools(value: unknown, missingDirs: ReadonlySet<string> = new
       sourceDir: text(fields.sourceDir),
       previousDir: text(fields.previousDir),
       installedSchemaVersion,
-      ...(dirMissing ? {
-        broken: {
-          kind: "missing-dir",
-          reason: `工具目录已丢失（${recordedDir}）。它可能已被移动或删除。`,
-          hint: "点「打开」会按安装记录自动重建运行副本；也可以在「⋯」里卸载这条记录后重新安装。",
-          at: Date.now(),
-        },
-      } : {}),
-      ...(typeof fields.previousVersion === "string" ? { previousVersion: fields.previousVersion } : {}),
+      ...(dirMissing
+        ? {
+            broken: {
+              kind: "missing-dir",
+              reason: `工具目录已丢失（${recordedDir}）。它可能已被移动或删除。`,
+              hint: "点「打开」会按安装记录自动重建运行副本；也可以在「⋯」里卸载这条记录后重新安装。",
+              at: Date.now(),
+            },
+          }
+        : {}),
+      ...(typeof fields.previousVersion === "string"
+        ? { previousVersion: fields.previousVersion }
+        : {}),
       ...(typeof fields.installedContractVersion === "number"
         ? { installedContractVersion: fields.installedContractVersion }
         : {}),
     });
   }
   return {
-    tools: tools.sort((a, b) =>
-      (b.lastOpened ?? 0) - (a.lastOpened ?? 0) ||
-      a.package.name.localeCompare(b.package.name),
+    tools: tools.sort(
+      (a, b) =>
+        (b.lastOpened ?? 0) - (a.lastOpened ?? 0) ||
+        a.package.name.localeCompare(b.package.name),
     ),
     broken,
   };
@@ -154,7 +189,10 @@ export function readTools(value: unknown, missingDirs: ReadonlySet<string> = new
  */
 function isSelfContained(tool: ToolPackage): boolean {
   try {
-    return missingEntryFiles(tool, Object.keys(materializeToolFiles(tool))).length === 0;
+    return (
+      missingEntryFiles(tool, Object.keys(materializeToolFiles(tool)))
+        .length === 0
+    );
   } catch {
     return false;
   }
@@ -171,7 +209,10 @@ export function apply(ctx: Context): void {
   const scope = ctx.configuration.register("aaw-desktop.personal-tools.v1");
   const account = ctx.account.state;
   const io = hostToolIO(ctx.host);
-  const backups = createBackupQueue(io, () => account.getState().currentUser?.id);
+  const backups = createBackupQueue(
+    io,
+    () => account.getState().currentUser?.id,
+  );
   const owner = () => account.getState().currentUser?.id;
   const userKey = () => {
     const user = account.getState().currentUser;
@@ -209,15 +250,22 @@ export function apply(ctx: Context): void {
     if (!Array.isArray(raw)) return;
     const next = new Set<string>();
     for (const entry of raw as readonly unknown[]) {
-      const dir = entry && typeof entry === "object"
-        ? text((entry as Record<string, unknown>).dir)
-        : undefined;
+      const dir =
+        entry && typeof entry === "object"
+          ? text((entry as Record<string, unknown>).dir)
+          : undefined;
       if (!dir || next.has(dir)) continue;
       try {
-        if (!await io.pathExists(dir)) next.add(dir);
-      } catch { /* 探测失败不当成丢失，下次启动再试 */ }
+        if (!(await io.pathExists(dir))) next.add(dir);
+      } catch {
+        /* 探测失败不当成丢失，下次启动再试 */
+      }
     }
-    if (next.size === missingDirs.size && [...next].every((dir) => missingDirs.has(dir))) return;
+    if (
+      next.size === missingDirs.size &&
+      [...next].every((dir) => missingDirs.has(dir))
+    )
+      return;
     missingDirs.clear();
     for (const dir of next) missingDirs.add(dir);
     store.setState(readCurrent(), true);
@@ -225,7 +273,9 @@ export function apply(ctx: Context): void {
 
   const store = createStore<readonly PersonalTool[]>(readCurrent);
   const view = createSnapshotView(store, (tools) => tools);
-  function update(transform: (current: readonly PersonalTool[]) => readonly PersonalTool[]) {
+  function update(
+    transform: (current: readonly PersonalTool[]) => readonly PersonalTool[],
+  ) {
     const key = userKey();
     if (!key) throw new Error("请先登录 AAW。");
     scope.update({ [key]: transform(readCurrent()) });
@@ -253,7 +303,9 @@ export function apply(ctx: Context): void {
     if (!error) return;
     const key = userKey();
     if (key) scope.update({ [key]: before });
-    throw new Error(`安装记录没有保存成功（${error}）。这次操作没有生效；磁盘满或文件被占用时清一下再试。`);
+    throw new Error(
+      `安装记录没有保存成功（${error}）。这次操作没有生效；磁盘满或文件被占用时清一下再试。`,
+    );
   }
 
   /**
@@ -281,17 +333,24 @@ export function apply(ctx: Context): void {
     // 不收就永远占着盘。按工具排队，避免删掉另一个正在写的暂存目录。
     for (const entry of entries) {
       try {
-        await serializeToolOp(`tool:${current}:${entry.package.id}`, async () => {
-          await sweepStagingDirs(io, current, entry.package.id);
-          // 启动是清理历史遗留的唯一统一时机：版本副本以前只增不减，升级过
-          // 几次的工具盘上会堆着几个再没有任何记录能退回的目录。
-          //
-          // 只对"运行目录还在"的条目做。目录丢了的那类会在下一轮物化出一份
-          // 新的，而那份刚写好、还没写进配置——这时扫盘会把它当孤儿删掉。
-          const alive = entry.dir ? await io.pathExists(entry.dir).catch(() => false) : false;
-          if (alive) await pruneOrphanVersions(io, current, entry.package.id);
-        });
-      } catch { /* 清不掉不影响启动，下次再试 */ }
+        await serializeToolOp(
+          `tool:${current}:${entry.package.id}`,
+          async () => {
+            await sweepStagingDirs(io, current, entry.package.id);
+            // 启动是清理历史遗留的唯一统一时机：版本副本以前只增不减，升级过
+            // 几次的工具盘上会堆着几个再没有任何记录能退回的目录。
+            //
+            // 只对"运行目录还在"的条目做。目录丢了的那类会在下一轮物化出一份
+            // 新的，而那份刚写好、还没写进配置——这时扫盘会把它当孤儿删掉。
+            const alive = entry.dir
+              ? await io.pathExists(entry.dir).catch(() => false)
+              : false;
+            if (alive) await pruneOrphanVersions(io, current, entry.package.id);
+          },
+        );
+      } catch {
+        /* 清不掉不影响启动，下次再试 */
+      }
     }
     // 上面按条目走，覆盖不到"第一次安装就崩了"的那类残余：安装没写完配置，
     // 所以这个工具根本没有条目，循环永远轮不到它，而 `versions/` 下那份
@@ -306,21 +365,28 @@ export function apply(ctx: Context): void {
     let libraryDirs: readonly string[] = [];
     if (sweepUnrecorded) {
       try {
-        libraryDirs = await io.listDirNames(await defaultInstalledToolsDir(io, current));
-      } catch { /* 工具库还没建 / 宿主没有列目录端口：没有可收的 */ }
+        libraryDirs = await io.listDirNames(
+          await defaultInstalledToolsDir(io, current),
+        );
+      } catch {
+        /* 工具库还没建 / 宿主没有列目录端口：没有可收的 */
+      }
     }
     for (const id of libraryDirs) {
       if (known.has(id)) continue;
       try {
         await serializeToolOp(`tool:${current}:${id}`, () =>
-          sweepStagingDirs(io, current, id));
-      } catch { /* 下次启动再试 */ }
+          sweepStagingDirs(io, current, id),
+        );
+      } catch {
+        /* 下次启动再试 */
+      }
     }
     for (const entry of entries) {
       // 不兼容的条目不重建：那不是文件问题，重建了也跑不了。
       if (entry.broken && entry.broken.kind !== "missing-dir") continue;
       try {
-        if (entry.dir && await io.pathExists(entry.dir)) continue;
+        if (entry.dir && (await io.pathExists(entry.dir))) continue;
       } catch {
         continue;
       }
@@ -338,7 +404,9 @@ export function apply(ctx: Context): void {
           return;
         }
         repairs.push({ id: entry.package.id, dir: staged.dir });
-      } catch { /* 下次启动再试；坏标记会继续告诉用户怎么恢复 */ }
+      } catch {
+        /* 下次启动再试；坏标记会继续告诉用户怎么恢复 */
+      }
     }
     if (!repairs.length) return;
     // 物化是异步的，期间可能换了账号：这时写回会落到别人的账下。
@@ -347,13 +415,20 @@ export function apply(ctx: Context): void {
     // `readCurrent()`，顺序反了就会带着旧标记重放一次，卡片一直说它坏了。
     for (const repair of repairs) missingDirs.delete(repair.dir);
     try {
-      update((list) => list.map((entry) => {
-        const repair = repairs.find((item) => item.id === entry.package.id);
-        if (!repair) return entry;
-        const clean = entry.broken?.kind === "missing-dir" ? withoutKey(entry, "broken") : entry;
-        return { ...clean, dir: repair.dir };
-      }));
-    } catch { /* 配置写不进去不该影响启动 */ }
+      update((list) =>
+        list.map((entry) => {
+          const repair = repairs.find((item) => item.id === entry.package.id);
+          if (!repair) return entry;
+          const clean =
+            entry.broken?.kind === "missing-dir"
+              ? withoutKey(entry, "broken")
+              : entry;
+          return { ...clean, dir: repair.dir };
+        }),
+      );
+    } catch {
+      /* 配置写不进去不该影响启动 */
+    }
   }
 
   /**
@@ -372,7 +447,9 @@ export function apply(ctx: Context): void {
       const raw = scope.read()?.[key];
       if (!Array.isArray(raw)) return;
       readTools(raw);
-    } catch { /* 配置读不出来时不动它，下次启动再试 */ }
+    } catch {
+      /* 配置读不出来时不动它，下次启动再试 */
+    }
   }
 
   ctx.provide(name, {
@@ -382,7 +459,11 @@ export function apply(ctx: Context): void {
       // 而不是装进去之后让用户面对一个白窗口。
       const incompatible = checkCompatibility(tool);
       if (incompatible.length) throw new ToolPackageError(incompatible);
-      let outcome: InstallOutcome = { version: tool.version, updated: false, versionChanged: false };
+      let outcome: InstallOutcome = {
+        version: tool.version,
+        updated: false,
+        versionChanged: false,
+      };
       // 提交前的整份列表：落盘失败时用它退回去（见 `persist`）。
       const before = readCurrent();
       /**
@@ -396,7 +477,10 @@ export function apply(ctx: Context): void {
       let displaced: ToolPackage | undefined;
       update((current) => {
         const previous = current.find((entry) => entry.package.id === tool.id);
-        if (previous && !options.replace) throw new Error("已安装相同 ID 的工具。请在「开发工具」里重新安装，或先卸载旧版本。");
+        if (previous && !options.replace)
+          throw new Error(
+            "已安装相同 ID 的工具。请在「开发工具」里重新安装，或先卸载旧版本。",
+          );
         // 上一版清单留到磁盘：旧记录没有版本目录，退版只能靠它重新物化。
         displaced = previous?.package;
         // 运行副本用调用方写好的版本目录；没给就沿用原路径（那里没有新目录可切）。
@@ -406,20 +490,27 @@ export function apply(ctx: Context): void {
         // 又贴回来：用户刚装好一个能跑的工具，卡片却写着"目录已丢失"。
         if (dir) missingDirs.delete(dir);
         // 只有"真的换了目录"才留上一版目录——同一个目录再记一次，退版会切回原地。
-        const previousDir = previous?.dir && dir && pathKey(previous.dir) !== pathKey(dir)
-          ? previous.dir
-          : undefined;
+        const previousDir =
+          previous?.dir && dir && pathKey(previous.dir) !== pathKey(dir)
+            ? previous.dir
+            : undefined;
         // 上一版能不能退回去，取决于"有完整副本"或"清单自己能凑出运行文件"。
         // 两者都不成立时不留 `previousVersion`——界面就不会摆一个点了必然失败的按钮。
-        const rollbackable = previous !== undefined && (previousDir !== undefined || isSelfContained(previous.package));
-        const sourceDir = options.sourceDir === undefined
-          ? previous?.sourceDir
-          : options.sourceDir ?? undefined;
+        const rollbackable =
+          previous !== undefined &&
+          (previousDir !== undefined || isSelfContained(previous.package));
+        const sourceDir =
+          options.sourceDir === undefined
+            ? previous?.sourceDir
+            : (options.sourceDir ?? undefined);
         outcome = {
           version: tool.version,
-          ...(rollbackable ? { previousVersion: previous.package.version } : {}),
+          ...(rollbackable
+            ? { previousVersion: previous.package.version }
+            : {}),
           updated: previous !== undefined,
-          versionChanged: previous !== undefined && previous.package.version !== tool.version,
+          versionChanged:
+            previous !== undefined && previous.package.version !== tool.version,
           ...(dir ? { dir } : {}),
         };
         const now = Date.now();
@@ -430,13 +521,16 @@ export function apply(ctx: Context): void {
             lastOpened: previous?.lastOpened,
             installedAt: previous?.installedAt ?? now,
             ...(previous ? { updatedAt: now } : {}),
-            ...(rollbackable && previous ? { previousVersion: previous.package.version } : {}),
+            ...(rollbackable && previous
+              ? { previousVersion: previous.package.version }
+              : {}),
             ...(dir ? { dir } : {}),
             ...(sourceDir ? { sourceDir } : {}),
             ...(previousDir ? { previousDir } : {}),
             settings: resolveToolSettings(tool, previous?.settings),
             // 记下这一版是"第几代契约"装进来的：将来规则收紧时按它判定，不用现行规则判死。
-            installedContractVersion: previous?.installedContractVersion ?? toolContractVersion,
+            installedContractVersion:
+              previous?.installedContractVersion ?? toolContractVersion,
             // schema 代际跟着包本身走：它就是这个包声明的那一代，回读时按它选规则。
             installedSchemaVersion: tool.schemaVersion,
           },
@@ -461,7 +555,8 @@ export function apply(ctx: Context): void {
       const current = owner();
       if (!current) throw new Error("请先登录 AAW。");
       const assertOwner = () => {
-        if (owner() !== current) throw new Error("账号已切换，已取消版本回退。请在当前账号重新操作。");
+        if (owner() !== current)
+          throw new Error("账号已切换，已取消版本回退。请在当前账号重新操作。");
       };
       // 同一工具的新装、更新、退版排队执行：两个操作同时跑会把 previousDir
       // 与 previous.json 配错版本——退回去的是 A 的文件配 B 的清单。
@@ -487,19 +582,23 @@ export function apply(ctx: Context): void {
         let dir: string | undefined = entry.previousDir;
         let staged: Awaited<ReturnType<typeof stageVersion>> | undefined;
         let backup: ToolPackage | undefined;
-        if (dir && await canRunToolDir(io, dir, id)) {
+        if (dir && (await canRunToolDir(io, dir, id))) {
           assertOwner();
           const read = await readToolProject(io, dir);
           // 版本号对不上时宁可不动：记录说"上一版是 1.0.0"、目录里却是别的
           // 版本，切过去等于装了一个用户没要求过的版本。
-          backup = read.ok && read.tool.version === entry.previousVersion ? read.tool : undefined;
+          backup =
+            read.ok && read.tool.version === entry.previousVersion
+              ? read.tool
+              : undefined;
         }
         if (!backup) {
           const saved = await readToolBackup(io, current, id);
           assertOwner();
           // 备份同样是影印件，也可能是过期的（同 id 重装、失败的更新都改过它）：
           // 版本对不上就明说"没有可回退的版本"，不把别的版本装进去。
-          if (!saved || saved.version !== entry.previousVersion) return undefined;
+          if (!saved || saved.version !== entry.previousVersion)
+            return undefined;
           const files = materializeToolFiles(saved);
           const missing = missingEntryFiles(saved, Object.keys(files));
           if (missing.length) {
@@ -507,7 +606,11 @@ export function apply(ctx: Context): void {
               `上一版缺少运行文件（${missing.join("、")}）：它当时只留下了清单。请重新导入那一版的 ZIP，当前版本保持不变。`,
             );
           }
-          staged = await stageVersion(io, { owner: current, tool: saved, files });
+          staged = await stageVersion(io, {
+            owner: current,
+            tool: saved,
+            files,
+          });
           dir = staged.dir;
           backup = saved;
         }
@@ -516,7 +619,10 @@ export function apply(ctx: Context): void {
         try {
           // 回滚本身也是一次安装：被换下来的那一版会自动成为新的"上一版"，
           // 所以点错了还能再点一次换回去。
-          const outcome = await ctx.tools.install(backup, { replace: true, runDir: dir });
+          const outcome = await ctx.tools.install(backup, {
+            replace: true,
+            runDir: dir,
+          });
           // 两格之外的副本到这一步就再没有任何记录指向它了。顺手收掉——留着
           // 既占盘，也没有入口能让用户退回去。仍然排在同一个队列里：此时配置
           // 已经写完，不会把刚切过去的那一版当孤儿。
@@ -533,24 +639,35 @@ export function apply(ctx: Context): void {
       // "丢失"记录还记着它，不先撤掉，下面这次配置重放会立刻把坏标记贴回去：
       // 用户点开能用，卡片却永久显示"目录已丢失"。
       missingDirs.delete(dir);
-      update((current) => current.map((entry) => {
-        if (entry.package.id !== id) return entry;
-        // 目录重建成功了，"目录丢失"这个标记就该消失，否则卡片会一直说它坏了。
-        const clean = entry.broken?.kind === "missing-dir" ? withoutKey(entry, "broken") : entry;
-        return { ...clean, dir };
-      }));
+      update((current) =>
+        current.map((entry) => {
+          if (entry.package.id !== id) return entry;
+          // 目录重建成功了，"目录丢失"这个标记就该消失，否则卡片会一直说它坏了。
+          const clean =
+            entry.broken?.kind === "missing-dir"
+              ? withoutKey(entry, "broken")
+              : entry;
+          return { ...clean, dir };
+        }),
+      );
     },
     setSourceDir(id, dir) {
-      update((current) => current.map((entry) => {
-        if (entry.package.id !== id) return entry;
-        const clean = withoutKey(entry, "sourceDir");
-        return dir ? { ...clean, sourceDir: dir } : clean;
-      }));
+      update((current) =>
+        current.map((entry) => {
+          if (entry.package.id !== id) return entry;
+          const clean = withoutKey(entry, "sourceDir");
+          return dir ? { ...clean, sourceDir: dir } : clean;
+        }),
+      );
     },
     open(id) {
-      update((current) => current.map((entry) =>
-        entry.package.id === id ? { ...entry, lastOpened: Date.now() } : entry,
-      ));
+      update((current) =>
+        current.map((entry) =>
+          entry.package.id === id
+            ? { ...entry, lastOpened: Date.now() }
+            : entry,
+        ),
+      );
     },
     async remove(id) {
       const before = readCurrent();
@@ -561,9 +678,16 @@ export function apply(ctx: Context): void {
     },
     saveSettings(id, values) {
       update((current) => {
-        if (!current.some((entry) => entry.package.id === id)) throw new Error("插件已卸载。");
-        return current.map((entry) => entry.package.id === id
-          ? { ...entry, settings: validateToolSettings(entry.package, values) } : entry);
+        if (!current.some((entry) => entry.package.id === id))
+          throw new Error("插件已卸载。");
+        return current.map((entry) =>
+          entry.package.id === id
+            ? {
+                ...entry,
+                settings: validateToolSettings(entry.package, values),
+              }
+            : entry,
+        );
       });
     },
   } satisfies ToolsService);
@@ -587,7 +711,9 @@ export function apply(ctx: Context): void {
         })();
       }
     });
-    const offConfig = scope.subscribe(() => store.setState(readCurrent(), true));
+    const offConfig = scope.subscribe(() =>
+      store.setState(readCurrent(), true),
+    );
     return () => {
       offConfig();
       offState();

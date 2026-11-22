@@ -9,11 +9,13 @@ import type { ToolProjectIO } from "./project.ts";
 
 export function hostToolIO(host: HostService): ToolProjectIO {
   return {
-    userDataDir: (namespace, directory) => host.skills.userDataDir(namespace, directory),
+    userDataDir: (namespace, directory) =>
+      host.skills.userDataDir(namespace, directory),
     pathExists: (path) => host.skills.pathExists(path),
     listDirNames: (path) => host.skills.listDirNames(path),
     readTextFile: (path) => host.archives.readTextFile(path),
-    writeTextFile: (path, contents) => host.skills.writeTextFile(path, contents),
+    writeTextFile: (path, contents) =>
+      host.skills.writeTextFile(path, contents),
     movePath: (from, to) => host.skills.moveToolPath(from, to),
     ...(host.skills.dropToolStaging
       ? { dropStaging: (path) => host.skills.dropToolStaging!(path) }
@@ -26,21 +28,31 @@ export function hostToolIO(host: HostService): ToolProjectIO {
         }
       : {}),
     ...(host.skills.writeBinaryFile
-      ? { writeBinaryFile: (path, base64) => host.skills.writeBinaryFile!(path, base64) }
+      ? {
+          writeBinaryFile: (path, base64) =>
+            host.skills.writeBinaryFile!(path, base64),
+        }
       : {}),
     ...(host.skills.readBinaryFile
-      ? { readBinaryFile: (path, limit) => host.skills.readBinaryFile!(path, limit) }
+      ? {
+          readBinaryFile: (path, limit) =>
+            host.skills.readBinaryFile!(path, limit),
+        }
       : {}),
     ...(host.skills.listToolFiles
       ? { listFiles: (root, limit) => host.skills.listToolFiles!(root, limit) }
       : {}),
     // 开发指导正文：桌面宿主才提供；缺省时 AGENTS.md 退回编译模板。
-    ...(host.skills.readGuideDoc ? { readGuideDoc: () => host.skills.readGuideDoc!() } : {}),
+    ...(host.skills.readGuideDoc
+      ? { readGuideDoc: () => host.skills.readGuideDoc!() }
+      : {}),
   };
 }
 
 /** 内存实现：测试与"没有宿主"的预览环境共用。 */
-export function memoryToolIO(seed: Readonly<Record<string, string>> = {}): ToolProjectIO & {
+export function memoryToolIO(
+  seed: Readonly<Record<string, string>> = {},
+): ToolProjectIO & {
   readonly files: Map<string, string>;
 } {
   const files = new Map(Object.entries(seed));
@@ -48,11 +60,15 @@ export function memoryToolIO(seed: Readonly<Record<string, string>> = {}): ToolP
   const parentOf = (path: string) => path.replace(/[\\/][^\\/]+$/, "");
   return {
     files,
-    userDataDir: (namespace, directory) => Promise.resolve(`${namespace}/${directory}`),
+    userDataDir: (namespace, directory) =>
+      Promise.resolve(`${namespace}/${directory}`),
     pathExists: (path) => Promise.resolve(files.has(path) || dirs.has(path)),
-    listDirNames: (path) => Promise.resolve([...dirs]
-      .filter((dir) => parentOf(dir) === path)
-      .map((dir) => dir.replace(/^.*[\\/]/, ""))),
+    listDirNames: (path) =>
+      Promise.resolve(
+        [...dirs]
+          .filter((dir) => parentOf(dir) === path)
+          .map((dir) => dir.replace(/^.*[\\/]/, "")),
+      ),
     readTextFile: (path) => {
       const text = files.get(path);
       return text === undefined
@@ -62,7 +78,11 @@ export function memoryToolIO(seed: Readonly<Record<string, string>> = {}): ToolP
     writeTextFile: (path, contents) => {
       files.set(path, contents);
       let child = path;
-      for (let dir = parentOf(child); dir && dir !== child; dir = parentOf(child)) {
+      for (
+        let dir = parentOf(child);
+        dir && dir !== child;
+        dir = parentOf(child)
+      ) {
         dirs.add(dir);
         child = dir;
       }
@@ -76,7 +96,8 @@ export function memoryToolIO(seed: Readonly<Record<string, string>> = {}): ToolP
         return Promise.resolve();
       }
       const moved = [...files].filter(([path]) => path.startsWith(`${from}/`));
-      if (!moved.length && !dirs.has(from)) return Promise.reject(new Error(`路径不存在：${from}`));
+      if (!moved.length && !dirs.has(from))
+        return Promise.reject(new Error(`路径不存在：${from}`));
       for (const [path, value] of moved) {
         files.delete(path);
         files.set(`${to}${path.slice(from.length)}`, value);
@@ -99,6 +120,7 @@ export function memoryToolIO(seed: Readonly<Record<string, string>> = {}): ToolP
     },
     // 内存实现不知道"谁在引用哪一份"——安装记录不在这里。真删等于瞎删，
     // 所以一律回空报告；要断言回收行为，测试里包一层假宿主即可。
-    pruneVersions: () => Promise.resolve({ removed: [], kept: [], skipped: [] }),
+    pruneVersions: () =>
+      Promise.resolve({ removed: [], kept: [], skipped: [] }),
   };
 }
