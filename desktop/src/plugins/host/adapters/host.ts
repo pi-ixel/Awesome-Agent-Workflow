@@ -214,6 +214,15 @@ interface DemoDirNode {
 interface DemoFileNode {
   readonly type: "file";
   contents: string;
+  /**
+   * `"base64"` 表示 `contents` 是二进制原文的 base64。
+   *
+   * 工具可以带 `node_modules`、图片、wasm：这些字节不是 UTF-8，按文本存会把
+   * 它们改坏（读回来再"转回字节"已经不可逆）。真实宿主里文件就是文件，内存
+   * 文件树里必须显式记住这一位，才能让 `readTextFile` / `readBinaryFile`
+   * 各走各的路。
+   */
+  readonly encoding?: "base64";
 }
 
 /** 内存节点：目录（含子节点）或文本文件。 */
@@ -221,6 +230,13 @@ type DemoNode = DemoDirNode | DemoFileNode;
 
 function demoDir(): DemoDirNode {
   return { type: "dir", children: new Map() };
+}
+
+/** UTF-8 文本 → base64。宿主读二进制时不区分作者写的是文本还是图片，一律回字节。 */
+function textToBase64(text: string): string {
+  let binary = "";
+  for (const byte of new TextEncoder().encode(text)) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 /**
@@ -238,6 +254,13 @@ export interface DemoHost extends HostRuntime {
     result: CommandResult,
   ): void;
   setUserDataDir(namespace: string, directory: string, path: string): void;
+  /**
+   * 删除一个文件或整棵目录。
+   *
+   * 只给测试布置现场（"用户把这个文件删了""清理工具把安装目录扫走了"）——
+   * 生产删除一律走 `toolPurge` / `dropToolStaging` 这类有形状守卫的窄命令。
+   */
+  removePath(path: string): void;
   /** 预置 SSO 登录轮询结果队列（按次消费；耗尽后再轮询即报错）。 */
   scriptSsoLoginPoll(results: readonly (SsoLoginPollWire | Error)[]): void;
   /** 清空文件树、命令脚本与目标目录设置（测试隔离用）。 */
@@ -303,7 +326,11 @@ export function createDemoHost(): DemoHost {
 
   function deepClone(node: DemoNode): DemoNode {
     if (node.type === "file") {
-      return { type: "file", contents: node.contents };
+      return {
+        type: "file",
+        contents: node.contents,
+        ...(node.encoding ? { encoding: node.encoding } : {}),
+      };
     }
     const clone = demoDir();
     for (const [name, child] of node.children) {
@@ -371,6 +398,11 @@ export function createDemoHost(): DemoHost {
       if (node === undefined || node.type !== "file") {
         return Promise.reject(new Error(`文件不存在：${path}`));
       }
+      // 二进制按文本读出来是一串 base64，调用方会把它当源码/JSON 用——宁可
+      // 报错，也不给一份"看起来能解析、实际是乱码"的内容。
+      if (node.encoding === "base64") {
+        return Promise.reject(new Error(`这不是文本文件：${path}`));
+      }
       return Promise.resolve(node.contents);
     },
     writeTextFile(path, contents) {
@@ -385,6 +417,62 @@ export function createDemoHost(): DemoHost {
         return Promise.reject(new Error(`目标已是目录：${path}`));
       }
       parent.children.set(name, { type: "file", contents });
+      return Promise.resolve();
+    },
+    writeBinaryFile(path, base64) {
+      const segments = normalizeKey(path);
+      const name = segments[segments.length - 1];
+      if (name === undefined) {
+        return Promise.reject(new Error(`路径无效：${path}`));
+      }
+      const parent = ensureDir(segments.slice(0, -1));
+      if (parent.children.get(name)?.type === "dir") {
+        return Promise.reject(new Error(`目标已是目录：${path}`));
+      }
+      parent.children.set(name, { type: "file", contents: base64, encoding: "base64" });
+      return Promise.resolve();
+    },
+    readBinaryFile(path, limit) {
+      const node = nodeAt(normalizeKey(path));
+      if (node === undefined || node.type !== "file") {
+        return Promise.reject(new Error(`文件不存在：${path}`));
+      }
+      // 文本文件也按原始字节回 base64：宿主侧只认"文件"，不区分作者写的类型。
+      const base64 = node.encoding === "base64" ? node.contents : textToBase64(node.contents);
+      const bytes = Math.floor((base64.length * 3) / 4);
+      if (limit !== undefined && bytes > limit) {
+        return Promise.reject(new Error(`文件超过单包上限（${limit} 字节）：${path}`));
+      }
+      return Promise.resolve(base64);
+    },
+    listToolFiles(root, limit) {
+      const node = nodeAt(normalizeKey(root));
+      if (node === undefined || node.type !== "dir") {
+        return Promise.reject(new Error(`目录不存在或不是目录：${root}`));
+      }
+      const names: string[] = [];
+      const walk = (dir: DemoDirNode, prefix: string) => {
+        if (limit !== undefined && names.length >= limit) return;
+        for (const [name, child] of dir.children) {
+          const next = prefix ? `${prefix}/${name}` : name;
+          if (child.type === "dir") walk(child, next);
+          else names.push(next);
+        }
+      };
+      walk(node, "");
+      return Promise.resolve(names.sort((left, right) => left.localeCompare(right)));
+    },
+    dropToolStaging(path) {
+      // 与 Rust 侧同一条纪律：只接受 `<…>/versions/<目录>`。
+      // 删目录不可逆，宁可让它窄到只能干"清理本次安装"这一件事。
+      const segments = normalizeKey(path);
+      if (segments[segments.length - 2] !== "versions") {
+        return Promise.reject(new Error(`只允许清理 versions 下的暂存目录：${path}`));
+      }
+      if (nodeAt(segments) === undefined) {
+        return Promise.reject(new Error(`暂存目录不存在：${path}`));
+      }
+      removeAt(segments);
       return Promise.resolve();
     },
     userDataDir(namespace, directory) {
@@ -464,6 +552,9 @@ export function createDemoHost(): DemoHost {
     },
     addDir(path) {
       ensureDir(normalizeKey(path));
+    },
+    removePath(path) {
+      removeAt(normalizeKey(path));
     },
     scriptCommand(program, args, result) {
       scripts.set(commandKey(program, args), result);

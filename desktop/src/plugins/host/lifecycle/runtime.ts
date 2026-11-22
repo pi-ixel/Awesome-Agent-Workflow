@@ -300,6 +300,31 @@ export class DesktopHost implements HostService {
       toolPurge: (input) => this.resources.run(() => backend.toolPurge(input)),
       moveToolPath: (from, to) =>
         this.resources.run(() => backend.moveToolPath(from, to)),
+      // 二进制与整树列举：带 node_modules / 图片 / wasm 的工具要按字节落盘，
+      // 导出要按字节读回。这几个口以前只接在 backend 上、门面没转发，前端
+      // 永远看不到它们——带附件的 ZIP 装到一半就报"不支持写入二进制文件"。
+      ...(backend.writeBinaryFile
+        ? {
+            writeBinaryFile: (path: string, base64: string) =>
+              this.resources.run(() => backend.writeBinaryFile!(path, base64)),
+          }
+        : {}),
+      ...(backend.readBinaryFile
+        ? {
+            readBinaryFile: (path: string, limit?: number) =>
+              this.resources.run(() => backend.readBinaryFile!(path, limit)),
+          }
+        : {}),
+      ...(backend.listToolFiles
+        ? {
+            listToolFiles: (root: string, limit?: number) =>
+              this.resources.run(() => backend.listToolFiles!(root, limit)),
+          }
+        : {}),
+      // 开发指导正文：用户改过的规范要贯通到 AGENTS.md 与技能目录。
+      ...(backend.readGuideDoc
+        ? { readGuideDoc: () => this.resources.run(() => backend.readGuideDoc!()) }
+        : {}),
       ...(backend.dropToolStaging
         ? {
             dropToolStaging: (path: string) =>

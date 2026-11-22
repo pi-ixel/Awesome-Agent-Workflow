@@ -206,9 +206,34 @@ export async function stageVersion(
 }
 
 /**
- * 这个目录能不能当某个工具的运行副本用：在、且清单 id 对得上。
+ * 这一份副本要跑起来、磁盘上必须有的文件。
  *
- * 只查这两条，不查内容新旧——退版要的是"上一版还完整"，不是"跟当前清单一致"。
+ * 页面工具（没有 `runtime.entry`）的唯一必需运行文件就是页面本身；带进程入口
+ * 的工具则不要求页面。只看清单声明的 `build.out` / `runtime.entry` 不够：
+ * 一个自包含的小工具什么都没声明，页面被删了也照样"通过"。
+ *
+ * 单独写在这里是因为退版校验只拿到**清单 JSON**：版本目录里没有 html 字段，
+ * 拼不成完整的 `ToolPackage`，用不了 `missingEntryFiles`。
+ */
+function requiredEntries(manifest: Record<string, unknown>): readonly string[] {
+  const pick = (field: string, key: string): string | undefined => {
+    const value = manifest[field];
+    const inner = value && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined;
+    return typeof inner === "string" ? inner.replace(/^\.\//, "") : undefined;
+  };
+  const out = pick("build", "out");
+  const entry = pick("runtime", "entry");
+  return [out, entry, entry ? undefined : toolProjectFileNames.html]
+    .filter((name): name is string => !!name);
+}
+
+/**
+ * 这个目录能不能当某个工具的运行副本用：在、清单 id 对得上、声明的入口也在。
+ *
+ * 为什么要查入口：退版切过去的是用户**马上要打开**的那一份。"清单还在"只说明
+ * 这个目录是它的，不说明它跑得起来——少一个 `index.html` 或 `build.out`，
+ * 用户看到的就是白窗口，而界面上写着"已退回 v1"。查不出来（宿主没有列目录
+ * 通道）时才退回只看清单。
  */
 export async function canRunToolDir(
   io: ToolProjectIO,
@@ -217,10 +242,16 @@ export async function canRunToolDir(
 ): Promise<boolean> {
   if (!dir) return false;
   try {
-    if (!await io.pathExists(joinPath(dir, toolProjectFileNames.manifest))) return false;
-    const parsed = JSON.parse(await io.readTextFile(joinPath(dir, toolProjectFileNames.manifest))) as unknown;
-    return !!parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      && (parsed as { id?: unknown }).id === id;
+    const manifestPath = joinPath(dir, toolProjectFileNames.manifest);
+    if (!await io.pathExists(manifestPath)) return false;
+    const parsed = JSON.parse(await io.readTextFile(manifestPath)) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+    const manifest = parsed as Record<string, unknown>;
+    if (manifest["id"] !== id) return false;
+    const names = await listNames(io, dir);
+    if (!names.length) return true;
+    const present = new Set(names.map((name) => name.replace(/\\/g, "/")));
+    return requiredEntries(manifest).every((name) => present.has(name));
   } catch {
     return false;
   }
