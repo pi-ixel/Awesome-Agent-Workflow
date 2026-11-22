@@ -620,15 +620,26 @@ pub fn tools_root_dir(app: AppHandle, directory: String) -> Result<String, Strin
 
 /// 在文件管理器里打开一个目录（设置页「打开文件夹」按钮）。
 #[tauri::command]
-pub async fn tools_storage_open(window: tauri::WebviewWindow, path: String) -> Result<(), String> {
+pub async fn tools_storage_open(
+    window: tauri::WebviewWindow,
+    app: AppHandle,
+) -> Result<(), String> {
     if window.label() != "main" {
         return Err("只有主窗口可以打开文件夹。".into());
     }
-    let path = PathBuf::from(path.trim());
-    if !path.is_dir() {
-        return Err("目录不存在。".into());
-    }
+    let data = app.state::<ToolsHost>().data_root()?;
+    let path = tool_home_for_open(&data)?;
     tauri_plugin_opener::open_path(path, None::<&str>).map_err(|error| format!("打开失败：{error}"))
+}
+
+fn tool_home_for_open(data: &Path) -> Result<PathBuf, String> {
+    if let Some(home) = selected(&preferences(data)?)? {
+        return home.accessible_path(data);
+    }
+    let path = default_tool_root(data);
+    fs::create_dir_all(&path)
+        .map_err(|error| format!("无法创建工具目录 {}：{error}", display_path(&path)))?;
+    Ok(path)
 }
 
 #[cfg(test)]
@@ -655,6 +666,16 @@ mod tests {
                 .unwrap(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn first_run_can_open_the_default_folder_before_installing_tools() {
+        let fixture = tempfile::tempdir().unwrap();
+        let data = fixture.path().join("new-aaw");
+        let expected = default_tool_root(&data);
+        assert!(!expected.exists());
+        assert_eq!(tool_home_for_open(&data).unwrap(), expected);
+        assert!(expected.is_dir());
     }
 
     #[test]

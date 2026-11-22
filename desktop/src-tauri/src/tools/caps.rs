@@ -154,9 +154,9 @@ pub(crate) fn dispatch(
 ) -> Response<Vec<u8>> {
     if body.len() > LIMITS.call_body_bytes {
         return fail(format!(
-            "请求体 {} KB 超过 {} KB 上限。",
-            body.len() / 1024,
-            LIMITS.call_body_bytes / 1024
+            "请求体超过上限：收到 {} 字节，最多 {} 字节。",
+            body.len(),
+            LIMITS.call_body_bytes
         ));
     }
     // 空 body 视为 `{}`：`store.keys()` / `host.info()` 这类无参调用不必凑一个空对象。
@@ -181,7 +181,8 @@ pub(crate) fn dispatch(
         // ── 存储 ────────────────────────────────────────────────────────
         "store.get" => (|| {
             let owner = storage_owner(tool_id, optional_text(&payload, "scope").unwrap_or(""))?;
-            store()?.get(&owner, &text(&payload, "name")?)
+            let name = text(&payload, "name")?;
+            store()?.get(&owner, &name)
         })(),
         "store.set" => (|| {
             let owner = storage_owner(tool_id, optional_text(&payload, "scope").unwrap_or(""))?;
@@ -191,7 +192,8 @@ pub(crate) fn dispatch(
         })(),
         "store.delete" => (|| {
             let owner = storage_owner(tool_id, optional_text(&payload, "scope").unwrap_or(""))?;
-            store()?.delete(&owner, &text(&payload, "name")?).map(Value::Bool)
+            let name = text(&payload, "name")?;
+            store()?.delete(&owner, &name).map(Value::Bool)
         })(),
         "store.keys" => (|| {
             let owner = storage_owner(tool_id, optional_text(&payload, "scope").unwrap_or(""))?;
