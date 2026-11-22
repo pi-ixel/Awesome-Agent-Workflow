@@ -128,7 +128,8 @@ fn optional_text<'a>(payload: &'a Value, key: &str) -> Option<&'a str> {
 fn secret_store(host: &ToolsHost) -> Result<SecretStore, String> {
     let store = host.store()?;
     let owner = store.owner()?;
-    Ok(SecretStore::new(&store.storage_root(), &owner))
+    let root = super::location::tool_partition(&store.storage_root(), &owner, "secrets")?;
+    Ok(SecretStore::new(root, &owner))
 }
 
 /// 分发一条能力调用。

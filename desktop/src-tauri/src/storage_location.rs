@@ -15,6 +15,8 @@ use crate::storage_preferences::{read_record, write_record};
 struct Location {
     active: Option<PathBuf>,
     pending: Option<Pending>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tool_paths_from: Option<PathBuf>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -28,6 +30,7 @@ struct StorageLocation {
     control: PathBuf,
     state: Mutex<Location>,
     error: Mutex<Option<String>>,
+    tool_migration_error: Mutex<Option<String>>,
     _lock: File,
 }
 
@@ -85,18 +88,41 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {
         .open(default.join("storage-location.lock"))
         .map_err(|e| e.to_string())?;
     let mut error = None;
+    let mut tool_error = None;
     if lock.try_lock().is_ok() {
         let mut state: Location = read_record(&control)?;
-        if let Some(pending) = state.pending.as_ref() {
-            let result = managed_paths(app, state.active.as_deref(), &default)
-                .and_then(|sources| migrate(&sources, pending).map_err(|e| e.to_string()))
-                .and_then(|()| {
-                    state.active = state.pending.take().map(|pending| pending.target);
-                    write_record(&control, &state)
-                });
-            if let Err(cause) = result {
-                error = Some(format!("存储目录迁移失败：{cause}"));
+        let finish_tool_paths = |state: &mut Location| -> Result<(), String> {
+            if let Some(from) = state.tool_paths_from.clone() {
+                let to = state.active.as_deref().unwrap_or(&default);
+                crate::tools::location::remap_after_app_move(&from, to)?;
+                let mut next = state.clone();
+                next.tool_paths_from = None;
+                write_record(&control, &next)?;
+                *state = next;
             }
+            Ok(())
+        };
+        let result = (|| {
+            finish_tool_paths(&mut state)?;
+            if let Some(pending) = &state.pending {
+                let from = state.active.as_deref().unwrap_or(&default);
+                let sources = managed_paths(app, state.active.as_deref(), &default)?;
+                migrate(&sources, pending).map_err(|error| error.to_string())?;
+                let next = Location {
+                    active: Some(pending.target.clone()),
+                    pending: None,
+                    tool_paths_from: Some(from.to_path_buf()),
+                };
+                write_record(&control, &next)?;
+                state = next;
+                finish_tool_paths(&mut state)?;
+            }
+            Ok::<_, String>(())
+        })();
+        if let Err(cause) = result {
+            error = Some(format!("存储目录迁移失败：{cause}"));
+        } else if let Err(cause) = crate::tools::location::apply_pending(state.active.as_deref().unwrap_or(&default)) {
+            tool_error = Some(cause);
         }
         lock.unlock().map_err(|e| e.to_string())?;
     }
@@ -110,9 +136,23 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {
         control,
         state: Mutex::new(state),
         error: Mutex::new(error),
+        tool_migration_error: Mutex::new(tool_error),
         _lock: lock,
     });
     Ok(())
+}
+
+pub(crate) fn tool_migration_error(app: &AppHandle) -> Option<String> {
+    app.try_state::<StorageLocation>()
+        .and_then(|location| location.tool_migration_error.lock().ok()?.clone())
+}
+
+pub(crate) fn clear_tool_migration_error(app: &AppHandle) {
+    if let Some(location) = app.try_state::<StorageLocation>() {
+        if let Ok(mut error) = location.tool_migration_error.lock() {
+            *error = None;
+        }
+    }
 }
 
 fn active_dir(app: &AppHandle) -> Option<PathBuf> {
@@ -172,20 +212,9 @@ fn managed_paths(
     };
     paths.push((logs.join("diagnostics"), "logs/diagnostics"));
     paths.push((cache.join("updates"), "updates"));
-    // 工具目录（installed/projects/backups）与工具数据（tools/storage）默认
-    // 就在数据根的 tools/ 下——数据根迁移时它们必须跟着走，否则指针切了
-    // 数据没搬，用户会看到"工具数据没了"。任一账号的工具整体指针指向别处
-    // （tool-locations/ 下有指针文件）时都不跟：那里已经是用户选的位置。
-    let tools_at_default = std::fs::read_dir(root.join("configuration").join("tool-locations"))
-        .map(|entries| {
-            entries
-                .flatten()
-                .all(|entry| entry.path().extension().is_none_or(|ext| ext != "json"))
-        })
-        .unwrap_or(true);
-    if tools_at_default {
-        paths.push((root.join("tools"), "tools"));
-    }
+    // 共用数据根下的默认工具及旧版目录始终复制。外置工具目录由独立位置指针继续引用。
+    paths.push((root.join("tools"), "tools"));
+    paths.push((root.join(crate::tools::location::DEFAULT_VERSIONS), crate::tools::location::DEFAULT_VERSIONS));
     Ok(paths)
 }
 
@@ -413,6 +442,7 @@ pub fn storage_location_schedule(
     let next = Location {
         active: state.active.clone(),
         pending,
+        tool_paths_from: state.tool_paths_from.clone(),
     };
     write_record(&location.control, &next)?;
     *state = next;

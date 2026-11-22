@@ -250,40 +250,10 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::
     Ok(())
 }
 
-/// 工具整体迁移期间的写盘闸：迁移中（拷贝→切指针→删旧）任何落到工具域内
-/// （默认根或当前账号的 home）的新写入都会丢失或把旧目录删不干净。只在路径
-/// 命中工具域时拦，别的模块写盘不受影响。
-fn gate_tool_write(app: &tauri::AppHandle, paths: &[&str]) -> Result<(), String> {
-    use tauri::Manager;
-    let Some(state) = app.try_state::<crate::tools::location::ToolHomeMigration>() else {
-        return Ok(());
-    };
-    if !state.0.is_running() {
-        return Ok(());
-    }
-    let host = app.state::<crate::tools::ToolsHost>();
-    let Ok(data_root) = host.data_root() else { return Ok(()) };
-    use crate::tools::location;
-    // 迁移期间整个工具域都别写：默认根（可能正被搬入/搬出）+ 当前账号 home。
-    let mut roots = vec![location::default_tool_root(&data_root)];    if let Ok(owner) = crate::tools::store::ToolStore::new(&data_root).owner() {
-        roots.push(location::tool_home(&data_root, &owner));
-    }
-    let under = paths.iter().any(|path| {
-        roots
-            .iter()
-            .any(|root| std::path::Path::new(path).starts_with(root))
-    });
-    if under {
-        return Err("工具存储正在迁移，请等迁移完成后再试。".into());
-    }
-    Ok(())
-}
-
 /// 整树复制 src → dst；dst 已存在时先删除（install.sh 的 rm -rf + cp -R
 /// 覆盖语义，供 skills 安装器逐项覆盖安装）。
 #[tauri::command]
-pub fn copy_dir(app: tauri::AppHandle, src: String, dst: String) -> Result<(), String> {
-    gate_tool_write(&app, &[&src, &dst])?;
+pub fn copy_dir(src: String, dst: String) -> Result<(), String> {
     copy_dir_impl(&src, &dst)
 }
 
@@ -307,8 +277,7 @@ pub fn read_text_file(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn write_text_file(app: tauri::AppHandle, path: String, contents: String) -> Result<(), String> {
-    gate_tool_write(&app, &[&path])?;
+pub fn write_text_file(path: String, contents: String) -> Result<(), String> {
     write_text_file_impl(&path, contents)
 }
 
@@ -328,8 +297,7 @@ fn write_text_file_impl(path: &str, contents: String) -> Result<(), String> {
 /// `write_text_file` 会把字节改坏。前端解压 ZIP 后逐个调用它落盘，运行时再从
 /// 工具目录加载——所以这里必须保字节原样。
 #[tauri::command]
-pub fn write_binary_file(app: tauri::AppHandle, path: String, base64_contents: String) -> Result<(), String> {
-    gate_tool_write(&app, &[&path])?;
+pub fn write_binary_file(path: String, base64_contents: String) -> Result<(), String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     let bytes = STANDARD
         .decode(base64_contents.as_bytes())
@@ -495,8 +463,7 @@ pub fn tool_purge(
 ///   搬走；
 /// - 目标与源不能是同一个路径，也不能把目录搬到它自己的子目录里。
 #[tauri::command]
-pub fn tool_move_path(app: tauri::AppHandle, from: String, to: String) -> Result<(), String> {
-    gate_tool_write(&app, &[&from, &to])?;
+pub fn tool_move_path(from: String, to: String) -> Result<(), String> {
     let src = std::path::Path::new(&from);
     let dst = std::path::Path::new(&to);
     if from.trim().is_empty() || to.trim().is_empty() {

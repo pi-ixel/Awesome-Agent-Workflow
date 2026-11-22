@@ -145,7 +145,7 @@ impl ToolStore {
     /// 的两半——那边的解析供迁移命令用，这边供逐次读写用。
     fn tool_data_root(&self) -> Result<PathBuf, String> {
         let owner = self.owner()?;
-        Ok(crate::tools::location::tool_storage_root(&self.storage_root(), &owner))
+        crate::tools::location::tool_partition(&self.storage_root(), &owner, "storage")
     }
 
     fn file(&self, owner: &str) -> Result<PathBuf, String> {

@@ -233,9 +233,9 @@ pub struct SecretStore {
 }
 
 impl SecretStore {
-    pub fn new(storage_root: &Path, owner: &str) -> Self {
+    pub fn new(root: PathBuf, owner: &str) -> Self {
         Self {
-            root: storage_root.join("tools").join("secrets").join(owner),
+            root,
             owner: owner.to_string(),
         }
     }
