@@ -39,6 +39,29 @@ const interactiveRoles = new Set([
 ]);
 const iconTag = /(?:Icon|Glyph|Spinner|BadgeDot|StatusDot|BrandMark)$|^Svg$/;
 
+it("keeps skill and MCP page filters on the shared control font scale", () => {
+  const controls = readFileSync("src/shared/ui/PageFilterControls.tsx", "utf8");
+  expect(controls).toContain('const pageFilterSize = "min-h-9 text-ui-sm"');
+  expect(controls).toMatch(
+    /<input\s+type="search"[\s\S]*?className=\{[^}]*\}\s*\$\{pageFilterSize\}/,
+  );
+  expect(controls).toMatch(
+    /<Listbox\s+\{\.\.\.props\}\s+className=\{[^\n]*\$\{pageFilterSize\}/,
+  );
+
+  const skills = readFileSync("src/plugins/skills/ui/SkillLibrary.tsx", "utf8");
+  const mcp = readFileSync("src/plugins/mcp/ui/McpView.tsx", "utf8");
+  for (const page of [skills, mcp]) {
+    expect(page).toContain("shared/ui/PageFilterControls.tsx");
+  }
+  expect(skills).toMatch(/<PageFilterSearch\s+label="搜索技能"/);
+  expect(skills).toMatch(/<PageFilterListbox\s+label="技能状态"/);
+  expect(skills).toMatch(/<PageFilterListbox\s+label="配置档案"/);
+  expect(mcp).toMatch(/<PageFilterSearch\s+label="搜索 MCP"/);
+  expect(mcp).toMatch(/<PageFilterListbox\s+label="筛选状态"/);
+  expect(mcp).toMatch(/<PageFilterListbox\s+label="筛选传输方式"/);
+});
+
 function jsxAttribute(
   node: ts.JsxOpeningLikeElement,
   name: string,
@@ -140,8 +163,15 @@ it("routes desktop glyphs, text and control heights through scalable UI styles",
         const terminalFont =
           file === "plugins/terminal/ui/TerminalSessionView.tsx" &&
           value === "readTerminalFontSize(host)";
-        const mermaidFont = file === "shared/ui/markdown/MermaidBlock.tsx" && value === '`${uiFontSize}px`';
-        if (!scalesWithFont.test(value) && !editorDecoration && !terminalFont && !mermaidFont) {
+        const mermaidFont =
+          file === "shared/ui/markdown/MermaidBlock.tsx" &&
+          value === "`${uiFontSize}px`";
+        if (
+          !scalesWithFont.test(value) &&
+          !editorDecoration &&
+          !terminalFont &&
+          !mermaidFont
+        ) {
           report(node, "derive fontSize from a shared font token");
         }
       }
@@ -153,7 +183,10 @@ it("routes desktop glyphs, text and control heights through scalable UI styles",
         node.parent.parent.name.getText(ast).includes(".cm-foldGutter") &&
         !scalesWithFont.test(node.initializer.getText(ast))
       ) {
-        report(node, "derive the source editor's fold marker size from the shared scale");
+        report(
+          node,
+          "derive the source editor's fold marker size from the shared scale",
+        );
       }
       ts.forEachChild(node, inspect);
     };

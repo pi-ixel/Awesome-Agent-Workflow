@@ -1561,6 +1561,13 @@
     },
     "targets": []
   },
+  "shared/ui/PageFilterControls.tsx": {
+    "definitions": {
+      "编辑输入": ["PageFilterSearch"],
+      "选择控件": ["PageFilterListbox"]
+    },
+    "targets": []
+  },
   "shared/ui/PageHeader.tsx": {
     "definitions": {
       "布局与操纵": ["PageHeader"]

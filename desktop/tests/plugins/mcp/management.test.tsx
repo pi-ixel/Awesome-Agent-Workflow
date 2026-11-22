@@ -26,7 +26,7 @@ import { createStore } from "zustand";
 
 afterEach(cleanup);
 
-it("服务开关逐项更新，连续写入使用新版本，筛选后仍保留原详情", async () => {
+it("服务开关逐项更新，连续写入使用新版本，筛选结果同步更新", async () => {
   const user = userEvent.setup();
   const { service, host, readLocal } = fixture();
   const [first] = managed.entries;
@@ -55,11 +55,11 @@ it("服务开关逐项更新，连续写入使用新版本，筛选后仍保留�
   );
   expect(screen.getByText(/会话工具未知/)).toBeVisible();
   const list = screen.getByRole("list", { name: "MCP 服务" });
+  await user.click(screen.getByRole("combobox", { name: "筛选状态" }));
+  await user.click(screen.getByRole("option", { name: "已启用" }));
   await user.click(
     await within(list).findByRole("button", { name: first!.name }),
   );
-  await user.click(screen.getByRole("combobox", { name: "筛选状态" }));
-  await user.click(screen.getByRole("option", { name: "已启用" }));
   const detail = screen.getByRole("complementary", {
     name: first!.name + " 详情",
   });
@@ -81,8 +81,7 @@ it("服务开关逐项更新，连续写入使用新版本，筛选后仍保留�
   expect(
     within(list).queryByRole("button", { name: first!.name }),
   ).not.toBeInTheDocument();
-  expect(firstToggle).not.toBeChecked();
-  expect(detail).toBeInTheDocument();
+  expect(detail).not.toBeVisible();
   expect(host.managedRead).toHaveBeenCalledTimes(1);
   expect(readLocal).toHaveBeenCalledTimes(1);
 });
@@ -270,6 +269,8 @@ it("复用已保存的检测结果，展示工具权限并按服务版本提交"
     message: "检测失败",
   } satisfies McpInspection);
   await user.click(within(detail).getByRole("button", { name: "测试连接" }));
+  expect(await within(detail).findByText("检测失败")).toBeVisible();
+  expect(within(detail).queryByText(/10 ms/)).not.toBeInTheDocument();
   expect(
     await within(detail).findByText(/显示上次检测到的工具清单/),
   ).toBeVisible();
@@ -666,6 +667,52 @@ it("passes MCP to Agent after native lookup failure and isolates an independent 
   expect(
     results.get(resolutionKey("shared-agent", workspace, "fallback"))?.injected,
   ).toEqual(["managed-tools"]);
+});
+
+it("opens details on demand, switches cards in place, and dismisses from outside", async () => {
+  const user = userEvent.setup();
+  const { service } = fixture([nativeTools]);
+  render(
+    <McpView
+      service={service}
+      agentId="chrys"
+      activeProfile={null}
+      browser={createTestBrowserHost()}
+      canManageNative
+      canManageInjected
+      canTest
+    />,
+  );
+  const managed = await screen.findByRole("button", { name: "managed-tools" });
+  const native = await screen.findByRole("button", { name: nativeTools.name });
+  expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  expect(managed).toHaveAttribute("aria-expanded", "false");
+
+  await user.click(managed);
+  const drawer = screen.getByRole("complementary", {
+    name: "managed-tools 详情",
+  });
+  expect(drawer).toHaveAttribute("data-edge-drawer", "right");
+  await user.click(native);
+  expect(
+    screen.getByRole("complementary", { name: nativeTools.name + " 详情" }),
+  ).toBe(drawer);
+  expect(managed).toHaveAttribute("aria-expanded", "false");
+  expect(native).toHaveAttribute("aria-expanded", "true");
+
+  await user.click(screen.getByRole("searchbox", { name: "搜索 MCP" }));
+  expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  await user.click(native);
+  await user.click(within(drawer).getByRole("button", { name: "收起详情" }));
+  expect(native).toHaveFocus();
+  expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  await user.click(native);
+  await user.keyboard("{Escape}");
+  expect(native).toHaveFocus();
+  expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  await user.click(native);
+  await user.click(native);
+  expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
 });
 
 it("mixes native and Desktop cards, filters by configured state, and checks exact duplicate names", async () => {

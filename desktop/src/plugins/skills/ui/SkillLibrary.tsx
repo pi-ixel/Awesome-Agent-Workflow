@@ -1,4 +1,7 @@
-import { fieldSurfaceClass } from "../../../shared/ui/SettingsPageParts.tsx";
+import {
+  PageFilterListbox,
+  PageFilterSearch,
+} from "../../../shared/ui/PageFilterControls.tsx";
 import { PageHeader } from "../../../shared/ui/PageHeader.tsx";
 import { useFeedback } from "../../../shared/ui/feedback.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -15,11 +18,7 @@ import {
   Checkbox,
   Listbox,
 } from "../../../shared/ui/controls.tsx";
-import {
-  PlusIcon,
-  RefreshIcon,
-  SearchIcon,
-} from "../../../shared/ui/icons.tsx";
+import { PlusIcon, RefreshIcon } from "../../../shared/ui/icons.tsx";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import { SkillPackageActions } from "./SkillPackageActions.tsx";
 import { SkillCard, SkillGroup } from "./SkillCards.tsx";
@@ -465,31 +464,29 @@ function LibraryPage(
       >
         <div className="flex flex-wrap items-center gap-2 border-b border-line pb-4">
           {!!catalog?.profiles.length && (
-            <Listbox
-              label="配置档案"
-              className="min-h-9 max-w-52 text-ui-sm"
-              value={catalog.profile}
-              triggerLabel={`配置档案 ${catalog.profile?.replace(/\.ya?ml$/, "") ?? "内置默认配置"}`}
-              options={catalog.profiles.map((p) => ({
-                value: p,
-                label: p.replace(/\.ya?ml$/, ""),
-              }))}
-              onChange={props.changeProfile}
-            />
+            <div className="min-w-0 max-w-52">
+              <PageFilterListbox
+                label="配置档案"
+                fullWidth
+                value={catalog.profile}
+                triggerLabel={`配置档案 ${catalog.profile?.replace(/\.ya?ml$/, "") ?? "内置默认配置"}`}
+                options={catalog.profiles.map((p) => ({
+                  value: p,
+                  label: p.replace(/\.ya?ml$/, ""),
+                }))}
+                onChange={props.changeProfile}
+              />
+            </div>
           )}
-          <label className="relative flex min-w-36 items-center">
-            <SearchIcon className="ui-icon-14 pointer-events-none absolute left-2.5 text-ink-mute" />
-            <input
-              aria-label="搜索技能"
-              className={`${fieldSurfaceClass} min-h-9 w-44 pl-8 pr-2 text-ui-xs`}
-              placeholder="搜索技能…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </label>
-          <Listbox
+          <PageFilterSearch
+            label="搜索技能"
+            className="w-44 max-w-full"
+            placeholder="搜索技能…"
+            value={search}
+            onChange={setSearch}
+          />
+          <PageFilterListbox
             label="技能状态"
-            className="min-h-9 text-ui-xs"
             value={status}
             options={[
               { value: "all", label: "全部状态" },

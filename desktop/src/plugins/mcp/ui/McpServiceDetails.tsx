@@ -6,7 +6,8 @@ import type {
 import { ActionButton, ToggleSwitch } from "../../../shared/ui/controls.tsx";
 import { SegmentedControl } from "../../../shared/ui/SettingsPageParts.tsx";
 import { fieldSurfaceClass } from "../../../shared/ui/inputStyles.ts";
-import { PlugIcon } from "../../../shared/ui/icons.tsx";
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { PanelRightCloseIcon, PlugIcon } from "../../../shared/ui/icons.tsx";
 
 function signature(schema: McpTool["inputSchema"]) {
   const properties = schema?.properties;
@@ -46,7 +47,7 @@ export function McpServiceDetails({
   actions,
   toggle,
   onToggleTools,
-  onBack,
+  onClose,
   isToolPending,
 }: {
   name: string;
@@ -61,7 +62,7 @@ export function McpServiceDetails({
   actions: ReactNode;
   toggle: ReactNode;
   onToggleTools?: (names: readonly string[], enabled: boolean) => void;
-  onBack: () => void;
+  onClose: () => void;
   isToolPending: (name: string) => boolean;
 }) {
   const [tab, setTab] = useState<"tools" | "connection" | "json">("tools");
@@ -75,52 +76,40 @@ export function McpServiceDetails({
     (tool) => !disabledTools.includes(tool.name),
   ).length;
   return (
-    <aside
-      aria-label={name + " 详情"}
-      className="min-w-0 @min-[48rem]:border-l @min-[48rem]:border-line"
-    >
-      <header className="space-y-3 border-b border-line px-5 py-4">
-        <ActionButton
-          tone="ghost"
-          size="compact"
-          className="@min-[48rem]:hidden"
-          onClick={onBack}
-        >
-          返回服务列表
-        </ActionButton>
-        <div className="flex min-w-0 items-center gap-3">
+    <div className="min-w-0">
+      <header className="sticky top-0 z-10 space-y-2 border-b border-line bg-base px-5 py-3">
+        <div className="flex min-w-0 items-start gap-2.5">
           <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-skill-reference-lilac/10 text-skill-reference-lilac">
             <PlugIcon className="ui-icon-18" />
           </span>
           <div className="min-w-0 flex-1">
             <h2 className="break-all text-ui-lg font-semibold">{name}</h2>
-            <p className="text-ui-caption text-ink-mute">
-              {transport} · {summary}
-            </p>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <p className="text-ui-caption text-ink-mute">
+                {transport} · {summary}
+              </p>
+              {actions}
+            </div>
           </div>
           {toggle}
+          <IconButton
+            iconSize="compact"
+            placement="top"
+            aria-label="收起详情"
+            data-hint="收起详情"
+            onClick={onClose}
+          >
+            <PanelRightCloseIcon className="ui-icon-16" />
+          </IconButton>
         </div>
         {description && (
           <p className="break-words text-ui-sm text-ink">{description}</p>
         )}
-        {health && (
-          <p
-            className={
-              health.ok
-                ? "text-ui-caption text-ink-mute"
-                : "text-ui-caption text-danger-ink"
-            }
-          >
-            {health.message} · {health.durationMs} ms ·{" "}
-            {new Date(health.checkedAt).toLocaleString("zh-CN")}
+        {health?.ok === false && (
+          <p className="break-words text-ui-caption text-danger-ink">
+            {health.message}
           </p>
         )}
-        {health?.ok === false && health.tools && (
-          <p className="text-ui-caption text-ink-mute">
-            显示上次检测到的工具清单。
-          </p>
-        )}
-        {actions}
       </header>
       <div className="border-b border-line px-5 py-2">
         <SegmentedControl
@@ -146,6 +135,11 @@ export function McpServiceDetails({
           aria-label="工具权限"
           className="space-y-3 p-5"
         >
+          {health?.ok === false && health.tools && (
+            <p className="text-ui-caption text-ink-mute">
+              显示上次检测到的工具清单。
+            </p>
+          )}
           {tools === undefined ? (
             <p className="text-ui-sm text-ink-mute">尚未读取工具清单。</p>
           ) : tools.length === 0 ? (
@@ -267,6 +261,6 @@ export function McpServiceDetails({
           </pre>
         </section>
       )}
-    </aside>
+    </div>
   );
 }
