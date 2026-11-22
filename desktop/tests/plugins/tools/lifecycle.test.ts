@@ -114,10 +114,25 @@ function machine() {
   const base = createDemoHost();
   /** 让下一个写这个路径的文本文件失败，模拟"写到一半磁盘不可写"。 */
   let failWrite: ((path: string) => boolean) | undefined;
+  /**
+   * 把某个路径的写入挂在半路上，用来制造"安装还没落地、用户已经点了别的按钮"。
+   *
+   * 只在写入**之前**等待，所以放行之后那次写入是完整成功的——模拟的是"操作
+   * 慢"，不是"操作坏"，两者要分开验。
+   */
+  let gate: { readonly match: (path: string) => boolean; readonly wait: Promise<void> } | undefined;
   const backend: DemoHost = {
     ...base,
-    writeTextFile: (path, contents) =>
-      failWrite?.(path) ? Promise.reject(new Error("磁盘写不进去")) : base.writeTextFile(path, contents),
+    async writeTextFile(path, contents) {
+      if (failWrite?.(path)) throw new Error("磁盘写不进去");
+      const pending = gate;
+      if (pending?.match(path)) {
+        // 只挂第一次：同一次安装里会有很多个文件，挂住一个就够。
+        gate = undefined;
+        await pending.wait;
+      }
+      return base.writeTextFile(path, contents);
+    },
   };
 
   let runtime: ReturnType<typeof createTestDesktopRuntime> | undefined;
@@ -207,6 +222,23 @@ function machine() {
     settle,
     failNextWrite(match: (path: string) => boolean) { failWrite = match; },
     healWrites() { failWrite = undefined; },
+    /**
+     * 挂住下一次匹配的写盘，返回放行函数。
+     *
+     * 用来让"安装 / 卸载"这两个本来一前一后完成的操作真的交叠，验证后点的那个
+     * 动作不会被前一个的迟到提交覆盖。
+     */
+    blockNextWrite(match: (path: string) => boolean) {
+      let release!: () => void;
+      const wait = new Promise<void>((resolve) => { release = resolve; });
+      gate = { match, wait };
+      return release;
+    },
+    /** 换一个账号登录（同一台机器、同一块盘，工号不同就是不同的人）。 */
+    loginAs(input: { readonly name: string; readonly employeeId: string }) {
+      if (!context) throw new Error("运行时未启动");
+      context.account.loginAsDev({ ...input });
+    },
     tools() {
       if (!context) throw new Error("运行时未启动");
       return context.tools;
@@ -926,5 +958,135 @@ describe("工具模块的状态转换（跨进程与降级）", () => {
     await app.restart();
     expect(app.tools().state.getState()).toEqual([]);
     expect(await app.filesOf(joinPath(installedRoot, "notes"))).toEqual([]);
+  });
+});
+
+/**
+ * 第四轮：前几轮的序列都是"一个动作走完再走下一个"。真实用户不是这样——
+ * 装一个大包要几秒，中间他可能就去点了卸载；磁盘满的时候备份写不进去，
+ * 安装本身却成功了；卸载后马上重装同一个版本；换个人登录接着用。
+ *
+ * 这几条问的都是同一件事：**后发生的那次操作，会不会被前一次的迟到提交覆盖**，
+ * 以及失败降级之后界面还能不能说实话。
+ */
+describe("工具模块的状态转换（并发与降级）", () => {
+  it("安装进行中点了卸载：卸载是最后一次意图，装好的那版不许再冒出来", async () => {
+    const app = await device();
+    const v1 = packageOf("1.0.0", "<p>v1</p>");
+    await app.workshopOf().installArchive(v1, runtimeFiles(v1));
+    const v1Dir = app.tools().state.getState()[0]?.dir as string;
+
+    // 更新到 v2：写到一半挂住，模拟"这个大包还在解压、落盘"。
+    const release = app.blockNextWrite((path) => path.includes(".staging-") && path.endsWith("index.html"));
+    const v2 = packageOf("1.1.0", "<p>v2</p>");
+    const updating = app.workshopOf().installArchive(v2, runtimeFiles(v2));
+    // 等它真的停在写盘上，而不是还没开始。
+    await app.settle(2);
+
+    // 这时候用户点「卸载」并勾上"同时删除文件"：先删记录，再清磁盘。
+    // 清理会排在这次安装后面——两个动作同时改同一个工具的目录，必须一前一后。
+    app.tools().remove("notes");
+    const purging = app.workshopOf().purge("notes");
+
+    // 放行那次写盘：安装会继续走完自己的提交，然后才轮到卸载。
+    release();
+    await updating;
+    const note = await purging;
+    expect(note.error).toBeUndefined();
+
+    // 卸载是用户最后一次意图：界面、配置、磁盘都必须空。
+    expect(app.tools().state.getState()).toEqual([]);
+    expect(app.savedEntries()).toEqual([]);
+    expect(await app.versionDirs("notes")).toEqual([]);
+    expect(await app.filesOf(joinPath(installedRoot, "notes"))).toEqual([]);
+    expect(await app.exists(v1Dir)).toBe(false);
+
+    await app.restart();
+    expect(app.tools().state.getState()).toEqual([]);
+    expect(await app.filesOf(joinPath(installedRoot, "notes"))).toEqual([]);
+  });
+
+  it("备份清单写失败但上一版副本完好：退版照样退得回去", async () => {
+    const app = await device();
+    const v1 = packageOf("1.0.0", "<p>v1</p>");
+    await app.workshopOf().installArchive(v1, runtimeFiles(v1));
+    const v1Dir = app.tools().state.getState()[0]?.dir as string;
+
+    // 这次只让备份清单写失败（磁盘满 / 临时只读），安装本身必须照常成功。
+    app.failNextWrite((path) => path.includes("backups"));
+    const v2 = packageOf("1.1.0", "<p>v2</p>");
+    await app.workshopOf().installArchive(v2, runtimeFiles(v2));
+    await app.settle();
+    app.healWrites();
+
+    expect(await app.exists(joinPath(backupRoot, "notes", "previous.json"))).toBe(false);
+    const current = app.tools().state.getState()[0];
+    expect(current?.previousDir).toBe(v1Dir);
+    expect(current?.previousVersion).toBe("1.0.0");
+    // 上一版副本在盘上、页面也在——比那份清单更可靠。
+    expect(await app.text(joinPath(v1Dir, "index.html"))).toBe("<p>v1</p>");
+
+    const back = await app.workshopOf().rollback("notes");
+    expect(back.error).toBeUndefined();
+    expect(app.tools().state.getState()[0]?.dir).toBe(v1Dir);
+    expect(app.tools().state.getState()[0]?.package.version).toBe("1.0.0");
+    await expectConsistent(app);
+  });
+
+  it("卸载后重装同一版本：不继承上一轮留下的「目录丢失」标记", async () => {
+    const app = await device();
+    const tool = packageOf("1.0.0", "<p>页面</p>", { build: { out: "dist/app.js" } });
+    const files = { ...runtimeFiles(tool), "dist/app.js": new TextEncoder().encode("console.log(1)") };
+    await app.workshopOf().installArchive(tool, files);
+    const dir = app.tools().state.getState()[0]?.dir as string;
+
+    // 目录被清理工具扫走：声明了 build.out 的工具自愈凑不出副本，卡片停在"目录丢失"。
+    app.removeDir(dir);
+    await app.restart();
+    expect(app.tools().state.getState()[0]?.broken?.kind).toBe("missing-dir");
+
+    // 用户卸载（勾"同时删除文件"）后重新导入同一个版本。
+    app.tools().remove("notes");
+    const note = await app.workshopOf().purge("notes");
+    expect(note.error).toBeUndefined();
+    await app.workshopOf().installArchive(tool, files);
+
+    // 重装落在同一个路径（versions/1.0.0 空了就复用），但它是好的：
+    // 上一轮那次"丢失"不该跟过来。
+    const again = app.tools().state.getState()[0];
+    expect(again?.broken).toBeUndefined();
+    expect(again?.dir).toBe(dir);
+    expect(await app.text(joinPath(dir, "dist/app.js"))).toBe("console.log(1)");
+    await expectConsistent(app);
+  });
+
+  it("换账号：另一个人的工具列表、记录、磁盘互不影响，切回来还是原样", async () => {
+    const app = await device();
+    const mine = packageOf("1.0.0", "<p>A 的页面</p>");
+    await app.workshopOf().installArchive(mine, runtimeFiles(mine));
+    const dirA = app.tools().state.getState()[0]?.dir as string;
+    expect(dirA).toBeDefined();
+
+    // 换一个人登录：不该看见前一个人的工具，也不该把它的记录读出来。
+    app.loginAs({ name: "另一个人", employeeId: "lifecycle-other" });
+    await app.settle();
+    expect(app.tools().state.getState()).toEqual([]);
+    expect(app.savedEntries()).toEqual([]);
+
+    // 这一个人装同一个 id：两边的副本各自独立，谁也不能动谁的页面。
+    const other = packageOf("2.0.0", "<p>B 的页面</p>");
+    await app.workshopOf().installArchive(other, runtimeFiles(other));
+    const dirB = app.tools().state.getState()[0]?.dir as string;
+    expect(dirB).not.toBe(dirA);
+    expect(await app.text(joinPath(dirB, "index.html"))).toBe("<p>B 的页面</p>");
+    expect(await app.text(joinPath(dirA, "index.html"))).toBe("<p>A 的页面</p>");
+
+    // 切回第一个人：还是他那一版，目录没被换掉。
+    app.loginAs({ name: "生命周期", employeeId: ownerId });
+    await app.settle();
+    expect(app.tools().state.getState()[0]?.dir).toBe(dirA);
+    expect(app.tools().state.getState()[0]?.package.version).toBe("1.0.0");
+    expect(app.savedEntries()[0]?.dir).toBe(dirA);
+    await expectConsistent(app);
   });
 });

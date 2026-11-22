@@ -8,6 +8,7 @@ import { checkCompatibility, readToolPackage, readToolPackageV1, ToolPackageErro
 import { resolveToolSettings, validateToolSettings } from "./runtime/settings.ts";
 import { createBackupQueue, readToolBackup } from "./runtime/backup.ts";
 import { hostToolIO } from "./runtime/io.ts";
+import { readToolProject } from "./runtime/project.ts";
 import {
   canRunToolDir,
   materializeToolFiles,
@@ -326,6 +327,10 @@ export function apply(ctx: Context): void {
         if (previous) backups.enqueue(previous.package);
         // 运行副本用调用方写好的版本目录；没给就沿用原路径（那里没有新目录可切）。
         const dir = options.runDir ?? previous?.dir;
+        // 这个目录刚被写过（或刚被确认可跑），上一轮探测留下的"丢失"标记必须撤掉。
+        // 不撤的话，重建常复用同名目录（`versions/1.0.0` 空了就复用），重放时标记
+        // 又贴回来：用户刚装好一个能跑的工具，卡片却写着"目录已丢失"。
+        if (dir) missingDirs.delete(dir);
         // 只有"真的换了目录"才留上一版目录——同一个目录再记一次，退版会切回原地。
         const previousDir = previous?.dir && dir && pathKey(previous.dir) !== pathKey(dir)
           ? previous.dir
@@ -384,14 +389,17 @@ export function apply(ctx: Context): void {
         // 清单（它只是一段文本）。于是"卸载 → 重装"之后点退版，会把刚装好的这一版
         // 换成**上一次安装**残留的那一版：用户从没在这一次安装里退回什么。
         if (!entry.previousVersion) return undefined;
-        const backup = await readToolBackup(io, current, id);
+        // 备份清单只是"上一版清单"的一份影印件，而完整的上一版副本里本来就有清单。
+        // 所以先看副本能不能跑，再决定要不要那份备份：反过来会让一颗完好的副本
+        // 被判成"没有可回退的版本"——磁盘满时备份写失败，用户就会撞上这个。
+        let backup = await readToolBackup(io, current, id);
         assertOwner();
-        if (!backup) return undefined;
         // 优先直接切回上一版的完整副本：那是当时真正跑过的那一份。
         let dir = entry.previousDir;
         let staged: Awaited<ReturnType<typeof stageVersion>> | undefined;
         if (!await canRunToolDir(io, dir, id)) {
           assertOwner();
+          if (!backup) return undefined;
           const files = materializeToolFiles(backup);
           const missing = missingEntryFiles(backup, Object.keys(files));
           if (missing.length) {
@@ -401,7 +409,14 @@ export function apply(ctx: Context): void {
           }
           staged = await stageVersion(io, { owner: current, tool: backup, files });
           dir = staged.dir;
+        } else if (!backup && dir) {
+          // 副本在、备份清单丢了：从副本自己的清单读回这一版。版本号对不上时
+          // 宁可不动——记录说"上一版是 1.0.0"而目录里是别的版本，切过去等于
+          // 装了一个用户没要求过的版本。
+          const read = await readToolProject(io, dir);
+          backup = read.ok && read.tool.version === entry.previousVersion ? read.tool : undefined;
         }
+        if (!backup) return undefined;
         assertOwner();
         try {
           // 回滚本身也是一次安装：被换下来的那一版会自动成为新的"上一版"，
