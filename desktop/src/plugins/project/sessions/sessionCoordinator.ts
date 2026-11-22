@@ -187,6 +187,16 @@ export function createSessionCoordinator({
       sessionId,
       agent: session.agentInfo,
       requestExtension: session.requestAgentExtension?.bind(session),
+      requestPermission: (toolCall, options) => {
+        const sessionId = session.sessionId;
+        if (runtime.disposed || runtime.session !== session || !sessionId) {
+          return Promise.resolve({ outcome: "cancelled" });
+        }
+        const automatic = resolveAutoPermission(getApprovalMode(), options);
+        if (automatic !== null) return Promise.resolve(automatic);
+        runtime.store.getState().sealStreamingItems();
+        return runtime.approval.getState().offerPermission({ sessionId, toolCall, options });
+      },
       onDispose: (listener) => {
         if (disposedToolSessions.has(session)) {
           void listener().catch(() => undefined);

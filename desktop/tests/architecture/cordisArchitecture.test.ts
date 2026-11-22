@@ -1,3 +1,4 @@
+import { productionPluginNames } from "../helpers/productionPluginNames";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { posix, resolve } from "node:path";
 import ts from "typescript";
@@ -166,7 +167,7 @@ it("locates entry points, shared code and production implementations under their
     "plugins",
     "shared",
   ]);
-  expect(readdirSync(resolve(root, "src/plugins")).sort()).toEqual(
+  expect(productionPluginNames(resolve(root, "src/plugins"))).toEqual(
     [...plugins].sort(),
   );
   for (const name of plugins) {

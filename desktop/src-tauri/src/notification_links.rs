@@ -257,6 +257,11 @@ mod windows_impl {
 
     /// 注册 `aaw://` 链接指向当前程序。开发版没有安装时建的快捷方式，另外登记通知用的应用标识。
     pub fn register(identifier: &str, product: Option<&str>) -> Result<(), String> {
+        // 独立调试实例只接收自己的通知，不接管用户全局 aaw:// 链接。
+        #[cfg(debug_assertions)]
+        if std::env::var_os("AAW_DEV_INSTANCE_DIR").is_some() {
+            return Ok(());
+        }
         let exe = std::env::current_exe().map_err(|error| error.to_string())?;
         let exe = exe.display().to_string();
         let classes = RegKey::predef(HKEY_CURRENT_USER)
