@@ -43,6 +43,10 @@ pub fn run() {
         .manage(tray::TrayPreference::default())
         .manage(tray::SchedulerLease::default())
         .setup(|app| {
+            #[cfg(all(windows, feature = "webview2-profile-ci"))]
+            if browser::bench::start(app.handle()) {
+                return Ok(());
+            }
             storage_location::initialize(app.handle()).map_err(std::io::Error::other)?;
             browser::host::initialize_agent_control(app.handle());
             if let Err(error) = diagnostics::start(app.handle()) {
