@@ -44,11 +44,8 @@ import type { ToolPackage } from "../types.ts";
 async function migrationBlock(): Promise<string | null> {
   try {
     if (!desktopManagedStorage.available()) return null;
-    const status = await desktopManagedStorage.request<{ migrating: boolean; dataMigrating: boolean }>(
-      "tools_location_read",
-    );
-    if (status.migrating) return "工具目录正在迁移，请等迁移完成后再试。";
-    if (status.dataMigrating) return "工具数据正在迁移，请等迁移完成后再试。";
+    const status = await desktopManagedStorage.request<{ migrating: boolean }>("tools_location_read");
+    if (status.migrating) return "工具存储正在迁移，请等迁移完成后再试。";
     return null;
   } catch {
     return null;

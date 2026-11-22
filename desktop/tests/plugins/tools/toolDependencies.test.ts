@@ -29,7 +29,9 @@ function fakeIO(seed: Readonly<Record<string, string>> = {}): ToolProjectIO & {
   const toBase64 = (value: string) => Buffer.from(value, "utf8").toString("base64");
   return {
     text, binary, dirs,
-    userDataDir: (namespace, directory) => Promise.resolve(`${namespace}/${directory}`),
+    // 模拟新契约：tools 分区由 Rust 按当前账号（me）解析好。
+    userDataDir: (namespace, directory) =>
+      Promise.resolve(namespace === "tools" ? `${namespace}/${directory}/me` : `${namespace}/${directory}`),
     // 目录是否存在也从文件路径反推：真宿主里 `mkdir -p` 已经建过，这里不能只认显式登记。
     pathExists: (path) => Promise.resolve(
       known().some((file) => file === path || file.startsWith(`${path}/`)),

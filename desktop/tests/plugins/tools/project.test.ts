@@ -11,7 +11,11 @@ import { sampleTool } from "../../../src/plugins/tools/ui/sample.ts";
 function memoryIO(initial: Record<string, string> = {}) {
   const files = new Map(Object.entries(initial));
   const io: ToolProjectIO = {
-    userDataDir: (namespace, directory) => Promise.resolve(`/data/${namespace}/${directory}`),
+    // 模拟新契约：tools 分区由 Rust 按当前账号（u1）解析好，前端不再拼账号段。
+    userDataDir: (namespace, directory) =>
+      Promise.resolve(
+        namespace === "tools" ? `/data/${namespace}/${directory}/u1` : `/data/${namespace}/${directory}`,
+      ),
     pathExists: (path) => Promise.resolve(
       files.has(path) || [...files.keys()].some((key) => key.startsWith(`${path}/`)),
     ),
@@ -114,15 +118,12 @@ it("lists projects and reads one back through the same contract as installing", 
   expect(result.ok).toBe(true);
 });
 
-it("gives every account its own projects root", async () => {
+it("uses the account-resolved projects root from the host as-is", async () => {
   const { io, files } = memoryIO();
+  // 账号层由宿主解析（替身模拟"当前账号是 u1"）；前端拿到什么就用什么，
+  // 不再自己拼账号段——"每个账号独立根"由 Rust 的按账号指针解析保证。
   const mine = await createToolProject(io, { id: "word-count", name: "字数", owner: "u1" });
-  const theirs = await createToolProject(io, { id: "word-count", name: "字数", owner: "u2" });
-  // 同一个 id 在两个人名下互不干扰——这正是"目录按账号"要买的东西。
   expect(mine.dir).toBe("/data/tools/projects/u1/word-count");
-  expect(theirs.dir).toBe("/data/tools/projects/u2/word-count");
-  expect(await listToolProjects(io, { owner: "u1" })).toEqual([mine.dir]);
-  expect(await listToolProjects(io, { owner: "u2" })).toEqual([theirs.dir]);
   expect(files.has("/data/tools/projects/u1/word-count/index.html")).toBe(true);
 });
 

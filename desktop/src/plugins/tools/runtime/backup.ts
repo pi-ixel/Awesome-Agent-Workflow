@@ -12,9 +12,9 @@
 import { joinPath } from "../../../shared/panelPaths.ts";
 import type { ToolPackage } from "../types.ts";
 import { validateToolPackage } from "./package.ts";
-import { toolOwnerSegment, type ToolProjectIO } from "./project.ts";
+import type { ToolProjectIO } from "./project.ts";
 
-/** 每个工具只留一版：`<数据目录>/tools/backups/<账号>/<工具 id>/previous.json`。 */
+/** 每个工具只留一版：`<备份分区>/<工具 id>/previous.json`（分区由 Rust 按账号解析）。 */
 export const toolBackupFileName = "previous.json";
 
 export async function toolBackupDir(
@@ -22,8 +22,11 @@ export async function toolBackupDir(
   owner: string | undefined,
   id: string,
 ): Promise<string> {
+  // 分区目录已由 Rust 按当前账号解析（账号层在默认位置、自定义家不带），
+  // 前端只拼工具 id。
+  void owner;
   const base = await io.userDataDir("tools", "backups");
-  return joinPath(base, toolOwnerSegment(owner), id);
+  return joinPath(base, id);
 }
 
 export async function toolBackupPath(
