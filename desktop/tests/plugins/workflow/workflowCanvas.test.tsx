@@ -175,7 +175,7 @@ it("tells the user a node is waiting for a reply and opens its session from the 
   // 引擎记录：这一轮结束了、结果还没交，在等用户经会话回复。
   const fake = fakeWorkflowService();
   const snapshot = snapshotOf({
-    nodes: [record("ask#1", "requirement", "running", { awaitingInput: true, awaitingInputSince: 1, actorSiteId: "ask#1", actorOrdinal: 1 })],
+    nodes: [record("ask#1", "requirement", "running", { turn: "completed", turnEndedAt: 1, actorSiteId: "ask#1", actorOrdinal: 1 })],
     actors: [{ siteId: "ask#1", ordinal: 1, name: "需求确认", sessionId: "s-1" }],
   });
   fake.setRuns([snapshot.run!]);
@@ -183,8 +183,10 @@ it("tells the user a node is waiting for a reply and opens its session from the 
   const opened: string[] = [];
   render(<WorkflowPanel service={fake.service} onOpenSession={(id) => opened.push(id)} />);
   const banner = await screen.findByRole("alert");
-  expect(banner).toHaveTextContent("「需求确认」这一轮结束了，还没有提交结果，请查看会话");
-  expect(screen.getByText("等待回复 ·")).toBeInTheDocument();
+  expect(banner).toHaveTextContent("「需求确认」等你在会话里回复");
+  // 横幅已经说了在等回复，头部只写停在哪一步。
+  expect(screen.queryByText("等待回复 ·")).not.toBeInTheDocument();
+  expect(screen.getByText("当前 ·")).toBeInTheDocument();
   // 状态词仍是「运行中」，附注说明在等回复。
   expect(await findStep("需求确认，运行中")).toHaveTextContent("等你在会话里回复");
   fireEvent.click(within(banner).getByRole("button", { name: "打开会话" }));
@@ -195,8 +197,8 @@ it("lists all waiting nodes with an independent session action", async () => {
   const fake = fakeWorkflowService();
   const snapshot = snapshotOf({
     nodes: [
-      record("ask#1", "requirement", "running", { awaitingInput: true, actorSiteId: "ask#1", actorOrdinal: 1 }),
-      record("ask#2", "design", "running", { awaitingInput: true, actorSiteId: "ask#2", actorOrdinal: 1 }),
+      record("ask#1", "requirement", "running", { turn: "completed", actorSiteId: "ask#1", actorOrdinal: 1 }),
+      record("ask#2", "design", "running", { turn: "completed", actorSiteId: "ask#2", actorOrdinal: 1 }),
     ],
     actors: [
       { siteId: "ask#1", ordinal: 1, name: "需求确认", sessionId: "s-1" },
@@ -215,18 +217,17 @@ it("lists all waiting nodes with an independent session action", async () => {
   expect(opened).toEqual(["s-2", "s-1"]);
 });
 
-it("shows the actual latest Agent message and falls back after a new user turn", async () => {
+it("does not repeat the Agent's message in the panel, the session shows it", async () => {
   const fake = fakeWorkflowService();
-  const snapshot = snapshotOf({ nodes: [record("ask#1", "requirement", "running", { awaitingInput: true })] });
+  const snapshot = snapshotOf({ nodes: [record("ask#1", "requirement", "running", { turn: "completed" })] });
   fake.setRuns([snapshot.run!]);
   fake.setSnapshot(snapshot.runId, snapshot);
   render(<WorkflowPanel service={fake.service} />);
-  await screen.findByLabelText("等待回复的节点");
+  const banner = await screen.findByRole("alert");
   act(() => fake.emit({ type: "acp-event", runId: "run-1", instance: { siteId: "ask#1", ordinal: 1 }, event: { type: "agent_message_chunk", text: "请确认范围" } }));
-  expect(screen.getByLabelText("等待回复的节点")).toHaveTextContent("请确认范围");
-  act(() => fake.emit({ type: "acp-event", runId: "run-1", instance: { siteId: "ask#1", ordinal: 1 }, event: { type: "user_message_chunk", text: "已确认" } }));
-  expect(screen.getByLabelText("等待回复的节点")).toHaveTextContent("请打开会话查看 Agent 的消息");
-  expect(screen.getByLabelText("等待回复的节点")).not.toHaveTextContent("请确认范围");
+  expect(banner).toHaveTextContent("「需求确认」等你在会话里回复");
+  expect(banner).not.toHaveTextContent("请确认范围");
+  expect(screen.queryByLabelText("等待回复的节点")).not.toBeInTheDocument();
 });
 
 it("shows the Agent's own plan as node progress and timing on the card", async () => {
@@ -252,7 +253,7 @@ it("shows the Agent's own plan as node progress and timing on the card", async (
 
 it("does not claim a stopped run is waiting for a reply", async () => {
   const stopped: RunSummary = { ...run, status: "stopped" };
-  mount(snapshotOf({ run: stopped, active: false, hasLease: false, nodes: [record("ask#1", "requirement", "running", { awaitingInput: true })] }));
+  mount(snapshotOf({ run: stopped, active: false, hasLease: false, nodes: [record("ask#1", "requirement", "running", { turn: "completed" })] }));
   expect(await findStep("需求确认，已中断")).toBeInTheDocument();
   expect(screen.queryByText(/等你在会话里回复/)).not.toBeInTheDocument();
 });
@@ -263,7 +264,7 @@ it("marks a running step's capsule as running, and as needing you while it waits
   const task = await screen.findByRole("button", { name: /^2 任务/ });
   expect(task.querySelector(".wf-pill")).toHaveClass("tone-running");
   cleanup();
-  mount(snapshotOf({ execution: { phase: "plan", stack: [], calls: [] }, nodes: [done, record("ask#3", "plan", "running", { awaitingInput: true })] }));
+  mount(snapshotOf({ execution: { phase: "plan", stack: [], calls: [] }, nodes: [done, record("ask#3", "plan", "running", { turn: "completed" })] }));
   const waiting = await screen.findByRole("button", { name: /^2 任务，要你处理/ });
   expect(waiting.querySelector(".wf-pill")).toHaveClass("tone-alert");
 });

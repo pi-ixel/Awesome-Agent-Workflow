@@ -48,7 +48,5 @@ it("原生复选框与单选框仅由登记的控件创建", () => {
     "shared/ui/controls.tsx#Checkbox",
     "shared/ui/controls.tsx#ToggleSwitch",
   ]);
-  expect(radios.sort()).toEqual([
-    "plugins/workflow/ui/WorkflowLauncher.tsx#WorkflowLauncher",
-  ]);
+  expect(radios.sort()).toEqual([]);
 });

@@ -511,10 +511,8 @@ test("业务列表的工作流卡在窄栏放得下确认按钮，并保留焦�
   await page.goto("/tests/visual/uiScaleFixture.html");
   const workflows = await context.newPage();
   await workflows.setViewportSize({ width: 288, height: 630 });
+  // 分类由左侧侧栏选（ADR 038），这里直接显示「我的」。
   await workflows.goto("/tests/visual/workflowFixture.html?library&appearance");
-  const tab = workflows.getByRole("tab", { name: "我的 1" });
-  await workflows.getByRole("tab", { name: /^预置/ }).press("ArrowRight");
-  await expect(tab).toHaveAttribute("aria-selected", "true");
   const collection = workflows.getByRole("region", { name: "我的工作流" });
   const name = "发布准备、兼容性审查和回滚演练";
   const card = collection.getByRole("button", { name: `查看工作流 ${name}` });
@@ -527,7 +525,6 @@ test("业务列表的工作流卡在窄栏放得下确认按钮，并保留焦�
     await expect(card.getByText(name)).toHaveCSS("font-size", size + "px");
     await expect(confirm).toBeFocused();
     await expect(confirm).not.toHaveCSS("box-shadow", "none");
-    await expect(tab).toHaveAttribute("aria-selected", "true");
     const main = (await card.boundingBox())!;
     const action = (await confirm.boundingBox())!;
     expect(main.x + main.width).toBeLessThanOrEqual(action.x);
@@ -542,60 +539,6 @@ test("业务列表的工作流卡在窄栏放得下确认按钮，并保留焦�
     "data-opened-workflow",
     "release-review",
   );
-});
-
-test("工作流文件列表和侧栏保留外观切换前状态，删除附件后焦点移动", async ({
-  page,
-  context,
-}) => {
-  test.setTimeout(60_000);
-  await page.goto("/tests/visual/uiScaleFixture.html");
-  const workflows = await context.newPage();
-  await workflows.setViewportSize({ width: 320, height: 740 });
-  await workflows.goto("/tests/visual/workflowFixture.html?files&appearance");
-  const sidebar = workflows.getByRole("region", { name: "工作流列表" });
-  const runTab = sidebar.getByRole("tab", { name: "运行" });
-  await sidebar.getByRole("tab", { name: "预置" }).press("End");
-  await expect(runTab).toBeFocused();
-  await expect(runTab).toHaveAttribute("aria-selected", "true");
-  const run = sidebar.getByRole("button", { name: /核对发布准备和回滚预案/ });
-  await run.press("Enter");
-  await expect(workflows.locator("html")).toHaveAttribute(
-    "data-opened-run",
-    "release",
-  );
-  await workflows.getByText("附件与标题（可选）", { exact: true }).click();
-  const files = workflows.getByRole("group", { name: "附件", exact: true });
-  await files.getByRole("button", { name: "选择文件…" }).click();
-  const first = files.getByRole("button", { name: /移除 .*详细交接说明/ });
-  const second = files.getByRole("button", { name: /移除 .*回滚预案/ });
-  const input = files.getByRole("textbox", { name: "附件路径" });
-  await input.fill("docs/尚未添加的检查记录.md");
-  await first.press("Shift");
-  for (const [theme, size] of appearanceSteps) {
-    await selectAppearance(page, theme, size);
-    await expect(first).toBeFocused();
-    await expect(first).not.toHaveCSS("box-shadow", "none");
-    await expect(files.getByText(/详细交接说明/)).toHaveCSS(
-      "font-size",
-      size - 2 + "px",
-    );
-    await expect(input).toHaveValue("docs/尚未添加的检查记录.md");
-    await expect(runTab).toHaveAttribute("aria-selected", "true");
-    expect(await files.evaluate((el) => el.scrollWidth)).toBeLessThanOrEqual(
-      320,
-    );
-  }
-  await first.press("Enter");
-  await expect(first).toBeHidden();
-  await expect(second).toBeFocused();
-  await second.press("Enter");
-  await expect(second).toBeHidden();
-  await expect(input).toBeFocused();
-  await input.press("Enter");
-  await expect(
-    files.getByRole("button", { name: /移除 .*尚未添加的检查记录/ }),
-  ).toBeVisible();
 });
 
 test("任务、会话状态和差异行随外观更新，保留折叠、阅读位置和焦点", async ({

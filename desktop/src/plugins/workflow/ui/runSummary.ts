@@ -4,7 +4,7 @@
  */
 import type { CanvasSnapshot, WorkflowCatalogNode } from "../types.ts";
 import { recordStatus, statusLabel } from "../status/snapshot.ts";
-import { nodeTiming, runActiveMs, runWaitedMs } from "../status/timing.ts";
+import { nodeTiming, runActiveMs, runClock, runWaitedMs } from "../status/timing.ts";
 import { describeResult, type Tone } from "./nodeDetail.ts";
 
 export interface SummaryStep {
@@ -60,7 +60,7 @@ export function summarizeRun(snapshot: CanvasSnapshot, now: number): RunSummaryV
 
   const steps: SummaryStep[] = live.map((record) => {
     const node = catalogNodes.get(record.siteId);
-    const timing = nodeTiming(record, now);
+    const timing = nodeTiming(record, runClock(snapshot, now));
     const conclusion = describeResult(record.result, node?.labels, snapshot.artifacts)?.conclusion;
     return {
       siteId: record.siteId,
@@ -102,8 +102,8 @@ export function summarizeRun(snapshot: CanvasSnapshot, now: number): RunSummaryV
     startedAt,
     endedAt,
     // 只算真正在跑的时间；停着的那段不计。
-    elapsedMs: startedAt === null ? null : runActiveMs(records, now, snapshot.active),
-    waitedMs: runWaitedMs(records, now),
+    elapsedMs: startedAt === null ? null : runActiveMs(records, now, snapshot.active, runClock(snapshot, now)),
+    waitedMs: runWaitedMs(records, runClock(snapshot, now)),
     reworks: interventions.filter((item) => item.kind === "rewind" || item.kind === "goto").length,
     confirms: interventions.filter((item) => item.kind === "confirm").length,
     superseded: records.length - live.length,

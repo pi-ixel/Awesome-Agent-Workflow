@@ -11,9 +11,9 @@ import "../../src/plugins/workflow/ui/workflowPanel.css";
 import { FlowStages } from "../../src/plugins/workflow/ui/FlowStages.tsx";
 import { WorkflowPanel } from "../../src/plugins/workflow/ui/WorkflowPanel.tsx";
 import { WorkflowLibrary } from "../../src/plugins/workflow/ui/WorkflowLibrary.tsx";
-import { WorkflowLauncher } from "../../src/plugins/workflow/ui/WorkflowLauncher.tsx";
 import { WorkflowSidebar } from "../../src/plugins/workflow/ui/WorkflowSidebar.tsx";
-import { WorkflowOverview } from "../../src/plugins/workflow/ui/WorkflowOverview.tsx";
+import { WorkflowWorkspace } from "../../src/plugins/workflow/ui/WorkflowWorkspace.tsx";
+import { createTemplateNavigation } from "../../src/plugins/workflow/ui/templateNavigation.ts";
 import { fakeWorkflowService, runSummary, workflowSummary } from "../plugins/workflow/helpers.ts";
 import type {
   CanvasSnapshot,
@@ -128,56 +128,6 @@ if (params.has("inspector")) {
   root.render(<div style={{ height: "100vh" }}>
     <WorkflowPanel service={service.service} onOpenSession={(id) => { document.documentElement.dataset.openedSession = id; }} />
   </div>);
-} else if (params.has("overview")) {
-  const service = fakeWorkflowService();
-  service.setRuns([runSummary({
-    runId: "overview-run",
-    title: "检查工作区文件与运行归档记录的详细状态",
-    name: "项目交接",
-    status: "running",
-  })]);
-  root.render(<WorkflowOverview service={service.service} project="/project"
-    onOpenRun={(id) => { document.documentElement.dataset.openedRun = id; }}
-    onLaunch={() => {}} onBrowse={() => {}} />);
-} else if (params.has("files")) {
-  const fake = fakeWorkflowService();
-  const project = "D:/workflow-release";
-  const summary = workflowSummary();
-  const metadata = summary.meta!;
-  const launcher = params.has("entries") ? {
-    ...metadata,
-    entries: [
-      { ...metadata.entries[0]!, description: "从原始需求启动并生成计划。" },
-      {
-        id: "release",
-        label: "从发布审查开始",
-        description: "已有设计结果，核对发布清单和回滚步骤。",
-        inputs: [{ name: "checklist", label: "发布清单", kind: "text" as const, required: true, placeholder: "" }],
-      },
-    ],
-  } : metadata;
-  const run = runSummary({ runId: "release", title: "核对发布准备和回滚预案", status: "completed" });
-  fake.setLibrary([summary]);
-  fake.setRuns([run]);
-  const service = {
-    ...fake.service,
-    sessionLinks: () => ({ workspace: project, runs: [] }),
-  };
-  const paths = [
-    "docs/releases/发布准备和兼容性检查的详细交接说明.md",
-    "docs/releases/回滚预案.md",
-  ];
-  root.render(
-    <main className="workflow-panel min-h-screen bg-base p-2 text-ink">
-      <WorkflowSidebar
-        project={project}
-        service={service}
-        onOpenWorkflow={(id) => { document.documentElement.dataset.openedWorkflow = id; }}
-        onOpenRun={(id) => { document.documentElement.dataset.openedRun = id; }}
-      />
-      <WorkflowLauncher service={service} meta={launcher} pickFiles={() => Promise.resolve(paths)} />
-    </main>,
-  );
 } else if (params.has("library")) {
   const fake = fakeWorkflowService();
   const summary = workflowSummary("release-review", "user");
@@ -191,34 +141,42 @@ if (params.has("inspector")) {
       <WorkflowLibrary
         service={fake.service}
         version={0}
+        tab={params.get("tab") === "presets" ? "presets" : "mine"}
         onOpenWorkflow={(id) => { document.documentElement.dataset.openedWorkflow = id; }}
-        onLaunch={(id) => { document.documentElement.dataset.launchedWorkflow = id; }}
       />
     </main>,
   );
-} else if (params.has("panel") || params.has("compose")) {
+} else if (params.has("panel")) {
   const service = fakeWorkflowService();
   service.setRuns([
     runSummary({ runId: "done", title: "整理交接记录", status: "completed" }),
     runSummary({ runId: "pending", title: "确认设计方案", status: "waiting" }),
   ]);
+  root.render(<div className="flex h-screen min-h-0 flex-col bg-base text-ink">
+    <div className="min-h-0 flex-1"><WorkflowPanel service={service.service} /></div>
+  </div>);
+} else if (params.has("compose")) {
+  // 左侧「工作流」功能区（ADR 038）：侧栏的「用 AI 新建」在中间的模板区打开撰写框。
+  const service = fakeWorkflowService();
+  const navigation = createTemplateNavigation();
   const editor: WorkflowDraftEditor = {
-    start: params.has("compose") ? async () => {
+    start: async () => {
       const response = await fetch("/tests/visual/workflowFixture.html?sample-compose-request");
       if (!response.ok) throw new Error("工作流编辑会话启动失败，请重试");
-    } : () => Promise.resolve(),
+    },
     show: () => Promise.resolve(false),
     has: () => false,
     send: () => false,
     end: async () => {},
   };
   root.render(<div className="flex h-screen min-h-0 flex-col bg-base text-ink">
-    {params.has("compose") && (
-      <header className="flex shrink-0 items-center border-b border-line p-2 text-ui-sm">
-        <button type="button" onClick={() => { document.documentElement.dataset.projectTool = "opened"; }}>项目工具</button>
-      </header>
-    )}
-    <div className="min-h-0 flex-1"><WorkflowPanel service={service.service} editor={editor} /></div>
+    <header className="flex shrink-0 items-center border-b border-line p-2 text-ui-sm">
+      <button type="button" onClick={() => { document.documentElement.dataset.projectTool = "opened"; }}>项目工具</button>
+    </header>
+    <div className="flex min-h-0 flex-1">
+      <aside className="w-48 shrink-0 border-r border-line"><WorkflowSidebar service={service.service} navigation={navigation} canCompose /></aside>
+      <div className="min-h-0 min-w-0 flex-1"><WorkflowWorkspace service={service.service} navigation={navigation} editor={editor} /></div>
+    </div>
   </div>);
 } else root.render(
   <div className="workflow-panel" style={{ height: "100vh" }}>

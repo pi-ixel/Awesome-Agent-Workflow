@@ -5,7 +5,7 @@ import { runSummary } from "./helpers.ts";
 it("picks the runs that need a decision from the user", () => {
   const runs = [
     runSummary({ runId: "wait", status: "waiting" }),
-    runSummary({ runId: "blocked", status: "failed", result: { status: "blocked", stage: "review" } }),
+    runSummary({ runId: "blocked", status: "blocked", result: { status: "blocked", stage: "review" } }),
     runSummary({ runId: "failed", status: "failed", result: { status: "done" } }),
     runSummary({ runId: "done", status: "completed" }),
     runSummary({ runId: "running", status: "running" }),
@@ -13,7 +13,7 @@ it("picks the runs that need a decision from the user", () => {
   expect(attentionOf(runs).map((run) => run.runId)).toEqual(["wait", "blocked"]);
 });
 
-it("ignores a result that is not an object when deciding what is blocked", () => {
+it("a failed run is a result, not something waiting for you", () => {
   expect(attentionOf([runSummary({ runId: "a", status: "failed", result: "boom" })])).toEqual([]);
 });
 

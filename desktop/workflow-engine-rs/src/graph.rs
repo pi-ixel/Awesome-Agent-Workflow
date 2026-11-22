@@ -13,6 +13,9 @@ use std::{
 pub struct Definition {
     pub id: String,
     pub name: String,
+    /// 作者写的「这个工作流在做什么」（ADR 041：进 Agent 的开场白）。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
     pub entry: String,
     #[serde(default)]
     pub initial_vars: BTreeMap<String, Value>,
@@ -35,6 +38,16 @@ pub struct Definition {
 pub struct Stage {
     pub id: String,
     pub label: String,
+    /// 作者写的「这个阶段在做什么」（ADR 041：进 Agent 的开场白）。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+}
+/// 步骤的必读清单一项（ADR 041）：运行变量名和一句用途。开场白里只写名字和
+/// 用途，内容由 Agent 用 `get_workflow_step` 按名字取。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReadHint {
+    pub name: String,
+    pub purpose: String,
 }
 /// All instances of one run share its immutable definition in memory. The
 /// root stores it once in the checkpoint; child references are restored on load.
@@ -108,6 +121,9 @@ pub struct Node {
     pub knowledge: String,
     #[serde(default)]
     pub knowledge_files: Vec<String>,
+    /// 这一步要读的运行变量（ADR 041）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reads: Vec<ReadHint>,
     #[serde(default)]
     pub schema: Option<Value>,
     #[serde(default)]
@@ -200,6 +216,18 @@ pub struct Route {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confirm: Option<String>,
     /// 给审查的人看的一句话条件（只用于界面呈现，不参与调度）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub explain: Option<String>,
+}
+/// 流程停在哪里：哪个实例（`call_path`）的哪一步（`phase`）之后，走了第几条去向。
+/// 执行次数超限、前置条件不满足时没有去向（`route` 为空），停在这一步之前。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Stop {
+    pub phase: String,
+    pub call_path: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub explain: Option<String>,
 }
@@ -644,6 +672,10 @@ pub struct Run {
     pub local_visits: BTreeMap<String, u32>,
     pub terminal: Option<String>,
     pub terminal_reason: Option<String>,
+    /// 流程停下（`$blocked`）的位置：停在哪一步之后、走了哪条去向（流程层的事实，
+    /// 由面板呈现，不进步骤会话）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop: Option<Stop>,
     #[serde(default)]
     pub stack: Vec<CallFrame>,
     #[serde(default)]
@@ -758,6 +790,7 @@ impl Run {
             local_visits: BTreeMap::new(),
             terminal: None,
             terminal_reason: None,
+            stop: None,
             stack: vec![],
             calls: vec![],
             skipped: vec![],
@@ -769,6 +802,9 @@ impl Run {
             entered: vec![],
             gate: None,
         })
+    }
+    fn stop_here(&self, route: Option<usize>, explain: Option<String>) -> Stop {
+        Stop { phase: self.phase.clone(), call_path: self.call_path(), route, explain }
     }
     pub fn call_path(&self) -> Vec<String> {
         self.prefix
@@ -1008,6 +1044,7 @@ impl Run {
             local_visits: BTreeMap::new(),
             terminal: None,
             terminal_reason: None,
+            stop: None,
             stack: vec![],
             calls: vec![],
             skipped: vec![],
@@ -1046,6 +1083,7 @@ impl Run {
                 .status = "failed".into();
             self.terminal = Some("blocked".into());
             self.terminal_reason = child.terminal_reason.clone();
+            self.stop = child.stop.clone();
         }
         Ok(())
     }
@@ -1101,6 +1139,7 @@ impl Run {
         if *local_count >= phase.max_visits.unwrap_or(1000) {
             self.terminal = Some("blocked".into());
             self.terminal_reason = Some("子流程调用超过执行次数上限".into());
+            self.stop = Some(self.stop_here(None, None));
             return Ok(());
         }
         *local_count += 1;
@@ -1165,6 +1204,7 @@ impl Run {
                 local_visits: BTreeMap::new(),
                 terminal: None,
                 terminal_reason: None,
+            stop: None,
                 stack: vec![],
                 calls: vec![],
                 skipped: vec![],
@@ -1304,6 +1344,7 @@ impl Run {
             if child.run.terminal.as_deref() == Some("blocked") {
                 let failed_run = child.run.clone();
                 let reason = child.run.terminal_reason.clone();
+                let stop = child.run.stop.clone();
                 let failed_id = child.instance_id.clone();
                 let mut restored = before;
                 restored.children[index].run = failed_run;
@@ -1317,6 +1358,7 @@ impl Run {
                 *ordinals = ordinals_before;
                 self.terminal = Some("blocked".into());
                 self.terminal_reason = reason;
+                self.stop = stop;
                 self.group = Some(restored);
                 return Ok(vec![]);
             }
@@ -1384,6 +1426,7 @@ impl Run {
             if *local_count >= phase.max_visits.unwrap_or(1000) {
                 self.terminal = Some("blocked".into());
                 self.terminal_reason = Some("子流程调用超过执行次数上限".into());
+                self.stop = Some(self.stop_here(None, None));
                 return Ok(vec![]);
             }
             *local_count += 1;
@@ -1449,6 +1492,7 @@ impl Run {
             if *local_count >= phase.max_visits.unwrap_or(1000) {
                 self.terminal = Some("blocked".into());
                 self.terminal_reason = Some("流程阶段超过执行次数上限".into());
+                self.stop = Some(self.stop_here(None, None));
                 return Ok(vec![]);
             }
             *local_count += 1;
@@ -1501,6 +1545,7 @@ impl Run {
                 if evaluate(&requirement.condition, &context)? != true {
                     self.terminal = Some("blocked".into());
                     self.terminal_reason = Some(format!("节点 {id}：{}", requirement.message));
+                    self.stop = Some(self.stop_here(None, None));
                     return Ok(vec![]);
                 }
             }
@@ -1548,7 +1593,18 @@ impl Run {
                 );
             }
             let scope = self.current_scope();
-            actions.push(Action { site: id.clone(), ordinal: *ordinal, actor, input: json!({"vars":self.vars,"latest":self.latest,"__node":node,"__phase":self.phase,"__scope":scope,"__callPath":path,"__initial":self.prefix.is_empty() && self.phase == self.definition.entry && count == 1}) });
+            // 开场白里「在造什么、在哪个阶段」（ADR 041）：作者写在定义里的说明。
+            let stage = self
+                .definition
+                .phases
+                .get(&self.phase)
+                .and_then(|phase| phase.stage.as_ref())
+                .and_then(|stage| self.definition.stages.iter().find(|s| &s.id == stage));
+            let brief = json!({
+                "workflow": {"name": self.definition.name, "description": self.definition.description},
+                "stage": stage.map(|s| json!({"label": s.label, "description": s.description})),
+            });
+            actions.push(Action { site: id.clone(), ordinal: *ordinal, actor, input: json!({"vars":self.vars,"latest":self.latest,"__node":node,"__phase":self.phase,"__scope":scope,"__callPath":path,"__brief":brief,"__initial":self.prefix.is_empty() && self.phase == self.definition.entry && count == 1}) });
             self.phase_nodes.insert(id.clone(), "running".into());
         }
         Ok(actions)
@@ -1577,6 +1633,7 @@ impl Run {
                 record.status = "failed".into();
                 self.terminal = Some("blocked".into());
                 self.terminal_reason = child.run.terminal_reason.clone();
+                self.stop = child.run.stop.clone();
             }
             if self.terminal.is_none() && group.pending.is_empty() {
                 // A successful child must remain completed even if the
@@ -1725,6 +1782,7 @@ impl Run {
                 "$blocked" => {
                     self.terminal = Some("blocked".into());
                     self.terminal_reason = route.reason;
+                    self.stop = Some(self.stop_here(Some(index), route.explain));
                 }
                 "$return" => {
                     if self.stack.is_empty() {
@@ -1857,6 +1915,7 @@ impl Run {
         if self.terminal.as_deref() == Some("blocked") {
             self.terminal = None;
             self.terminal_reason = None;
+            self.stop = None;
         }
         let mut instance = None;
         for child in self.phase_calls.values_mut() {
@@ -1938,6 +1997,7 @@ impl Run {
         self.batch.clear();
         self.terminal = None;
         self.terminal_reason = None;
+        self.stop = None;
         self.return_value = None;
         self.gate = None;
         Ok(())
@@ -2310,5 +2370,28 @@ mod tests {
         assert!(run.dispatch(&mut ordinals).unwrap().is_empty());
         assert_eq!(run.terminal.as_deref(), Some("blocked"));
         assert!(run.terminal_reason.unwrap().contains("缺少上游文件"));
+        // 前置条件不满足：停在这一步之前，没有去向。
+        assert_eq!(run.stop, Some(Stop { phase: "check".into(), call_path: vec![], route: None, explain: None }));
+    }
+    #[test]
+    fn a_blocked_route_records_where_the_flow_stopped() {
+        let mut flow = definition();
+        let routes = &mut flow.phases.get_mut("reviews").unwrap().routes;
+        routes[1].explain = Some("有评审没通过".into());
+        routes[1].reason = Some("看评审意见后决定".into());
+        let mut run = Run::new(flow, json!({})).unwrap();
+        let mut ordinals = BTreeMap::new();
+        run.dispatch(&mut ordinals).unwrap();
+        run.complete("implement", 1, json!({})).unwrap();
+        run.dispatch(&mut ordinals).unwrap();
+        run.complete("reviewA", 1, json!({"decision":"pass"})).unwrap();
+        run.complete("reviewB", 1, json!({"decision":"revise"})).unwrap();
+        run.dispatch(&mut ordinals).unwrap();
+        assert_eq!(run.terminal.as_deref(), Some("blocked"));
+        assert_eq!(run.terminal_reason.as_deref(), Some("看评审意见后决定"));
+        assert_eq!(
+            run.stop,
+            Some(Stop { phase: "reviews".into(), call_path: vec![], route: Some(1), explain: Some("有评审没通过".into()) })
+        );
     }
 }

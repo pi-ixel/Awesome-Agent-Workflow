@@ -34,6 +34,12 @@ export interface SlashItem {
   readonly insertText?: string;
   readonly skillReference?: SkillReference;
   readonly searchAlias?: string;
+  /** 扩展条目自带的图标。 */
+  readonly Icon?: ProjectSlashEntry["Icon"];
+  /** 扩展条目是发送对象时（ADR 039）：带着它发送时交给扩展。 */
+  readonly submit?: ProjectSlashEntry["submit"];
+  readonly placeholder?: string;
+  readonly pendingLabel?: string;
 }
 
 /** 检测光标前是否处在行首 slash 触发段；返回查询串（可空）或 null。 */

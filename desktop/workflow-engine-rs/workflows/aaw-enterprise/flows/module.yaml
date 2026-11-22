@@ -14,6 +14,10 @@ steps:
       delivers: 一份实施计划和任务列表：每项任务的目标、范围和要做的测试
       prompt: 规划有序任务，明确每项范围与测试责任，更新测试设计；不允许空计划或只有标题。
       knowledge: [host-tools.md, task-split.md]
+      reads:
+        currentModule: 当前模块组
+        design: 通过门禁的模块设计
+        tests: 通过门禁的测试设计（分配测试责任）
       does:
         - 拆分有序任务
         - 明确范围与测试
@@ -62,6 +66,11 @@ steps:
       delivers: 这个模块组的交付说明：验证情况、产物和遗留问题
       prompt: 汇总实际验证、证据与遗留事项。遇到需要用户决定的问题，在当前会话中说明并等待答复，处理后继续；无法完成时如实说明，不得虚构已完成。
       knowledge: [host-tools.md, dev-completion.md]
+      reads:
+        currentModule: 当前模块组
+        plan: 任务计划（各任务的交付结果用 list_workflow_results 查看）
+        planVersion: 最新的任务计划版本
+        testVersion: 最新的测试设计版本
       does:
         - 汇总验证与产物
         - 说明遗留问题
@@ -91,6 +100,10 @@ steps:
       delivers: 一份模块设计：现状分析和目标设计
       prompt: 对当前模块组先做现状证据分析，再形成目标设计。在 files 中列出这一步新建的文档路径。
       knowledge: [host-tools.md, module-design-method.md]
+      reads:
+        currentModule: 当前模块组
+        arClarification: AR 澄清结论（需求依据）
+        boundary: 模块边界与交互
       does:
         - 现状与证据
         - 目标设计
@@ -126,6 +139,10 @@ steps:
       delivers: 一份模块测试设计：要验证什么、怎么验证
       prompt: 依据当前模块组设计形成最小充分验证方案。
       knowledge: [host-tools.md, test-design-method.md, test-design-template.md]
+      reads:
+        currentModule: 当前模块组
+        design: 当前模块设计（测试设计的依据）
+        arClarification: AR 澄清结论（验收口径）
       does:
         - 验证范围
         - 测试设计
@@ -157,6 +174,11 @@ steps:
       delivers: 一份门禁报告：模块设计能否进入任务规划，以及发现的问题
       prompt: 独立检查当前模块设计及测试设计。
       knowledge: [host-tools.md, module-gate-method.md]
+      reads:
+        currentModule: 当前模块组
+        design: 当前模块设计
+        tests: 当前测试设计
+        arClarification: AR 澄清结论
       does:
         - 独立检查
         - 输出结论
@@ -201,6 +223,10 @@ steps:
       delivers: 修正后的模块设计和测试设计
       prompt: 依据最新模块门禁报告，在授权内修正设计与测试；不得擅自作用户决策。
       knowledge: [host-tools.md, module-design-method.md, repair-policy.md]
+      reads:
+        design: 当前模块设计
+        tests: 当前测试设计
+        gateReview: 模块门禁报告（按它整改）
       does:
         - 修正设计或测试
       session_scope: [vars.currentAr.id, vars.currentModule.id]
@@ -236,6 +262,10 @@ steps:
       role: 模块设计门禁
       prompt: 根据最新模块设计及测试设计独立复核。
       knowledge: [host-tools.md, module-gate-method.md]
+      reads:
+        design: 整改后的模块设计
+        tests: 整改后的测试设计
+        gateReview: 上一轮门禁报告（确认是否改好）
       does:
         - 整改后复核
       session_scope: [vars.currentAr.id, vars.currentModule.id]

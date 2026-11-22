@@ -37,7 +37,7 @@ import { UiIcon } from "./UiIcon.tsx";
 import { forwardRef, useEffect, useId, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from "react";
 
 import { useAnchoredPopover } from "./controls/useAnchoredPopover.ts";
-import { ChevronDownIcon } from "./icons.tsx";
+import { CheckIcon, ChevronDownIcon } from "./icons.tsx";
 
 export const focusVisibleRing =
   "focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:outline-none";
@@ -635,6 +635,148 @@ export function Listbox({
             </li>
           ))}
         </ul>
+      ) : null}
+    </div>
+  );
+}
+
+export interface MultiListboxOption {
+  readonly value: string;
+  readonly label: string;
+  /** 选项前的图标（如状态图标），以 ui-icon-16 为基准。 */
+  readonly icon?: ReactNode;
+}
+
+/**
+ * 多选下拉：外观、定位、键盘与 Listbox 一致，区别是点选项只勾选 / 取消、面板不收起，
+ * 一项都不选等于不筛选（触发按钮显示 emptyLabel）。勾了东西时面板底部给「清除」。
+ *
+ * 触发按钮的文字：没选 → emptyLabel；一两项 → 用「、」连起来；更多 → 「N 项」加 unit。
+ */
+export function MultiListbox({
+  label,
+  values,
+  options,
+  onChange,
+  emptyLabel,
+  unit = "项",
+  className = "py-1 text-xs",
+}: {
+  /** 可访问名称（触发按钮与面板的 aria-label）。 */
+  readonly label: string;
+  readonly values: readonly string[];
+  readonly options: readonly MultiListboxOption[];
+  readonly onChange: (values: readonly string[]) => void;
+  readonly emptyLabel: string;
+  /** 选了三项以上时触发按钮写「N {unit}」。 */
+  readonly unit?: string;
+  readonly className?: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  useAnchoredPopover(isOpen, containerRef, listRef);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    function handlePointerDown(event: PointerEvent): void {
+      if (containerRef.current !== null && !containerRef.current.contains(event.target as Node)) setIsOpen(false);
+    }
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => window.removeEventListener("pointerdown", handlePointerDown);
+  }, [isOpen]);
+
+  const chosen = options.filter((option) => values.includes(option.value));
+  const summary = chosen.length === 0 ? emptyLabel
+    : chosen.length <= 2 ? chosen.map((option) => option.label).join("、")
+    : `${chosen.length} ${unit}`;
+  // 保持选项原有的顺序，不按点选先后。
+  const toggle = (value: string): void => {
+    const next = values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
+    onChange(options.map((option) => option.value).filter((item) => next.includes(item)));
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>): void => {
+    if (!isOpen) {
+      if (event.key === "Enter" || event.key === " " || event.key === "ArrowDown") {
+        event.preventDefault();
+        setActiveIndex(0);
+        setIsOpen(true);
+      }
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveIndex((index) => Math.min(index + 1, options.length - 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex((index) => Math.max(index - 1, 0));
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      const option = options[activeIndex];
+      if (option) toggle(option.value);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      setIsOpen(false);
+    }
+  };
+
+  return (
+    <div ref={containerRef} className="relative inline-flex">
+      <button
+        type="button"
+        role="combobox"
+        aria-label={label}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((open) => !open)}
+        onKeyDown={handleKeyDown}
+        className={`inline-flex min-w-24 items-center justify-between gap-2 rounded-md border border-line-strong bg-surface px-2.5 text-left text-ink transition-colors hover:border-ink-faint ${focusVisibleRing} ${className}`}
+      >
+        <span className="truncate">{summary}</span>
+        <ChevronDownIcon className="ui-icon-12 text-ink-faint" />
+      </button>
+      {isOpen ? (
+        <div
+          ref={listRef}
+          popover={typeof HTMLElement.prototype.showPopover === "function" ? "manual" : undefined}
+          className="absolute top-full right-0 z-40 mt-1 min-w-40 rounded-xl border border-line-strong bg-surface p-1 shadow-floating selection-popup"
+        >
+          <ul role="listbox" aria-label={label} aria-multiselectable="true" className="max-h-64 overflow-y-auto">
+            {options.map((option, index) => {
+              const selected = values.includes(option.value);
+              return (
+                <li key={option.value}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    onPointerEnter={() => setActiveIndex(index)}
+                    onClick={() => toggle(option.value)}
+                    className={`relative flex min-h-8 w-full items-center gap-2 rounded-lg py-1.5 pr-8 pl-2 text-left text-xs whitespace-nowrap transition-colors ${
+                      index === activeIndex ? rowSelectedClass : "text-ink-soft"
+                    }`}
+                  >
+                    {option.icon}
+                    {option.label}
+                    {selected && <CheckIcon aria-hidden={true} className="pointer-events-none absolute right-2 ui-icon-16 text-ink-subtle" />}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          {values.length > 0 && <>
+            <div role="separator" className="-mx-1 my-1 h-px bg-border" />
+            <button
+              type="button"
+              onClick={() => onChange([])}
+              className="flex min-h-8 w-full items-center rounded-lg px-2 text-left text-xs text-ink-mute transition-colors hover:bg-(--color-selected) hover:text-ink"
+            >
+              清除
+            </button>
+          </>}
+        </div>
       ) : null}
     </div>
   );

@@ -92,22 +92,34 @@ export function apply(ctx: Context): void {
     logger,
     agentLaunch,
     plans: createNodePlans(host.storage),
+    // 会话是唯一来源（ADR 040）：节点「在干什么」读会话视图用的同一份会话活动。
+    sessionActivity: project.sessions.activity,
   });
 
   // 节点会话就是普通会话（ADR 037）：宿主经 project 的会话能力打开、发任务说明、订阅轮次。
   const sessions: NodeSessionPort = {
     open: (options) => project.sessions.openPluginSession(options),
+    ready: (target) => project.sessions.pluginSessionReady(target),
     send: (target, message) => project.conversation.send(target, message.text, undefined, { display: message.display }),
     cancel: (target) => project.conversation.cancel(target),
     isRunning: (target) =>
       target.sessionId !== null && project.sessions.busySessionIds(target.agentKey, target.workspacePath).has(target.sessionId),
-    watchTurns: (target, listener) => project.sessions.watchTurns(target, listener),
+    watchTurns: (sessionId, listener) => project.sessions.watchTurns(sessionId, listener),
     watchEvents: (target, listener) => project.sessions.watchEvents(target, listener),
+  };
+  // 登记在没结束的运行上的会话（所有项目）：运行停着也一直报它们的状态（ADR 040）。
+  const registeredSessions = (): ReadonlySet<string> => {
+    const runs = [...service.sessionLinks().runs, ...service.otherSessionLinks().flatMap((item) => item.runs)];
+    return new Set(runs.filter((run) => run.status !== "completed").flatMap((run) => run.links.map((link) => link.sessionId)));
   };
   const detachHost = platform.isTauriEnv()
     ? attachNodeSessionHost({
         workflow: client,
         sessions,
+        registered: {
+          sessions: registeredSessions,
+          subscribe: (listener) => service.subscribe((event) => { if (event.type === "runs-changed") listener(); }),
+        },
         onEvent: projectEvent,
         logger,
         openTrackerTransport: (params: TrackerStartParamsWire) =>

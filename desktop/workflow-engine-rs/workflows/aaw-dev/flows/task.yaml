@@ -15,6 +15,12 @@ steps:
       role: 任务实现与测试
       prompt: 实现当前任务并执行实际验证，返回变更及证据；不得越过任务范围。files 列出这一步新增或修改的文件（相对项目目录的路径）。
       knowledge: [host-tools.md, task-implementation.md]
+      reads:
+        task: 当前任务的目标、范围和测试责任
+        design: 设计（照此实现）
+        testVersion: 当前测试设计版本
+        planVersion: 当前任务计划版本
+        previousDelivery: 上一个任务的交付（衔接用；第一个任务没有）
       does:
         - 实现当前任务
         - 执行验证并留证
@@ -57,6 +63,11 @@ steps:
         有可用的代码检查 skill 或工具（例如团队提供的代码检查 skill，或项目自带的 lint、类型检查、测试）就用它们，保留原始输出；
         没有时，逐个审读本次改动的文件完成一次自检。如实交付结论和你用了什么方式检查。
       knowledge: [host-tools.md, codecheck.md]
+      reads:
+        task: 当前任务的范围
+        implementation: 本次实现说明和改动的文件
+        design: 对照设计检查一致性
+        testVersion: 对照测试设计检查一致性
       does:
         - 用可用的检查工具或自行审读变更
         - 给出结论与问题清单
@@ -108,6 +119,10 @@ steps:
       role: 代码检查整改
       prompt: 只修正代码检查中确定安全的问题并重跑受影响测试，禁止弱化规则；需要用户决策时在当前会话提问并等待答复，再完成可执行的处置。files 列出这一步新增或修改的文件（相对项目目录的路径）。
       knowledge: [host-tools.md, codecheck.md]
+      reads:
+        scan: 代码检查发现的问题（只修确定安全的）
+        implementation: 本次实现说明和改动的文件
+        task: 当前任务的范围
       does:
         - 修复确定安全的问题
         - 重新执行检查
@@ -138,6 +153,13 @@ steps:
       delivers: 这个任务的完成确认，以及更新后的计划
       prompt: 核对当前任务实际证据并更新任务计划和测试设计版本。还有任务时 done=false 且 nextTaskId 为下一个任务 ID；全部完成时 done=true 且 nextTaskId 为空。不得跳过任务。
       knowledge: [host-tools.md, task-delivery.md]
+      reads:
+        task: 当前任务
+        implementation: 实现说明与验证证据
+        scan: 代码检查结论
+        plan: 全部任务（确定下一个任务）
+        planVersion: 要更新的任务计划版本
+        testVersion: 要更新的测试设计版本
       does:
         - 核对任务证据
         - 更新计划与测试版本

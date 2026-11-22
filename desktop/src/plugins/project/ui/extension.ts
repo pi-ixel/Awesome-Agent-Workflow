@@ -8,6 +8,7 @@
  */
 import type { ComponentType } from "react";
 import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
+import type { SessionTarget } from "../sessions/types.ts";
 
 /** 项目里一项需要关注的后台工作（如一次工作流运行）。 */
 export interface ProjectActivity {
@@ -23,6 +24,8 @@ export interface ProjectActivity {
   readonly summary: string;
   /** 打开它的按钮的无障碍名称。 */
   readonly openLabel: string;
+  /** 它自己的会话：在这些会话里由它的会话横幅说明，状态卡不再重复列出。 */
+  readonly sessionIds?: readonly string[];
 }
 
 export interface ProjectActivities {
@@ -36,7 +39,27 @@ export interface ProjectSlashEntry {
   readonly id: string;
   readonly label: string;
   readonly description: string;
-  run(this: void): void;
+  /** 条目前的图标（同技能行的位置）；给了图标时不再在名称前加「/」。 */
+  readonly Icon?: ComponentType<{ readonly className?: string }>;
+  /** 选中即执行；发送对象（给了 submit）不用它。 */
+  readonly run?: (this: void) => void;
+  /**
+   * 给了它，条目就是「发送对象」（ADR 039）：选中后显示为输入框里的标签，带着
+   * 标签发送时把文字交给扩展，不发给 Agent。发出后那句话立刻显示在信息流里，
+   * 直到返回的 Promise 结束——扩展在它的消息进到会话（接手）之后再 resolve；
+   * 失败时抛出给用户看的原因，那句话回到输入框。
+   */
+  readonly submit?: (this: void, submission: ProjectSlashSubmission) => Promise<void>;
+  /** 作为发送对象时输入框的提示文字。 */
+  readonly placeholder?: string;
+  /** 发出后、扩展接手前，那句话下面显示的状态（如「正在启动工作流…」）。 */
+  readonly pendingLabel?: string;
+}
+
+/** 带着发送对象发出的内容：在哪个会话里、写了什么。 */
+export interface ProjectSlashSubmission {
+  readonly session: SessionTarget & { readonly sessionId: string };
+  readonly text: string;
 }
 
 /** 空会话里的快捷动作（如「启动工作流」「查看进行中的工作流」）。 */
@@ -63,9 +86,9 @@ export interface ProjectExtension {
   readonly slashEntries: ReadonlySnapshot<readonly ProjectSlashEntry[]>;
   readonly quickAction: ReadonlySnapshot<ProjectQuickAction | null>;
   readonly treeAction: ProjectTreeAction;
-  /** 项目总览里的区块。 */
-  readonly Overview: ComponentType<{ readonly project: string }>;
-  /** 会话顶部的横幅（不是插件自己的会话时不渲染）。 */
+  /** 项目总览里的区块（可不提供）。 */
+  readonly Overview?: ComponentType<{ readonly project: string }>;
+  /** 输入框卡片最上面一行，排在排队消息上面（不是插件自己的会话时不渲染）。 */
   readonly SessionBanner: ComponentType<{ readonly project: string; readonly sessionId: string }>;
 }
 

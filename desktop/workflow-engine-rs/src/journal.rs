@@ -5,6 +5,7 @@
 //! 建表语句删除；旧库文件中遗留的这些表不迁移、不再写入，只读保留原样。
 use crate::{
     Action, ProcessOutput, Workflow,
+    session_host::{SessionState, TurnOutcome},
     intervention::{
         AffectedNode, CheckpointInfo, CleanupFile, CleanupProblem, InterventionPlan,
         InterventionRequest, IrreversibleNode,
@@ -14,7 +15,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -78,12 +79,17 @@ pub struct NodeRecord {
     pub call_path: Vec<String>,
     pub phase_id: Option<String>,
     pub result: Option<Value>,
-    /// 这一轮已结束但还没有结果，引擎在等用户经会话回复（只在 running 记录上出现）。
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub awaiting_input: bool,
-    /// 开始等待的时刻（毫秒时间戳）。
+    /// 这一步在会话里最近一轮的情况（ADR 040 轮次记录）：`working`（还没
+    /// 结束）或它的结束方式 `completed` / `cancelled` / `failed`。只在
+    /// running 记录上出现。
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub awaiting_input_since: Option<i64>,
+    pub turn: Option<String>,
+    /// 最近一轮结束的时刻（毫秒时间戳）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_ended_at: Option<i64>,
+    /// 已经交了结果、还没被采用（只在 running 记录上出现）。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub submitted: bool,
     /// 进入该动作所在步骤时的检查点（ADR 031）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint: Option<i64>,
@@ -96,13 +102,81 @@ pub struct NodeRecord {
     /// 结束的时刻；仍在执行时没有。失败后重试会清掉，重新计时到再次结束。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ended_at: Option<i64>,
-    /// 已结束的等待回复累计时长（毫秒），不含当前这一次等待。
+    /// 已结束的等待累计时长（毫秒，两轮之间会话空着的时间），只算运行在执行的时段；
+    /// 当前这一次等待只含已结束的执行时段里的部分，正在执行的这段由界面接着算。
     #[serde(default, skip_serializing_if = "is_zero")]
     pub waited_ms: i64,
 }
 
 fn is_zero(value: &i64) -> bool {
     *value == 0
+}
+
+/// 一份会话报告在轮次记录里新记下的事实（推给界面与通知，ADR 040）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnFact {
+    pub run_id: String,
+    pub project: String,
+    pub site: String,
+    pub ordinal: u32,
+    pub kind: TurnFactKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnFactKind {
+    /// 会话里开始了一轮（用户在会话里接着说了）。
+    Started { turn: u64 },
+    /// 一轮结束了；`awaiting`：正常停下却没交结果，在等你回复。
+    Ended { turn: u64, outcome: TurnOutcome, awaiting: bool },
+}
+
+/// 这一步在会话里的一轮（ADR 040 轮次记录）。轮次编号是宿主给的（这一轮
+/// 开始时会话状态的序号），跨页面重载单调递增。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnRecord {
+    pub turn: u64,
+    pub session_id: String,
+    /// 这一轮是工作流发说明开始的（不是用户在会话里发起的）。
+    pub prompted: bool,
+    /// 还没看到它结束时为空（例如运行在这一轮中途被停止）。
+    pub outcome: Option<TurnOutcome>,
+}
+
+struct TurnTimes {
+    started_at: Option<i64>,
+    ended_at: Option<i64>,
+    outcome: Option<String>,
+}
+
+/// 会让运行在界面上的样子变化的表（ADR 040）：这些表上的任何写入都由触发器把
+/// `run_changes` 里这次运行的版本号加一，服务据此推送新状态——不靠写入方记得。
+const CHANGE_TRACKED: &[(&str, &str)] = &[
+    ("runs", "id"),
+    ("action_records", "run_id"),
+    ("result_candidates", "run_id"),
+    ("action_turns", "run_id"),
+    ("action_sessions", "run_id"),
+    ("actor_sessions", "run_id"),
+    ("action_marks", "run_id"),
+    ("run_info", "run_id"),
+    ("run_archive", "run_id"),
+    ("interventions", "run_id"),
+    ("step_checkpoints", "run_id"),
+    ("lease_recovery_audit", "run_id"),
+];
+
+fn change_triggers() -> String {
+    // 列名不叫 run_id：删除运行时按 run_id 清表，版本号要留下来让服务看到「删了」。
+    let mut sql = String::from("CREATE TABLE IF NOT EXISTS run_changes (run TEXT PRIMARY KEY, version INTEGER NOT NULL);");
+    for (table, column) in CHANGE_TRACKED {
+        for (event, row) in [("INSERT", "NEW"), ("UPDATE", "NEW"), ("DELETE", "OLD")] {
+            sql.push_str(&format!(
+                "CREATE TRIGGER IF NOT EXISTS {table}_changed_{name} AFTER {event} ON {table} BEGIN INSERT INTO run_changes(run,version) VALUES ({row}.{column},1) ON CONFLICT(run) DO UPDATE SET version=version+1; END;",
+                name = event.to_lowercase(),
+            ));
+        }
+    }
+    sql
 }
 
 impl RunSnapshot {
@@ -132,6 +206,12 @@ pub struct RunInfo {
     pub updated_at: i64,
     /// 归档时刻（ADR 036）；没归档为 None。
     pub archived_at: Option<i64>,
+    /// 这一段执行从何时开始（运行在执行时）。
+    pub active_since: Option<i64>,
+    /// 最近一次停下的时刻（执行时段结束）。
+    pub stopped_at: Option<i64>,
+    /// 全部执行时段（起，止；正在执行的没有止），界面据此只算执行时的用时。
+    pub spans: Vec<(i64, Option<i64>)>,
 }
 impl Journal {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
@@ -170,21 +250,28 @@ impl Journal {
         tx.execute_batch("CREATE TABLE IF NOT EXISTS action_context (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,scope TEXT NOT NULL,PRIMARY KEY(run_id,site,ordinal),FOREIGN KEY(run_id,site,ordinal) REFERENCES action_records(run_id,site,ordinal));").map_err(err)?;
         tx.execute_batch("CREATE TABLE IF NOT EXISTS action_auto_retries (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,first_attempt TEXT NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(run_id,site,ordinal),FOREIGN KEY(run_id,site,ordinal) REFERENCES action_records(run_id,site,ordinal));").map_err(err)?;
         tx.execute_batch("CREATE TABLE IF NOT EXISTS action_call_path (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,phase TEXT NOT NULL,path TEXT NOT NULL,PRIMARY KEY(run_id,site,ordinal),FOREIGN KEY(run_id,site,ordinal) REFERENCES action_records(run_id,site,ordinal));").map_err(err)?;
-        // 等待用户回复的呈现标记：一轮结束仍无结果、引擎挂起等下一个轮次边界时写入，
-        // 边界到达即删除。只用于呈现，不参与调度与恢复。
-        tx.execute_batch("CREATE TABLE IF NOT EXISTS action_awaiting_input (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,since INTEGER NOT NULL,PRIMARY KEY(run_id,site,ordinal),FOREIGN KEY(run_id,site,ordinal) REFERENCES action_records(run_id,site,ordinal));").map_err(err)?;
+        // ADR 040：旧版的「等你回复」标记表（靠写入方记得清除，进程中途退出会留下
+        // 残留）由轮次记录取代；等不等你从轮次记录算出来。
+        tx.execute_batch("DROP TRIGGER IF EXISTS action_times_wait; DROP TABLE IF EXISTS action_awaiting_input;").map_err(err)?;
+        // ADR 040 轮次记录：这一步在会话里的每一轮、它怎么结束的（宿主如实报告）。
+        // 运行在执行的时段（有属主的时段）：等待、用时只算这些时段里的（停着的时间不计）。
+        // 租约的取得与释放都经过 runs.owner，由触发器记下，不靠各处写入方记得。
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS run_spans (run_id TEXT NOT NULL,started_at INTEGER NOT NULL,ended_at INTEGER);             CREATE INDEX IF NOT EXISTS run_spans_run ON run_spans(run_id,started_at);             CREATE TRIGGER IF NOT EXISTS run_spans_open AFTER UPDATE OF owner ON runs WHEN OLD.owner IS NULL AND NEW.owner IS NOT NULL BEGIN UPDATE run_spans SET ended_at=started_at WHERE run_id=NEW.id AND ended_at IS NULL; INSERT INTO run_spans(run_id,started_at) VALUES (NEW.id,CAST(unixepoch('subsec')*1000 AS INTEGER)); END;             CREATE TRIGGER IF NOT EXISTS run_spans_close AFTER UPDATE OF owner ON runs WHEN OLD.owner IS NOT NULL AND NEW.owner IS NULL BEGIN UPDATE run_spans SET ended_at=CAST(unixepoch('subsec')*1000 AS INTEGER) WHERE run_id=NEW.id AND ended_at IS NULL; END;").map_err(err)?;
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS action_turns (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,turn INTEGER NOT NULL,session_id TEXT NOT NULL,prompted INTEGER NOT NULL DEFAULT 0,started_at INTEGER,ended_at INTEGER,outcome TEXT,error TEXT,PRIMARY KEY(run_id,site,ordinal,turn),FOREIGN KEY(run_id,site,ordinal) REFERENCES action_records(run_id,site,ordinal));").map_err(err)?;
         // 运行的显示信息：标题（默认取需求首行）与创建时间。只用于呈现。
         tx.execute_batch("CREATE TABLE IF NOT EXISTS run_info (run_id TEXT PRIMARY KEY REFERENCES runs(id),title TEXT NOT NULL,created_at INTEGER NOT NULL);").map_err(err)?;
+        // ADR 039：在会话里发起的运行，第一个 Agent 步骤接着用发起它的会话。
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS run_entry_sessions (run_id TEXT PRIMARY KEY REFERENCES runs(id),session_id TEXT NOT NULL);").map_err(err)?;
         tx.execute_batch("CREATE TABLE IF NOT EXISTS workflow_artifacts (run_id TEXT NOT NULL REFERENCES runs(id),id TEXT NOT NULL,source TEXT NOT NULL,sha256 TEXT NOT NULL,media_type TEXT NOT NULL,content BLOB NOT NULL,PRIMARY KEY(run_id,id));").map_err(err)?;
         // ADR 031：步骤检查点、动作所属步骤、作废 / 人工跳过标记、干预审计、会话重置。
         tx.execute_batch("CREATE TABLE IF NOT EXISTS step_checkpoints (seq INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT NOT NULL REFERENCES runs(id),prefix TEXT NOT NULL,call_path TEXT NOT NULL,phase TEXT NOT NULL,state TEXT NOT NULL,created_at INTEGER NOT NULL,superseded_by INTEGER); CREATE INDEX IF NOT EXISTS step_checkpoints_run ON step_checkpoints(run_id,seq); CREATE TABLE IF NOT EXISTS action_steps (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,checkpoint INTEGER,clock INTEGER NOT NULL,PRIMARY KEY(run_id,site,ordinal),FOREIGN KEY(run_id,site,ordinal) REFERENCES action_records(run_id,site,ordinal)); CREATE TABLE IF NOT EXISTS action_marks (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,mark TEXT NOT NULL,intervention INTEGER NOT NULL,PRIMARY KEY(run_id,site,ordinal),FOREIGN KEY(run_id,site,ordinal) REFERENCES action_records(run_id,site,ordinal)); CREATE TABLE IF NOT EXISTS interventions (id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT NOT NULL REFERENCES runs(id),kind TEXT NOT NULL,detail TEXT NOT NULL,created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS actor_session_resets (run_id TEXT NOT NULL REFERENCES runs(id),actor TEXT NOT NULL,intervention INTEGER NOT NULL,PRIMARY KEY(run_id,actor));").map_err(err)?;
         // ADR 035：节点用时只用于呈现。由触发器跟随状态变化记录，任何写入路径都不会漏记。
         tx.execute_batch("CREATE TABLE IF NOT EXISTS action_times (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,started_at INTEGER NOT NULL,ended_at INTEGER,waited_ms INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(run_id,site,ordinal)); \
             CREATE TRIGGER IF NOT EXISTS action_times_start AFTER INSERT ON action_records WHEN NEW.status='running' BEGIN INSERT OR IGNORE INTO action_times(run_id,site,ordinal,started_at) VALUES (NEW.run_id,NEW.site,NEW.ordinal,CAST(unixepoch('subsec')*1000 AS INTEGER)); END; \
-            CREATE TRIGGER IF NOT EXISTS action_times_status AFTER UPDATE OF status ON action_records WHEN NEW.status<>OLD.status BEGIN UPDATE action_times SET ended_at=CASE WHEN NEW.status='running' THEN NULL ELSE CAST(unixepoch('subsec')*1000 AS INTEGER) END WHERE run_id=NEW.run_id AND site=NEW.site AND ordinal=NEW.ordinal; END; \
-            CREATE TRIGGER IF NOT EXISTS action_times_wait AFTER DELETE ON action_awaiting_input BEGIN UPDATE action_times SET waited_ms=waited_ms+MAX(0,CAST(unixepoch('subsec')*1000 AS INTEGER)-OLD.since) WHERE run_id=OLD.run_id AND site=OLD.site AND ordinal=OLD.ordinal; END;").map_err(err)?;
+            CREATE TRIGGER IF NOT EXISTS action_times_status AFTER UPDATE OF status ON action_records WHEN NEW.status<>OLD.status BEGIN UPDATE action_times SET ended_at=CASE WHEN NEW.status='running' THEN NULL ELSE CAST(unixepoch('subsec')*1000 AS INTEGER) END WHERE run_id=NEW.run_id AND site=NEW.site AND ordinal=NEW.ordinal; END;").map_err(err)?;
         // ADR 036：归档只用于呈现（从列表与侧栏隐藏），不影响运行本身。
         tx.execute_batch("CREATE TABLE IF NOT EXISTS run_archive (run_id TEXT PRIMARY KEY REFERENCES runs(id),archived_at INTEGER NOT NULL);").map_err(err)?;
+        tx.execute_batch(&change_triggers()).map_err(err)?;
         tx.pragma_update(None, "user_version", VERSION)
             .map_err(err)?;
         tx.commit().map_err(err)?;
@@ -342,6 +429,21 @@ impl Journal {
         self.db.query_row("SELECT a.session_id FROM actor_sessions a JOIN runs r ON r.id=a.run_id WHERE r.id=?1 AND r.project=?2 AND a.actor=?3 AND NOT EXISTS (SELECT 1 FROM actor_session_resets x WHERE x.run_id=a.run_id AND x.actor=a.actor)",params![id,project,actor],|row|row.get(0)).optional().map_err(err)
     }
 
+    /// 发起这次运行的会话（ADR 039）。
+    pub fn set_entry_session(&mut self, id: &str, session_id: &str) -> Result<()> {
+        self.db
+            .execute("INSERT OR REPLACE INTO run_entry_sessions(run_id,session_id) VALUES(?1,?2)", params![id, session_id])
+            .map(|_| ())
+            .map_err(err)
+    }
+
+    /// 还没有任何角色会话时，第一个 Agent 步骤接着用发起运行的会话（ADR 039）；
+    /// 一旦有角色占用了会话，入口会话就已经用过了。
+    pub fn unclaimed_entry_session(&self, id: &str, project: &str) -> Result<Option<String>> {
+        self.load(id, project)?;
+        self.db.query_row("SELECT e.session_id FROM run_entry_sessions e WHERE e.run_id=?1 AND NOT EXISTS (SELECT 1 FROM actor_sessions a WHERE a.run_id=e.run_id)",params![id],|row|row.get(0)).optional().map_err(err)
+    }
+
     pub fn record_result_candidate(
         &mut self,
         id: &str,
@@ -414,30 +516,182 @@ impl Journal {
             .map_err(err)
     }
 
-    /// 标记 / 清除「这一轮在等用户回复」。标记要求动作仍在执行中且调用方持有租约；
-    /// 清除总是允许（幂等）。
-    pub fn set_awaiting_input(
+    /// 工作流在会话里发出了这一步的说明，这一轮的编号是 `turn`（ADR 040）。
+    /// 这是运行线程知道的事实，只有它写；这一轮之后怎么样由会话报告记录。
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_prompted(
         &mut self,
         id: &str,
         project: &str,
         owner: &str,
         action: &Action,
-        waiting: bool,
+        session_id: &str,
+        turn: u64,
     ) -> Result<()> {
         let tx = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(err)?;
         let (_, workflow) = read_owned(&tx, id, project, owner)?;
-        if waiting {
-            if workflow.action(&action.site, action.ordinal) != Some(action) {
-                return Err("ACTION_NOT_IN_FLIGHT".into());
-            }
-            tx.execute("INSERT OR IGNORE INTO action_awaiting_input(run_id,site,ordinal,since) VALUES (?1,?2,?3,?4)",params![id,action.site,action.ordinal,now()]).map_err(err)?;
-        } else {
-            tx.execute("DELETE FROM action_awaiting_input WHERE run_id=?1 AND site=?2 AND ordinal=?3",params![id,action.site,action.ordinal]).map_err(err)?;
+        if workflow.action(&action.site, action.ordinal) != Some(action) {
+            return Err("ACTION_NOT_IN_FLIGHT".into());
         }
+        tx.execute(
+            "INSERT INTO action_turns(run_id,site,ordinal,turn,session_id,prompted,started_at) VALUES (?1,?2,?3,?4,?5,1,?6) ON CONFLICT(run_id,site,ordinal,turn) DO UPDATE SET prompted=1,started_at=COALESCE(started_at,excluded.started_at)",
+            params![id, action.site, action.ordinal, turn as i64, session_id, now()],
+        )
+        .map_err(err)?;
         tx.commit().map_err(err)
+    }
+
+    /// 宿主报来一份会话状态（ADR 040）：记进这个会话此刻挂着的那一步的轮次记录。
+    /// 与运行在不在执行无关——会话只要登记在没结束的运行上，它的每一轮都记下。
+    ///
+    /// 归属：会话登记在哪次运行的哪个角色上，就记到这个角色正在做的 Agent 步骤；
+    /// 只有工作流已经在这个会话里发过这一步的说明，之后的轮次才算这一步的。这一步
+    /// 做完了、运行结束了、还没发过说明，都不记。返回新记下的事实（推给界面与通知）。
+    pub fn record_session_state(&mut self, session_id: &str, state: &SessionState) -> Result<Vec<TurnFact>> {
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(err)?;
+        let links: Vec<(String, String, String, String)> = {
+            let mut stmt = tx
+                .prepare("SELECT a.run_id,r.project,a.actor,r.checkpoint FROM actor_sessions a JOIN runs r ON r.id=a.run_id WHERE a.session_id=?1")
+                .map_err(err)?;
+            let rows = stmt
+                .query_map(params![session_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
+                .map_err(err)?;
+            rows.collect::<std::result::Result<_, _>>().map_err(err)?
+        };
+        let mut facts = Vec::new();
+        for (run_id, project, actor, checkpoint) in links {
+            let workflow: Workflow = serde_json::from_str(&checkpoint).map_err(err)?;
+            if workflow.stage == crate::Stage::Completed {
+                continue;
+            }
+            let Some(action) = workflow
+                .inflight
+                .values()
+                .find(|action| action.actor == actor && action.input["__node"]["kind"] == "agent")
+            else {
+                continue;
+            };
+            let first: Option<i64> = tx
+                .query_row(
+                    "SELECT MIN(turn) FROM action_turns WHERE run_id=?1 AND site=?2 AND ordinal=?3 AND session_id=?4 AND prompted=1",
+                    params![run_id, action.site, action.ordinal, session_id],
+                    |row| row.get(0),
+                )
+                .map_err(err)?;
+            let Some(first) = first.map(|turn| turn as u64) else {
+                continue;
+            };
+            let fact = |kind| TurnFact {
+                run_id: run_id.clone(),
+                project: project.clone(),
+                site: action.site.clone(),
+                ordinal: action.ordinal,
+                kind,
+            };
+            if let Some(turn) = state.running.filter(|turn| *turn >= first) {
+                let inserted = tx
+                    .execute(
+                        "INSERT OR IGNORE INTO action_turns(run_id,site,ordinal,turn,session_id,started_at) VALUES (?1,?2,?3,?4,?5,?6)",
+                        params![run_id, action.site, action.ordinal, turn as i64, session_id, now()],
+                    )
+                    .map_err(err)?;
+                if inserted == 1 {
+                    facts.push(fact(TurnFactKind::Started { turn }));
+                }
+            }
+            if let Some(ended) = state.ended.as_ref().filter(|ended| ended.turn >= first) {
+                let known: Option<Option<String>> = tx
+                    .query_row(
+                        "SELECT outcome FROM action_turns WHERE run_id=?1 AND site=?2 AND ordinal=?3 AND turn=?4",
+                        params![run_id, action.site, action.ordinal, ended.turn as i64],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(err)?;
+                if known.flatten().as_deref() == Some(ended.outcome.as_str()) {
+                    continue;
+                }
+                let error = ended.error.as_deref().and_then(sanitize_detail);
+                tx.execute(
+                    "INSERT INTO action_turns(run_id,site,ordinal,turn,session_id,ended_at,outcome,error) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(run_id,site,ordinal,turn) DO UPDATE SET ended_at=excluded.ended_at,outcome=excluded.outcome,error=excluded.error",
+                    params![run_id, action.site, action.ordinal, ended.turn as i64, session_id, now(), ended.outcome.as_str(), error],
+                )
+                .map_err(err)?;
+                let submitted: bool = tx
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM result_candidates WHERE run_id=?1 AND site=?2 AND ordinal=?3 AND state='submitted')",
+                        params![run_id, action.site, action.ordinal],
+                        |row| row.get(0),
+                    )
+                    .map_err(err)?;
+                facts.push(fact(TurnFactKind::Ended {
+                    turn: ended.turn,
+                    outcome: ended.outcome,
+                    awaiting: ended.outcome == TurnOutcome::Completed && !submitted,
+                }));
+            }
+        }
+        tx.commit().map_err(err)?;
+        Ok(facts)
+    }
+
+    /// 这个会话收到过这个节点工单的其他执行有几次（ADR 041）：大于 0 时这次执行
+    /// 只发返工提示。
+    pub fn prompted_executions(&self, id: &str, project: &str, site: &str, ordinal: u32, session_id: &str) -> Result<u32> {
+        self.db
+            .query_row(
+                "SELECT COUNT(DISTINCT t.ordinal) FROM action_turns t JOIN runs r ON r.id=t.run_id WHERE r.id=?1 AND r.project=?2 AND t.site=?3 AND t.ordinal<>?4 AND t.session_id=?5 AND t.prompted=1",
+                params![id, project, site, ordinal, session_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count as u32)
+            .map_err(err)
+    }
+
+    /// 这一步在会话里最近的一轮。
+    pub fn last_turn(&self, id: &str, project: &str, site: &str, ordinal: u32) -> Result<Option<TurnRecord>> {
+        self.db
+            .query_row(
+                "SELECT t.turn,t.session_id,t.prompted,t.outcome FROM action_turns t JOIN runs r ON r.id=t.run_id WHERE r.id=?1 AND r.project=?2 AND t.site=?3 AND t.ordinal=?4 ORDER BY t.turn DESC LIMIT 1",
+                params![id, project, site, ordinal],
+                |row| {
+                    Ok(TurnRecord {
+                        turn: row.get::<_, i64>(0)? as u64,
+                        session_id: row.get(1)?,
+                        prompted: row.get(2)?,
+                        outcome: row.get::<_, Option<String>>(3)?.as_deref().and_then(TurnOutcome::parse),
+                    })
+                },
+            )
+            .optional()
+            .map_err(err)
+    }
+
+    /// 运行的版本号（ADR 040）：这次运行的任何可见变化都会让它变大。
+    pub fn run_version(&self, id: &str) -> Result<i64> {
+        self.db
+            .query_row("SELECT version FROM run_changes WHERE run=?1", params![id], |row| row.get(0))
+            .optional()
+            .map(|version| version.unwrap_or(0))
+            .map_err(err)
+    }
+
+    /// 全部运行的版本号（服务推送状态时比对用）。
+    pub fn run_versions(&self) -> Result<Vec<(String, i64)>> {
+        let mut stmt = self.db.prepare("SELECT run,version FROM run_changes").map_err(err)?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?))).map_err(err)?;
+        rows.collect::<std::result::Result<_, _>>().map_err(err)
+    }
+
+    /// 别的连接有没有提交过改动（`PRAGMA data_version`，同一连接上前后比较）。
+    pub fn data_version(&self) -> Result<i64> {
+        self.db.query_row("PRAGMA data_version", [], |row| row.get(0)).map_err(err)
     }
 
     pub fn result_candidates(
@@ -504,7 +758,7 @@ impl Journal {
     pub fn run_info(&self, id: &str) -> Result<RunInfo> {
         self.db
             .query_row(
-                "SELECT r.updated_at, i.title, i.created_at, a.archived_at FROM runs r LEFT JOIN run_info i ON i.run_id=r.id LEFT JOIN run_archive a ON a.run_id=r.id WHERE r.id=?1",
+                "SELECT r.updated_at, i.title, i.created_at, a.archived_at, (SELECT MAX(started_at) FROM run_spans s WHERE s.run_id=r.id AND s.ended_at IS NULL), (SELECT MAX(ended_at) FROM run_spans s WHERE s.run_id=r.id) FROM runs r LEFT JOIN run_info i ON i.run_id=r.id LEFT JOIN run_archive a ON a.run_id=r.id WHERE r.id=?1",
                 params![id],
                 |row| {
                     Ok(RunInfo {
@@ -512,10 +766,14 @@ impl Journal {
                         title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                         created_at: row.get::<_, Option<i64>>(2)?,
                         archived_at: row.get::<_, Option<i64>>(3)?,
+                        active_since: row.get::<_, Option<i64>>(4)?,
+                        stopped_at: row.get::<_, Option<i64>>(5)?,
+                        spans: Vec::new(),
                     })
                 },
             )
             .map_err(err)
+            .and_then(|info| Ok(RunInfo { spans: self.run_spans(id)?, ..info }))
     }
 
     pub fn list_runs(&self, project: &str) -> Result<Vec<(String, Workflow)>> {
@@ -700,6 +958,12 @@ impl Journal {
                 return Err("OWNER_PROCESS_STILL_ALIVE".into());
             }
             tx.execute("INSERT INTO lease_recovery_audit(run_id,owner,pid,started,reason,recovered_at) VALUES (?1,?2,?3,?4,?5,?6)",params![id,owner,pid,started,reason.trim(),now()]).map_err(err)?;
+            // 属主进程已退出：执行时段截止到最后看到的动静（检查点、轮次），不算到现在。
+            tx.execute(
+                "UPDATE run_spans SET ended_at=MAX(started_at,COALESCE((SELECT updated_at FROM runs WHERE id=?1),0),COALESCE((SELECT MAX(COALESCE(ended_at,started_at)) FROM action_turns WHERE run_id=?1),0)) WHERE run_id=?1 AND ended_at IS NULL",
+                params![id],
+            )
+            .map_err(err)?;
             tx.execute(
                 "DELETE FROM owner_process WHERE run_id=?1 AND owner=?2",
                 params![id, owner],
@@ -1150,9 +1414,40 @@ impl Journal {
         Ok(())
     }
 
+    /// 运行在执行的时段（起，止；正在执行的没有止）。旧运行没有记录时为空。
+    pub fn run_spans(&self, id: &str) -> Result<Vec<(i64, Option<i64>)>> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT started_at,ended_at FROM run_spans WHERE run_id=?1 ORDER BY started_at")
+            .map_err(err)?;
+        let rows = stmt.query_map(params![id], |row| Ok((row.get(0)?, row.get(1)?))).map_err(err)?;
+        rows.collect::<std::result::Result<_, _>>().map_err(err)
+    }
+
     pub fn nodes(&self, id: &str, project: &str) -> Result<Vec<NodeRecord>> {
         self.load(id, project)?;
-        let mut stmt=self.db.prepare("SELECT a.site,a.ordinal,a.actor,a.status,a.result,ctx.scope,c.path,c.phase,w.since,st.checkpoint,m.mark,t.started_at,t.ended_at,t.waited_ms FROM action_records a JOIN runs r ON r.id=a.run_id LEFT JOIN action_context ctx ON ctx.run_id=a.run_id AND ctx.site=a.site AND ctx.ordinal=a.ordinal LEFT JOIN action_call_path c ON c.run_id=a.run_id AND c.site=a.site AND c.ordinal=a.ordinal LEFT JOIN action_awaiting_input w ON w.run_id=a.run_id AND w.site=a.site AND w.ordinal=a.ordinal LEFT JOIN action_steps st ON st.run_id=a.run_id AND st.site=a.site AND st.ordinal=a.ordinal LEFT JOIN action_marks m ON m.run_id=a.run_id AND m.site=a.site AND m.ordinal=a.ordinal LEFT JOIN action_times t ON t.run_id=a.run_id AND t.site=a.site AND t.ordinal=a.ordinal WHERE r.id=?1 AND r.project=?2 ORDER BY a.rowid").map_err(err)?;
+        let turns = self.turn_times(id)?;
+        let spans = self.run_spans(id)?;
+        // 等你的时间只算运行在执行的时段；没有时段记录的旧运行照旧全算。
+        let counted = |from: i64, to: Option<i64>| -> i64 {
+            if spans.is_empty() {
+                return to.map_or(0, |to| (to - from).max(0));
+            }
+            spans
+                .iter()
+                .filter_map(|(start, end)| {
+                    let upper = match (to, *end) {
+                        (Some(to), Some(end)) => to.min(end),
+                        (Some(to), None) => to,
+                        (None, Some(end)) => end,
+                        // 还没结束的等待落在正在执行的时段里：由界面按当前时刻接着算。
+                        (None, None) => return None,
+                    };
+                    Some((upper - from.max(*start)).max(0))
+                })
+                .sum()
+        };
+        let mut stmt=self.db.prepare("SELECT a.site,a.ordinal,a.actor,a.status,a.result,ctx.scope,c.path,c.phase,EXISTS(SELECT 1 FROM result_candidates rc WHERE rc.run_id=a.run_id AND rc.site=a.site AND rc.ordinal=a.ordinal AND rc.state='submitted'),st.checkpoint,m.mark,t.started_at,t.ended_at,t.waited_ms FROM action_records a JOIN runs r ON r.id=a.run_id LEFT JOIN action_context ctx ON ctx.run_id=a.run_id AND ctx.site=a.site AND ctx.ordinal=a.ordinal LEFT JOIN action_call_path c ON c.run_id=a.run_id AND c.site=a.site AND c.ordinal=a.ordinal LEFT JOIN action_steps st ON st.run_id=a.run_id AND st.site=a.site AND st.ordinal=a.ordinal LEFT JOIN action_marks m ON m.run_id=a.run_id AND m.site=a.site AND m.ordinal=a.ordinal LEFT JOIN action_times t ON t.run_id=a.run_id AND t.site=a.site AND t.ordinal=a.ordinal WHERE r.id=?1 AND r.project=?2 ORDER BY a.rowid").map_err(err)?;
         let rows = stmt
             .query_map(params![id, project], |row| {
                 Ok((
@@ -1164,7 +1459,7 @@ impl Journal {
                     row.get::<_, Option<String>>(5)?,
                     row.get::<_, Option<String>>(6)?,
                     row.get::<_, Option<String>>(7)?,
-                    row.get::<_, Option<i64>>(8)?,
+                    row.get::<_, bool>(8)?,
                     row.get::<_, Option<i64>>(9)?,
                     row.get::<_, Option<String>>(10)?,
                     (
@@ -1177,11 +1472,25 @@ impl Journal {
             .map_err(err)?;
         let mut result = Vec::new();
         for row in rows {
-            let (site_id, ordinal, actor, status, text, scope, call_path, phase_id, since, checkpoint, mark, times) =
+            let (site_id, ordinal, actor, status, text, scope, call_path, phase_id, submitted, checkpoint, mark, times) =
                 row.map_err(err)?;
             let (started_at, ended_at, waited_ms) = times;
-            // 残留标记（进程中途退出没来得及清）只在仍在执行的记录上才算数。
-            let since = since.filter(|_| status == "running");
+            let history = turns.get(&(site_id.clone(), ordinal)).map(Vec::as_slice).unwrap_or_default();
+            // 两轮之间会话空着的时间都算在等你。
+            let running = status == "running";
+            let last = history.last().filter(|_| running);
+            // 当前这次等待在已结束的执行时段里的部分（运行停过又继续时）。
+            let open_wait = last
+                .filter(|turn| turn.outcome.is_some())
+                .and_then(|turn| turn.ended_at)
+                .filter(|_| !spans.is_empty())
+                .map_or(0, |ended| counted(ended, None));
+            let waited_ms = waited_ms
+                + open_wait
+                + history
+                    .windows(2)
+                    .filter_map(|pair| Some(counted(pair[0].ended_at?, Some(pair[1].started_at?))))
+                    .sum::<i64>();
             result.push(NodeRecord {
                 site_id,
                 ordinal,
@@ -1199,8 +1508,9 @@ impl Journal {
                 result: text
                     .map(|s| serde_json::from_str(&s).map_err(err))
                     .transpose()?,
-                awaiting_input: since.is_some(),
-                awaiting_input_since: since,
+                turn: last.map(|turn| turn.outcome.clone().unwrap_or_else(|| "working".into())),
+                turn_ended_at: last.and_then(|turn| turn.ended_at),
+                submitted: running && submitted,
                 checkpoint,
                 mark,
                 started_at,
@@ -1209,6 +1519,28 @@ impl Journal {
             });
         }
         Ok(result)
+    }
+
+    /// 一次运行全部轮次的起止（按步骤分组、按轮次排序）。
+    fn turn_times(&self, id: &str) -> Result<BTreeMap<(String, u32), Vec<TurnTimes>>> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT site,ordinal,started_at,ended_at,outcome FROM action_turns WHERE run_id=?1 ORDER BY site,ordinal,turn")
+            .map_err(err)?;
+        let rows = stmt
+            .query_map(params![id], |row| {
+                Ok((
+                    (row.get::<_, String>(0)?, row.get::<_, u32>(1)?),
+                    TurnTimes { started_at: row.get(2)?, ended_at: row.get(3)?, outcome: row.get(4)? },
+                ))
+            })
+            .map_err(err)?;
+        let mut grouped: BTreeMap<(String, u32), Vec<TurnTimes>> = BTreeMap::new();
+        for row in rows {
+            let (key, times) = row.map_err(err)?;
+            grouped.entry(key).or_default().push(times);
+        }
+        Ok(grouped)
     }
 
     pub fn store_artifact(
@@ -1693,11 +2025,6 @@ impl Journal {
             tx.execute(
                 "UPDATE action_records SET status=?4 WHERE run_id=?1 AND site=?2 AND ordinal=?3 AND status IN ('running','failed')",
                 params![id, node.site_id, node.ordinal, status],
-            )
-            .map_err(err)?;
-            tx.execute(
-                "DELETE FROM action_awaiting_input WHERE run_id=?1 AND site=?2 AND ordinal=?3",
-                params![id, node.site_id, node.ordinal],
             )
             .map_err(err)?;
         }

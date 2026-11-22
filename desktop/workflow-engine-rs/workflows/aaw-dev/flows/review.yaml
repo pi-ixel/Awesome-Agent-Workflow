@@ -37,6 +37,10 @@ steps:
       role: 发现处置与重验
       prompt: 依据两份独立报告及已有的最新定向复核报告处置发现，重跑受影响验证；如需原 Reviewer 复核，明确 needA/needB。不得忽略尚未通过的定向复核发现。files 列出这一步新增或修改的文件（相对项目目录的路径）。
       knowledge: [host-tools.md, finding-resolution.md]
+      reads:
+        implementation: 本次实现说明和改动的文件（两份评审报告和复核报告用 list_workflow_results 查看）
+        task: 当前任务的范围
+        resolution: 已有的处置记录（之前处置过时才有）
       does:
         - 处理评审发现
         - 重跑受影响验证
@@ -90,6 +94,9 @@ steps:
       role: Reviewer A
       prompt: 只读定向复核你先前发现的整改，提供结论和证据。
       knowledge: [host-tools.md, semantic-review-a.md]
+      reads:
+        resolution: 针对你先前发现所做的处置
+        implementation: 本次实现说明和改动的文件
       does:
         - 复核原发现的整改
         - 保留复核结论
@@ -139,6 +146,9 @@ steps:
       role: Reviewer B
       prompt: 只读定向复核你先前发现的整改，提供结论和证据。
       knowledge: [host-tools.md, semantic-review-b.md]
+      reads:
+        resolution: 针对你先前发现所做的处置
+        implementation: 本次实现说明和改动的文件
       does:
         - 复核原发现的整改
         - 保留复核结论
@@ -176,10 +186,16 @@ nodes:
 
   reviewer_a:
     label: 评审员 A
+    role: Reviewer A                  # 与「评审员 A 复核」同一会话：复核时看得到自己先前的发现
     why: 从正确性和边界的角度独立评审本次改动。
     delivers: 一份评审报告：正确性和边界方面的问题
     prompt: 只读独立评审当前任务的正确性及边界，提供报告与证据。
     knowledge: [host-tools.md, semantic-review-a.md]
+    reads:
+      task: 当前任务的范围
+      implementation: 本次实现说明和改动的文件
+      design: 设计（评审的对照依据）
+      testVersion: 当前测试设计版本
     does:
       - 独立检查正确性
       - 记录评审证据
@@ -189,10 +205,16 @@ nodes:
 
   reviewer_b:
     label: 评审员 B
+    role: Reviewer B                  # 与「评审员 B 复核」同一会话：复核时看得到自己先前的发现
     why: 从可维护性和一致性的角度独立评审本次改动。
     delivers: 一份评审报告：可维护性和一致性方面的问题
     prompt: 只读独立评审当前任务的可维护性及一致性，提供报告与证据。
     knowledge: [host-tools.md, semantic-review-b.md]
+    reads:
+      task: 当前任务的范围
+      implementation: 本次实现说明和改动的文件
+      design: 设计（评审的对照依据）
+      testVersion: 当前测试设计版本
     does:
       - 独立检查维护性
       - 记录评审证据

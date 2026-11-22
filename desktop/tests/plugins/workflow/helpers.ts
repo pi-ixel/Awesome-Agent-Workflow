@@ -1,3 +1,4 @@
+import type { SessionTurnStatus } from "../../../src/plugins/workflow/status/nodeActivity.ts";
 import { pathKey } from "../../../src/shared/panelPaths.ts";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { NodePlanEntry } from "../../../src/plugins/workflow/status/nodePlans.ts";
@@ -98,9 +99,21 @@ export function fakeWorkflowService() {
   const draftChecks = new Map<string, WorkflowDraftCheck>();
   let importResult: WorkflowImportPreview | Error = { id: "imported", meta: null, diagnostics: [], scripts: [] };
   const plans = new Map<string, readonly NodePlanEntry[]>();
+  // 会话的实时状态（ADR 040）：用例经 setSessionStatus 扮演会话视图那一份。
+  type ActivityState = { readonly entries: Readonly<Record<string, { readonly sessionId: string; readonly status: SessionTurnStatus }>> };
+  let activity: ActivityState = { entries: {} };
+  const activityListeners = new Set<(state: ActivityState, previous: ActivityState) => void>();
 
   const service: WorkflowService = {
     isActive: () => !disposed,
+    sessionActivity: {
+      getState: () => activity,
+      getInitialState: () => activity,
+      subscribe: (listener) => {
+        activityListeners.add(listener);
+        return () => activityListeners.delete(listener);
+      },
+    },
     bindWorkspace: () => () => {},
     workflows: () => Promise.resolve(library),
     workflow: (id) => {
@@ -304,6 +317,12 @@ export function fakeWorkflowService() {
     setRuns(next: readonly RunSummary[]): void {
       runs = next;
       listeners.forEach((listener) => listener({ type: "runs-changed", runId: "" }));
+    },
+    /** 会话变成某个状态（工作中 running、你打断了 cancelled、出错 failed……）。 */
+    setSessionStatus(sessionId: string, status: SessionTurnStatus): void {
+      const previous = activity;
+      activity = { entries: { ...activity.entries, [sessionId]: { sessionId, status } } };
+      activityListeners.forEach((listener) => listener(activity, previous));
     },
     setSnapshot(runId: string, next: CanvasSnapshot): void {
       const store = snapshots.get(runId);

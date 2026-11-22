@@ -7,6 +7,7 @@ import type { ForegroundSessionTarget } from "../viewState.ts";
 import type { QuestionDraft } from "../../interactions/types.ts";
 import type { ContentBlock } from "../../../../contracts/acp/protocol.ts";
 import type { SendOptions } from "../sessionStore.ts";
+import type { SessionHandoff } from "../types.ts";
 
 /** Capture the rendered owner: a late callback must never act on another session. */
 export function useSessionCommands() {
@@ -83,6 +84,8 @@ export function useSessionCommands() {
           (service, owner) => service.interactions.cancelQuestions(owner, id),
           undefined,
         ),
+      setHandoff: (handoff: SessionHandoff | null) =>
+        run((service, owner) => service.conversation.setHandoff(owner, handoff), undefined),
       sendPrompt: (
         text: string,
         attachments?: readonly ContentBlock[],

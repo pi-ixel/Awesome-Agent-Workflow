@@ -1,0 +1,26 @@
+label: 制作卡片
+entry: write
+outputs:
+  file: write.file
+
+steps:
+  write:
+    stage: build
+    agent:
+      label: 制作卡片
+      why: 每张卡片各由一个会话制作，演练并行子流程。
+      delivers: 一个卡片文件
+      role: 卡片制作
+      session_scope: [vars.card.id]
+      prompt: 在项目的 trial/flowtest/ 下写 card-<卡片 id>.txt（已存在就覆盖），内容只有卡片的文字一行。file 填这个文件的路径。
+      knowledge: [host-tools.md]
+      reads:
+        card: 这张卡片的 id 和文字
+      does:
+        - 写一个卡片文件
+      result:
+        file: string
+      labels:
+        file: 卡片文件
+    next:
+      - to: $return

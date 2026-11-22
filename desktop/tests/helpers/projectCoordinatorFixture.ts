@@ -70,6 +70,7 @@ export const {
   registerSessionTools,
   openPluginSessionRuntime,
   watchSessionTurns,
+  pluginSessionReady,
   watchSessionEvents,
   projectFactory,
   dispose,

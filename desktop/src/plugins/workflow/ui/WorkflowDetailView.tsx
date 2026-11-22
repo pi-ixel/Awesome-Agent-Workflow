@@ -1,13 +1,12 @@
 import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 /**
- * 工作流详情（AAW 面板第二层）：它是什么、长什么样。运行记录归「运行管理」。
+ * 工作流详情（左侧「工作流」功能区的第二层，ADR 038）：它是什么、长什么样。
+ * 运行记录归右侧的「运行管理」；发起只在会话里（「/」菜单），这里不放运行按钮。
  *
- * - 头部：名称、来源（预置 / 我的）；动作：运行、用 AI 修改、复制为我的、删除；
+ * - 头部：名称、来源（预置 / 我的）；动作：用 AI 修改、复制为我的、导出、删除；
  * - 流程图：按起点显示整张图，点节点在分屏里审查它：做什么、交出什么、结果怎么走、要不要你确认；
  * - 源码：工作流目录里的文件（只读）与编译诊断。
- *
- * 点「运行」后，启动表单替换头部显示在本页最上面（WorkflowLauncher）；流程图仍在下面可看。
- */
+ * */
 import { errorLine } from "../status/errorText.ts";
 import { useEffect, useRef, useState } from "react";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
@@ -18,7 +17,6 @@ import { NodeReview } from "./NodeReview.tsx";
 import { KnowledgeDetail } from "./KnowledgeDetail.tsx";
 import { SplitPane } from "./SplitPane.tsx";
 import { entryConditions, nodeOutcomes } from "./nodeDetail.ts";
-import { WorkflowLauncher } from "./WorkflowLauncher.tsx";
 import { ActionButton, Badge, Listbox } from "../../../shared/ui/controls.tsx";
 import { MoreMenu } from "./MoreMenu.tsx";
 import { Callout } from "../../../shared/ui/Callout.tsx";
@@ -27,12 +25,9 @@ import { InlineConfirm } from "../../../shared/ui/InlineConfirm.tsx";
 
 type Tab = "graph" | "source";
 
-export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, draft, onAiEdit, onOpenDraft, onLaunch, onCloseLaunch, onStarted, onCopied, onDeleted }: {
+export function WorkflowDetailView({ service, id, transfer, draft, onAiEdit, onOpenDraft, onCopied, onDeleted }: {
   service: WorkflowService;
   id: string;
-  /** 非空时在顶部展开启动表单（可预选起点）。 */
-  launch: { readonly entry?: string } | null;
-  pickFiles?: () => Promise<readonly string[]>;
   /** 导出用的保存对话框（ADR 036）。 */
   transfer?: WorkflowFileTransfer;
   /** 这个工作流未保存的 AI 修改（ADR 036）。 */
@@ -40,9 +35,6 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, d
   /** 让 AI 修改：由面板先问要求，或回到已有草稿。preset 表示要先复制。 */
   onAiEdit?: (preset: boolean) => void;
   onOpenDraft?: (draftId: string) => void;
-  onLaunch: (entry?: string) => void;
-  onCloseLaunch: () => void;
-  onStarted: (runId: string) => void;
   onCopied: (id: string) => void;
   onDeleted: () => void;
 }) {
@@ -113,24 +105,13 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, d
   };
 
   return <div className={`workflow-detail-page${tab === "graph" ? " is-graph" : ""}`}>
-    {launch && meta ? <div className="workflow-launch-sheet">
-      <WorkflowLauncher
-        key={`${detail.id}:${launch.entry ?? ""}`}
-        service={service}
-        meta={meta}
-        initialEntry={launch.entry}
-        pickFiles={pickFiles}
-        onStarted={onStarted}
-        onCancel={onCloseLaunch}
-      />
-    </div> : <header className="workflow-detail-head">
+    <header className="workflow-detail-head">
       <div className="workflow-detail-title">
         <b>{meta?.name ?? detail.id}</b>
         <Badge tone={detail.origin === "preset" ? "info" : "neutral"}>{detail.origin === "preset" ? "预置" : "我的"}</Badge>
         {meta?.version && <small>{meta.version}</small>}
       </div>
       <div className="workflow-detail-actions">
-        {meta && <ActionButton type="button" tone="primary" size="compact" onClick={() => onLaunch(entry || undefined)}>运行</ActionButton>}
         {onAiEdit && <ActionButton type="button" tone="secondary" size="compact" disabled={busy} data-hint={detail.origin === "preset" ? "预置工作流不能直接改：先复制为我的，再让 AI 修改副本" : draft ? "回到这个工作流未保存的 AI 修改" : "让 AI 改一份草稿，确认后再保存"} onClick={() => onAiEdit(detail.origin === "preset")}>
           {detail.origin === "preset" ? "复制并用 AI 修改" : draft ? "继续 AI 修改" : "用 AI 修改"}
         </ActionButton>}
@@ -145,7 +126,7 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, d
       </div>
       {confirmDelete && <InlineConfirm className="workflow-head-confirm" label="确认删除" message="删除后不能恢复，已有的运行记录保留。" confirmLabel="删除" busy={busy} getReturnFocus={() => moreButton.current} onConfirm={() => void act(async () => { await service.deleteWorkflow(detail.id); onDeleted(); })} onCancel={() => setConfirmDelete(false)} />}
       {meta?.description && <p className="workflow-detail-desc">{meta.description}</p>}
-    </header>}
+    </header>
 
     {notice !== "" && <p className="workflow-muted workflow-pad" role="status">{notice}</p>}
 

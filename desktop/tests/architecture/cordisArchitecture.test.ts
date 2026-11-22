@@ -494,7 +494,7 @@ it("keeps plugin names and dependency relations aligned with their production ow
       "plugin-management",
     ]);
     expect(rail.filter(({ WorkArea }) => WorkArea).map(({ id }) => id)).toEqual(
-      ["scheduled-tasks", "plugin-management"],
+      ["workflow", "scheduled-tasks", "plugin-management"],
     );
     expect(
       view.sidebar.filter((entry) => entry.default).map(({ id }) => id),

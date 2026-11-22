@@ -40,6 +40,8 @@ steps:
       delivers: 一份设计文档：方案、改动范围和验收方式
       prompt: 依据确认需求完成设计，按提供的工作方法查证和提问；缺少条件不得虚构。交付供后续节点读取的设计成果及必要说明；无法完成时说明阻塞。
       knowledge: [host-tools.md, design-method.md, design-template.md]
+      reads:
+        confirmed: 已确认的需求、边界和用户答复（设计的依据）
       does:
         - 查证项目与问题池
         - 形成设计并自检
@@ -71,6 +73,9 @@ steps:
       role: 设计独立检查
       prompt: 独立只读检查设计。只对既有授权内均可安全修正的问题返回 revise 且 safe=true。
       knowledge: [host-tools.md, review-criteria.md]
+      reads:
+        confirmed: 核对设计是否覆盖需求和边界
+        design: 要检查的设计成果
       does:
         - 检查设计和证据
         - 给出检查结论
@@ -113,6 +118,9 @@ steps:
       role: 设计
       prompt: 在既有授权内修正独立设计检查的问题；交付修正后的设计成果，无法安全处理则说明阻塞。
       knowledge: [host-tools.md, repair-policy.md, design-method.md]
+      reads:
+        design: 要修正的设计成果
+        designReview: 检查提出的问题（只修这些）
       does:
         - 修复可安全处理的问题
         - 保留新版本
@@ -143,6 +151,10 @@ steps:
       role: 设计独立检查
       prompt: 重新独立只读检查修正后的设计。
       knowledge: [host-tools.md, review-criteria.md]
+      reads:
+        confirmed: 核对设计是否覆盖需求和边界
+        design: 修正后的设计成果
+        designReview: 上一轮检查提出的问题（确认是否修好）
       does:
         - 复查修正后设计
         - 最多两轮修正
@@ -184,6 +196,9 @@ steps:
       delivers: 一份测试设计：要验证什么、怎么验证
       prompt: 依据通过检查的设计形成测试设计；证据或设计不足时应在当前会话说明并与用户确认，不代上游作决定。
       knowledge: [host-tools.md, test-design-method.md, test-design-template.md]
+      reads:
+        confirmed: 需求侧的验收口径
+        design: 通过检查的设计（测试设计的权威输入）
       does:
         - 规划测试与追溯
         - 记录设计缺口
@@ -214,6 +229,10 @@ steps:
       role: 设计门禁检查
       prompt: 独立只读检查需求、设计和测试设计的闭环。只有均可在既有授权内安全整改时 revise 且 safe=true。
       knowledge: [host-tools.md, gate-review.md]
+      reads:
+        confirmed: 确认过的需求
+        design: 当前设计版本
+        tests: 当前测试设计版本
       does:
         - 检查需求与设计闭环
         - 决定通过或停止
@@ -253,6 +272,10 @@ steps:
       role: 设计门禁整改
       prompt: 仅整改门禁中确定安全的问题，返回设计和测试设计实际版本引用；未修改的一方沿用原引用。
       knowledge: [host-tools.md, gate-repair.md]
+      reads:
+        design: 当前设计版本
+        tests: 当前测试设计版本
+        gateReview: 门禁提出的问题（只整改这些）
       does:
         - 整改安全问题
         - 更新产物引用
@@ -287,6 +310,11 @@ steps:
       role: 设计门禁检查
       prompt: 重新只读检查整改后的设计和测试设计版本。
       knowledge: [host-tools.md, gate-review.md]
+      reads:
+        confirmed: 确认过的需求
+        design: 整改后的设计版本
+        tests: 整改后的测试设计版本
+        gateReview: 上一轮门禁提出的问题（确认是否改好）
       does:
         - 审查更新后的产物
         - 最多两轮整改
@@ -328,6 +356,10 @@ steps:
       delivers: 一份实施计划和任务列表：每项任务的目标、范围和要做的测试
       prompt: 规划有序任务，明确每项范围与测试责任，更新测试设计；不允许空计划或只有标题。
       knowledge: [host-tools.md, task-split.md]
+      reads:
+        confirmed: 需求边界（任务不越界）
+        design: 通过门禁的设计
+        tests: 通过门禁的测试设计（分配测试责任）
       does:
         - 拆分有序任务
         - 明确范围与测试
@@ -375,6 +407,11 @@ steps:
       delivers: 一份交付说明：完成了什么、怎么验证的、还剩什么问题
       prompt: 汇总实际验证、证据与遗留事项。遇到需要用户决定的问题，在当前会话中说明并等待答复，处理后继续；无法完成时如实说明，不得虚构已完成。
       knowledge: [host-tools.md, dev-completion.md]
+      reads:
+        confirmed: 最初确认的需求（核对是否做到）
+        plan: 任务计划（各任务的交付结果用 list_workflow_results 查看）
+        planVersion: 最新的任务计划版本
+        testVersion: 最新的测试设计版本
       does:
         - 汇总验证与产物
         - 说明遗留问题

@@ -1,13 +1,14 @@
 /**
  * 工作流节点会话宿主（ADR 037）：节点会话是应用的普通会话，宿主只经会话能力
  * 打开会话、发任务说明、订阅轮次；不自己持有连接，也不转发用户消息。
+ * 会话是唯一来源（ADR 040）：会话每次变化都把完整状态报给引擎。
  */
 import { afterEach, describe, expect, it } from "vitest";
 import type { AcpSessionEvent } from "../../../src/plugins/acpRuntime/events.ts";
 import type { PluginSessionOptions, SessionTarget, SessionTurnEvent } from "../../../src/plugins/project/service.ts";
 import type { MessageDisplay } from "../../../src/shared/messageDisplay.ts";
 import type { WorkflowEvent } from "../../../src/plugins/workflow/engine/protocol.ts";
-import { attachNodeSessionHost, type NodeSessionPort } from "../../../src/plugins/workflow/sessionHost/nodeSessionHost.ts";
+import { attachNodeSessionHost, type NodeSessionPort, type SessionStateWire } from "../../../src/plugins/workflow/sessionHost/nodeSessionHost.ts";
 
 const offer = {
   name: "aaw-workflow-result",
@@ -43,6 +44,7 @@ function fakeSessions() {
       opened.push(options);
       return Promise.resolve({ workspacePath: options.workspacePath, agentKey: "key", sessionId: options.resumeSessionId ?? "s-1" });
     },
+    ready: () => Promise.resolve(),
     send: (_target, message) => {
       if (running) return false;
       sent.push(message);
@@ -66,11 +68,12 @@ function fakeSessions() {
   return { port, opened, sent, cancelled, start, end, emitEvent: (event: AcpSessionEvent) => eventWatchers.forEach((w) => w(event)) };
 }
 
-function harness() {
+function harness(registered?: ReadonlySet<string>) {
   const sessions = fakeSessions();
   const observers = new Set<(event: WorkflowEvent) => void>();
   const responses: { id: number; response: Record<string, unknown> }[] = [];
   const projected: WorkflowEvent[] = [];
+  const reports: { sessionId: string; state: SessionStateWire }[] = [];
   const detach = attachNodeSessionHost({
     workflow: {
       subscribe: (listener) => {
@@ -81,8 +84,13 @@ function harness() {
         responses.push(JSON.parse(frame) as { id: number; response: Record<string, unknown> });
         return Promise.resolve();
       },
+      reportSession: (sessionId, state) => {
+        reports.push({ sessionId, state });
+        return Promise.resolve();
+      },
     },
     sessions: sessions.port,
+    ...(registered ? { registered: { sessions: () => registered, subscribe: () => () => {} } } : {}),
     onEvent: (event) => projected.push(event),
   });
   let serial = 0;
@@ -95,7 +103,11 @@ function harness() {
     await vi_waitFor(() => responses.some((item) => item.id === id));
     return responses.find((item) => item.id === id)!.response;
   };
-  return { ...sessions, responses, projected, detach, send, responseOf };
+  const lastReport = () => reports[reports.length - 1]!.state;
+  const exit = () => {
+    for (const observer of observers) observer({ type: "service-exit", runId: "" });
+  };
+  return { ...sessions, responses, projected, reports, lastReport, exit, detach, send, responseOf };
 }
 
 async function vi_waitFor(condition: () => boolean) {
@@ -134,17 +146,36 @@ describe("打开节点会话", () => {
   });
 });
 
+describe("在会话里发起的运行（ADR 039）", () => {
+  it("发起的会话接不上时第一步改开新会话；原有角色的会话接不上照常失败", async () => {
+    const h = (current = harness());
+    const open = h.port.open.bind(h.port);
+    h.port.open = (options) => (options.resumeSessionId === "user-session" ? Promise.reject(new Error("Agent 不接受重新载入")) : open(options));
+    const entry = h.send({ kind: "spawn_node_session", requirement: requirement({ resume_session_id: "user-session", entry_session: true }) });
+    expect(await h.responseOf(entry)).toEqual({ result: { sessionId: "s-1" } });
+    expect(h.opened.map((options) => options.resumeSessionId)).toEqual([undefined]);
+    const actor = h.send({ kind: "spawn_node_session", requirement: requirement({ resume_session_id: "user-session" }) });
+    expect(Object.keys(await h.responseOf(actor))).toContain("code");
+  });
+
+  it("任务说明进到会话时告诉发起方：它可以收起「正在启动工作流」", async () => {
+    const h = (current = harness());
+    await h.responseOf(h.send({ kind: "spawn_node_session", requirement: requirement() }));
+    h.send({ kind: "prompt_turn", session_id: "s-1", action: action(), prompt: "做事" });
+    await vi_waitFor(() => h.sent.length === 1);
+    expect(h.projected).toContainEqual({ type: "session-task-sent", runId: "run-1", sessionId: "s-1" });
+  });
+});
+
 describe("一轮工作流轮次", () => {
-  it("任务说明作为插件消息发出（收成一行），这一轮结束才应答；运行第一步把用户的要求显示出来", async () => {
+  it("任务说明作为插件消息发出（收成一行），这一轮一开始就应答轮次编号；运行第一步把用户的要求显示出来", async () => {
     const h = (current = harness());
     await h.responseOf(h.send({ kind: "spawn_node_session", requirement: requirement() }));
     const first = action("ask#1", 1, { __initial: true, vars: { input: { requirement: "做一个登录页" } }, __node: { actor: "需求确认" } });
     const id = h.send({ kind: "prompt_turn", session_id: "s-1", action: first, prompt: "确认需求" });
     await vi_waitFor(() => h.sent.length === 1);
     expect(h.sent[0]).toEqual({ text: "做一个登录页\n\n确认需求", display: { source: "workflow", visible: "做一个登录页", foldLabel: "工作流给 Agent 的说明" } });
-    expect(h.responses.some((item) => item.id === id)).toBe(false);
-    h.end();
-    expect(await h.responseOf(id)).toEqual({ result: null });
+    expect(await h.responseOf(id)).toEqual({ result: { turn: h.lastReport().running } });
   });
 
   it("运行没填输入时第一步不显示「{}」，整段说明收起", async () => {
@@ -157,19 +188,6 @@ describe("一轮工作流轮次", () => {
     h.end();
   });
 
-  it("被用户打断不算失败；出错才报给引擎", async () => {
-    const h = (current = harness());
-    await h.responseOf(h.send({ kind: "spawn_node_session", requirement: requirement() }));
-    const cancelled = h.send({ kind: "prompt_turn", session_id: "s-1", action: action(), prompt: "做事" });
-    await vi_waitFor(() => h.sent.length === 1);
-    h.end("cancelled");
-    expect(await h.responseOf(cancelled)).toEqual({ result: null });
-    const failed = h.send({ kind: "prompt_turn", session_id: "s-1", action: action(), prompt: "再做" });
-    await vi_waitFor(() => h.sent.length === 2);
-    h.end("failed", "连接断开");
-    expect(await h.responseOf(failed)).toEqual({ code: "连接断开" });
-  });
-
   it("用户正在和 Agent 聊时，等这一轮结束再发任务说明", async () => {
     const h = (current = harness());
     await h.responseOf(h.send({ kind: "spawn_node_session", requirement: requirement() }));
@@ -179,8 +197,7 @@ describe("一轮工作流轮次", () => {
     expect(h.sent).toHaveLength(0);
     h.end();
     await vi_waitFor(() => h.sent.length === 1);
-    h.end();
-    expect(await h.responseOf(id)).toEqual({ result: null });
+    expect(Object.keys(await h.responseOf(id))).toEqual(["result"]);
   });
 
   it("会话事件归到当前这一步，交给运行视图", async () => {
@@ -194,47 +211,95 @@ describe("一轮工作流轮次", () => {
   });
 });
 
-describe("等下一轮结束", () => {
-  it("用户在会话里回复的那一轮结束时应答；等待之前已经结束的一轮立即算数", async () => {
+describe("会话状态报告（ADR 040）", () => {
+  it("接上会话报一份空闲状态；每轮开始、结束各报一份完整的，序号递增，结束方式照实说", async () => {
     const h = (current = harness());
     await h.responseOf(h.send({ kind: "spawn_node_session", requirement: requirement() }));
-    const turn = h.send({ kind: "prompt_turn", session_id: "s-1", action: action(), prompt: "做事" });
-    await vi_waitFor(() => h.sent.length === 1);
-    h.end();
-    await h.responseOf(turn);
-    const wait = h.send({ kind: "wait_turn_ended", session_id: "s-1" });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(h.responses.some((item) => item.id === wait)).toBe(false);
-    // 用户自己发消息：普通会话的一轮，宿主不经手，只看它结束。
+    expect(h.reports).toHaveLength(1);
+    expect(h.lastReport()).toMatchObject({ running: null, ended: null });
+    const id = h.send({ kind: "prompt_turn", session_id: "s-1", action: action(), prompt: "做事" });
+    const { result } = (await h.responseOf(id)) as { result: { turn: number } };
+    expect(h.lastReport()).toMatchObject({ seq: result.turn, running: result.turn, ended: null });
+    h.end("cancelled");
+    expect(h.lastReport()).toMatchObject({ running: null, ended: { turn: result.turn, outcome: "cancelled", error: null } });
+    // 用户在会话里接着说：普通会话的一轮，同样报给引擎；网络断开就说出错。
     h.start();
-    h.end();
-    expect(await h.responseOf(wait)).toEqual({ result: null });
-    // 引擎还没来等，用户已经又聊完一轮：等的时候立即应答。
+    const reply = h.lastReport().running!;
+    expect(reply).toBeGreaterThan(result.turn);
+    expect(h.lastReport().ended).toMatchObject({ turn: result.turn, outcome: "cancelled" });
+    h.end("failed", "连接断开");
+    expect(h.lastReport()).toMatchObject({ running: null, ended: { turn: reply, outcome: "failed", error: "连接断开" } });
+    const seqs = h.reports.map((item) => item.state.seq);
+    expect([...seqs].sort((a, b) => a - b)).toEqual(seqs);
+    expect(new Set(seqs).size).toBe(seqs.length);
+  });
+
+  it("会话已经在跑一轮时接上：报告里带着这一轮", async () => {
+    const h = (current = harness());
     h.start();
-    h.end();
-    const late = h.send({ kind: "wait_turn_ended", session_id: "s-1" });
-    expect(await h.responseOf(late)).toEqual({ result: null });
+    await h.responseOf(h.send({ kind: "spawn_node_session", requirement: requirement() }));
+    expect(h.lastReport().running).not.toBeNull();
   });
 });
 
 describe("运行停止", () => {
-  it("唤醒挂起的等待、停下进行中的一轮；本帧不应答，会话留给用户继续用", async () => {
+  it("停下这次运行会话里进行中的一轮；本帧不应答，会话留给用户继续用；没登记的会话不再报告", async () => {
     const h = (current = harness());
     await h.responseOf(h.send({ kind: "spawn_node_session", requirement: requirement() }));
-    const wait = h.send({ kind: "wait_turn_ended", session_id: "s-1" });
+    await h.responseOf(h.send({ kind: "prompt_turn", session_id: "s-1", action: action(), prompt: "做事" }));
     const stop = h.send({ kind: "cancel_waiting" });
-    expect(await h.responseOf(wait)).toEqual({ code: "RUN_CANCELLED" });
+    await vi_waitFor(() => h.cancelled.length === 1);
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(h.responses.some((item) => item.id === stop)).toBe(false);
+    const reported = h.reports.length;
+    h.start();
+    h.end();
+    expect(h.reports).toHaveLength(reported);
     // 停止后这个会话不再归这次运行：引擎再问就如实说不在。
     const after = h.send({ kind: "prompt_turn", session_id: "s-1", action: action(), prompt: "做事" });
     expect(await h.responseOf(after)).toEqual({ code: "WORKFLOW_SESSION_NOT_HOSTED" });
+  });
 
+  it("会话空着时停止不去取消什么", async () => {
+    const h = (current = harness());
     await h.responseOf(h.send({ kind: "spawn_node_session", requirement: requirement() }));
-    const running = h.send({ kind: "prompt_turn", session_id: "s-1", action: action(), prompt: "做事" });
-    await vi_waitFor(() => h.sent.length === 1);
     h.send({ kind: "cancel_waiting" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(h.cancelled).toHaveLength(0);
+  });
+});
+
+describe("引擎进程退出", () => {
+  it("它在执行的运行都停了：会话里这次运行正在跑的一轮一起停下，不再报告", async () => {
+    const h = (current = harness());
+    await h.responseOf(h.send({ kind: "spawn_node_session", requirement: requirement() }));
+    await h.responseOf(h.send({ kind: "prompt_turn", session_id: "s-1", action: action(), prompt: "做事" }));
+    h.exit();
     await vi_waitFor(() => h.cancelled.length === 1);
-    expect(await h.responseOf(running)).toEqual({ result: null });
+    const reported = h.reports.length;
+    h.start();
+    expect(h.reports).toHaveLength(reported);
+  });
+});
+
+describe("登记过的会话一直报告（ADR 040）", () => {
+  it("运行停着、这个页面没接上它，你在会话里说的每一轮照样报给引擎", () => {
+    const h = (current = harness(new Set(["s-1"])));
+    h.start();
+    expect(h.reports.at(-1)).toMatchObject({ sessionId: "s-1", state: { ended: null } });
+    const turn = h.lastReport().running!;
+    h.end("completed");
+    expect(h.lastReport()).toMatchObject({ running: null, ended: { turn, outcome: "completed" } });
+  });
+
+  it("接上又停下：登记着就接着报", async () => {
+    const h = (current = harness(new Set(["s-1"])));
+    await h.responseOf(h.send({ kind: "spawn_node_session", requirement: requirement() }));
+    h.send({ kind: "cancel_waiting" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const reported = h.reports.length;
+    h.start();
+    h.end();
+    expect(h.reports.length).toBe(reported + 2);
   });
 });

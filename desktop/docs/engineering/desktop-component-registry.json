@@ -525,7 +525,7 @@
   "plugins/project/conversation/ui/SessionView.tsx": {
     "definitions": {
       "状态与统计": ["DraftPromptChips", "EmptyPrompts"],
-      "内容与专用绘制": ["SessionItemView", "renderSessionItem"],
+      "内容与专用绘制": ["HandoffTurn", "SessionItemView", "renderSessionItem"],
       "布局与操纵": ["SessionView"]
     },
     "targets": [
@@ -1280,14 +1280,17 @@
   },
   "plugins/workflow/ui/RunList.tsx": {
     "definitions": {
-      "导航与列表": ["RunRow"]
+      "导航与列表": ["RunRow"],
+      "图标与内容标识": ["MarkGlyph"],
+      "提示与确认": ["RunMarkLegend"]
     },
     "targets": []
   },
   "plugins/workflow/ui/RunManager.tsx": {
     "definitions": {
       "布局与操纵": ["RunManager"],
-      "导航与列表": ["RunManager/renderRuns", "RunManager/row"]
+      "导航与列表": ["RunManager/renderRuns", "RunManager/row"],
+      "命令按钮": ["RunManager/row/guarded"]
     },
     "targets": []
   },
@@ -1321,25 +1324,12 @@
     },
     "targets": []
   },
-  "plugins/workflow/ui/WorkflowLauncher.tsx": {
-    "definitions": {
-      "导航与列表": ["FileList"],
-      "布局与操纵": ["WorkflowLauncher"]
-    },
-    "targets": []
-  },
   "plugins/workflow/ui/WorkflowLibrary.tsx": {
     "definitions": {
       "内容与专用绘制": ["ImportPreviewCard"],
       "布局与操纵": ["WorkflowCard", "WorkflowLibrary"],
       "提示与确认": ["CardDelete"],
       "导航与列表": ["CardName", "DraftCard"]
-    },
-    "targets": []
-  },
-  "plugins/workflow/ui/WorkflowOverview.tsx": {
-    "definitions": {
-      "布局与操纵": ["WorkflowOverview"]
     },
     "targets": []
   },
@@ -1351,7 +1341,8 @@
   },
   "plugins/workflow/ui/WorkflowSessionBanner.tsx": {
     "definitions": {
-      "布局与操纵": ["WorkflowSessionBanner"]
+      "布局与操纵": ["WorkflowSessionBanner"],
+      "状态与统计": ["Strip"]
     },
     "targets": []
   },
@@ -1359,28 +1350,36 @@
     "definitions": {
       "导航与列表": ["WorkflowSidebar"]
     },
+    "targets": [
+      "WorkflowSidebar/shared/ui/SidebarCreateButton.tsx#SidebarCreateButton@Icon → shared/ui/icons.tsx#SparklesIcon"
+    ]
+  },
+  "plugins/workflow/ui/WorkflowWorkspace.tsx": {
+    "definitions": {
+      "布局与操纵": ["WorkflowWorkspace"]
+    },
     "targets": []
   },
   "plugins/workflow/ui/workbench.tsx": {
     "definitions": {
       "布局与操纵": [
-        "createWorkflowWorkbench/\"workflow\"/View",
-        "createWorkflowWorkbench/Overview",
         "createWorkflowWorkbench/SessionBanner",
-        "createWorkflowWorkbench/panelId/View"
+        "createWorkflowWorkbench/panelId/View",
+        "createWorkflowWorkbench/sidebarId/View",
+        "createWorkflowWorkbench/sidebarId/WorkArea"
       ]
     },
     "targets": [
       "apply/panels → plugins/workflow/ui/workbench.tsx#createWorkflowWorkbench/panel",
       "apply/sidebar → plugins/workflow/ui/workbench.tsx#createWorkflowWorkbench/sidebar",
-      "createWorkflowWorkbench/\"workflow\"/Icon → shared/ui/icons.tsx#WorkflowIcon",
-      "createWorkflowWorkbench/\"workflow\"/View → (inline)",
       "createWorkflowWorkbench/Icon → shared/ui/icons.tsx#WorkflowIcon",
-      "createWorkflowWorkbench/Overview → (inline)",
-      "createWorkflowWorkbench/Overview → plugins/workflow/types.ts#Overview",
       "createWorkflowWorkbench/SessionBanner → (inline)",
       "createWorkflowWorkbench/panelId/Icon → shared/ui/icons.tsx#WorkflowIcon",
-      "createWorkflowWorkbench/panelId/View → (inline)"
+      "createWorkflowWorkbench/panelId/View → (inline)",
+      "createWorkflowWorkbench/sidebarId/Icon → shared/ui/icons.tsx#WorkflowIcon",
+      "createWorkflowWorkbench/sidebarId/View → (inline)",
+      "createWorkflowWorkbench/sidebarId/WorkArea → (inline)",
+      "entryCommands/`workflow:${workflow.id}:${entry.id}`/Icon → shared/ui/icons.tsx#WorkflowIcon"
     ]
   },
   "shared/logging/react.ts": {
@@ -1414,15 +1413,15 @@
     },
     "targets": []
   },
-  "shared/ui/ConfirmIconAction.tsx": {
-    "definitions": {
-      "提示与确认": ["ConfirmIconAction"]
-    },
-    "targets": []
-  },
   "shared/ui/CapabilityCard.tsx": {
     "definitions": {
       "布局与操纵": ["CapabilityCard"]
+    },
+    "targets": []
+  },
+  "shared/ui/ConfirmIconAction.tsx": {
+    "definitions": {
+      "提示与确认": ["ConfirmIconAction"]
     },
     "targets": []
   },
@@ -1626,7 +1625,13 @@
         "Spinner",
         "StatusDot"
       ],
-      "选择控件": ["Checkbox", "Listbox", "RadioDot", "ToggleSwitch"],
+      "选择控件": [
+        "Checkbox",
+        "Listbox",
+        "MultiListbox",
+        "RadioDot",
+        "ToggleSwitch"
+      ],
       "命令按钮": ["ActionButton", "DangerButton"]
     },
     "targets": []
@@ -1726,6 +1731,7 @@
       "图标与内容标识": [
         "ActivityIcon",
         "ArchiveIcon",
+        "ArchiveRestoreIcon",
         "ArrowDownIcon",
         "ArrowDownToLineIcon",
         "ArrowLeftIcon",
@@ -1772,8 +1778,9 @@
         "PencilIcon",
         "PinIcon",
         "PinOffIcon",
-        "PlusIcon",
+        "PlayIcon",
         "PlugIcon",
+        "PlusIcon",
         "PuzzleIcon",
         "RefreshIcon",
         "SearchIcon",

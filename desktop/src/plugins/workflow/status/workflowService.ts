@@ -5,9 +5,17 @@
  * - **引擎客户端**：持有 engine/client.ts 的 WorkflowClient，所有引擎方法
  *   （workflows / workflow / list / snapshot / start / resume / recover /
  *   stop / authorize-retry / reconcile）经 `request` 走 NDJSON 帧协议；
+ * - **项目状态（ADR 040）**：运行列表与会话关联每个项目只有一份。引擎在运行
+ *   有任何可见变化时推 `run-changed`（带版本号与这次运行的摘要、会话关联），
+ *   这里按版本号直接替换，所有界面读同一份、同一刻变化，不回头去拉——面板上的
+ *   操作（停止、继续、处置、改名、归档……）之后也不补拉；只在绑定项目、引擎退出
+ *   重连、用户点刷新时拉全量。引擎进程退出时先把运行标成不在
+ *   执行，再拉起引擎拉全量，不会停在「运行中」；
  * - **每 runId 快照流**：`snapshot(runId)` 返回一个 ReadonlySnapshot<
- *   CanvasSnapshot>（Map 复用）；引擎事件到达后 200ms 去抖重取（对齐旧
- *   WorkflowPanel 的刷新节奏），快照解析走 status/snapshot.ts 纯函数；
+ *   CanvasSnapshot>（Map 复用）；推来的版本号比快照新才重取（同一时刻只有一个
+ *   请求在路上），快照解析走 status/snapshot.ts 纯函数；
+ * - **会话状态**：`sessionActivity` 是会话视图用的同一份会话活动，节点「在干
+ *   什么」由 status/nodeActivity.ts 从它算出（ADR 040）；
  * - **节点会话事件**：节点会话宿主把会话事件（Agent 的输出、计划更新）
  *   交给 `project`，在此更新节点计划并经 `subscribe` 转发给运行视图。会话
  *   本身是应用的普通会话（ADR 037），这里只是运行视图的旁听。
@@ -32,14 +40,15 @@ import type {
   WorkflowService,
 } from "../types.ts";
 import { parseDraft, parseDraftCheck, parseImportPreview, parseWorkflowDetail, parseWorkflowSummary } from "./library.ts";
+import type { SessionActivitySource } from "./nodeActivity.ts";
 import {
   deriveCanvasSnapshot,
   emptyCanvasSnapshot,
   parseInterventionOutcome,
 } from "./snapshot.ts";
 
-/** 事件到达后的去抖刷新窗口（对齐旧 WorkflowPanel 的 200ms）。 */
-const REFRESH_DEBOUNCE_MS = 200;
+/** 引擎进程退出后多久重新拉起并拉全量。 */
+const RECONNECT_DELAY_MS = 300;
 
 /** WorkflowService 的装配依赖（index.ts 生产装配；测试注入桩）。 */
 export interface WorkflowServiceDeps {
@@ -59,6 +68,8 @@ export interface WorkflowServiceDeps {
   };
   /** 节点进度（ACP plan，ADR 035）；不给时不记录。 */
   readonly plans?: NodePlans;
+  /** 会话的实时状态（project 的会话活动，ADR 040）。 */
+  readonly sessionActivity?: SessionActivitySource;
 }
 
 /** 工厂返回值：服务本体 + index.ts 接线用的生命周期钩子。 */
@@ -86,6 +97,9 @@ interface RunStore {
   readonly listeners: Set<(state: CanvasSnapshot, previous: CanvasSnapshot) => void>;
   timer: ReturnType<typeof setTimeout> | null;
   seq: number;
+  /** 正在取快照；取的途中又推来了更新的版本时，取完再取一次。 */
+  fetching: boolean;
+  stale: boolean;
 }
 
 /** 站点身份 `` `${siteId}#${ordinal}` `` 的解析。 */
@@ -121,6 +135,7 @@ export function deriveSessionLinks(value: unknown): RunSessionLinks[] {
       title: text(item.title) || text(item.workflowName),
       status: text(item.status),
       active: item.active === true,
+      ...(item.stopping === true ? { stopping: true } : {}),
       ...(item.archived === true ? { archived: true } : {}),
       ...(item.failed === true ? { failed: true } : {}),
       links: links.flatMap((link): RunSessionLink[] => {
@@ -141,7 +156,8 @@ export function deriveSessionLinks(value: unknown): RunSessionLinks[] {
               ordinal: typeof n.ordinal === "number" ? n.ordinal : 0,
               status: text(n.status),
               label: text(n.label) || siteId,
-              awaitingInput: n.awaitingInput === true,
+              ...(typeof n.turn === "string" ? { turn: n.turn } : {}),
+              ...(n.submitted === true ? { submitted: true } : {}),
             }];
           }),
         }];
@@ -181,7 +197,6 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
   const { client, logger } = deps;
   const listeners = new Set<(event: WorkflowEvent) => void>();
   const runStores = new Map<string, RunStore>();
-  const runTimers = new Map<string, ReturnType<typeof setTimeout>>();
   let disposed = false;
   let workspace: string | null = null;
   let runList: readonly RunSummary[] = [];
@@ -189,8 +204,16 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
   let pendingPanelRequest: WorkflowPanelRequest | null = null;
   let links: { workspace: string | null; runs: readonly RunSessionLinks[] } = { workspace: null, runs: [] };
   let otherLinks: readonly { project: string; runs: readonly RunSessionLinks[] }[] = [];
-  let listTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let bindingVersion = 0;
+  /** 各运行最近采用的版本号（推送与全量拉取都按它取新舍旧）。 */
+  const versions = new Map<string, number>();
+  const versionOf = (value: unknown): number => {
+    const version = (value as { version?: unknown } | null)?.version;
+    return typeof version === "number" ? version : 0;
+  };
+  /** 全量拉取的结果里，比已采用的推送旧的行不要（拉取途中又推来了新的）。 */
+  const fresher = (runId: string, version: number) => version >= (versions.get(runId) ?? 0);
 
   const emit = (event: WorkflowEvent): void => {
     for (const listener of [...listeners]) {
@@ -235,16 +258,29 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
     const cwd = requireCwd(workspace);
     const raw = await client.request<unknown>("list", { cwd });
     if (disposed || version !== bindingVersion || !Array.isArray(raw)) return;
+    const previous = new Map(runList.map((run) => [run.runId, run]));
     runList = raw.flatMap((item) => {
       const run = deriveRunSummary(item);
-      return run === null ? [] : [run];
+      if (run === null) return [];
+      const kept = previous.get(run.runId);
+      return [kept && !fresher(run.runId, versionOf(item)) ? kept : run];
     });
     // 会话关联（侧栏分组）：失败只记日志，保留上一份，不影响运行列表。
     try {
       const rawLinks = await client.request<unknown>("session-links", { cwd });
       if (disposed || version !== bindingVersion) return;
       // 已归档的运行带 archived 标记：侧栏据此把它的会话一起隐去（ADR 036）。
-      if (cwd === workspace) links = { workspace: cwd, runs: deriveSessionLinks(rawLinks) };
+      if (cwd === workspace) {
+        const previous = new Map(links.runs.map((run) => [run.runId, run]));
+        const versionsOf = new Map((Array.isArray(rawLinks) ? rawLinks : []).map((item) => [text((item as { runId?: unknown } | null)?.runId), versionOf(item)]));
+        links = {
+          workspace: cwd,
+          runs: deriveSessionLinks(rawLinks).map((run) => {
+            const kept = previous.get(run.runId);
+            return kept && !fresher(run.runId, versionsOf.get(run.runId) ?? 0) ? kept : run;
+          }),
+        };
+      }
     } catch (error) {
       logger.warn("运行会话关联刷新失败", {
         reason: error instanceof Error ? error.message : String(error),
@@ -266,14 +302,6 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
     }
   };
 
-  const scheduleList = (): void => {
-    if (disposed) return;
-    if (listTimer !== null) clearTimeout(listTimer);
-    listTimer = setTimeout(() => {
-      listTimer = null;
-      void refreshList();
-    }, REFRESH_DEBOUNCE_MS);
-  };
 
   // ------------------------------------------------------------ run 快照流
 
@@ -297,6 +325,8 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
     if (store.cwd === null) return;
     const cwd = store.cwd;
     const seq = ++store.seq;
+    store.fetching = true;
+    store.stale = false;
     try {
       const raw = await client.request<unknown>("snapshot", { cwd, runId });
       if (disposed || store.seq !== seq || runStores.get(runId) !== store) return;
@@ -308,20 +338,96 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       if (message.includes("RUN_NOT_FOUND")) return;
       logger.warn("运行快照刷新失败", { runId, reason: message });
       emit({ type: "snapshot-error", runId, message });
+    } finally {
+      if (store.seq === seq) {
+        store.fetching = false;
+        if (store.stale && !disposed) void refreshRun(runId);
+      }
     }
   };
 
-  const scheduleRun = (runId: string): void => {
-    if (disposed || runId === "") return;
-    const pending = runTimers.get(runId);
-    if (pending !== undefined) clearTimeout(pending);
-    runTimers.set(
-      runId,
-      setTimeout(() => {
-        runTimers.delete(runId);
-        void refreshRun(runId);
-      }, REFRESH_DEBOUNCE_MS),
-    );
+  /** 推来的版本比快照新：重取（取的途中只记下，取完再取一次，不并发）。 */
+  const followVersion = (runId: string, version: number): void => {
+    const store = runStores.get(runId);
+    if (disposed || store === undefined) return;
+    if (store.state.runId === runId && (store.state.version ?? 0) >= version) return;
+    if (store.fetching) {
+      store.stale = true;
+      return;
+    }
+    void refreshRun(runId);
+  };
+
+  // ---------------------------------------------------------- 引擎推来的状态
+
+  /** 一次运行的新状态（ADR 040）：按版本号替换列表与会话关联里的那一行。 */
+  const applyRunChanged = (event: WorkflowEvent): void => {
+    const runId = event.runId;
+    const project = text(event.project);
+    const version = versionOf(event);
+    if (runId === "" || version < (versions.get(runId) ?? 0)) return;
+    versions.set(runId, version);
+    const summary = deriveRunSummary(event.run);
+    const [link] = deriveSessionLinks([event.links]);
+    if (workspace !== null && pathKey(project) === pathKey(workspace)) {
+      if (summary !== null) {
+        const at = runList.findIndex((run) => run.runId === runId);
+        runList = at < 0 ? [summary, ...runList] : runList.map((run, index) => (index === at ? summary : run));
+      }
+      if (link) {
+        const at = links.runs.findIndex((run) => run.runId === runId);
+        links = { workspace: links.workspace, runs: at < 0 ? [link, ...links.runs] : links.runs.map((run, index) => (index === at ? link : run)) };
+      }
+    } else if (link && project !== "") {
+      const at = otherLinks.findIndex((item) => pathKey(item.project) === pathKey(project));
+      const runs = at < 0 ? [link] : otherLinks[at]!.runs.some((run) => run.runId === runId)
+        ? otherLinks[at]!.runs.map((run) => (run.runId === runId ? link : run))
+        : [link, ...otherLinks[at]!.runs];
+      otherLinks = at < 0 ? [...otherLinks, { project, runs }] : otherLinks.map((item, index) => (index === at ? { project: item.project, runs } : item));
+    }
+    emit({ type: "runs-changed", runId: "" });
+    // 推来的摘要里有的（在不在执行、是否正在停止、运行状态）直接换进打开着的
+    // 快照：「正在停止」这类只在服务内存里的变化不改版本号，也要同时出现。
+    const store = runStores.get(runId);
+    if (store && summary && store.state.runId === runId && (store.state.version ?? 0) <= version) {
+      setState(store, { ...store.state, active: summary.active ?? store.state.active, run: { ...store.state.run, ...summary } });
+    }
+    followVersion(runId, version);
+  };
+
+  const applyRunRemoved = (runId: string): void => {
+    versions.delete(runId);
+    runList = runList.filter((run) => run.runId !== runId);
+    links = { workspace: links.workspace, runs: links.runs.filter((run) => run.runId !== runId) };
+    otherLinks = otherLinks.map((item) => ({ project: item.project, runs: item.runs.filter((run) => run.runId !== runId) }));
+    emit({ type: "runs-changed", runId: "" });
+  };
+
+  /**
+   * 引擎进程退出了：它在执行的运行都不在执行了（下次启动时由引擎释放占用）。
+   * 先把界面上的运行标成不在执行，再拉起引擎、拉全量对齐，不停在「运行中」。
+   */
+  const engineExited = (): void => {
+    versions.clear();
+    runList = runList.map((run) => (run.active ? { ...run, active: false, stopping: false } : run));
+    const settle = (runs: readonly RunSessionLinks[]) => runs.map((run) => (run.active ? { ...run, active: false, stopping: false } : run));
+    links = { workspace: links.workspace, runs: settle(links.runs) };
+    otherLinks = otherLinks.map((item) => ({ project: item.project, runs: settle(item.runs) }));
+    for (const store of runStores.values()) {
+      if (store.state.active) setState(store, { ...store.state, active: false, ...(store.state.run ? { run: { ...store.state.run, active: false, stopping: false } } : {}) });
+    }
+    emit({ type: "runs-changed", runId: "" });
+    if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (disposed) return;
+      for (const runId of runStores.keys()) void refreshRun(runId);
+      // 引擎重新拉起、列表拉到了：退出提示过时了，界面据此收起（不再让人点「重试」）。
+      void fetchList().then(
+        () => { if (!disposed) emit({ type: "service-reconnected", runId: "" }); },
+        (error: unknown) => logger.warn("运行列表刷新失败", { reason: error instanceof Error ? error.message : String(error) }),
+      );
+    }, RECONNECT_DELAY_MS);
   };
 
   const snapshotOf = (runId: string): ReadonlySnapshot<CanvasSnapshot> => {
@@ -335,6 +441,8 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
         listeners: new Set(),
         timer: null,
         seq: 0,
+        fetching: false,
+        stale: false,
       };
       runStores.set(runId, store);
       void refreshRun(runId);
@@ -392,6 +500,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       cwd, workflow: request.workflowId, entry: request.entry, inputs: request.inputs,
       ...(title ? { title } : {}),
       ...(request.autoConfirm ? { autoConfirm: true } : {}),
+      ...(request.entrySession ? { entrySession: request.entrySession } : {}),
       command: [...launch.command],
       ...(launch.agentId ? { agentId: launch.agentId } : {}),
       mcpServers: Array.isArray(launch.mcpServers) ? launch.mcpServers : [],
@@ -400,6 +509,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
 
   const service: WorkflowService = {
     isActive: () => !disposed,
+    ...(deps.sessionActivity ? { sessionActivity: deps.sessionActivity } : {}),
 
     bindWorkspace(path: string | null): () => void {
       if (disposed) return () => {};
@@ -426,7 +536,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
         runList = [];
         links = { workspace: null, runs: [] };
         emit({ type: "runs-changed", runId: "" });
-        scheduleList();
+        void refreshList();
       };
     },
 
@@ -536,8 +646,6 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       });
       const runId = typeof result?.runId === "string" ? result.runId : "";
       if (runId === "") throw new Error("WORKFLOW_RUN_ID_MISSING");
-      scheduleList();
-      scheduleRun(runId);
       return { runId };
     },
 
@@ -551,16 +659,12 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
         command: [...launch.command],
         mcpServers: Array.isArray(launch.mcpServers) ? launch.mcpServers : [],
       });
-      scheduleRun(runId);
-      scheduleList();
     },
 
     async recover(runId: string, reason: string) {
       if (disposed) throw new Error("Workflow service is disposed");
       const cwd = requireCwd(workspace);
       await client.request("recover", { cwd, runId, reason });
-      scheduleRun(runId);
-      scheduleList();
     },
 
     runs: () => runList.filter((run) => run.archivedAt == null),
@@ -581,20 +685,16 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
     async renameRun(runId, title, project) {
       if (disposed) throw new Error("Workflow service is disposed");
       await client.request("run-rename", { cwd: project ?? requireCwd(workspace), runId, title });
-      await fetchList();
-      scheduleRun(runId);
     },
 
     async archiveRun(runId, archived, project) {
       if (disposed) throw new Error("Workflow service is disposed");
       await client.request("run-archive", { cwd: project ?? requireCwd(workspace), runId, archived });
-      await fetchList();
     },
 
     async deleteRun(runId, project) {
       if (disposed) throw new Error("Workflow service is disposed");
       await client.request("run-delete", { cwd: project ?? requireCwd(workspace), runId });
-      await fetchList();
     },
 
     nodePlan: (runId, siteId, ordinal) => deps.plans?.get(runId, siteId, ordinal) ?? null,
@@ -650,8 +750,6 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       const { siteId, ordinal } = parseSite(site);
       if (evidence.trim() === "") throw new Error("WORKFLOW_EVIDENCE_REQUIRED");
       await client.request("authorize-retry", { cwd, runId, siteId, ordinal, evidence: evidence.trim() });
-      scheduleRun(runId);
-      scheduleList();
     },
 
     async reconcile(runId, site, resolution) {
@@ -671,15 +769,11 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
           result: resolution.result ?? null,
         });
       }
-      scheduleRun(runId);
-      scheduleList();
     },
 
     async stop(runId: string) {
       if (disposed) throw new Error("Workflow service is disposed");
       await client.request("stop", { runId });
-      scheduleRun(runId);
-      scheduleList();
     },
 
     async intervene(runId, request, options) {
@@ -687,10 +781,6 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       const cwd = requireCwd(workspace);
       const preview = options?.preview === true;
       const result = await client.request("intervene", { cwd, runId, preview, request });
-      if (!preview) {
-        scheduleRun(runId);
-        scheduleList();
-      }
       return parseInterventionOutcome(result);
     },
 
@@ -704,23 +794,19 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
 
   // ---------------------------------------------------------------- 泵接线
 
+  // 引擎推来的运行状态直接替换（ADR 040）；其余事件只转发，不触发回头拉取。
   const unsubscribeClient = client.subscribe((event) => {
     if (disposed) return;
+    if (event.type === "run-changed") applyRunChanged(event);
+    else if (event.type === "run-removed" && typeof event.runId === "string") applyRunRemoved(event.runId);
+    else if (event.type === "service-exit") engineExited();
     emit(event);
-    if (event.type === "service-exit") return;
-    const runId = typeof event.runId === "string" ? event.runId : "";
-    if (runId !== "") {
-      scheduleRun(runId);
-      scheduleList();
-    }
   });
   const dispose = (): void => {
     if (disposed) return;
     disposed = true;
     unsubscribeClient();
-    if (listTimer !== null) clearTimeout(listTimer);
-    for (const timer of runTimers.values()) clearTimeout(timer);
-    runTimers.clear();
+    if (reconnectTimer !== null) clearTimeout(reconnectTimer);
     runStores.clear();
     runList = [];
     listeners.clear();

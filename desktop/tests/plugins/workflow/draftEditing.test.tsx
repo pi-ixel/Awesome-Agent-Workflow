@@ -1,8 +1,8 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { diffLines, withContext } from "../../../src/plugins/workflow/ui/textDiff.ts";
 import { createDraftEditor, draftPrompt } from "../../../src/plugins/workflow/editing/draftSessions.ts";
-import { WorkflowPanel } from "../../../src/plugins/workflow/ui/WorkflowPanel.tsx";
+import { renderTemplates } from "./templateHarness.tsx";
 import type { WorkflowDraft, WorkflowDraftCheck, WorkflowDraftEditor } from "../../../src/plugins/workflow/types.ts";
 import { fakeWorkflowService, workflowSummary } from "./helpers.ts";
 
@@ -48,7 +48,8 @@ describe("编辑会话", () => {
     const options = project.sessions.openPluginSession.mock.calls[0]![0] as { workspacePath: string; cwd: string; title: string; tools: (agent: null) => readonly unknown[] };
     expect(options).toMatchObject({ workspacePath: "D:/project", cwd: "D:/drafts/d1", title: "编辑工作流：我的" });
     expect(options.tools(null)).toEqual([mcpServer]);
-    expect(project.sessions.openSessionFromEntry).toHaveBeenCalledWith("D:/project", "s-1", "key-a");
+    // 不抢前台：用户留在功能区的草稿页（ADR 038），要说话时再打开。
+    expect(project.sessions.openSessionFromEntry).not.toHaveBeenCalled();
     expect(project.conversation.send).toHaveBeenCalledWith(target, "第一条", undefined, { display: first.display });
     // 重新打开或重连时，登记的提供方继续给这个会话编写工具。
     expect(
@@ -64,6 +65,8 @@ describe("编辑会话", () => {
     ).toEqual([]);
     expect(editor.has("d1")).toBe(true);
     expect(editor.send("d1", "报错")).toBe(true);
+    expect(await editor.show("d1")).toBe(true);
+    expect(project.sessions.openSessionFromEntry).toHaveBeenCalledWith("D:/project", "s-1", "key-a");
     await editor.end("d1");
     expect(project.conversation.cancel).toHaveBeenCalledWith(target);
     expect(editor.has("d1")).toBe(false);
@@ -96,11 +99,11 @@ const broken: WorkflowDraftCheck = {
   changes: [{ path: "workflow.yaml", status: "modified", before: "id: my-workflow\n", after: "id: x\n" }],
 };
 
-it("asks for the request first, then creates the draft and opens the editing session", async () => {
+it("asks for the request first, then creates the draft and stays on it with the session a click away", async () => {
   const fake = fakeWorkflowService();
   const { editor, started, end } = fakeEditor();
   fake.setDraftCheck({ ...broken, ok: true, diagnostics: [], changes: [] });
-  render(<WorkflowPanel service={fake.service} editor={editor} />);
+  renderTemplates(fake.service, { editor });
 
   fireEvent.click(await screen.findByRole("button", { name: "用 AI 新建" }));
   // 弹窗里只有输入框；Esc 关掉，什么也不留下。
@@ -120,7 +123,7 @@ it("asks for the request first, then creates the draft and opens the editing ses
   fireEvent.keyDown(box, { key: "Enter" });
   await vi.waitFor(() => expect(started).toHaveLength(1));
   expect(started[0]).toContain("用户的要求：做一个先设计再实现的流程");
-  expect(await screen.findByRole("button", { name: "回到编辑会话" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "打开编辑会话" })).toBeInTheDocument();
   // 起步模板一点没改：不能保存。
   expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
 
@@ -149,9 +152,9 @@ it("returns to the existing draft of a workflow instead of creating another one"
   fake.setDetail({ ...workflowSummary("mine", "user"), catalogs: {}, files: [], scripts: [] });
   fake.addDraft({ draftId: "mine-1", base: "mine", dir: "D:/drafts/mine-1", createdAt: 1, changes: 2, ok: true });
   fake.setDraftCheck({ draft: { draftId: "mine-1", base: "mine", dir: "D:/drafts/mine-1", createdAt: 1, changes: 2, ok: true }, ok: true, meta: null, catalogs: {}, diagnostics: [], changes: [] });
-  render(<WorkflowPanel service={fake.service} editor={editor} />);
+  renderTemplates(fake.service, { editor });
 
-  fireEvent.click(await screen.findByRole("tab", { name: "我的 1" }));
+  fireEvent.click(await screen.findByRole("button", { name: /^我的/ }));
   // 修改已有工作流的草稿不单独成卡，标在原卡片上。
   const card = (await screen.findByRole("button", { name: "查看工作流 mine" })).closest("article")!;
   expect(within(card).getByText("草稿")).toBeInTheDocument();
@@ -170,7 +173,7 @@ it("copies a preset before letting AI edit it", async () => {
   const fake = fakeWorkflowService();
   const { editor, started } = fakeEditor();
   fake.setDetail({ ...workflowSummary(), catalogs: {}, files: [], scripts: [] });
-  render(<WorkflowPanel service={fake.service} editor={editor} />);
+  renderTemplates(fake.service, { editor });
   fireEvent.click(await screen.findByRole("button", { name: /查看工作流 AAW 轻量开发/ }));
   fireEvent.click(await screen.findByRole("button", { name: "复制并用 AI 修改" }));
   const page = screen.getByRole("dialog", { name: /用 AI 修改/ });
@@ -183,8 +186,8 @@ it("copies a preset before letting AI edit it", async () => {
 it("discards a draft from the library after confirmation", async () => {
   const fake = fakeWorkflowService();
   fake.addDraft({ draftId: "new-1", base: null, dir: "D:/drafts/new-1", createdAt: 1, changes: 0, ok: true, name: "我的工作流" });
-  render(<WorkflowPanel service={fake.service} editor={fakeEditor().editor} />);
-  fireEvent.click(await screen.findByRole("tab", { name: /我的 \d+/ }));
+  renderTemplates(fake.service, { editor: fakeEditor().editor });
+  fireEvent.click(await screen.findByRole("button", { name: /^我的/ }));
   const card = (await screen.findByRole("button", { name: "打开草稿 我的工作流" })).closest("article")!;
   expect(within(card).getByText("草稿")).toBeInTheDocument();
   fireEvent.click(within(card).getByRole("button", { name: "放弃草稿" }));
@@ -198,8 +201,8 @@ it("marks a draft that has errors and opens it from its card", async () => {
   const draft = { draftId: "new-2", base: null, dir: "D:/drafts/new-2", createdAt: 1, changes: 1, ok: false, name: "坏草稿" };
   fake.addDraft(draft);
   fake.setDraftCheck({ draft, ok: false, meta: null, catalogs: {}, diagnostics: [], changes: [] });
-  render(<WorkflowPanel service={fake.service} editor={fakeEditor().editor} />);
-  fireEvent.click(await screen.findByRole("tab", { name: /我的 \d+/ }));
+  renderTemplates(fake.service, { editor: fakeEditor().editor });
+  fireEvent.click(await screen.findByRole("button", { name: /^我的/ }));
   const open = await screen.findByRole("button", { name: "打开草稿 坏草稿" });
   expect(within(open).getByRole("img", { name: "有错误" })).toBeInTheDocument();
   fireEvent.click(open);

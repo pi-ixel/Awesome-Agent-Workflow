@@ -8,12 +8,14 @@
  * - 直接切到另一个阶段时，当前阶段用 1.5 倍速收回再展开新的；
  * - 回环、分支条件、终点不画在图上：节点详情的「结果怎么走」里有。
  */
+import type { SessionLookup } from "../status/snapshot.ts";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal, flushSync } from "react-dom";
 import type { CanvasNodeSnapshot, CanvasSnapshot, HierarchyStructure, WorkflowCatalogNode, WorkflowStage } from "../types.ts";
 import { STATE_LABEL } from "../status/snapshot.ts";
 import { planProgress, type NodePlanEntry } from "../status/nodePlans.ts";
 import { cardTime } from "./nodeText.ts";
+import { runClock } from "../status/timing.ts";
 import { childSteps, flowStages, toneOf, type FlowContext, type FlowStep } from "./flowModel.ts";
 import { grow, motionOff, ROOM_MS, shrink, wait } from "./flowMotion.ts";
 import { drawMinimap, jumpTo } from "./flowMinimap.ts";
@@ -74,6 +76,7 @@ export function FlowStages({
   reveal,
   planOf,
   sessionFor,
+  sessionStatus,
   onOpenSession,
   onSelect,
 }: {
@@ -92,12 +95,14 @@ export function FlowStages({
   reveal?: FlowReveal;
   planOf?: (record: CanvasNodeSnapshot) => readonly NodePlanEntry[] | null;
   sessionFor?: (record: CanvasNodeSnapshot) => string | undefined;
+  /** 会话的实时状态（ADR 040）：节点卡片的说法与会话一致。 */
+  sessionStatus?: SessionLookup;
   onOpenSession?: (sessionId: string) => void;
   /** 点步骤；不给时步骤卡只读（草稿对比的预览图）。 */
   onSelect?: (site: string, callPath: string[], phaseId?: string) => void;
 }) {
   const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
-  const ctx: FlowContext = useMemo(() => ({ structure, nodeMap, snapshot }), [structure, nodeMap, snapshot]);
+  const ctx: FlowContext = useMemo(() => ({ structure, nodeMap, snapshot, session: sessionStatus }), [structure, nodeMap, snapshot, sessionStatus]);
   const views = useMemo(
     () => flowStages(ctx, entry, stages, rootLabel ?? structure.flows[structure.rootFlow]?.label ?? ""),
     [ctx, entry, stages, rootLabel, structure],
@@ -442,7 +447,7 @@ export function FlowStages({
     const word = !snapshot ? "" : step.status && step.status.state === step.state ? step.status.label : STATE_LABEL[step.state];
     const record = step.record && step.record.mark !== "superseded" ? step.record : undefined;
     const progress = record && planOf ? planProgress(planOf(record) ?? []) : null;
-    const meta = [cardTime(record, now, snapshot?.active === false), progress ? `进度 ${progress.done}/${progress.total}` : "", (step.status?.count ?? 0) > 1 ? `第 ${step.status!.count} 轮` : ""].filter(Boolean).join(" · ");
+    const meta = [cardTime(record, now === undefined ? undefined : runClock(snapshot, now)), progress ? `进度 ${progress.done}/${progress.total}` : "", (step.status?.count ?? 0) > 1 ? `第 ${step.status!.count} 轮` : ""].filter(Boolean).join(" · ");
     const sessionId = record && step.node?.kind === "agent" ? sessionFor?.(record) : undefined;
     // 卡片本身就是胶囊的颜色；已完成不再写字，序号换成一个圆形对勾。
     const done = step.state === "done" || step.state === "done-findings";
@@ -462,6 +467,7 @@ export function FlowStages({
       {step.does && <small className="wf-does" data-hint={step.does}>{step.does}</small>}
       {meta && <small className="wf-meta">{meta}</small>}
       {step.status?.note && <small className={`wf-note${step.status.noteAttention ? " attention" : ""}`}>{step.status.note}</small>}
+      {step.stop && <small className="wf-note wf-stop" data-hint={step.stop}>{step.stop}</small>}
       {step.child && pills(`f:${depth}:${step.key}`, childSteps(ctx, step), isOpen)}
     </>;
     return <div key={step.key} className={`wf-step tone-${tone}${step.child ? " is-flow" : ""}${isOpen ? " open" : ""}${isSelected ? " selected" : ""}${flash && step.site === flash ? " flash" : ""}${sessionId ? " has-session" : ""}`}

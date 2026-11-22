@@ -1,44 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { blend, color, ratio } from "./contrast.ts";
-
-test("工作流起点原生单选在双主题与三档字号下保留焦点和所选入口", async ({ page, context }) => {
-  await page.goto("/tests/visual/uiScaleFixture.html");
-  const workflow = await context.newPage();
-  await workflow.setViewportSize({ width: 320, height: 660 });
-  await workflow.goto("/tests/visual/workflowFixture.html?files&entries&appearance");
-  const group = workflow.getByRole("group", { name: "从哪里开始" });
-  const initial = group.getByRole("radio").first();
-  const release = group.getByRole("radio", { name: /从发布审查开始/ });
-  const mark = release.locator("+ span");
-  const row = release.locator("..");
-  const font = page.getByRole("spinbutton", { name: "界面字号" });
-  await expect(initial).toBeChecked();
-  await initial.press("ArrowDown");
-  const checklist = workflow.getByRole("textbox", { name: "发布清单" });
-  await checklist.fill("检查版本签名与回滚演练");
-  await release.press("Shift");
-
-  for (const [theme, px] of [["暖白", 12], ["暗夜", 20], ["暖白", 14]] as const) {
-    await page.getByRole("button", { name: theme, exact: true }).click();
-    await font.fill(String(px));
-    await font.press("Enter");
-    await expect(release).toBeChecked();
-    await expect(release).toBeFocused();
-    await expect(mark).not.toHaveCSS("box-shadow", "none");
-    await expect(row).toHaveCSS("font-size", `${px}px`);
-    expect((await mark.boundingBox())!.width).toBeCloseTo((16 * px) / 14, 1);
-    const base = await color(workflow.locator("main"), "background-color");
-    await expect.poll(async () => {
-      const background = blend(await color(row, "background-color"), base);
-      return ratio(await color(row, "color"), background);
-    }).toBeGreaterThanOrEqual(4.5);
-    await expect(checklist).toHaveValue("检查版本签名与回滚演练");
-  }
-  await release.press("ArrowUp");
-  await expect(initial).toBeChecked();
-  await expect(initial).toBeFocused();
-  await expect(checklist).toBeHidden();
-});
+import { color } from "./contrast.ts";
 
 test("工作流面包屑在窄栏切换外观后保留焦点并可键盘返回原筛选结果", async ({
   page,
@@ -48,8 +9,7 @@ test("工作流面包屑在窄栏切换外观后保留焦点并可键盘返回�
   const workflow = await context.newPage();
   await workflow.setViewportSize({ width: 300, height: 560 });
   await workflow.goto("/tests/visual/workflowFixture.html?panel&appearance");
-  const runs = workflow.getByRole("tab", { name: "运行管理" });
-  await runs.click();
+  // 面板首页就是运行管理（ADR 038：模板在左侧功能区）。
   const search = workflow.getByRole("searchbox", { name: "搜索运行" });
   await search.fill("整理交接");
   const result = workflow.getByRole("button", {
@@ -83,8 +43,6 @@ test("工作流面包屑在窄栏切换外观后保留焦点并可键盘返回�
   }
   await back.press("Enter");
   await expect(path).toBeHidden();
-  await expect(runs).toBeFocused();
-  await expect(runs).toHaveAttribute("aria-selected", "true");
   await expect(search).toHaveValue("整理交接");
   await expect(result).toBeVisible();
   await expect(
@@ -162,42 +120,6 @@ test("展开任务阶段和子流程后切换外观，保留焦点并可用 Esca
   await expect(stage).toBeFocused();
 });
 
-test("项目总览的共享运行行在窄栏和主题切换中保留键盘焦点与打开动作", async ({
-  page,
-  context,
-}) => {
-  await page.goto("/tests/visual/uiScaleFixture.html");
-  const overview = await context.newPage();
-  await overview.setViewportSize({ width: 320, height: 500 });
-  await overview.goto("/tests/visual/workflowFixture.html?overview&appearance");
-  const row = overview.getByRole("button", { name: /^查看运行 检查工作区/ });
-  const region = overview.getByRole("region", { name: "AAW 工作流" });
-  await row.press("Tab");
-  await overview.keyboard.press("Shift+Tab");
-  await expect(row).toBeFocused();
-  const font = page.getByRole("spinbutton", { name: "界面字号" });
-  for (const [theme, size] of [
-    ["暖白", 12],
-    ["暗夜", 20],
-    ["暖白", 14],
-  ] as const) {
-    await page.getByRole("button", { name: theme, exact: true }).click();
-    await font.fill(String(size));
-    await font.press("Enter");
-    await expect(row).toHaveCSS("font-size", size + "px");
-    await expect(row).toBeFocused();
-    await expect(row).not.toHaveCSS("box-shadow", "none");
-    expect(await region.evaluate((el) => el.scrollWidth)).toBeLessThanOrEqual(
-      320,
-    );
-  }
-  await row.press("Enter");
-  await expect(overview.locator("html")).toHaveAttribute(
-    "data-opened-run",
-    "overview-run",
-  );
-});
-
 test("运行管理的筛选草稿、选区和焦点在外观更新后保留", async ({
   page,
   context,
@@ -205,7 +127,6 @@ test("运行管理的筛选草稿、选区和焦点在外观更新后保留", as
   await page.goto("/tests/visual/uiScaleFixture.html");
   const workflow = await context.newPage();
   await workflow.goto("/tests/visual/workflowFixture.html?panel&appearance");
-  await workflow.getByRole("tab", { name: "运行管理" }).click();
   const field = workflow.getByRole("searchbox", { name: "搜索运行" });
   await field.fill("整理交接记录");
   await field.press("Home");
@@ -235,21 +156,22 @@ test("运行管理的筛选草稿、选区和焦点在外观更新后保留", as
       workflow.getByRole("button", { name: /查看运行 整理交接记录/ }),
     ).toBeVisible();
   }
-  const actions = workflow.getByRole("button", { name: "整理交接记录 的操作" });
-  await actions.press("Enter");
-  const runMenu = workflow.getByRole("menu", { name: "整理交接记录 的操作" });
-  await runMenu.getByRole("menuitem", { name: "删除", exact: true }).press("Enter");
-  const confirmation = workflow.getByRole("group", { name: "确认删除" });
-  const cancel = confirmation.getByRole("button", { name: "取消" });
-  await expect(cancel).toBeFocused();
+  // 行尾的删除图标：点一下变成「确认删除」，换肤时焦点留在确认上，Esc 退回图标。
+  const row = workflow.locator("li", {
+    has: workflow.getByRole("button", { name: /查看运行 整理交接记录/ }),
+  });
+  const remove = row.getByRole("button", { name: "删除", exact: true });
+  await remove.press("Enter");
+  const confirm = row.getByRole("button", { name: "确认删除" });
+  await expect(confirm).toBeFocused();
   await page.getByRole("button", { name: "暗夜", exact: true }).click();
   await font.fill("20");
   await font.press("Enter");
-  await expect(confirmation.getByText(/项目里的文件不受影响/)).toHaveCSS("font-size", "18px");
-  await expect(cancel).toBeFocused();
-  await cancel.press("Escape");
-  await expect(confirmation).toBeHidden();
-  await expect(actions).toBeFocused();
+  await expect(confirm).toBeFocused();
+  await expect(confirm).not.toHaveCSS("box-shadow", "none");
+  await confirm.press("Escape");
+  await expect(confirm).toBeHidden();
+  await expect(remove).toBeFocused();
   await expect(field).toHaveValue("整理交接记录");
 });
 
@@ -260,7 +182,8 @@ test("工作流 AI 输入框换肤后保留已输入要求、选区与焦点", a
   await page.goto("/tests/visual/uiScaleFixture.html");
   const workflow = await context.newPage();
   await workflow.setViewportSize({ width: 390, height: 620 });
-  await workflow.goto("/tests/visual/workflowFixture.html?panel&appearance");
+  // 「用 AI 新建」在左侧「工作流」功能区的侧栏里（ADR 038）。
+  await workflow.goto("/tests/visual/workflowFixture.html?compose&appearance");
   await workflow.getByRole("button", { name: "用 AI 新建", exact: true }).click();
   const dialog = workflow.getByRole("dialog", { name: "用 AI 新建工作流" });
   const field = dialog.getByRole("textbox");
@@ -399,33 +322,25 @@ test("窄面板大字号时可打开指定轮次，详情操作在面板内换�
   });
 });
 
-test("窄栏首页并列显示工作流库和运行管理，返回时保留筛选", async ({ page }) => {
+test("窄栏首页是运行管理，返回时保留筛选", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 780 });
   await page.goto("/tests/visual/workflowFixture.html?panel");
-  const nav = page.getByRole("tablist", { name: "工作流面板" });
-  await expect(nav.getByRole("tab", { name: "工作流库" })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
-  await expect(page.getByRole("region", { name: "预置工作流" })).toBeVisible();
-  await nav.getByRole("tab", { name: "运行管理" }).click();
   const manager = page.getByRole("region", { name: "运行管理" });
-  const archived = manager.getByRole("checkbox", { name: /显示已归档/ });
-  await manager.getByText(/^显示已归档/).click();
-  await expect(archived).toBeChecked();
-  await archived.press("Space");
-  await expect(archived).not.toBeChecked();
-  await expect(archived).toBeFocused();
   await expect(manager.getByRole("region", { name: "待处理" })).toContainText(
     "确认设计方案",
   );
   await expect(manager.getByRole("region", { name: "运行记录" })).toContainText(
     "整理交接记录",
   );
+  const archived = manager.getByRole("button", { name: "显示已归档" });
+  await archived.click();
+  await expect(archived).toHaveAttribute("aria-pressed", "true");
+  await archived.press("Space");
+  await expect(archived).toHaveAttribute("aria-pressed", "false");
+  await expect(archived).toBeFocused();
   await manager.getByRole("searchbox").fill("交接");
   await expect(manager.getByRole("region", { name: "待处理" })).toHaveCount(0);
   await manager.getByRole("button", { name: /查看运行 整理交接记录/ }).click();
-  await expect(nav).toHaveCount(0);
   await page
     .getByRole("navigation", { name: "工作流路径" })
     .getByRole("button", { name: "运行管理" })

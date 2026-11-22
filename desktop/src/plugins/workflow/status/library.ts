@@ -43,6 +43,7 @@ function parseEntry(value: unknown): WorkflowEntry | null {
     id,
     label: text(item.label) || id,
     description: text(item.description),
+    hint: text(item.hint),
     inputs: list(item.inputs).flatMap((input) => parseInput(input) ?? []),
   };
 }

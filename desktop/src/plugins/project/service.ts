@@ -1,3 +1,4 @@
+import type { SessionHandoff } from "./conversation/types.ts";
 import type { AcpSessionEvent } from "../acpRuntime/events.ts";
 import type {
   PluginSessionOptions,
@@ -55,6 +56,7 @@ export type {
   ProjectExtension,
   ProjectQuickAction,
   ProjectSlashEntry,
+  ProjectSlashSubmission,
   ProjectTreeAction,
 } from "./ui/extension.ts";
 export type {
@@ -175,9 +177,17 @@ export interface ProjectSessions extends Pick<
    * 发消息用 conversation.send（带 display 选项），轮次进展用 watchTurns。
    */
   openPluginSession(options: PluginSessionOptions): Promise<SessionTarget>;
-  /** 订阅一个会话的轮次事件（不管这一轮是谁发起的）。返回的函数取消订阅。 */
+  /**
+   * 插件在这个会话里发消息前等它就绪：打开时要换的工具正排在会话当前这一轮后面
+   * （会话正忙时不打断、不失败），换好才兑现；没有排队的事立即兑现。
+   */
+  pluginSessionReady(target: SessionTarget): Promise<void>;
+  /**
+   * 按会话 id 订阅轮次事件（不管这一轮是谁发起的）。会话还没打开也可以先订阅：
+   * 之后不管被谁打开、断线重连、重新打开，开始与结束都会送到。返回的函数取消订阅。
+   */
   watchTurns(
-    target: SessionTarget,
+    sessionId: string,
     listener: (event: SessionTurnEvent) => void,
   ): () => void;
   /** 订阅一个会话的原始事件（Agent 的消息、工具调用、计划等）。返回的函数取消订阅。 */
@@ -227,6 +237,8 @@ export interface ProjectConversation {
   clear(target: ForegroundSessionTarget): void;
   dismissTurnError(target: ForegroundSessionTarget): void;
   reportCommandFailure(target: ForegroundSessionTarget, reason: string): void;
+  /** 交接开始 / 结束（ADR 039）：带着发送对象发出的话，扩展接手前显示在信息流里。 */
+  setHandoff(target: SessionTarget, handoff: SessionHandoff | null): void;
   send(
     target: SessionTarget,
     text: string,

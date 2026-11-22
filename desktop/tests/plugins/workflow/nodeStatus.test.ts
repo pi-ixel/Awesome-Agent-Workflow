@@ -3,7 +3,9 @@ import {
   deriveCanvasSnapshot,
   mergeStates,
   nodeStatus,
+  runStop,
   statusLabel,
+  stopSentence,
 } from "../../../src/plugins/workflow/status/snapshot.ts";
 import type { CanvasSnapshot } from "../../../src/plugins/workflow/types.ts";
 import { runSummary } from "./helpers.ts";
@@ -86,22 +88,37 @@ describe("nodeStatus", () => {
     }))).toEqual({ label: "已完成", state: "done", count: 1, note: "结果已交，继续运行后往下走" });
   });
 
-  it("keeps 运行中 but notes that the engine is waiting for a reply in the session", () => {
-    const waiting = record({ status: "running", awaitingInput: true });
+  it("keeps 运行中 but says what the session needs from you, in the session's own words (ADR 040)", () => {
+    const waiting = record({ status: "running", sessionId: "s-1", turn: "completed" });
     expect(nodeStatus(node, snapshot({ nodes: [waiting] })))
-      .toEqual({ label: "运行中", state: "running", count: 1, note: "等你在会话里回复", noteAttention: true, awaiting: true });
-    // 运行已停：残留标记不算数，按已中断处理。
+      .toEqual({ label: "运行中", state: "running", count: 1, note: "等你在会话里回复", noteAttention: true, activity: "awaiting" });
+    // 会话说了算：引擎记的是「停下了」，会话此刻在跑（用户刚回复）就是进行中。
+    expect(nodeStatus(node, snapshot({ nodes: [waiting] }), () => "running"))
+      .toEqual({ label: "运行中", state: "running", count: 1 });
+    // 你在会话里打断了 Agent、这一轮出错：照实说，不说成「等你回复」。
+    expect(nodeStatus(node, snapshot({ nodes: [waiting] }), () => "cancelled").note).toBe("你在会话里打断了 Agent");
+    expect(nodeStatus(node, snapshot({ nodes: [waiting] }), () => "failed").note).toBe("Agent 出错，可在会话里重试");
+    expect(nodeStatus(node, snapshot({ nodes: [waiting] }), () => "waiting").note).toBe("等你在会话里处理");
+    // 交了结果、正在收尾：不提醒。
+    expect(nodeStatus(node, snapshot({ nodes: [{ ...waiting, submitted: true }] }), () => "completed").note).toBeUndefined();
+    // 运行已停：按已中断处理。
     expect(nodeStatus(node, snapshot({ active: false, nodes: [waiting] })).state).toBe("stuck");
   });
 
-  it("parses the engine's awaiting-input fields only when present", () => {
-    const parsed = deriveCanvasSnapshot({ nodes: [
-      { siteId: "ask#1", ordinal: 1, status: "running", awaitingInput: true, awaitingInputSince: 42 },
-      { siteId: "ask#2", ordinal: 1, status: "running", awaitingInput: "yes" },
+  it("a step that has not started a turn yet is starting, whatever the session did before", () => {
+    const starting = record({ status: "running", sessionId: "s-1" });
+    expect(nodeStatus(node, snapshot({ nodes: [starting] }), () => "completed")).toEqual({ label: "运行中", state: "running", count: 1 });
+  });
+
+  it("parses the engine's turn fields only when present", () => {
+    const parsed = deriveCanvasSnapshot({ version: 7, nodes: [
+      { siteId: "ask#1", ordinal: 1, status: "running", turn: "cancelled", turnEndedAt: 42, submitted: true },
+      { siteId: "ask#2", ordinal: 1, status: "running", turn: 3, submitted: "yes" },
     ] });
-    expect(parsed.nodes[0]).toMatchObject({ awaitingInput: true, awaitingInputSince: 42 });
-    expect(parsed.nodes[1]).not.toHaveProperty("awaitingInput");
-    expect(parsed.nodes[1]).not.toHaveProperty("awaitingInputSince");
+    expect(parsed.version).toBe(7);
+    expect(parsed.nodes[0]).toMatchObject({ turn: "cancelled", turnEndedAt: 42, submitted: true });
+    expect(parsed.nodes[1]).not.toHaveProperty("turn");
+    expect(parsed.nodes[1]).not.toHaveProperty("submitted");
   });
 
   it("reads command results: non-zero exit code fails, stdout JSON is unwrapped", () => {
@@ -233,8 +250,14 @@ describe("statusLabel", () => {
         structure: { rootFlow: "main", flows: { main: { id: "main", label: "AAW dev", entry: "first", phases: [{ id: "first", run: ["ask#1"], routes: [] }] } } },
       },
     }).catalog;
-    expect(statusLabel(run({ status: "failed", result: { status: "blocked", stage: "first" } }), catalog)).toBe("已阻塞 · 需求确认");
-    expect(statusLabel(run({ status: "failed", result: { status: "blocked", stage: "missing" } }), catalog)).toBe("已阻塞");
+    expect(statusLabel(run({ status: "blocked", result: { status: "blocked", stage: "first", stop: { phase: "first", callPath: [], route: 0 } } }), catalog)).toBe("已阻塞 · 需求确认");
+    expect(statusLabel(run({ status: "blocked", result: { status: "blocked", stage: "missing" } }), catalog)).toBe("已阻塞");
+    // 只有正式的 blocked 状态才算阻塞，「失败」不再夹带标记。
+    expect(statusLabel(run({ status: "failed", result: { status: "blocked", stage: "first" } }), catalog)).toBe("失败");
+    const stop = runStop(run({ status: "blocked", result: { reason: "补齐后重跑", stop: { phase: "first", callPath: [], route: 1, explain: "信息不全" } } }), catalog)!;
+    expect(stopSentence(stop)).toBe("在「需求确认」之后停下：信息不全");
+    expect(stop.reason).toBe("补齐后重跑");
+    expect(stopSentence(runStop(run({ status: "blocked", result: { reason: "超过上限", stop: { phase: "first", callPath: [] } } }), catalog)!)).toBe("在「需求确认」之前停下");
   });
 
   it("labels the known run statuses", () => {

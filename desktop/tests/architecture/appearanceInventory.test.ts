@@ -253,6 +253,9 @@ it("按钮语义由登记的共享控件渲染", () => {
     "shared/ui/controls.tsx#ActionButton · <button>",
     "shared/ui/controls.tsx#Listbox · <button>",
     "shared/ui/controls.tsx#Listbox · <button>",
+    "shared/ui/controls.tsx#MultiListbox · <button>",
+    "shared/ui/controls.tsx#MultiListbox · <button>",
+    "shared/ui/controls.tsx#MultiListbox · <button>",
     "shared/ui/controls/SegmentedControl.tsx#SegmentedControl · <button>",
   ]);
 });

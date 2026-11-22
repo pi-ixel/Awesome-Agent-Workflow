@@ -154,14 +154,8 @@
     "RunManager · <input>",
     "RunManager/row · <input>"
   ],
-  "plugins/workflow/ui/WorkflowLauncher.tsx": [
-    "FileList · <input>",
-    "WorkflowLauncher · <input>",
-    "WorkflowLauncher · <input>",
-    "WorkflowLauncher · <textarea>"
-  ],
   "plugins/workflow/ui/flowStages.css": [
-    "主题分支 · html.theme-warm .wf-flow, html.theme-warm .wf-fx"
+    "主题分支 · html.theme-warm .wf-flow, html.theme-warm .wf-fx, html.theme-warm .wf-strip"
   ],
   "shared/styles/index.css": [
     ".annotation-rainbow-border::before mask · #fff",
@@ -261,6 +255,10 @@
     "Listbox · <button>",
     "Listbox · <button>",
     "Listbox · role=combobox",
+    "MultiListbox · <button>",
+    "MultiListbox · <button>",
+    "MultiListbox · <button>",
+    "MultiListbox · role=combobox",
     "ProgressBar · 原生 role=progressbar",
     "ToggleSwitch · <input>",
     "ToggleSwitch · role=switch"

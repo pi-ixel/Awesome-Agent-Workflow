@@ -27,6 +27,7 @@ export function createTestDesktopRuntime(
       openSession: unused,
       registerSessionTools: () => () => {},
       openPluginSession: unused,
+      pluginSessionReady: () => Promise.resolve(),
       watchTurns: () => () => {},
       watchEvents: () => () => {},
       closeProject: unused,

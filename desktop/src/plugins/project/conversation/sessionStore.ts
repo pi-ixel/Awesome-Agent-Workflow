@@ -25,7 +25,7 @@ import {
   readPromptSkillReferences,
   type PromptSkillReference,
 } from "../composer/skillReferences.ts";
-import type { QueuedPrompt } from "./types.ts";
+import type { QueuedPrompt, SessionHandoff } from "./types.ts";
 import { supportsImagePrompt } from "../../../contracts/acp/content.ts";
 import type { ContentBlock } from "../../../contracts/acp/protocol.ts";
 import { nonTextContent } from "../../../contracts/acp/content.ts";
@@ -372,6 +372,8 @@ export interface SessionStoreState extends ConversationViewState {
     attachments?: readonly ContentBlock[],
     options?: SendOptions,
   ) => boolean;
+  /** 交接开始 / 结束（ADR 039）；结束时 Agent 空闲就把交接期间排的队放出去。 */
+  readonly setHandoff: (handoff: SessionHandoff | null) => void;
   /** 运行中把消息加入队列（空闲时的防御路径直接发送）。 */
   readonly enqueuePrompt: (
     text: string,
@@ -1993,6 +1995,11 @@ export const createSessionStore = (
       },
 
       sendPrompt: actions.sendPrompt,
+      setHandoff: (handoff) => {
+        set({ handoff });
+        if (handoff === null && !get().isAgentRunning && get().queuedPrompts.length > 0)
+          drainNextQueued();
+      },
       steerPrompt: actions.steerPrompt,
       stopSteering: actions.stopSteering,
 
@@ -2058,6 +2065,7 @@ export const createSessionStore = (
         }
         set({
           items: [],
+          handoff: null,
           queuedPrompts: [],
           queuePaused: false,
           firstPromptPending: false,
