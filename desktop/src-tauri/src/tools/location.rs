@@ -237,18 +237,20 @@ pub struct ToolHomeMigration(pub MigrationState);
 /// 回滚删除失败）。残骸留着不动的话，重试会永远撞"已存在 projects"，
 /// 报错又没说这是哪来的、能不能删——用户被逼进死角（2026-11-22 真机实测）。
 ///
-/// 分类的两个特征，误伤概率可以忽略：
-/// - **≥2 个已知分区目录**（installed/projects/backups/storage）：正常迁移
-///   完成后指针就切走了，指针没切却凑齐多个分区，只能是中断产物；
-/// - **`.aaw-stage-*` 暂存目录**：那是复制中途被杀的现场，随机目录里不会
-///   自己长出来。
+/// 目标落点分类。残骸判定只认一样东西：**迁移标记**（Z-25 教训——旧的
+/// "目标里有 ≥2 个已知分区目录就算残骸"是形状猜测：迁回默认时默认根下
+/// 别的账号数据不归本账号管、动不得；选自定义目录时选中文件夹里若躺着
+/// 别的账号的旧工具数据，会被静默误删）。标记在迁移复制开始前写入目标、
+/// 整体成功收尾才删除：有本账号标记 = 目标内容确属本账号上次中断的迁移
+/// 现场（源数据原样在旧家，复制阶段 move_subtree 不动源），清理目标安全；
+/// 没标记一律当真冲突报错，让用户自己决定，绝不凭目录形状猜。
 #[derive(Debug)]
 enum DestinationState {
-    /// 干净，直接迁。
+    /// 干净（或只有空壳），直接迁。
     Vacant,
     /// 上次迁移的残骸：这些目录可以安全删除（源数据原样在旧家）。
     Leftover { paths: Vec<PathBuf> },
-    /// 真冲突：目标里有不像残骸的内容，报错让用户决定。
+    /// 真冲突：目标里有无法证实是残骸的内容，报错让用户决定。
     Conflict { name: &'static str, dest: PathBuf },
 }
 
@@ -274,19 +276,38 @@ fn occupancy(dest: &Path) -> PartitionOccupancy {
     }
 }
 
-fn has_stage_leftover(destinations: &[(&'static str, PathBuf)]) -> bool {
-    // 暂存目录建在每个落点的父目录里（家模式 = 目标家根本身）。
-    destinations.iter().any(|(_, dest)| {
-        let Some(parent) = dest.parent() else { return false };
-        fs::read_dir(parent).is_ok_and(|entries| {
-            entries.flatten().any(|entry| {
-                entry.file_name().to_string_lossy().starts_with(".aaw-stage-")
-            })
-        })
-    })
+/// 迁移标记的落点。家模式的目标目录按约定账号私有，固定文件名即可；
+/// 默认模式的 `<tools>` 根是多账号共享的，文件名必须带账号——只认自己
+/// 名下的现场，别人的标记不动也不认。
+fn migration_marker_path(to_default: bool, target: &Path, owner: &str) -> PathBuf {
+    if to_default {
+        target.join(format!(".aaw-migration-{owner}.json"))
+    } else {
+        target.join(".aaw-migration.json")
+    }
 }
 
-fn classify_destinations(destinations: &[(&'static str, PathBuf)]) -> DestinationState {
+fn write_migration_marker(path: &Path, owner: &str) {
+    let started = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_millis())
+        .unwrap_or_default();
+    let body = serde_json::json!({ "owner": owner, "startedAt": started });
+    let temp = path.with_extension(format!("tmp-{}", std::process::id()));
+    if fs::write(&temp, body.to_string()).is_ok() {
+        let _ = fs::rename(&temp, path);
+    }
+}
+
+/// 标记里登记的账号；文件损坏或读不出归属都按"无标记"处理。
+fn read_migration_owner(path: &Path) -> Option<String> {
+    let text = fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    value.get("owner")?.as_str().map(str::to_owned)
+}
+
+/// `own_marker`：目标处存在本账号的迁移标记（见 migration_marker_path）。
+fn classify_destinations(destinations: &[(&'static str, PathBuf)], own_marker: bool) -> DestinationState {
     let mut occupied: Vec<(&'static str, &PathBuf)> = Vec::new();
     let mut shells: Vec<PathBuf> = Vec::new();
     for (name, dest) in destinations {
@@ -296,19 +317,22 @@ fn classify_destinations(destinations: &[(&'static str, PathBuf)]) -> Destinatio
             PartitionOccupancy::Occupied => occupied.push((name, dest)),
         }
     }
-    let stage = has_stage_leftover(destinations);
-    if occupied.len() >= 2 || (occupied.len() == 1 && stage) {
-        // 残骸：已知落点（含空壳）一起清。删除失败不阻塞——后面归位前的
-        // 叶子检查仍会拦，报告里也说得清。
-        let mut paths: Vec<PathBuf> = occupied.iter().map(|(_, dest)| (*dest).clone()).collect();
-        paths.extend(shells);
-        return DestinationState::Leftover { paths };
-    }
     if let Some((name, dest)) = occupied.first() {
-        return DestinationState::Conflict { name, dest: (*dest).clone() };
+        if own_marker {
+            // 残骸：已知落点（含空壳）一起清。删除失败不阻塞——后面归位前
+            // 的叶子检查仍会拦，报告里也说得清。
+            let mut paths: Vec<PathBuf> =
+                occupied.iter().map(|(_, dest)| (*dest).clone()).collect();
+            paths.extend(shells);
+            return DestinationState::Leftover { paths };
+        }
+        return DestinationState::Conflict {
+            name: *name,
+            dest: (*dest).clone(),
+        };
     }
     if !shells.is_empty() {
-        // 只剩空壳：删壳即可，不算冲突。
+        // 只剩空壳：删壳即可，不算冲突（空目录里没有可丢的数据）。
         return DestinationState::Leftover { paths: shells };
     }
     DestinationState::Vacant
@@ -490,6 +514,12 @@ fn run_tool_home_migration(app: &AppHandle, target: Option<PathBuf>) -> Result<S
         .filter(|(source, _)| source.is_dir())
         .collect();
     if canonical(&from_home).is_some_and(|value| Some(value) == canonical(&target)) {
+        // 已在目标 = 上次迁移至少完成了切换点；顺带清掉可能残留的迁移标记
+        // （上次跑到切换点之后、删标记之前被杀，标记会留在目标处）。
+        let marker = migration_marker_path(to_default, &target, &owner);
+        if read_migration_owner(&marker).is_some_and(|value| value == owner) {
+            let _ = fs::remove_file(&marker);
+        }
         return Ok(format!("工具整体已在 {}，无需迁移。", display_path(&target)));
     }
     // 目标分区：home 模式 <home>/<partition>；默认模式 <tools>/<partition>/<owner>
@@ -506,14 +536,18 @@ fn run_tool_home_migration(app: &AppHandle, target: Option<PathBuf>) -> Result<S
         .chain(std::iter::once(&"storage"))
         .map(|name| (*name, destination_of(name)))
         .collect();
-    // 上次迁移的残骸先清掉（判据见 classify_destinations 文档），否则重试
-    // 会被自己上次的中断产物永久挡死；真冲突才报错，且报错带路径。
+    // 上次迁移的残骸先清掉。残骸判定只认迁移标记：有本账号标记才允许
+    // 自动清理目标（源数据原样在旧家，删目标无损失）；没标记一律当真
+    // 冲突报错让用户决定——默认根下有别的账号的数据、选中文件夹里躺着
+    // 别人的旧家，都不能凭“形状像分区”就动手（Z-25）。
+    let marker = migration_marker_path(to_default, &target, &owner);
+    let own_marker = read_migration_owner(&marker).is_some_and(|value| value == owner);
     let mut residue_note = String::new();
-    match classify_destinations(&destinations) {
+    match classify_destinations(&destinations, own_marker) {
         DestinationState::Vacant => {}
         DestinationState::Leftover { paths } => {
             residue_note = format!(
-                "检测到上次迁移在 {} 留下的残骸，已清理后继续。",
+                "检测到本账号上次迁移在 {} 留下的残骸（有迁移标记），已清理后继续。",
                 display_path(&target)
             );
             for path in &paths {
@@ -522,7 +556,7 @@ fn run_tool_home_migration(app: &AppHandle, target: Option<PathBuf>) -> Result<S
         }
         DestinationState::Conflict { name, dest } => {
             return Err(format!(
-                "目标位置 {} 已有内容（{name}），看起来不是迁移残骸，不能自动覆盖：请换一个空目录；如果确认这些内容可以删除，清掉后重试即可。",
+                "目标位置 {} 已有内容（{name}），且没有本账号的迁移标记，不能自动覆盖：请换一个空目录；如果确认这是上次中断迁移留下的残骸、这些内容可以删除，手动清掉后重试即可。",
                 display_path(&dest)
             ));
         }
@@ -543,6 +577,13 @@ fn run_tool_home_migration(app: &AppHandle, target: Option<PathBuf>) -> Result<S
                 }
             }
         }
+    }
+
+    // 标记从这一刻起代表“本账号迁移进行中”：写在复制之前，整体成功收尾
+    // 才删。中途被杀，重试凭它识别现场并自动清理；已有本账号标记（重试）
+    // 不重写，保持原现场。
+    if !own_marker {
+        write_migration_marker(&marker, &owner);
     }
 
     state.0.stage("关窗", "关闭打开的工具窗口".into());
@@ -589,6 +630,9 @@ fn run_tool_home_migration(app: &AppHandle, target: Option<PathBuf>) -> Result<S
     } else if let Err(error) = write_home_pointer(&pointer, &target) {
         return Err(format!("{error}（原目录未动，可重试）"));
     }
+    // 指针已切换 = 迁移已提交，标记完成使命。这之后的任何失败重试都会走
+    // 上面“已在目标”分支并顺带删标记。
+    let _ = fs::remove_file(&marker);
 
     // 重映射：安装记录里的 dir、排除列表、运行目录登记都跟着搬。账号层
     // 变化是结构性的（默认家带账号层、home 不带），不能纯前缀替换。
@@ -1027,47 +1071,35 @@ mod tests {
     }
 
     #[test]
-    fn classify_destinations_tells_residue_from_conflict() {
-        // ≥2 个非空已知分区 → 残骸，全部清理（含空壳）
-        let root = temp_root("classify-residue");
+    fn classify_destinations_requires_migration_marker() {
+        // 目标里有分区状内容但没有本账号标记 → 一律真冲突，绝不凭形状猜
+        // （Z-25：形状判据会误删别的账号留在目标目录里的工具数据）。
+        let root = temp_root("classify-no-marker");
         for name in ["installed", "projects"] {
             fs::create_dir_all(root.join(name)).unwrap();
-            fs::write(root.join(name).join("marker"), b"x").unwrap();
+            fs::write(root.join(name).join("leftover"), b"x").unwrap();
         }
-        fs::create_dir_all(root.join("backups")).unwrap(); // 空壳也算进清理
         let destinations: Vec<(&'static str, PathBuf)> = PARTITIONS
             .iter()
             .map(|name| (*name, root.join(name)))
             .collect();
-        match classify_destinations(&destinations) {
+        match classify_destinations(&destinations, false) {
+            DestinationState::Conflict { name, dest } => {
+                assert_eq!(name, "installed");
+                assert_eq!(dest, root.join("installed"));
+            }
+            other => panic!("无标记应为冲突，实际 {other:?}"),
+        }
+        // 有本账号标记 → 残骸，全部清理（含空壳）
+        fs::create_dir_all(root.join("backups")).unwrap(); // 空壳也算进清理
+        match classify_destinations(&destinations, true) {
             DestinationState::Leftover { paths } => {
                 assert_eq!(paths.len(), 3, "两个非空分区 + 一个空壳");
                 assert!(paths.contains(&root.join("backups")));
             }
-            other => panic!("应为残骸，实际 {other:?}"),
+            other => panic!("有标记应为残骸，实际 {other:?}"),
         }
-        // 单个非空分区且无暂存目录 → 真冲突
-        let root = temp_root("classify-conflict");
-        fs::create_dir_all(root.join("projects")).unwrap();
-        fs::write(root.join("projects/user-code.txt"), b"mine").unwrap();
-        let destinations: Vec<(&'static str, PathBuf)> = PARTITIONS
-            .iter()
-            .map(|name| (*name, root.join(name)))
-            .collect();
-        match classify_destinations(&destinations) {
-            DestinationState::Conflict { name, dest } => {
-                assert_eq!(name, "projects");
-                assert_eq!(dest, root.join("projects"));
-            }
-            other => panic!("应为冲突，实际 {other:?}"),
-        }
-        // 单个非空分区 + 暂存目录 → 残骸（暂存目录是复制被杀的现场）
-        fs::create_dir_all(root.join(".aaw-stage-projects-deadbeef")).unwrap();
-        match classify_destinations(&destinations) {
-            DestinationState::Leftover { paths } => assert_eq!(paths.len(), 1),
-            other => panic!("有暂存目录应为残骸，实际 {other:?}"),
-        }
-        // 全空壳 → 清壳不算冲突
+        // 只剩空壳 → 清壳不算冲突（空目录里没有可丢的数据，与标记无关）
         let root = temp_root("classify-shell");
         fs::create_dir_all(root.join("storage")).unwrap();
         let destinations: Vec<(&'static str, PathBuf)> = PARTITIONS
@@ -1075,7 +1107,7 @@ mod tests {
             .chain(std::iter::once(&"storage"))
             .map(|name| (*name, root.join(name)))
             .collect();
-        match classify_destinations(&destinations) {
+        match classify_destinations(&destinations, false) {
             DestinationState::Leftover { paths } => assert_eq!(paths, vec![root.join("storage")]),
             other => panic!("空壳应清掉，实际 {other:?}"),
         }
@@ -1085,7 +1117,28 @@ mod tests {
             .iter()
             .map(|name| (*name, root.join(name)))
             .collect();
-        assert!(matches!(classify_destinations(&destinations), DestinationState::Vacant));
+        assert!(matches!(classify_destinations(&destinations, false), DestinationState::Vacant));
+    }
+
+    #[test]
+    fn migration_marker_is_owner_scoped() {
+        let target = temp_root("marker-path");
+        // 家模式目标账号私有 → 固定文件名；默认模式 <tools> 根多账号共享
+        // → 文件名必须带账号，认不出别人的现场。
+        assert_eq!(
+            migration_marker_path(false, &target, "u1"),
+            target.join(".aaw-migration.json")
+        );
+        assert_eq!(
+            migration_marker_path(true, &target, "u1"),
+            target.join(".aaw-migration-u1.json")
+        );
+        // 读写往返；损坏内容按无标记处理
+        let marker = migration_marker_path(true, &target, "u1");
+        write_migration_marker(&marker, "u1");
+        assert_eq!(read_migration_owner(&marker).as_deref(), Some("u1"));
+        fs::write(&marker, "not json").unwrap();
+        assert_eq!(read_migration_owner(&marker), None);
     }
 
     #[test]
