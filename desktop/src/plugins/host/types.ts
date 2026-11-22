@@ -154,6 +154,13 @@ export interface HostRuntime {
    */
   moveToolPath(from: string, to: string): Promise<void>;
   /**
+   * 删除一次安装创建的工具版本目录（`<installed>/<账号>/<id>/versions/…`）。
+   *
+   * 只给"安装失败，把刚写进去的东西清掉"用。宿主侧只接受这个形状的路径，
+   * 别处一律拒绝——删目录是不可逆操作，宁可让它窄到只能干一件事。
+   */
+  dropToolStaging?(path: string): Promise<void>;
+  /**
    * 打开（或唤起）SSO 登录窗口：首次调用创建 **隐藏** 窗口（给持久
    * cookie 的静默探测留窗口期），再次调用即唤起显示。语义见 sso_login.rs。
    */
@@ -360,6 +367,8 @@ export type {
 export type SkillFiles = Pick<
   HostRuntime,
   | "userDataDir" | "listDirNames" | "pathExists" | "copyDir" | "writeTextFile" | "toolPurge" | "moveToolPath"
+  // 安装失败清理：只删工具库 versions/ 下的副本目录
+  | "dropToolStaging"
   // 工具带依赖之后要落二进制（node_modules / 图片 / wasm）并整树导出
   | "writeBinaryFile" | "readBinaryFile" | "listToolFiles"
   // 开发指导正文：用户改过的规范要贯通到 AGENTS.md 与技能目录

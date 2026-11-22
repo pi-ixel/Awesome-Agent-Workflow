@@ -3,10 +3,11 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { createStore } from "zustand";
 import { ToolsPanel } from "../../../src/plugins/tools/ui/ToolsPanel.tsx";
 import { sampleTool } from "../../../src/plugins/tools/ui/sample.ts";
-import type { PersonalTool, ToolSettings } from "../../../src/plugins/tools/types.ts";
+import type { PersonalTool, ToolPackage, ToolSettings } from "../../../src/plugins/tools/types.ts";
 import type { ToolsService } from "../../../src/plugins/tools/service.ts";
 import type { HostService } from "../../../src/plugins/host/service.ts";
-import { importToolProject } from "../../../src/plugins/tools/runtime/projectArchive.ts";
+import { importToolProject, exportToolProject } from "../../../src/plugins/tools/runtime/projectArchive.ts";
+import { exampleTools } from "../../../src/plugins/tools/runtime/examples.ts";
 import { ToolManagement } from "../../../src/plugins/tools/ui/ToolManagement.tsx";
 import { fakeWorkshop } from "./fakeWorkshop.ts";
 
@@ -30,7 +31,7 @@ it("defers a selected source update until dirty settings are explicitly discarde
 
 it("keeps unsaved settings until leaving the tool is explicitly confirmed", () => {
   const state = createStore<readonly PersonalTool[]>(() => [{ package: sampleTool }]);
-  const service = { state, install: vi.fn(), rollback: vi.fn(), setSource: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
+  const service = { state, install: vi.fn(), rollback: vi.fn(), setRunDir: vi.fn(), setSourceDir: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
   const host = { isNative: () => true } as unknown as HostService;
   render(<ToolsPanel service={service} host={host} workshop={fakeWorkshop()} />);
   openCardMenu();
@@ -46,6 +47,55 @@ it("keeps unsaved settings until leaving the tool is explicitly confirmed", () =
   expect(service.saveSettings).not.toHaveBeenCalled();
 });
 
+/**
+ * 退版会让表单按上一版的 schema 重新挂载，没保存的草稿会一起没（OBS-07）。
+ * 所以它必须和「更新源码」「返回」走同一个放弃确认，而且在用户点确认之前
+ * 一条退版请求都不该发出去——连点两次触发也只能弹一次、发一条。
+ */
+it("rolls back only after unsaved settings are explicitly discarded, and only once", async () => {
+  const rollback = vi.fn().mockResolvedValue({ text: "已退回 v0.9.0。" });
+  const state = createStore<readonly PersonalTool[]>(() => [{ package: sampleTool, previousVersion: "0.9.0" }]);
+  const service = { state, install: vi.fn(), rollback: vi.fn(), setRunDir: vi.fn(), setSourceDir: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
+  const host = { isNative: () => true } as unknown as HostService;
+  render(<ToolsPanel service={service} host={host} workshop={{ ...fakeWorkshop(), rollback }} />);
+  openCardMenu();
+  fireEvent.click(screen.getByRole("menuitem", { name: "管理" }));
+  fireEvent.change(screen.getByLabelText(/缩进空格数/), { target: { value: "4" } });
+  expandSection(/源码与开发/);
+  fireEvent.click(screen.getByRole("button", { name: "退回上一版 v0.9.0" }));
+  expect(rollback).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "继续编辑" })).toHaveFocus();
+  fireEvent.click(screen.getByRole("button", { name: "继续编辑" }));
+  // 选了「继续编辑」就只是回到编辑态：草稿还在，退版一条都没发。
+  expect(screen.getByLabelText(/缩进空格数/)).toHaveValue(4);
+  expect(rollback).not.toHaveBeenCalled();
+  // 触发点连点两次不该排出两条队列（第二条会拿到刚换下来的那一版）。
+  fireEvent.click(screen.getByRole("button", { name: "退回上一版 v0.9.0" }));
+  fireEvent.click(screen.getByRole("button", { name: "退回上一版 v0.9.0" }));
+  fireEvent.click(screen.getByRole("button", { name: "放弃修改并退回" }));
+  await waitFor(() => expect(rollback).toHaveBeenCalledExactlyOnceWith(sampleTool.id));
+  expect(screen.getByRole("status")).toHaveTextContent("已退回 v0.9.0");
+});
+
+/** 退版失败时草稿必须还能编辑：失败提示是结果，不是把用户输入也一并清掉。 */
+it("keeps the unsaved draft editable when a rollback fails", async () => {
+  const rollback = vi.fn().mockResolvedValue({ text: "退回失败：上一版的运行副本不可用。", error: true });
+  const state = createStore<readonly PersonalTool[]>(() => [{ package: sampleTool, previousVersion: "0.9.0" }]);
+  const service = { state, install: vi.fn(), rollback: vi.fn(), setRunDir: vi.fn(), setSourceDir: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
+  const host = { isNative: () => true } as unknown as HostService;
+  render(<ToolsPanel service={service} host={host} workshop={{ ...fakeWorkshop(), rollback }} />);
+  openCardMenu();
+  fireEvent.click(screen.getByRole("menuitem", { name: "管理" }));
+  fireEvent.change(screen.getByLabelText(/缩进空格数/), { target: { value: "4" } });
+  expandSection(/源码与开发/);
+  fireEvent.click(screen.getByRole("button", { name: "退回上一版 v0.9.0" }));
+  fireEvent.click(screen.getByRole("button", { name: "放弃修改并退回" }));
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("退回失败"));
+  expect(screen.getByLabelText(/缩进空格数/)).toHaveValue(4);
+  expect(screen.getByRole("button", { name: /源码与开发/ })).toHaveAttribute("aria-expanded", "true");
+  expect(rollback).toHaveBeenCalledTimes(1);
+});
+
 /** 卡片上只剩「打开」与「⋯」，管理 / 导出 / 卸载都收进了菜单。 */
 function openCardMenu(name = "JSON 格式化") {
   fireEvent.click(screen.getByRole("button", { name: `更多操作：${name}` }));
@@ -59,7 +109,7 @@ function expandSection(name: RegExp) {
 
 it("opens the tool directly, routes Manage separately, saves settings and exports source ZIP", async () => {
   const state = createStore<readonly PersonalTool[]>(() => [{ package: sampleTool, settings: { indent: 2 } }]);
-  const service = { state, install: vi.fn(), rollback: vi.fn(), setSource: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn((_id: string, values: ToolSettings) => state.setState([{ package: sampleTool, settings: values }], true)) } satisfies ToolsService;
+  const service = { state, install: vi.fn(), rollback: vi.fn(), setRunDir: vi.fn(), setSourceDir: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn((_id: string, values: ToolSettings) => state.setState([{ package: sampleTool, settings: values }], true)) } satisfies ToolsService;
   const open = vi.fn().mockResolvedValue(undefined);
   const write = vi.fn().mockResolvedValue(undefined);
   const stop = vi.fn().mockResolvedValue(undefined);
@@ -102,7 +152,7 @@ it("opens the tool directly, routes Manage separately, saves settings and export
 /** 分区默认收起，只留摘要；来源目录是文本胶囊，界面不再写死不存在的文件。 */
 it("collapses secondary sections and shows the source dir as a copyable text path", () => {
   const dir = "C:/Users/14993/AppData/Roaming/tools/projects/anonymous/json-formatter";
-  render(<ToolManagement entry={{ package: sampleTool, dir }} onBack={vi.fn()} onOpen={vi.fn()}
+  render(<ToolManagement entry={{ package: sampleTool, sourceDir: dir }} onBack={vi.fn()} onOpen={vi.fn()}
     onExport={vi.fn()} onUpdate={vi.fn()} onSave={() => true} onRemove={vi.fn()} busy={false} />);
   expect(screen.getByRole("button", { name: /自定义设置/ })).toHaveAttribute("aria-expanded", "true");
   expect(screen.getByRole("button", { name: /源码与开发/ })).toHaveAttribute("aria-expanded", "false");
@@ -119,7 +169,7 @@ it("collapses secondary sections and shows the source dir as a copyable text pat
 /** AI 修不动时不能只留一句话：源码路径要看得见可复制，校验要能自己发起（docs 22 §4 P0-2）。 */
 it("shows the source path and re-checking once AI gave up", () => {
   const state = createStore<readonly PersonalTool[]>(() => []);
-  const service = { state, install: vi.fn(), rollback: vi.fn(), setSource: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
+  const service = { state, install: vi.fn(), rollback: vi.fn(), setRunDir: vi.fn(), setSourceDir: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
   const host = { isNative: () => true } as unknown as HostService;
   const verify = vi.fn().mockResolvedValue(null);
   const workshop = {
@@ -146,7 +196,7 @@ it("shows the source path and re-checking once AI gave up", () => {
 /** 需求可以精心写，界面不再用「一句话」暗示只能随手写一句。 */
 it("does not cap the brief to a single sentence, and drops the manual guide-sync module", () => {
   const state = createStore<readonly PersonalTool[]>(() => []);
-  const service = { state, install: vi.fn(), rollback: vi.fn(), setSource: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
+  const service = { state, install: vi.fn(), rollback: vi.fn(), setRunDir: vi.fn(), setSourceDir: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
   const host = { isNative: () => true } as unknown as HostService;
   const { container } = render(<ToolsPanel service={service} host={host} workshop={fakeWorkshop()} />);
   fireEvent.click(screen.getByRole("button", { name: /开发工具/ }));
@@ -159,7 +209,7 @@ it("does not cap the brief to a single sentence, and drops the manual guide-sync
 /** 空状态是一个主 CTA + 两个统一尺寸的备选，不再是三种大小的按钮并排。 */
 it("gives the empty library one primary CTA and two equally-sized alternatives", () => {
   const state = createStore<readonly PersonalTool[]>(() => []);
-  const service = { state, install: vi.fn(), rollback: vi.fn(), setSource: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
+  const service = { state, install: vi.fn(), rollback: vi.fn(), setRunDir: vi.fn(), setSourceDir: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
   const host = { isNative: () => true } as unknown as HostService;
   const { container } = render(<ToolsPanel service={service} host={host} workshop={fakeWorkshop()} />);
   expect(container.querySelectorAll(".tools-empty-primary")).toHaveLength(1);
@@ -172,7 +222,7 @@ it("gives the empty library one primary CTA and two equally-sized alternatives",
 /** 导入只有一个入口：点「导入工具」弹菜单选 ZIP 还是文件夹（浏览器无文件夹项）。 */
 it("routes both import kinds through a single menu entry", () => {
   const state = createStore<readonly PersonalTool[]>(() => []);
-  const service = { state, install: vi.fn(), rollback: vi.fn(), setSource: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
+  const service = { state, install: vi.fn(), rollback: vi.fn(), setRunDir: vi.fn(), setSourceDir: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
   const importFromFolder = vi.fn(() => Promise.resolve({ text: "已导入。" }));
   const native = { isNative: () => true } as unknown as HostService;
   const workshop = { ...fakeWorkshop(), importFromFolder } as never;
@@ -191,12 +241,49 @@ it("routes both import kinds through a single menu entry", () => {
   expect(screen.queryByRole("menuitem", { name: "导入文件夹…" })).toBeNull();
 });
 
+/**
+ * 示例工具也必须走"物化一份完整副本再写记录"的安装链路（OBS-02）。
+ *
+ * 旧实现直接 `service.install()`：只写配置、不落盘，示例装完根本没有运行副本。
+ * 主窗打开时会临时补一份，启动器小窗直接开就只能报一句路径。
+ */
+it("loads every example tool through the archive install path", async () => {
+  const state = createStore<readonly PersonalTool[]>(() => []);
+  const service = { state, install: vi.fn(), rollback: vi.fn(), setRunDir: vi.fn(), setSourceDir: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
+  const installArchive = vi.fn((tool: ToolPackage) => Promise.resolve({ version: tool.version, updated: false, versionChanged: false }));
+  const host = { isNative: () => true } as unknown as HostService;
+  render(<ToolsPanel service={service} host={host} workshop={{ ...fakeWorkshop(), installArchive }} />);
+  fireEvent.click(screen.getByRole("button", { name: "载入示例工具" }));
+  await waitFor(() => expect(installArchive).toHaveBeenCalledTimes(exampleTools.length));
+  expect(installArchive.mock.calls.map(([tool]) => tool.id)).toEqual(exampleTools.map((tool) => tool.id));
+  expect(service.install).not.toHaveBeenCalled();
+  expect(screen.getByRole("status")).toHaveTextContent(`已载入 ${exampleTools.length} 个示例工具`);
+});
+
+/** 导入 ZIP 要把包里的文件一起交给安装链路，而不是只吞下清单。 */
+it("installs an imported ZIP together with the files it carries", async () => {
+  const state = createStore<readonly PersonalTool[]>(() => []);
+  const service = { state, install: vi.fn(), rollback: vi.fn(), setRunDir: vi.fn(), setSourceDir: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
+  const installArchive = vi.fn((tool: ToolPackage) => Promise.resolve({ version: tool.version, updated: false, versionChanged: false }));
+  const host = { isNative: () => true } as unknown as HostService;
+  const { container } = render(<ToolsPanel service={service} host={host} workshop={{ ...fakeWorkshop(), installArchive }} />);
+  const bytes = exportToolProject(sampleTool, {});
+  const zip = new Blob([bytes.buffer as ArrayBuffer], { type: "application/zip" });
+  const file = new File([zip], `${sampleTool.id}.zip`, { type: "application/zip" });
+  fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [file] } });
+  await waitFor(() => expect(installArchive).toHaveBeenCalledOnce());
+  const [tool, files] = installArchive.mock.calls[0]! as unknown as [ToolPackage, Record<string, Uint8Array>];
+  expect(tool.id).toBe(sampleTool.id);
+  expect(Object.keys(files)).toEqual(expect.arrayContaining(["manifest.json", "index.html"]));
+  expect(screen.getByRole("status")).toHaveTextContent(sampleTool.name);
+});
+
 /** 常驻工具：关窗只是隐藏，所以列表要标明，菜单要留一条真出口。 */
 it("marks background tools and offers a real stop from the card menu", async () => {
   const tool = { ...sampleTool, background: { reason: "剪切板历史" } };
   const state = createStore<readonly PersonalTool[]>(() => [{ package: tool }]);
   const stopTool = vi.fn(async () => {});
-  const service = { state, install: vi.fn(), rollback: vi.fn(), setSource: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
+  const service = { state, install: vi.fn(), rollback: vi.fn(), setRunDir: vi.fn(), setSourceDir: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
   const host = { isNative: () => true, stopTool } as unknown as HostService;
   render(<ToolsPanel service={service} host={host} workshop={fakeWorkshop()} />);
   expect(screen.getByText("后台")).toBeVisible();
@@ -209,7 +296,7 @@ it("marks background tools and offers a real stop from the card menu", async () 
 /** 非常驻工具不该出现「停止后台运行」：菜单里放一条点了没用的项等于骗人。 */
 it("does not offer the background stop for tools that never keep running", () => {
   const state = createStore<readonly PersonalTool[]>(() => [{ package: sampleTool }]);
-  const service = { state, install: vi.fn(), rollback: vi.fn(), setSource: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
+  const service = { state, install: vi.fn(), rollback: vi.fn(), setRunDir: vi.fn(), setSourceDir: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
   const host = { isNative: () => true } as unknown as HostService;
   render(<ToolsPanel service={service} host={host} workshop={fakeWorkshop()} />);
   openCardMenu();
@@ -219,7 +306,7 @@ it("does not offer the background stop for tools that never keep running", () =>
 /** 常驻挂载之后，重新可见是唯一的刷新时机：不然 AI 刚写完的项目永远不露面。 */
 it("refreshes the project list whenever the panel becomes visible again", () => {
   const state = createStore<readonly PersonalTool[]>(() => []);
-  const service = { state, install: vi.fn(), rollback: vi.fn(), setSource: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
+  const service = { state, install: vi.fn(), rollback: vi.fn(), setRunDir: vi.fn(), setSourceDir: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
   const host = { isNative: () => true } as unknown as HostService;
   const refreshProjects = vi.fn(() => Promise.resolve());
   const workshop = { ...fakeWorkshop(), refreshProjects };
@@ -236,7 +323,7 @@ it("refreshes the project list whenever the panel becomes visible again", () => 
  */
 it("keeps one row per project and expands only the open one", () => {
   const state = createStore<readonly PersonalTool[]>(() => []);
-  const service = { state, install: vi.fn(), rollback: vi.fn(), setSource: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
+  const service = { state, install: vi.fn(), rollback: vi.fn(), setRunDir: vi.fn(), setSourceDir: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
   const host = { isNative: () => true } as unknown as HostService;
   const select = vi.fn(() => Promise.resolve());
   const dismiss = vi.fn();
@@ -278,7 +365,7 @@ it("keeps one row per project and expands only the open one", () => {
 it("keeps project actions usable before the first check lands", () => {
   const dir = "E:/tools/brand-new";
   const state = createStore<readonly PersonalTool[]>(() => []);
-  const service = { state, install: vi.fn(), rollback: vi.fn(), setSource: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
+  const service = { state, install: vi.fn(), rollback: vi.fn(), setRunDir: vi.fn(), setSourceDir: vi.fn(), open: vi.fn(), remove: vi.fn(), saveSettings: vi.fn() } satisfies ToolsService;
   const host = { isNative: () => true } as unknown as HostService;
   const verify = vi.fn().mockResolvedValue(null);
   const workshop = {

@@ -405,8 +405,14 @@ fn rewrite_preferences(prefs: &mut Preferences, changes: &PathChanges) -> Result
         let accounts = library.as_object_mut().ok_or("工具清单格式无效。")?;
         for entries in accounts.values_mut().filter_map(Value::as_array_mut) {
             for entry in entries {
-                if let Some(Value::String(path)) = entry.get_mut("dir") {
-                    rewrite_path(path, changes);
+                // 一条安装记录最多引用三个目录：当前运行副本、上一版副本、开发来源。
+                // 前两个永远在受管分区里，换盘时必须一起改，否则退版会指向一个
+                // 已经搬走的旧路径。开发来源也一样——它常在 projects 分区里；
+                // 真落在用户自己目录里的，rewrite_path 匹配不到就不动。
+                for field in ["dir", "previousDir", "sourceDir"] {
+                    if let Some(Value::String(path)) = entry.get_mut(field) {
+                        rewrite_path(path, changes);
+                    }
                 }
             }
         }
@@ -841,11 +847,20 @@ mod tests {
         let to = fixture.path().join("new-aaw");
         let home = plan(None);
         let old_dir = home.path(&from).join("installed/alice/notes");
+        let old_previous = home.path(&from).join("installed/alice/notes/versions/1.0.0");
+        let old_source = home.path(&from).join("projects/alice/notes");
         let external = fixture.path().join("other/project");
         let prefs = Preferences::from([
             (LOCATION_KEY.into(), Some(serde_json::to_string(&home).unwrap())),
             ("aaw-desktop.personal-tools.v1".into(), Some(json!({
-                "user:alice":[{"dir":display_path(&old_dir)},{"dir":display_path(&external)}]
+                "user:alice":[
+                    {
+                        "dir": display_path(&old_dir),
+                        "previousDir": display_path(&old_previous),
+                        "sourceDir": display_path(&old_source)
+                    },
+                    {"dir": display_path(&external), "previousDir": display_path(&external)}
+                ]
             }).to_string())),
         ]);
         write_record(&configuration(&to, "preferences.json"), &prefs).unwrap();
@@ -856,7 +871,17 @@ mod tests {
             library["user:alice"][0]["dir"],
             display_path(&home.path(&to).join("installed/alice/notes"))
         );
+        // 上一版副本与开发来源都跟着搬：漏掉任何一个，退版与"回开发目录"都会悬空。
+        assert_eq!(
+            library["user:alice"][0]["previousDir"],
+            display_path(&home.path(&to).join("installed/alice/notes/versions/1.0.0"))
+        );
+        assert_eq!(
+            library["user:alice"][0]["sourceDir"],
+            display_path(&home.path(&to).join("projects/alice/notes"))
+        );
         assert_eq!(library["user:alice"][1]["dir"], display_path(&external));
+        assert_eq!(library["user:alice"][1]["previousDir"], display_path(&external));
         assert_eq!(tool_home(&to).unwrap(), home.path(&to));
     }
 }

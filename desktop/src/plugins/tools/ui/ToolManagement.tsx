@@ -129,11 +129,16 @@ export function ToolManagement({ entry, onBack, onOpen, onExport, onUpdate, onSa
             open={open.source} onToggle={() => toggle("source")}>
             <div className="mg-content">
               <div className="mg-files">{archiveFiles.slice(0, 6).map((name) => <code key={name}>{name}</code>)}{archiveFiles.length > 6 && <span>+ 另外 {archiveFiles.length - 6} 个文件</span>}</div>
-              <div className="mg-actions"><button type="button" className={btnSecondary} onClick={onExport} disabled={busy}>导出源码 ZIP</button><button type="button" className={btnGhost} onClick={() => picker.current?.click()} disabled={busy}>更新源码</button>{entry.previousVersion && onRollback && <button type="button" className={btnGhost} onClick={onRollback} disabled={busy}>退回上一版 v{entry.previousVersion}</button>}</div>
+              <div className="mg-actions"><button type="button" className={btnSecondary} onClick={onExport} disabled={busy}>导出源码 ZIP</button><button type="button" className={btnGhost} onClick={() => picker.current?.click()} disabled={busy}>更新源码</button>{entry.previousVersion && onRollback && <button type="button" className={btnGhost} disabled={busy} onClick={() => {
+                // 退版会让设置表单按上一版的 schema 重挂载：没保存的草稿会没。
+                // 与「更新源码」「返回」走同一个放弃确认，别让退版成为唯一的例外。
+                const rollback = onRollback;
+                requestAction("退回上一版", rollback, "放弃修改并退回");
+              }}>退回上一版 v{entry.previousVersion}</button>}</div>
               <p className="mg-note">导出的是可直接导入的源码包：不需要 Node、不需要构建；要装回去时在工具中心点「导入工具」选中这个 ZIP。不包含你的个人设置。</p>
-              {entry.dir && <div className="mg-source-dir">
-                <p className="mg-note">这一版是从下面的目录装进来的。在那里改完内容要回工具中心点一次「安装」才会生效——已安装的是一份快照，不会跟着目录自动变。</p>
-                <ToolPath path={entry.dir} compact />
+              {entry.sourceDir && <div className="mg-source-dir">
+                <p className="mg-note">这一版是从下面的开发目录装进来的，装的是一份快照。在那里改完内容要回工具中心点一次「安装」才会生效——已安装的工具不会跟着目录自动变。</p>
+                <ToolPath path={entry.sourceDir} compact />
               </div>}
               <input ref={picker} type="file" className={fieldSurfaceClass} accept=".zip,.json" hidden onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) requestAction("更新源码", () => onUpdate(file)); }} />
             </div>

@@ -40,7 +40,8 @@ const service: ToolsService = {
     return { version: tool.version, updated: false, versionChanged: false };
   },
   rollback: () => Promise.resolve(undefined),
-  setSource: () => {},
+  setRunDir: () => {},
+  setSourceDir: () => {},
   open: () => {}, remove: () => {},
   saveSettings: (id, values) => state.setState(state.getState().map((entry) => entry.package.id === id ? { ...entry, settings: resolveToolSettings(entry.package, values) } : entry), true),
 };

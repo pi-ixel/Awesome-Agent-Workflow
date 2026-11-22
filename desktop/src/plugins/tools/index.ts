@@ -1,12 +1,20 @@
 import type { Context } from "cordis";
 import { createStore } from "zustand";
 import { createSnapshotView } from "../../shared/state/readonlySnapshot.ts";
-import type { InstallOutcome, ToolsService } from "./service.ts";
+import { pathKey } from "../../shared/panelPaths.ts";
+import type { InstallOptions, InstallOutcome, ToolsService } from "./service.ts";
 import type { PersonalTool, ToolPackage } from "./types.ts";
 import { checkCompatibility, readToolPackage, readToolPackageV1, ToolPackageError, toolContractVersion } from "./runtime/package.ts";
 import { resolveToolSettings, validateToolSettings } from "./runtime/settings.ts";
 import { createBackupQueue, readToolBackup } from "./runtime/backup.ts";
 import { hostToolIO } from "./runtime/io.ts";
+import {
+  canRunToolDir,
+  materializeToolFiles,
+  missingEntryFiles,
+  serializeToolOp,
+  stageVersion,
+} from "./runtime/versions.ts";
 
 export const name = "tools";
 export const inject = ["account", "configuration", "host"];
@@ -109,6 +117,8 @@ export function readTools(value: unknown, missingDirs: ReadonlySet<string> = new
       installedAt: finiteNumber(fields.installedAt),
       updatedAt: finiteNumber(fields.updatedAt),
       dir: recordedDir,
+      sourceDir: text(fields.sourceDir),
+      previousDir: text(fields.previousDir),
       installedSchemaVersion,
       ...(dirMissing ? {
         broken: {
@@ -133,11 +143,33 @@ export function readTools(value: unknown, missingDirs: ReadonlySet<string> = new
   };
 }
 
+/**
+ * 这一版的清单能不能独立凑出一份能跑的副本。
+ *
+ * 退版入口是否显示要据此判断：只剩清单、缺 `build.out` 或进程入口的工具，
+ * 给一个点了必然失败的"退回上一版"，比不给更糟。
+ */
+function isSelfContained(tool: ToolPackage): boolean {
+  try {
+    return missingEntryFiles(tool, Object.keys(materializeToolFiles(tool))).length === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** 去掉某个字段（`exactOptionalPropertyTypes` 下不能用 `{ key: undefined }`）。 */
+function withoutKey<T extends object, K extends keyof T>(value: T, key: K): T {
+  const copy = { ...value };
+  delete copy[key];
+  return copy;
+}
+
 export function apply(ctx: Context): void {
   const scope = ctx.configuration.register("aaw-desktop.personal-tools.v1");
   const account = ctx.account.state;
   const io = hostToolIO(ctx.host);
   const backups = createBackupQueue(io, () => account.getState().currentUser?.id);
+  const owner = () => account.getState().currentUser?.id;
   const userKey = () => {
     const user = account.getState().currentUser;
     return user ? `user:${user.id}` : undefined;
@@ -197,6 +229,58 @@ export function apply(ctx: Context): void {
   }
 
   /**
+   * 运行副本自愈：记录在、目录不在时，按记录里的清单物化一份并写回 `dir`。
+   *
+   * 为什么放在启动时而不是等"打开"：小窗（启动器）打开工具时走的是宿主侧
+   * 的目录解析，没有主窗前端参与，也就没有机会先补文件。目录必须在那之前
+   * 就是对的——否则用户点一次就得回来先开一次主窗，那正是要消灭的绕路。
+   *
+   * 只在**能确定凑齐运行文件**时才动手：缺 `build.out` / 进程入口的工具
+   * 留着坏标记，让"重新导入"的提示说话，不塞一个跑不起来的空壳进去。
+   */
+  async function ensureRunCopies(): Promise<void> {
+    const current = owner();
+    if (!current) return;
+    let entries: readonly PersonalTool[];
+    try {
+      entries = readCurrent();
+    } catch {
+      return;
+    }
+    const repairs: { readonly id: string; readonly dir: string }[] = [];
+    for (const entry of entries) {
+      // 不兼容的条目不重建：那不是文件问题，重建了也跑不了。
+      if (entry.broken && entry.broken.kind !== "missing-dir") continue;
+      try {
+        if (entry.dir && await io.pathExists(entry.dir)) continue;
+      } catch {
+        continue;
+      }
+      if (!isSelfContained(entry.package)) continue;
+      try {
+        const staged = await stageVersion(io, {
+          owner: current,
+          tool: entry.package,
+          files: materializeToolFiles(entry.package),
+        });
+        repairs.push({ id: entry.package.id, dir: staged.dir });
+      } catch { /* 下次启动再试；坏标记会继续告诉用户怎么恢复 */ }
+    }
+    if (!repairs.length) return;
+    // 物化是异步的，期间可能换了账号：这时写回会落到别人的账下。
+    if (owner() !== current) return;
+    try {
+      update((list) => list.map((entry) => {
+        const repair = repairs.find((item) => item.id === entry.package.id);
+        if (!repair) return entry;
+        const clean = entry.broken?.kind === "missing-dir" ? withoutKey(entry, "broken") : entry;
+        return { ...clean, dir: repair.dir };
+      }));
+      for (const repair of repairs) missingDirs.delete(repair.dir);
+    } catch { /* 配置写不进去不该影响启动 */ }
+  }
+
+  /**
    * 存量自检：**只读，绝不写回**。
    *
    * 这个函数以前叫 `pruneBroken`，会把读不出来的条目从配置里删掉——从用户角度
@@ -217,7 +301,7 @@ export function apply(ctx: Context): void {
 
   ctx.provide(name, {
     state: view.snapshot,
-    install(tool, replace = false, sourceDir): InstallOutcome {
+    install(tool, options: InstallOptions = {}): InstallOutcome {
       // 安装关口：先问"当前宿主能不能跑这个工具"。不兼容就当场拦下并说清原因，
       // 而不是装进去之后让用户面对一个白窗口。
       const incompatible = checkCompatibility(tool);
@@ -225,13 +309,24 @@ export function apply(ctx: Context): void {
       let outcome: InstallOutcome = { version: tool.version, updated: false, versionChanged: false };
       update((current) => {
         const previous = current.find((entry) => entry.package.id === tool.id);
-        if (previous && !replace) throw new Error("已安装相同 ID 的工具。请在「开发工具」里重新安装，或先卸载旧版本。");
-        // 覆盖前把上一版挪到磁盘：装坏了能一步退回，不用再找 AI 重写。
+        if (previous && !options.replace) throw new Error("已安装相同 ID 的工具。请在「开发工具」里重新安装，或先卸载旧版本。");
+        // 上一版清单留到磁盘：旧记录没有版本目录，退版只能靠它重新物化。
         if (previous) backups.enqueue(previous.package);
-        const dir = sourceDir ?? previous?.dir;
+        // 运行副本用调用方写好的版本目录；没给就沿用原路径（那里没有新目录可切）。
+        const dir = options.runDir ?? previous?.dir;
+        // 只有"真的换了目录"才留上一版目录——同一个目录再记一次，退版会切回原地。
+        const previousDir = previous?.dir && dir && pathKey(previous.dir) !== pathKey(dir)
+          ? previous.dir
+          : undefined;
+        // 上一版能不能退回去，取决于"有完整副本"或"清单自己能凑出运行文件"。
+        // 两者都不成立时不留 `previousVersion`——界面就不会摆一个点了必然失败的按钮。
+        const rollbackable = previous !== undefined && (previousDir !== undefined || isSelfContained(previous.package));
+        const sourceDir = options.sourceDir === undefined
+          ? previous?.sourceDir
+          : options.sourceDir ?? undefined;
         outcome = {
           version: tool.version,
-          ...(previous ? { previousVersion: previous.package.version } : {}),
+          ...(rollbackable ? { previousVersion: previous.package.version } : {}),
           updated: previous !== undefined,
           versionChanged: previous !== undefined && previous.package.version !== tool.version,
           ...(dir ? { dir } : {}),
@@ -243,9 +338,11 @@ export function apply(ctx: Context): void {
             package: tool,
             lastOpened: previous?.lastOpened,
             installedAt: previous?.installedAt ?? now,
-            ...(previous ? { updatedAt: now, previousVersion: previous.package.version } : {}),
-            // 来源目录优先用这次传入的（用户可能换了目录重装），否则沿用上一次。
+            ...(previous ? { updatedAt: now } : {}),
+            ...(rollbackable && previous ? { previousVersion: previous.package.version } : {}),
             ...(dir ? { dir } : {}),
+            ...(sourceDir ? { sourceDir } : {}),
+            ...(previousDir ? { previousDir } : {}),
             settings: resolveToolSettings(tool, previous?.settings),
             // 记下这一版是"第几代契约"装进来的：将来规则收紧时按它判定，不用现行规则判死。
             installedContractVersion: previous?.installedContractVersion ?? toolContractVersion,
@@ -257,25 +354,61 @@ export function apply(ctx: Context): void {
       return outcome;
     },
     async rollback(id) {
-      const owner = account.getState().currentUser?.id;
-      if (!owner) throw new Error("请先登录 AAW。");
+      const current = owner();
+      if (!current) throw new Error("请先登录 AAW。");
       const assertOwner = () => {
-        if (account.getState().currentUser?.id !== owner) throw new Error("账号已切换，已取消版本回退。请在当前账号重新操作。");
+        if (owner() !== current) throw new Error("账号已切换，已取消版本回退。请在当前账号重新操作。");
       };
-      await backups.settled();
-      assertOwner();
-      const backup = await readToolBackup(io, owner, id);
-      assertOwner();
-      if (!backup) return undefined;
-      // 回滚本身也是一次安装：被换下来的那一版会自动成为新的"上一版"，
-      // 所以点错了还能再点一次换回去。
-      const install = ctx.tools.install.bind(ctx.tools);
-      return install(backup, true);
+      // 同一工具的新装、更新、退版排队执行：两个操作同时跑会把 previousDir
+      // 与 previous.json 配错版本——退回去的是 A 的文件配 B 的清单。
+      return serializeToolOp(`tool:${current}:${id}`, async () => {
+        await backups.settled();
+        assertOwner();
+        const entry = readCurrent().find((item) => item.package.id === id);
+        if (!entry) return undefined;
+        const backup = await readToolBackup(io, current, id);
+        assertOwner();
+        if (!backup) return undefined;
+        // 优先直接切回上一版的完整副本：那是当时真正跑过的那一份。
+        let dir = entry.previousDir;
+        let staged: Awaited<ReturnType<typeof stageVersion>> | undefined;
+        if (!await canRunToolDir(io, dir, id)) {
+          assertOwner();
+          const files = materializeToolFiles(backup);
+          const missing = missingEntryFiles(backup, Object.keys(files));
+          if (missing.length) {
+            throw new Error(
+              `上一版缺少运行文件（${missing.join("、")}）：它当时只留下了清单。请重新导入那一版的 ZIP，当前版本保持不变。`,
+            );
+          }
+          staged = await stageVersion(io, { owner: current, tool: backup, files });
+          dir = staged.dir;
+        }
+        assertOwner();
+        try {
+          // 回滚本身也是一次安装：被换下来的那一版会自动成为新的"上一版"，
+          // 所以点错了还能再点一次换回去。
+          return ctx.tools.install(backup, { replace: true, runDir: dir });
+        } catch (error) {
+          await staged?.discard();
+          throw error;
+        }
+      });
     },
-    setSource(id, dir) {
-      update((current) => current.map((entry) => entry.package.id === id
-        ? { ...entry, dir }
-        : entry));
+    setRunDir(id, dir) {
+      update((current) => current.map((entry) => {
+        if (entry.package.id !== id) return entry;
+        // 目录重建成功了，"目录丢失"这个标记就该消失，否则卡片会一直说它坏了。
+        const clean = entry.broken?.kind === "missing-dir" ? withoutKey(entry, "broken") : entry;
+        return { ...clean, dir };
+      }));
+    },
+    setSourceDir(id, dir) {
+      update((current) => current.map((entry) => {
+        if (entry.package.id !== id) return entry;
+        const clean = withoutKey(entry, "sourceDir");
+        return dir ? { ...clean, sourceDir: dir } : clean;
+      }));
     },
     open(id) {
       update((current) => current.map((entry) =>
@@ -296,13 +429,20 @@ export function apply(ctx: Context): void {
 
   ctx.effect(() => {
     auditBroken();
-    void auditMissingDirs();
+    void (async () => {
+      // 先自愈再探测：刚补齐的目录不该被报成"丢失"。
+      await ensureRunCopies();
+      await auditMissingDirs();
+    })();
     const offState = account.subscribe((next, previous) => {
       if (next.currentUser?.id !== previous.currentUser?.id) {
         missingDirs.clear();
         store.setState(readCurrent(), true);
         auditBroken();
-        void auditMissingDirs();
+        void (async () => {
+          await ensureRunCopies();
+          await auditMissingDirs();
+        })();
       }
     });
     const offConfig = scope.subscribe(() => store.setState(readCurrent(), true));

@@ -145,6 +145,11 @@ export function createTauriHost(invoke: NativeInvoke = defaultInvoke): HostRunti
     async moveToolPath(from, to) {
       await invoke<null>("tool_move_path", { from, to });
     },
+    async dropToolStaging(path) {
+      // Rust 侧只接受 `installed/<账号>/<id>/versions/<名字>` 这个形状；
+      // 传别处会明确报错，不会静默删掉什么。
+      await invoke<null>("tool_drop_staging", { path });
+    },
     async ssoOpenLogin(loginUrl, attemptId) {
       try {
         await invoke("sso_open_login", { loginUrl, attemptId });

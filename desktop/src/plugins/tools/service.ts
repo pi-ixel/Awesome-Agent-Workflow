@@ -18,34 +18,57 @@ export interface InstallOutcome {
   readonly updated: boolean;
   /** 版本号是否真的变了。false 表示内容覆盖但版本号没动。 */
   readonly versionChanged: boolean;
-  /** 这次安装带上了来源目录（从项目目录装 / 或本来就是）。 */
+  /** 这一版生效的运行副本目录。 */
   readonly dir?: string;
+}
+
+export interface InstallOptions {
+  /** 允许覆盖已装的同一 id；默认 false（撞 id 当场报错）。 */
+  readonly replace?: boolean;
+  /**
+   * 这一版生效的运行副本目录（调用方已经写好的版本目录）。
+   *
+   * 省略表示沿用记录里原来的 `dir`——那里没有新目录可切，就不该动它。
+   * 这里不做任何校验：校验属于写盘那一步的责任，重复一遍只会给出两套口径。
+   */
+  readonly runDir?: string;
+  /**
+   * 开发来源目录。省略 = 保留原来的；`null` = 显式清掉（例如从 ZIP 更新，
+   * 原先那个项目目录已经不再对应这一版了）。
+   */
+  readonly sourceDir?: string | null;
 }
 
 export interface ToolsService {
   readonly state: ReadonlySnapshot<readonly PersonalTool[]>;
   /**
-   * `sourceDir` 是这次安装的来源项目目录（从 ZIP 导入时没有）。
+   * 写一条安装记录（提交步）。
    *
-   * 记它有两个用处：界面能回答"这个工具是哪个目录装的"，以及当目录里的
-   * 内容再被改过时提示"项目已改动，这一版还没装"。
+   * 它**不写磁盘**：文件由工坊的暂存流程写进版本目录再传进来（`runDir`）。
+   * 以前这一步同时负责解压落盘，于是"写盘失败"和"写配置失败"混成一条错误，
+   * 生效目录被写坏也照样报成安装失败。
    */
-  install(tool: ToolPackage, replace?: boolean, sourceDir?: string): InstallOutcome;
+  install(tool: ToolPackage, options?: InstallOptions): InstallOutcome;
   /**
-   * 退回上一版（覆盖安装前落盘的那一份）。
+   * 退回上一版。
    *
-   * 返回 undefined 表示没有可回退的副本——只有"装过至少两次"的工具才有。
-   * 回退本身也是一次安装，所以退回去之后还能再点一次退回来。
+   * 优先切回 `previousDir`（上一版的完整运行副本）；旧记录没有这个目录时，
+   * 用 `previous.json` 里的清单重新物化一份——只有确认能凑齐运行文件才会
+   * 动手，缺附件就明确拒绝，并保留当前版本。
+   *
+   * 返回 undefined 表示没有可回退的副本。回退本身也是一次安装，所以退回去
+   * 之后还能再点一次退回来。
    */
   rollback(id: string): Promise<InstallOutcome | undefined>;
+  /** 写回"生效的运行副本目录"，并把"目录丢失"的坏标记消掉。 */
+  setRunDir(id: string, dir: string): void;
   /**
-   * 只补记"来源目录"，不动版本与设置。
+   * 只记/只清"开发来源目录"，不动版本、不动运行副本。
    *
-   * 老工具是从配置里迁到项目目录的：迁移那一刻才知道目录在哪，而重装一次
-   * 会改掉更新时间、还会白白生成一份同版本的"上一版"备份，所以单独开一个
-   * 窄接口给它用。
+   * 迁移旧记录、把某个项目登记成来源时用它：这些场景都不该触发一次覆盖
+   * 安装（那会改更新时间，还会生成一份同版本的"上一版"备份）。
    */
-  setSource(id: string, dir: string): void;
+  setSourceDir(id: string, dir: string | undefined): void;
   open(id: string): void;
   remove(id: string): void;
   saveSettings(id: string, values: ToolSettings): void;

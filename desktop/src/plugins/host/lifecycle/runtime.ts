@@ -300,6 +300,12 @@ export class DesktopHost implements HostService {
       toolPurge: (input) => this.resources.run(() => backend.toolPurge(input)),
       moveToolPath: (from, to) =>
         this.resources.run(() => backend.moveToolPath(from, to)),
+      ...(backend.dropToolStaging
+        ? {
+            dropToolStaging: (path: string) =>
+              this.resources.run(() => backend.dropToolStaging!(path)),
+          }
+        : {}),
     };
     this.account = createAccountHost(backend, this.resources);
     this.process = {

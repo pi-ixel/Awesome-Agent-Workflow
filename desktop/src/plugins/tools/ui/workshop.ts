@@ -20,19 +20,27 @@ import type { HostService } from "../../host/service.ts";
 import type { ProjectService } from "../../project/service.ts";
 import { briefMessage, repairMessage, toolGuideSkill, toolGuideSkillFromDoc } from "../runtime/guide.ts";
 import {
-  checkToolProject, createToolProject, defaultInstalledToolsDir, listToolProjectSummaries,
-  migrateLegacyTools, prepareToolDir, readToolDirFiles, readToolProject, renameToolProject, runtimeFiles, syncToolProjectGuide,
+  checkToolProject, createToolProject, listToolProjectSummaries,
+  migrateLegacyTools, readToolDirFiles, renameToolProject, syncToolProjectGuide,
   syncToolProjectGuides, toolProjectFileNames,
-  toolProjectIdFromBrief, writeToolFiles,
+  toolProjectIdFromBrief,
   type LegacyMigration,
   type ToolProjectCheck,
   type ToolProjectIO,
   type ToolProjectSummary,
 } from "../runtime/project.ts";
+import {
+  installedToolRoot,
+  listVersionDirs,
+  materializeToolFiles,
+  missingEntryFiles,
+  serializeToolOp,
+  stageVersion,
+} from "../runtime/versions.ts";
 import { checkCompatibility, ToolPackageError } from "../runtime/package.ts";
 import { hostToolIO } from "../runtime/io.ts";
 import type { InstallOutcome, ToolsService } from "../service.ts";
-import type { ToolPackage } from "../types.ts";
+import type { PersonalTool, ToolPackage } from "../types.ts";
 
 /**
  * 迁移闸：工具目录 / 工具数据正在迁移时拒绝一切写操作。
@@ -125,11 +133,11 @@ export interface WorkshopService {
    * 安装一个从文件 / 压缩包读出来的工具。
    *
    * 为什么不能直接 `tools.install()`：带依赖的包（`node_modules`、图片、wasm）
-   * 没法只写进配置——那些必须落在工具目录里，运行时才 `require` 得到。所以路径是
-   * 「先把文件写进目录 → 再从目录读回清单 → 带着目录安装」。
+   * 没法只写进配置——那些必须落在磁盘上，运行时才 `require` 得到。所以路径是
+   * 「写一份完整版本副本 → 从磁盘回读校验 → 就位 → 再写安装记录」。
    */
   installArchive(tool: ToolPackage, files?: Readonly<Record<string, Uint8Array>>): Promise<InstallOutcome>;
-  /** 退回上一版（覆盖安装前落盘的副本）。 */
+  /** 退回上一版（覆盖安装前保留的那份完整副本）。 */
   rollback(id: string): Promise<WorkshopNote>;
   /** 改显示名 / 改目录名（= 改 id）。 */
   rename(dir: string, input: { readonly name?: string; readonly id?: string }): Promise<WorkshopNote>;
@@ -144,8 +152,11 @@ export interface WorkshopService {
    * 必须由工坊来做：落点要跟"项目列表"用同一个账号那层。放在面板里调时
    * 拿不到 owner，只能落到 `projects/anonymous/`——用户在「开发工具」里
    * 永远看不见这些项目，提示却让他去那里继续开发。
+   *
+   * 只登记**开发来源**，绝不改运行目录：以前这里顺手 `setSource(id, dir)`，
+   * 把安装记录的运行路径指到了刚生成的脚手架，带二进制的工具当场读不到附件。
    */
-  migrateLegacy(tools: readonly ToolPackage[]): Promise<LegacyMigration>;
+  migrateLegacy(tools: readonly PersonalTool[]): Promise<LegacyMigration>;
   /** 卸载清理：删目录与工具数据。返回给用户看的一句话。 */
   purge(id: string): Promise<WorkshopNote>;
   /**
@@ -560,6 +571,26 @@ export function createWorkshop(deps: {
     }
   }
 
+  /**
+   * 把开发目录里的文件全部读出来当安装内容。
+   *
+   * 为什么不用清单里的 `sourceFiles`：那只装文本。`node_modules`、图片、wasm、
+   * `bin/` 都只在磁盘上。读目录时任何一个文件读失败或超限都**中止**——装进去
+   * 一份"少了一半依赖"的副本，比装失败难查得多（打开不报错，点哪儿都空白）。
+   */
+  async function installFiles(dir: string, tool: ToolPackage): Promise<Record<string, Uint8Array>> {
+    // 宿主没有列目录 / 读二进制通道（浏览器预览）：退回清单能表达的那部分。
+    if (!io.listFiles || !io.readBinaryFile) return materializeToolFiles(tool);
+    const read = await readToolDirFiles(io, dir);
+    if (read.skipped.length) {
+      const names = read.skipped.slice(0, 3).join("、");
+      throw new Error(
+        `项目里有 ${read.skipped.length} 个文件读不出来或超过单包上限（${names}${read.skipped.length > 3 ? " 等" : ""}），这次没有安装。处理掉这些文件，或改用「导入工具 → ZIP 包」逐个确认。`,
+      );
+    }
+    return Object.keys(read.files).length ? { ...read.files } : materializeToolFiles(tool);
+  }
+
   async function install(): Promise<boolean> {
     const current = store.getState().project;
     if (!current) return false;
@@ -581,13 +612,28 @@ export function createWorkshop(deps: {
       patch({ note: { text: "还有必须修的问题，先让 AI 修完再安装。", error: true } });
       return false;
     }
+    const tool = result.tool;
     try {
-      // 带上来源目录：以后能回答"这个工具是哪个项目装的"，也能比对两边的差异。
-      const outcome = tools.install(result.tool, true, current.dir);
-      touchedAt.set(pathKey(current.dir), Date.now());
-      patch({ installed: true, drift: false, note: { text: describeInstall(outcome, result.tool.name) } });
-      void refreshProjects();
-      return true;
+      return await serializeToolOp(`tool:${owner ?? ""}:${tool.id}`, async () => {
+        const files = await installFiles(current.dir, tool);
+        // 装的是项目目录的一份**快照**：之后作者再改目录，已安装的工具不变。
+        const staged = await stageVersion(io, { owner, tool, files });
+        try {
+          const outcome = tools.install(staged.tool, {
+            replace: true,
+            runDir: staged.dir,
+            sourceDir: current.dir,
+          });
+          touchedAt.set(pathKey(current.dir), Date.now());
+          patch({ installed: true, drift: false, note: { text: describeInstall(outcome, staged.tool.name) } });
+          void refreshProjects();
+          return true;
+        } catch (error) {
+          // 配置没写成功：这一版没人引用，清掉，别在磁盘上留一份孤儿副本。
+          await staged.discard();
+          throw error;
+        }
+      });
     } catch (error) {
       patch({ note: { text: errorText(error), error: true } });
       return false;
@@ -596,46 +642,67 @@ export function createWorkshop(deps: {
 
   async function installArchive(tool: ToolPackage, files?: Readonly<Record<string, Uint8Array>>): Promise<InstallOutcome> {
     // 闸门提前到写盘之前。`tools.install()` 里那道契约校验只依赖清单的
-    // `requires`，不需要磁盘；等它拦下来时目录已经解压完了，installed/<账号>/<id>/
-    // 会留一个注册表里查不到的空壳——用户看不见、卸载清不到、白占空间。
-    // 把同一道判定挪到这里，不兼容的包从头到尾不碰磁盘。
+    // `requires`，不需要磁盘；等它拦下来时文件已经写完了。
     const incompatible = checkCompatibility(tool);
     if (incompatible.length) throw new ToolPackageError(incompatible);
-    // 只有清单与页面的包走原路径：不建目录、不碰磁盘，行为和以前一模一样。
-    if (!files || !Object.keys(files).length) return tools.install(tool, true);
-    // 解到 `installed/` 而不是 `projects/`：前者是我们的运行副本（卸载可删），
-    // 后者是用户自己的源码（永远不替用户删）。混在一起，两个方向都会做错。
-    const parent = await defaultInstalledToolsDir(io, deps.owner());
-    const dir = await prepareToolDir(io, { id: tool.id, parent });
-    await writeToolFiles(io, dir, files);
-    // 以磁盘上的那份为准重新读一次：清单可能与 ZIP 里的不一致（比如 AI 顺手改了 id），
-    // 与其装进去两份不一样的东西，不如当场让校验说话。
-    const read = await readToolProject(io, dir);
-    if (!read.ok) throw new Error(`文件已写入 ${dir}，但目录里的清单校验不通过：${read.violations[0]?.message ?? "原因未知"}`);
-    const outcome = tools.install(read.tool, true, dir);
-    void refreshProjects();
-    return outcome;
+    // 没有文件集（示例工具 / 只带清单的包）时按清单物化。装完必须有一份能跑
+    // 的副本：否则主窗打开要临时补文件，启动器小窗根本补不了。
+    const contents = files && Object.keys(files).length ? files : materializeToolFiles(tool);
+    const missing = missingEntryFiles(tool, Object.keys(contents));
+    if (missing.length) {
+      throw new Error(
+        `包里缺少运行入口 ${missing.join("、")}。这个包只带了清单，运行需要的文件不在里面——请用作者提供的完整 ZIP 重新导入。`,
+      );
+    }
+    const owner = deps.owner();
+    return serializeToolOp(`tool:${owner ?? ""}:${tool.id}`, async () => {
+      const staged = await stageVersion(io, { owner, tool, files: contents });
+      try {
+        // ZIP / 文件夹导入没有开发来源：显式清掉上一次的来源，免得管理页
+        // 指着一个已经不对应这一版的目录。
+        const outcome = tools.install(staged.tool, { replace: true, runDir: staged.dir, sourceDir: null });
+        void refreshProjects();
+        return outcome;
+      } catch (error) {
+        await staged.discard();
+        throw error;
+      }
+    });
   }
 
   /**
-   * 解析「打开」应该用的运行副本目录（接口注释见 WorkshopService）。
+   * 解析「打开」应该用的运行副本目录。
    *
-   * 物化用的是安装记录里的包（配置是唯一现成的事实来源），落点与 ZIP 导入
-   * 一致（`installed/<账号>/<id>`）。`prepareToolDir` 在目录里已有不同 id
-   * 的清单时会报错——那是真正的目录冲突，不能静默覆盖。
+   * 安装记录里的 `dir` 是唯一真源；它消失了（示例工具从没落盘过、目录被
+   * 移动或清理）才在这里重建一份。重建按清单物化，缺附件的明确拒绝——打开
+   * 一个空壳比报错更难解释。
    */
   async function resolveOpenDir(id: string): Promise<string | undefined> {
     const entry = tools.state.getState().find((item) => item.package.id === id);
     if (!entry) return undefined;
-    // 目录在、条目没被标坏：直接用，不动磁盘。 broken（目录丢失）的条目
+    // 目录在、条目没被标坏：直接用，不动磁盘。broken（目录丢失）的条目
     // 也走物化重建——这是自愈，不是报错。
     if (entry.dir && entry.broken === undefined && await io.pathExists(entry.dir)) return entry.dir;
-    const parent = await defaultInstalledToolsDir(io, deps.owner());
-    const dir = await prepareToolDir(io, { id: entry.package.id, parent });
-    await writeToolFiles(io, dir, runtimeFiles(entry.package));
-    // 写回安装记录：下次打开 pathExists 直接命中，auditMissingDirs 也据实判定。
-    tools.setSource(entry.package.id, dir);
-    return dir;
+    const owner = deps.owner();
+    return serializeToolOp(`tool:${owner ?? ""}:${id}`, async () => {
+      const latest = tools.state.getState().find((item) => item.package.id === id);
+      if (!latest) return undefined;
+      // 排队期间可能已经被另一次安装/自愈补好了。
+      if (latest.dir && await io.pathExists(latest.dir)) {
+        if (latest.broken !== undefined) tools.setRunDir(id, latest.dir);
+        return latest.dir;
+      }
+      const files = materializeToolFiles(latest.package);
+      const missing = missingEntryFiles(latest.package, Object.keys(files));
+      if (missing.length) {
+        throw new Error(
+          `这个工具的运行副本不在了，而安装记录只剩清单（缺 ${missing.join("、")}）。请用作者提供的完整 ZIP 重新导入，或到「开发工具」里重新安装。`,
+        );
+      }
+      const staged = await stageVersion(io, { owner, tool: latest.package, files });
+      tools.setRunDir(id, staged.dir);
+      return staged.dir;
+    });
   }
 
   return {
@@ -791,15 +858,34 @@ export function createWorkshop(deps: {
     refreshProjects,
 
     async migrateLegacy(list) {
+      /**
+       * 已有有效运行副本的工具**不迁**。
+       *
+       * 它本来就跑得起来，再造一份同名项目只会让"哪份是源码"变成歧义。
+       * 更要紧的是：旧版补齐曾经借这一步把安装记录的运行路径改指到刚生成
+       * 的脚手架，带二进制附件的工具当场读不到附件。
+       */
+      const pending: ToolPackage[] = [];
+      /** 传进来的记录里已经登记的来源：重复写配置只会让界面白重渲染一次。 */
+      const known = new Map<string, string | undefined>();
+      for (const entry of list) {
+        known.set(entry.package.id, entry.sourceDir);
+        // 读不到就当它不在：迁移最坏的结果是多造一个项目，删掉即可；
+        // 反过来把活着的工具又迁一遍，会让"哪份是源码"变成歧义。
+        const alive = entry.dir ? await io.pathExists(entry.dir).catch(() => false) : false;
+        if (!alive) pending.push(entry.package);
+      }
+      if (!pending.length) return { created: [], skipped: [] };
       // 迁移落点跟新建同一口径：自定义根目录优先，不套账号段。
-      const result = await migrateLegacyTools(io, list, {
+      const result = await migrateLegacyTools(io, pending, {
         owner: deps.owner(),
         ...(customRoot ? { parent: customRoot } : {}),
       });
-      // 迁移出来的目录就是这些工具现在的源码位置：记下来，卡片才能判断"项目改了没重装"。
+      // 迁出来的目录只登记成**开发来源**，运行仍用安装记录里的副本。
       for (const dir of result.created) {
         const id = dir.split(/[\\/]/).filter(Boolean).pop();
-        if (id) tools.setSource(id, dir);
+        if (!id || !known.has(id) || known.get(id) === dir) continue;
+        tools.setSourceDir(id, dir);
       }
       return result;
     },
@@ -819,15 +905,20 @@ export function createWorkshop(deps: {
        * 运行副本也一起清：ZIP 装进来的工具可能带着 `node_modules`（几十到几百 MB），
        * 只删注册表等于把它们永久留在磁盘上。
        *
+       * 每个版本是 `installed/<账号>/<id>/versions/<版本>` 下的独立目录，要逐个
+       * 交给宿主：宿主只删"清单 id 对得上"的目录，而 `<id>` 根目录里现在没有
+       * manifest.json，整条传过去会被跳过（等于什么都没删）。
+       *
        * 只认两种来源，别的路径一概不传给宿主：
        * - `projects/<账号>/<id>`：用户自己建的项目（在这里出现的才说明它就是这个工具）；
-       * - `installed/<账号>/<id>`：我们自己解压出来的副本，路径可推算。
-       * 用户选了别处的目录当运行目录（`setSource`）时，那条路径不会出现在这里，
+       * - `installed/<账号>/<id>/versions/*` 与旧布局的 `installed/<账号>/<id>`。
+       * 用户把别处的目录设成来源（`sourceDir`）时，那条路径不会出现在这里，
        * 所以永远不会被误删。
        */
-      const dirs = [...projectDirs];
-      const installedDir = joinPath(await defaultInstalledToolsDir(io, owner), id);
-      if (await io.pathExists(installedDir)) dirs.push(installedDir);
+      const root = await installedToolRoot(io, owner, id);
+      const dirs = [...projectDirs, ...await listVersionDirs(io, owner, id)];
+      // 旧布局：`installed/<账号>/<id>` 本身就是运行副本，根目录里有清单。
+      if (await io.pathExists(joinPath(root, toolProjectFileNames.manifest))) dirs.push(root);
       try {
         const report = await host.skills.toolPurge({ toolId: id, owner, projectDirs: dirs });
         const parts: string[] = [];

@@ -15,6 +15,9 @@ export function hostToolIO(host: HostService): ToolProjectIO {
     readTextFile: (path) => host.archives.readTextFile(path),
     writeTextFile: (path, contents) => host.skills.writeTextFile(path, contents),
     movePath: (from, to) => host.skills.moveToolPath(from, to),
+    ...(host.skills.dropToolStaging
+      ? { dropStaging: (path) => host.skills.dropToolStaging!(path) }
+      : {}),
     ...(host.skills.writeBinaryFile
       ? { writeBinaryFile: (path, base64) => host.skills.writeBinaryFile!(path, base64) }
       : {}),
@@ -75,6 +78,15 @@ export function memoryToolIO(seed: Readonly<Record<string, string>> = {}): ToolP
         if (dir !== from && !dir.startsWith(`${from}/`)) continue;
         dirs.delete(dir);
         dirs.add(`${to}${dir.slice(from.length)}`);
+      }
+      return Promise.resolve();
+    },
+    dropStaging: (path) => {
+      for (const key of [...files.keys()]) {
+        if (key === path || key.startsWith(`${path}/`)) files.delete(key);
+      }
+      for (const dir of [...dirs]) {
+        if (dir === path || dir.startsWith(`${path}/`)) dirs.delete(dir);
       }
       return Promise.resolve();
     },

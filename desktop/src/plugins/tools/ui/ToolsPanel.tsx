@@ -132,7 +132,7 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
     migrated.current = true;
     void (async () => {
       try {
-        const result = await workshop.migrateLegacy(tools.map((entry) => entry.package));
+        const result = await workshop.migrateLegacy(tools);
         if (result.created.length) {
           setFeedback({ text: `已把 ${result.created.length} 个旧工具迁成项目目录，可以在「开发工具」里继续开发。` });
           void workshop.refreshProjects();
@@ -181,21 +181,39 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
     } finally { setBusy(false); }
   }
 
-  function installPackage(tool: ToolPackage) {
-    setFeedback({ text: describeInstall(service.install(tool, true), tool.name) });
+  /**
+   * 示例工具 / 预览安装都走和导入 ZIP 完全一样的安装链路。
+   *
+   * 以前这里直接 `service.install()`：只写配置、不落盘，装完的工具没有运行
+   * 副本，打开时才临时补——补不了的时候（启动器小窗直接打开）就只能报路径。
+   * 现在一律先物化一份完整副本再写记录。
+   */
+  async function installPackage(tool: ToolPackage) {
+    setFeedback(undefined);
+    try {
+      setFeedback({ text: describeInstall(await workshop.installArchive(tool), tool.name) });
+    } catch (error) {
+      setFeedback({ text: errorText(error), error: true });
+    }
   }
 
-  /** 示例工具走和导入 ZIP 完全一样的 install 路径，不搞特殊数据通道。 */
-  function installExamples() {
-    try {
-      const names = exampleTools.map((tool) => {
-        service.install(tool, true);
-        return tool.name;
-      });
-      setFeedback({ text: `已载入 ${names.length} 个示例工具：${names.join("、")}。在「已安装」里可以打开、改设置或卸载；卸载完空状态里还能再载入一次。` });
-    } catch (error) {
-      setFeedback({ text: `载入示例失败：${errorText(error)}`, error: true });
+  async function installExamples() {
+    const names: string[] = [];
+    const failures: string[] = [];
+    for (const tool of exampleTools) {
+      try {
+        await workshop.installArchive(tool);
+        names.push(tool.name);
+      } catch (error) {
+        failures.push(`${tool.name}：${errorText(error)}`);
+      }
     }
+    const loaded = names.length
+      ? `已载入 ${names.length} 个示例工具：${names.join("、")}。在「已安装」里可以打开、改设置或卸载；卸载完空状态里还能再载入一次。`
+      : "";
+    setFeedback(failures.length
+      ? { text: [loaded, `载入示例失败：${failures.join("；")}`].filter(Boolean).join("\n"), error: true }
+      : { text: loaded });
   }
 
   /**
@@ -350,9 +368,22 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
     cardMenu.open(tool.id, `${tool.name} 操作`, entries, { x: rect.right, y: rect.bottom + 4, side: "bottom", align: "end" });
   }
 
+  /**
+   * 退版：一次只发一条。
+   *
+   * 退版要读上一版的清单、可能还要重建副本，比"点一下"慢得多；连点两次会
+   * 排两条队列，第二条拿到的已经是刚换下来的那一版——用户看到版本号来回跳。
+   */
   async function rollbackTool(id: string) {
-    const note = await workshop.rollback(id);
-    setFeedback({ text: note.text, ...(note.error ? { error: true as const } : {}) });
+    if (busy) return;
+    setBusy(true);
+    setFeedback(undefined);
+    try {
+      const note = await workshop.rollback(id);
+      setFeedback({ text: note.text, ...(note.error ? { error: true as const } : {}) });
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function confirmRemove(id: string, files: boolean) {
@@ -387,7 +418,7 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
     return <ToolPreview
       tool={active.tool}
       onBack={() => setView({ kind: active.from })}
-      onInstall={() => { run(() => installPackage(active.tool)); setView({ kind: "library" }); }}
+      onInstall={() => { void installPackage(active.tool); setView({ kind: "library" }); }}
       installLabel="安装到工具中心"
     />;
   }
@@ -433,7 +464,7 @@ export function ToolsPanel({ service, host, project, workshop, visible: panelVis
             <EmptyLibrary
               onCreate={() => setView({ kind: "projects" })}
               onImport={openImportMenu}
-              onExamples={installExamples}
+              onExamples={() => void installExamples()}
             />
           )}
           {tools.length > 0 && <label className="tools-search"><span aria-hidden="true">⌕</span><input className={composerFieldClass} aria-label="搜索已安装工具" placeholder="搜索你的工具…" value={search} onChange={(event) => setSearch(event.target.value)} /><span>{tools.length}</span></label>}
