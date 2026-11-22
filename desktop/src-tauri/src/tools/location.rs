@@ -260,7 +260,11 @@ fn canonical(path: &Path) -> Option<PathBuf> {
 }
 
 /// 迁移目标的公共校验：绝对路径、已存在、与任何已知根互不嵌套。
-fn validate_target(input: &str, forbidden: &[PathBuf], label: &str) -> Result<PathBuf, String> {
+/// `forbidden` 每项带名字：第一道检查里同名的是“当前根”（撞上=没变化），
+/// 异名的是别的受保护根（撞上=撞车，必须各自报各自的文案——
+/// Z-22 用户实测：给工具数据选了工具目录刚迁去的文件夹，被误报成
+/// 「没有变化，无需迁移」，用户完全看不懂）。
+fn validate_target(input: &str, forbidden: &[(PathBuf, &str)], label: &str) -> Result<PathBuf, String> {
     let target = PathBuf::from(input.trim());
     if !target.is_absolute() {
         return Err("请输入绝对目录路径。".into());
@@ -271,16 +275,21 @@ fn validate_target(input: &str, forbidden: &[PathBuf], label: &str) -> Result<Pa
     let Some(canon) = canonical(&target) else {
         return Err("无法访问所选目录。".into());
     };
-    for root in forbidden {
+    for (root, name) in forbidden {
         if let Some(root) = canonical(root) {
             if canon == root {
-                return Err(format!("{label}没有变化，无需迁移。"));
+                if *name == label {
+                    return Err(format!("{label}没有变化，无需迁移。"));
+                }
+                return Err(format!(
+                    "所选文件夹与「{name}」是同一个位置，两者不能混在一起：请为{label}换一个单独的文件夹。"
+                ));
             }
             if canon.starts_with(&root) {
-                return Err(format!("所选目录位于当前 {label}内部，请选择它以外的文件夹。"));
+                return Err(format!("所选文件夹位于「{name}」内部，请换一个它以外的文件夹。"));
             }
             if root.starts_with(&canon) {
-                return Err("当前目录位于所选目录内部，这样迁移会互相嵌套。".into());
+                return Err(format!("「{name}」位于所选文件夹内部，这样迁移会互相嵌套。"));
             }
         }
     }
@@ -597,9 +606,9 @@ pub async fn tools_location_schedule(
     }
     let fallback = data_root.join("tools");
     let forbidden = [
-        tool_root(&data_root),
-        tool_data_root(&data_root),
-        data_root.clone(),
+        (tool_root(&data_root), "工具目录"),
+        (tool_data_root(&data_root), "工具数据目录"),
+        (data_root.clone(), "数据根"),
     ];
     let target = match target.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
         Some(input) => validate_target(input, &forbidden, "工具目录")?,
@@ -658,9 +667,9 @@ pub async fn tools_data_location_schedule(
     }
     let fallback = data_root.join("tools").join("storage");
     let forbidden = [
-        tool_data_root(&data_root),
-        tool_root(&data_root),
-        data_root.clone(),
+        (tool_data_root(&data_root), "工具数据目录"),
+        (tool_root(&data_root), "工具目录"),
+        (data_root.clone(), "数据根"),
     ];
     let target = match target.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
         Some(input) => validate_target(input, &forbidden, "工具数据目录")?,
@@ -781,9 +790,26 @@ mod tests {
         let root = temp_root("validate");
         let inner = root.join("inside");
         fs::create_dir_all(&inner).unwrap();
-        assert!(validate_target("relative/path", &[root.clone()], "工具目录").is_err());
-        assert!(validate_target(&root.join("missing").to_string_lossy(), &[root.clone()], "工具目录").is_err());
-        assert!(validate_target(&inner.to_string_lossy(), &[root.clone()], "工具目录").is_err());
-        assert!(validate_target(&root.to_string_lossy(), &[root.clone()], "工具目录").is_err());
+        let forbidden = [(root.clone(), "工具目录")];
+        assert!(validate_target("relative/path", &forbidden, "工具目录").is_err());
+        assert!(validate_target(&root.join("missing").to_string_lossy(), &forbidden, "工具目录").is_err());
+        assert!(validate_target(&inner.to_string_lossy(), &forbidden, "工具目录").is_err());
+        assert!(validate_target(&root.to_string_lossy(), &forbidden, "工具目录").is_err());
+    }
+
+    /// 给 A 迁移选了 B 正在用的文件夹：报「撞车」而不是「没有变化」。
+    #[test]
+    fn validate_target_distinguishes_collision_from_no_change() {
+        let mine = temp_root("collision-mine");
+        let other = temp_root("collision-other");
+        let same_as_other = format!("{}", other.display());
+        // 与别的受保护根相同 → 撞车文案，不含「没有变化」
+        let error = validate_target(&same_as_other, &[(mine.clone(), "工具数据目录"), (other.clone(), "工具目录")], "工具数据目录")
+            .unwrap_err();
+        assert!(error.contains("工具目录") && !error.contains("没有变化"), "{error}");
+        // 与当前根相同 → 才是「没有变化」
+        let error = validate_target(&mine.display().to_string(), &[(mine, "工具数据目录"), (other, "工具目录")], "工具数据目录")
+            .unwrap_err();
+        assert!(error.contains("没有变化"), "{error}");
     }
 }
