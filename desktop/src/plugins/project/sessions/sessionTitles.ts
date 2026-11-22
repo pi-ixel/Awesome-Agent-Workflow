@@ -1,11 +1,18 @@
 import { sameSessionAgent } from "./sessionDeletion.ts";
 import { managedProjectStorage } from "../lifecycle/persistence.ts";
+import { isBrowserContextTitle } from "../../../shared/browser/promptContext.ts";
 
 const KEY_PREFIX = "aaw-desktop/session-title/";
 const SCOPED_PREFIX = "aaw-desktop/session-title.v2/";
 let persisted: Record<string, string | null> | undefined;
 let pending: Promise<unknown> = Promise.resolve();
 let loadFailure: string | undefined;
+
+/** 浏览器探测和页面上下文会附到请求里，Agent 有时会把它复述为标题。 */
+export function agentSessionTitle(title?: string | null): string | undefined {
+  const trimmed = title?.trim();
+  return trimmed && !isBrowserContextTitle(trimmed) ? trimmed : undefined;
+}
 
 export function isSessionTitleKey(key: string): boolean {
   return key.startsWith(KEY_PREFIX) || key.startsWith(SCOPED_PREFIX);

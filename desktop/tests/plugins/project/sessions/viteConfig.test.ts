@@ -46,12 +46,32 @@ describe("TD-014 Vite 开发刷新治理", () => {
     expect(pluginNames(web)).not.toContain("aaw-disable-dev-client");
   });
 
+  it("浏览器测试与配置用例使用独立的依赖缓存", async () => {
+    const cacheLocations = [];
+    for (const instance of ["", "playwright", "config-test"]) {
+      vi.stubEnv("AAW_VITE_TEST_CACHE", instance);
+      vi.resetModules();
+      cacheLocations.push(
+        (await import("../../../../vite.config.ts")).default.cacheDir,
+      );
+    }
+    expect(cacheLocations).toEqual([
+      undefined,
+      "node_modules/.cache/aaw-vite-playwright",
+      "node_modules/.cache/aaw-vite-config-test",
+    ]);
+  });
+
   it("TD-014-B01 客户端保留模块能力但不再自动刷新", async () => {
     const port = 14622;
     const child = spawn(
       process.execPath,
       ["node_modules/vite/bin/vite.js", "--port", String(port), "--strictPort"],
-      { cwd: process.cwd(), stdio: "ignore" },
+      {
+        cwd: process.cwd(),
+        stdio: "ignore",
+        env: { ...process.env, AAW_VITE_TEST_CACHE: "config-test" },
+      },
     );
     try {
       await waitForVite(port);

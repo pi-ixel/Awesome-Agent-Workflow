@@ -15,6 +15,9 @@ pub enum Action {
     Delete {
         items: Vec<Selection>,
     },
+    DeletePermanent {
+        item: Selection,
+    },
     Restore {
         ids: Vec<String>,
     },
@@ -28,13 +31,145 @@ pub enum Action {
         names: Vec<String>,
     },
 }
+#[derive(Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum Toggle {
+    Enable {
+        id: String,
+    },
+    Disable {
+        source: PathBuf,
+        path: PathBuf,
+        real_path: PathBuf,
+        name: String,
+        revision: String,
+    },
+}
+
+#[derive(Serialize)]
+pub struct ToggleResult {
+    message: String,
+    entry: Option<Entry>,
+    stopped: Option<TrashItem>,
+}
+
+pub(super) fn toggle(loc: &Locations, query: &Query, action: Toggle) -> Result<ToggleResult> {
+    let catalog = catalog::discover_sources(loc, query)?;
+    match action {
+        Toggle::Enable { id } => {
+            let (_, record) = checked_record(loc, query.provider, &id)?;
+            let text = restore_or_purge(loc, query.provider, &catalog.sources, &id, false)?;
+            let entry = if text == "已恢复" {
+                let mut row = if record.kind == Kind::Inline {
+                    profiles::inline_entry(
+                        &record.original,
+                        record
+                            .inline
+                            .as_ref()
+                            .ok_or_else(|| error("缺少配置备份"))?,
+                    )?
+                } else {
+                    let source = catalog
+                        .sources
+                        .iter()
+                        .find(|source| source.path == record.source)
+                        .ok_or_else(|| error("技能来源已变化"))?;
+                    catalog::file_entry(source, &record.original)?
+                };
+                if query.provider == Provider::CodeAgent {
+                    let _ = catalog::usage(
+                        &loc.home.join(".cac/skill-usage.jsonl"),
+                        std::slice::from_mut(&mut row),
+                    );
+                }
+                Some(row)
+            } else {
+                None
+            };
+            Ok(ToggleResult {
+                message: format!("{} · {text}", record.name),
+                entry,
+                stopped: None,
+            })
+        }
+        Toggle::Disable {
+            source,
+            path,
+            real_path,
+            name,
+            revision,
+        } => {
+            let root = catalog
+                .sources
+                .iter()
+                .find(|entry| entry.path == source)
+                .ok_or_else(|| error("技能来源已变化，请刷新列表"))?;
+            let entry = if root.kind == Kind::Inline {
+                catalog
+                    .entries
+                    .iter()
+                    .find(|entry| {
+                        entry.path == path && entry.name == name && entry.revision == revision
+                    })
+                    .ok_or_else(|| error("条目已变化，请刷新"))?
+                    .clone()
+            } else {
+                let selected = files::Selection {
+                    source,
+                    path,
+                    real_path,
+                    disabled_id: None,
+                };
+                files::skill_root(&catalog.sources, query.provider, &selected)?;
+                let entry = catalog::file_entry(root, &selected.path)?;
+                if entry.name != name || entry.revision != revision {
+                    return Err(error("条目已变化，请刷新"));
+                }
+                entry
+            };
+            let id = remove(loc, query, &entry, &catalog.sources)?;
+            let stopped = TrashItem {
+                id,
+                name: entry.name,
+                description: entry.description,
+                path: entry.path,
+                kind: entry.kind,
+                source: entry.source,
+                project: root.project.clone(),
+                preview: if entry.kind == Kind::Inline {
+                    entry.preview
+                } else {
+                    String::new()
+                },
+                is_link: entry.is_link,
+                unavailable: None,
+            };
+            Ok(ToggleResult {
+                message: format!("{} · 已停用", stopped.name),
+                entry: None,
+                stopped: Some(stopped),
+            })
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct TrashItem {
     pub(super) id: String,
     name: String,
     pub(super) description: String,
     path: PathBuf,
     kind: Kind,
+    source: PathBuf,
+    project: Option<PathBuf>,
+    preview: String,
+    is_link: bool,
+    unavailable: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 struct Record {
@@ -49,6 +184,8 @@ struct Record {
     profile_target: Option<PathBuf>,
     #[serde(default)]
     position: usize,
+    #[serde(default)]
+    project: Option<PathBuf>,
 }
 
 fn staged(record: &Record, id: &str) -> PathBuf {
@@ -72,6 +209,7 @@ fn legacy_description(record: &Record, payload: &Path) -> Option<String> {
 pub(super) fn trash_items(
     loc: &Locations,
     provider: Provider,
+    sources: &[Source],
     warnings: &mut Vec<String>,
 ) -> Result<Vec<TrashItem>> {
     let mut items = vec![];
@@ -106,15 +244,31 @@ pub(super) fn trash_items(
         items.push(TrashItem {
             id: id.into(),
             description,
+            preview: record
+                .inline
+                .as_ref()
+                .and_then(|value| serde_yaml::to_string(value).ok())
+                .unwrap_or_default(),
+            is_link: files::is_link_metadata(&payload),
+            unavailable: validate_record(&record, sources)
+                .err()
+                .map(|e| e.to_string()),
+            project: record.project.or_else(|| {
+                sources
+                    .iter()
+                    .find(|s| s.path == record.source)
+                    .and_then(|s| s.project.clone())
+            }),
             name: record.name,
             path: record.original,
             kind: record.kind,
+            source: record.source,
         });
     }
     Ok(items)
 }
 fn load(folder: &Path) -> Result<Record> {
-    if !fs::symlink_metadata(folder)?.is_dir() {
+    if !fs::symlink_metadata(folder)?.is_dir() || files::is_link_metadata(folder) {
         return Err(error("回收记录不是目录"));
     }
     serde_json::from_slice(&fs::read(folder.join("record.json"))?).map_err(error)
@@ -138,9 +292,27 @@ pub(super) fn apply(loc: &Locations, query: &Query, action: Action) -> Result<Ve
                             && e.revision == selection.revision
                     })
                     .ok_or_else(|| error("条目已变化，请刷新"))
-                    .and_then(|entry| remove(loc, query, entry));
+                    .and_then(|entry| remove(loc, query, entry, &catalog.sources))
+                    .map(|_| "已停用".into());
                 report(&mut reports, &selection.name, result);
             }
+        }
+        Action::DeletePermanent { item } => {
+            let result = catalog
+                .entries
+                .iter()
+                .find(|entry| {
+                    entry.path == item.path
+                        && entry.name == item.name
+                        && entry.revision == item.revision
+                })
+                .ok_or_else(|| error("条目已变化，请刷新"))
+                .and_then(|entry| {
+                    let id = remove(loc, query, entry, &catalog.sources)?;
+                    restore_or_purge(loc, query.provider, &catalog.sources, &id, true)
+                        .map_err(|e| error(format!("已停用，删除未完成，请在已停用列表重试 · {e}")))
+                });
+            report(&mut reports, &item.name, result);
         }
         Action::Import {
             from,
@@ -212,7 +384,7 @@ pub(super) fn apply(loc: &Locations, query: &Query, action: Action) -> Result<Ve
     Ok(reports)
 }
 
-fn remove(loc: &Locations, query: &Query, entry: &Entry) -> Result<String> {
+fn remove(loc: &Locations, query: &Query, entry: &Entry, sources: &[Source]) -> Result<String> {
     if entry.kind != Kind::Inline {
         let root = Source {
             path: entry.source.clone(),
@@ -235,7 +407,7 @@ fn remove(loc: &Locations, query: &Query, entry: &Entry) -> Result<String> {
     let folder = loc.trash.join(&id);
     fs::create_dir_all(&loc.trash)?;
     if loc.trash.canonicalize()?.starts_with(&entry.real_path) {
-        return Err(error("技能目录包含回收站"));
+        return Err(error("技能目录包含停用数据目录"));
     }
     fs::create_dir(&folder)?;
     let mut record = Record {
@@ -249,6 +421,10 @@ fn remove(loc: &Locations, query: &Query, entry: &Entry) -> Result<String> {
         inline: None,
         profile_target: (entry.kind == Kind::Inline).then(|| entry.real_path.clone()),
         position: 0,
+        project: sources
+            .iter()
+            .find(|source| source.path == entry.source)
+            .and_then(|source| source.project.clone()),
     };
     let save = |r: &Record| {
         crate::storage_preferences::write_record(&folder.join("record.json"), r).map_err(error)
@@ -288,21 +464,9 @@ fn remove(loc: &Locations, query: &Query, entry: &Entry) -> Result<String> {
             Err(e) => return Err(e),
         }
     }
-    Ok("已移入回收站".into())
+    Ok(id)
 }
-fn restore_or_purge(
-    loc: &Locations,
-    provider: Provider,
-    sources: &[Source],
-    id: &str,
-    purge: bool,
-) -> Result<String> {
-    Uuid::parse_str(id).map_err(error)?;
-    let folder = loc.trash.join(id);
-    let record = load(&folder)?;
-    if record.provider != provider {
-        return Err(error("回收站来源不匹配"));
-    }
+fn validate_record(record: &Record, sources: &[Source]) -> Result<()> {
     let original = &record.original;
     let matches_source = sources
         .iter()
@@ -319,7 +483,9 @@ fn restore_or_purge(
         || (record.kind == Kind::Inline && depth != 0)
         || (record.kind == Kind::Package && depth != 1)
     {
-        return Err(error("请切换到原配置或添加原项目，重新核对回收条目的来源"));
+        return Err(error(
+            "请切换到原配置或添加原项目，重新核对已停用技能的来源",
+        ));
     }
     if !original.is_absolute()
         || original
@@ -330,10 +496,55 @@ fn restore_or_purge(
     {
         return Err(error("原目录已移动或不可访问"));
     }
+    Ok(())
+}
+
+fn checked_record(loc: &Locations, provider: Provider, id: &str) -> Result<(PathBuf, Record)> {
+    Uuid::parse_str(id).map_err(error)?;
+    let folder = loc.trash.join(id);
+    let record = load(&folder)?;
+    if record.provider != provider {
+        return Err(error("已停用技能来源不匹配"));
+    }
+    Ok((folder, record))
+}
+
+pub(super) fn disabled_root(loc: &Locations, query: &Query, id: &str) -> Result<PathBuf> {
+    let (folder, record) = checked_record(loc, query.provider, id)?;
+    if record.kind == Kind::Inline {
+        return Err(error("配置定义没有技能目录"));
+    }
+    let saved = folder.join("payload");
+    let root = if present(&saved)? {
+        saved
+    } else {
+        validate_record(&record, &catalog::discover_sources(loc, query)?.sources)?;
+        staged(&record, id)
+    };
+    if !fs::symlink_metadata(&root)?.is_dir() || files::is_link_metadata(&root) {
+        return Err(error("停用的链接技能可在重新启用后查看文件"));
+    }
+    Ok(root.canonicalize()?)
+}
+
+fn restore_or_purge(
+    loc: &Locations,
+    provider: Provider,
+    sources: &[Source],
+    id: &str,
+    purge: bool,
+) -> Result<String> {
+    let (folder, record) = checked_record(loc, provider, id)?;
+    validate_record(&record, sources)?;
+    let original = &record.original;
     let stage = staged(&record, id);
     if purge {
         if present(&stage)? {
             remove_tree(&stage)?;
+        }
+        let payload = folder.join("payload");
+        if present(&payload)? {
+            remove_tree(&payload)?;
         }
         fs::remove_dir_all(&folder)?;
         return Ok("已永久删除".into());

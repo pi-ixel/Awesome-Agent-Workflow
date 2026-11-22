@@ -1,4 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { TextLink } from "../../../shared/ui/TextLink.tsx";
+import { observeAppearance } from "../../../shared/ui/observeAppearance.ts";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
 import { MetricStrip } from "../../../shared/ui/MetricStrip.tsx";
@@ -18,16 +21,12 @@ import {
 import { UsageHeatmap } from "./UsageHeatmap.tsx";
 
 const number = new Intl.NumberFormat("zh-CN");
-const colors = [
-  "#0b7fff",
-  "#21a88a",
-  "#9671e0",
-  "#d88637",
-  "#d45081",
-  "#6a92a8",
-];
+const seriesTokens = [
+  "--color-usage-series-1", "--color-usage-series-2", "--color-usage-series-3",
+  "--color-usage-series-4", "--color-usage-series-5", "--color-usage-series-6",
+] as const;
 type Day = { day: string; tokens: bigint };
-type TrendSeries = { name: string; color: string; values: number[] };
+type TrendSeries = { name: string; colorToken: string; values: number[] };
 const chartDate = new Intl.DateTimeFormat("zh-CN", {
   month: "numeric",
   day: "numeric",
@@ -56,7 +55,7 @@ function Trend({ days, series }: { days: Day[]; series: TrendSeries[] }) {
       const y = (value: number) => bottom - (value / peak) * (bottom - top);
       const theme = getComputedStyle(canvas);
       ctx.strokeStyle =
-        theme.getPropertyValue("--color-line").trim() || "#e3e3e3";
+        theme.getPropertyValue("--color-line").trim();
       ctx.setLineDash([3, 3]);
       for (let line = 0; line <= 4; line++) {
         const row = top + ((bottom - top) * line) / 4;
@@ -66,7 +65,7 @@ function Trend({ days, series }: { days: Day[]; series: TrendSeries[] }) {
         ctx.stroke();
       }
       ctx.setLineDash([]);
-      for (const { color, values } of series) {
+      for (const { colorToken, values } of series) {
         // Monotone cubic interpolation preserves local maxima and keeps zero flat.
         const slopes = values.slice(1).map((value, i) => value - values[i]!);
         const slope = (i: number) => {
@@ -75,7 +74,7 @@ function Trend({ days, series }: { days: Day[]; series: TrendSeries[] }) {
           if (a === undefined || b === undefined) return a ?? b ?? 0;
           return a * b > 0 ? (2 * a * b) / (a + b) : 0;
         };
-        ctx.strokeStyle = color;
+        ctx.strokeStyle = theme.getPropertyValue(colorToken).trim();
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(x(0), y(values[0] ?? 0));
@@ -91,10 +90,10 @@ function Trend({ days, series }: { days: Day[]; series: TrendSeries[] }) {
         }
         ctx.stroke();
       }
-      ctx.font = "13px " + theme.fontFamily;
+      ctx.font = theme.fontSize + " " + theme.fontFamily;
       ctx.textAlign = "center";
       ctx.fillStyle =
-        theme.getPropertyValue("--color-ink-mute").trim() || "#777";
+        theme.getPropertyValue("--color-ink-mute").trim();
       const ticks = Math.min(days.length, Math.max(2, Math.floor(width / 62)));
       for (let i = 0; i < ticks; i++) {
         const index = Math.round(
@@ -110,19 +109,21 @@ function Trend({ days, series }: { days: Day[]; series: TrendSeries[] }) {
     draw();
     const observer = new ResizeObserver(draw);
     observer.observe(canvas);
-    const themeObserver = new MutationObserver(draw);
-    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
-    return () => { observer.disconnect(); themeObserver.disconnect(); };
+    const unwatchAppearance = observeAppearance(canvas.ownerDocument.documentElement, draw);
+    return () => {
+      observer.disconnect();
+      unwatchAppearance();
+    };
   }, [days, series]);
   return (
     <>
       <ul className="mb-2 flex flex-wrap gap-x-4 gap-y-1 px-3 text-ui-caption text-ink-mute">
-        {series.map(({ name, color }, index) => (
+        {series.map(({ name, colorToken }, index) => (
           <li key={index} className="flex items-center gap-2">
             <span
               aria-hidden="true"
               className="size-2.5 rounded-sm"
-              style={{ backgroundColor: color }}
+              style={{ backgroundColor: `var(${colorToken})` }}
             />
             {name}
           </li>
@@ -130,7 +131,7 @@ function Trend({ days, series }: { days: Day[]; series: TrendSeries[] }) {
       </ul>
       <canvas
         ref={ref}
-        className="h-60 w-full"
+        className="h-60 w-full text-ui-caption"
         role="img"
         aria-label={days
           .map(({ day, tokens }) => `${day}：${number.format(tokens)} Token`)
@@ -156,12 +157,20 @@ export function UsageAgentFilter({
       value={agent}
       options={[{ value: "", label: "全部 Agent" }, ...agents.map(({ id, displayName }) => ({ value: id, label: displayName }))]}
       onChange={(value) => filter.setState({ agent: value })}
-      className="py-1.5 text-sm"
+      className="py-1.5 text-ui-base"
     />
   );
 }
 
-export function UsageSettings({ filter }: { filter: AgentFilter }) {
+const usageRefreshMs = 60_000;
+
+export function UsageSettings({
+  filter,
+  active = true,
+}: {
+  readonly filter: AgentFilter;
+  readonly active?: boolean;
+}) {
   const agent = useStore(filter, (state) => state.agent);
   const [range, setRange] = useState(7);
   const [displayRange, setDisplayRange] = useState(7);
@@ -173,33 +182,61 @@ export function UsageSettings({ filter }: { filter: AgentFilter }) {
   const [failure, setFailure] = useState<{ agent: string; message: string }>();
   const snapshot = response?.agent === agent ? response.snapshot : undefined;
   const queryError = failure?.agent === agent ? failure.message : "";
-  const { revision, error } = useStore(usageState);
+  const { revision, error } = useStore(
+    usageState,
+    useShallow((state) => ({
+      revision: active ? state.revision : 0,
+      error: state.error,
+    })),
+  );
+  const lastRead = useRef<{
+    agent: string;
+    range: number;
+    revision: typeof revision;
+    refresh: number;
+    at: number;
+  }>(undefined);
   useEffect(() => {
-    let active = true;
+    if (!active) return;
+    const previous = lastRead.current;
+    if (
+      previous?.agent === agent &&
+      previous.range === range &&
+      previous.revision === revision &&
+      previous.refresh === refresh &&
+      Date.now() - previous.at < usageRefreshMs
+    )
+      return;
+    let current = true;
     void queryUsage("", agent, range).then(
       (next) => {
-        if (!active) return;
+        if (!current) return;
+        lastRead.current = { agent, range, revision, refresh, at: Date.now() };
         setResponse({ agent, snapshot: next });
         setDisplayRange(range);
         setFailure(undefined);
       },
       (reason: unknown) => {
-        if (!active) return;
+        if (!current) return;
         setFailure({ agent, message: String(reason) });
       },
     );
     return () => {
-      active = false;
+      current = false;
     };
-  }, [agent, range, refresh, revision]);
+  }, [active, agent, range, refresh, revision]);
   useEffect(() => {
+    if (!active) return;
     const timer = window.setInterval(
       () => setRefresh((value) => value + 1),
-      60_000,
+      usageRefreshMs,
     );
     return () => window.clearInterval(timer);
-  }, []);
-  const usage = snapshot && summarizeUsage(snapshot, displayRange);
+  }, [active]);
+  const usage = useMemo(
+    () => snapshot && summarizeUsage(snapshot, displayRange),
+    [snapshot, displayRange],
+  );
   const rangeTotal =
     usage?.trend.reduce((total, day) => total + day.tokens, 0n) ?? 0n;
   let angle = 0;
@@ -209,22 +246,22 @@ export function UsageSettings({ filter }: { filter: AgentFilter }) {
       .map((model, index) => {
         const start = angle;
         angle += (Number(model.tokens) / Number(rangeTotal)) * 360;
-        return `${colors[index % colors.length]} ${start}deg ${angle}deg`;
+        return `var(${seriesTokens[index % seriesTokens.length]}) ${start}deg ${angle}deg`;
       }) ?? [];
   return (
     <section className="flex min-w-0 flex-col gap-5" aria-label="使用统计">
       {(error || queryError) && (
         <div role="alert" className="rounded-lg bg-surface p-3 text-danger-ink">
           {error ? `统计数据保存失败：${error}` : `统计读取失败：${queryError}`}
-          <button
+          <TextLink
             type="button"
-            className="ml-3 underline"
+            className="ml-3"
             onClick={() => {
               void retryUsage().then(() => setRefresh((value) => value + 1));
             }}
           >
             重试
-          </button>
+          </TextLink>
         </div>
       )}
       {snapshot === undefined && !queryError && (
@@ -280,7 +317,7 @@ export function UsageSettings({ filter }: { filter: AgentFilter }) {
                 .filter((model) => model.tokens > 0)
                 .map((model, index) => ({
                   name: model.label,
-                  color: colors[index % colors.length]!,
+                  colorToken: seriesTokens[index % seriesTokens.length]!,
                   values: usage.trend.map(({ day }) =>
                     Number(model.daily?.get(day) ?? 0n),
                   ),
@@ -325,7 +362,7 @@ export function UsageSettings({ filter }: { filter: AgentFilter }) {
                       <span
                         aria-hidden="true"
                         className="size-2.5 shrink-0 rounded-sm"
-                        style={{ background: colors[index % colors.length] }}
+                        style={{ background: `var(${seriesTokens[index % seriesTokens.length]})` }}
                       />
                       <span className="flex min-w-0 items-center gap-1.5 font-mono">
                         <span className="min-w-0 wrap-anywhere">{model.label}</span>

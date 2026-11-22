@@ -4,6 +4,7 @@ import type {
   ConfigurationScope,
 } from "../../configuration/types.ts";
 import type { AgentsService } from "../service.ts";
+import type { AgentExtensionClient } from "../../../contracts/mcp/management.ts";
 import type { AgentProtocolCheckOptions } from "../types.ts";
 import type { AgentProbeSessionFactory } from "../probe/types.ts";
 import type {
@@ -32,6 +33,8 @@ interface ProbeTransportOwner {
   stopping?: Promise<void>;
 }
 
+const probeBusyMessage = "已有 ACP 诊断正在运行，请等待结束后重试";
+
 export class DesktopAgents implements AgentsService {
   readonly service: AgentsService;
   private readonly lifecycle = new AbortController();
@@ -45,13 +48,17 @@ export class DesktopAgents implements AgentsService {
   private readonly configurationView;
   readonly configuration: AgentsService["configuration"];
   private readonly probeReports = createProtocolProbeStore();
-  private readonly probeView = createSnapshotView(this.probeReports, (state) => ({
-    phase: state.phase,
-    step: state.step,
-    probingAgentId: state.probingAgentId,
-    result: state.result,
-    resultsByAgent: state.resultsByAgent,
-  }));
+  private readonly probeView = createSnapshotView(
+    this.probeReports,
+    (state) => ({
+      isBusy: state.isBusy,
+      phase: state.phase,
+      step: state.step,
+      probingAgentId: state.probingAgentId,
+      result: state.result,
+      resultsByAgent: state.resultsByAgent,
+    }),
+  );
   readonly probeState: AgentsService["probeState"] = this.probeView.snapshot;
   private probeGeneration = 0;
   private stopping?: Promise<void>;
@@ -104,6 +111,7 @@ export class DesktopAgents implements AgentsService {
       scan: this.scan.bind(this),
       registerProbeSessions: this.registerProbeSessions.bind(this),
       testConnection: this.testConnection.bind(this),
+      runMcpExtension: this.runMcpExtension.bind(this),
       runProtocolCheck: this.runProtocolCheck.bind(this),
       shutdown: this.shutdown.bind(this),
     };
@@ -271,9 +279,13 @@ export class DesktopAgents implements AgentsService {
       this.probeSessions = undefined;
       owner.lifecycle.abort();
       this.probeGeneration++;
-      const report = this.probeReports.getState();
-      if (report.phase === "probing") report.cancel();
-      await this.stopProbes();
+      try {
+        await this.stopProbes();
+      } finally {
+        const report = this.probeReports.getState();
+        if (report.phase === "probing") report.cancel();
+        else this.probeReports.setState({ isBusy: false });
+      }
     };
   }
   async testConnection(
@@ -285,6 +297,9 @@ export class DesktopAgents implements AgentsService {
     if (!adapter) return { ok: false, message: "未找到目标 Agent", stderr: "" };
     if (!this.probeSessions)
       return { ok: false, message: "ACP 探查服务尚未就绪", stderr: "" };
+    const { isBusy, phase } = this.probeReports.getState();
+    if (isBusy || phase === "probing")
+      return { ok: false, message: probeBusyMessage, stderr: "" };
     const executable = adapter.configuredExecutable?.(
       this.preferences.store.getState(),
       toolPaths,
@@ -293,14 +308,53 @@ export class DesktopAgents implements AgentsService {
       testAgentConnection(adapter, { ...resources, executablePath: executable, onStep }),
     );
   }
-  async runProtocolCheck(id: string, options: AgentProtocolCheckOptions): Promise<void> {
+  runMcpExtension<T>(
+    id: string,
+    toolPaths: object,
+    run: (client: AgentExtensionClient) => Promise<T>,
+  ): Promise<T> {
+    const adapter = this.resolve(id);
+    if (!adapter?.mcpManagement)
+      return Promise.reject(new Error("此 Agent 暂未提供 MCP 管理"));
+    return this.withProbe(async (resources) => {
+      const launch = this.buildLaunch(adapter, toolPaths, null);
+      const transport = await resources.createTransport(launch, adapter);
+      if (!transport) throw new Error("无法启动 Agent");
+      const lease = resources.createLease(
+        transport,
+        adapter.maxConcurrentRequests ?? 1,
+        {
+          clientInfo: adapter.clientInfo,
+          requestTimeoutMs: 15_000,
+        },
+        adapter.diagnosticPrivacy,
+      );
+      try {
+        const session = lease.openSession();
+        const handshake = await session.initialize();
+        const request = session.requestAgentExtension?.bind(session);
+        if (!request) throw new Error("当前 ACP 连接不支持扩展请求");
+        return await run({
+          capabilities: handshake.agentCapabilities,
+          request: (method, params) => request(method, params, 15_000),
+        });
+      } finally {
+        await lease.release();
+      }
+    });
+  }
+
+  async runProtocolCheck(
+    id: string,
+    options: AgentProtocolCheckOptions,
+  ): Promise<void> {
     if (this.lifecycle.signal.aborted) return;
     const adapter = this.resolve(id);
-    if (!adapter) return;
+    const report = this.probeReports.getState();
+    if (!adapter || report.isBusy || report.phase === "probing") return;
     const generation = ++this.probeGeneration;
     const current = () =>
       !this.lifecycle.signal.aborted && generation === this.probeGeneration;
-    const report = this.probeReports.getState();
     report.begin(id);
     const startedAt = new Date().toISOString();
     try {
@@ -358,9 +412,11 @@ export class DesktopAgents implements AgentsService {
     if (!factory) throw new Error("ACP 探查服务尚未就绪");
     const signal = factory.lifecycle.signal;
     signal.throwIfAborted();
+    if (this.probes.size) throw new Error(probeBusyMessage);
     const owned: ProbeTransportOwner = {};
     this.probes.add(owned);
     try {
+      this.probeReports.setState({ isBusy: true });
       return await run({
         signal,
         createLease: (...args) => {
@@ -374,7 +430,8 @@ export class DesktopAgents implements AgentsService {
             isolated: true,
             commands: this.commands,
             signal,
-            createTransport: (options) => this.connections.createTransport(options),
+            createTransport: (options) =>
+              this.connections.createTransport(options, "diagnostic"),
           });
           const transport = await owned.opening;
           owned.transport = transport ?? undefined;
@@ -385,6 +442,7 @@ export class DesktopAgents implements AgentsService {
       });
     } finally {
       this.probes.delete(owned);
+      if (!signal.aborted) this.probeReports.setState({ isBusy: false });
     }
   }
 

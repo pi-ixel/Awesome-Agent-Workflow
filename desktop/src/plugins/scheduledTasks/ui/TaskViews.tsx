@@ -1,8 +1,11 @@
+import { fieldSurfaceClass, SettingRow, settingsInputClass, settingsTextareaClass } from "../../../shared/ui/SettingsPageParts.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useId, useState, type FormEvent } from "react";
 import { useStore } from "zustand";
 import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
-import { btnPrimary, btnSecondary, focusVisibleRing, Listbox, rowSelectedClass } from "../../../shared/ui/controls.tsx";
+import { ActionButton, Checkbox, focusVisibleRing, Listbox } from "../../../shared/ui/controls.tsx";
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
+import { PageHeader } from "../../../shared/ui/PageHeader.tsx";
 import { ClockIcon, PlusIcon, XIcon, ChevronDownIcon } from "../../../shared/ui/icons.tsx";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
@@ -19,9 +22,7 @@ const status = {
   running: "运行中", waiting: "等待确认", success: "成功", failed: "失败",
   missed: "已错过", skipped: "已跳过", interrupted: "已中断",
 };
-const inlineField = `min-h-8 min-w-0 max-w-full rounded-md border border-transparent bg-transparent px-2 text-right text-ui-sm text-ink-soft hover:bg-surface-hover ${focusVisibleRing}`;
-const action = `${btnSecondary} min-h-8 px-3 text-ui-sm`;
-const primary = `${btnPrimary} min-h-8 px-3 text-ui-sm`;
+const inlineField = `${fieldSurfaceClass} min-h-8 max-w-full px-2 text-right text-ui-sm`;
 
 function formatDate(at: number) {
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(at);
@@ -37,20 +38,18 @@ export function TaskSidebar({ scheduler }: { readonly scheduler: Scheduler }) {
       <ul className="min-h-0 overflow-y-auto">
         {visible.map((task) => (
           <li key={task.id}>
-            <button
-              type="button"
-              className={`flex min-h-8 w-full items-center gap-2 rounded-lg px-2 text-left hover:bg-hover ${focusVisibleRing} ${selected === task.id ? rowSelectedClass : ""}`}
+            <NavigationRow
               aria-current={selected === task.id || undefined}
               onClick={() => scheduler.store.setState({ selected: task.id })}
             >
               <SidebarItemTitle>{task.name}</SidebarItemTitle>
               <span className="shrink-0 text-ui-sm text-ink-mute">{task.enabled ? timing[task.schedule.kind] : "已暂停"}</span>
-            </button>
+            </NavigationRow>
           </li>
         ))}
       </ul>
       {tasks.some((task) => task.deleted) && (
-        <button type="button" className={action} onClick={() => scheduler.store.setState({ selected: "deleted" })}>已删除任务的记录</button>
+        <ActionButton tone="secondary" type="button" className="min-h-8 px-3 text-ui-sm" onClick={() => scheduler.store.setState({ selected: "deleted" })}>已删除任务的记录</ActionButton>
       )}
     </section>
   );
@@ -80,24 +79,22 @@ export function TaskWorkspace({ scheduler, project, agents, openRun }: {
           <ClockIcon className="ui-icon-32 text-ink-mute" />
           <h1 className="text-ui-xl font-semibold">定时任务</h1>
           <p className="text-ui-sm text-ink-mute">在本机为项目安排 Agent 指令。Desktop 运行期间会按时触发。</p>
-          <button type="button" className={primary} onClick={() => scheduler.store.setState({ editing: null })}>新建任务</button>
+          <ActionButton tone="primary" type="button" className="min-h-8 px-3 text-ui-sm" onClick={() => scheduler.store.setState({ editing: null })}>新建任务</ActionButton>
         </div>
       ) : (
         <>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h1 className="break-words text-ui-xl font-semibold">{task?.name ?? "已删除任务的运行记录"}</h1>
-              {task && <p className="mt-1 break-all text-ui-sm text-ink-mute">{task.project} · {agents.resolve(task.agent)?.displayName ?? task.agent}</p>}
-            </div>
-            {task && !task.deleted && (
-              <div className="flex flex-wrap gap-2">
-                <button type="button" className={primary} onClick={() => invoke(scheduler.runNow(task.id))}>立即运行</button>
-                <button type="button" className={action} onClick={() => invoke(scheduler.change(task.id, { enabled: !task.enabled }))}>{task.enabled ? "暂停" : "启用"}</button>
-                <button type="button" className={action} onClick={() => scheduler.store.setState({ editing: task.id })}>编辑</button>
-                <button type="button" className={action} onClick={() => setConfirmDelete(task.id)}>删除</button>
-              </div>
+          <PageHeader
+            title={task?.name ?? "已删除任务的运行记录"}
+            description={task && <>{task.project} · {agents.resolve(task.agent)?.displayName ?? task.agent}</>}
+            actions={task && !task.deleted && (
+              <>
+                <ActionButton tone="primary" type="button" className="min-h-8 px-3 text-ui-sm" onClick={() => invoke(scheduler.runNow(task.id))}>立即运行</ActionButton>
+                <ActionButton tone="secondary" type="button" className="min-h-8 px-3 text-ui-sm" onClick={() => invoke(scheduler.change(task.id, { enabled: !task.enabled }))}>{task.enabled ? "暂停" : "启用"}</ActionButton>
+                <ActionButton tone="secondary" type="button" className="min-h-8 px-3 text-ui-sm" onClick={() => scheduler.store.setState({ editing: task.id })}>编辑</ActionButton>
+                <ActionButton tone="secondary" type="button" className="min-h-8 px-3 text-ui-sm" onClick={() => setConfirmDelete(task.id)}>删除</ActionButton>
+              </>
             )}
-          </div>
+          />
           {task && (
             <>
               <p className="whitespace-pre-wrap break-words rounded-xl border border-line bg-surface p-3 text-ui-base">{task.prompt}</p>
@@ -105,7 +102,7 @@ export function TaskWorkspace({ scheduler, project, agents, openRun }: {
             </>
           )}
           <div>
-            <h2 className="mb-2 text-ui-base font-semibold">运行记录</h2>
+            <PageHeader size="section" title="运行记录" className="mb-2" />
             {!history.length && <p className="text-ui-sm text-ink-mute">暂无运行记录</p>}
             <ul className="divide-y divide-line rounded-xl border border-line">
               {history.map((run) => (
@@ -114,7 +111,7 @@ export function TaskWorkspace({ scheduler, project, agents, openRun }: {
                     <p className="text-ui-sm">{status[run.status]} · {formatDate(run.at)}</p>
                     {run.error && <p className="mt-1 break-words text-ui-caption text-danger-ink">{run.error}</p>}
                   </div>
-                  {run.session && <button type="button" className={action} onClick={() => invoke(openRun(run))}>打开会话</button>}
+                  {run.session && <ActionButton tone="secondary" type="button" className="min-h-8 px-3 text-ui-sm" onClick={() => invoke(openRun(run))}>打开会话</ActionButton>}
                 </li>
               ))}
             </ul>
@@ -146,15 +143,6 @@ export function TaskWorkspace({ scheduler, project, agents, openRun }: {
   );
 }
 
-function TaskSettingRow({ label, children }: { readonly label: string; readonly children: ReactNode }) {
-  return (
-    <div className="flex min-h-12 items-center justify-between gap-4 px-4 py-1.5 text-ui-sm">
-      <span className="shrink-0 text-ink-soft">{label}</span>
-      <div className="min-w-0 max-w-[72%]">{children}</div>
-    </div>
-  );
-}
-
 function TaskEditor({ task, scheduler, project, agents }: {
   readonly task?: ScheduledTask;
   readonly scheduler: Scheduler;
@@ -166,6 +154,7 @@ function TaskEditor({ task, scheduler, project, agents }: {
   const paths = Array.from(new Set([workspace?.activePath, workspace?.selectedPath,
     ...(workspace?.pinnedPaths ?? []), ...(workspace?.recentWorkspaces.map((entry) => entry.path) ?? [])]
     .filter((path): path is string => Boolean(path))));
+  const dateId = useId();
   const [schedule, setSchedule] = useState<TaskSchedule>(task ? { ...task.schedule, timeZone: "local" } : {
     kind: "daily", time: "09:00", timeZone: "local",
   });
@@ -231,16 +220,16 @@ function TaskEditor({ task, scheduler, project, agents }: {
             <label className="grid gap-1.5 text-ui-sm text-ink-soft">
               任务名称
               <input name="task-title" autoComplete="off" required defaultValue={task?.name}
-                className={`min-h-11 w-full rounded-xl border border-line bg-surface px-4 text-ui-base text-ink ${focusVisibleRing}`} />
+                className={`${settingsInputClass} min-h-11`} />
             </label>
             <label className="grid gap-1.5 text-ui-sm text-ink-soft">
               任务描述
               <textarea placeholder="描述希望 Agent 定时完成的任务…" name="prompt" autoComplete="off" rows={3} required defaultValue={task?.prompt}
-                className={`w-full resize-y rounded-xl border border-line bg-surface px-4 py-3 text-ui-base leading-relaxed text-ink placeholder:text-ink-mute ${focusVisibleRing}`} />
+                className={settingsTextareaClass} />
             </label>
           </div>
           <div className="mt-4 divide-y divide-line rounded-2xl border border-line">
-            <TaskSettingRow label="重复">
+            <SettingRow density="compact" label="重复">
               <Listbox label="重复" appearance="quiet" value={schedule.kind}
                 options={Object.entries(timing).map(([value, label]) => ({ value, label }))}
                 onChange={(kind) => {
@@ -249,63 +238,65 @@ function TaskEditor({ task, scheduler, project, agents }: {
                   else if (kind === "weekly") setSchedule({ kind, time, timeZone, weekdays: [1] });
                   else setSchedule({ kind: "daily", time, timeZone });
                 }} />
-            </TaskSettingRow>
-            <TaskSettingRow label="时间">
+            </SettingRow>
+            <SettingRow density="compact" label="时间">
               <Listbox label="时间" appearance="quiet" showSelectionMark value={schedule.time}
                 options={times.map((value) => ({ value, label: value }))}
                 onChange={(time) => setSchedule({ ...schedule, time })} />
-            </TaskSettingRow>
-            {schedule.kind === "once" && <TaskSettingRow label="日期">
-              <input aria-label="日期" type="date" className={inlineField} required value={schedule.date}
+            </SettingRow>
+            {schedule.kind === "once" && <SettingRow density="compact" label="日期" htmlFor={dateId}>
+              <input id={dateId} type="date" className={inlineField} required value={schedule.date}
                 onChange={(event) => setSchedule({ ...schedule, date: event.currentTarget.value })} />
-            </TaskSettingRow>}
-            {schedule.kind === "weekly" && <TaskSettingRow label="星期">
+            </SettingRow>}
+            {schedule.kind === "weekly" && <SettingRow density="compact" label="星期">
               <div role="group" aria-label="星期" className="flex flex-wrap justify-end gap-1">
                 {["日", "一", "二", "三", "四", "五", "六"].map((day, index) => (
-                  <label key={day} className="cursor-pointer">
-                    <input type="checkbox" aria-label={`星期${day}`} className="peer sr-only"
-                      checked={schedule.weekdays.includes(index)}
-                      onChange={(event) => setSchedule({ ...schedule, weekdays: event.currentTarget.checked
-                        ? [...schedule.weekdays, index] : schedule.weekdays.filter((value) => value !== index) })} />
-                    <span className="grid min-h-8 min-w-8 place-items-center rounded-full text-ink-soft hover:bg-surface-hover peer-checked:bg-ink peer-checked:text-foreground-inverse peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring">{day}</span>
-                  </label>
+                  <Checkbox
+                    key={day}
+                    appearance="pill"
+                    accessibleName={`星期${day}`}
+                    label={day}
+                    checked={schedule.weekdays.includes(index)}
+                    onChange={(checked) => setSchedule({ ...schedule, weekdays: checked
+                      ? [...schedule.weekdays, index] : schedule.weekdays.filter((value) => value !== index) })}
+                  />
                 ))}
               </div>
-            </TaskSettingRow>}
+            </SettingRow>}
           </div>
           <div className="mt-3 rounded-2xl border border-line">
-            <TaskSettingRow label="项目">
+            <SettingRow density="compact" label="项目">
               <Listbox label="项目" appearance="quiet" className="max-w-full py-1 text-ui-sm" value={path || null} disabled={checking} placeholder="选择项目"
                 options={Array.from(new Set([...paths, ...(task ? [task.project] : [])])).map((value) => ({ value, label: value }))}
                 onChange={(value) => { setPath(value); setModel(""); setEffort(""); }} />
-            </TaskSettingRow>
+            </SettingRow>
           </div>
-          <button type="button" aria-expanded={advanced} aria-controls="task-advanced" onClick={() => setAdvanced(!advanced)}
-            className={`my-3 flex min-h-8 items-center gap-1.5 rounded-lg px-1 text-ui-sm text-ink-mute hover:text-ink ${focusVisibleRing}`}>
+          <NavigationRow layout="compound" aria-expanded={advanced} aria-controls="task-advanced" onClick={() => setAdvanced(!advanced)}
+            className={`my-3 flex min-h-8 items-center gap-1.5 rounded-lg px-1 text-ui-sm text-ink-mute hover:text-ink`}>
             高级 <ChevronDownIcon className={`ui-icon-14 ${treeChevronClass} ${advanced ? "rotate-180" : ""}`} />
-          </button>
+          </NavigationRow>
           <TreeBranch id="task-advanced" open={advanced}>
             <div className="flex flex-col gap-3 pb-1">
               <div className="rounded-2xl border border-line">
-                <TaskSettingRow label="运行结果通知">
+                <SettingRow density="compact" label="运行结果通知">
                   <Listbox label="运行结果通知" appearance="quiet" value={notifications}
                     options={[{ value: "all", label: "所有运行" }, { value: "failures", label: "仅失败" }, { value: "off", label: "关闭" }]}
                     onChange={(value) => setNotifications(value as TaskInput["notifications"])} />
-                </TaskSettingRow>
+                </SettingRow>
               </div>
               <div className="divide-y divide-line rounded-2xl border border-line">
-                <TaskSettingRow label="模型">
+                <SettingRow density="compact" label="模型">
                   <Listbox label="模型" disabled={checking || Boolean(optionsError)} triggerLabel={checking ? "正在读取…" : undefined} appearance="quiet" className="max-w-full py-1 text-ui-sm" value={model} onChange={setModel}
                     options={[{ value: "", label: "Agent 默认值" },
                       ...(model && !options?.models.some(({ value }) => value === model) ? [{ value: model, label: model }] : []),
                       ...(options?.models ?? [])]} />
-                </TaskSettingRow>
-                {(options?.efforts.length || effort) ? <TaskSettingRow label="强度">
+                </SettingRow>
+                {(options?.efforts.length || effort) ? <SettingRow density="compact" label="强度">
                   <Listbox label="强度" appearance="quiet" value={effort} onChange={setEffort}
                     options={[{ value: "", label: "Agent 默认值" },
                       ...(effort && !options?.efforts.some(({ value }) => value === effort) ? [{ value: effort, label: effort }] : []),
                       ...(options?.efforts ?? [])]} />
-                </TaskSettingRow> : null}
+                </SettingRow> : null}
               </div>
               {optionsError && <p role="alert" className="px-1 text-ui-sm text-danger-ink">模型选项读取失败：{optionsError}</p>}
             </div>
@@ -314,8 +305,8 @@ function TaskEditor({ task, scheduler, project, agents }: {
         <footer className="flex shrink-0 flex-col gap-3 px-6 pt-3 pb-5">
           {error && <p role="alert" className="text-ui-sm text-danger-ink">{error}</p>}
           <div className="flex justify-end gap-2">
-            <button type="button" className={`${btnSecondary} min-h-9 rounded-full! px-5 text-ui-sm`} onClick={close} disabled={saving}>取消</button>
-            <button type="submit" className={`${btnPrimary} min-h-9 rounded-full! px-5 text-ui-sm`} disabled={saving || checking || Boolean(optionsError) || !path}>{task ? "保存" : "创建"}</button>
+            <ActionButton tone="secondary" type="button" className="min-h-9 rounded-full! px-5 text-ui-sm" onClick={close} disabled={saving}>取消</ActionButton>
+            <ActionButton tone="primary" type="submit" className="min-h-9 rounded-full! px-5 text-ui-sm" disabled={saving || checking || Boolean(optionsError) || !path}>{task ? "保存" : "创建"}</ActionButton>
           </div>
         </footer>
       </form>

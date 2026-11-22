@@ -10,6 +10,7 @@ import {
   switchRuntimeAgent,
   projectFactory,
   projectIndexes,
+  browser as testBrowser,
 } from "../helpers/projectCoordinatorFixture.ts";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 import { AcpClosedError } from "../../src/plugins/acpRuntime/service.ts";
@@ -643,10 +644,16 @@ describe("openRealWorkspace：会话恢复装配", () => {
     const create = vi.spyOn(FakeAcpSession.prototype, "newSession");
     try {
       fakeSessionControl.listed = [
-        { sessionId: "sess-old", cwd: WORKSPACE, updatedAt: "2026-10-19T09:00:00" },
+        {
+          sessionId: "sess-old",
+          cwd: WORKSPACE,
+          updatedAt: "2026-10-19T09:00:00",
+        },
       ];
       await openRealWorkspace(WORKSPACE, { sessionId: "sess-old" });
-      expect(load).toHaveBeenCalledWith("sess-old", WORKSPACE, { mcpServers: [tool] });
+      expect(load).toHaveBeenCalledWith("sess-old", WORKSPACE, {
+        mcpServers: [tool],
+      });
       await openRealWorkspace(WORKSPACE, { forceNew: true, draft: true });
       useSessionStore.getState().sendPrompt("第一条消息");
       await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(1));
@@ -670,10 +677,19 @@ describe("openRealWorkspace：会话恢复装配", () => {
         title: "编辑工作流：我的",
         tools: (agent) => (agent ? [tool] : []),
       });
-      expect(target).toMatchObject({ workspacePath: WORKSPACE, sessionId: "new-session-id" });
-      expect(create).toHaveBeenCalledWith("D:/drafts/d1", { mcpServers: [tool] });
-      expect(manualTitleOf("new-session-id", target.agentKey)).toBe("编辑工作流：我的");
-      expect(findSessionRuntime(WORKSPACE, target.agentKey, "new-session-id")).toBeDefined();
+      expect(target).toMatchObject({
+        workspacePath: WORKSPACE,
+        sessionId: "new-session-id",
+      });
+      expect(create).toHaveBeenCalledWith("D:/drafts/d1", {
+        mcpServers: [tool],
+      });
+      expect(manualTitleOf("new-session-id", target.agentKey)).toBe(
+        "编辑工作流：我的",
+      );
+      expect(
+        findSessionRuntime(WORKSPACE, target.agentKey, "new-session-id"),
+      ).toBeDefined();
       expect(useSessionStore.getState().activeSessionId).toBe(foreground);
     } finally {
       create.mockRestore();
@@ -682,10 +698,20 @@ describe("openRealWorkspace：会话恢复装配", () => {
 
   it("插件恢复会话：按原 id 载入；已经开着的会话不再载入第二次", async () => {
     fakeSessionControl.listed = [
-      { sessionId: "sess-old", cwd: WORKSPACE, updatedAt: "2026-10-19T09:00:00" },
+      {
+        sessionId: "sess-old",
+        cwd: WORKSPACE,
+        updatedAt: "2026-10-19T09:00:00",
+      },
     ];
-    const first = await openPluginSessionRuntime({ workspacePath: WORKSPACE, resumeSessionId: "sess-old" });
-    const again = await openPluginSessionRuntime({ workspacePath: WORKSPACE, resumeSessionId: "sess-old" });
+    const first = await openPluginSessionRuntime({
+      workspacePath: WORKSPACE,
+      resumeSessionId: "sess-old",
+    });
+    const again = await openPluginSessionRuntime({
+      workspacePath: WORKSPACE,
+      resumeSessionId: "sess-old",
+    });
     expect(first).toEqual(again);
     expect(fakeSessionControl.loadCalls).toEqual(["sess-old"]);
   });
@@ -771,11 +797,18 @@ describe("openRealWorkspace：会话恢复装配", () => {
     await vi.waitFor(() => expect(events).toHaveLength(2));
     expect(events).toEqual([
       { type: "started" },
-      { type: "ended", outcome: "completed", stopReason: "end_turn", error: null },
+      {
+        type: "ended",
+        outcome: "completed",
+        stopReason: "end_turn",
+        error: null,
+      },
     ]);
     stop();
     expect(runtime.store.getState().sendPrompt("再来")).toBe(true);
-    await vi.waitFor(() => expect(runtime.store.getState().isAgentRunning).toBe(false));
+    await vi.waitFor(() =>
+      expect(runtime.store.getState().isAgentRunning).toBe(false),
+    );
     expect(events).toHaveLength(2);
   });
 
@@ -783,7 +816,11 @@ describe("openRealWorkspace：会话恢复装配", () => {
     const load = vi.spyOn(FakeAcpSession.prototype, "loadSession");
     try {
       fakeSessionControl.listed = [
-        { sessionId: "sess-old", cwd: WORKSPACE, updatedAt: "2026-10-19T09:00:00" },
+        {
+          sessionId: "sess-old",
+          cwd: WORKSPACE,
+          updatedAt: "2026-10-19T09:00:00",
+        },
       ];
       await openRealWorkspace(WORKSPACE, { sessionId: "sess-old" });
       expect(load).toHaveBeenCalledWith("sess-old", WORKSPACE, undefined);
@@ -1223,6 +1260,61 @@ describe("openRealWorkspace：审批默认模式分派（P0-4）", () => {
       outcome: "selected",
       optionId: "mystery",
     });
+  });
+});
+
+describe("036 浏览器审批桥接线", () => {
+  function emitScriptApproval(approvalId: string) {
+    const sessionId = workingSession()?.sessionId;
+    if (!sessionId) throw new Error("会话尚未就绪");
+    testBrowser.emitApproval({
+      approvalId,
+      sessionId,
+      tabId: "tab-1",
+      action: "script:abc",
+      status: "pending",
+      generation: 1,
+    });
+    return sessionId;
+  }
+
+  it("自动放行：会话就绪后原生浏览器审批直接批准，不进入待办", async () => {
+    projectPreferences.setApprovalMode("auto-allow");
+    await openRealWorkspace(WORKSPACE);
+    testBrowser.resetApprovals();
+
+    emitScriptApproval("approval-wire-1");
+
+    await vi.waitFor(() =>
+      expect(testBrowser.approvalDecisions).toEqual([
+        { approvalId: "approval-wire-1", approved: true },
+      ]),
+    );
+    expect(useApprovalStore.getState().pending).toHaveLength(0);
+  });
+
+  it("人工模式：进入统一待办，允许后回传原生批准", async () => {
+    projectPreferences.setApprovalMode("ask");
+    await openRealWorkspace(WORKSPACE);
+    testBrowser.resetApprovals();
+
+    emitScriptApproval("approval-wire-2");
+
+    await vi.waitFor(() =>
+      expect(useApprovalStore.getState().pending).toHaveLength(1),
+    );
+    const item = useApprovalStore.getState().pending[0]!;
+    expect(item).toMatchObject({
+      id: "permission:browser:approval-wire-2",
+      title: "允许 Agent 在浏览器中执行脚本？",
+    });
+    useApprovalStore.getState().decidePermission(item.id, "allow");
+
+    await vi.waitFor(() =>
+      expect(testBrowser.approvalDecisions).toEqual([
+        { approvalId: "approval-wire-2", approved: true },
+      ]),
+    );
   });
 });
 

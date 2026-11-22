@@ -1,5 +1,5 @@
+import { ActionButton } from "../../../../shared/ui/controls.tsx";
 import { IconButton } from "../../../../shared/ui/IconButton.tsx";
-import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
 import { useRef, useState } from "react";
 import { useSessionValue } from "../../ui/bindings/conversationView.ts";
 import { useProjectComposer } from "../../ui/bindings/composerView.ts";
@@ -11,7 +11,7 @@ import {
   queuedSkillOptions,
 } from "../queuedPrompt.ts";
 import { promptWithEditableSkills } from "../../composer/skillReferences.ts";
-import { GripVerticalIcon, PencilIcon } from "../../../../shared/ui/icons.tsx";
+import { GripVerticalIcon, PencilIcon, TrashIcon } from "../../../../shared/ui/icons.tsx";
 
 export function QueueDock(): React.JSX.Element | null {
   const composer = useProjectComposer();
@@ -47,20 +47,22 @@ export function QueueDock(): React.JSX.Element | null {
         <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-warn-ink">
           <span>队列已暂停</span>
           <span className="flex-1" />
-          <button
+          <ActionButton
+            tone="ghost"
+            size="compact"
             type="button"
             onClick={resumeQueue}
-            className="rounded px-2 py-1 hover:bg-surface"
           >
             继续队列
-          </button>
-          <button
+          </ActionButton>
+          <ActionButton
+            tone="ghost"
+            size="compact"
             type="button"
             onClick={clearQueue}
-            className="rounded px-2 py-1 hover:bg-surface"
           >
             清空
-          </button>
+          </ActionButton>
         </div>
       )}
       {notice && (
@@ -184,17 +186,7 @@ export function QueueDock(): React.JSX.Element | null {
                   if (id) removeQueuedPromptById(id);
                 }}
               >
-                <UiIcon
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="ui-icon-16"
-                >
-                  <path d="M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3" />
-                </UiIcon>
+                <TrashIcon className="ui-icon-16" />
               </IconButton>
             </li>
           );

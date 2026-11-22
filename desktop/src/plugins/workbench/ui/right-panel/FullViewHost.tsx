@@ -32,7 +32,7 @@ import {
   ChevronUpIcon,
   GripVerticalIcon,
   MessageCircleIcon,
-  MinimizeIcon,
+  MinusIcon,
 } from "../../../../shared/ui/icons.tsx";
 import { emptyPanel } from "../../layout/rightPanelStore.ts";
 import { pathKey } from "../../../../shared/panelPaths.ts";
@@ -560,8 +560,8 @@ function FullViewHostFrame({
                 onClick={handleMinimize}
               >
                 {/* ZCode MinusIcon（ConversationHost:490）——desktop 既有
-                    MinimizeIcon（icons.tsx:184）即 lucide minus 同字形，直接复用 */}
-                <MinimizeIcon className="ui-icon-16" />
+                    MinusIcon（icons.tsx:184）即 lucide minus 同字形，直接复用 */}
+                <MinusIcon className="ui-icon-16" />
               </IconButton>
               <IconButton iconSize="compact"
                 type="button"

@@ -8,8 +8,10 @@ import { FileAnnotations } from "./FileAnnotations.tsx";
 import { createPortal } from "react-dom";
 import { SearchIcon, ChevronRightIcon, EllipsisIcon } from "../../../shared/ui/icons.tsx";
 import { FindBar, findActionClass, findFieldClass } from "../../../shared/ui/controls/FindBar.tsx";
+import { ActionButton, focusVisibleRing, rowSelectedClass } from "../../../shared/ui/controls.tsx";
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
-import { useMenuController } from "./file-tree/menuController.ts";
+import { useMenuController } from "../../../shared/ui/useMenuController.ts";
 import type { MarkdownFindOption } from "./markdownFind.ts";
 import {
   useCallback,
@@ -18,10 +20,10 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
-  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { useFrameTask } from "../../../shared/ui/controls/useFrameTask.ts";
+import { ColumnResizer } from "../../../shared/ui/controls/ColumnResizer.tsx";
+import { clampWidth } from "../../../shared/ui/controls/columnWidth.ts";
 import { fileHeadings, fileTextRanges } from "./fileDocumentIndex.ts";
 
 const OUTLINE_WIDTH_KEY = "aaw:document-outline-width";
@@ -88,29 +90,13 @@ export function FileDocumentTools({
   const [resizingOutline, setResizingOutline] = useState(false);
   const splitRow = useRef<HTMLDivElement>(null);
   const outlineColumn = useRef<HTMLDivElement>(null);
-  const outlineSeparator = useRef<HTMLDivElement>(null);
-  const resizeFrame = useFrameTask();
-  const outlineDrag = useRef<{
-    pointerId: number;
-    startX: number;
-    startWidth: number;
-    width: number;
-    min: number;
-    max: number;
-  } | null>(null);
-  // CSS clamps against the enclosing pane in real time. Reading its width and
-  // setting React state from ResizeObserver would rerender the entire outline
-  // on every outer-pane resize. Measure only when an interaction starts.
+  // CSS 实时限制大纲宽度。共享分隔条只更新无障碍范围，避免在外栏拖动时重绘整棵大纲树。
   const outlineBounds = () => {
     const rowWidth = splitRow.current?.clientWidth ?? 0;
     const max = rowWidth
       ? Math.max(100, Math.min(560, Math.floor(rowWidth * 0.6), rowWidth - 200))
       : 560;
     return { min: Math.min(144, max), max };
-  };
-  const clampOutlineWidth = (width: number) => {
-    const { min, max } = outlineBounds();
-    return Math.round(Math.max(min, Math.min(max, width)));
   };
   const persistOutlineWidth = (width: number) => {
     try {
@@ -119,32 +105,6 @@ export function FileDocumentTools({
       // A disabled preference store must not prevent resizing.
     }
   };
-  const finishOutlineResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const drag = outlineDrag.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    outlineDrag.current = null;
-    resizeFrame.flush();
-    setResizingOutline(false);
-    setPreferredWidth(drag.width);
-    persistOutlineWidth(drag.width);
-    if (event.currentTarget.hasPointerCapture(event.pointerId))
-      event.currentTarget.releasePointerCapture(event.pointerId);
-  };
-  useEffect(() => {
-    const nav = outlineColumn.current;
-    if (!outline || !nav || typeof ResizeObserver === "undefined") return;
-    // Keep assistive technology in sync with CSS clamping, without reconciling
-    // hundreds of outline rows when an enclosing pane changes width.
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry)
-        outlineSeparator.current?.setAttribute(
-          "aria-valuenow",
-          String(Math.round(entry.contentRect.width)),
-        );
-    });
-    observer.observe(nav);
-    return () => observer.disconnect();
-  }, [outline]);
   const content = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const searchButton = useRef<HTMLButtonElement>(null);
@@ -347,13 +307,13 @@ export function FileDocumentTools({
     return (
       <div key={`${heading.line}-${i}`}>
         <div
-          className={`flex items-center rounded ${active ? "bg-selected text-ink" : "text-ink-soft hover:bg-surface-hover"}`}
+          className={`flex items-center rounded ${active ? rowSelectedClass + " text-ink" : "text-ink-soft hover:bg-surface-hover"}`}
           style={{ paddingLeft: `${heading.depth * 10}px` }}
         >
           {hasChildren ? (
             <IconButton iconSize="compact"
               type="button"
-              className="flex shrink-0 items-center justify-center rounded hover:bg-hover"
+              className={`flex shrink-0 items-center justify-center rounded hover:bg-hover ${focusVisibleRing}`}
               aria-label={`${expanded ? "折叠" : "展开"} ${heading.title}`}
               aria-expanded={expanded}
               aria-controls={branchId}
@@ -364,15 +324,15 @@ export function FileDocumentTools({
           ) : (
             <span className="w-5 shrink-0" />
           )}
-          <button
-            type="button"
+          <NavigationRow
+            layout="compound"
             data-hint={heading.title}
             aria-current={section === i ? "location" : undefined}
-            className={`min-w-0 flex-1 truncate py-1.5 pr-2 text-left ${heading.level === 1 ? "text-ui-base font-semibold" : heading.level === 2 ? "text-ui-caption font-medium" : "text-ui-sm font-normal"}`}
+            className={`py-1.5 pr-2 ${heading.level === 1 ? "text-ui-base font-semibold" : heading.level === 2 ? "text-ui-caption font-medium" : "text-ui-sm font-normal"}`}
             onClick={() => jump(i)}
           >
-            {heading.title}
-          </button>
+            <span className="min-w-0 truncate">{heading.title}</span>
+          </NavigationRow>
         </div>
         {hasChildren && (
           <TreeBranch id={branchId} open={expanded}>
@@ -389,7 +349,7 @@ export function FileDocumentTools({
       className="flex min-h-0 flex-1 flex-col"
       data-file-search-scope={scope}
     >
-      <style>{`::highlight(${name}) { background: #fde68a; color: #1f2937; } ::highlight(${name}-active) { background: #fb923c; color: #1f2937; }`}</style>
+      <style>{`::highlight(${name}) { background: var(--color-find-highlight); color: var(--color-ink); } ::highlight(${name}-active) { background: var(--color-find-highlight-active); color: var(--color-find-highlight-active-ink); }`}</style>
       {toolbar
         ? createPortal(
             <>
@@ -489,82 +449,28 @@ export function FileDocumentTools({
           </nav>}
         </CollapsibleTreePane>
         {outline && (
-          <div
-            ref={outlineSeparator}
-            role="separator"
-            aria-label="调整大纲宽度"
-            aria-orientation="vertical"
-            aria-valuemin={100}
-            aria-valuemax={560}
-            aria-valuenow={preferredWidth}
-            tabIndex={0}
-            data-hint="拖拽调整大纲宽度，双击恢复默认"
-            className={`group relative w-px shrink-0 touch-none bg-line outline-none before:absolute before:inset-y-0 before:-left-1 before:w-[9px] before:cursor-col-resize before:content-[''] after:pointer-events-none after:absolute after:inset-y-2 after:-left-px after:w-0.5 after:rounded-full after:bg-ink-subtlest/50 after:opacity-0 hover:after:opacity-100 focus-visible:after:opacity-100 ${resizingOutline ? "cursor-col-resize after:opacity-100" : ""}`}
-            onPointerDown={(event) => {
-              if (event.button !== 0) return;
-              event.preventDefault();
-              event.currentTarget.focus();
-              event.currentTarget.setPointerCapture(event.pointerId);
-              const bounds = outlineBounds();
-              const width =
-                outlineColumn.current?.clientWidth ||
-                clampOutlineWidth(preferredWidth);
-              outlineDrag.current = {
-                pointerId: event.pointerId,
-                startX: event.clientX,
-                startWidth: width,
-                width,
-                ...bounds,
-              };
-              setResizingOutline(true);
-            }}
-            onPointerMove={(event) => {
-              const drag = outlineDrag.current;
-              if (!drag || drag.pointerId !== event.pointerId) return;
-              const width = Math.round(
-                Math.max(
-                  drag.min,
-                  Math.min(
-                    drag.max,
-                    drag.startWidth + event.clientX - drag.startX,
-                  ),
-                ),
-              );
-              drag.width = width;
-              const separator = event.currentTarget;
-              resizeFrame.schedule(() => {
-                if (outlineColumn.current)
-                  outlineColumn.current.style.width = outlineWidthStyle(width);
-                separator.setAttribute("aria-valuenow", String(width));
-              });
-            }}
-            onPointerUp={finishOutlineResize}
-            onPointerCancel={finishOutlineResize}
-            onLostPointerCapture={finishOutlineResize}
-            onDoubleClick={() => {
-              setPreferredWidth(DEFAULT_OUTLINE_WIDTH);
-              persistOutlineWidth(DEFAULT_OUTLINE_WIDTH);
-            }}
-            onKeyDown={(event) => {
-              if (
-                !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)
-              )
-                return;
-              event.preventDefault();
+          <ColumnResizer
+            label="调整大纲宽度"
+            hint="拖拽调整大纲宽度，双击恢复默认"
+            placement="seam"
+            growDirection="end"
+            minPx={100}
+            maxPx={560}
+            defaultWidthPx={DEFAULT_OUTLINE_WIDTH}
+            paneRef={outlineColumn}
+            readBounds={outlineBounds}
+            readWidth={() => {
               const { min, max } = outlineBounds();
-              const width =
-                outlineColumn.current?.clientWidth || preferredWidth;
-              const next =
-                event.key === "Home"
-                  ? min
-                  : event.key === "End"
-                    ? max
-                    : clampOutlineWidth(
-                        width + (event.key === "ArrowRight" ? 16 : -16),
-                      );
-              setPreferredWidth(next);
-              persistOutlineWidth(next);
+              return outlineColumn.current?.clientWidth || clampWidth(preferredWidth, min, max);
             }}
+            onPreviewWidth={(width) => {
+              if (outlineColumn.current) outlineColumn.current.style.width = outlineWidthStyle(width);
+            }}
+            onCommitWidth={(width) => {
+              setPreferredWidth(width);
+              persistOutlineWidth(width);
+            }}
+            onDraggingChange={setResizingOutline}
           />
         )}
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -586,14 +492,14 @@ export function FileDocumentTools({
               enterNavigates
               actions={editorFind && editorMatches && (
                 <div className="flex shrink-0 items-center gap-0.5 border-l border-line pl-1.5">
-                  <button
-                    type="button"
+                  <ActionButton
+                    tone="ghost"
                     aria-expanded={replaceOpen}
-                    className={`${findActionClass} px-1.5 text-ui-caption`}
+                    className="shrink-0 px-1.5 text-ui-caption"
                     onClick={() => setReplaceOpen((expanded) => !expanded)}
                   >
                     替换
-                  </button>
+                  </ActionButton>
                   <IconButton iconSize="compact"
                     type="button"
                     aria-label="更多查找选项"
@@ -602,7 +508,10 @@ export function FileDocumentTools({
                     aria-expanded={!!menu && !menu.closing}
                     className={findActionClass}
                     onClick={(event) => {
-                      const bounds = event.currentTarget.getBoundingClientRect();
+                      if (menu && !menu.closing) {
+                        dismissMenu();
+                        return;
+                      }
                       openMenu("markdown-find", "更多查找选项", [
                         ...markdownFindOptions.map(({ key, label }) => ({
                           id: key,
@@ -612,7 +521,7 @@ export function FileDocumentTools({
                         })),
                         { type: "separator" },
                         { id: "select-matches", label: "选中全部匹配", disabled: !matchCount, onSelect: editorFind.selectAll },
-                      ], { x: bounds.right, y: bounds.bottom, side: "bottom", align: "end" });
+                      ], { trigger: event.currentTarget });
                     }}
                   >
                     <EllipsisIcon className="ui-icon-14" />
@@ -634,14 +543,14 @@ export function FileDocumentTools({
                       editorFind.replace(false);
                     }}
                   />
-                  <button type="button" disabled={!matchCount} className={`${findActionClass} px-1.5 text-ui-caption`}
+                  <ActionButton tone="ghost" disabled={!matchCount} className="shrink-0 px-1.5 text-ui-caption"
                     onClick={() => editorFind.replace(false)}>
                     替换当前
-                  </button>
-                  <button type="button" disabled={!matchCount} className={`${findActionClass} px-1.5 text-ui-caption`}
+                  </ActionButton>
+                  <ActionButton tone="ghost" disabled={!matchCount} className="shrink-0 px-1.5 text-ui-caption"
                     onClick={() => editorFind.replace(true)}>
                     全部替换
-                  </button>
+                  </ActionButton>
                 </div>
               )}
             </FindBar>
@@ -650,7 +559,7 @@ export function FileDocumentTools({
       </div>
       {open && editorFind && menu && (
         <ContextMenu entries={menu.entries} placement={menu.placement} label={menu.label}
-          closing={menu.closing} onDismiss={dismissMenu} />
+          trigger={menu.trigger} closing={menu.closing} onDismiss={dismissMenu} />
       )}
     </div>
   );

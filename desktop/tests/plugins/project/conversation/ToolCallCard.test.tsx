@@ -52,8 +52,8 @@ describe("ToolCallCard", () => {
       />,
     );
     // 折叠行 diffstat（ZCode renderDiffCount）：+N 绿 / -N 红（专用 diff token）
-    expect(screen.getByText("+1")).toHaveClass("text-diff-added");
-    expect(screen.getByText("-1")).toHaveClass("text-diff-removed");
+    expect(screen.getByText("+1")).toHaveClass("text-diff-added-ink");
+    expect(screen.getByText("-1")).toHaveClass("text-diff-removed-ink");
     // 改动卡不再行下直出，随行展开出现
     expect(screen.queryByLabelText("工具改动")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("工具输出")).not.toBeInTheDocument();

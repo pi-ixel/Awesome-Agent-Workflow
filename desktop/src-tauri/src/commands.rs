@@ -547,6 +547,12 @@ mod tests {
 
 /// 关闭守卫确认后的强制关闭：destroy 跳过 CloseRequested 事件直关窗口。
 #[tauri::command]
-pub fn force_close(window: tauri::WebviewWindow) {
-    let _ = window.destroy();
+pub fn force_close(webview: tauri::Webview) -> Result<(), String> {
+    if webview.label() != "main" {
+        return Err("只有主窗口可以确认退出".into());
+    }
+    webview
+        .window()
+        .destroy()
+        .map_err(|error| error.to_string())
 }

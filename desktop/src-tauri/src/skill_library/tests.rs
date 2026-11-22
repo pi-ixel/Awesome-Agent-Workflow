@@ -32,6 +32,215 @@ fn skill(path: &Path, name: &str) {
 fn action(json: serde_json::Value) -> Action {
     serde_json::from_value(json).unwrap()
 }
+
+#[test]
+fn toggle_returns_only_the_affected_entry_and_rejects_a_stale_revision() {
+    let (_tmp, loc, query) = setup(Provider::CodeAgent);
+    let source = loc.home.join(".cac/skills");
+    let path = source.join("toggle");
+    skill(&path, "toggle");
+    skill(&source.join("other"), "other");
+    let entry = catalog::list(&loc, &query)
+        .unwrap()
+        .entries
+        .into_iter()
+        .find(|entry| entry.name == "toggle")
+        .unwrap();
+    let request = |revision: &str| {
+        serde_json::from_value(json!({
+            "type":"disable","name":entry.name,"path":entry.path,"realPath":entry.real_path,
+            "source":entry.source,"revision":revision
+        }))
+        .unwrap()
+    };
+    assert!(changes::toggle(&loc, &query, request("stale")).is_err());
+    let disabled =
+        serde_json::to_value(changes::toggle(&loc, &query, request(&entry.revision)).unwrap())
+            .unwrap();
+    assert!(!path.exists());
+    assert!(source.join("other/SKILL.md").is_file());
+    assert_eq!(disabled["stopped"]["name"], "toggle");
+    let enable =
+        serde_json::from_value(json!({"type":"enable","id":disabled["stopped"]["id"]})).unwrap();
+    let enabled = serde_json::to_value(changes::toggle(&loc, &query, enable).unwrap()).unwrap();
+    assert_eq!(enabled["entry"]["name"], "toggle");
+    assert!(path.is_dir());
+}
+
+#[cfg(any(windows, unix))]
+fn link_directory(link: &Path, target: &Path) {
+    #[cfg(windows)]
+    assert!(
+        std::process::Command::new("cmd")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(link.to_string_lossy().replace('/', "\\"))
+            .arg(target.to_string_lossy().replace('/', "\\"))
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
+#[cfg(any(windows, unix))]
+#[test]
+fn directory_sizes_resolve_skill_links_but_skip_nested_links_and_other_roots() {
+    let (tmp, loc, query) = setup(Provider::CodeAgent);
+    let target = tmp.path().join("shared-skill");
+    skill(&target, "linked");
+    let templates = target.join("templates");
+    fs::create_dir(&templates).unwrap();
+    fs::write(templates.join("test.txt"), "模板").unwrap();
+    let outside = tmp.path().join("outside");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("ignored"), [0; 128]).unwrap();
+    link_directory(&templates.join("external"), &outside);
+    link_directory(&templates.join("loop"), &target);
+    let root = loc.home.join(".cac/skills");
+    fs::create_dir_all(&root).unwrap();
+    link_directory(&root.join("linked"), &target);
+    let catalog = catalog::list(&loc, &query).unwrap();
+    let valid = serde_json::to_value(&catalog.entries[0]).unwrap();
+    let mut invalid = valid.clone();
+    invalid["realPath"] = json!(outside);
+    let selected =
+        serde_json::from_value::<Vec<files::Selection>>(json!([valid, invalid])).unwrap();
+    let expected = fs::metadata(target.join("SKILL.md")).unwrap().len() + "模板".len() as u64;
+    assert_eq!(
+        files::directory_sizes(&loc, &query, &selected).unwrap(),
+        vec![Some(expected), None]
+    );
+}
+
+#[test]
+fn skill_detail_reads_selected_directory_and_exact_text() {
+    use files::{Request, browse};
+
+    let (_tmp, loc, query) = setup(Provider::CodeAgent);
+    let root = query.projects[0].join(".cac/skills/sample");
+    skill(&root, "sample");
+    let templates = root.join("templates");
+    fs::create_dir(&templates).unwrap();
+    let text = "# 模板\r\n\r\n正文\r\n";
+    fs::write(templates.join("模板.md"), text).unwrap();
+    let catalog = catalog::list(&loc, &query).unwrap();
+    let entry = catalog
+        .entries
+        .iter()
+        .find(|item| item.path == root)
+        .unwrap();
+    let selection = serde_json::from_value(serde_json::to_value(entry).unwrap()).unwrap();
+    let response = browse(
+        &loc,
+        &query,
+        &selection,
+        Request::Directory {
+            path: "templates".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(response).unwrap(),
+        json!({
+            "type": "directory",
+            "entries": [{ "name": "模板.md", "kind": "file", "bytes": text.len() }],
+            "truncated": false
+        })
+    );
+    let response = browse(
+        &loc,
+        &query,
+        &selection,
+        Request::Read {
+            path: "templates/模板.md".into(),
+        },
+    )
+    .unwrap();
+    let response = serde_json::to_value(response).unwrap();
+    assert_eq!(response["type"], "text");
+    assert_eq!(response["text"], text);
+    assert!(response["modifiedAt"].is_u64());
+}
+
+#[test]
+fn skill_detail_rejects_outside_paths_stale_roots_and_unreadable_content() {
+    use files::{Request, browse};
+
+    let (tmp, loc, query) = setup(Provider::CodeAgent);
+    let root = loc.home.join(".cac/skills/sample");
+    skill(&root, "sample");
+    let outside = tmp.path().join("outside.txt");
+    fs::write(&outside, "外部文档").unwrap();
+    fs::write(root.join("binary"), [0, 1, 2]).unwrap();
+    fs::write(root.join("oversize.md"), vec![b'x'; 256 * 1024 + 1]).unwrap();
+    let catalog = catalog::list(&loc, &query).unwrap();
+    let entry = catalog
+        .entries
+        .iter()
+        .find(|item| item.path == root)
+        .unwrap();
+    let identity = serde_json::to_value(entry).unwrap();
+    let selection = serde_json::from_value(identity.clone()).unwrap();
+
+    for path in [
+        outside.clone(),
+        "../outside.txt".into(),
+        "SKILL.md:stream".into(),
+        "binary".into(),
+        "oversize.md".into(),
+    ] {
+        assert!(browse(&loc, &query, &selection, Request::Read { path }).is_err());
+    }
+
+    let mut changed_identity = identity;
+    changed_identity["realPath"] = json!(tmp.path());
+    let changed = serde_json::from_value(changed_identity).unwrap();
+    assert!(
+        browse(
+            &loc,
+            &query,
+            &changed,
+            Request::Read {
+                path: "SKILL.md".into()
+            }
+        )
+        .is_err()
+    );
+
+    let link = root.join("outside-link.txt");
+    #[cfg(unix)]
+    let linked = std::os::unix::fs::symlink(outside, link).is_ok();
+    #[cfg(windows)]
+    let linked = std::os::windows::fs::symlink_file(outside, link).is_ok();
+    if linked {
+        let response = browse(
+            &loc,
+            &query,
+            &selection,
+            Request::Directory {
+                path: PathBuf::new(),
+            },
+        )
+        .unwrap();
+        let response = serde_json::to_value(response).unwrap();
+        assert!(response["entries"].as_array().unwrap().iter().any(|entry| {
+            entry["name"] == "outside-link.txt" && entry["kind"] == "unavailable"
+        }));
+        assert!(
+            browse(
+                &loc,
+                &query,
+                &selection,
+                Request::Read {
+                    path: "outside-link.txt".into()
+                }
+            )
+            .is_err()
+        );
+    }
+}
 fn delete(loc: &Locations, q: &Query, e: &Entry) -> String {
     apply(loc, q, action(json!({"type":"delete","items":[e]})))
         .unwrap()
@@ -62,7 +271,7 @@ fn home_and_project_remain_separate_and_conflicts_skip() {
     let c = catalog::list(&loc, &q).unwrap();
     assert_eq!(c.entries.len(), 2);
     let original = c.entries.iter().find(|e| e.source == global).unwrap();
-    assert!(delete(&loc, &q, original).contains("已移入"));
+    assert!(delete(&loc, &q, original).contains("已停用"));
     check_recycled_description(&loc, &q, original);
     assert!(project.join("alpha/SKILL.md").is_file());
     let from = tmp.path().join("import");
@@ -101,7 +310,7 @@ fn recycles_only_the_selected_skill_in_a_codeagent_package() {
     let item = library.entries.iter().find(|e| e.path == selected).unwrap();
     assert_eq!(item.kind, Kind::Package);
 
-    assert!(delete(&loc, &q, item).contains("已移入"));
+    assert!(delete(&loc, &q, item).contains("已停用"));
     assert!(!selected.exists());
     assert!(sibling.join("SKILL.md").is_file());
     assert!(manifest.is_file());
@@ -117,13 +326,61 @@ fn recycles_only_the_selected_skill_in_a_codeagent_package() {
         .iter()
         .find(|e| e.path == selected)
         .unwrap();
-    assert!(delete(&loc, &q, item).contains("已移入"));
+    assert!(delete(&loc, &q, item).contains("已停用"));
     let trash = catalog::list(&loc, &q).unwrap().trash;
     let purge = action(json!({"type":"purge","ids":[trash[0].id]}));
     assert!(apply(&loc, &q, purge).unwrap()[0].contains("已永久删除"));
     assert!(!selected.exists());
     assert!(sibling.join("SKILL.md").is_file());
     assert!(manifest.is_file());
+    assert!(catalog::list(&loc, &q).unwrap().trash.is_empty());
+}
+
+#[test]
+fn reads_disabled_files_by_record_and_permanently_deletes_only_the_selected_skill() {
+    use super::files::{Request, Selection, browse};
+
+    let (_tmp, loc, q) = setup(Provider::CodeAgent);
+    let root = q.projects[0].join(".agents/skills");
+    let chosen = root.join("chosen");
+    let sibling = root.join("sibling");
+    skill(&chosen, "chosen");
+    skill(&sibling, "sibling");
+    let catalog = catalog::list(&loc, &q).unwrap();
+    let item = catalog.entries.iter().find(|e| e.path == chosen).unwrap();
+    assert!(delete(&loc, &q, item).contains("已停用"));
+    let stopped = catalog::list(&loc, &q).unwrap().trash;
+    let id = &stopped[0].id;
+    let selection: Selection = serde_json::from_value(json!({
+        "source": root, "path": chosen, "realPath": chosen, "disabledId": id
+    }))
+    .unwrap();
+    let request = |name: &str| Request::Read { path: name.into() };
+    let file = browse(&loc, &q, &selection, request("SKILL.md")).unwrap();
+    assert!(
+        serde_json::to_value(file).unwrap()["text"]
+            .as_str()
+            .unwrap()
+            .contains("chosen")
+    );
+    assert!(browse(&loc, &q, &selection, request("../record.json")).is_err());
+    let other = Query {
+        provider: Provider::ICode,
+        ..q.clone()
+    };
+    assert!(browse(&loc, &other, &selection, request("SKILL.md")).is_err());
+    let bytes = files::directory_sizes(&loc, &q, std::slice::from_ref(&selection)).unwrap();
+    assert!(bytes[0].is_some_and(|size| size > 0));
+    assert!(
+        apply(&loc, &q, action(json!({"type":"restore","ids":[id]}))).unwrap()[0]
+            .contains("已恢复")
+    );
+    let current = catalog::list(&loc, &q).unwrap();
+    let item = current.entries.iter().find(|e| e.path == chosen).unwrap();
+    let destroy = action(json!({"type":"deletePermanent","item":item}));
+    assert!(apply(&loc, &q, destroy).unwrap()[0].contains("已永久删除"));
+    assert!(!chosen.exists());
+    assert!(sibling.join("SKILL.md").is_file());
     assert!(catalog::list(&loc, &q).unwrap().trash.is_empty());
 }
 
@@ -138,7 +395,7 @@ fn inline_delete_restore_preserves_independent_profile_changes() {
     assert_eq!(c.profile.as_deref(), Some("Code.yaml"));
     assert_eq!(c.entries.len(), 2);
     let item = c.entries.iter().find(|e| e.kind == Kind::Inline).unwrap();
-    assert!(delete(&loc, &q, item).contains("已移入"));
+    assert!(delete(&loc, &q, item).contains("已停用"));
     check_recycled_description(&loc, &q, item);
     let text = fs::read_to_string(&path).unwrap() + "other: retained\n";
     fs::write(&path, text).unwrap();
@@ -164,22 +421,11 @@ fn link_recovery_keeps_the_original_target_and_sibling_intact() {
     let root = loc.home.join(".cac/skills");
     fs::create_dir_all(&root).unwrap();
     let link = root.join("linked");
-    #[cfg(windows)]
-    assert!(
-        std::process::Command::new("cmd")
-            .args(["/d", "/c", "mklink", "/J"])
-            .arg(link.to_string_lossy().replace('/', "\\"))
-            .arg(target.to_string_lossy().replace('/', "\\"))
-            .output()
-            .unwrap()
-            .status
-            .success()
-    );
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(&target, &link).unwrap();
+    #[cfg(any(windows, unix))]
+    link_directory(&link, &target);
     let item = catalog::list(&loc, &q).unwrap().entries.remove(0);
     assert!(item.is_link);
-    assert!(delete(&loc, &q, &item).contains("已移入"));
+    assert!(delete(&loc, &q, &item).contains("已停用"));
     check_recycled_description(&loc, &q, &item);
     assert!(target.join("SKILL.md").exists() && !present(&link).unwrap());
     let trash = catalog::list(&loc, &q).unwrap().trash;

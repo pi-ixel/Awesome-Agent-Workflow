@@ -19,8 +19,10 @@ import { runClock } from "../status/timing.ts";
 import { childSteps, flowStages, toneOf, type FlowContext, type FlowStep } from "./flowModel.ts";
 import { grow, motionOff, ROOM_MS, shrink, wait } from "./flowMotion.ts";
 import { drawMinimap, jumpTo } from "./flowMinimap.ts";
+import { observeAppearance } from "../../../shared/ui/observeAppearance.ts";
 import { Badge } from "../../../shared/ui/controls.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { CheckIcon, ChevronRightIcon, HandIcon, MessageCircleIcon } from "../../../shared/ui/icons.tsx";
 import "./flowStages.css";
 
@@ -234,6 +236,14 @@ export function FlowStages({
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+  useEffect(() => {
+    const root = scroller.current?.ownerDocument.documentElement;
+    if (!root) return;
+    return observeAppearance(root, ({ fontChanged }) => {
+      if (fontChanged) relayout.current();
+      else drawMinimap(scroller.current, canvas.current, map.current);
+    });
+  }, []);
   const mapFrame = useRef(0);
   const onScroll = () => {
     if (mapFrame.current) return;
@@ -404,12 +414,23 @@ export function FlowStages({
   }, [flash, seenReveal]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key !== "Escape" || !openRef.current.stage) return;
+    const { stage: id, path } = openRef.current;
+    if (event.key !== "Escape" || !id || busy.current) return;
     event.preventDefault();
     event.stopPropagation();
-    const { stage: id, path } = openRef.current;
-    if (path.length) void toggleFlow(path.length - 1, path[path.length - 1]!);
-    else void toggleStage(id);
+    if (path.length) {
+      const depth = path.length - 1;
+      const key = path[depth]!;
+      const parent = [...(tree.current?.querySelectorAll<HTMLElement>(".wf-col > .wf-step") ?? [])]
+        .find((step) => step.dataset.key === key && Number(step.parentElement?.dataset.depth) === depth);
+      parent?.querySelector<HTMLButtonElement>("button.wf-step-main")?.focus({ preventScroll: true });
+      void toggleFlow(depth, key);
+    } else {
+      const stage = [...(stageRow.current?.querySelectorAll<HTMLButtonElement>(".wf-stage") ?? [])]
+        .find((button) => button.dataset.stage === id);
+      stage?.focus({ preventScroll: true });
+      void toggleStage(id);
+    }
   };
 
   // ------------------------------------------------------------ 呈现
@@ -452,11 +473,11 @@ export function FlowStages({
     return <div key={step.key} className={`wf-step tone-${tone}${step.child ? " is-flow" : ""}${isOpen ? " open" : ""}${isSelected ? " selected" : ""}${flash && step.site === flash ? " flash" : ""}${sessionId ? " has-session" : ""}`}
       data-k={k} data-key={step.key} data-tone={tone} data-site={step.site}>
       {step.child
-        ? <button type="button" className="wf-step-main" aria-expanded={isOpen} aria-label={`${step.label}${word ? `，${word}` : ""}，${isOpen ? "收起" : "展开"}子流程`} onClick={() => void toggleFlow(depth, step.key)}>
+        ? <NavigationRow layout="compound" className="wf-step-main" aria-expanded={isOpen} aria-label={`${step.label}${word ? `，${word}` : ""}，${isOpen ? "收起" : "展开"}子流程`} onClick={() => void toggleFlow(depth, step.key)}>
           {body}<ChevronRightIcon className="ui-icon-16 wf-chevron" aria-hidden="true" />
-        </button>
+        </NavigationRow>
         : onSelect && step.site
-          ? <button type="button" className="wf-step-main" aria-label={`${step.label}${word ? `，${word}` : ""}`} onClick={() => onSelect(step.site!, [...step.callPath], step.phaseId)}>{body}</button>
+          ? <NavigationRow layout="compound" className="wf-step-main" aria-pressed={isSelected} aria-label={`${step.label}${word ? `，${word}` : ""}`} onClick={() => onSelect(step.site!, [...step.callPath], step.phaseId)}>{body}</NavigationRow>
           : <div className="wf-step-main" role="group" aria-label={step.label}>{body}</div>}
       {sessionId && onOpenSession && <IconButton iconSize="compact" type="button" className="wf-session" aria-label={`打开「${step.label}」第 ${record!.ordinal} 轮会话`} data-hint="打开会话" onClick={() => onOpenSession(sessionId)}>
         <MessageCircleIcon className="ui-icon-14" />
@@ -472,7 +493,7 @@ export function FlowStages({
             const isOpen = open.stage === view.id;
             const tone = toneOf(view);
             const names = view.steps.map((step) => step.label).join(" → ");
-            return <button key={view.id} type="button" className={`wf-stage${isOpen ? " open" : ""}`} data-stage={view.id} aria-expanded={isOpen}
+            return <NavigationRow layout="compound" key={view.id} className={`wf-stage${isOpen ? " open" : ""}`} data-stage={view.id} aria-expanded={isOpen}
               aria-label={`${view.no} ${view.label}，${view.word}，${isOpen ? "收起" : "展开"}步骤`} onClick={() => void toggleStage(view.id)}>
               {/* 左边序号圆是视觉重点，颜色就是状态（完成换成对勾）；右边名字、步骤名、胶囊 */}
               <span className={`wf-stage-mark tone-${tone}`} aria-hidden="true">{tone === "done" ? <CheckIcon className="ui-icon-14" /> : view.no}</span>
@@ -484,7 +505,7 @@ export function FlowStages({
                 <small className="wf-stage-span" data-hint={names}>{names}</small>
                 {pills(`g:${view.id}`, view.steps, isOpen)}
               </span>
-            </button>;
+            </NavigationRow>;
           })}
         </div>
         <div className="wf-tree" ref={tree}>
@@ -500,6 +521,6 @@ export function FlowStages({
     <div className="wf-map" aria-hidden="true">
       <canvas ref={map} onPointerDown={onMapPointer} onPointerMove={onMapPointer} />
     </div>
-    {typeof document !== "undefined" && createPortal(<div className="wf-fx" ref={fx} aria-hidden="true" />, document.body)}
+    {typeof document !== "undefined" && createPortal(<div className="wf-fx" ref={fx} aria-hidden="true" inert />, document.body)}
   </div>;
 }

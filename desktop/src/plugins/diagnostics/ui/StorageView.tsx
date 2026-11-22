@@ -1,7 +1,16 @@
+import { ActionButton, Checkbox } from "../../../shared/ui/controls.tsx";
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
-import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
-import { Listbox, focusVisibleRing } from "../../../shared/ui/controls.tsx";
+import { Listbox } from "../../../shared/ui/controls.tsx";
 import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
 import { ChevronRightIcon, CircleHelpIcon } from "../../../shared/ui/icons.tsx";
 import { MetricStrip } from "../../../shared/ui/MetricStrip.tsx";
@@ -20,7 +29,6 @@ const formatBytes = (bytes: number) =>
     : bytes < 1024 ** 2
       ? (bytes / 1024).toFixed(1) + " KiB"
       : (bytes / 1024 ** 2).toFixed(1) + " MiB";
-const button = "rounded border border-line px-2 py-1 disabled:opacity-50";
 const columns =
   "grid grid-cols-[minmax(150px,1fr)_90px_132px_88px_88px] items-center gap-3 px-4";
 
@@ -61,9 +69,13 @@ const categoryDescriptions: Readonly<Partial<Record<string, string>>> = {
 export function StorageView({
   request,
   reminderGroups,
+  active = true,
+  revision = 0,
 }: {
   readonly request?: (request: StorageRequest) => Promise<StorageResponse>;
   readonly reminderGroups?: readonly ReminderGroup[];
+  readonly active?: boolean;
+  readonly revision?: number;
 }) {
   const [rows, setRows] = useState<StorageRow[]>([]);
   const [at, setAt] = useState<number>();
@@ -77,25 +89,44 @@ export function StorageView({
     targets: StorageRow[];
     preview: CleanupPreview;
   }>();
+  const readId = useRef(0);
+  const lastRead = useRef<{
+    request: typeof request;
+    revision: number;
+    at: number;
+  }>(undefined);
   const refresh = useCallback(async () => {
     if (!request) return;
+    const id = ++readId.current;
     setBusy(true);
     setError("");
     try {
-      setRows((await request({ action: "list" })) as StorageRow[]);
-      setAt(Date.now());
+      const next = (await request({ action: "list" })) as StorageRow[];
+      if (id !== readId.current) return;
+      const at = Date.now();
+      lastRead.current = { request, revision, at };
+      setRows(next);
+      setAt(at);
     } catch (error) {
-      setError(String(error));
+      if (id === readId.current) setError(String(error));
     } finally {
-      setBusy(false);
+      if (id === readId.current) setBusy(false);
     }
-  }, [request]);
+  }, [request, revision]);
   useEffect(() => {
+    if (!active || !request) return;
+    const previous = lastRead.current;
+    if (
+      previous?.request === request &&
+      previous.revision === revision &&
+      Date.now() - previous.at < 60_000
+    )
+      return;
     const timer = setTimeout(() => {
       void refresh();
     }, 0);
     return () => clearTimeout(timer);
-  }, [refresh]);
+  }, [active, refresh, request, revision]);
 
   async function preview(row: StorageRow, targets: StorageRow[] = [row]) {
     if (!request) return;
@@ -216,7 +247,7 @@ export function StorageView({
   return (
     <section
       aria-label="Desktop 存储"
-      className="min-h-0 overflow-auto text-sm"
+      className="min-h-0 overflow-auto text-ui-sm"
     >
       <div className="mx-auto max-w-6xl space-y-4">
         <MetricStrip
@@ -235,7 +266,7 @@ export function StorageView({
               value={agent}
               options={[{ value: "", label: "全部 Agent" }, ...agents.map((name) => ({ value: name, label: name }))]}
               onChange={(value) => { setAgent(value); setProject(""); }}
-              className="py-1.5 text-sm"
+              className="py-1.5 text-ui-sm"
             />
             <div data-hint={projects.find(([key]) => key === project)?.[1]}>
               <Listbox
@@ -243,22 +274,23 @@ export function StorageView({
                 value={project}
                 options={[{ value: "", label: "全部项目" }, ...projects.map(([key, path]) => ({ value: key, label: basename(path) }))]}
                 onChange={setProject}
-                className="py-1.5 text-sm"
+                className="py-1.5 text-ui-sm"
               />
             </div>
           </div>
-          <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-ink-mute">
+          <div className="ml-auto flex shrink-0 items-center gap-2 text-ui-xs text-ink-mute">
             <span>
               {at ? new Date(at).toLocaleTimeString() + " 更新" : "尚未统计"}
             </span>
-            <button
+            <ActionButton
+              tone="secondary"
+              className="min-h-8 px-3"
               type="button"
-              className="min-h-8 rounded-md border border-line bg-surface px-3 text-ink-soft hover:bg-hover disabled:opacity-50"
               disabled={busy || !!confirm}
               onClick={() => void refresh()}
             >
               刷新
-            </button>
+            </ActionButton>
           </div>
         </div>
         {error && (
@@ -275,8 +307,10 @@ export function StorageView({
             <strong>{row.label}</strong>
             <p>{row.error}</p>
             {row.retryable && (
-              <button
-                className={button}
+              <ActionButton
+                tone="secondary"
+                type="submit"
+                className="px-2 py-1"
                 disabled={busy}
                 onClick={() => {
                   setBusy(true);
@@ -290,7 +324,7 @@ export function StorageView({
                 }}
               >
                 重试保存
-              </button>
+              </ActionButton>
             )}
           </div>
         ))}
@@ -306,7 +340,7 @@ export function StorageView({
         {busy && <p role="status">正在处理…</p>}
         <div className="overflow-x-auto rounded-xl border border-line bg-surface">
           <div className="min-w-[630px]">
-            <div className={`${columns} bg-surface py-3 text-xs text-ink-mute`}>
+            <div className={`${columns} bg-surface py-3 text-ui-xs text-ink-mute`}>
               <span>数据分类</span>
               <span>占用</span>
               <span>{reminderGroups ? "提醒阈值" : "阈值"}</span>
@@ -426,19 +460,19 @@ function StorageCategoryName({
     >
       <span className="inline-flex min-w-0 items-center gap-1">
         {disclosure ? (
-          <button
-            type="button"
+          <NavigationRow
+            layout="compound"
             aria-expanded={disclosure.expanded}
             aria-controls={disclosure.controls}
             onClick={disclosure.toggle}
-            className={`inline-flex min-w-0 cursor-pointer items-center gap-1.5 rounded text-left font-semibold text-ink hover:underline ${focusVisibleRing}`}
+            className="inline-flex min-w-0 items-center gap-1.5 font-semibold text-ink hover:underline"
           >
             <ChevronRightIcon
               aria-hidden="true"
               className={`ui-icon-14 shrink-0 text-ink-mute transition-transform motion-reduce:transition-none ${disclosure.expanded ? "rotate-90" : ""}`}
             />
             {label}
-          </button>
+          </NavigationRow>
         ) : (
           <strong className="pl-5">{label}</strong>
         )}
@@ -447,7 +481,7 @@ function StorageCategoryName({
         )}
       </span>
       {count !== undefined && (
-        <span className="text-xs text-ink-mute">{count} 项</span>
+        <span className="text-ui-xs text-ink-mute">{count} 项</span>
       )}
     </span>
   );
@@ -523,7 +557,7 @@ function ConversationStorage({
             ? (rows.every((row) => row.exact) ? "" : "≈ ") + formatBytes(used)
             : "—"}
         </span>
-        <div className="text-xs text-ink-mute">{threshold ?? "—"}</div>
+        <div className="text-ui-xs text-ink-mute">{threshold ?? "—"}</div>
         <span className="tabular-nums">
           {cleanable.length ? formatBytes(freeableBytes) : "—"}
         </span>
@@ -599,7 +633,7 @@ function StorageCategoryTable({
           {first.exact ? "" : "≈ "}
           {formatBytes(total("bytes"))}
         </span>
-        <div className="text-xs text-ink-mute">
+        <div className="text-ui-xs text-ink-mute">
           {threshold ?? first.threshold ?? "—"}
         </div>
         <span className="tabular-nums">
@@ -623,52 +657,50 @@ function StorageCategoryTable({
             ...new Set(group.flatMap((item) => item.reasons ?? [])),
           ];
           return (
-            <label
+            <Checkbox
               key={key}
               className="flex items-start gap-3 rounded-lg p-2 hover:bg-raised"
-            >
-              <input
-                type="checkbox"
-                className="mt-1"
-                aria-label={
-                  "选择 " + projectName(row.project) + " " + agentName(row)
-                }
-                disabled={busy || !enabled}
-                checked={enabled && selected.has(key)}
-                onChange={(event) =>
-                  setSelected((previous) => {
-                    const next = new Set(previous);
-                    if (event.target.checked) next.add(key);
-                    else next.delete(key);
-                    return next;
-                  })
-                }
-              />
-              <span className="min-w-0 flex-1">
-                <span className="font-medium" data-hint={row.project}>
-                  {projectName(row.project)}
+              accessibleName={"选择 " + projectName(row.project) + " " + agentName(row)}
+              disabled={busy || !enabled}
+              checked={enabled && selected.has(key)}
+              onChange={(checked) =>
+                setSelected((previous) => {
+                  const next = new Set(previous);
+                  if (checked) next.add(key);
+                  else next.delete(key);
+                  return next;
+                })
+              }
+              label={
+                <span className="flex min-w-0 gap-3">
+                  <span className="min-w-0 flex-1">
+                    <span className="font-medium" data-hint={row.project}>
+                      {projectName(row.project)}
+                    </span>
+                    {(row.agent || row.project) && (
+                      <span className="ml-3 text-ui-xs text-ink-mute">
+                        {row.agent ? agentName(row) : "历史记录 / 项目共用"}
+                      </span>
+                    )}
+                    {reasons.length > 0 && (
+                      <span className="mt-1 block text-ui-xs text-ink-mute">
+                        {reasons.join(" · ")}
+                      </span>
+                    )}
+                  </span>
+                  <span className="tabular-nums">
+                    {formatBytes(group.reduce((sum, item) => sum + item.bytes, 0))}
+                  </span>
                 </span>
-                {(row.agent || row.project) && (
-                  <span className="ml-3 text-xs text-ink-mute">
-                    {row.agent ? agentName(row) : "历史记录 / 项目共用"}
-                  </span>
-                )}
-                {reasons.length > 0 && (
-                  <span className="mt-1 block text-xs text-ink-mute">
-                    {reasons.join(" · ")}
-                  </span>
-                )}
-              </span>
-              <span className="tabular-nums">
-                {formatBytes(group.reduce((sum, item) => sum + item.bytes, 0))}
-              </span>
-            </label>
+              }
+            />
           );
         })}
         <div className="flex flex-wrap items-center gap-3 border-t border-line pt-3">
-          <button
+          <ActionButton
+            tone="secondary"
             type="button"
-            className={button}
+            className="px-2 py-1"
             disabled={busy || !rows.some(eligible)}
             onClick={() =>
               setSelected(
@@ -681,8 +713,8 @@ function StorageCategoryTable({
             }
           >
             全选
-          </button>
-          <span className="flex-1 text-xs text-ink-mute">
+          </ActionButton>
+          <span className="flex-1 text-ui-xs text-ink-mute">
             已选 {new Set(choice.map((row) => normalize(row.project))).size}{" "}
             个范围 ·{" "}
             {first.resetOnly
@@ -695,14 +727,15 @@ function StorageCategoryTable({
                   ),
                 )}
           </span>
-          <button
+          <ActionButton
+            tone="secondary"
             type="button"
-            className={button}
+            className="px-2 py-1"
             disabled={busy || !choice.length}
             onClick={() => preview(choice)}
           >
             {action}
-          </button>
+          </ActionButton>
         </div>
       </div>}
     </div>

@@ -1,26 +1,24 @@
-import { treeChevronClass, treeRowEnterClass } from "../../../../shared/ui/TreeMotion.tsx";
+import { treeRowEnterClass } from "../../../../shared/ui/TreeMotion.tsx";
+import { focusVisibleRing, rowSelectedClass } from "../../../../shared/ui/controls.tsx";
 /**
  * 文件树单行渲染（对齐 ZCode WorkspaceFileTreeRowView.tsx:210-333；token
  * 换算：foreground→ink、subtlest→ink-subtlest，text-ui-base 两边同名同源
  * --ui-font-size，不换算）：
  *
- * - 行高 28px（h-7）、text-ui-base、rounded-lg、默认透明 border（选中 =
- *   灰 pill 底；悬停 = surface-hover；省略 border 会让行高/对齐差 1px）；
+ * - 行高 28px，选中底色和键盘焦点复用共享变量；
  * - 左缩进 = depth*12px + 8px（CSS 变量驱动），depth>0 画层级引导线；
- * - 目录无文件夹图标，只有 size-3 ChevronRight（展开 rotate-90）；
+ * - 文件夹图标表示目录的开合状态；
  * - Git：行名全色、行尾字母 /70（无定宽列）、目录圆点 /60（loading 时隐藏圆点）；
  * - deleted 虚拟行不可拖拽、点击/Enter 只选中不打开。
  */
 import {
   useState,
   type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { ChevronRightIcon } from "../../../../shared/ui/icons.tsx";
-import { AlertCircleIcon, LoaderCircleIcon } from "../../../../shared/ui/file-icons/icons.tsx";
-import { FileDisplayIcon } from "../../../../shared/ui/file-icons/fileDisplay.tsx";
-import { resolveIconName } from "../../../../shared/ui/file-icons/fileDisplayHelpers.ts";
+import { AlertCircleIcon } from "../../../../shared/ui/file-icons/icons.tsx";
+import { Spinner } from "../../../../shared/ui/controls.tsx";
+import { FileEntryLabel } from "../../../../shared/ui/file-icons/FileEntryLabel.tsx";
 import { FILE_TREE_DRAG_MIME } from "./constants.ts";
 import { getHierarchyGuideStyle } from "./hierarchyGuides.ts";
 import { buildFileMentionMarkdown } from "./helpers.ts";
@@ -31,7 +29,6 @@ import {
   getGitStatusTextClass,
   GIT_STATUS_LABELS,
 } from "./statusStyles.ts";
-import { FileTreeRowName } from "./RowName.tsx";
 import type { FileTreeGitStatus, FileTreeRow } from "./model.ts";
 
 export interface FileTreeRowHandlers {
@@ -39,10 +36,6 @@ export interface FileTreeRowHandlers {
   onToggleDirectory: (row: FileTreeRow) => void;
   onOpenFile: (row: FileTreeRow) => void;
   onOpenContextMenu: (row: FileTreeRow, x: number, y: number) => void;
-  onKeyDown: (
-    event: ReactKeyboardEvent<HTMLDivElement>,
-    row: FileTreeRow,
-  ) => void;
 }
 
 export function FileTreeRow({
@@ -77,8 +70,6 @@ export function FileTreeRow({
     "--workspace-file-tree-depth": row.depth,
   } as CSSProperties;
   const guideStyle = getHierarchyGuideStyle(row.depth);
-  // 文件图标：内联彩色 SVG（16 viewBox 品牌色线稿）；目录无图标只留 chevron。
-  const fileIconName = isDirectory ? null : resolveIconName(row.path);
   const statusLabel = gitStatus ? GIT_STATUS_LABELS[gitStatus] : null;
   const indicator = gitStatus ? getGitStatusIndicator(gitStatus) : null;
   const indicatorClass = gitStatus
@@ -110,22 +101,21 @@ export function FileTreeRow({
     <div
       role="treeitem"
       aria-expanded={isDirectory ? row.expanded : undefined}
+      aria-selected={selected}
       tabIndex={0}
       draggable={!isDeleted}
+      data-file-tree-key={row.key}
       data-hint={relativePath}
       className={[
         // ZCode 原规格（WorkspaceFileTreeRowView :225-232）：行盒 28px
-        //（h-7）、字号 text-ui-base（14px，随 --ui-font-size 可调档缩放）、
-        // 图标 size-4 / chevron size-3；选中态 = 灰色圆角 pill 底（border 恒
-        // 透明，无描边）。
+        //（h-7）、字号 text-ui-base（随 --ui-font-size 调整）。
         animateEnter ? treeRowEnterClass : "",
         "relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded-lg border pr-2 text-left text-ui-base leading-tight text-ink outline-none transition-[background-color,border-color,box-shadow]",
         isDeleted ? "cursor-default" : "cursor-pointer",
         "pl-[calc(var(--workspace-file-tree-depth)*0.75rem+0.5rem)]",
-        selected
-          ? "border-transparent bg-surface-hover hover:bg-surface-hover"
-          : "border-transparent hover:bg-surface-hover",
-        "focus-visible:border-line-strong",
+        "border-transparent focus-visible:ring-inset",
+        selected ? rowSelectedClass : "hover:bg-surface-hover",
+        focusVisibleRing,
       ].join(" ")}
       onClick={handleRowClick}
       onContextMenu={(event) => {
@@ -133,13 +123,27 @@ export function FileTreeRow({
         handlers.onOpenContextMenu(row, event.clientX, event.clientY);
       }}
       onKeyDown={(event) => {
-        if (isDeleted && event.key === "Enter") {
-          // deleted 虚拟行的 Enter 与点击同拍：只选中不打开。
+        if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
           event.preventDefault();
-          handlers.onSelect(row);
+          const bounds = event.currentTarget.getBoundingClientRect();
+          handlers.onOpenContextMenu(row, bounds.left, bounds.bottom);
           return;
         }
-        handlers.onKeyDown(event, row);
+        if (event.key === "Enter") {
+          event.preventDefault();
+          handlers.onSelect(row);
+          if (isDirectory) handlers.onToggleDirectory(row);
+          else if (!isDeleted) handlers.onOpenFile(row);
+          return;
+        }
+        if (isDirectory && (event.key === "ArrowRight" || event.key === "ArrowLeft")) {
+          event.preventDefault();
+          const expand = event.key === "ArrowRight";
+          if (row.expanded !== expand) {
+            handlers.onSelect(row);
+            handlers.onToggleDirectory(row);
+          }
+        }
       }}
       onDragStart={(event) => {
         if (isDeleted) {
@@ -172,26 +176,11 @@ export function FileTreeRow({
           style={guideStyle}
         />
       ) : null}
-      {isDirectory ? (
-        <span className="flex ui-icon-16 shrink-0 items-center justify-center text-ink-subtle">
-          <ChevronRightIcon
-            aria-hidden="true"
-            className={`ui-icon-12 text-ink-subtlest ${treeChevronClass} ${
-              row.expanded ? "rotate-90" : ""
-            }`}
-          />
-        </span>
-      ) : null}
-      <span className="flex min-w-0 flex-1 items-center gap-1.5">
-        {fileIconName ? (
-          <FileDisplayIcon name={fileIconName} className="ui-icon-16 shrink-0" />
-        ) : null}
-        <FileTreeRowName
-          name={row.name}
-          className={`min-w-0 flex-1 truncate ${nameStatusClass ?? ""}`}
-          slashClassName="mx-1 text-ink-subtlest"
-        />
-      </span>
+      <FileEntryLabel
+        name={row.name}
+        folder={isDirectory ? (row.expanded ? "open" : "closed") : undefined}
+        nameClassName={nameStatusClass ?? undefined}
+      />
       {indicator !== null && statusLabel !== null ? (
         <span
           data-hint={statusLabel}
@@ -216,7 +205,7 @@ export function FileTreeRow({
         </span>
       ) : null}
       {row.loading ? (
-        <LoaderCircleIcon className="ml-2 ui-icon-12 shrink-0 animate-spin text-ink-subtlest" />
+        <Spinner className="ml-2 ui-icon-12 shrink-0 text-ink-subtlest" />
       ) : row.error ? (
         <AlertCircleIcon className="ml-2 ui-icon-12 shrink-0 text-warn" />
       ) : null}

@@ -1,8 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type {
-  BrowserApproval,
-  BrowserSpace,
-} from "../../../contracts/browser/types.ts";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { BrowserSpace } from "../../../contracts/browser/types.ts";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -14,7 +11,12 @@ import {
   SquareIcon,
   XIcon,
 } from "../../../shared/ui/icons.tsx";
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { ActionButton, Checkbox } from "../../../shared/ui/controls.tsx";
+import { HintSurface } from "../../../shared/ui/controls/HintSurface.tsx";
+import { InlineConfirm } from "../../../shared/ui/InlineConfirm.tsx";
+import { fieldSurfaceClass, settingsInputClass } from "../../../shared/ui/inputStyles.ts";
 import type { HostService } from "../../host/service.ts";
 import type {
   BrowserCleanupPreview,
@@ -25,14 +27,12 @@ import type {
   BrowserPermission,
 } from "../../../contracts/browser/types.ts";
 import {
-  applyBrowserNavigation,
   calculateBrowserBounds,
   changeBrowserPageZoom,
-  createBrowserNavigationState,
-  createBrowserRestorePlan,
   normalizeBrowserNavigationTarget,
 } from "../domain/model.ts";
 import { isNativeOccludingLayer } from "../domain/occlusion.ts";
+import { useBrowserRestore } from "./useBrowserRestore.ts";
 
 export interface BrowserPanelProps {
   host: HostService["browser"];
@@ -49,7 +49,7 @@ interface CleanupResultView {
 }
 
 export function BrowserPanel(props: BrowserPanelProps) {
-  return <BrowserPanelSession key={props.sessionId} {...props} />;
+  return <BrowserPanelSession key={JSON.stringify([props.workspaceId, props.sessionId])} {...props} />;
 }
 
 function BrowserPanelSession({
@@ -61,14 +61,13 @@ function BrowserPanelSession({
   const viewportRef = useRef<HTMLDivElement>(null);
   const [space, setSpace] = useState<BrowserSpace | null>(null);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
-  const [navigation, setNavigation] = useState(createBrowserNavigationState);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [pageZooms, setPageZooms] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
   const [cancelResult, setCancelResult] = useState<{
     tabId: string;
     ids: string[];
   } | null>(null);
-  const [approvals, setApprovals] = useState<BrowserApproval[]>([]);
   const [permissions, setPermissions] = useState<BrowserPermission[]>([]);
   const [dialogs, setDialogs] = useState<BrowserDialog[]>([]);
   const [downloads, setDownloads] = useState<BrowserDownload[]>([]);
@@ -86,15 +85,13 @@ function BrowserPanelSession({
   const [activeCleanupTask, setActiveCleanupTask] = useState<string | null>(
     null,
   );
+  const [isCleaning, setCleaning] = useState(false);
+  const cleanupInFlight = useRef(false);
+  const cleanupTrigger = useRef<HTMLButtonElement>(null);
+  const cleanupPrompt = useRef<HTMLDivElement>(null);
   const [picking, setPicking] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(1280);
   const [viewportHeight, setViewportHeight] = useState(720);
-  const [restoreEnabled, setRestoreEnabled] = useState(
-    () =>
-      window.localStorage.getItem(
-        `aaw-browser-restore:${sessionId}:enabled`,
-      ) === "true",
-  );
   const activeTab =
     space?.tabs.find(
       (tab) => tab.tabId === activeTabId && tab.lifecycle !== "closed",
@@ -108,6 +105,10 @@ function BrowserPanelSession({
   const pageKey = activeTab
     ? `${activeTab.tabId}:${activeTab.generation}`
     : null;
+  const draftKey = pageKey ?? "";
+  const draft = drafts[draftKey] ?? activeTab?.committedUrl ?? "";
+  const pageZoom = pageZooms[draftKey] ?? 1;
+  const snapshotRevision = useRef(0);
   const previousPageRef = useRef({
     key: pageKey,
     tabId: activeTab?.tabId ?? null,
@@ -118,7 +119,8 @@ function BrowserPanelSession({
   useEffect(() => {
     activeTabIdRef.current = activeTabId;
   }, [activeTabId]);
-  useEffect(() => {
+  // Reset stale picking before the active tab can receive input.
+  useLayoutEffect(() => {
     const previous = previousPageRef.current;
     const changed = previous.key !== pageKey;
     if (!changed && !agentActive) return;
@@ -157,23 +159,17 @@ function BrowserPanelSession({
   }, [host, sessionId]);
 
   const refresh = useCallback(async () => {
+    const revision = ++snapshotRevision.current;
     const snapshot = await host.snapshot(sessionId);
+    if (revision !== snapshotRevision.current) return;
+    const liveTabs = snapshot.tabs.filter((tab) => tab.lifecycle !== "closed");
     setSpace(snapshot);
-    if (
-      !snapshot.tabs.some(
-        (tab) => tab.tabId === activeTabId && tab.lifecycle !== "closed",
-      )
-    ) {
-      const nextActiveId = snapshot.tabs.find(
-        (tab) => tab.lifecycle !== "closed",
-      )?.tabId;
-      setActiveTabId(nextActiveId ?? null);
-      setDraft(
-        snapshot.tabs.find((tab) => tab.tabId === nextActiveId)?.committedUrl ??
-          "",
-      );
-    }
-  }, [activeTabId, host, sessionId]);
+    setActiveTabId((id) =>
+      liveTabs.some((tab) => tab.tabId === id)
+        ? id
+        : liveTabs[0]?.tabId ?? null,
+    );
+  }, [host, sessionId]);
 
   useEffect(() => {
     if (!dataOpen) return;
@@ -189,34 +185,6 @@ function BrowserPanelSession({
       active = false;
     };
   }, [dataOpen, host, sessionId]);
-
-  useEffect(() => {
-    let active = true;
-    let unsubscribe = () => {};
-    void host
-      .approvalSnapshot(sessionId)
-      .then((items) => {
-        if (active) setApprovals(items);
-      })
-      .catch((cause) => setError(String(cause)));
-    void host
-      .onApproval((approval) => {
-        if (!active || approval.sessionId !== sessionId) return;
-        setApprovals((current) => [
-          ...current.filter((item) => item.approvalId !== approval.approvalId),
-          approval,
-        ]);
-      })
-      .then((release) => {
-        unsubscribe = release;
-        if (!active) release();
-      })
-      .catch((cause) => setError(String(cause)));
-    return () => {
-      active = false;
-      unsubscribe();
-    };
-  }, [host, sessionId]);
 
   useEffect(() => {
     let active = true;
@@ -320,27 +288,6 @@ function BrowserPanelSession({
     let active = true;
     let unsubscribe = () => {};
     void host
-      .onElement((element) => {
-        if (active && element.sessionId === sessionId) {
-          pickingRef.current = false;
-          setPicking(false);
-        }
-      })
-      .then((release) => {
-        unsubscribe = release;
-        if (!active) release();
-      })
-      .catch((cause) => setError(String(cause)));
-    return () => {
-      active = false;
-      unsubscribe();
-    };
-  }, [host, sessionId]);
-
-  useEffect(() => {
-    let active = true;
-    let unsubscribe = () => {};
-    void host
       .onPickCancel((event) => {
         if (!active || event.sessionId !== sessionId) return;
         pickingRef.current = false;
@@ -363,14 +310,9 @@ function BrowserPanelSession({
     void host
       .onActivity((snapshot) => {
         if (!active || snapshot.sessionId !== sessionId) return;
+        ++snapshotRevision.current;
         setSpace(snapshot);
         setCancelResult(null);
-        void host
-          .approvalSnapshot(sessionId)
-          .then((items) => {
-            if (active) setApprovals(items);
-          })
-          .catch((cause) => setError(String(cause)));
       })
       .then((release) => {
         unsubscribe = release;
@@ -385,7 +327,8 @@ function BrowserPanelSession({
 
   const bounds = useCallback(() => {
     const rect = viewportRef.current?.getBoundingClientRect();
-    if (!rect) return { x: 0, y: 0, width: 640, height: 480 };
+    if (!rect || rect.width <= 0 || rect.height <= 0)
+      return { x: 0, y: 0, width: 640, height: 480 };
     return calculateBrowserBounds(rect, window.devicePixelRatio || 1);
   }, []);
 
@@ -405,14 +348,15 @@ function BrowserPanelSession({
             : current,
         );
         setActiveTabId(tab.tabId);
-        setDraft(tab.committedUrl ?? "");
         setError(null);
+        return tab;
       } catch (cause) {
         setError(String(cause));
       }
     },
     [bounds, host, sessionId],
   );
+  const restore = useBrowserRestore(host, workspaceId, sessionId, space, createTab);
 
   useEffect(() => {
     let active = true;
@@ -420,15 +364,12 @@ function BrowserPanelSession({
     void host
       .onPage((event) => {
         if (!active || event.sessionId !== sessionId) return;
-        if (event.event === "Started" || event.event === "Finished") {
-          if (event.event === "Started") {
-            pickingRef.current = false;
-            setPicking(false);
-          }
-          setNavigation((current) => ({
-            ...current,
-            loading: event.event === "Started",
-          }));
+        if (
+          event.event === "Started" &&
+          previousPageRef.current.key === `${event.tabId}:${event.tabGeneration}`
+        ) {
+          pickingRef.current = false;
+          setPicking(false);
         }
         void refresh().catch((cause) => setError(String(cause)));
       })
@@ -448,14 +389,11 @@ function BrowserPanelSession({
     let unsubscribe = () => {};
     void host
       .onZoom((event) => {
-        if (
-          !active ||
-          event.sessionId !== sessionId ||
-          event.tabId !== activeTab?.tabId ||
-          event.tabGeneration !== activeTab.generation
-        )
-          return;
-        setNavigation((current) => ({ ...current, pageZoom: event.zoom }));
+        if (!active || event.sessionId !== sessionId) return;
+        setPageZooms((current) => ({
+          ...current,
+          [`${event.tabId}:${event.tabGeneration}`]: event.zoom,
+        }));
       })
       .then((release) => {
         unsubscribe = release;
@@ -466,7 +404,7 @@ function BrowserPanelSession({
       active = false;
       unsubscribe();
     };
-  }, [activeTab?.tabId, activeTab?.generation, host, sessionId]);
+  }, [host, sessionId]);
 
   useEffect(() => {
     let active = true;
@@ -492,13 +430,8 @@ function BrowserPanelSession({
     void host
       .onSelect(({ sessionId: owner, tabId }) => {
         if (!active || owner !== sessionId) return;
-        if (
-          space?.tabs.some(
-            (tab) => tab.tabId === tabId && tab.lifecycle !== "closed",
-          )
-        ) {
-          setActiveTabId(tabId);
-        }
+        setActiveTabId(tabId);
+        void refresh().catch((cause) => setError(String(cause)));
       })
       .then((release) => {
         unsubscribe = release;
@@ -509,7 +442,7 @@ function BrowserPanelSession({
       active = false;
       unsubscribe();
     };
-  }, [host, sessionId, space]);
+  }, [host, refresh, sessionId]);
 
   useEffect(() => {
     let active = true;
@@ -524,26 +457,6 @@ function BrowserPanelSession({
               created.tabs.find((tab) => tab.lifecycle !== "closed")?.tabId ??
               null,
           );
-          if (created.tabs.length === 0 && restoreEnabled) {
-            try {
-              const saved: unknown = JSON.parse(
-                window.localStorage.getItem(
-                  `aaw-browser-restore:${sessionId}:tabs`,
-                ) ?? "[]",
-              );
-              if (Array.isArray(saved)) {
-                for (const url of createBrowserRestorePlan(
-                  saved.filter(
-                    (item): item is string => typeof item === "string",
-                  ),
-                )) {
-                  await createTab(url);
-                }
-              }
-            } catch (cause) {
-              setError(`标签恢复失败：${String(cause)}`);
-            }
-          }
         }
       } catch (cause) {
         if (!String(cause).includes("SESSION_EXISTS")) {
@@ -557,30 +470,78 @@ function BrowserPanelSession({
     return () => {
       active = false;
     };
-  }, [createTab, host, refresh, restoreEnabled, sessionId, workspaceId]);
-
-  useEffect(() => {
-    if (!activeTab) return;
-    const element = viewportRef.current;
-    if (!element) return;
-    const synchronize = () => {
-      const rect = element.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
-      void host
-        .setBounds(sessionId, activeTab.tabId, bounds())
-        .catch((cause) => setError(String(cause)));
-    };
-    if (typeof ResizeObserver === "undefined") {
-      synchronize();
-      return;
-    }
-    const observer = new ResizeObserver(synchronize);
-    observer.observe(element);
-    synchronize();
-    return () => observer.disconnect();
-  }, [activeTab, bounds, host, sessionId]);
+  }, [host, refresh, sessionId, workspaceId]);
 
   const nativeTabId = activeTab?.tabId;
+  useEffect(() => {
+    if (!nativeTabId || !visible) return;
+    const element = viewportRef.current;
+    if (!element) return;
+    const drawer = element.closest("[data-edge-drawer]");
+    let frame: number | null = null;
+    let isMoving = false;
+    let isSending = false;
+    let isDisposed = false;
+    let lastBounds: ReturnType<typeof bounds> | undefined;
+    const schedule = () => {
+      if (!isDisposed && frame === null)
+        frame = window.requestAnimationFrame(synchronize);
+    };
+    const synchronize = () => {
+      frame = null;
+      if (isSending) return;
+      if (isMoving) schedule();
+      const rect = element.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const next = calculateBrowserBounds(rect, window.devicePixelRatio || 1);
+      if (
+        lastBounds?.x === next.x &&
+        lastBounds.y === next.y &&
+        lastBounds.width === next.width &&
+        lastBounds.height === next.height
+      ) return;
+      lastBounds = next;
+      isSending = true;
+      void host
+        .setBounds(sessionId, nativeTabId, next)
+        .catch((cause) => {
+          if (!isDisposed) setError(String(cause));
+        })
+        .finally(() => {
+          isSending = false;
+          schedule();
+        });
+    };
+    const observeMotion = (event: Event) => {
+      if (
+        event.target !== drawer ||
+        !("propertyName" in event) ||
+        typeof event.propertyName !== "string" ||
+        !["translate", "transform"].includes(event.propertyName)
+      ) return;
+      isMoving = event.type === "transitionrun";
+      schedule();
+    };
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(schedule);
+    observer?.observe(element);
+    drawer?.addEventListener("transitionrun", observeMotion);
+    drawer?.addEventListener("transitionend", observeMotion);
+    drawer?.addEventListener("transitioncancel", observeMotion);
+    window.addEventListener("resize", schedule);
+    document.addEventListener("scroll", schedule, true);
+    synchronize();
+    return () => {
+      isDisposed = true;
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      drawer?.removeEventListener("transitionrun", observeMotion);
+      drawer?.removeEventListener("transitionend", observeMotion);
+      drawer?.removeEventListener("transitioncancel", observeMotion);
+      window.removeEventListener("resize", schedule);
+      document.removeEventListener("scroll", schedule, true);
+    };
+  }, [host, nativeTabId, sessionId, visible]);
   const [nativeOccluded, setNativeOccluded] = useState(false);
   useEffect(() => {
     if (!nativeTabId || !visible) return;
@@ -665,25 +626,13 @@ function BrowserPanelSession({
       .setVisible(sessionId, tabId, visible && !nativeOccluded)
       .catch((cause) => setError(String(cause)));
     return () => {
-      void host
-        .setVisible(sessionId, tabId, false)
-        .catch((cause) => setError(String(cause)));
+      void host.setVisible(sessionId, tabId, false).catch((cause) => {
+        // 关闭活动标签后的 cleanup 会晚于 WebView 销毁；隐藏已关闭标签是幂等成功。
+        const message = cause instanceof Error ? cause.message : String(cause);
+        if (message !== "TAB_NOT_FOUND") setError(String(cause));
+      });
     };
   }, [host, nativeOccluded, nativeTabId, sessionId, visible]);
-
-  useEffect(() => {
-    if (!space) return;
-    const urls = createBrowserRestorePlan(
-      space.tabs
-        .filter((tab) => tab.lifecycle !== "closed")
-        .map((tab) => tab.committedUrl)
-        .filter((url): url is string => typeof url === "string"),
-    );
-    window.localStorage.setItem(
-      `aaw-browser-restore:${sessionId}:tabs`,
-      JSON.stringify(urls),
-    );
-  }, [sessionId, space]);
 
   const navigate = async () => {
     if (!userCanControl) {
@@ -701,23 +650,17 @@ function BrowserPanelSession({
     }
     try {
       if (activeTab) {
-        const tab = await host.navigate(sessionId, activeTab.tabId, target.url);
-        setSpace((current) =>
-          current
-            ? {
-                ...current,
-                tabs: current.tabs.map((item) =>
-                  item.tabId === tab.tabId ? tab : item,
-                ),
-              }
-            : current,
-        );
+        await host.navigate(sessionId, activeTab.tabId, target.url);
+        await refresh();
       } else {
         await createTab(target.url);
       }
-      setNavigation((current) =>
-        applyBrowserNavigation(current, { type: "navigate", url: target.url }),
-      );
+      setDrafts((current) => {
+        if (current[draftKey] !== draft) return current;
+        const next = { ...current };
+        delete next[draftKey];
+        return next;
+      });
       setError(null);
     } catch (cause) {
       setError(String(cause));
@@ -725,18 +668,29 @@ function BrowserPanelSession({
   };
 
   const changeZoom = (direction: "in" | "out" | "reset") => {
-    const next = changeBrowserPageZoom(navigation, direction);
+    const next = changeBrowserPageZoom(pageZoom, direction);
     if (activeTab)
       void host
-        .setZoom(sessionId, activeTab.tabId, next.pageZoom)
+        .setZoom(sessionId, activeTab.tabId, next)
         .catch((cause) => setError(String(cause)));
   };
 
+  const requestCleanup = (scope: CleanupScope, trigger: HTMLButtonElement) => {
+    if (cleanupInFlight.current) return;
+    cleanupTrigger.current = trigger;
+    setConfirmCleanup(scope);
+  };
+  const dismissCleanup = () => {
+    setConfirmCleanup(null);
+    cleanupTrigger.current?.focus({ preventScroll: true });
+  };
   const executeCleanup = async (
     scope: CleanupScope | null = confirmCleanup,
   ) => {
-    if (!scope) return;
+    if (!scope || cleanupInFlight.current) return;
     const taskId = crypto.randomUUID();
+    cleanupInFlight.current = true;
+    setCleaning(true);
     setCleanupResult(null);
     if (scope === "workspace" || scope === "all") setActiveCleanupTask(taskId);
     try {
@@ -759,7 +713,8 @@ function BrowserPanelSession({
         result = { status, items: [{ itemId: scope, status }] };
       }
       setCleanupResult({ scope, result });
-      setConfirmCleanup(null);
+      if (cleanupPrompt.current?.contains(document.activeElement)) dismissCleanup();
+      else setConfirmCleanup(null);
       setCatalog(await host.dataCatalog());
       setPreview(await host.cleanupPreview(sessionId));
       await refresh();
@@ -767,6 +722,8 @@ function BrowserPanelSession({
     } catch (cause) {
       setError(String(cause));
     } finally {
+      cleanupInFlight.current = false;
+      setCleaning(false);
       setActiveCleanupTask(null);
     }
   };
@@ -814,7 +771,7 @@ function BrowserPanelSession({
           data-hint={
             userCanControl ? "后退" : "Agent 正在操作，点击“我来接管”后可操作"
           }
-          disabled={!userCanControl || !activeTab || navigation.index <= 0}
+          disabled={!userCanControl || !activeTab?.navigation?.canGoBack}
           className="rounded shrink-0 p-1 hover:bg-hover disabled:opacity-40"
           onClick={() => {
             if (!userCanControl || !activeTab) return;
@@ -822,9 +779,6 @@ function BrowserPanelSession({
               .back(sessionId, activeTab.tabId)
               .then(refresh)
               .catch((cause) => setError(String(cause)));
-            setNavigation((current) =>
-              applyBrowserNavigation(current, { type: "back" }),
-            );
           }}
         >
           <ArrowLeftIcon className="ui-icon-16" />
@@ -835,11 +789,7 @@ function BrowserPanelSession({
           data-hint={
             userCanControl ? "前进" : "Agent 正在操作，点击“我来接管”后可操作"
           }
-          disabled={
-            !userCanControl ||
-            !activeTab ||
-            navigation.index >= navigation.entries.length - 1
-          }
+          disabled={!userCanControl || !activeTab?.navigation?.canGoForward}
           className="rounded shrink-0 p-1 hover:bg-hover disabled:opacity-40"
           onClick={() => {
             if (!userCanControl || !activeTab) return;
@@ -847,9 +797,6 @@ function BrowserPanelSession({
               .forward(sessionId, activeTab.tabId)
               .then(refresh)
               .catch((cause) => setError(String(cause)));
-            setNavigation((current) =>
-              applyBrowserNavigation(current, { type: "forward" }),
-            );
           }}
         >
           <ArrowRightIcon className="ui-icon-16" />
@@ -883,15 +830,18 @@ function BrowserPanelSession({
             aria-label="地址栏"
             value={draft}
             disabled={!userCanControl}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              const value = event.target.value;
+              setDrafts((current) => ({ ...current, [draftKey]: value }));
+            }}
             placeholder={
               userCanControl ? "输入 HTTP/HTTPS 地址" : "Agent 正在操作"
             }
-            className="min-h-7 w-full rounded-full border border-line bg-surface px-3 text-xs outline-none focus:border-focus-ring disabled:opacity-50"
+            className={`${fieldSurfaceClass} min-h-7 w-full rounded-full! px-3 text-xs focus-visible:ring-inset`}
           />
         </form>
         <span className="w-8 shrink-0 text-center text-2xs text-ink-muted">
-          {Math.round(navigation.pageZoom * 100)}%
+          {Math.round(pageZoom * 100)}%
         </span>
         <IconButton
           type="button"
@@ -991,16 +941,14 @@ function BrowserPanelSession({
                 key={tab.tabId}
                 className={`flex min-w-24 max-w-48 items-center gap-1 rounded pr-1 text-xs ${tab.tabId === activeTabId ? "bg-selected" : "hover:bg-hover"}`}
               >
-                <button
+                <NavigationRow layout="compound"
                   type="button"
-                  className="min-w-0 flex-1 truncate rounded px-2 py-1 text-left"
-                  onClick={() => {
-                    setActiveTabId(tab.tabId);
-                    setDraft(tab.committedUrl ?? "");
-                  }}
+                  aria-current={tab.tabId === activeTabId ? "page" : undefined}
+                  className="min-w-0 items-center px-2 py-1"
+                  onClick={() => setActiveTabId(tab.tabId)}
                 >
-                  {tab.committedUrl || "空白页"}
-                </button>
+                  <span className="truncate">{tab.committedUrl || "空白页"}</span>
+                </NavigationRow>
                 <IconButton
                   aria-label={`关闭标签 ${tab.tabId}`}
                   disabled={!userCanControl}
@@ -1018,6 +966,7 @@ function BrowserPanelSession({
             ))}
         </div>
       )}
+      {restore.error && <p role="status" className="px-2 py-1 text-ui-sm text-warn-ink">{restore.error}</p>}
       {error && (
         <p
           role="alert"
@@ -1039,7 +988,7 @@ function BrowserPanelSession({
       <div
         ref={viewportRef}
         data-browser-viewport={sessionId}
-        className="relative min-h-0 flex-1 bg-white"
+        className="relative min-h-0 flex-1 bg-base"
         onWheel={(event) => {
           if (!event.ctrlKey) return;
           event.preventDefault();
@@ -1049,10 +998,9 @@ function BrowserPanelSession({
         {activeTab?.lifecycle === "crashed" && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-base text-sm text-ink">
             <span>页面进程已退出，标签和最后地址仍保留。</span>
-            <button
+            <ActionButton tone="secondary" size="compact"
               type="button"
               disabled={!userCanControl}
-              className="rounded border border-line px-3 py-1.5 disabled:opacity-40"
               onClick={() => {
                 if (!userCanControl) return;
                 void host
@@ -1062,7 +1010,7 @@ function BrowserPanelSession({
               }}
             >
               恢复页面
-            </button>
+            </ActionButton>
           </div>
         )}
         {!activeTab && (
@@ -1079,13 +1027,12 @@ function BrowserPanelSession({
       {evidenceUrl && (
         <div className=" right-4 top-20 z-20 max-w-[80%] rounded-lg border border-line bg-base p-2 shadow-floating">
           <div className="mb-2 flex justify-end gap-2">
-            <button
+            <ActionButton tone="ghost" size="compact"
               type="button"
-              className="text-xs"
               onClick={() => setEvidenceUrl(null)}
             >
               关闭
-            </button>
+            </ActionButton>
           </div>
           <img
             aria-label="浏览器截图证据"
@@ -1095,26 +1042,27 @@ function BrowserPanelSession({
         </div>
       )}
       {dataOpen && (
-        <div
+        <HintSurface
+          open
           role="dialog"
           aria-label="浏览器数据管理"
-          className=" inset-x-6 top-16 z-20 max-h-[70vh] overflow-y-auto rounded-lg border border-line bg-base p-4 shadow-floating"
+          className="inset-x-6 top-16 z-20 max-h-[70vh] overflow-y-auto p-4"
         >
-          <div className="sticky top-0 z-10 flex items-start justify-between gap-3 bg-base pb-2">
+          <div className="sticky top-0 z-10 flex items-start justify-between gap-3 bg-surface pb-2">
             <div>
               <h2 className="text-sm font-medium">浏览器数据管理</h2>
               <p className="mt-1 text-xs text-ink-muted">
                 支持缓存、站点、会话、工作区和全部浏览器数据分层管理；清理前必须确认实际范围。
               </p>
             </div>
-            <button
+            <ActionButton tone="secondary" size="compact"
               type="button"
               aria-label="关闭数据管理"
-              className="shrink-0 rounded border border-line px-2 py-1 text-xs hover:bg-hover"
+              className="shrink-0"
               onClick={() => setDataOpen(false)}
             >
               关闭
-            </button>
+            </ActionButton>
           </div>
           <div aria-label="数据分区列表" className="mt-3 space-y-1 text-xs">
             {catalog
@@ -1152,9 +1100,8 @@ function BrowserPanelSession({
                     {permission.origin} · {permission.permissionKind} ·{" "}
                     {permission.decision === "allow" ? "已允许" : "已拒绝"}
                   </span>
-                  <button
+                  <ActionButton tone="secondary" size="compact"
                     type="button"
-                    className="rounded border border-line px-2 py-1"
                     onClick={() => {
                       const operation =
                         permission.decision === "allow"
@@ -1195,7 +1142,7 @@ function BrowserPanelSession({
                     }}
                   >
                     {permission.decision === "allow" ? "撤销" : "允许"}
-                  </button>
+                  </ActionButton>
                 </div>
               ))}
             </div>
@@ -1210,7 +1157,7 @@ function BrowserPanelSession({
                 onChange={(event) =>
                   setViewportWidth(Number(event.target.value))
                 }
-                className="w-20 rounded border border-line bg-surface px-1"
+                className={`${fieldSurfaceClass} min-h-7 w-20 px-1 text-center tabular-nums`}
               />
             </label>
             <label>
@@ -1222,12 +1169,11 @@ function BrowserPanelSession({
                 onChange={(event) =>
                   setViewportHeight(Number(event.target.value))
                 }
-                className="w-20 rounded border border-line bg-surface px-1"
+                className={`${fieldSurfaceClass} min-h-7 w-20 px-1 text-center tabular-nums`}
               />
             </label>
-            <button
+            <ActionButton tone="secondary" size="compact"
               type="button"
-              className="rounded border border-line px-2 py-1"
               disabled={!activeTab}
               onClick={() =>
                 activeTab &&
@@ -1242,10 +1188,9 @@ function BrowserPanelSession({
               }
             >
               应用
-            </button>
-            <button
+            </ActionButton>
+            <ActionButton tone="secondary" size="compact"
               type="button"
-              className="rounded border border-line px-2 py-1"
               disabled={!activeTab}
               onClick={() =>
                 activeTab &&
@@ -1255,93 +1200,76 @@ function BrowserPanelSession({
               }
             >
               跟随容器
-            </button>
+            </ActionButton>
           </div>
-          <label className="mt-3 flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={restoreEnabled}
-              onChange={(event) => {
-                const enabled = event.target.checked;
-                setRestoreEnabled(enabled);
-                window.localStorage.setItem(
-                  `aaw-browser-restore:${sessionId}:enabled`,
-                  String(enabled),
-                );
-              }}
-            />
-            重启后恢复合法标签 URL
-          </label>
+          <Checkbox
+            className="mt-3 flex items-center gap-2 text-xs"
+            label="重启后恢复合法标签 URL"
+            checked={restore.enabled}
+            disabled={restore.isSaving}
+            onChange={(enabled) => { void restore.toggle(enabled); }}
+          />
           <div className="mt-3 flex flex-wrap gap-2">
-            <button
+            <ActionButton tone="secondary" size="compact"
               type="button"
-              className="rounded border border-line px-3 py-1 text-xs"
-              onClick={() => setConfirmCleanup("cache")}
+              onClick={(event) => requestCleanup("cache", event.currentTarget)}
             >
               清除当前会话缓存
-            </button>
-            <button
+            </ActionButton>
+            <ActionButton tone="secondary" size="compact"
               type="button"
-              className="rounded border border-line px-3 py-1 text-xs"
               disabled={!activeTab}
-              onClick={() => setConfirmCleanup("site")}
+              onClick={(event) => requestCleanup("site", event.currentTarget)}
             >
               清除当前站点
-            </button>
-            <button
+            </ActionButton>
+            <ActionButton tone="danger" size="compact"
               type="button"
-              className="rounded border border-line px-3 py-1 text-xs text-danger-ink"
-              onClick={() => setConfirmCleanup("session")}
+              onClick={(event) => requestCleanup("session", event.currentTarget)}
             >
               清除当前会话数据
-            </button>
-            <button
+            </ActionButton>
+            <ActionButton tone="danger" size="compact"
               type="button"
-              className="rounded border border-line px-3 py-1 text-xs text-danger-ink"
-              onClick={() => setConfirmCleanup("workspace")}
+              onClick={(event) => requestCleanup("workspace", event.currentTarget)}
             >
               清除当前工作区
-            </button>
-            <button
+            </ActionButton>
+            <ActionButton tone="danger" size="compact"
               type="button"
-              className="rounded border border-line px-3 py-1 text-xs text-danger-ink"
-              onClick={() => setConfirmCleanup("all")}
+              onClick={(event) => requestCleanup("all", event.currentTarget)}
             >
               清除全部浏览器数据
-            </button>
+            </ActionButton>
             {confirmCleanup && (
-              <div
-                role="alert"
-                className="w-full rounded border border-line bg-surface p-3 text-xs"
-              >
-                确认清理“{confirmCleanup}”范围？{preview?.affected.join("、")}
-                。已完成的子项不会因取消而回滚。
-                <div className="mt-2 flex gap-2">
-                  <button
-                    type="button"
-                    className="rounded border border-line px-2 py-1"
-                    onClick={() => setConfirmCleanup(null)}
-                  >
-                    取消
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded border border-line px-2 py-1 text-danger-ink"
-                    onClick={() => void executeCleanup()}
-                  >
-                    确认清理
-                  </button>
-                  {activeCleanupTask && (
-                    <button
-                      type="button"
-                      className="rounded border border-line px-2 py-1"
-                      onClick={() => void host.cancelCleanup(activeCleanupTask)}
-                    >
-                      取消剩余子项
-                    </button>
-                  )}
-                </div>
+              <div ref={cleanupPrompt} className="w-full">
+                <InlineConfirm
+                  key={confirmCleanup}
+                  label="确认清理浏览器数据"
+                  message={
+                    <span role="alert">
+                      确认清理“{confirmCleanup}”范围？{preview?.affected.join("、")}
+                      。已完成的子项不会因取消而回滚。
+                      {(confirmCleanup === "session" || confirmCleanup === "workspace" || confirmCleanup === "all") &&
+                        " 该范围内的标签恢复快照也会清理。"}
+                    </span>
+                  }
+                  confirmLabel="确认清理"
+                  busy={isCleaning}
+                  onConfirm={() => void executeCleanup()}
+                  onCancel={dismissCleanup}
+                />
               </div>
+            )}
+            {activeCleanupTask && (
+              <ActionButton tone="secondary" size="compact"
+                type="button"
+                onClick={() =>
+                  void host.cancelCleanup(activeCleanupTask).catch((cause) => setError(String(cause)))
+                }
+              >
+                取消剩余子项
+              </ActionButton>
             )}
             {cleanupResult && (
               <section
@@ -1367,25 +1295,25 @@ function BrowserPanelSession({
                   cleanupResult.result.items.some(
                     (item) => item.status !== "completed",
                   )) && (
-                  <button
+                  <ActionButton tone="secondary" size="compact"
                     type="button"
-                    className="mt-2 rounded border border-line px-2 py-1 hover:bg-hover"
+                    className="mt-2"
+                    disabled={isCleaning}
                     onClick={() => void executeCleanup(cleanupResult.scope)}
                   >
                     重试该范围清理
-                  </button>
+                  </ActionButton>
                 )}
               </section>
             )}
-            <button
+            <ActionButton tone="ghost" size="compact"
               type="button"
-              className="rounded px-3 py-1 text-xs"
               onClick={() => setDataOpen(false)}
             >
               关闭
-            </button>
+            </ActionButton>
           </div>
-        </div>
+        </HintSurface>
       )}
       {downloads.length > 0 && (
         <section
@@ -1410,9 +1338,8 @@ function BrowserPanelSession({
                 </span>
                 {download.status === "pending" && (
                   <>
-                    <button
+                    <ActionButton tone="secondary" size="compact"
                       type="button"
-                      className="rounded border border-line px-2 py-1"
                       onClick={() =>
                         void host
                           .decideDownload(sessionId, download.downloadId, false)
@@ -1420,10 +1347,9 @@ function BrowserPanelSession({
                       }
                     >
                       拒绝
-                    </button>
-                    <button
+                    </ActionButton>
+                    <ActionButton tone="secondary" size="compact"
                       type="button"
-                      className="rounded border border-line px-2 py-1"
                       onClick={() =>
                         void host
                           .decideDownload(sessionId, download.downloadId, true)
@@ -1431,7 +1357,7 @@ function BrowserPanelSession({
                       }
                     >
                       允许
-                    </button>
+                    </ActionButton>
                   </>
                 )}
               </div>
@@ -1440,11 +1366,12 @@ function BrowserPanelSession({
         </section>
       )}
       {dialogs.map((dialog) => (
-        <div
+        <HintSurface
+          open
           key={dialog.dialogId}
           role="dialog"
           aria-label="页面对话框"
-          className=" inset-x-4 bottom-10 z-30 rounded-lg border border-line bg-base p-4 shadow-floating"
+          className="inset-x-4 bottom-10 z-30 p-4"
         >
           <h2 className="text-sm font-medium">页面{dialog.dialogType}对话框</h2>
           <p className="mt-1 text-xs text-ink-muted">
@@ -1454,16 +1381,15 @@ function BrowserPanelSession({
           {dialog.dialogType === "prompt" && (
             <input
               aria-label="对话框输入"
-              className="mt-3 w-full rounded border border-line bg-surface px-2 py-1 text-xs"
+              className={`${settingsInputClass} mt-3`}
               value={dialogInput}
               onChange={(event) => setDialogInput(event.target.value)}
             />
           )}
           <div className="mt-3 flex justify-end gap-2">
             {dialog.dialogType !== "alert" && (
-              <button
+              <ActionButton tone="secondary" size="compact"
                 type="button"
-                className="rounded border border-line px-3 py-1 text-xs"
                 onClick={() => {
                   void host
                     .decideDialog(
@@ -1483,11 +1409,10 @@ function BrowserPanelSession({
                 }}
               >
                 取消
-              </button>
+              </ActionButton>
             )}
-            <button
+            <ActionButton tone="primary" size="compact"
               type="button"
-              className="rounded bg-ink px-3 py-1 text-xs text-foreground-inverse"
               onClick={() => {
                 void host
                   .decideDialog(
@@ -1508,72 +1433,10 @@ function BrowserPanelSession({
               }}
             >
               确定
-            </button>
+            </ActionButton>
           </div>
-        </div>
+        </HintSurface>
       ))}
-      {approvals
-        .filter((approval) => approval.status === "pending")
-        .map((approval) => (
-          <div
-            key={approval.approvalId}
-            role="dialog"
-            aria-label="浏览器高风险操作审批"
-            className=" inset-x-4 bottom-10 z-20 rounded-lg border border-line bg-base p-4 shadow-floating"
-          >
-            <h2 className="text-sm font-medium">
-              {approval.action === "control"
-                ? "允许 Agent 控制此页面？"
-                : approval.action === "submit"
-                  ? "允许 Agent 提交此表单？"
-                  : approval.action.startsWith("upload:")
-                    ? "允许 Agent 上传指定文件？"
-                    : "允许 Agent 执行此受限操作？"}
-            </h2>
-            <p className="mt-1 text-xs text-ink-muted">
-              动作：{approval.action}；标签：{approval.tabId}
-              ；仅限当前页面代次。
-            </p>
-            <div className="mt-3 flex justify-end gap-2">
-              <button
-                type="button"
-                className="rounded border border-line px-3 py-1 text-xs"
-                onClick={() => {
-                  void host
-                    .decideApproval(approval.approvalId, false)
-                    .then(() =>
-                      setApprovals((current) =>
-                        current.filter(
-                          (item) => item.approvalId !== approval.approvalId,
-                        ),
-                      ),
-                    )
-                    .catch((cause) => setError(String(cause)));
-                }}
-              >
-                拒绝
-              </button>
-              <button
-                type="button"
-                className="rounded bg-ink px-3 py-1 text-xs text-foreground-inverse"
-                onClick={() => {
-                  void host
-                    .decideApproval(approval.approvalId, true)
-                    .then(() =>
-                      setApprovals((current) =>
-                        current.filter(
-                          (item) => item.approvalId !== approval.approvalId,
-                        ),
-                      ),
-                    )
-                    .catch((cause) => setError(String(cause)));
-                }}
-              >
-                批准一次
-              </button>
-            </div>
-          </div>
-        ))}
       <footer className="flex min-h-6 items-center justify-between border-t border-line px-3 text-2xs text-ink-muted">
         <span>
           {agentActive
@@ -1583,7 +1446,7 @@ function BrowserPanelSession({
               : "未打开页面"}
         </span>
         <span>
-          {navigation.loading
+          {activeTab?.navigation?.isLoading
             ? "加载中"
             : activeTab?.lifecycle === "crashed"
               ? "页面已崩溃"

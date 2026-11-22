@@ -1,6 +1,5 @@
 import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import { useState } from "react";
-import { createPortal } from "react-dom";
 import { ImagePreviewDialog } from "../../../../shared/ui/markdown/MarkdownImage.tsx";
 import type { DraftImage } from "../../composer/types.ts";
 import { ImageAttachmentThumbnail } from "./ImageAttachmentThumbnail.tsx";
@@ -50,13 +49,12 @@ export function ImageAttachments({
       )}
       {preview !== null &&
         items[preview] &&
-        createPortal(
+        (
           <ImagePreviewDialog
             items={items}
             initialIndex={preview}
             onClose={() => setPreview(null)}
-          />,
-          document.body,
+          />
         )}
     </>
   );

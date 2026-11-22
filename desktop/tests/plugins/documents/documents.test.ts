@@ -267,6 +267,7 @@ it("keeps a mounted file annotation editor on the original draft, follows promot
       selection.addRange(range);
       fireEvent.keyUp(paragraph, { key: "Shift" });
       fireEvent.click(screen.getByRole("button", { name: "批注" }));
+      expect(screen.getByRole("dialog", { name: "文档批注" })).toHaveAttribute("data-hint-open", "true");
       fireEvent.change(screen.getByRole("textbox", { name: "批注意见" }), { target: { value: comment } });
     };
     const save = () => fireEvent.click(screen.getByRole("button", { name: "添加到会话" }));

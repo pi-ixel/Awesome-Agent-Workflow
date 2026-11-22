@@ -1,3 +1,4 @@
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import type { ReactNode } from "react";
 import { CheckIcon } from "../../../shared/ui/icons.tsx";
 
@@ -25,18 +26,19 @@ export function SettingsPreviewPicker<Value extends string>({
               : "border-line hover:bg-hover"
           }`}
         >
-          <button
+          <NavigationRow
+            layout="compound"
             type="button"
             aria-pressed={value === choice.value}
             onClick={() => onChange(choice.value)}
-            className="flex items-center justify-between gap-2 px-1 text-left text-ui-base leading-snug font-semibold text-ink focus-visible:outline-none after:absolute after:inset-0"
+            className="flex items-center justify-between gap-2 px-1 text-left text-ui-base leading-snug font-semibold text-ink focus-visible:ring-0! after:absolute after:inset-0"
           >
             {choice.label}
             <CheckIcon
               aria-hidden="true"
               className={`ui-icon-16 shrink-0 text-info ${value === choice.value ? "" : "invisible"}`}
             />
-          </button>
+          </NavigationRow>
           <div
             inert
             aria-hidden="true"

@@ -249,8 +249,58 @@ pub(crate) fn publish_activity(
     snapshot: &BrowserSpaceSnapshot,
 ) -> Result<(), String> {
     sync_session_control_bridges(app, host, &snapshot.session_id)?;
+    for tab in &snapshot.tabs {
+        if let Ok(view) = find_webview(app, host, &snapshot.session_id, &tab.tab_id) {
+            refresh_memory(&view, app, &snapshot.session_id, &tab.tab_id);
+        }
+    }
     app.emit("aaw://browser-activity", snapshot)
         .map_err(|error| error.to_string())
+}
+
+fn refresh_memory(view: &tauri::Webview, app: &AppHandle, session_id: &str, tab_id: &str) {
+    #[cfg(windows)]
+    {
+        let view = view.clone();
+        let app = app.clone();
+        let session_id = session_id.to_owned();
+        let tab_id = tab_id.to_owned();
+        // Dispatch after the native callback returns to avoid reentering WebView2.
+        tauri::async_runtime::spawn(async move {
+            super::webview2::refresh_memory(view, app, session_id, tab_id);
+        });
+    }
+    #[cfg(not(windows))]
+    let _ = (view, app, session_id, tab_id);
+}
+
+pub(super) fn update_page(
+    app: &AppHandle,
+    session_id: &str,
+    tab_id: &str,
+    generation: u64,
+    event: &str,
+    update: impl FnOnce(&mut Tab),
+) {
+    {
+        let host = app.state::<BrowserHost>();
+        let Ok(mut runtime) = host.runtime.lock() else { return };
+        let Some(tab) = runtime.spaces.get_mut(session_id).and_then(|space| space.tabs.get_mut(tab_id))
+            else { return };
+        if tab.generation != generation || tab.lifecycle != super::model::TabLifecycle::Ready {
+            return;
+        }
+        update(tab);
+    }
+    let host = app.state::<BrowserHost>();
+    let is_registered = host.labels.lock().is_ok_and(|labels| {
+        labels.contains_key(&format!("{session_id}::{tab_id}"))
+    });
+    if is_registered {
+        let _ = app.emit("aaw://browser-page", serde_json::json!({
+            "sessionId": session_id, "tabId": tab_id, "tabGeneration": generation, "event": event,
+        }));
+    }
 }
 
 pub fn validate_navigation_target(target: &str) -> Result<String, String> {
@@ -379,7 +429,7 @@ pub async fn create_tab_for(
         .map_err(|_| "BROWSER_LOCK_FAILED")?
         .create_tab(session_id, &url)?;
     match create_native_tab(app, host, tab.clone(), &url, bounds).await {
-        Ok(()) => Ok(tab),
+        Ok(tab) => Ok(tab),
         Err(error) => {
             host.runtime
                 .lock()
@@ -396,7 +446,7 @@ async fn create_native_tab(
     tab: Tab,
     url: &str,
     bounds: NativeBounds,
-) -> Result<(), String> {
+) -> Result<Tab, String> {
     let session_id = tab.session_id.as_str();
     let window_id = host
         .runtime
@@ -448,25 +498,15 @@ async fn create_native_tab(
     })
     .on_page_load(move |webview, payload| {
         let _ = sync_control_bridge(&webview, &page_app, &page_session, &page_tab);
-        let _ = page_app.emit(
-            "aaw://browser-page",
-            serde_json::json!({
-                "sessionId": page_session,
-                "tabId": page_tab,
-                "event": format!("{:?}", payload.event()),
-            }),
-        );
-        if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
-            if let Ok(mut runtime) = page_app.state::<BrowserHost>().runtime.lock()
-                && let Some(current) = runtime
-                    .spaces
-                    .get_mut(&page_session)
-                    .and_then(|space| space.tabs.get_mut(&page_tab))
-                && current.generation == page_generation
-            {
-                current.committed_url = Some(payload.url().to_string());
-            }
-        }
+        let is_loading = matches!(payload.event(), tauri::webview::PageLoadEvent::Started);
+        update_page(&page_app, &page_session, &page_tab, page_generation,
+            if is_loading { "Started" } else { "Finished" }, |tab| {
+                tab.navigation.is_loading = is_loading;
+                if !is_loading {
+                    tab.committed_url = Some(payload.url().to_string());
+                }
+            });
+        refresh_memory(&webview, &page_app, &page_session, &page_tab);
     });
     let created = window
         .add_child(
@@ -475,38 +515,53 @@ async fn create_native_tab(
             LogicalSize::new(bounds.width, bounds.height),
         )
         .map_err(|error| error.to_string())?;
-    created.hide().map_err(|error| error.to_string())?;
-    let (agent_active, manual_takeover) = {
+    let setup = async {
+        created.hide().map_err(|error| error.to_string())?;
+        let (agent_active, manual_takeover) = {
+            let runtime = host.runtime.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+            let space = runtime.spaces.get(session_id).ok_or("SESSION_NOT_FOUND")?;
+            (space.agent_active, space.manual_takeover)
+        };
+        created
+            .eval(control_state_script(
+                agent_active,
+                manual_takeover,
+                tab.control.generation,
+            ))
+            .map_err(|error| error.to_string())?;
+        register_user_message_bridge(&created, app, session_id, &tab.tab_id)?;
+        register_permission_bridge(&created, app, session_id, &tab.tab_id)?;
+        register_process_failure_bridge(&created, app, session_id, &tab.tab_id)?;
+        register_zoom_bridge(&created, app, session_id, &tab.tab_id, tab.generation)?;
+        #[cfg(windows)]
+        super::webview2::register_navigation(&created, app, session_id, &tab.tab_id, tab.generation).await?;
+        super::native_dialog::register(
+            app,
+            &created,
+            session_id,
+            &tab.tab_id,
+            tab.generation,
+            host.dialogs.clone(),
+        )?;
+        super::download::register_native(app, &created, session_id, &tab.tab_id, tab.generation)?;
+        super::evidence::call_cdp(&created, "Page.enable", serde_json::json!({})).await?;
         let runtime = host.runtime.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
-        let space = runtime.spaces.get(session_id).ok_or("SESSION_NOT_FOUND")?;
-        (space.agent_active, space.manual_takeover)
-    };
-    created
-        .eval(control_state_script(
-            agent_active,
-            manual_takeover,
-            tab.control.generation,
-        ))
-        .map_err(|error| error.to_string())?;
-    register_user_message_bridge(&created, app, session_id, &tab.tab_id)?;
-    register_permission_bridge(&created, app, session_id, &tab.tab_id)?;
-    register_process_failure_bridge(&created, app, session_id, &tab.tab_id)?;
-    register_zoom_bridge(&created, app, session_id, &tab.tab_id, tab.generation)?;
-    super::native_dialog::register(
-        app,
-        &created,
-        session_id,
-        &tab.tab_id,
-        tab.generation,
-        host.dialogs.clone(),
-    )?;
-    super::download::register_native(app, &created, session_id, &tab.tab_id, tab.generation)?;
-    super::evidence::call_cdp(&created, "Page.enable", serde_json::json!({})).await?;
-    host.labels
-        .lock()
-        .map_err(|_| "BROWSER_LOCK_FAILED")?
-        .insert(format!("{session_id}::{}", tab.tab_id), label);
-    Ok(())
+        let current = runtime.spaces.get(session_id).and_then(|space| space.tabs.get(&tab.tab_id))
+            .filter(|current| current.generation == tab.generation && current.lifecycle == super::model::TabLifecycle::Ready)
+            .ok_or("TAB_NOT_FOUND")?;
+        host.labels
+            .lock()
+            .map_err(|_| "BROWSER_LOCK_FAILED")?
+            .insert(format!("{session_id}::{}", tab.tab_id), label);
+        Ok(current.clone())
+    }.await;
+    if setup.is_err() {
+        created.close().map_err(|error| error.to_string())?;
+    } else {
+        update_page(app, session_id, &tab.tab_id, tab.generation, "Ready", |_| {});
+        refresh_memory(&created, app, session_id, &tab.tab_id);
+    }
+    setup
 }
 
 #[tauri::command]
@@ -547,15 +602,17 @@ pub async fn browser_recover_tab(
         .lock()
         .map_err(|_| "BROWSER_LOCK_FAILED")?
         .recover_tab(&session_id, &tab_id)?;
-    if let Err(error) = create_native_tab(&app, &state, tab.clone(), &url, bounds).await {
-        let _ = state
-            .runtime
-            .lock()
-            .map_err(|_| "BROWSER_LOCK_FAILED")?
-            .crash_tab(&session_id, &tab_id);
-        return Err(error);
+    match create_native_tab(&app, &state, tab, &url, bounds).await {
+        Ok(tab) => Ok(tab),
+        Err(error) => {
+            let _ = state
+                .runtime
+                .lock()
+                .map_err(|_| "BROWSER_LOCK_FAILED")?
+                .crash_tab(&session_id, &tab_id);
+            Err(error)
+        }
     }
-    Ok(tab)
 }
 
 #[tauri::command]
@@ -576,13 +633,12 @@ pub fn browser_navigate(
     webview
         .navigate(url.parse().map_err(|_| "INVALID_URL")?)
         .map_err(|error| error.to_string())?;
-    let mut runtime = state.runtime.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+    let runtime = state.runtime.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
     let tab = runtime
         .spaces
-        .get_mut(&session_id)
-        .and_then(|space| space.tabs.get_mut(&tab_id))
+        .get(&session_id)
+        .and_then(|space| space.tabs.get(&tab_id))
         .ok_or("ACCESS_DENIED")?;
-    tab.committed_url = Some(url);
     Ok(tab.clone())
 }
 
@@ -592,14 +648,25 @@ fn close_tab_impl(
     session_id: &str,
     tab_id: &str,
 ) -> Result<(), String> {
-    if let Ok(webview) = find_webview(app, state, session_id, tab_id) {
+    let key = format!("{session_id}::{tab_id}");
+    let label = {
+        let mut runtime = state.runtime.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+        let labels = state.labels.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+        let Some(label) = labels.get(&key) else {
+            // 初始化中的标签尚未登记原生句柄。先关闭其代次，由初始化回滚销毁句柄。
+            runtime.close_tab(session_id, tab_id)?;
+            return Ok(());
+        };
+        label.clone()
+    };
+    if let Some(webview) = app.get_webview(&label) {
         webview.close().map_err(|error| error.to_string())?;
     }
     state
         .labels
         .lock()
         .map_err(|_| "BROWSER_LOCK_FAILED")?
-        .remove(&format!("{session_id}::{tab_id}"));
+        .remove(&key);
     state
         .runtime
         .lock()
@@ -629,6 +696,7 @@ pub fn browser_close_session(
     state: State<'_, BrowserHost>,
     session_id: String,
 ) -> Result<Vec<String>, String> {
+    state.cancel_turn_work(&session_id)?;
     let tab_ids = state
         .runtime
         .lock()
@@ -685,7 +753,9 @@ pub fn browser_set_visible(
 ) -> Result<(), String> {
     let webview = find_webview(&app, &state, &session_id, &tab_id)?;
     if !visible {
-        return webview.hide().map_err(|error| error.to_string());
+        webview.hide().map_err(|error| error.to_string())?;
+        refresh_memory(&webview, &app, &session_id, &tab_id);
+        return Ok(());
     }
     let target_window = state
         .runtime
@@ -713,7 +783,7 @@ pub fn browser_set_visible(
         if key == target_key {
             continue;
         }
-        let Some((owner, _)) = key.split_once("::") else {
+        let Some((owner, other_id)) = key.rsplit_once("::") else {
             continue;
         };
         if session_windows.get(owner) != Some(&target_window) {
@@ -721,9 +791,12 @@ pub fn browser_set_visible(
         }
         if let Some(other) = app.get_webview(&label) {
             other.hide().map_err(|error| error.to_string())?;
+            refresh_memory(&other, &app, owner, other_id);
         }
     }
-    webview.show().map_err(|error| error.to_string())
+    webview.show().map_err(|error| error.to_string())?;
+    refresh_memory(&webview, &app, &session_id, &tab_id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -760,30 +833,36 @@ fn assert_user_navigation(state: &BrowserHost, session_id: &str) -> Result<(), S
         .assert_session_control(session_id, PageSource::User)
 }
 
-#[tauri::command]
-pub fn browser_back(
-    app: AppHandle,
-    state: State<'_, BrowserHost>,
-    session_id: String,
-    tab_id: String,
-) -> Result<(), String> {
-    assert_user_navigation(&state, &session_id)?;
-    find_webview(&app, &state, &session_id, &tab_id)?
-        .eval("history.back()")
+pub(super) async fn navigate_history(view: &tauri::Webview, back: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    return super::webview2::go(view, back).await;
+    #[cfg(not(windows))]
+    view.eval(if back { "history.back()" } else { "history.forward()" })
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-pub fn browser_forward(
+pub async fn browser_back(
     app: AppHandle,
     state: State<'_, BrowserHost>,
     session_id: String,
     tab_id: String,
 ) -> Result<(), String> {
     assert_user_navigation(&state, &session_id)?;
-    find_webview(&app, &state, &session_id, &tab_id)?
-        .eval("history.forward()")
-        .map_err(|error| error.to_string())
+    let view = find_webview(&app, &state, &session_id, &tab_id)?;
+    navigate_history(&view, true).await
+}
+
+#[tauri::command]
+pub async fn browser_forward(
+    app: AppHandle,
+    state: State<'_, BrowserHost>,
+    session_id: String,
+    tab_id: String,
+) -> Result<(), String> {
+    assert_user_navigation(&state, &session_id)?;
+    let view = find_webview(&app, &state, &session_id, &tab_id)?;
+    navigate_history(&view, false).await
 }
 
 #[tauri::command]
@@ -957,20 +1036,82 @@ pub fn browser_agent_control_status(state: State<'_, BrowserHost>) -> bool {
     state.agent_control_enabled()
 }
 
+#[derive(Deserialize, Serialize)]
+struct AgentControlPreference {
+    enabled: bool,
+}
+
+impl Default for AgentControlPreference {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn browser_agent_control_preference_survives_readback() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("browser-agent-control.json");
+    let load = || crate::storage_preferences::read_record::<AgentControlPreference>(&path).unwrap();
+    assert!(load().enabled);
+    for enabled in [false, true] {
+        crate::storage_preferences::write_record(&path, &AgentControlPreference { enabled }).unwrap();
+        assert_eq!(load().enabled, enabled);
+    }
+}
+
+static AGENT_CONTROL_WRITER: Mutex<()> = Mutex::new(());
+
+fn agent_control_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(crate::storage_location::data_dir(app)?
+        .join("configuration")
+        .join("browser-agent-control.json"))
+}
+
+pub(crate) fn initialize_agent_control(app: &AppHandle) {
+    let preference = agent_control_path(app)
+        .and_then(|path| crate::storage_preferences::read_record::<AgentControlPreference>(&path));
+    let enabled = match preference {
+        Ok(preference) => preference.enabled,
+        Err(error) => {
+            eprintln!("浏览器 MCP 授权设置无法读取，已保持关闭：{error}");
+            false
+        }
+    };
+    app.state::<BrowserHost>().agent_control.store(enabled, Ordering::Release);
+}
+
 #[tauri::command]
 pub fn browser_set_agent_control(
     app: AppHandle,
+    webview: tauri::Webview,
     state: State<'_, BrowserHost>,
     enabled: bool,
 ) -> Result<bool, String> {
-    state.set_agent_control(enabled)?;
+    if webview.label() != "main" {
+        return Err("只有主窗口可以修改浏览器 MCP 授权".into());
+    }
+    let _writer = AGENT_CONTROL_WRITER.lock().map_err(|_| "浏览器 MCP 授权设置正在使用")?;
+    let change = (|| {
+        if !enabled {
+            state.set_agent_control(false)?;
+        }
+        crate::storage_preferences::write_record(
+            &agent_control_path(&app)?,
+            &AgentControlPreference { enabled },
+        )?;
+        if enabled {
+            state.set_agent_control(true)?;
+        }
+        Ok::<(), String>(())
+    })();
     let actual = state.agent_control_enabled();
     app.emit(
         "aaw://browser-agent-control",
         serde_json::json!({ "enabled": actual }),
     )
     .map_err(|error| error.to_string())?;
-    Ok(actual)
+    change.map(|()| actual)
 }
 
 #[tauri::command]
@@ -1543,6 +1684,7 @@ impl BrowserHost {
     ) -> Result<Option<BrowserSpaceSnapshot>, String> {
         let space = {
             let mut runtime = self.runtime.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+            runtime.active_turns.insert(session_id.into());
             if !runtime.spaces.contains_key(session_id) {
                 return Ok(None);
             }
@@ -1569,6 +1711,7 @@ impl BrowserHost {
 
     pub fn cancel_turn_work(&self, session_id: &str) -> Result<Vec<String>, String> {
         let mut runtime = self.runtime.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+        runtime.active_turns.remove(session_id);
         if runtime.spaces.contains_key(session_id) {
             runtime.end_turn(session_id)?;
         }

@@ -1,3 +1,4 @@
+import { TextLink } from "../../../shared/ui/TextLink.tsx";
 import { describeUnknownError } from "../../../shared/errors.ts";
 import { useWorkspaceValue } from "./bindings/workspaceView.ts";
 import { ConversationDocumentContext } from "../conversation/ui/documentView.ts";
@@ -17,10 +18,10 @@ export function FilePathButton({
   const reference = project ? resolveFileReference(project, path) : null;
   return (
     <span className="min-w-0">
-      <button
+      <TextLink
         disabled={!reference || !openPath}
         data-hint={path}
-        className="max-w-full truncate text-left text-accent-ink underline decoration-dotted disabled:text-ink-faint"
+        className="max-w-full truncate"
         onClick={() => {
           if (reference && project && openPath) {
             setError(null);
@@ -34,7 +35,7 @@ export function FilePathButton({
       >
         {path}
         {line !== undefined ? `:${line}` : ""}
-      </button>
+      </TextLink>
       {error && (
         <span role="alert" className="block whitespace-normal text-danger-ink">
           {error}

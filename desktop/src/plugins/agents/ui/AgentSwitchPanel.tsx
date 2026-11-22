@@ -1,3 +1,4 @@
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { ACP_CONNECTION_POOL_SIZE } from "../../acpConnection/service.ts";
@@ -5,11 +6,8 @@ import type { WorkbenchLayout } from "../../workbench/types.ts";
 import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import { CopyButton } from "../../../shared/ui/CopyButton.tsx";
-import {
-  btnGhost,
-  btnSecondary,
-  Spinner,
-} from "../../../shared/ui/controls.tsx";
+import { ActionButton, Spinner } from "../../../shared/ui/controls.tsx";
+import { HintSurface } from "../../../shared/ui/controls/HintSurface.tsx";
 import {
   stageNames,
   type AgentSwitchProgressController,
@@ -44,7 +42,7 @@ function diagnosticText(progress: SwitchProgress): string {
         (step) =>
           `${step.failed ? "失败" : step.endedAt ? "完成" : "进行中"}：${stageNames[step.stage]}，${elapsed(step.startedAt, step.endedAt ?? end)}`,
       ),
-      `连接：发起启动 ${progress.startedConnections}，开始握手 ${progress.handshakes}，就绪 ${progress.readyConnections}，失败 ${progress.failedConnections}；全局额度 ${ACP_CONNECTION_POOL_SIZE}`,
+      `连接：发起启动 ${progress.startedConnections}，开始握手 ${progress.handshakes}，就绪 ${progress.readyConnections}，失败 ${progress.failedConnections}；会话连接额度 ${ACP_CONNECTION_POOL_SIZE}`,
       ...(progress.failedStage
         ? [`失败步骤：${stageNames[progress.failedStage]}`]
         : []),
@@ -91,7 +89,8 @@ function SwitchStatusButton({
 }) {
   const statusText = statusOf(progress);
   return (
-    <button
+    <NavigationRow
+      layout="compound"
       type="button"
       aria-label={`Agent 切换状态：${statusText}`}
       aria-expanded={progress.expanded}
@@ -111,7 +110,7 @@ function SwitchStatusButton({
         </span>
       )}
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-xs text-ink">{progress.targetName}</span>
+        <span className="truncate text-ui-sm text-ink">{progress.targetName}</span>
         <span className="truncate text-2xs text-ink-soft">
           {statusText}
           {progress.status === "running" &&
@@ -123,7 +122,7 @@ function SwitchStatusButton({
       <span className="shrink-0 text-2xs text-ink-soft">
         {elapsed(progress.startedAt, end)}
       </span>
-    </button>
+    </NavigationRow>
   );
 }
 
@@ -194,9 +193,11 @@ export function AgentSwitchPanel({
       aria-label="Agent 切换状态"
     >
       {progress.expanded && (
-        <section
+        <HintSurface
+          open
+          role="region"
           aria-label="Agent 切换进度详情"
-          className="flex max-h-[min(65vh,560px)] w-[360px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-xl border border-line-strong bg-surface shadow-floating"
+          className="flex max-h-[min(65vh,560px)] w-[360px] max-w-[calc(100vw-24px)] flex-col overflow-hidden"
         >
           <div className="flex items-start gap-3 border-b border-line px-4 py-3">
             <div className="min-w-0 flex-1">
@@ -207,13 +208,14 @@ export function AgentSwitchPanel({
                 {statusText} · 总耗时 {elapsed(progress.startedAt, end)}
               </p>
             </div>
-            <button
+            <ActionButton
+              tone="ghost"
               type="button"
-              className={`${btnGhost} px-2 py-1 text-xs text-ink-soft`}
+              className="px-2 py-1 text-xs text-ink-soft"
               onClick={() => controller.expand(false)}
             >
               最小化
-            </button>
+            </ActionButton>
           </div>
           <div className="min-h-0 space-y-3 overflow-y-auto px-4 py-3 text-xs">
             {progress.replacedPrevious && (
@@ -252,7 +254,7 @@ export function AgentSwitchPanel({
               <div className="rounded-lg bg-raised/50 px-3 py-2 text-ink-soft">
                 发起启动 {progress.startedConnections} · 开始握手{" "}
                 {progress.handshakes} · 握手完成 {progress.readyConnections} ·
-                全局额度 {ACP_CONNECTION_POOL_SIZE}
+                会话连接额度 {ACP_CONNECTION_POOL_SIZE}
                 {progress.failedConnections > 0 && (
                   <p className="mt-1 text-danger-ink">
                     连接失败 {progress.failedConnections}
@@ -303,23 +305,25 @@ export function AgentSwitchPanel({
                 tone="soft"
                 getText={() => diagnosticText(progress)}
               />
-              <button
+              <ActionButton
+                tone="secondary"
                 type="button"
-                className={`${btnSecondary} ml-auto px-3 py-1.5 text-xs`}
+                className="ml-auto px-3 py-1.5 text-xs"
                 onClick={() => setRetryId(progress.id)}
               >
                 重试
-              </button>
-              <button
+              </ActionButton>
+              <ActionButton
+                tone="ghost"
                 type="button"
-                className={`${btnGhost} px-2 py-1.5 text-xs text-ink-soft`}
+                className="px-2 py-1.5 text-xs text-ink-soft"
                 onClick={() => controller.dismiss(progress.id)}
               >
                 关闭
-              </button>
+              </ActionButton>
             </div>
           )}
-        </section>
+        </HintSurface>
       )}
       {hideSidebar && (
         <SwitchStatusButton

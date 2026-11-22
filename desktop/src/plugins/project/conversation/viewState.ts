@@ -69,6 +69,7 @@ export const emptyRuntime: RuntimeStatusValues = {
     maxContextTokens: null,
     skillNames: [],
     toolNames: [],
+    toolInventoryKnown: false,
     skillSources: [],
     mcpServers: [],
     mcpFailures: [],

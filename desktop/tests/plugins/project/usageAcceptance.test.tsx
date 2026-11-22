@@ -611,3 +611,29 @@ it("U03 U05 U10 refreshes totals without showing an unknown-turn count in the su
     reopened.unmount();
   }
 });
+
+it("pauses hidden usage polling and refreshes expired cached data on return", async () => {
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+  vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+  const request = vi.fn<Request>().mockResolvedValue(empty);
+  bind(request);
+  const filter = createStore(() => ({ agent: "" }));
+  const view = render(<UsageSettings filter={filter} active={false} />);
+  expect(request).not.toHaveBeenCalled();
+  view.rerender(<UsageSettings filter={filter} />);
+  await screen.findByText("累计 Token");
+  expect(request).toHaveBeenCalledTimes(1);
+
+  view.rerender(<UsageSettings filter={filter} active={false} />);
+  view.rerender(<UsageSettings filter={filter} />);
+  expect(request).toHaveBeenCalledTimes(1);
+  view.rerender(<UsageSettings filter={filter} active={false} />);
+  await act(async () => vi.advanceTimersByTimeAsync(120_000));
+  expect(request).toHaveBeenCalledTimes(1);
+  await act(() => {
+    view.rerender(<UsageSettings filter={filter} />);
+    return Promise.resolve();
+  });
+  expect(screen.getByText("累计 Token")).toBeInTheDocument();
+  expect(request).toHaveBeenCalledTimes(2);
+});

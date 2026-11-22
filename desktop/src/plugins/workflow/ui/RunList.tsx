@@ -7,6 +7,7 @@ import { CircleHelpIcon } from "../../../shared/ui/icons.tsx";
 import { RUN_MARKS, runMarkKind, type RunMarkKind } from "./runMarks.tsx";
 import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { HintSurface } from "../../../shared/ui/controls/HintSurface.tsx";
 
 function MarkGlyph({ kind }: { kind: RunMarkKind }) {
@@ -62,12 +63,12 @@ export function RunRow({
     showEntry ? run.entryLabel : "",
     run.updatedAt != null ? formatAgo(run.updatedAt, now) : "",
   ].filter(Boolean).join(" · ");
-  return <button type="button" className="workflow-run-open" onClick={onOpen} aria-label={`查看运行 ${run.title}${ordinals}`}>
+  return <NavigationRow layout="compound" className="workflow-run-open" onClick={onOpen} aria-label={`查看运行 ${run.title}${ordinals}`}>
     <span className={`workflow-run-mark tone-${kind}`} aria-hidden="true" {...hintTooltipProps(label)}><MarkGlyph kind={kind} /></span>
     <span className="workflow-run-list-title" data-hint={run.title}>
       <span className="workflow-run-list-name">{`${run.title}${suffix}`}</span>
       {ordinal !== undefined && <em>{`第 ${ordinal} 次`}</em>}
     </span>
     {meta !== "" && <span className="workflow-run-list-meta">{meta}</span>}
-  </button>;
+  </NavigationRow>;
 }

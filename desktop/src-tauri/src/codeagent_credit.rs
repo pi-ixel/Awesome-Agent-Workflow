@@ -34,14 +34,17 @@ pub(crate) struct TokenQuotaResult {
 
 #[tauri::command]
 pub(crate) async fn codeagent_credit_quota(
-    window: tauri::WebviewWindow,
+    webview: tauri::Webview,
     quota: tauri::State<'_, CreditQuota>,
 ) -> Result<QuotaResult, String> {
-    if window.label() != "main" {
+    if webview.label() != "main" {
         return Ok(QuotaResult::Unavailable);
     }
     #[cfg(windows)]
-    return Ok(windows::read(&window, &quota, windows::Query::Credit).await);
+    {
+        use tauri::Manager;
+        Ok(windows::read(webview.app_handle(), &quota, windows::Query::Credit).await)
+    }
     #[cfg(not(windows))]
     {
         let _ = quota;
@@ -51,11 +54,11 @@ pub(crate) async fn codeagent_credit_quota(
 
 #[tauri::command]
 pub(crate) async fn codeagent_token_quota(
-    window: tauri::WebviewWindow,
+    webview: tauri::Webview,
     quota: tauri::State<'_, CreditQuota>,
     model_id: Option<String>,
 ) -> Result<TokenQuotaResult, String> {
-    if window.label() != "main" {
+    if webview.label() != "main" {
         return Ok(TokenQuotaResult {
             result: QuotaResult::Unavailable,
             #[cfg(windows)]
@@ -64,9 +67,11 @@ pub(crate) async fn codeagent_token_quota(
     }
     #[cfg(windows)]
     {
-        let result = windows::read(&window, &quota, windows::Query::Token(model_id)).await;
-        let models = windows::result_models(&window, &result).await;
-        return Ok(TokenQuotaResult { result, models });
+        use tauri::Manager;
+        let app = webview.app_handle();
+        let result = windows::read(app, &quota, windows::Query::Token(model_id)).await;
+        let models = windows::result_models(app, &result).await;
+        Ok(TokenQuotaResult { result, models })
     }
     #[cfg(not(windows))]
     {
@@ -429,10 +434,7 @@ mod windows {
         models
     }
 
-    pub(super) async fn result_models(
-        window: &tauri::WebviewWindow,
-        result: &QuotaResult,
-    ) -> Vec<Model> {
+    pub(super) async fn result_models(app: &tauri::AppHandle, result: &QuotaResult) -> Vec<Model> {
         match result {
             QuotaResult::Ready { snapshot } | QuotaResult::Stale { snapshot } => {
                 snapshot.models.clone()
@@ -440,7 +442,7 @@ mod windows {
             QuotaResult::SignInRequired => Vec::new(),
             // 额度接口失败时，仍允许用户切换到其它具体模型。
             _ => {
-                let Ok(home) = window.path().home_dir() else {
+                let Ok(home) = app.path().home_dir() else {
                     return Vec::new();
                 };
                 tokio::fs::read(home.join(".cac.json"))
@@ -552,19 +554,17 @@ mod windows {
     }
 
     pub(super) async fn read(
-        window: &tauri::WebviewWindow,
+        app: &tauri::AppHandle,
         quota: &CreditQuota,
         query: Query,
     ) -> QuotaResult {
-        let Ok(home) = window.path().home_dir() else {
+        let Ok(home) = app.path().home_dir() else {
             return QuotaResult::Unavailable;
         };
-        let saved_path = crate::storage_location::data_dir(window.app_handle())
-            .ok()
-            .map(|root| {
-                root.join("configuration")
-                    .join("codeagent-token-quota.json")
-            });
+        let saved_path = crate::storage_location::data_dir(app).ok().map(|root| {
+            root.join("configuration")
+                .join("codeagent-token-quota.json")
+        });
         let mut cache = quota.cache.lock().await;
         let token = match read_credentials(&home).await {
             Ok(token) => token,

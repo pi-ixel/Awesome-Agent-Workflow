@@ -9,20 +9,42 @@ export function EmptyState({
   title,
   description,
   action,
+  density = "standard",
+  role = "status",
   className = "",
 }: {
   readonly icon?: ReactNode;
   readonly title: ReactNode;
   readonly description?: ReactNode;
   readonly action?: ReactNode;
+  readonly density?: "standard" | "compact";
+  readonly role?: "status" | "alert";
   readonly className?: string;
 }) {
   return (
-    <div role="status" className={`flex flex-col items-center gap-1.5 px-3 py-6 text-center ${className}`}>
-      {icon && <span aria-hidden={true} className="mb-1 text-ink-faint [&_svg]:ui-icon-24">{icon}</span>}
+    <div
+      role={role}
+      className={`flex min-w-0 flex-col items-center gap-1.5 px-3 py-6 text-center ${density === "compact" ? "min-h-32 justify-center" : ""} ${className}`}
+    >
+      {icon && (
+        <span
+          aria-hidden={true}
+          className={`mb-1 text-ink-faint ${density === "compact" ? "[&_svg]:ui-icon-16" : "[&_svg]:ui-icon-24"}`}
+        >
+          {icon}
+        </span>
+      )}
       <span className="text-ui-sm font-medium text-ink">{title}</span>
-      {description && <span className="max-w-[34ch] text-ui-sm text-ink-mute">{description}</span>}
-      {action && <div className="mt-1.5 flex flex-wrap justify-center gap-2">{action}</div>}
+      {description && (
+        <span className="w-full max-w-[34ch] [overflow-wrap:anywhere] text-ui-sm text-ink-mute">
+          {description}
+        </span>
+      )}
+      {action && (
+        <div className="mt-1.5 flex flex-wrap justify-center gap-2">
+          {action}
+        </div>
+      )}
     </div>
   );
 }

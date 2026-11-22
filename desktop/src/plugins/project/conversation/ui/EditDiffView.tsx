@@ -1,3 +1,9 @@
+import { ActionButton } from "../../../../shared/ui/controls.tsx";
+import {
+  diffAppearance,
+  diffSurfaceClass,
+} from "../../../../shared/ui/diffStyles.ts";
+import { NavigationRow } from "../../../../shared/ui/NavigationRow.tsx";
 import { useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
 import { useProjectView } from "../../ui/bindings/projectView.tsx";
 import { useRegisteredSnapshot } from "../../../../shared/state/useRegisteredSnapshot.ts";
@@ -8,20 +14,17 @@ import { useRegisteredSnapshot } from "../../../../shared/state/useRegisteredSna
  * - write_file：新内容预览（超过 WRITE_PREVIEW_LINE_LIMIT 行截断提示）。
  * 数据全部来自 editDiff 纯函数，本组件只做渲染。
  */
-import { useMemo, useState, type ReactNode } from "react";
+import {
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { ChevronRightIcon } from "../../../../shared/ui/icons.tsx";
 import type { DiffResult, EditPayload } from "./editDiff.ts";
 import { buildDiffRows, previewLines } from "./editDiff.ts";
 import { FilePathButton } from "../../ui/FilePathButton.tsx";
-
-/** diff 行的底色：ZCode lightweight-diff-preview 公式——14% 行底 + 3px
-    内嵌状态条（token 落 index.css --color-diff-*-row，双主题同源）。 */
-const rowClasses: Readonly<Record<string, string>> = {
-  context: "",
-  add: "bg-diff-added-row shadow-[inset_3px_0_0_var(--color-diff-added)]",
-  del: "bg-diff-removed-row shadow-[inset_3px_0_0_var(--color-diff-removed)]",
-  gap: "",
-};
 
 /** This card describes one tool payload, never the whole turn or worktree. */
 function FileChangeCard({
@@ -37,16 +40,19 @@ function FileChangeCard({
   readonly children: ReactNode;
   readonly defaultExpanded?: boolean;
 }) {
-  const openGitReview = useRegisteredSnapshot(useProjectView()?.gitReview, (review) => review?.open);
+  const openGitReview = useRegisteredSnapshot(
+    useProjectView()?.gitReview,
+    (review) => review?.open,
+  );
   const [expanded, setExpanded] = useState(defaultExpanded);
   const project = useWorkspaceValue((state) => state.activePath);
   return (
     <div className="overflow-hidden bg-surface">
-      <button
-        type="button"
+      <NavigationRow
+        layout="compound"
         aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
-        className="flex min-h-10 w-full items-center gap-2 px-3 text-left text-ui-base hover:bg-hover"
+        className="flex min-h-10 w-full items-center gap-2 px-3 text-left text-ui-base hover:bg-surface-hover"
       >
         <ChevronRightIcon
           className={`ui-icon-14 shrink-0 text-ink-mute transition-transform ${expanded ? "rotate-90" : ""}`}
@@ -54,19 +60,21 @@ function FileChangeCard({
         <span className="shrink-0 font-medium">{label}</span>
         <span className="min-w-0 flex-1 truncate text-ink-soft">{path}</span>
         <span className="shrink-0 tabular-nums">{stats}</span>
-      </button>
+      </NavigationRow>
       {expanded && (
         <div className="border-t border-line">
           <div className="flex min-w-0 items-center gap-2 px-3 py-2 text-ui-base">
             <FilePathButton path={path} />
             {!defaultExpanded && project && openGitReview && (
-              <button
+              <ActionButton
+                tone="secondary"
+                size="compact"
                 type="button"
-                className="ml-auto shrink-0 rounded border border-line px-2 py-1 text-ui-sm hover:bg-hover"
+                className="ml-auto shrink-0"
                 onClick={() => openGitReview(project, "changes")}
               >
                 查看工作区变更
-              </button>
+              </ActionButton>
             )}
           </div>
           {children}
@@ -77,64 +85,85 @@ function FileChangeCard({
 }
 
 function DiffRowsView({ diff }: { readonly diff: DiffResult }) {
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const rowsRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    const rows = rowsRef.current;
+    if (!viewport || !rows || typeof ResizeObserver === "undefined") return;
+    let anchor: HTMLElement | undefined;
+    let offset = 0;
+    const remember = () => {
+      anchor = [...rows.children].find(
+        (row): row is HTMLElement =>
+          row instanceof HTMLElement &&
+          row.offsetTop + row.offsetHeight > viewport.scrollTop,
+      );
+      offset = anchor
+        ? (viewport.scrollTop - anchor.offsetTop) /
+          Math.max(anchor.offsetHeight, 1)
+        : 0;
+    };
+    remember();
+    const observer = new ResizeObserver(() => {
+      if (anchor)
+        viewport.scrollTop = anchor.offsetTop + offset * anchor.offsetHeight;
+    });
+    observer.observe(rows);
+    viewport.addEventListener("scroll", remember, { passive: true });
+    return () => {
+      viewport.removeEventListener("scroll", remember);
+      observer.disconnect();
+    };
+  }, [diff]);
+
   if (diff.rows.length === 0) {
     return <p className="px-3 py-1.5 text-ui-sm text-ink-mute">（无差异行）</p>;
   }
   return (
     <div
-      className="max-h-60 overflow-auto bg-base font-mono text-xs leading-relaxed text-ink"
+      ref={viewportRef}
+      className={`max-h-60 overflow-auto text-ui-xs [overflow-anchor:none] ${diffSurfaceClass}`}
       aria-label="行级差异"
     >
-      {diff.rows.map((row, index) => (
-        <div
-          key={index}
-          className={`flex gap-2 px-3 whitespace-pre-wrap break-words ${
-            rowClasses[row.type] ?? ""
-          }`}
-        >
-          <span
-            className={`w-12 shrink-0 select-none px-2 text-right tabular-nums ${
-              row.type === "add"
-                ? "bg-diff-added-gutter text-diff-added"
-                : row.type === "del"
-                  ? "bg-diff-removed-gutter text-diff-removed"
-                  : "text-ink-subtlest"
-            }`}
+      <div ref={rowsRef} className="relative">
+        {diff.rows.map((row, index) => (
+          <div
+            key={index}
+            className={`flex gap-2 px-3 whitespace-pre-wrap break-words ${diffAppearance[row.type].row}`}
           >
-            {row.type === "gap" ? "" : (row.oldNo ?? "")}
-          </span>
-          <span
-            className={`w-10 shrink-0 select-none border-r border-line px-2 text-right tabular-nums ${
-              row.type === "add"
-                ? "bg-diff-added-gutter text-diff-added"
-                : row.type === "del"
-                  ? "bg-diff-removed-gutter text-diff-removed"
-                  : "text-ink-subtlest"
-            }`}
-          >
-            {row.type === "gap" ? "" : (row.newNo ?? "")}
-          </span>
-          <span
-            aria-hidden={true}
-            className="w-3 shrink-0 select-none text-center"
-          >
-            {row.type === "add" ? (
-              <span className="text-diff-added">+</span>
-            ) : row.type === "del" ? (
-              <span className="text-diff-removed">−</span>
-            ) : row.type === "gap" ? (
-              <span className="text-ink-mute">⋯</span>
-            ) : null}
-          </span>
-          <span
-            className={`min-w-0 flex-1 ${
-              row.type === "gap" ? "select-none text-ink-mute" : "text-ink"
-            }`}
-          >
-            {row.text}
-          </span>
-        </div>
-      ))}
+            <span
+              className={`w-[max(36px,6ch)] shrink-0 select-none px-1 text-right tabular-nums ${diffAppearance[row.type].gutter}`}
+            >
+              {row.type === "gap" ? "" : (row.oldNo ?? "")}
+            </span>
+            <span
+              className={`w-[max(36px,6ch)] shrink-0 select-none border-r border-line px-1 text-right tabular-nums ${diffAppearance[row.type].gutter}`}
+            >
+              {row.type === "gap" ? "" : (row.newNo ?? "")}
+            </span>
+            <span
+              aria-hidden={true}
+              className="w-3 shrink-0 select-none text-center"
+            >
+              {row.type === "add" ? (
+                <span className={diffAppearance.add.ink}>+</span>
+              ) : row.type === "del" ? (
+                <span className={diffAppearance.del.ink}>−</span>
+              ) : row.type === "gap" ? (
+                <span className="text-ink-mute">⋯</span>
+              ) : null}
+            </span>
+            <span
+              className={`min-w-0 flex-1 ${
+                row.type === "gap" ? "select-none text-ink-mute" : "text-ink"
+              }`}
+            >
+              {row.text}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -144,7 +173,7 @@ function WritePreview({ content }: { readonly content: string }) {
   const preview = useMemo(() => previewLines(content), [content]);
   return (
     <div
-      className="max-h-60 overflow-auto bg-base p-2.5 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-ink"
+      className={`max-h-60 overflow-auto p-2.5 text-ui-xs whitespace-pre-wrap break-words ${diffSurfaceClass}`}
       aria-label="新文件内容预览"
     >
       {preview.lines.length === 0
@@ -183,8 +212,8 @@ function EditCard({
       label="修改片段"
       stats={
         <span>
-          <span className="text-diff-added">+{diff.added}</span>{" "}
-          <span className="text-diff-removed">−{diff.removed}</span>
+          <span className={diffAppearance.add.ink}>+{diff.added}</span>{" "}
+          <span className={diffAppearance.del.ink}>−{diff.removed}</span>
         </span>
       }
     >

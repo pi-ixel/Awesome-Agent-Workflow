@@ -1,7 +1,5 @@
 @import "tailwindcss";
-/* highlight.js 主题：配合 rehype-highlight 渲染代码块。
-   基底引入 github-dark（暗夜为默认主题）；暖白下的 token 覆盖见文件末尾
-   的 `html.theme-warm` 作用域块。 */
+/* highlight.js 提供基础排版，语法颜色由共享主题变量控制。 */
 @import "highlight.js/styles/github-dark.css";
 /* streamdown 渲染基座与 KaTeX 公式样式(ZCode 同款接线;KaTeX 缺 CSS 会
    出现 MathML + HTML 双层重复显示) */
@@ -61,8 +59,8 @@
   }
 
   .sidebar-account-avatar {
-    color: #393653;
-    background: linear-gradient(150deg, #c8bff0 50%, #9acde2 50%);
+    color: var(--color-avatar-ink);
+    background: linear-gradient(150deg, var(--color-avatar-violet) 50%, var(--color-avatar-blue) 50%);
   }
 
   .icon-hover-glyph {
@@ -382,7 +380,66 @@ html.theme-warm {
   --color-control-line: #484848;
   --color-dialog-line: #484848;
   --color-focus-ring: #ababab;
+  /* 文件类型共用品牌色，相邻文件行的默认与悬停表面均可辨认。 */
+  --color-file-audio: #8b7cf6;
+  --color-file-config-orange: #f57d00;
+  --color-file-console: #5fa04e;
+  --color-file-css: #9572b9;
+  --color-file-database: #c96442;
+  --color-file-docker: #de5241;
+  --color-file-document: #8a8f98;
+  --color-file-eslint: #8372d6;
+  --color-file-gemfile: #d55953;
+  --color-file-git: #f05133;
+  --color-file-go: #00a3c4;
+  --color-file-html: #d2691e;
+  --color-file-image: #46bf72;
+  --color-file-java: #b1731b;
+  --color-file-javascript: #d4a017;
+  --color-file-jest: #b16f79;
+  --color-file-json: #bf9c00;
+  --color-file-makefile: #6a9e58;
+  --color-file-markdown: #4099ff;
+  --color-file-nodejs-alt: #528f4d;
+  --color-file-npm: #d45a59;
+  --color-file-pdf: #e44a4a;
+  --color-file-php: #7a7eb1;
+  --color-file-powerpoint: #d6593c;
+  --color-file-prettier: #b96bc6;
+  --color-file-python: #5186b2;
+  --color-file-react: #2f9ee0;
+  --color-file-rust: #c76540;
+  --color-file-snapcraft: #5a9e6f;
+  --color-file-storybook: #db4d7b;
+  --color-file-svg: #a071c9;
+  --color-file-table: #4d8f6c;
+  --color-file-typescript: #4484cb;
+  --color-file-video: #e06c75;
+  --color-file-vitest: #729b1b;
+  --color-file-word: #6282b4;
+  --color-file-yarn: #2c8ebb;
+  --color-code-text: #c9d1d9;
+  --color-code-keyword: #ff7b72;
+  --color-code-title: #d2a8ff;
+  --color-code-constant: #79c0ff;
+  --color-code-string: #a5d6ff;
+  --color-code-builtin: #ffa657;
+  --color-code-comment: #98a0a9;
+  --color-code-name: #7ee787;
+  --color-code-section: #80beff;
+  --color-code-bullet: #f2cc60;
+  --color-code-addition: #aff5b4;
+  --color-code-addition-bg: #033a16;
+  --color-code-deletion: #ffdcd7;
+  --color-code-deletion-bg: #67060c;
+  --color-window-halo: rgb(14 165 233 / 0.07);
   --color-chart-line: #80beff;
+  --color-usage-series-1: #80beff;
+  --color-usage-series-2: #67d8bd;
+  --color-usage-series-3: #bc9aef;
+  --color-usage-series-4: #f2b678;
+  --color-usage-series-5: #ef97bb;
+  --color-usage-series-6: #a7c4d4;
   --color-annotation-underline: #f5c64b;
 
   /* 选中行 / 激活页签底：Zai 的 selected = 白 10%（中性，无色相） */
@@ -398,6 +455,8 @@ html.theme-warm {
   /* diff 行、标记和统计共享可辨的绿红颜色。 */
   --color-diff-added: #67d887;
   --color-diff-removed: #ff8585;
+  --color-diff-added-ink: var(--color-diff-added);
+  --color-diff-removed-ink: var(--color-diff-removed);
 
   /* 当前查找命中使用深色文字，与亮橙背景区分。 */
   --color-find-highlight: #542500;
@@ -416,6 +475,8 @@ html.theme-warm {
   /* 右栏遮罩（收编 RightPanel 字面 bg-black/25；ZCode 原值未勘察，
      沿用 desktop 现值，两主题同值不虚构差异） */
   --color-scrim: rgb(0 0 0 / 0.25);
+  --color-overlay-shade: #000;
+  --color-media-ink: #fff;
 
   /* 右键/下拉菜单容器（ZCode bg-menu，zai-dark styles.css:759；zai-light :595） */
   --color-menu: #2b2b2b;
@@ -483,6 +544,9 @@ html.theme-warm {
   /* 红色文字统一跟随 diff 删除统计；避免状态标签与统计呈现两种红色。 */
   --color-danger-ink: var(--color-diff-removed);
   --color-danger-line: #783333;
+  --color-danger-solid: #dc2626;
+  --color-danger-solid-hover: #b91c1c;
+  --color-danger-solid-ink: #fff;
 
   /* 状态：信息（Zai 蓝 #4099ff 族） */
   --color-info-bg: #1e2739;
@@ -585,7 +649,66 @@ html.theme-warm {
   --color-control-line: #e3e3e3;
   --color-dialog-line: #d3d3d3;
   --color-focus-ring: #737373;
-  --color-chart-line: #bad9ff;
+  /* 文件类型共用品牌色，相邻文件行的默认与悬停表面均可辨认。 */
+  --color-file-audio: #796cd6;
+  --color-file-config-orange: #bf6200;
+  --color-file-console: #518842;
+  --color-file-css: #663399;
+  --color-file-database: #bf5f3f;
+  --color-file-docker: #d94a38;
+  --color-file-document: #777b83;
+  --color-file-eslint: #4b32c3;
+  --color-file-gemfile: #cc342d;
+  --color-file-git: #d8492e;
+  --color-file-go: #0086a1;
+  --color-file-html: #bf601b;
+  --color-file-image: #338b53;
+  --color-file-java: #a96d18;
+  --color-file-javascript: #9b7511;
+  --color-file-jest: #99424f;
+  --color-file-json: #937800;
+  --color-file-makefile: #5a864b;
+  --color-file-markdown: #347ccf;
+  --color-file-nodejs-alt: #43853d;
+  --color-file-npm: #cb3837;
+  --color-file-pdf: #e03131;
+  --color-file-php: #7377ad;
+  --color-file-powerpoint: #d24726;
+  --color-file-prettier: #a660b2;
+  --color-file-python: #3572a5;
+  --color-file-react: #2782b8;
+  --color-file-rust: #c1542b;
+  --color-file-snapcraft: #4c865e;
+  --color-file-storybook: #d74373;
+  --color-file-svg: #9368b9;
+  --color-file-table: #1e7145;
+  --color-file-typescript: #3178c6;
+  --color-file-video: #be5c63;
+  --color-file-vitest: #628517;
+  --color-file-word: #2b569a;
+  --color-file-yarn: #2883ac;
+  --color-code-text: #24292e;
+  --color-code-keyword: #b0303c;
+  --color-code-title: #6f42c1;
+  --color-code-constant: #005cc5;
+  --color-code-string: #032f62;
+  --color-code-builtin: #9f4506;
+  --color-code-comment: #596169;
+  --color-code-name: #1c6e30;
+  --color-code-section: #005cc5;
+  --color-code-bullet: #735c0f;
+  --color-code-addition: #1c6e30;
+  --color-code-addition-bg: #f0fff4;
+  --color-code-deletion: #b0303c;
+  --color-code-deletion-bg: #ffeef0;
+  --color-window-halo: rgb(14 165 233 / 0.05);
+  --color-chart-line: var(--color-info-ink);
+  --color-usage-series-1: #0867ce;
+  --color-usage-series-2: #15785f;
+  --color-usage-series-3: #7951b0;
+  --color-usage-series-4: #9a571c;
+  --color-usage-series-5: #a63563;
+  --color-usage-series-6: #496e81;
   --color-annotation-underline: #ca8a04;
   --usage-heatmap-empty: color-mix(in oklab, currentColor 4%, transparent);
   --usage-heatmap-1: color-mix(in oklab, #0b7fff 18%, var(--color-surface));
@@ -599,14 +722,15 @@ html.theme-warm {
 
   --color-ink: #262626; /* 主文字（neutral-800，Zai light foreground） */
   --color-ink-soft: #525252;
-  --color-ink-mute: #737373;
-  --color-ink-faint: #a3a3a3;
-  --color-ink-ghost: #d4d4d4;
+  --color-ink-mute: #565656;
+  --color-ink-faint: #606060;
+  --color-ink-ghost: #616161;
 
-  /* diff 饱和绿红（ZCode zai-light 原值 styles.css:628/:630）：diffstat
-     与 diff 行底/行号/±计数同源 */
+  /* 行首标记与背景混色沿用原绿红；行号和统计复用代码主题的高对比文字色。 */
   --color-diff-added: #1e8a3e;
   --color-diff-removed: #e03131;
+  --color-diff-added-ink: var(--color-code-addition);
+  --color-diff-removed-ink: var(--color-code-deletion);
 
   /* 查找高亮（zai-light styles.css:529-530） */
   --color-find-highlight: #fff4eb;
@@ -624,6 +748,8 @@ html.theme-warm {
 
   /* 右栏遮罩（与暗夜同值，出处见暗色块注释） */
   --color-scrim: rgb(0 0 0 / 0.25);
+  --color-overlay-shade: #000;
+  --color-media-ink: #fff;
 
   /* 行悬停（ZCode bg-surface-hover，zai-light styles.css:539——此前缺失，
      浅色主题会错用暗色 10% 白，必修） */
@@ -637,11 +763,11 @@ html.theme-warm {
      独立成 token 以对齐 ZCode 语义名） */
   --color-icon-blue: #0066dd;
   /* foreground-subtle 同位级：前景 60% 洗色（zai-light :610 neutral-800@60%） */
-  --color-ink-subtle: rgb(38 38 38 / 0.6);
+  --color-ink-subtle: #595959;
 
   /* foreground-subtlest（zai-light = neutral-800@40%，styles.css:612；
      neutral-800=#262626） */
-  --color-ink-subtlest: rgb(38 38 38 / 0.4);
+  --color-ink-subtlest: #606060;
 
   /* 发送钮主色 brand（ZCode bg-brand zai-light #000000 黑底白字）与
      text-foreground-inverse（zai-light #ffffff，styles.css:614） */
@@ -680,12 +806,15 @@ html.theme-warm {
   --color-ok-line: #b7e0c2;
 
   --color-warn-bg: #f6e9da;
-  --color-warn-ink: #e25507;
+  --color-warn-ink: #9b400b;
   --color-warn-line: #f0c8a8;
 
   --color-danger-bg: #f6e4e4;
-  --color-danger-ink: var(--color-diff-removed);
+  --color-danger-ink: #b42323;
   --color-danger-line: #f0b9b9;
+  --color-danger-solid: #c52929;
+  --color-danger-solid-hover: #a62020;
+  --color-danger-solid-ink: #fff;
 
   --color-info-bg: #ebf4ff;
   --color-info-ink: #0867ce;
@@ -763,90 +892,82 @@ html.theme-warm {
   background: transparent;
 }
 
-/**
- * highlight.js 暖白适配：在 `html.theme-warm` 作用域内覆盖各 token
- * 颜色（取自 highlight.js 官方 github-light 主题）。
- *
- * 实现取舍：不用「动态切换样式表引入」——那需要 JS 增删 <link>、
- * 处理加载完成前的闪烁（FOUC）与双份网络请求；这里纯 CSS 按根类
- * 作用域覆盖，主题切换零延迟、构建期合入同一产物，token 类名集合
- * 有限且稳定（hljs 官方类名十年未变），维护成本可控。
- */
-html.theme-warm .hljs {
-  color: #24292e;
+/* highlight.js 保留语法类别；颜色由应用外观设置统一提供。 */
+.hljs {
+  color: var(--color-code-text);
 }
-html.theme-warm .hljs-doctag,
-html.theme-warm .hljs-keyword,
-html.theme-warm .hljs-meta .hljs-keyword,
-html.theme-warm .hljs-template-tag,
-html.theme-warm .hljs-template-variable,
-html.theme-warm .hljs-type,
-html.theme-warm .hljs-variable.language_ {
-  color: #d73a49;
+.hljs-doctag,
+.hljs-keyword,
+.hljs-meta .hljs-keyword,
+.hljs-template-tag,
+.hljs-template-variable,
+.hljs-type,
+.hljs-variable.language_ {
+  color: var(--color-code-keyword);
 }
-html.theme-warm .hljs-title,
-html.theme-warm .hljs-title.class_,
-html.theme-warm .hljs-title.class_.inherited__,
-html.theme-warm .hljs-title.function_ {
-  color: #6f42c1;
+.hljs-title,
+.hljs-title.class_,
+.hljs-title.class_.inherited__,
+.hljs-title.function_ {
+  color: var(--color-code-title);
 }
-html.theme-warm .hljs-attr,
-html.theme-warm .hljs-attribute,
-html.theme-warm .hljs-literal,
-html.theme-warm .hljs-meta,
-html.theme-warm .hljs-number,
-html.theme-warm .hljs-operator,
-html.theme-warm .hljs-variable,
-html.theme-warm .hljs-selector-attr,
-html.theme-warm .hljs-selector-class,
-html.theme-warm .hljs-selector-id {
-  color: #005cc5;
+.hljs-attr,
+.hljs-attribute,
+.hljs-literal,
+.hljs-meta,
+.hljs-number,
+.hljs-operator,
+.hljs-variable,
+.hljs-selector-attr,
+.hljs-selector-class,
+.hljs-selector-id {
+  color: var(--color-code-constant);
 }
-html.theme-warm .hljs-regexp,
-html.theme-warm .hljs-string,
-html.theme-warm .hljs-meta .hljs-string {
-  color: #032f62;
+.hljs-regexp,
+.hljs-string,
+.hljs-meta .hljs-string {
+  color: var(--color-code-string);
 }
-html.theme-warm .hljs-built_in,
-html.theme-warm .hljs-symbol {
-  color: #e36209;
+.hljs-built_in,
+.hljs-symbol {
+  color: var(--color-code-builtin);
 }
-html.theme-warm .hljs-comment,
-html.theme-warm .hljs-code,
-html.theme-warm .hljs-formula {
-  color: #6a737d;
+.hljs-comment,
+.hljs-code,
+.hljs-formula {
+  color: var(--color-code-comment);
 }
-html.theme-warm .hljs-name,
-html.theme-warm .hljs-quote,
-html.theme-warm .hljs-selector-tag,
-html.theme-warm .hljs-selector-pseudo {
-  color: #22863a;
+.hljs-name,
+.hljs-quote,
+.hljs-selector-tag,
+.hljs-selector-pseudo {
+  color: var(--color-code-name);
 }
-html.theme-warm .hljs-subst {
-  color: #24292e;
+.hljs-subst {
+  color: var(--color-code-text);
 }
-html.theme-warm .hljs-section {
-  color: #005cc5;
+.hljs-section {
+  color: var(--color-code-section);
   font-weight: bold;
 }
-html.theme-warm .hljs-bullet {
-  color: #735c0f;
+.hljs-bullet {
+  color: var(--color-code-bullet);
 }
-html.theme-warm .hljs-emphasis {
-  color: #24292e;
+.hljs-emphasis {
+  color: var(--color-code-text);
   font-style: italic;
 }
-html.theme-warm .hljs-strong {
-  color: #24292e;
+.hljs-strong {
+  color: var(--color-code-text);
   font-weight: bold;
 }
-html.theme-warm .hljs-addition {
-  color: #22863a;
-  background-color: #f0fff4;
+.hljs-addition {
+  color: var(--color-code-addition);
+  background-color: var(--color-code-addition-bg);
 }
-html.theme-warm .hljs-deletion {
-  color: #d73a49;
-  background-color: #ffeef0;
+.hljs-deletion {
+  color: var(--color-code-deletion);
+  background-color: var(--color-code-deletion-bg);
 }
 
 /**
@@ -894,14 +1015,7 @@ body::before {
   pointer-events: none;
   background: radial-gradient(
     720px 320px at 50% -80px,
-    rgb(14 165 233 / 0.07),
-    transparent 70%
-  );
-}
-html.theme-warm body::before {
-  background: radial-gradient(
-    720px 320px at 50% -80px,
-    rgb(14 165 233 / 0.05),
+    var(--color-window-halo),
     transparent 70%
   );
 }
@@ -917,7 +1031,7 @@ html.theme-warm body::before {
 .press {
   transition: transform 80ms ease;
 }
-.press:active:not(:disabled) {
+.press:active:not(:disabled):not([aria-disabled="true"]) {
   transform: scale(0.97);
 }
 .lift {
@@ -986,23 +1100,7 @@ html.theme-warm body::before {
 
 /** 运行中站灯的光晕（时间线「在动」的能量感）。 */
 .lamp-glow-running {
-  filter: drop-shadow(0 0 6px rgb(245 158 11 / 0.45));
-}
-
-/** 输入卡悬停/聚焦（ZCode 壳 ChatPromptEditor.tsx:410 hover:border-input-border-hover
-    focus-within:!border-input-border-focused；zai 主题两者皆 = border-hover 15%，
-    styles.css:550-551/:714-715；扁平：只变描边，不发蓝光、不加投影）。
-    line-strong 随主题变化，滚动条沿用共享边界色。 */
-.composer-card {
-  transition:
-    border-color 160ms ease,
-    box-shadow 160ms ease;
-}
-.composer-card:hover {
-  border-color: var(--color-line-strong);
-}
-.composer-card:focus-within {
-  border-color: var(--color-line-strong);
+  filter: drop-shadow(0 0 6px var(--color-running-glow));
 }
 
 /* Shared entrance for composer menus and listboxes. Individual transforms
@@ -1074,7 +1172,7 @@ html.theme-warm body::before {
   .lift {
     transition: none;
   }
-  .press:active:not(:disabled) {
+  .press:active:not(:disabled):not([aria-disabled="true"]) {
     transform: none;
   }
   .lift:hover {
@@ -1148,13 +1246,13 @@ html.theme-warm body::before {
   /* 水印=hero 自身背景层（背景不存在绘制剔除问题）：透明度预烘进素材
      alpha，完整呈现不裁切。min-height 给完整 logo 留画布（背景置顶），
      品牌行+问候沉到画布底部、不遮挡 logo（用户定稿：字在下、图完整）。 */
-  min-height: 26rem;
+  min-height: min(calc(416 * var(--ui-icon-unit)), 72vh);
   justify-content: flex-end;
   padding-bottom: 4px;
   background-image: url("../assets/aaw-logo-mark.png");
   background-repeat: no-repeat;
   background-position: center top;
-  background-size: min(100%, 25rem) auto;
+  background-size: min(100%, calc(400 * var(--ui-icon-unit)), 65vh) auto;
 }
 html.theme-warm .draft-greeting-hero {
   background-image: url("../assets/aaw-logo-mark-light.png");
@@ -1206,11 +1304,11 @@ html.theme-warm .draft-greeting-hero {
   padding: 2px;
   background: conic-gradient(
     from var(--annotation-border-angle),
-    #77c9ed,
-    #ab8aee,
-    #eb99c2,
-    #eac57f,
-    #77c9ed
+    var(--color-annotation-sky),
+    var(--color-annotation-violet),
+    var(--color-annotation-pink),
+    var(--color-annotation-gold),
+    var(--color-annotation-sky)
   );
   mask:
     linear-gradient(#fff 0 0) content-box,
@@ -1248,8 +1346,6 @@ html:not(.theme-warm) :is(button, input, select, textarea):disabled { opacity: 0
 /* Some local controls use structural borders; keep their interactive edge visible in dark mode. */
 html:not(.theme-warm) :is(button, input, textarea, select, [role="combobox"])[class~="border-line"]:not(:focus-visible) { border-color: var(--color-control-line); }
 
-/* GitHub dark section headings need enough contrast on the code background. */
-html:not(.theme-warm) .hljs-section { color: #80beff; }
 
 :root {
   --color-annotation-underline: #f5c64b;
@@ -1260,6 +1356,76 @@ html:not(.theme-warm) .hljs-section { color: #80beff; }
   --usage-heatmap-4: #b6dbff;
 }
 
-/* Keep text readable on solid danger actions in dark mode. */
-html:not(.theme-warm) .contrast-danger-solid { background-color: #dc2626; }
-html:not(.theme-warm) .contrast-danger-solid:hover:not(:disabled) { background-color: #b91c1c; }
+
+/* 共享品牌标志、头像与批注装饰色。 */
+:root {
+  --color-avatar-ink: #393653;
+  --color-avatar-violet: #c8bff0;
+  --color-avatar-blue: #9acde2;
+  --color-annotation-sky: #77c9ed;
+  --color-annotation-violet: #ab8aee;
+  --color-annotation-pink: #eb99c2;
+  --color-annotation-gold: #eac57f;
+  --color-running-glow: rgb(245 158 11 / 0.45);
+  --color-brand-halo-cyan: rgb(34 211 238 / 12%);
+  --color-brand-halo-violet: rgb(168 85 247 / 13%);
+  --color-brand-logo-shadow: rgb(124 58 237 / 12%);
+  --color-brand-immersive-shadow: rgb(124 58 237 / 22%);
+}
+
+/* 工作流画布表面、描边与阴影，由根元素主题统一提供。 */
+:root {
+  /* 画布的实体层级：托盘是凹进去的纸槽，卡是抬起来的纸片。
+     这一组变量以前是把深色公式写死在各条规则里的（base 混黑、硬黑阴影），
+     换到暖白主题后托盘与卡被算成同一档灰 —— 整张图糊成一片瓦灰、阴影变成
+     脏污块、子流程叠板变成一条黑杠。现在两套主题各给一份取值。 */
+  --workflow-card-hover-drop: 0 12px 22px -12px rgb(0 0 0 / .32);
+  --workflow-connector-inset: inset 0 1px 0 rgb(24 24 27 / .06);
+  --workflow-tools-drop: 0 6px 14px -10px rgb(24 24 27 / .35);
+  --workflow-zoom-inset: inset 0 1px 2px rgb(24 24 27 / .07);
+  --workflow-tray:color-mix(in srgb, var(--color-surface) 40%, var(--color-base));
+  --workflow-tray-edge:var(--color-line-strong);
+  --workflow-tray-shadow:inset 0 6px 16px -4px color-mix(in srgb, #000 40%, transparent), inset 0 -3px 8px rgb(0 0 0 / .18), 0 1px 0 color-mix(in srgb, #fff 6%, transparent);
+  /* 槽头不再自己铺一层底色（那层在托盘上就是一块脏灰）：只留一条分隔线，
+     标题直接坐在托盘上 —— 原型 .cz-band-head 只有 border-bottom，没有 background。 */
+  --workflow-tray-head:transparent;
+  --workflow-tray-head-edge:var(--color-line);
+  --workflow-plate-face:color-mix(in srgb, var(--color-raised) 72%, var(--color-base));
+  --workflow-plate-deep:color-mix(in srgb, var(--color-raised) 48%, var(--color-base));
+  --workflow-chip:linear-gradient(180deg, var(--color-raised) 0%, color-mix(in srgb, var(--color-raised) 82%, var(--color-base)) 100%);
+  --workflow-chip-edge:var(--color-line-strong);
+  --workflow-chip-sheen:color-mix(in srgb, #fff 8%, transparent);
+  /* 卡面就是 surface 本色（原型 --cz-surface 纯色，从不往里混文字色）：
+     从前把 --color-ink（主文字色）混进渐变，高饱和的文字色把卡染出一层
+     彩灰「脏底」；唇边用 line-strong（偏亮）也压不住那种脏。 */
+  --workflow-card-face:var(--color-surface);
+  --workflow-card-edge:var(--color-line-strong);
+  --workflow-card-lip:color-mix(in srgb, #000 62%, var(--color-base));
+  --workflow-card-sheen:color-mix(in srgb, #fff 10%, transparent);
+  --workflow-card-drop:0 6px 14px -10px rgb(0 0 0 / .55);
+  --workflow-icon-face:linear-gradient(180deg, color-mix(in srgb, var(--color-base) 92%, #000) 0%, color-mix(in srgb, var(--color-base) 76%, #000) 100%);
+  --workflow-icon-edge:var(--color-line-strong);
+}
+/* 暖白：托盘 #e6e6ea 带内阴影（陷进画布的槽），卡是纯白纸片 + 极淡投影。
+   槽头同样不铺底色，只留分隔线。三档关系：卡 #fff > 托盘 #e6e6ea > 画布 #f7f7f8。 */
+html.theme-warm {
+  --workflow-tray:#e6e6ea;
+  --workflow-tray-edge:#d3d3d3;
+  --workflow-tray-shadow:inset 0 4px 12px -2px rgb(24 24 27 / .1), inset 0 -2px 6px rgb(24 24 27 / .06), 0 1px 0 rgb(255 255 255 / .95);
+  --workflow-tray-head:transparent;
+  --workflow-tray-head-edge:#e3e3e3;
+  --workflow-plate-face:#eeeff2;
+  --workflow-plate-deep:#e4e5e9;
+  --workflow-chip:linear-gradient(180deg, var(--color-surface) 0%, color-mix(in srgb, var(--color-surface) 88%, var(--color-base)) 100%);
+  --workflow-chip-edge:var(--color-line-strong);
+  --workflow-chip-sheen:rgb(255 255 255 / .9);
+  --workflow-card-face:var(--color-surface);
+  --workflow-card-edge:#c9c9d2;
+  --workflow-card-lip:#dcdcdf;
+  --workflow-card-sheen:rgb(255 255 255 / .95);
+  --workflow-card-drop:0 5px 12px -9px rgb(24 24 27 / .2);
+  /* 浅色下卡片是白纸，图标座改用 raised（#dcdcdc）才读得出是「压在纸上的小方块」；
+     深色下反过来，raised 与卡面同色，图标座要退到 base 一档。 */
+  --workflow-icon-face:linear-gradient(180deg, var(--color-raised) 0%, color-mix(in srgb, var(--color-raised) 88%, var(--color-base)) 100%);
+  --workflow-icon-edge:var(--color-line-strong);
+}

@@ -62,7 +62,7 @@ export function SegmentedControl<T extends string | number>({
               <span
                 aria-hidden={true}
                 data-dot=""
-                className="ml-1 inline-block size-1.5 shrink-0 rounded-full bg-warn-ink"
+                className="ml-1 inline-block ui-icon-6 shrink-0 rounded-full bg-warn-ink"
               />
             )}
           </button>

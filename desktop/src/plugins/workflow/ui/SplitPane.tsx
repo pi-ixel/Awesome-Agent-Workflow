@@ -11,8 +11,8 @@ import { readColumnWidth, saveColumnWidth } from "../../../shared/ui/controls/co
 export const SPLIT_WIDE = 700;
 
 const SIZE = {
-  wide: { key: "aaw-workflow/split-width", cssVar: "--workflow-aside-w", fallback: 360, min: 280, max: 760 },
-  stacked: { key: "aaw-workflow/split-height", cssVar: "--workflow-aside-h", fallback: 320, min: 160, max: 640 },
+  wide: { key: "aaw-workflow/split-width", cssVar: "--split-aside-width", fallback: 360, min: 280, max: 760 },
+  stacked: { key: "aaw-workflow/split-height", cssVar: "--split-aside-height", fallback: 320, min: 160, max: 640 },
 } as const;
 
 /** 分屏尺寸存哪（宿主存储，工作台注入）；不给时只在本次打开期间有效。 */

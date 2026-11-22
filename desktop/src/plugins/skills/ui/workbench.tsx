@@ -1,7 +1,9 @@
 import type { Context } from "cordis";
+import type { ComponentType } from "react";
 import { SkillLibrary } from "./SkillLibrary.tsx";
 import { createStore, useStore } from "zustand";
-import { PuzzleIcon, SkillIcon, TrashIcon } from "../../../shared/ui/icons.tsx";
+import { PlugIcon, PuzzleIcon, SkillIcon } from "../../../shared/ui/icons.tsx";
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { knownWorkspacePaths } from "../../project/service.ts";
 import type { SkillsSettingsView } from "../types.ts";
 import SkillsInstallerSection from "./SkillsInstallerSection.tsx";
@@ -26,30 +28,54 @@ export function apply(ctx: Context): void {
         onChange={(directory) => skills.setSourceDirectory(directory)}
       />
     ),
-    Installer: () => <SkillsInstallerSection skills={skills} />,
+    Installer: ({ active }) => (
+      <SkillsInstallerSection skills={skills} active={active} />
+    ),
   };
   ctx.provide("skillsUi", view);
   ctx.inject(["project", "agents", "host"], (ctx) => {
     const { project, agents, host } = ctx;
-    const navigation = createStore(() => ({ trash: false }));
+    const navigation = createStore<{
+      page: "skills" | "mcp";
+      McpPage: ComponentType | null;
+    }>(() => ({ page: "skills", McpPage: null }));
+    ctx.inject(["mcp"], (ctx) => {
+      const { mcp } = ctx;
+      ctx.effect(() => {
+        navigation.setState({ McpPage: mcp.View });
+        return () =>
+          navigation.setState(({ page }) => ({
+            page: page === "mcp" ? "skills" : page,
+            McpPage: null,
+          }));
+      }, "skills:mcp-page");
+    });
     function Sidebar() {
-      const { trash } = useStore(navigation);
+      const { page, McpPage } = useStore(navigation);
       return (
         <nav aria-label="插件管理" className="space-y-1 p-3">
-          {[
-            { label: "技能", Icon: SkillIcon, recycle: false },
-            { label: "回收站", Icon: TrashIcon, recycle: true },
-          ].map(({ label, Icon, recycle }) => (
-            <button
-              key={label}
-              aria-current={trash === recycle ? "page" : undefined}
-              onClick={() => navigation.setState({ trash: recycle })}
-              className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm ${trash === recycle ? "bg-selected font-semibold text-ink" : "text-ink-mute hover:bg-hover hover:text-ink"}`}
-            >
-              <Icon className="ui-icon-16" />
-              {label}
-            </button>
-          ))}
+          {(
+            [
+              { label: "技能", Icon: SkillIcon, id: "skills" },
+              { label: "MCP", Icon: PlugIcon, id: "mcp" },
+            ] as const
+          )
+            .filter(({ id }) => id !== "mcp" || McpPage)
+            .map(({ label, Icon, id }) => (
+              <NavigationRow
+                key={label}
+                aria-current={page === id ? "page" : undefined}
+                onClick={() => navigation.setState({ page: id })}
+                className={
+                  page === id
+                    ? "font-semibold text-ink"
+                    : "text-ink-mute hover:text-ink"
+                }
+              >
+                <Icon className="ui-icon-16" />
+                {label}
+              </NavigationRow>
+            ))}
         </nav>
       );
     }
@@ -63,14 +89,15 @@ export function apply(ctx: Context): void {
         Icon: PuzzleIcon,
         View: Sidebar,
         WorkArea: function SkillsWorkArea() {
-          const { trash } = useStore(navigation);
+          const { page, McpPage } = useStore(navigation);
           const configuration = useStore(agents.configuration);
           const adapter = agents.resolve(configuration.activeAgentId);
+          if (page === "mcp" && McpPage) return <McpPage />;
           if (!adapter?.skillLibrary) {
             return (
               <section
                 aria-label="技能管理"
-                className="p-6 text-sm text-ink-mute"
+                className="p-6 text-ui-base text-ink-mute"
               >
                 {adapter?.displayName ?? configuration.activeAgentId}{" "}
                 暂未提供技能管理。
@@ -79,7 +106,6 @@ export function apply(ctx: Context): void {
           }
           return (
             <SkillLibrary
-              trash={trash}
               library={host.skills.library}
               key={configuration.activeAgentId}
               provider={adapter.skillLibrary}

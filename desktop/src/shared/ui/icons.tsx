@@ -8,7 +8,7 @@
  *   的 flex items-center 承担；
  * - 纯装饰图标一律 aria-hidden（语义在按钮的 aria-label / title 上）。
  */
-import { UiIcon, type IconProps } from "./UiIcon.tsx";
+import { Svg, type IconProps } from "./UiIcon.tsx";
 import { useId } from "react";
 
 export type { IconProps } from "./UiIcon.tsx";
@@ -21,22 +21,6 @@ export function BotIcon(props: IconProps) {
       <rect x="4" y="8" width="16" height="12" rx="2" />
       <path d="M2 14h2m16 0h2m-13-1v2m6-2v2" />
     </Svg>
-  );
-}
-
-function Svg({ children, ...rest }: IconProps) {
-  return (
-    <UiIcon
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...rest}
-    >
-      {children}
-    </UiIcon>
   );
 }
 
@@ -215,8 +199,8 @@ export function Minimize2Icon(props: IconProps) {
   );
 }
 
-/** 最小化（底横线；窗口控制同款几何）。 */
-export function MinimizeIcon(props: IconProps) {
+/** 减号，用于缩小预览和最小化窗口。 */
+export function MinusIcon(props: IconProps) {
   return (
     <Svg {...props}>
       <path d="M5 12h14" />
@@ -353,28 +337,29 @@ export function ShieldCheckIcon(props: IconProps) {
 
 /** 文件夹图标：与项目树一致的双态 Lucide 线性图形（收起合口 / 展开开口）。 */
 export function FolderGlyph({
-  isExpanded,
+  isExpanded = true,
   className = "ui-icon-14 shrink-0 text-ink-mute",
 }: {
-  readonly isExpanded: boolean;
+  readonly isExpanded?: boolean;
   className?: string;
 }) {
   return (
-    <UiIcon
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
+    <Svg strokeWidth={2} className={className}>
       {isExpanded ? (
         <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />
       ) : (
         <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
       )}
-    </UiIcon>
+    </Svg>
+  );
+}
+
+/** 自动换行。 */
+export function WrapTextIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M3 6h18M3 12h13a3 3 0 1 1 0 6h-4m2-2-2 2 2 2M3 18h4" />
+    </Svg>
   );
 }
 
@@ -419,23 +404,6 @@ export function WorkflowIcon(props: IconProps) {
       <rect x="3" y="3" width="8" height="8" rx="2" />
       <path d="M7 11v4a2 2 0 0 0 2 2h4" />
       <rect x="13" y="13" width="8" height="8" rx="2" />
-    </Svg>
-  );
-}
-
-/** 加载中：八辐条风车（Lucide loader）。运行中回合的尾部 spinner——
- * 旋转容器而非 SVG 本体（ZCode ChatLoading 同款，动画走合成层）。 */
-export function LoaderIcon(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M12 2v2" />
-      <path d="M12 20v2" />
-      <path d="m4.93 4.93 1.41 1.41" />
-      <path d="m17.66 17.66 1.41 1.41" />
-      <path d="M2 12h2" />
-      <path d="M20 12h2" />
-      <path d="m6.34 17.66-1.41 1.41" />
-      <path d="m19.07 4.93-1.41 1.41" />
     </Svg>
   );
 }
@@ -509,6 +477,14 @@ export function PuzzleIcon(props: IconProps) {
   );
 }
 
+export function PlugIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M7 2v7m10-7v7M2.5 9h19v3a6 6 0 0 1-6 6h-7a6 6 0 0 1-6-6V9ZM12 18v4" />
+    </Svg>
+  );
+}
+
 export function TrashIcon(props: IconProps) {
   return (
     <Svg {...props}>
@@ -528,7 +504,9 @@ export function SkillIcon(props: IconProps) {
           <stop offset="100%" stopColor="var(--color-skill-reference-lilac)" />
         </linearGradient>
       </defs>
-      <path d="m5 7 7-4 7 4v10l-7 4-7-4zM5 7l7 4 7-4M5 12l7 4 7-4M12 11v10" />
+      <path d="M11 4c.7 4.1 2.4 5.8 6.5 6.5-4.1.7-5.8 2.4-6.5 6.5-.7-4.1-2.4-5.8-6.5-6.5C8.6 9.8 10.3 8.1 11 4Z" />
+      <path d="M19 2v6m-3-3h6" />
+      <path d="M5 15.5c.4 1.9 1.1 2.7 3 3.2-1.9.4-2.6 1.3-3 3.3-.4-2-1.1-2.9-3-3.3 1.9-.5 2.6-1.3 3-3.2Z" />
     </Svg>
   );
 }

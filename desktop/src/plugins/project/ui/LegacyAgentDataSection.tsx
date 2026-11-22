@@ -1,3 +1,6 @@
+import { ActionButton } from "../../../shared/ui/controls.tsx";
+import { settingsInputClass } from "../../../shared/ui/inputStyles.ts";
+import { Disclosure } from "../../../shared/ui/Disclosure.tsx";
 import { useState } from "react";
 import { useStore } from "zustand";
 import type { AgentsService } from "../../agents/service.ts";
@@ -50,9 +53,9 @@ export function LegacyAgentDataSection({
         {agentName ?? "所选 Agent"}
         ；保留原记录，不覆盖已有数据。恢复后重新打开会话；归档列表需重启应用刷新。
       </p>
-      <button type="button" onClick={() => setRecords(listLegacyAgentData())}>
+      <ActionButton tone="secondary" size="compact" type="button" onClick={() => setRecords(listLegacyAgentData())}>
         刷新旧记录
-      </button>
+      </ActionButton>
       {message && <p role="status">{message}</p>}
       {records.length === 0 && <p>没有待归属的旧记录</p>}
       <ul className="max-h-96 space-y-2 overflow-auto">
@@ -65,19 +68,21 @@ export function LegacyAgentDataSection({
               <label>
                 目标会话 ID
                 <input
+                  className={settingsInputClass}
                   aria-label="旧快照目标会话 ID"
                   value={targetSessionId}
                   onChange={(event) => setTargetSessionId(event.target.value)}
                 />
               </label>
             )}
-            <details>
-              <summary>查看原数据</summary>
+            <Disclosure summary="查看原数据">
               <pre className="max-h-48 overflow-auto whitespace-pre-wrap">
                 {record.value}
               </pre>
-            </details>
-            <button
+            </Disclosure>
+            <ActionButton
+              tone="secondary"
+              size="compact"
               type="button"
               disabled={!agentKey}
               onClick={() => void (async () => {
@@ -103,7 +108,7 @@ export function LegacyAgentDataSection({
               })()}
             >
               将此记录恢复到 {agentName ?? "所选 Agent"}
-            </button>
+            </ActionButton>
           </li>
         ))}
       </ul>

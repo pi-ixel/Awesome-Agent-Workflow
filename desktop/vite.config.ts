@@ -7,6 +7,7 @@ import process from "node:process";
 import { aawDevBridgePlugin } from "./scripts/devBridgePlugin.ts";
 
 const host = process.env.TAURI_DEV_HOST;
+const testCache = process.env.AAW_VITE_TEST_CACHE;
 
 const disableDevClient: Plugin = {
   name: "aaw-disable-dev-client",
@@ -51,6 +52,11 @@ const isolatedPoolTests = [
 
 // https://vite.dev/config/
 export default defineConfig({
+  // 测试启动的 Vite 与常驻开发预览各自优化依赖，避免覆盖对方的模块版本。
+  cacheDir:
+    testCache === "playwright" || testCache === "config-test"
+      ? `node_modules/.cache/aaw-vite-${testCache}`
+      : undefined,
   plugins: [
     react(),
     tailwindcss(),

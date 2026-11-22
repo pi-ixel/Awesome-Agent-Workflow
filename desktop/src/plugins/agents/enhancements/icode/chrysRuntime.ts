@@ -53,6 +53,7 @@ function parseRuntimeDetails(details: unknown): {
   modelProvider: string | null;
   toolNames: readonly string[] | null;
   mcpServers: readonly McpServerEntry[];
+  mcpFailuresKnown: boolean;
   mcpFailures: readonly { name: string; error: string }[];
   skillSources: readonly { source: string; count: number }[];
 } {
@@ -63,6 +64,7 @@ function parseRuntimeDetails(details: unknown): {
       modelProvider: null,
       toolNames: null,
       mcpServers: [],
+      mcpFailuresKnown: false,
       mcpFailures: [],
       skillSources: [],
     };
@@ -100,6 +102,7 @@ function parseRuntimeDetails(details: unknown): {
             name: entry.name,
             toolCount: entry.count,
           })),
+    mcpFailuresKnown: failuresRecord !== null,
     mcpFailures,
     skillSources:
       skillSources === null
@@ -135,6 +138,7 @@ export function normalizeChrysRuntime(
   const toolNames = asStringList(incoming.toolNames);
   if (toolNames !== null) {
     next.toolNames = toolNames;
+    next.toolInventoryKnown = true;
   }
   const skillNames = asStringList(incoming.skillNames);
   if (skillNames !== null) {
@@ -146,8 +150,21 @@ export function normalizeChrysRuntime(
     next.modelProvider = details.modelProvider;
     if (toolNames === null && details.toolNames !== null) {
       next.toolNames = details.toolNames;
+      next.toolInventoryKnown = true;
     }
     next.mcpServers = details.mcpServers;
+    const serverTools = asRecord(
+      asRecord(incoming.runtimeDetails)?.["mcp_tools"],
+    );
+    next.mcpToolsByServer = serverTools
+      ? Object.fromEntries(
+          Object.entries(serverTools).map(([name, tools]) => [
+            name,
+            asStringList(tools) ?? [],
+          ]),
+        )
+      : undefined;
+    next.mcpFailuresKnown = details.mcpFailuresKnown;
     next.mcpFailures = details.mcpFailures;
     next.skillSources = details.skillSources;
     if (skillNames !== null && skillNames.length === 0) {

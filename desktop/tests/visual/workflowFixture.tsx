@@ -2,23 +2,29 @@
  * 流程画布的真机同源夹具：直接渲染产品里的 FlowStages，
  * 结构与 aaw-dev 的 main/task 流程一致（含条件轨道、回环、子流程调用、终点）。
  *
- * 用途：在浏览器里以真实 CSS 与真实字号复核画布外观（托盘层级、卡片、叠板、
- * 导轨、缩放药丸）。这里只搭数据，不复刻样式。
+ * 使用产品样式验证阶段展开、子流程及运行详情，并以工作流库夹具验证同一套外观设置。
  */
 import { createRoot } from "react-dom/client";
+import { bindSecondaryWindowAppearance } from "../../src/plugins/workbench/appearance/windowAppearance.ts";
 import "../../src/shared/styles/index.css";
 import "../../src/plugins/workflow/ui/workflowPanel.css";
 import { FlowStages } from "../../src/plugins/workflow/ui/FlowStages.tsx";
 import { WorkflowPanel } from "../../src/plugins/workflow/ui/WorkflowPanel.tsx";
-import { fakeWorkflowService, runSummary } from "../plugins/workflow/helpers.ts";
+import { WorkflowLibrary } from "../../src/plugins/workflow/ui/WorkflowLibrary.tsx";
+import { WorkflowSidebar } from "../../src/plugins/workflow/ui/WorkflowSidebar.tsx";
+import { WorkflowWorkspace } from "../../src/plugins/workflow/ui/WorkflowWorkspace.tsx";
+import { createTemplateNavigation } from "../../src/plugins/workflow/ui/templateNavigation.ts";
+import { fakeWorkflowService, runSummary, workflowSummary } from "../plugins/workflow/helpers.ts";
 import type {
   CanvasSnapshot,
   HierarchyStructure,
   WorkflowCatalogNode,
+  WorkflowDraftEditor,
   WorkflowStage,
 } from "../../src/plugins/workflow/types.ts";
 
 const params = new URLSearchParams(location.search);
+if (params.has("appearance")) bindSecondaryWindowAppearance(document.documentElement);
 if (params.get("theme") === "dark") document.documentElement.classList.remove("theme-warm");
 
 const stages: WorkflowStage[] = [
@@ -122,14 +128,55 @@ if (params.has("inspector")) {
   root.render(<div style={{ height: "100vh" }}>
     <WorkflowPanel service={service.service} onOpenSession={(id) => { document.documentElement.dataset.openedSession = id; }} />
   </div>);
+} else if (params.has("library")) {
+  const fake = fakeWorkflowService();
+  const summary = workflowSummary("release-review", "user");
+  const name = "发布准备、兼容性审查和回滚演练";
+  fake.setLibrary([
+    workflowSummary(),
+    { ...summary, meta: { ...summary.meta!, name, description: "核对部署前置条件、灰度结果和回滚记录。" } },
+  ]);
+  root.render(
+    <main className="workflow-panel bg-base text-ink">
+      <WorkflowLibrary
+        service={fake.service}
+        version={0}
+        tab={params.get("tab") === "presets" ? "presets" : "mine"}
+        onOpenWorkflow={(id) => { document.documentElement.dataset.openedWorkflow = id; }}
+      />
+    </main>,
+  );
 } else if (params.has("panel")) {
   const service = fakeWorkflowService();
   service.setRuns([
     runSummary({ runId: "done", title: "整理交接记录", status: "completed" }),
     runSummary({ runId: "pending", title: "确认设计方案", status: "waiting" }),
   ]);
-  root.render(<div style={{ height: "100vh" }}>
-    <WorkflowPanel service={service.service} />
+  root.render(<div className="flex h-screen min-h-0 flex-col bg-base text-ink">
+    <div className="min-h-0 flex-1"><WorkflowPanel service={service.service} /></div>
+  </div>);
+} else if (params.has("compose")) {
+  // 左侧「工作流」功能区（ADR 038）：侧栏的「用 AI 新建」在中间的模板区打开撰写框。
+  const service = fakeWorkflowService();
+  const navigation = createTemplateNavigation();
+  const editor: WorkflowDraftEditor = {
+    start: async () => {
+      const response = await fetch("/tests/visual/workflowFixture.html?sample-compose-request");
+      if (!response.ok) throw new Error("工作流编辑会话启动失败，请重试");
+    },
+    show: () => Promise.resolve(false),
+    has: () => false,
+    send: () => false,
+    end: async () => {},
+  };
+  root.render(<div className="flex h-screen min-h-0 flex-col bg-base text-ink">
+    <header className="flex shrink-0 items-center border-b border-line p-2 text-ui-sm">
+      <button type="button" onClick={() => { document.documentElement.dataset.projectTool = "opened"; }}>项目工具</button>
+    </header>
+    <div className="flex min-h-0 flex-1">
+      <aside className="w-48 shrink-0 border-r border-line"><WorkflowSidebar service={service.service} navigation={navigation} canCompose /></aside>
+      <div className="min-h-0 min-w-0 flex-1"><WorkflowWorkspace service={service.service} navigation={navigation} editor={editor} /></div>
+    </div>
   </div>);
 } else root.render(
   <div className="workflow-panel" style={{ height: "100vh" }}>

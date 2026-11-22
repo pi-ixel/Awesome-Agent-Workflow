@@ -7,7 +7,11 @@ import { chrysAgentAdapter } from "../../../src/plugins/agents/enhancements/icod
  */
 import { describe, expect, it } from "vitest";
 
-import { agentAdapters, findAgentAdapter } from "../../../src/plugins/agents/registry/registry.ts";
+import {
+  agentAdapters,
+  findAgentAdapter,
+} from "../../../src/plugins/agents/registry/registry.ts";
+import { agentSelectionKey } from "../../../src/plugins/agents/registry/selection.ts";
 
 describe("agentAdapters 注册表", () => {
   it("注册表包含内置适配项", () => {
@@ -36,6 +40,33 @@ describe("agentAdapters 注册表", () => {
     });
     expect(fallback.command).toEqual(["icode", "acp"]);
     expect(fallback.cwd).toBeNull();
+  });
+
+  it("仅 iCode 在启动时启用回环代理策略", () => {
+    const context = { workspacePath: null };
+    expect(chrysAgentAdapter.buildLaunch(context).proxyPolicy).toBe(
+      "pythonHttpxLoopback",
+    );
+    expect(
+      findAgentAdapter("codeagent")?.buildLaunch(context).proxyPolicy,
+    ).toBeUndefined();
+  });
+
+  it("内部代理策略沿用 iCode 已有会话目录的身份", () => {
+    const state = {
+      activeAgentId: "chrys",
+      agents: [],
+      discoveredAgents: [],
+      getAgentSettings: () => ({}),
+    };
+    expect(
+      agentSelectionKey(state, {}),
+    ).toBe(
+      JSON.stringify([
+        "chrys",
+        { command: ["icode", "acp"], cwd: null, extraEnv: {} },
+      ]),
+    );
   });
 });
 

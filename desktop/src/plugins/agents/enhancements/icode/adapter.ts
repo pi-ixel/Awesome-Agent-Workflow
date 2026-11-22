@@ -9,6 +9,8 @@ import { createICodeSkillInstallation } from "./skillsInstaller.ts";
 import { extractEditPayload } from "./editPayload.ts";
 import { readChrysArchive } from "./chrysArchive.ts";
 import { createChrysDialect } from "./chrysDialect.ts";
+import { icodeMcpManagement } from "./mcpManagement.ts";
+import { icodeDiagnosticPrivacy } from "./diagnosticPrivacy.ts";
 import type { LoggerFactory } from "../../../../shared/logging/logger.ts";
 
 /**
@@ -27,6 +29,8 @@ export function createChrysAgentAdapter(loggerFactory?: LoggerFactory): AgentAda
   return {
     maxConcurrentRequests: 5,
     id: "chrys",
+    mcpManagement: icodeMcpManagement,
+    diagnosticPrivacy: icodeDiagnosticPrivacy,
     skillLibrary: "icode",
     slashSkillSource: "session",
     turnUsageBasis: "prompt-total",
@@ -58,6 +62,7 @@ export function createChrysAgentAdapter(loggerFactory?: LoggerFactory): AgentAda
         command: [program, "acp"],
         cwd: context.workspacePath,
         extraEnv: {},
+        proxyPolicy: "pythonHttpxLoopback",
       };
     },
     clientInfo: { name: "aaw-desktop", version: "0.1.0" },

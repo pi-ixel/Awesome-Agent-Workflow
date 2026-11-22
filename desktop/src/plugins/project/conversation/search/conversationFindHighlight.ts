@@ -15,12 +15,12 @@ export const FIND_ACTIVE_HIGHLIGHT_NAME = "zcode-find-active";
 const FIND_STYLE_ID = "zcode-find-highlight-style";
 const FIND_HIGHLIGHT_STYLE = `
 ::highlight(${FIND_HIGHLIGHT_NAME}) {
-  background-color: #fde68a;
-  color: #1f2937;
+  background-color: var(--color-find-highlight);
+  color: var(--color-ink);
 }
 ::highlight(${FIND_ACTIVE_HIGHLIGHT_NAME}) {
-  background-color: #facc15;
-  color: #1f2937;
+  background-color: var(--color-find-highlight-active);
+  color: var(--color-find-highlight-active-ink);
 }
 `;
 

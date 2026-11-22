@@ -141,6 +141,9 @@ it("TD-032-B01 关闭开关后的标准 ACP 会话无 MCP 且提示禁止系统�
 }) => {
   let root: Context | undefined;
   const peers: ReturnType<typeof standardAcpPeer>[] = [];
+  const closeBrowserSession =
+    vi.fn<Context["host"]["browser"]["closeSession"]>();
+  closeBrowserSession.mockResolvedValue([]);
   const runtime = createDesktopRuntime(
     undefined,
     undefined,
@@ -153,6 +156,9 @@ it("TD-032-B01 关闭开关后的标准 ACP 会话无 MCP 且提示禁止系统�
         return Promise.resolve(peer.client);
       });
       vi.spyOn(context.host.browser, "isAvailable").mockReturnValue(true);
+      vi.spyOn(context.host.browser, "closeSession").mockImplementation(
+        closeBrowserSession,
+      );
       vi.spyOn(context.host.browser, "agentControlEnabled").mockResolvedValue(
         false,
       );
@@ -200,6 +206,8 @@ it("TD-032-B01 关闭开关后的标准 ACP 会话无 MCP 且提示禁止系统�
         block.text.includes("不得改用系统默认浏览器"),
     ),
   ).toBe(true);
+  await runtime.shutdown();
+  expect(closeBrowserSession).toHaveBeenCalledExactlyOnceWith(sessionId);
 });
 
 it("TD-032-A05 旧运行时残留工具名不能掩盖端点已撤销", async () => {
@@ -370,4 +378,243 @@ it("TD-032-A07 运行时未知但端点明确 revoked 时不得隐藏恢复提�
   expect(
     await screen.findByText("当前会话尚未注册浏览器工具"),
   ).toBeInTheDocument();
+});
+
+async function activeBrowserHost() {
+  const host = createTestBrowserHost();
+  const endpoint = await host.createMcpEndpoint();
+  await host.bindMcpEndpoint(endpoint.endpointId, "session-a");
+  return host;
+}
+
+it("TD-035-U01 标准 ACP 端点 active 且工具清单未知时不误报未注册", async () => {
+  const host = await activeBrowserHost();
+  await act(async () => {
+    render(
+      <BrowserToolRecovery
+        host={host}
+        project={{ sessions: { recoverSession: vi.fn() } }}
+        workspacePath="D:/workspace"
+        agentKey="codeagent"
+        sessionId="session-a"
+        runtime={{
+          lastSessionId: "session-a",
+          toolNames: [],
+          toolInventoryKnown: false,
+        }}
+      />,
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(
+    screen.queryByText("当前会话尚未注册浏览器工具"),
+  ).not.toBeInTheDocument();
+});
+
+it("TD-035-U02 工具清单已知但缺少浏览器工具时仍提示恢复", async () => {
+  const host = await activeBrowserHost();
+  await act(async () => {
+    render(
+      <BrowserToolRecovery
+        host={host}
+        project={{ sessions: { recoverSession: vi.fn() } }}
+        workspacePath="D:/workspace"
+        agentKey="chrys"
+        sessionId="session-a"
+        runtime={{
+          lastSessionId: "session-a",
+          toolNames: ["read"],
+          toolInventoryKnown: true,
+        }}
+      />,
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(
+    await screen.findByText("当前会话尚未注册浏览器工具"),
+  ).toBeInTheDocument();
+});
+
+it("TD-035-U03 端点撤销时即使工具清单未知也必须提示恢复", async () => {
+  const host = await activeBrowserHost();
+  await host.setAgentControl(false);
+  await host.setAgentControl(true);
+  await act(async () => {
+    render(
+      <BrowserToolRecovery
+        host={host}
+        project={{ sessions: { recoverSession: vi.fn() } }}
+        workspacePath="D:/workspace"
+        agentKey="codeagent"
+        sessionId="session-a"
+        runtime={{
+          lastSessionId: null,
+          toolNames: [],
+          toolInventoryKnown: false,
+        }}
+      />,
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(
+    await screen.findByText("当前会话尚未注册浏览器工具"),
+  ).toBeInTheDocument();
+});
+
+it("TD-035-U04 识别 CodeAgent 的 MCP 前缀工具名", async () => {
+  const host = await activeBrowserHost();
+  const registration = vi.spyOn(host, "mcpRegistration");
+  await act(async () => {
+    render(
+      <BrowserToolRecovery
+        host={host}
+        project={{ sessions: { recoverSession: vi.fn() } }}
+        workspacePath="D:/workspace"
+        agentKey="codeagent"
+        sessionId="session-a"
+        runtime={{
+          lastSessionId: "session-a",
+          toolNames: ["mcp__aaw-browser-hash__browser_open"],
+          toolInventoryKnown: true,
+        }}
+      />,
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(
+    screen.queryByText("当前会话尚未注册浏览器工具"),
+  ).not.toBeInTheDocument();
+  expect(registration).not.toHaveBeenCalled();
+});
+
+it("只显示当前 iCode 端点的连接失败，完成注册后消失", async () => {
+  const host = await activeBrowserHost();
+  const registration = vi.spyOn(host, "mcpRegistration").mockResolvedValue({
+    endpointName: "aaw-browser-current",
+    handshakeComplete: false,
+  });
+  const props = {
+    host,
+    project: { sessions: { recoverSession: vi.fn() } },
+    workspacePath: "D:/workspace",
+    agentKey: "chrys",
+    sessionId: "session-a",
+  };
+  const runtime = { ...missingTools, toolInventoryKnown: true };
+  const { rerender } = render(
+    <BrowserToolRecovery
+      {...props}
+      runtime={{
+        ...runtime,
+        mcpFailures: [
+          {
+            name: "aaw-browser-old",
+            error: "connection did not complete within 30s",
+          },
+        ],
+      }}
+    />,
+  );
+  expect(
+    await screen.findByText("正在连接本地浏览器工具…"),
+  ).toBeInTheDocument();
+  expect(screen.queryByText("本地浏览器工具连接失败")).not.toBeInTheDocument();
+
+  rerender(
+    <BrowserToolRecovery
+      {...props}
+      runtime={{
+        ...runtime,
+        mcpFailures: [
+          {
+            name: "aaw-browser-current",
+            error: "Server error '502 Bad Gateway' for url '<local>'",
+          },
+        ],
+      }}
+    />,
+  );
+  expect(await screen.findByText("本地浏览器工具连接失败")).toBeInTheDocument();
+  expect(screen.getByText(/HTTP 502/)).toBeInTheDocument();
+
+  registration.mockResolvedValue({
+    endpointName: "aaw-browser-current",
+    handshakeComplete: true,
+  });
+  rerender(
+    <BrowserToolRecovery
+      {...props}
+      runtime={{
+        ...runtime,
+        toolNames: ["browser_snapshot"],
+        mcpFailures: [],
+      }}
+    />,
+  );
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("status")).not.toBeInTheDocument(),
+  );
+});
+
+it("TD-035-U05 CodeAgent 连续两轮 prompt 不注入不可用文本", async ({
+  onTestFinished,
+}) => {
+  const peers: ReturnType<typeof standardAcpPeer>[] = [];
+  const runtime = createDesktopRuntime(
+    undefined,
+    undefined,
+    undefined,
+    (context) => {
+      vi.spyOn(context.agents, "openTransport").mockImplementation(() => {
+        const peer = standardAcpPeer();
+        peers.push(peer);
+        return Promise.resolve(peer.client);
+      });
+    },
+  );
+  const { acpRuntime, agents, project } = await runtime.ready;
+  bindRuntimeServices(acpRuntime.protocol, agents);
+  const foreground = mutableProjectForeground(project);
+  const activity = createForegroundActivity();
+  bindForeground({
+    view: foreground,
+    select: () => {},
+    activity,
+  });
+  agents.select("codeagent");
+  await coordinatorBrowser.setAgentControl(true);
+  onTestFinished(async () => {
+    await closeRealRuntime();
+    activity.dispose();
+    await runtime.shutdown();
+  });
+  const opened = await openRealWorkspace("/browser-codeagent", {
+    forceNew: true,
+  });
+  const sessionId = opened?.sessionId;
+  const peer = peers[0];
+  if (!sessionId || !peer) throw new Error("ACP session is not active");
+  const created = peer.received.find((wire) => wire.method === "session/new");
+  expect(created?.params?.mcpServers).toHaveLength(1);
+  const sessionRuntime = [...projectFactory.sessions()].find(
+    (session) => session.session.sessionId === sessionId,
+  );
+  if (!sessionRuntime) throw new Error("Session runtime is missing");
+
+  await sessionRuntime.session.prompt("第一轮检查");
+  await sessionRuntime.session.prompt("第二轮检查");
+
+  const prompts = peer.received.filter(
+    (wire) => wire.method === "session/prompt",
+  );
+  expect(prompts).toHaveLength(2);
+  for (const prompt of prompts) {
+    expect(JSON.stringify(prompt.params?.prompt ?? [])).not.toContain(
+      "AAW 内嵌浏览器工具当前不可用",
+    );
+  }
 });

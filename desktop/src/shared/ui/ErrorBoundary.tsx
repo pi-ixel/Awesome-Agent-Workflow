@@ -1,3 +1,5 @@
+import { Disclosure } from "./Disclosure.tsx";
+import { ActionButton } from "./controls.tsx";
 /**
  * 两级错误边界（对齐 ZCode 的分层容错，按我们的体量裁剪）：
  *
@@ -23,14 +25,11 @@ interface FallbackProps {
 /** 堆栈折叠（原生 details，零依赖）。 */
 function StackDetails({ error }: { readonly error: Error }) {
   return (
-    <details className="w-full">
-      <summary className="cursor-pointer text-xs text-ink-faint">
-        技术细节
-      </summary>
+    <Disclosure className="w-full" summary="技术细节">
       <pre className="mt-1 max-h-48 overflow-auto rounded bg-base p-2 text-left font-mono text-2xs whitespace-pre-wrap break-words text-ink-ghost">
         {error.stack ?? error.message}
       </pre>
-    </details>
+    </Disclosure>
   );
 }
 
@@ -47,22 +46,24 @@ function AppFallback({ error, onRetry }: FallbackProps) {
       </p>
       <StackDetails error={error} />
       <div className="flex items-center gap-2">
-        <button
+        <ActionButton
+          tone="secondary"
+          size="compact"
           type="button"
           onClick={onRetry}
-          className="rounded-md border border-line-strong bg-surface px-3 py-1.5 text-xs text-ink transition-colors hover:bg-raised"
         >
           重试
-        </button>
-        <button
+        </ActionButton>
+        <ActionButton
+          tone="ghost"
+          size="compact"
           type="button"
           onClick={() => {
             window.location.reload();
           }}
-          className="rounded-md border border-line-strong px-3 py-1.5 text-xs text-ink-mute transition-colors hover:bg-raised"
         >
           刷新页面
-        </button>
+        </ActionButton>
       </div>
     </div>
   );
@@ -83,13 +84,15 @@ function PanelFallback({
       <span className="min-w-0 flex-1 truncate" data-hint={error.message}>
         加载失败：{error.message}
       </span>
-      <button
+      <ActionButton
+        tone="secondary"
+        size="compact"
         type="button"
         onClick={onRetry}
-        className="shrink-0 rounded border border-line-strong px-2 py-0.5 text-xs text-ink transition-colors hover:bg-raised"
+        className="shrink-0"
       >
         重试
-      </button>
+      </ActionButton>
     </div>
   );
 }

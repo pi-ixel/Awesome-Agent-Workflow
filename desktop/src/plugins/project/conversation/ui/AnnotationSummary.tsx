@@ -1,11 +1,19 @@
+import { ActionButton } from "../../../../shared/ui/controls.tsx";
+import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
 import { IconButton } from "../../../../shared/ui/IconButton.tsx";
-import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
-import { useEffect, useRef, useState, type ComponentProps } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+} from "react";
 import { createPortal } from "react-dom";
 import { AnnotationCards } from "./AnnotationCards.tsx";
-import { XIcon } from "../../../../shared/ui/icons.tsx";
+import { MessageCircleIcon, XIcon } from "../../../../shared/ui/icons.tsx";
 
-/** Hover entry and portal share a delayed exit, so crossing the gap does not close the editor. */
+/** 入口和浮层共享关闭延时，允许鼠标跨过两者之间的空隙。 */
 export function AnnotationSummary({
   onClear,
   className = "px-3 pt-3",
@@ -17,6 +25,8 @@ export function AnnotationSummary({
   const button = useRef<HTMLButtonElement>(null);
   const entry = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
+  const focusOnOpen = useRef(false);
+  const panelId = useId();
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [position, setPosition] = useState<{
     left: number;
@@ -28,10 +38,11 @@ export function AnnotationSummary({
     if (closeTimer.current) clearTimeout(closeTimer.current);
     closeTimer.current = null;
   };
-  const open = () => {
+  const open = (focus = false) => {
     cancelClose();
     const rect = button.current?.getBoundingClientRect();
     if (!rect) return;
+    if (focus) focusOnOpen.current = true;
     setPosition({
       left: Math.max(8, Math.min(rect.left, window.innerWidth - 428)),
       top: rect.top >= 200 ? rect.top - 8 : rect.bottom + 8,
@@ -42,15 +53,17 @@ export function AnnotationSummary({
     cancelClose();
     closeTimer.current = setTimeout(() => {
       const active = document.activeElement;
-      if (
-        active &&
-        panel.current?.contains(active) &&
-        active.matches("textarea,input")
-      )
+      if (panel.current?.contains(active) || entry.current?.contains(active))
         return;
       setPosition(null);
     }, 220);
   };
+  useLayoutEffect(() => {
+    if (position && focusOnOpen.current) {
+      focusOnOpen.current = false;
+      panel.current?.focus({ preventScroll: true });
+    }
+  }, [position]);
   useEffect(
     () => () => {
       if (closeTimer.current) clearTimeout(closeTimer.current);
@@ -69,25 +82,14 @@ export function AnnotationSummary({
         setPosition(null);
       }
     };
-    const key = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        cancelClose();
-        setPosition(null);
-        button.current?.focus();
-      }
-    };
     const close = () => {
       cancelClose();
       setPosition(null);
     };
     document.addEventListener("pointerdown", outside);
-    window.addEventListener("keydown", key, true);
     window.addEventListener("resize", close);
     return () => {
       document.removeEventListener("pointerdown", outside);
-      window.removeEventListener("keydown", key, true);
       window.removeEventListener("resize", close);
     };
   }, [position, count]);
@@ -96,35 +98,48 @@ export function AnnotationSummary({
     return null;
   }
   return (
-    <div className={className}>
+    <div
+      className={className}
+      onKeyDownCapture={(event) => {
+        if (!position || event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        cancelClose();
+        setPosition(null);
+        button.current?.focus({ preventScroll: true });
+      }}
+      onBlur={(event) => {
+        const next = event.relatedTarget;
+        if (
+          next &&
+          !entry.current?.contains(next) &&
+          !panel.current?.contains(next)
+        )
+          scheduleClose();
+      }}
+    >
       <div
         ref={entry}
-        onMouseEnter={open}
+        onMouseEnter={() => open()}
         onMouseLeave={scheduleClose}
         className="annotation-rainbow-border group relative inline-flex items-center rounded-full bg-ink/5 text-ui-caption text-ink hover:bg-ink/10"
       >
-        <button
+        <ActionButton
+          tone="ghost"
           ref={button}
           type="button"
           aria-expanded={position !== null}
+          aria-controls={position ? panelId : undefined}
           aria-haspopup="dialog"
-          className="inline-flex items-center gap-1.5 rounded-full py-1 pl-3 pr-1.5"
-          onClick={open}
+          className="inline-flex items-center gap-1.5 rounded-full! py-1 pl-3 pr-1.5"
+          onClick={() => open(true)}
         >
-          <UiIcon
-            viewBox="0 0 16 16"
-            className="ui-icon-14 text-ink-mute"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.3"
-          >
-            <path d="M3 2.5h10v8H6L3 13v-10Z" />
-            <path d="M5 5h6M5 7.5h4" />
-          </UiIcon>
+          <MessageCircleIcon className="ui-icon-14 text-ink-mute" />
           {count} 条评论
-        </button>
+        </ActionButton>
         {onClear && (
-          <IconButton iconSize="compact"
+          <IconButton
+            iconSize="compact"
             type="button"
             aria-label="删除全部评论"
             data-hint="删除全部评论"
@@ -140,34 +155,41 @@ export function AnnotationSummary({
           </IconButton>
         )}
       </div>
-      {position &&
-        createPortal(
-          <div
-            ref={panel}
-            role="dialog"
-            aria-label="文档评论"
-            onMouseEnter={cancelClose}
-            onMouseLeave={scheduleClose}
-            className="fixed z-[100] w-[420px] max-w-[calc(100vw-16px)] overflow-auto rounded-xl border border-line bg-surface text-ink"
-            style={{
-              left: position.left,
-              top: position.top,
-              transform: position.above ? "translateY(-100%)" : undefined,
-              maxHeight: Math.max(
-                80,
-                Math.min(
-                  360,
-                  position.above
-                    ? position.top - 8
-                    : window.innerHeight - position.top - 8,
-                ),
-              ),
-            }}
-          >
-            <AnnotationCards {...props} />
-          </div>,
-          document.body,
-        )}
+      {createPortal(
+        <HintSurface
+          open={position !== null}
+          id={panelId}
+          ref={panel}
+          role="dialog"
+          aria-label="文档评论"
+          tabIndex={-1}
+          onMouseEnter={cancelClose}
+          onMouseLeave={scheduleClose}
+          onFocus={cancelClose}
+          className="fixed z-[100] w-[420px] max-w-[calc(100vw-16px)] overflow-auto focus-visible:outline focus-visible:outline-focus-ring"
+          style={
+            position
+              ? {
+                  left: position.left,
+                  top: position.top,
+                  transform: position.above ? "translateY(-100%)" : undefined,
+                  maxHeight: Math.max(
+                    80,
+                    Math.min(
+                      360,
+                      position.above
+                        ? position.top - 8
+                        : window.innerHeight - position.top - 8,
+                    ),
+                  ),
+                }
+              : undefined
+          }
+        >
+          <AnnotationCards {...props} />
+        </HintSurface>,
+        document.body,
+      )}
     </div>
   );
 }

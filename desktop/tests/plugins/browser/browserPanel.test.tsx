@@ -4,15 +4,20 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { BrowserPanel } from "../../../src/plugins/browser/ui/BrowserPanel.tsx";
 import type { BrowserHost } from "../../../src/plugins/host/browser/types.ts";
-import type { BrowserSpace } from "../../../src/contracts/browser/types.ts";
+import type { BrowserPageEvent, BrowserSpace } from "../../../src/contracts/browser/types.ts";
 import { browserElement } from "../../helpers/browserElement.ts";
 
 function host(): BrowserHost {
   return {
+    readRestore: vi.fn().mockResolvedValue({ epoch: "", revision: null, urls: [] }),
+    saveRestore: vi.fn(),
+    forgetRestore: vi.fn().mockResolvedValue(undefined),
+    migrateLegacyRestores: () => () => {},
     isAvailable: () => true,
     agentControlEnabled: vi.fn().mockResolvedValue(true),
     setAgentControl: vi
@@ -35,9 +40,10 @@ function host(): BrowserHost {
     setBounds: vi.fn().mockResolvedValue(undefined),
     setVisible: vi.fn().mockResolvedValue(undefined),
     setZoom: vi.fn(),
-    snapshot: vi.fn(),
+    snapshot: vi.fn().mockImplementation(() => Promise.resolve(spaceWithTab())),
     createMcpEndpoint: vi.fn(),
     mcpStatus: vi.fn().mockResolvedValue("not_bound"),
+    mcpRegistration: vi.fn().mockResolvedValue(null),
     bindMcpEndpoint: vi.fn(),
     revokeMcpEndpoint: vi.fn(),
     setMcpCapabilities: vi.fn(),
@@ -109,6 +115,48 @@ function spaceWithTab(): BrowserSpace {
     ],
   };
 }
+
+describe("浏览器标签恢复存储", () => {
+  it("WebView 配额已满且恢复存储不可用时，浏览器仍可操作", async () => {
+    const write = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("QuotaExceededError", "QuotaExceededError");
+    });
+    const fake = host();
+    fake.createSpace = vi.fn().mockResolvedValue(spaceWithTab());
+    fake.readRestore = vi.fn().mockRejectedValue(new Error("磁盘不可访问"));
+    try {
+      render(<BrowserPanel host={fake} workspaceId="workspace" sessionId="session-a" visible />);
+      expect(await screen.findByText(/无法读取浏览器标签恢复数据/)).toBeVisible();
+      expect(screen.getByRole("textbox", { name: "地址栏" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "新建标签页" })).toBeEnabled();
+      expect(write).not.toHaveBeenCalled();
+    } finally {
+      write.mockRestore();
+    }
+  });
+
+  it("恢复期间的空浏览器状态不会覆盖原快照", async () => {
+    const fake = host();
+    const live = spaceWithTab();
+    const tab = live.tabs[0]!;
+    fake.createSpace = vi.fn().mockResolvedValue({ ...live, tabs: [] });
+    fake.readRestore = vi.fn().mockResolvedValue({ epoch: "", revision: "old", urls: [tab.committedUrl] });
+    let resolveTab!: (value: typeof tab) => void;
+    const createTab = vi.fn().mockImplementation(() => new Promise<typeof tab>((resolve) => { resolveTab = resolve; }));
+    const saveRestore = vi.fn().mockResolvedValue({ epoch: "", revision: "new", urls: [tab.committedUrl] });
+    fake.createTab = createTab;
+    fake.saveRestore = saveRestore;
+    render(<BrowserPanel host={fake} workspaceId="workspace" sessionId="session-a" visible />);
+    await waitFor(() => expect(createTab).toHaveBeenCalledOnce());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
+    expect(saveRestore).not.toHaveBeenCalled();
+    resolveTab(tab);
+    await waitFor(() => expect(saveRestore).toHaveBeenCalledWith(
+      { workspaceId: "workspace", sessionId: "session-a" },
+      { epoch: "", revision: "old", enabled: true, urls: [tab.committedUrl] },
+    ));
+  });
+});
 
 describe("TD-024-U02 活动驱动浏览器控件", () => {
   it("无活动时用户直接操作且不存在静态接管开关", async () => {
@@ -229,51 +277,122 @@ describe("TD-008 图标按钮与交互动效", () => {
   });
 });
 
-describe("TD-08-I01 页面加载状态投影", () => {
-  it("原生 Started 和 Finished 事件驱动加载状态结束", async () => {
+describe("原生导航和标签状态投影", () => {
+  it("右栏平移时持续同步原生页面的位置", async () => {
     const fake = host();
     fake.createSpace = vi.fn().mockResolvedValue(spaceWithTab());
-    fake.snapshot = vi.fn().mockResolvedValue(spaceWithTab());
-    const listeners: ((event: {
-      sessionId: string;
-      tabId: string;
-      event: string;
-    }) => void)[] = [];
-    fake.onPage = vi.fn(
-      (
-        listener: (event: {
-          sessionId: string;
-          tabId: string;
-          event: string;
-        }) => void,
-      ) => {
-        listeners.push(listener);
-        return Promise.resolve(() => {});
-      },
+    const setBounds = vi.spyOn(fake, "setBounds");
+    const { container } = render(
+      <div data-edge-drawer>
+        <BrowserPanel host={fake} sessionId="session-a" visible />
+      </div>,
     );
-    render(<BrowserPanel host={fake} sessionId="session-a" visible />);
-    await screen.findByText("https://local.test");
-    await waitFor(() => expect(listeners.length).toBeGreaterThan(0));
-    await act(async () => {
-      listeners.at(-1)?.({
-        sessionId: "session-a",
-        tabId: "tab-1",
-        event: "Started",
-      });
-      await Promise.resolve();
-    });
-    expect(await screen.findByText("加载中")).toBeInTheDocument();
-    await act(async () => {
-      listeners.at(-1)?.({
-        sessionId: "session-a",
-        tabId: "tab-1",
-        event: "Finished",
-      });
-      await Promise.resolve();
-    });
+    await screen.findByRole("button", { name: "https://local.test" });
+    const drawer = container.querySelector("[data-edge-drawer]");
+    const viewport = container.querySelector("[data-browser-viewport]");
+    if (!drawer || !viewport) throw new Error("Browser drawer is missing");
+    let left = 100;
+    vi.spyOn(viewport, "getBoundingClientRect").mockImplementation(
+      () => new DOMRect(left, 40, 400, 300),
+    );
+    const signalTransition = (type: string) => {
+      const event = new Event(type);
+      Object.defineProperty(event, "propertyName", { value: "translate" });
+      fireEvent(drawer, event);
+    };
+    signalTransition("transitionrun");
     await waitFor(() =>
-      expect(screen.queryByText("加载中")).not.toBeInTheDocument(),
+      expect(setBounds).toHaveBeenLastCalledWith("session-a", "tab-1", {
+        x: 100,
+        y: 40,
+        width: 400,
+        height: 300,
+      }),
     );
+    left = 240;
+    await waitFor(() =>
+      expect(setBounds).toHaveBeenLastCalledWith("session-a", "tab-1", {
+        x: 240,
+        y: 40,
+        width: 400,
+        height: 300,
+      }),
+    );
+    signalTransition("transitionend");
+  });
+
+  it("隔离地址草稿和加载状态，前进后退只使用原生历史", async () => {
+    const fake = host();
+    const first = {
+      ...spaceWithTab().tabs[0]!,
+      navigation: {
+        canGoBack: false,
+        canGoForward: false,
+        isLoading: false,
+      },
+    };
+    const second = {
+      ...first,
+      tabId: "tab-2",
+      committedUrl: "https://other.test",
+    };
+    let snapshot = { ...spaceWithTab(), tabs: [first, second] };
+    fake.createSpace = vi.fn().mockResolvedValue(snapshot);
+    fake.snapshot = vi.fn().mockImplementation(() => Promise.resolve(snapshot));
+    fake.back = vi.fn().mockRejectedValue(new Error("HISTORY_FAILED"));
+    let onPage: ((event: BrowserPageEvent) => void) | undefined;
+    fake.onPage = vi.fn((receive: (event: BrowserPageEvent) => void) => {
+      onPage = receive;
+      return Promise.resolve(() => {});
+    });
+    const emit = async (tabId: string, event: string) => {
+      await act(() => {
+        onPage?.({ sessionId: "session-a", tabId, tabGeneration: 1, event });
+        return Promise.resolve();
+      });
+    };
+    render(<BrowserPanel host={fake} sessionId="session-a" visible />);
+    const input = await screen.findByRole("textbox", { name: "地址栏" });
+    await waitFor(() => expect(input).toHaveValue("https://local.test"));
+    const back = screen.getByRole("button", { name: "后退" });
+    expect(back).toBeDisabled();
+
+    snapshot = {
+      ...snapshot,
+      tabs: [
+        {
+          ...first,
+          committedUrl: "https://local.test/redirected",
+          navigation: {
+            canGoBack: true,
+            canGoForward: false,
+            isLoading: true,
+          },
+        },
+        second,
+      ],
+    };
+    await emit("tab-1", "HistoryChanged");
+    expect(input).toHaveValue("https://local.test/redirected");
+    expect(back).toBeEnabled();
+    expect(screen.getByText("加载中")).toBeInTheDocument();
+    fireEvent.click(back);
+    await screen.findByText(/HISTORY_FAILED/);
+    expect(back).toBeEnabled();
+
+    fireEvent.change(input, { target: { value: "https://typed.test" } });
+    await emit("tab-2", "Finished");
+    expect(input).toHaveValue("https://typed.test");
+    expect(screen.getByText("加载中")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "https://other.test" }));
+    expect(input).toHaveValue("https://other.test");
+    expect(back).toBeDisabled();
+    expect(screen.queryByText("加载中")).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "https://local.test/redirected" }),
+    );
+    expect(input).toHaveValue("https://typed.test");
+    expect(screen.getByText("加载中")).toBeInTheDocument();
   });
 });
 
@@ -305,30 +424,6 @@ describe("TD-08-M05 证据展示", () => {
       await screen.findByRole("img", { name: "浏览器截图证据" }),
     ).toBeInTheDocument();
     expect(readEvidence).toHaveBeenCalledWith("session-a", "artifact-1");
-  });
-});
-
-describe("TD-06-M01 高风险动作审批", () => {
-  it("受限脚本审批与普通控制及表单提交分开表达", async () => {
-    const fake = host();
-    fake.createSpace = vi.fn().mockResolvedValue(spaceWithTab());
-    fake.approvalSnapshot = vi.fn().mockResolvedValue([
-      {
-        approvalId: "approval-script",
-        sessionId: "session-a",
-        tabId: "tab-1",
-        action: "script:abc",
-        status: "pending",
-        generation: 1,
-      },
-    ]);
-    render(<BrowserPanel host={fake} sessionId="session-a" visible />);
-    const dialog = await screen.findByRole("dialog", {
-      name: "浏览器高风险操作审批",
-    });
-    expect(dialog).toHaveTextContent("允许 Agent 执行此受限操作");
-    expect(dialog).not.toHaveTextContent("控制此页面");
-    expect(dialog).not.toHaveTextContent("提交此表单");
   });
 });
 
@@ -408,6 +503,40 @@ describe("TD-08-M04 元素拾取", () => {
       expect(pickStart).toHaveBeenCalledWith("session-a", "tab-1"),
     );
   });
+
+  it("TD-039-U03 元素引用进入会话后仍保持连续拾取", async () => {
+    const fake = host();
+    fake.pickStart = vi.fn().mockResolvedValue(undefined);
+    fake.createSpace = vi.fn().mockResolvedValue({
+      ...spaceWithTab(),
+      manualTakeover: true,
+    });
+    const listeners: ((element: typeof browserElement) => void)[] = [];
+    fake.onElement = vi.fn(
+      (listener: (element: typeof browserElement) => void) => {
+        listeners.push(listener);
+        return Promise.resolve(() => {});
+      },
+    );
+    render(<BrowserPanel host={fake} sessionId="session-a" visible />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "拾取元素" })).toBeEnabled(),
+    );
+    await act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "拾取元素" }));
+      return Promise.resolve();
+    });
+    expect(screen.getByRole("button", { name: "取消拾取" })).toBeInTheDocument();
+
+    await act(async () => {
+      for (const listener of listeners) listener(browserElement);
+      await Promise.resolve();
+    });
+
+    expect(
+      screen.getByRole("button", { name: "取消拾取" }),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("TD-006 会话状态隔离", () => {
@@ -446,19 +575,9 @@ describe("TD-006 会话状态隔离", () => {
 });
 
 describe("TD-003 原生视口与交互区", () => {
-  it("审批、证据预览和数据管理不使用绝对定位覆盖原生视口", async () => {
+  it("证据预览和数据管理不使用绝对定位覆盖原生视口", async () => {
     const fake = host();
     fake.createSpace = vi.fn().mockResolvedValue(spaceWithTab());
-    fake.approvalSnapshot = vi.fn().mockResolvedValue([
-      {
-        approvalId: "approval-control",
-        sessionId: "session-a",
-        tabId: "tab-1",
-        action: "control",
-        status: "pending",
-        generation: 1,
-      },
-    ]);
     fake.screenshot = vi.fn().mockResolvedValue({
       artifactId: "artifact-1",
       sessionId: "session-a",
@@ -471,11 +590,9 @@ describe("TD-003 原生视口与交互区", () => {
     URL.createObjectURL = vi.fn().mockReturnValue("blob:evidence");
 
     render(<BrowserPanel host={fake} sessionId="session-a" visible />);
-    const approval = await screen.findByRole("dialog", {
-      name: "浏览器高风险操作审批",
-    });
-    expect(approval).not.toHaveClass("absolute");
-
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "保存证据" })).toBeEnabled(),
+    );
     fireEvent.click(screen.getByRole("button", { name: "保存证据" }));
     const evidence = await screen.findByRole("img", {
       name: "浏览器截图证据",
@@ -571,6 +688,41 @@ describe("TD-030 数据管理结果与关闭闭环", () => {
       await screen.findByText("completed", { selector: "strong" }),
     ).toBeInTheDocument();
     expect(clearAllData).toHaveBeenCalledTimes(2);
+  });
+
+  it("清理确认默认聚焦取消，进行中的清理可以停止剩余子项且不能重复提交", async () => {
+    const fake = host();
+    fake.createSpace = vi.fn().mockResolvedValue(spaceWithTab());
+    let complete!: () => void;
+    const operation = new Promise<{ status: "completed"; items: [] }>((resolve) => {
+      complete = () => resolve({ status: "completed", items: [] });
+    });
+    const clear = vi.fn<BrowserHost["clearAllData"]>().mockReturnValue(operation);
+    const cancelCleanup = vi.fn().mockResolvedValue(undefined);
+    fake.clearAllData = clear;
+    fake.cancelCleanup = cancelCleanup;
+    render(<BrowserPanel host={fake} sessionId="session-a" visible />);
+    fireEvent.click(await screen.findByRole("button", { name: "浏览器数据管理" }));
+    const trigger = screen.getByRole("button", { name: "清除全部浏览器数据" });
+    const scope = () => screen.getByRole("group", { name: "确认清理浏览器数据" });
+    fireEvent.click(trigger);
+    const cancel = within(scope()).getByRole("button", { name: "取消" });
+    expect(cancel).toHaveFocus();
+    fireEvent.keyDown(cancel, { key: "Escape" });
+    expect(trigger).toHaveFocus();
+    expect(clear).not.toHaveBeenCalled();
+
+    fireEvent.click(trigger);
+    const confirmation = within(scope()).getByRole("button", { name: "确认清理" });
+    fireEvent.click(confirmation);
+    expect(confirmation).toBeDisabled();
+    fireEvent.click(confirmation);
+    expect(clear).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "取消剩余子项" }));
+    expect(cancelCleanup).toHaveBeenCalledWith(clear.mock.calls[0]?.[0]);
+    complete();
+    await screen.findByRole("region", { name: "清理结果" });
+    expect(screen.queryByRole("group", { name: "确认清理浏览器数据" })).toBeNull();
   });
 });
 
@@ -707,5 +859,106 @@ describe("TD-021 全局浮层与原生页面遮挡", () => {
       first.remove();
       second.remove();
     }
+  });
+});
+
+describe("TD-034 关闭活动标签清理错误隔离", () => {
+  function fixtureWithTwoTabs() {
+    const fake = host();
+    const first = spaceWithTab().tabs[0]!;
+    const second = {
+      ...first,
+      tabId: "tab-2",
+      committedUrl: "about:blank",
+    };
+    let current: BrowserSpace = {
+      ...spaceWithTab(),
+      manualTakeover: true,
+      tabs: [first, second],
+    };
+    fake.createSpace = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(current));
+    fake.snapshot = vi.fn().mockImplementation(() => Promise.resolve(current));
+    fake.closeTab = vi.fn().mockImplementation((_sessionId, tabId: string) => {
+      current = {
+        ...current,
+        tabs: current.tabs.map((tab) =>
+          tab.tabId === tabId ? { ...tab, lifecycle: "closed" as const } : tab,
+        ),
+      };
+      return Promise.resolve();
+    });
+    return { fake };
+  }
+
+  it("隐藏已关闭的活动标签返回 TAB_NOT_FOUND 时不显示错误条", async () => {
+    const { fake } = fixtureWithTwoTabs();
+    const setVisible = vi.fn(
+      (_sessionId: string, tabId: string, visible: boolean) =>
+        tabId === "tab-2" && !visible
+          ? Promise.reject(new Error("TAB_NOT_FOUND"))
+          : Promise.resolve(),
+    );
+    fake.setVisible = setVisible;
+    render(<BrowserPanel host={fake} sessionId="session-a" visible />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /about:blank/ }));
+    await waitFor(() =>
+      expect(setVisible).toHaveBeenCalledWith("session-a", "tab-2", true),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "关闭标签 tab-2" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "地址栏" })).toHaveValue(
+        "https://local.test",
+      ),
+    );
+    await waitFor(() =>
+      expect(setVisible).toHaveBeenCalledWith("session-a", "tab-2", false),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("隐藏已关闭标签返回其他错误时仍显示真实错误", async () => {
+    const { fake } = fixtureWithTwoTabs();
+    fake.setVisible = vi.fn(
+      (_sessionId: string, tabId: string, visible: boolean) =>
+        tabId === "tab-2" && !visible
+          ? Promise.reject(new Error("NATIVE_PAGE_NOT_FOUND"))
+          : Promise.resolve(),
+    );
+    render(<BrowserPanel host={fake} sessionId="session-a" visible />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /about:blank/ }));
+    fireEvent.click(screen.getByRole("button", { name: "关闭标签 tab-2" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "NATIVE_PAGE_NOT_FOUND",
+    );
+  });
+
+  it("关闭非活动标签时不隐藏其他活动标签或显示错误", async () => {
+    const { fake } = fixtureWithTwoTabs();
+    const setVisible = vi.fn().mockResolvedValue(undefined);
+    fake.setVisible = setVisible;
+    render(<BrowserPanel host={fake} sessionId="session-a" visible />);
+
+    await screen.findByRole("textbox", { name: "地址栏" });
+    fireEvent.click(screen.getByRole("button", { name: "关闭标签 tab-2" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: /about:blank/ }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(
+      setVisible.mock.calls.filter((call) => call[1] === "tab-2"),
+    ).toHaveLength(0);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

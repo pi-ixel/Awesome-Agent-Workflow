@@ -31,48 +31,17 @@ pub(super) fn inline_entry(path: &Path, value: &Value) -> Result<Entry> {
     })
 }
 
-// 只重写有变化的顶层字段，并用完整文档回读核对，保留其他字段的注释和格式。
-fn replace_section(original: &str, key: &str, updated: &Value) -> Result<String> {
-    let mut section = serde_yaml::Mapping::new();
-    section.insert(key.into(), updated[key].clone());
-    let replacement = serde_yaml::to_string(&section).map_err(error)?;
-    let mut lines = original.split_inclusive('\n').peekable();
-    let mut result = String::new();
-    let mut replaced = false;
-    while let Some(line) = lines.next() {
-        if line.strip_prefix(key).is_some_and(|s| s.starts_with(':')) {
-            replaced = true;
-            result.push_str(&replacement);
-            while lines
-                .peek()
-                .is_some_and(|s| s.starts_with(char::is_whitespace) || s.starts_with("- "))
-            {
-                lines.next();
-            }
-        } else {
-            result.push_str(line);
-        }
-    }
-    if !replaced {
-        result.push('\n');
-        result.push_str(&replacement);
-    }
-    if serde_yaml::from_str::<Value>(&result).map_err(error)? != *updated {
-        return Err(error("配置格式无法无损更新，请在 iCode 中修改"));
-    }
-    Ok(result)
-}
-
 pub(super) fn edit<T>(
     path: &Path,
     key: &str,
     change: impl FnOnce(&mut Value) -> Result<T>,
 ) -> Result<T> {
     let path = path.canonicalize()?;
+    let _lock = crate::config_edit::lock_file(&path.with_file_name(".profiles.lock"))?;
     let original = fs::read_to_string(&path)?;
     let mut data: Value = serde_yaml::from_str(&original).map_err(error)?;
     let result = change(&mut data)?;
-    let updated = replace_section(&original, key, &data)?;
+    let updated = crate::config_edit::replace_section(&original, key, &data).map_err(error)?;
     let mut tmp = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
     tmp.write_all(updated.as_bytes())?;
     tmp.as_file()

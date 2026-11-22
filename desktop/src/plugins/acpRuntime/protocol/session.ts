@@ -279,6 +279,32 @@ export class AcpSession implements AcpSessionPort {
     return this.handshake;
   }
 
+  requestAgentExtension(
+    method: string,
+    params?: Readonly<Record<string, unknown>>,
+    timeoutMs = 5_000,
+  ): Promise<unknown> {
+    if (
+      !this.isInitialized ||
+      !method.startsWith("_") ||
+      (params && "sessionId" in params)
+    )
+      return Promise.reject(
+        new Error("Agent 扩展需要已握手的连接，且不能指定会话"),
+      );
+    return this.connection.request(method, params, { timeoutMs });
+  }
+
+  private mergeMcpServers(
+    extras: readonly McpServer[] = [],
+  ): readonly McpServer[] {
+    const servers = new Map<string, McpServer>();
+    for (const server of [...this.mcpServers, ...extras]) {
+      if (!servers.has(server.name)) servers.set(server.name, server);
+    }
+    return [...servers.values()];
+  }
+
   /** 建新会话。 */
   async newSession(
     cwd: string,
@@ -286,10 +312,10 @@ export class AcpSession implements AcpSessionPort {
   ): Promise<NewSessionResult> {
     this.invalidateConfiguration();
     this.latestConfigurationSessionId = null;
-    const { mcpServers = this.mcpServers, ...requestOptions } = options;
+    const { mcpServers, ...requestOptions } = options;
     const raw = await this.connection.request(
       ACP_METHOD.sessionNew,
-      { cwd, mcpServers },
+      { cwd, mcpServers: this.mergeMcpServers(mcpServers) },
       requestOptions,
     );
     const result = asNewSessionResult(raw);
@@ -325,11 +351,11 @@ export class AcpSession implements AcpSessionPort {
     this.invalidateConfiguration();
     this.latestConfigurationSessionId = null;
     this.loadingConfigurationSessionId = sessionId;
-    const { mcpServers = this.mcpServers, ...requestOptions } = options;
+    const { mcpServers, ...requestOptions } = options;
     const raw = await this.connection
       .request(
         ACP_METHOD.sessionLoad,
-        { sessionId, cwd, mcpServers },
+        { sessionId, cwd, mcpServers: this.mergeMcpServers(mcpServers) },
         requestOptions,
       )
       .finally(() => {

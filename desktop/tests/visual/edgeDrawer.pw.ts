@@ -1,8 +1,128 @@
 import { expect, test, type Locator } from "@playwright/test";
+import { color } from "./contrast.ts";
 
 const fixture =
   "/tests/visual/sessionStatusOverlayFixture.html?right-panel&workbench";
 const leftToggleName = "展开/收起侧边栏";
+
+test("侧栏底部在两套主题下保留提醒和账号菜单，并在键盘开合时接续焦点", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/tests/visual/uiScaleFixture.html");
+  const workspace = await context.newPage();
+  await workspace.setViewportSize({ width: 500, height: 600 });
+  await workspace.goto(`${fixture}&activity-rail&appearance&storage-notice`);
+  const footer = workspace.getByRole("complementary", { name: "存储提醒" });
+  const notice = footer.locator("[data-sidebar-footer-row]");
+  const sizeLabel = notice.getByText("1234567.0/100 MiB", { exact: true });
+  const rail = workspace.getByRole("navigation", { name: "工作台导航" });
+  const account = rail.getByRole("button", { name: "打开账号菜单" });
+  await expect(sizeLabel).toBeVisible();
+  await account.press("Enter");
+  const menu = workspace.getByRole("menu", { name: "账号菜单" });
+  const settings = menu.getByRole("menuitem", { name: "设置" });
+  await menu.press("ArrowDown");
+  await expect(settings).toBeFocused();
+
+  const font = page.getByRole("spinbutton", { name: "界面字号" });
+  for (const [theme, px] of [
+    ["暖白", 12],
+    ["暗夜", 20],
+    ["暖白", 14],
+  ] as const) {
+    await page.getByRole("button", { name: theme, exact: true }).click();
+    await font.fill(String(px));
+    await font.press("Enter");
+    await expect(workspace.locator("html")).toHaveCSS(
+      "--ui-font-size",
+      `${px}px`,
+    );
+    await expect(settings).toBeFocused();
+    await expect(sizeLabel).toBeVisible();
+    expect(
+      await notice.evaluate((el) => el.scrollWidth <= el.clientWidth),
+    ).toBe(true);
+  }
+  await settings.press("Escape");
+  await expect(menu).toBeHidden();
+  await expect(account).toBeFocused();
+  await expect(account).not.toHaveCSS("box-shadow", "none");
+
+  const collapse = workspace.getByRole("button", {
+    name: leftToggleName,
+    expanded: true,
+  });
+  const expand = workspace.getByRole("button", {
+    name: leftToggleName,
+    expanded: false,
+  });
+  await collapse.press("Enter");
+  await expect(expand).toBeFocused();
+  await expect(expand).not.toHaveCSS("box-shadow", "none");
+  await expand.press("Enter");
+  await expect(collapse).toBeFocused();
+  await expect(sizeLabel).toBeVisible();
+  await notice.getByRole("button", { name: "管理" }).press("Enter");
+  await expect(workspace.locator("html")).toHaveAttribute(
+    "data-opened-storage",
+    "true",
+  );
+  await expect(notice).toBeHidden();
+});
+
+test("活动栏在两种主题和三档字号下保持键盘焦点与当前入口", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/tests/visual/uiScaleFixture.html");
+  const workspace = await context.newPage();
+  await workspace.setViewportSize({ width: 720, height: 650 });
+  await workspace.goto(`${fixture}&activity-rail&appearance`);
+  const rail = workspace.getByRole("navigation", { name: "工作台导航" });
+  const mark = rail.getByTestId("workbench-mark");
+  const workflow = rail.getByRole("button", { name: "工作流" });
+  await workflow.press("Enter");
+  await expect(workflow).toHaveAttribute("aria-current", "location");
+  await expect(workflow).toHaveAttribute("aria-expanded", "true");
+  await expect(workspace.getByText("当前项目的工作流")).toBeVisible();
+  const font = page.getByRole("spinbutton", { name: "界面字号" });
+  for (const [theme, px] of [
+    ["暖白", 12],
+    ["暗夜", 20],
+    ["暖白", 14],
+  ] as const) {
+    await page.getByRole("button", { name: theme, exact: true }).click();
+    await font.fill(String(px));
+    await font.press("Enter");
+    await expect(workspace.locator("html")).toHaveCSS(
+      "--ui-font-size",
+      `${px}px`,
+    );
+    await expect(workflow).toBeFocused();
+    await expect(workflow).toHaveAttribute("aria-current", "location");
+    await expect(workflow).toHaveAttribute("aria-expanded", "true");
+    await expect(workflow).not.toHaveCSS("box-shadow", "none");
+    await expect
+      .poll(() => color(workflow, "background-color"))
+      .toEqual(await color(workflow, "--color-selected"));
+    await expect
+      .poll(() =>
+        workflow
+          .locator("svg")
+          .evaluate((icon) => parseFloat(getComputedStyle(icon).width)),
+      )
+      .toBeCloseTo((18 * px) / 14, 1);
+    expect((await workflow.boundingBox())!.width).toBe(36);
+    const markBounds = (await mark.boundingBox())!;
+    expect(markBounds.width).toBeCloseTo((24 * px) / 14, 1);
+    expect(markBounds.height).toBeCloseTo(markBounds.width, 1);
+  }
+  await workflow.press("Space");
+  await expect(workflow).toHaveAttribute("aria-expanded", "false");
+  await expect(workflow).toHaveAttribute("aria-current", "location");
+  await expect(workflow).toBeFocused();
+});
 
 test("the activity rail has a full-height divider and keeps icons in place on collapse", async ({
   page,

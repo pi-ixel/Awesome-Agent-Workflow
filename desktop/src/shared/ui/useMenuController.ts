@@ -1,34 +1,44 @@
-/** 右键/下拉菜单宿主控制器（与 ContextBar 的 useBarMenuController 同拍）：
- *  onDismiss 只置 closing 播 100ms 退场动画，100ms 后卸载。 */
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ContextMenuEntry, MenuPlacement } from "../../../../shared/ui/ContextMenu.tsx";
+import type { ContextMenuEntry, MenuPlacement } from "./ContextMenu.tsx";
 
-export const MENU_CLOSE_MS = 100;
+/** 退场动画时长（与 index.css 的 .context-menu-out 同拍）。 */
+const MENU_CLOSE_MS = 100;
 
-export interface MenuState {
+/** 菜单状态（id 区分触发器；closing 驱动退场动画）。 */
+interface MenuState {
   readonly id: string;
+  readonly instance: number;
   readonly label: string;
   readonly entries: readonly ContextMenuEntry[];
   readonly placement: MenuPlacement;
+  readonly trigger?: HTMLElement;
   readonly closing: boolean;
 }
 
+type MenuAnchor = Pick<Partial<MenuPlacement>, "side" | "align"> & {
+  readonly trigger: HTMLElement;
+};
+
+/** 关闭时先播放退场动画，重新打开会取消待执行的卸载。 */
 export function useMenuController(): {
   menu: MenuState | null;
   open: (
     id: string,
     label: string,
     entries: readonly ContextMenuEntry[],
-    placement: MenuPlacement,
+    target: MenuPlacement | MenuAnchor,
   ) => void;
   dismiss: () => void;
 } {
   const [menu, setMenu] = useState<MenuState | null>(null);
+  const nextInstance = useRef(0);
   const closeTimerRef = useRef<number | null>(null);
 
   const dismiss = useCallback(() => {
     setMenu((current) =>
-      current === null || current.closing ? current : { ...current, closing: true },
+      current === null || current.closing
+        ? current
+        : { ...current, closing: true },
     );
     if (closeTimerRef.current === null) {
       closeTimerRef.current = window.setTimeout(() => {
@@ -43,13 +53,31 @@ export function useMenuController(): {
       id: string,
       label: string,
       entries: readonly ContextMenuEntry[],
-      placement: MenuPlacement,
+      target: MenuPlacement | MenuAnchor,
     ) => {
       if (closeTimerRef.current !== null) {
         window.clearTimeout(closeTimerRef.current);
         closeTimerRef.current = null;
       }
-      setMenu({ id, label, entries, placement, closing: false });
+      const placement: MenuPlacement =
+        "trigger" in target
+          ? {
+              x: 0,
+              y: 0,
+              side: target.side ?? "bottom",
+              align: target.align ?? "end",
+            }
+          : target;
+      const trigger = "trigger" in target ? target.trigger : undefined;
+      setMenu({
+        id,
+        instance: ++nextInstance.current,
+        label,
+        entries,
+        placement,
+        trigger,
+        closing: false,
+      });
     },
     [],
   );

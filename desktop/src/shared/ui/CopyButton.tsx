@@ -6,8 +6,9 @@
  * （配合 `revealOnHover`），用于消息卡右上角这类弱操作，避免常驻文字
  * 按钮成为噪音；无障碍名称始终由 label 提供。
  */
-import { UiIcon } from "./UiIcon.tsx";
+import { CheckIcon, CopyIcon } from "./icons.tsx";
 import { IconButton } from "./IconButton.tsx";
+import { ActionButton } from "./controls.tsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 async function copyText(text: string): Promise<boolean> {
@@ -23,45 +24,14 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-/** 复制图标（静息态）。 */
-function CopyIcon() {
-  return (
-    <UiIcon
-      viewBox="0 0 14 14"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.4}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="ui-icon-14"
-    >
-      <rect x="4.5" y="4.5" width="7" height="7" rx="1.2" />
-      <path d="M9.5 4.5v-1a1.2 1.2 0 0 0-1.2-1.2H3.7A1.2 1.2 0 0 0 2.5 3.5v4.6A1.2 1.2 0 0 0 3.7 9.3h1" />
-    </UiIcon>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <UiIcon
-      viewBox="0 0 14 14"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.4}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="ui-icon-14"
-    >
-      <path d="m3 7 2.5 2.5L11 4" />
-    </UiIcon>
-  );
-}
-
 export interface CopyButtonProps {
   /** 延迟取文本：点击瞬间才读取最新内容（流式消息也能复制完整文本）。 */
   readonly getText: () => string;
   /** 无障碍名称，缺省「复制」。 */
   readonly label?: string;
+  /** 紧凑描边规格同时显示复制图标和文案。 */
+  readonly appearance?: "plain" | "outlined";
+  readonly copiedLabel?: string;
   /** 图标模式：静息态只显示图标（反馈文案仍以文字出现）。 */
   readonly iconOnly?: boolean;
   readonly icon?: ReactNode;
@@ -82,6 +52,8 @@ const COPY_FEEDBACK_TIMEOUT_MS = 2_000;
 export function CopyButton({
   getText,
   label = "复制",
+  appearance = "plain",
+  copiedLabel = "已复制",
   iconOnly = false,
   icon,
   tone = "faint",
@@ -127,34 +99,67 @@ export function CopyButton({
       ? "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
       : "";
 
+  const isOutlined = !iconOnly && appearance === "outlined";
   const sizeClass = iconOnly
     ? size === "md"
       ? "rounded-lg"
       : "rounded"
-    : "rounded px-1.5 py-0.5 text-xs";
+    : isOutlined
+      ? ""
+      : "min-h-7 px-1.5 py-0.5 text-ui-sm";
 
   const classes = `shrink-0 transition-[color,background-color,opacity] ${sizeClass} ${revealClass} ${
     state === "done"
-      ? "text-ok-ink"
+      ? "text-ok-ink! hover:text-ok-ink!"
       : state === "failed"
-        ? "text-danger-ink hover:text-danger-ink"
-        : `${tone === "soft" ? "text-ink-soft" : tone === "muted" ? "text-ink-mute" : "text-ink-faint"} hover:bg-raised hover:text-ink-soft`
+        ? "text-danger-ink! hover:text-danger-ink!"
+        : isOutlined
+          ? ""
+          : `${tone === "soft" ? "text-ink-soft" : tone === "muted" ? "text-ink-mute" : "text-ink-faint"} hover:bg-raised hover:text-ink-soft`
   }`;
-  const feedback = state === "done" ? "已复制" : state === "failed" ? "复制失败" : "";
-  const buttonProps = { "aria-label": label, "data-hint": feedback || label, className: classes, onClick: handleClick };
+  const feedback =
+    state === "done" ? copiedLabel : state === "failed" ? "复制失败" : "";
+  const glyph =
+    state === "done" ? (
+      <CheckIcon className="ui-icon-14 shrink-0" />
+    ) : (
+      (icon ?? <CopyIcon className="ui-icon-14 shrink-0" />)
+    );
+  const buttonProps = {
+    "aria-label": label,
+    "data-hint": feedback || label,
+    className: classes,
+    onClick: handleClick,
+  };
   if (iconOnly) {
     return (
       <>
-        <IconButton {...buttonProps} iconSize={size === "md" ? "standard" : "compact"}>
-          {state === "done" ? <CheckIcon /> : icon ?? <CopyIcon />}
+        <IconButton
+          {...buttonProps}
+          iconSize={size === "md" ? "standard" : "compact"}
+        >
+          {glyph}
         </IconButton>
-        {feedback && <span className="sr-only" aria-live="polite">{feedback}</span>}
+        {feedback && (
+          <span className="sr-only" aria-live="polite">
+            {feedback}
+          </span>
+        )}
       </>
     );
   }
   return (
-    <button type="button" {...buttonProps}>
-      {feedback ? <span aria-live="polite">{feedback}</span> : <span>{label}</span>}
-    </button>
+    <ActionButton
+      tone={isOutlined ? "secondary" : "ghost"}
+      size={isOutlined ? "compact" : undefined}
+      {...buttonProps}
+    >
+      {isOutlined && glyph}
+      {feedback ? (
+        <span aria-live="polite">{feedback}</span>
+      ) : (
+        <span>{label}</span>
+      )}
+    </ActionButton>
   );
 }

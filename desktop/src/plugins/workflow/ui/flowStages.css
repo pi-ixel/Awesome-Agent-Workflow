@@ -11,17 +11,17 @@ html.theme-warm .wf-flow, html.theme-warm .wf-fx, html.theme-warm .wf-strip {
   --wf-step-edge:var(--color-line-strong);
   --wf-stage-bg:var(--color-surface);
   --wf-stage-no:var(--color-base);
-  --wf-stage-lift:0 1px 2px rgb(24 24 27 / .06), 0 6px 16px -10px rgb(24 24 27 / .18);
+  --wf-stage-lift:var(--shadow-elev-2);
 }
 .wf-flow, .wf-fx, .wf-strip {
   /* 阶段块：暗色下抬高一档（raised）；暖白下 raised 是一块暗灰，会显得脏，改用白卡 + 轻投影 */
   --wf-step-wait:color-mix(in srgb, var(--wf-wait) 22%, var(--color-surface));
   --wf-step-edge:var(--color-line);
-  --wf-canvas:color-mix(in srgb, var(--color-base) 88%, #000);
+  --wf-canvas:color-mix(in srgb, var(--color-base) 88%, var(--color-overlay-shade));
   --wf-dot:color-mix(in srgb, var(--color-line-strong) 90%, transparent);
   --wf-stage-bg:var(--color-raised);
   --wf-stage-no:var(--color-surface);
-  --wf-stage-lift:0 1px 0 var(--color-line-strong), 0 8px 18px -14px rgb(0 0 0 / .6);
+  --wf-stage-lift:0 1px 0 var(--color-line-strong), var(--shadow-elev-2);
   --wf-done:var(--color-ok);
   --wf-running:var(--color-accent-ink);
   --wf-wait:var(--color-line-strong);
@@ -39,7 +39,7 @@ html.theme-warm .wf-flow, html.theme-warm .wf-fx, html.theme-warm .wf-strip {
 /* 阶段块：一层的提纲，比步骤卡更「实」——抬高一档的底色、更粗的边、投影、圆形序号 */
 .wf-stage { position:relative; display:flex; align-items:flex-start; gap:12px; min-width:0; padding:13px 14px 14px; border:1px solid var(--color-line-strong); border-radius:14px; background:var(--wf-stage-bg); color:var(--color-ink); text-align:left; cursor:pointer; box-shadow:var(--wf-stage-lift); transition:border-color .15s ease, box-shadow .15s ease; }
 .wf-stage:hover { border-color:var(--color-ink-mute); }
-.wf-stage:focus-visible { outline:2px solid var(--color-accent-ink); outline-offset:2px; }
+.wf-stage:focus-visible { outline:2px solid var(--color-focus-ring); outline-offset:2px; }
 /* 展开中：一圈实色描边，不用发虚的光晕 */
 .wf-stage.open { border-color:var(--color-accent-ink); box-shadow:0 0 0 1px var(--color-accent-ink), var(--wf-stage-lift); }
 /* 阶段之间的连线：挂在后一个阶段前面，被推开时跟着拉长（--wf-reach），始终连着前一个阶段 */
@@ -100,7 +100,7 @@ html.theme-warm .wf-flow, html.theme-warm .wf-fx, html.theme-warm .wf-strip {
 .wf-step.is-flow.open { border-style:solid; border-color:var(--color-info-line); box-shadow:0 0 0 3px var(--color-info-bg); }
 .wf-step-main { flex:1; display:flex; flex-direction:column; gap:2px; min-width:0; padding:9px 12px 10px; border:0; border-radius:inherit; background:transparent; color:inherit; font:inherit; text-align:left; }
 button.wf-step-main { cursor:pointer; }
-button.wf-step-main:focus-visible { outline:2px solid var(--color-accent-ink); outline-offset:2px; }
+button.wf-step-main:focus-visible { outline:2px solid var(--color-focus-ring); outline-offset:2px; }
 .wf-step.is-flow .wf-step-main { padding-right:34px; }
 .wf-step.has-session .wf-step-main { padding-right:40px; }
 .wf-step-row { display:flex; align-items:center; gap:8px; min-width:0; }
@@ -123,7 +123,7 @@ button.wf-step-main:focus-visible { outline:2px solid var(--color-accent-ink); o
 .wf-session { position:absolute; right:8px; top:8px; }
 
 /* 小地图：右下角，内容放不下时淡入；点或拖跳到那里 */
-.wf-map { position:absolute; right:18px; bottom:18px; z-index:4; padding:6px; border:1px solid var(--color-line-strong); border-radius:10px; background:color-mix(in srgb, var(--color-surface) 92%, transparent); box-shadow:0 6px 18px -10px rgb(0 0 0 / .35); opacity:0; pointer-events:none; transform:translateY(4px); transition:opacity .25s ease, transform .25s ease; }
+.wf-map { position:absolute; right:18px; bottom:18px; z-index:4; padding:6px; border:1px solid var(--color-line-strong); border-radius:10px; background:color-mix(in srgb, var(--color-surface) 92%, transparent); box-shadow:var(--shadow-elev-2); opacity:0; pointer-events:none; transform:translateY(4px); transition:opacity .25s ease, transform .25s ease; }
 .wf-map.show { opacity:1; pointer-events:auto; transform:none; }
 .wf-map canvas { display:block; cursor:pointer; touch-action:none; }
 /* 收起动画的复制品挂在这里（固定定位，不受面板滚动和裁剪影响） */

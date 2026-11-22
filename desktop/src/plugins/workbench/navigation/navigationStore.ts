@@ -40,6 +40,7 @@ export const emptyWorkbenchUi: WorkbenchUiState = {
   contextPath: null,
   overlay: null,
   settingsInitialTab: "general",
+  settingsTabRequest: 0,
   settingsFocus: null,
   sidebarCollapsed: false,
   sidebarId: null,
@@ -79,11 +80,12 @@ export function createWorkbenchNavigation(
     ) => {
       if (!active || !isCurrent()) return;
       if (!guard.guard(() => openSettingsTab(tab, isCurrent, focusElementId))) return;
-      set({
+      set((state) => ({
         overlay: "settings",
         settingsInitialTab: tab,
+        settingsTabRequest: state.settingsTabRequest + 1,
         settingsFocus: focusElementId ? { elementId: focusElementId } : null,
-      });
+      }));
     };
     return {
       ...emptyWorkbenchUi,

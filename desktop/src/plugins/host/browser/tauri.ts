@@ -3,6 +3,7 @@ import type {
   BrowserPopup,
   BrowserSpace,
   BrowserZoomEvent,
+  BrowserPageEvent,
   BrowserTab,
 } from "../../../contracts/browser/types.ts";
 import type { NativeInvoke } from "../adapters/invoke.ts";
@@ -14,7 +15,10 @@ import type {
   BrowserEvidence,
   BrowserHost,
   BrowserMcpEndpoint,
+  BrowserMcpRegistration,
   BrowserMcpStatus,
+  BrowserRestoreScope,
+  BrowserRestoreSnapshot,
 } from "./types.ts";
 import type {
   BrowserCleanupPreview,
@@ -25,6 +29,14 @@ import type {
   BrowserPermission,
 } from "../../../contracts/browser/types.ts";
 import { isTauriEnv } from "../adapters/host.ts";
+import { pathKey } from "../../../shared/panelPaths.ts";
+import {
+  isLegacyRestoreEnabled,
+  legacyRestoreSessions,
+  readWithLegacyRestore,
+  removeLegacyRestore,
+  removeLegacyRestoreTabs,
+} from "./legacyRestore.ts";
 
 function listenBrowserEvent<T>(
   event: string,
@@ -37,8 +49,79 @@ function listenBrowserEvent<T>(
 export function createBrowserHost(
   nativeInvoke: NativeInvoke = invoke,
 ): BrowserHost {
+  const saveRestore: BrowserHost["saveRestore"] = (scope, update) =>
+    nativeInvoke("browser_restore_save", { scope, update });
+  const restoreOwners = () =>
+    nativeInvoke<BrowserRestoreScope[]>("browser_restore_owners").catch(
+      () => [],
+    );
+  const reading = new Map<string, Promise<BrowserRestoreSnapshot>>();
+  const readRestore = (scope: BrowserRestoreScope) => {
+    const key = JSON.stringify([scope.workspaceId, scope.sessionId]);
+    let request = reading.get(key);
+    if (!request) {
+      request = readWithLegacyRestore(
+        scope,
+        () =>
+          nativeInvoke<BrowserRestoreSnapshot>("browser_restore_read", {
+            scope,
+          }),
+        (update) => saveRestore(scope, update),
+      ).finally(() => reading.delete(key));
+      reading.set(key, request);
+    }
+    return request;
+  };
   return {
     isAvailable: isTauriEnv,
+    readRestore,
+    saveRestore,
+    async forgetRestore(scope) {
+      await nativeInvoke("browser_restore_clear", { scope });
+      removeLegacyRestore(scope.sessionId);
+    },
+    migrateLegacyRestores() {
+      if (!isTauriEnv()) return () => {};
+      let stopped = false;
+      let timer: ReturnType<typeof setTimeout>;
+      const run = async () => {
+        let catalog: BrowserRestoreScope[] | undefined;
+        for (const sessionId of legacyRestoreSessions()) {
+          if (stopped) return;
+          if (!isLegacyRestoreEnabled(sessionId)) {
+            removeLegacyRestore(sessionId);
+          } else if (sessionId.startsWith("manual:")) {
+            await readRestore({
+              workspaceId: sessionId.slice(7),
+              sessionId,
+            }).catch(() => {});
+          } else {
+            catalog ??= await restoreOwners();
+            if (stopped) return;
+            const owners = new Set(
+              catalog
+                .filter((item) => item.sessionId === sessionId)
+                .map((item) => item.workspaceId),
+            );
+            const workspaceId =
+              owners.size === 1 ? owners.values().next().value : undefined;
+            if (workspaceId)
+              await readRestore({ workspaceId, sessionId }).catch(() => {});
+          }
+          if (stopped) return;
+          await new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, 40);
+          });
+        }
+      };
+      timer = setTimeout(() => {
+        void run();
+      }, 1500);
+      return () => {
+        stopped = true;
+        clearTimeout(timer);
+      };
+    },
     agentControlEnabled: () => {
       if (!isTauriEnv()) return Promise.resolve(false);
       return nativeInvoke<boolean>("browser_agent_control_status");
@@ -104,6 +187,8 @@ export function createBrowserHost(
       nativeInvoke<BrowserMcpEndpoint>("browser_mcp_create"),
     mcpStatus: (sessionId) =>
       nativeInvoke<BrowserMcpStatus>("browser_mcp_status", { sessionId }),
+    mcpRegistration: (sessionId) =>
+      nativeInvoke<BrowserMcpRegistration | null>("browser_mcp_registration", { sessionId }),
     bindMcpEndpoint: (endpointId, sessionId) =>
       nativeInvoke<BrowserMcpEndpoint>("browser_mcp_bind", {
         endpointId,
@@ -178,17 +263,49 @@ export function createBrowserHost(
       }),
     clearCache: (sessionId) =>
       nativeInvoke<string>("browser_clear_cache", { sessionId }),
-    clearSessionData: (sessionId) =>
-      nativeInvoke<string>("browser_clear_session_data", { sessionId }),
+    async clearSessionData(sessionId) {
+      const result = await nativeInvoke<string>("browser_clear_session_data", {
+        sessionId,
+      });
+      removeLegacyRestoreTabs(sessionId);
+      return result;
+    },
     clearSiteData: (sessionId, origin) =>
       nativeInvoke<string>("browser_clear_site_data", { sessionId, origin }),
-    clearWorkspaceData: (workspaceId, taskId) =>
-      nativeInvoke<BrowserCleanupResult>("browser_clear_workspace_data", {
-        workspaceId,
-        taskId,
-      }),
-    clearAllData: (taskId) =>
-      nativeInvoke<BrowserCleanupResult>("browser_clear_all_data", { taskId }),
+    async clearWorkspaceData(workspaceId, taskId) {
+      const result = await nativeInvoke<BrowserCleanupResult>(
+        "browser_clear_workspace_data",
+        {
+          workspaceId,
+          taskId,
+        },
+      );
+      if (result.status === "completed") {
+        const project = pathKey(workspaceId);
+        const sessions = legacyRestoreSessions();
+        for (const id of sessions) {
+          if (id.startsWith("manual:") && pathKey(id.slice(7)) === project)
+            removeLegacyRestoreTabs(id);
+        }
+        if (sessions.some((id) => !id.startsWith("manual:"))) {
+          const catalog = await restoreOwners();
+          for (const entry of catalog) {
+            if (pathKey(entry.workspaceId) === project)
+              removeLegacyRestoreTabs(entry.sessionId);
+          }
+        }
+      }
+      return result;
+    },
+    async clearAllData(taskId) {
+      const result = await nativeInvoke<BrowserCleanupResult>(
+        "browser_clear_all_data",
+        { taskId },
+      );
+      if (result.status === "completed")
+        for (const id of legacyRestoreSessions()) removeLegacyRestoreTabs(id);
+      return result;
+    },
     cancelCleanup: async (taskId) => {
       await nativeInvoke("browser_cleanup_cancel", { taskId });
     },
@@ -266,9 +383,8 @@ export function createBrowserHost(
         (event) => receive(event.payload),
       ),
     onPage: (receive) =>
-      listenBrowserEvent<{ sessionId: string; tabId: string; event: string }>(
-        "aaw://browser-page",
-        (event) => receive(event.payload),
+      listenBrowserEvent<BrowserPageEvent>("aaw://browser-page", (event) =>
+        receive(event.payload),
       ),
     onZoom: (receive) =>
       listenBrowserEvent<BrowserZoomEvent>("aaw://browser-zoom", (event) =>

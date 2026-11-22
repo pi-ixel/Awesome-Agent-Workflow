@@ -21,8 +21,8 @@ import type {
   WorkflowService,
 } from "../types.ts";
 import { disposeActions, gotoTargets, type DisposeAction as Action, type DisposeCandidate } from "./dispose.ts";
-import { CheckSquare, Listbox } from "../../../shared/ui/controls.tsx";
-import { ghostButton, primaryButton, secondaryButton } from "./buttons.ts";
+import { ActionButton, Checkbox, Listbox } from "../../../shared/ui/controls.tsx";
+
 import { settingsTextareaClass } from "../../../shared/ui/SettingsPageParts.tsx";
 
 const ACTION_LABEL: Record<Action, string> = {
@@ -86,7 +86,7 @@ export function DisposePanel({ service, runId, snapshot, catalog, record, candid
     return <div className="workflow-reconcile">
       <h4>处置</h4>
       <p>{record.mark === "superseded" ? "这条记录已被回退作废，只供回看。" : "这条记录所在的步骤已经不在当前执行路线上，不能从这里处置；可以选它之后仍在执行的节点。"}</p>
-      <div className="workflow-reconcile-actions"><button type="button" className={secondaryButton} onClick={onCancel}>返回</button></div>
+      <div className="workflow-reconcile-actions"><ActionButton type="button" tone="secondary" size="compact" onClick={onCancel}>返回</ActionButton></div>
     </div>;
   }
 
@@ -188,18 +188,19 @@ export function DisposePanel({ service, runId, snapshot, catalog, record, candid
         : <p>没有节点声明要删除的文件；旧文件会留在原处，重做时由节点自行处理。</p>)}
       {plan.cleanupProblems.length > 0 && <p className="attention">有 {plan.cleanupProblems.length} 个清理条目不会执行：{plan.cleanupProblems.map((p) => `${p.entry}（${p.message}）`).join("；")}</p>}
       {plan.sessions.length > 0 && <p>这些步骤会换新会话：{plan.sessions.join("、")}</p>}
-      {needsAck && <label className="workflow-dispose-ack attention">
-        <input type="checkbox" className="peer sr-only" checked={acknowledged} onChange={(e) => setAcknowledgedKey(e.target.checked ? requestKey : "")} />
-        <CheckSquare checked={acknowledged} />
-        <span>这些节点的影响撤不回，重做会再来一次：{plan.irreversible.map((n) => `${n.label}（${n.reason}）`).join("；")}。我知道了</span>
-      </label>}
+      {needsAck && <Checkbox
+        className="workflow-dispose-ack attention"
+        label={`这些节点的影响撤不回，重做会再来一次：${plan.irreversible.map((n) => `${n.label}（${n.reason}）`).join("；")}。我知道了`}
+        checked={acknowledged}
+        onChange={(checked) => setAcknowledgedKey(checked ? requestKey : "")}
+      />}
     </section>}
 
     {active && <p className="attention">运行正在执行，先在上方停止运行再处置。</p>}
     {error && <p className="attention">{error}</p>}
     <div className="workflow-reconcile-actions">
-      <button type="button" className={ghostButton} onClick={onCancel}>取消</button>
-      <button type="button" className={primaryButton} disabled={disabled} onClick={() => void execute()}>{busy ? "处理中…" : "执行并继续运行"}</button>
+      <ActionButton type="button" tone="ghost" size="compact" onClick={onCancel}>取消</ActionButton>
+      <ActionButton type="button" tone="primary" size="compact" disabled={disabled} onClick={() => void execute()}>{busy ? "处理中…" : "执行并继续运行"}</ActionButton>
     </div>
   </div>;
 }

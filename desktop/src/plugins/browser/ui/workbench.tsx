@@ -14,7 +14,8 @@ export function apply(ctx: Context): void {
     () =>
       ctx.workbench.register("settings", {
         id: "browser",
-        order: 25,
+        group: "agent",
+        order: 45,
         label: "浏览器",
         Icon: GlobeIcon,
         View: () => <BrowserAgentControlSettings host={ctx.host.browser} />,
@@ -50,6 +51,17 @@ export function apply(ctx: Context): void {
             ctx.project.conversation.foreground.runtime,
             (state) => state.runtime.toolNames,
           );
+          const toolInventoryKnown = useStore(
+            ctx.project.conversation.foreground.runtime,
+            (state) => state.runtime.toolInventoryKnown,
+          );
+          const mcpFailures = useStore(
+            ctx.project.conversation.foreground.runtime,
+            (state) =>
+              state.runtime.mcpFailuresKnown
+                ? state.runtime.mcpFailures
+                : undefined,
+          );
           const sessionId = activeSessionId ?? `manual:${project}`;
           return (
             <div className="flex h-full min-h-0 flex-col">
@@ -60,7 +72,12 @@ export function apply(ctx: Context): void {
                   workspacePath={project}
                   agentKey={agentKey}
                   sessionId={activeSessionId}
-                  runtime={{ lastSessionId, toolNames }}
+                  runtime={{
+                    lastSessionId,
+                    toolNames,
+                    toolInventoryKnown,
+                    mcpFailures,
+                  }}
                 />
               )}
               <div className="min-h-0 flex-1">

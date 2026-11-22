@@ -1,7 +1,7 @@
 {
   "name": "aaw-desktop",
   "private": true,
-  "version": "0.1.52",
+  "version": "0.1.55",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,6 +14,7 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:visual": "playwright test",
+    "ui:audit": "tsx scripts/reportUiInventory.ts",
     "tauri": "tauri",
     "acp:smoke": "tsx scripts/acp-smoke.ts",
     "test:browser:blackbox": "tsx scripts/browserMcpBlackbox.ts",
@@ -34,7 +35,6 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^2.0.0",
-    "@modelcontextprotocol/sdk": "1.32.2",
     "@codemirror/commands": "^6.11.1",
     "@codemirror/lang-markdown": "^6.5.2",
     "@codemirror/language": "^6.13.1",
@@ -42,6 +42,7 @@
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.15",
     "@lezer/highlight": "^1.2.5",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@streamdown/cjk": "^1.0.4",
     "@streamdown/code": "^2.0.0",
     "@streamdown/math": "^1.0.3",
@@ -88,7 +89,9 @@
     "fake-indexeddb": "^6.2.7",
     "globals": "^17.13.0",
     "jsdom": "^29.1.1",
+    "mdn-data": "^2.27.1",
     "mermaid": "^12.2.0",
+    "postcss": "^8.5.31",
     "prettier": "^3.9.10",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.15",

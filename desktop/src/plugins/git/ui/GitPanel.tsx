@@ -14,6 +14,8 @@ import {
   type CSSProperties,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
+import { FileEntryLabel } from "../../../shared/ui/file-icons/FileEntryLabel.tsx";
 import {
   changeKey,
   createGitRevealCursor,
@@ -21,11 +23,7 @@ import {
   type GitRevealCursor,
 } from "../review/review.ts";
 import { createGitDiffCache } from "../diff/diffCache.ts";
-import {
-  ChevronDownIcon,
-  ChevronRightIcon,
-  FolderGlyph,
-} from "../../../shared/ui/icons.tsx";
+import { ChevronDownIcon } from "../../../shared/ui/icons.tsx";
 import { ColumnResizer } from "../../../shared/ui/controls/ColumnResizer.tsx";
 import { reviewRailWidths } from "../config.ts";
 import { GitReviewDiff } from "./GitReviewDiff.tsx";
@@ -59,7 +57,7 @@ export function GitPanel({
         <p className="p-2 text-warn-ink">{result.watchError}</p>
       )}
       {result.data?.statsWarning && (
-        <p role="status" className="p-2 text-xs text-warn-ink">
+        <p role="status" className="p-2 text-ui-sm text-warn-ink">
           {result.data.statsWarning}
         </p>
       )}
@@ -231,11 +229,12 @@ function GitReview({
       : "";
     return (
       <div data-review-index={index}>
-        <button
+        <NavigationRow
+          layout="compound"
           aria-expanded={isOpen}
           aria-label={`${isOpen ? "收起" : "展开"} ${change.path}`}
           data-hint={`${change.oldPath ? `${change.oldPath} → ` : ""}${change.path} · ${change.status}`}
-          className={`sticky top-0 z-10 flex min-h-8 w-full items-center gap-3 bg-base px-3 text-left transition-colors hover:bg-surface-hover ${isOpen ? "bg-surface-hover" : ""}`}
+          className={`sticky top-0 z-10 min-h-8 w-full items-center gap-3 rounded-none! px-3 text-ui-base hover:bg-surface-hover ${isOpen ? "bg-surface-hover" : "bg-base"}`}
           onClick={() => {
             setExpanded(isOpen ? null : key);
           }}
@@ -257,7 +256,7 @@ function GitReview({
           <ChevronDownIcon
             className={`ui-icon-16 shrink-0 text-ink-soft transition-transform ${isOpen ? "rotate-180" : ""}`}
           />
-        </button>
+        </NavigationRow>
         {isOpen && (
           <div className="border-b border-line">
             {(!entry || (entry.loading && !entry.model)) && (
@@ -348,10 +347,11 @@ function GitReview({
             const label = group === "changes" ? "Changes" : "Unversioned Files";
             return (
               <section key={group} data-git-group={group} className="mb-3">
-                <button
+                <NavigationRow
+                  layout="tree"
                   aria-label={label}
                   aria-expanded={isOpen}
-                  className={`flex w-full flex-wrap items-center gap-1 py-2 text-left ${group === "untracked" ? "text-danger-ink" : ""}`}
+                  className={group === "untracked" ? "flex-wrap text-danger-ink" : "flex-wrap"}
                   onClick={() =>
                     setGroups((old) => ({ ...old, [group]: !old[group] }))
                   }
@@ -364,7 +364,7 @@ function GitReview({
                   <span className="ml-auto">
                     <GitLineStats changes={all} />
                   </span>
-                </button>
+                </NavigationRow>
                 <TreeBranch open={isOpen}>
                   <GitFileTree
                     key={`${group}-${group === revealedGroup ? revealWave : 0}`}
@@ -477,24 +477,16 @@ function GitFileTree({
         const isOpen = expanded.has(`${prefix}${name}`);
         return (
           <div key={name}>
-            <button
-              type="button"
+            <NavigationRow
+              layout="tree"
               aria-expanded={isOpen}
-              className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-left hover:bg-raised"
+              data-hint={`${prefix}${name}`}
               onClick={() =>
                 toggleFolder(expanded, setExpanded, `${prefix}${name}`)
               }
             >
-              <span
-                aria-hidden={true}
-                className={`shrink-0 text-ink-faint ${treeChevronClass}`}
-                style={{ transform: isOpen ? "rotate(90deg)" : "rotate(0deg)" }}
-              >
-                <ChevronRightIcon className="ui-icon-12" />
-              </span>
-              <FolderGlyph isExpanded={isOpen} />
-              <span className="min-w-0 flex-1 truncate">{name}</span>
-            </button>
+              <FileEntryLabel name={name} folder={isOpen ? "open" : "closed"} />
+            </NavigationRow>
             <TreeBranch open={isOpen}>
               <div className="ml-3 border-l border-line pl-2">
                 <GitFileTree
@@ -513,19 +505,18 @@ function GitFileTree({
         );
       })}
       {files.map((path) => (
-        <button
+        <NavigationRow
+          layout="tree"
           key={path}
           data-hint={path}
           aria-label={`定位 ${path}`}
           aria-current={selectedPath === path ? "true" : undefined}
-          className={`flex w-full items-center gap-2 rounded px-1 py-1 text-left hover:bg-raised ${selectedPath === path ? "bg-selected" : ""} ${red || changes.some((c) => c.path === path && c.source === "conflict") ? "text-danger-ink" : ""}`}
+          className={red || changes.some((c) => c.path === path && c.source === "conflict") ? "text-danger-ink" : undefined}
           onClick={() => onSelect(path)}
         >
-          <span className="min-w-0 flex-1 truncate">
-            {path.slice(prefix.length)}
-          </span>
+          <FileEntryLabel name={path.slice(prefix.length)} />
           <GitLineStats changes={changes.filter((c) => c.path === path)} />
-        </button>
+        </NavigationRow>
       ))}
     </div>
   );

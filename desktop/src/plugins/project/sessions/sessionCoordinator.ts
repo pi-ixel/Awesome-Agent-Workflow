@@ -98,7 +98,14 @@ import {
   prepareDraftPromotion,
 } from "../composer/draftPromotion.ts";
 import { resolveAutoPermission } from "../interactions/permissionPolicy.ts";
+import { attachBrowserApprovals } from "../interactions/browserApprovalBridge.ts";
 import { browserObservationUrl } from "../../../shared/urlPrivacy.ts";
+import {
+  browserContextUnavailable,
+  browserPageContextPrefix,
+  browserUnavailablePrompt,
+} from "../../../shared/browser/promptContext.ts";
+import { browserToolsUnavailable } from "../../../shared/browser/toolAvailability.ts";
 import { asRecord } from "../../../shared/valueGuards.ts";
 
 export type RealWorkspaceOpenResult = NonNullable<OpenSessionResult>;
@@ -131,10 +138,10 @@ export interface ProjectSessionDependencies {
 export async function disposeBrowserSession(
   browser: HostService["browser"],
   sessionId: string,
-  endpointId: string,
+  endpointId?: string,
 ): Promise<void> {
   await browser.closeSession(sessionId);
-  await browser.revokeMcpEndpoint(endpointId);
+  if (endpointId) await browser.revokeMcpEndpoint(endpointId);
 }
 
 export function createSessionCoordinator({
@@ -164,24 +171,40 @@ export function createSessionCoordinator({
   let focusRevision = 0;
   const projectFactory = new ProjectFactory<SessionRuntime>();
   const sessionTools = createSessionTools(logger);
+  const toolDisposals = new WeakMap<AcpSessionPort, Set<() => Promise<void>>>();
+  const disposedToolSessions = new WeakSet<AcpSessionPort>();
   /** 会话的附加工具：打开它的插件给的在前，登记方给的在后；同名只留第一个。 */
   const toolsFor = async (
     runtime: SessionRuntime,
     sessionId: string | null,
+    session = runtime.session,
   ) => {
-    const tools = [
-      ...(runtime.openTools?.(runtime.session.agentInfo) ?? []),
-      ...(await sessionTools.resolve({
-        workspacePath: runtime.workspacePath,
-        agentKey: runtime.agentKey,
-        sessionId,
-        agent: runtime.session.agentInfo,
-      })),
-    ];
-    return tools.filter(
-      (tool, index) =>
-        tools.findIndex((other) => other.name === tool.name) === index,
-    );
+    const explicit = runtime.openTools?.(session.agentInfo) ?? [];
+    const resolved = await sessionTools.resolve({
+      workspacePath: runtime.workspacePath,
+      agentKey: runtime.agentKey,
+      agentId: runtime.adapter.id,
+      sessionId,
+      agent: session.agentInfo,
+      requestExtension: session.requestAgentExtension?.bind(session),
+      onDispose: (listener) => {
+        if (disposedToolSessions.has(session)) {
+          void listener().catch(() => undefined);
+          return;
+        }
+        const listeners = toolDisposals.get(session) ?? new Set();
+        listeners.add(listener);
+        toolDisposals.set(session, listeners);
+      },
+    });
+    const tools = [...explicit, ...resolved.servers];
+    return {
+      ...resolved,
+      servers: tools.filter(
+        (tool, index) =>
+          tools.findIndex((other) => other.name === tool.name) === index,
+      ),
+    };
   };
   /** 会话原始事件的订阅方（按会话）。 */
   const eventWatchers = new Map<
@@ -557,10 +580,23 @@ export function createSessionCoordinator({
   }
 
   function disposeRuntime(runtime: SessionRuntime): Promise<void> {
+    const sessionId =
+      runtime.session.sessionId ?? runtime.store.getState().activeSessionId;
     return runtime.close({
       release: releaseSessionResources,
       force: exitForce,
       onClosing: () => projectFactory.removeSession(runtime),
+      onClosed: async () => {
+        if (!sessionId || runtime.listOnly) return;
+        const browser = getBrowser();
+        if (!browser.isAvailable()) return;
+        const hasOtherOwner = [...projectFactory.sessions()].some(
+          (other) =>
+            (other.session.sessionId ??
+              other.store.getState().activeSessionId) === sessionId,
+        );
+        if (!hasOtherOwner) await disposeBrowserSession(browser, sessionId);
+      },
     });
   }
 
@@ -619,22 +655,18 @@ export function createSessionCoordinator({
       release: releaseSessionResources,
       recoverConnection: recoverSessionResources,
       restore: async (session, options) => {
-        const tools = [
-          ...(runtime.openTools?.(session.agentInfo) ?? []),
-          ...(await sessionTools.resolve({
-            workspacePath: runtime.workspacePath,
-            agentKey: runtime.agentKey,
-            sessionId: options.sessionId,
-            agent: session.agentInfo,
-          })),
-        ];
-        return getProtocol().restore(session, {
-          ...options,
-          mcpServers: tools.filter(
-            (tool, index) =>
-              tools.findIndex((other) => other.name === tool.name) === index,
-          ),
-        });
+        const resolved = await toolsFor(runtime, options.sessionId, session);
+        try {
+          await getProtocol().restore(session, {
+            ...options,
+            mcpServers: resolved.servers,
+          });
+          if (options.isCurrent()) resolved.establish(options.sessionId);
+          else await resolved.dispose?.();
+        } catch (error) {
+          await resolved.dispose?.();
+          throw error;
+        }
       },
       prepare: (retained, isCurrent) =>
         prepareRuntime(
@@ -1346,10 +1378,16 @@ export function createSessionCoordinator({
   /** 在同一个连接上重新载入会话，换上它现在的 openTools。 */
   function reloadTools(runtime: SessionRuntime): Promise<void> {
     return runtime.reload({
-      restore: (session, restoreOptions) =>
-        toolsFor(runtime, restoreOptions.sessionId).then((mcpServers) =>
-          getProtocol().restore(session, { ...restoreOptions, mcpServers }),
-        ),
+      restore: async (session, restoreOptions) => {
+        const resolved = await toolsFor(runtime, restoreOptions.sessionId, session);
+        try {
+          await getProtocol().restore(session, { ...restoreOptions, mcpServers: resolved.servers });
+          resolved.establish(restoreOptions.sessionId);
+        } catch (error) {
+          await resolved.dispose?.();
+          throw error;
+        }
+      },
       attach: attachProjectSessionViews,
     });
   }
@@ -1771,6 +1809,8 @@ export function createSessionCoordinator({
         sessionsByPath: catalogStore.getState().sessionsByPath,
       });
     let candidate: SessionRuntime | null = null;
+    let releaseBrowserApprovals = () => {};
+    let isBrowserEndpointDisposed = false;
     try {
       const protocol = backgroundAdapter
         ? getProtocol()
@@ -1818,7 +1858,17 @@ export function createSessionCoordinator({
               onSessionReady: (sessionId: string) =>
                 browser
                   .bindMcpEndpoint(browserEndpoint.endpointId, sessionId)
-                  .then(() => {}),
+                  .then((endpoint) => {
+                    if (isBrowserEndpointDisposed) return;
+                    releaseBrowserApprovals();
+                    releaseBrowserApprovals = attachBrowserApprovals({
+                      browser,
+                      sessionId: endpoint.sessionId ?? sessionId,
+                      approvalStore: approvalStore.getState(),
+                      getApprovalMode,
+                      logger: approvalLogger,
+                    });
+                  }),
               onCapabilitiesReady: (capabilities) =>
                 browser
                   .setMcpCapabilities(
@@ -1827,12 +1877,6 @@ export function createSessionCoordinator({
                       true,
                   )
                   .then(() => {}),
-              onSessionDisposed: () =>
-                disposeBrowserSession(
-                  browser,
-                  browserEndpoint.sessionId ?? "",
-                  browserEndpoint.endpointId,
-                ),
 
               onCancel: (sessionId: string) =>
                 browser.cancelWork(sessionId).then(() => {}),
@@ -1842,26 +1886,43 @@ export function createSessionCoordinator({
                 browser.cancelWork(sessionId).then(() => {}),
             }
           : {}),
+        onSessionDisposed: async () => {
+          isBrowserEndpointDisposed = true;
+          releaseBrowserApprovals();
+          if (session) {
+            disposedToolSessions.add(session);
+            const listeners = toolDisposals.get(session);
+            toolDisposals.delete(session);
+            await Promise.allSettled(
+              Array.from(listeners ?? [], (release) => release()),
+            );
+          }
+          if (browserEndpoint) {
+            await browser.revokeMcpEndpoint(browserEndpoint.endpointId);
+          }
+        },
         onPromptContext: async (sessionId: string) => {
           if (!browser.isAvailable()) return [];
           const enabled = await browser.agentControlEnabled();
           const mcpStatus = await browser.mcpStatus(sessionId);
+          const registration =
+            mcpStatus === "active"
+              ? await browser.mcpRegistration(sessionId).catch(() => null)
+              : null;
           const status = statusStore.getState();
-          const runtimeKnown = status.lastSessionId === sessionId;
-          const hasBrowserTools =
-            runtimeKnown &&
-            status.runtime.toolNames.some((name) =>
-              name.startsWith("browser_"),
-            );
-          if (
-            !enabled ||
-            mcpStatus !== "active" ||
-            (runtimeKnown && !hasBrowserTools)
-          ) {
+          const unavailable = browserToolsUnavailable({
+            enabled,
+            mcpStatus,
+            runtimeKnown: status.lastSessionId === sessionId,
+            toolInventoryKnown: status.runtime.toolInventoryKnown,
+            hasEnabledTools: registration?.hasEnabledTools,
+            toolNames: status.runtime.toolNames,
+          });
+          if (unavailable) {
             return [
               {
                 type: "text" as const,
-                text: "AAW 内嵌浏览器工具当前不可用。不得改用系统默认浏览器；请指导用户在 AAW 中开启“Agent 浏览器控制”，并在浏览器面板确认“重连并恢复浏览器工具”。",
+                text: browserUnavailablePrompt,
               },
             ];
           }
@@ -1876,11 +1937,11 @@ export function createSessionCoordinator({
             return [
               {
                 type: "text" as const,
-                text: `当前浏览器页面上下文（只读，不构成操作授权）：URL=${url}；状态=${tab.lifecycle}`,
+                text: `${browserPageContextPrefix}：URL=${url}；状态=${tab.lifecycle}`,
               },
             ];
           } catch {
-            return [{ type: "text" as const, text: "当前页面上下文不可用" }];
+            return [{ type: "text" as const, text: browserContextUnavailable }];
           }
         },
         project: { id: pathKey(workspacePath), path: workspacePath },
@@ -2042,6 +2103,7 @@ export function createSessionCoordinator({
       }
       return runtime;
     } catch (error) {
+      releaseBrowserApprovals();
       if (candidate) {
         if (retained) {
           candidate.disposed = true;
@@ -2523,6 +2585,13 @@ export function createSessionCoordinator({
           await indexes.deletions.save({ ...target, phase });
         }
         await cleanup();
+        const browser = getBrowser();
+        if (browser.isAvailable()) {
+          await browser.forgetRestore({
+            workspaceId: target.workspacePath,
+            sessionId: target.sessionId,
+          });
+        }
         const agent = sessionAgentId(target.agentKey);
         if (agent !== null)
           await deleteContextUsage({

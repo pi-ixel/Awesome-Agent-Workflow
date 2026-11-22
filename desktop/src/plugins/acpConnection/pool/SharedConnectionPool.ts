@@ -301,15 +301,6 @@ export class SharedConnectionPool implements AcpSharedConnectionPoolPort {
     this.current = config;
   }
 
-  async reclaimIdle(): Promise<void> {
-    await this.enqueue(async () => {
-      const idle = this.slots.find(
-        (slot) => slot.users === 0 && slot.config !== this.candidate?.config,
-      );
-      if (idle) await this.remove(idle);
-    });
-  }
-
   get size(): number {
     return this.slots.reduce((sum, slot) => sum + slot.pool.size, 0);
   }

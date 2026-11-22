@@ -7,12 +7,13 @@ import { errorLine } from "../status/errorText.ts";
 import { useEffect, useState } from "react";
 import type { WorkflowDraft, WorkflowFileTransfer, WorkflowImportPreview, WorkflowService, WorkflowSummary } from "../types.ts";
 import { describeDiagnostic } from "../status/library.ts";
-import { ghostButton, primaryButton, secondaryButton } from "./buttons.ts";
-import { Badge } from "../../../shared/ui/controls.tsx";
+import { ActionButton, Badge, btnSecondary } from "../../../shared/ui/controls.tsx";
+import { PageHeader } from "../../../shared/ui/PageHeader.tsx";
 import { Callout } from "../../../shared/ui/Callout.tsx";
 import { ConfirmIconAction } from "../../../shared/ui/ConfirmIconAction.tsx";
 import { ImportIcon, TrashIcon, TriangleAlertIcon } from "../../../shared/ui/icons.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
 import { EmptyState } from "../../../shared/ui/EmptyState.tsx";
 
@@ -87,12 +88,8 @@ export function WorkflowLibrary({ service, version, transfer, drafts, tab, onOpe
     {importError !== "" && <Callout tone="danger" className="workflow-callout" title={importError} onDismiss={() => setImportError("")} />}
     {importing && <ImportPreviewCard preview={importing.preview} busy={busy} onConfirm={() => void confirmImport()} onCancel={() => setImporting(null)} />}
 
-    <div className="workflow-library-tools">
-      <h1 className="workflow-library-title">{tab === "presets" ? "预置工作流" : "我的工作流"}</h1>
-      <div className="workflow-library-actions">
-        {transfer && <IconButton className={`${secondaryButton} workflow-icon-only`} aria-label="导入" data-hint="导入" onClick={() => void pickImport()}><ImportIcon className="ui-icon-16" /></IconButton>}
-      </div>
-    </div>
+    <PageHeader className="workflow-library-tools" title={tab === "presets" ? "预置工作流" : "我的工作流"}
+      actions={transfer && <IconButton className={`${btnSecondary} workflow-icon-only`} aria-label="导入" data-hint="导入" onClick={() => void pickImport()}><ImportIcon className="ui-icon-16" /></IconButton>} />
 
     {tab === "presets" && <section aria-label="预置工作流" className="workflow-tab-panel">
       {items === null && error === "" && <p className="workflow-muted">正在读取…</p>}
@@ -152,10 +149,10 @@ function DraftCard({ draft, confirming, setConfirming, onOpen, onDiscard }: {
 }) {
   const name = draft.name ?? draft.base ?? "未命名";
   return <article className={`workflow-card-item group/card${onDiscard ? " deletable" : ""}`}>
-    <button type="button" className="workflow-card-main" onClick={onOpen} aria-label={`打开草稿 ${name}`}>
+    <NavigationRow layout="compound" className="workflow-card-main" onClick={onOpen} aria-label={`打开草稿 ${name}`}>
       <CardName name={name} draft={draft} />
       {draft.description && <span className="workflow-card-desc" data-hint={draft.description}>{draft.description}</span>}
-    </button>
+    </NavigationRow>
     {onDiscard && <CardDelete label="放弃草稿" confirming={confirming} setConfirming={setConfirming} onConfirm={onDiscard} />}
   </article>;
 }
@@ -175,12 +172,12 @@ function WorkflowCard({ item, draft, onOpen, confirming = false, setConfirming, 
   const description = meta ? meta.description || "没有说明。" : "";
   const deletable = Boolean(onDelete && setConfirming);
   return <article className={`workflow-card-item group/card${meta ? "" : " broken"}${deletable ? " deletable" : ""}`}>
-    <button type="button" className="workflow-card-main" onClick={() => onOpen(item.id)} aria-label={`查看工作流 ${meta?.name ?? item.id}`}>
+    <NavigationRow layout="compound" className="workflow-card-main" onClick={() => onOpen(item.id)} aria-label={`查看工作流 ${meta?.name ?? item.id}`}>
       <CardName name={meta?.name ?? item.id} draft={draft} />
       {meta
         ? <span className="workflow-card-desc" data-hint={description}>{description}</span>
         : <span className="workflow-card-desc attention">源码有错误，暂时不能运行{firstError ? `：${describeDiagnostic(firstError)}` : ""}</span>}
-    </button>
+    </NavigationRow>
     {onDelete && setConfirming && <CardDelete label="删除工作流" confirming={confirming} setConfirming={setConfirming} onConfirm={onDelete} />}
   </article>;
 }
@@ -205,8 +202,8 @@ function ImportPreviewCard({ preview, busy, onConfirm, onCancel }: {
       <ul className="workflow-callout-list">{preview.scripts.map((path) => <li key={path}><code>{path}</code></li>)}</ul>
     </Callout>}
     <div className="workflow-import-actions">
-      <button type="button" className={primaryButton} disabled={busy || errors.length > 0} onClick={onConfirm}>导入</button>
-      <button type="button" className={ghostButton} onClick={onCancel}>取消</button>
+      <ActionButton type="button" tone="primary" size="compact" disabled={busy || errors.length > 0} onClick={onConfirm}>导入</ActionButton>
+      <ActionButton type="button" tone="ghost" size="compact" onClick={onCancel}>取消</ActionButton>
     </div>
   </div>;
 }

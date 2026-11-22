@@ -26,6 +26,7 @@ pub struct McpEndpoint {
 #[derive(Default)]
 pub struct McpRegistry {
     pub endpoints: BTreeMap<String, McpEndpoint>,
+    current_endpoints: BTreeMap<String, String>,
     ready_endpoints: std::collections::BTreeSet<String>,
     shutdowns: BTreeMap<String, tokio::sync::oneshot::Sender<()>>,
 }
@@ -77,7 +78,12 @@ pub fn bind_endpoint(
     {
         return Err("ENDPOINT_ALREADY_BOUND".into());
     }
-    endpoint.session_id = Some(session_id.into());
+    if endpoint.session_id.is_none() {
+        endpoint.session_id = Some(session_id.into());
+        registry
+            .current_endpoints
+            .insert(session_id.into(), endpoint_id.into());
+    }
     Ok(endpoint.clone())
 }
 
@@ -125,6 +131,71 @@ pub fn browser_mcp_status(
     Ok(session_status(&registry, &session_id).into())
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpRegistration {
+    endpoint_name: String,
+    handshake_complete: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    has_enabled_tools: Option<bool>,
+}
+
+fn current_registration(registry: &McpRegistry, session_id: &str) -> Option<McpRegistration> {
+    let endpoint_id = registry.current_endpoints.get(session_id)?;
+    let endpoint = registry.endpoints.get(endpoint_id)?;
+    (!endpoint.revoked).then(|| McpRegistration {
+        endpoint_name: endpoint.name.clone(),
+        handshake_complete: registry.ready_endpoints.contains(endpoint_id),
+        has_enabled_tools: None,
+    })
+}
+
+#[cfg(test)]
+#[test]
+fn registration_tracks_the_replacement_endpoint_and_its_handshake() {
+    let mut registry = McpRegistry::default();
+    let original = create_endpoint(&mut registry, 41022).unwrap();
+    let replacement = create_endpoint(&mut registry, 41023).unwrap();
+    bind_endpoint(&mut registry, &original.endpoint_id, "session").unwrap();
+    complete_handshake(&mut registry, &original.endpoint_id).unwrap();
+    bind_endpoint(&mut registry, &replacement.endpoint_id, "session").unwrap();
+    bind_endpoint(&mut registry, &original.endpoint_id, "session").unwrap();
+    revoke_endpoint(&mut registry, &original.endpoint_id).unwrap();
+    let current = current_registration(&registry, "session").unwrap();
+    assert_eq!(current.endpoint_name, replacement.name);
+    assert!(!current.handshake_complete);
+    complete_handshake(&mut registry, &replacement.endpoint_id).unwrap();
+    assert!(
+        current_registration(&registry, "session")
+            .unwrap()
+            .handshake_complete
+    );
+    revoke_endpoint(&mut registry, &replacement.endpoint_id).unwrap();
+    assert!(current_registration(&registry, "session").is_none());
+}
+
+#[tauri::command]
+pub async fn browser_mcp_registration(
+    app: AppHandle,
+    session_id: String,
+    state: State<'_, BrowserHost>,
+) -> Result<Option<McpRegistration>, String> {
+    let result = {
+        let registry = state.mcp.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+        current_registration(&registry, &session_id)
+    };
+    if let Some(mut registration) = result {
+        if let Ok(definitions) = permitted_definitions(&app).await {
+            registration.has_enabled_tools = definitions["tools"]
+                .as_array()
+                .map(|tools| !tools.is_empty());
+        }
+        Ok(Some(registration))
+    } else {
+        Ok(None)
+    }
+}
+
 pub fn complete_handshake(registry: &mut McpRegistry, endpoint_id: &str) -> Result<(), String> {
     let endpoint = registry
         .endpoints
@@ -158,6 +229,14 @@ pub fn revoke_endpoint(
         endpoint.generation += 1;
     }
     let endpoint = endpoint.clone();
+    if let Some(session_id) = &endpoint.session_id
+        && registry
+            .current_endpoints
+            .get(session_id)
+            .is_some_and(|current| current == endpoint_id)
+    {
+        registry.current_endpoints.remove(session_id);
+    }
     registry.ready_endpoints.remove(endpoint_id);
     if let Some(shutdown) = registry.shutdowns.remove(endpoint_id) {
         let _ = shutdown.send(());
@@ -183,6 +262,9 @@ pub async fn browser_mcp_create(
     let (shutdown, mut stopped) = tokio::sync::oneshot::channel();
     let endpoint = {
         let mut registry = state.mcp.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+        if !state.agent_control_enabled() {
+            return Err("AGENT_CONTROL_DISABLED".into());
+        }
         let endpoint = create_endpoint(&mut registry, port)?;
         registry
             .shutdowns
@@ -432,9 +514,10 @@ async fn handle_rpc(app: &AppHandle, endpoint: McpEndpoint, request: Value) -> V
             Err(code) => rpc_error(id, -32002, &code),
         },
         "notifications/initialized" => json!({"jsonrpc":"2.0","id":id,"result":{}}),
-        "tools/list" => {
-            json!({"jsonrpc":"2.0","id":id,"result":super::tool::tool_definitions()})
-        }
+        "tools/list" => match permitted_definitions(app).await {
+            Ok(result) => json!({"jsonrpc":"2.0","id":id,"result":result}),
+            Err(error) => rpc_error(id, -32002, &error),
+        },
         "tools/call" => {
             let params = request.get("params").cloned().unwrap_or(Value::Null);
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
@@ -451,6 +534,26 @@ async fn handle_rpc(app: &AppHandle, endpoint: McpEndpoint, request: Value) -> V
     }
 }
 
+async fn disabled_tools(app: &AppHandle) -> Result<Vec<String>, String> {
+    let root = crate::storage_location::data_dir(app)?;
+    tokio::task::spawn_blocking(move || crate::mcp_management::inspection::browser_disabled(&root))
+        .await
+        .map_err(|_| "无法读取浏览器工具权限".to_owned())?
+}
+
+async fn permitted_definitions(app: &AppHandle) -> Result<Value, String> {
+    let disabled = disabled_tools(app).await?;
+    let mut definitions = super::tool::tool_definitions();
+    if let Some(tools) = definitions["tools"].as_array_mut() {
+        tools.retain(|tool| {
+            tool["name"]
+                .as_str()
+                .is_some_and(|name| !disabled.iter().any(|value| value == name))
+        });
+    }
+    Ok(definitions)
+}
+
 async fn call_tool(
     app: &AppHandle,
     endpoint: &McpEndpoint,
@@ -458,6 +561,9 @@ async fn call_tool(
     arguments: Value,
     runtime_meta: Option<&Value>,
 ) -> Result<Value, String> {
+    if disabled_tools(app).await?.iter().any(|tool| tool == name) {
+        return Err("此浏览器工具已关闭".into());
+    }
     super::tool::validate_tool_arguments(name, &arguments)?;
     let host = app.state::<BrowserHost>();
     let session_id = endpoint.session_id.as_deref().ok_or("ENDPOINT_NOT_BOUND")?;
@@ -505,7 +611,7 @@ async fn call_tool(
     }
     match name {
         "browser_capabilities" => {
-            let definitions = super::tool::tool_definitions();
+            let definitions = permitted_definitions(app).await?;
             let names: Vec<_> = definitions["tools"]
                 .as_array()
                 .into_iter()
@@ -580,12 +686,13 @@ async fn call_tool(
                 .ok_or("MISSING_ARGUMENT")?;
             let webview = find_webview(app, &host, session_id, tab_id)?;
             match name {
-                "browser_back" => webview.eval("history.back()"),
-                "browser_forward" => webview.eval("history.forward()"),
-                "browser_reload" => webview.reload(),
-                _ => webview.eval("window.stop()"),
+                "browser_back" => super::host::navigate_history(&webview, true).await?,
+                "browser_forward" => super::host::navigate_history(&webview, false).await?,
+                "browser_reload" => webview.reload().map_err(|error| error.to_string())?,
+                _ => webview
+                    .eval("window.stop()")
+                    .map_err(|error| error.to_string())?,
             }
-            .map_err(|error| error.to_string())?;
             let tab = host
                 .runtime
                 .lock()
@@ -754,13 +861,12 @@ async fn call_tool(
             find_webview(app, &host, session_id, tab_id)?
                 .navigate(url.parse().map_err(|_| "INVALID_URL")?)
                 .map_err(|error| error.to_string())?;
-            let mut runtime = host.runtime.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+            let runtime = host.runtime.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
             let tab = runtime
                 .spaces
-                .get_mut(session_id)
-                .and_then(|space| space.tabs.get_mut(tab_id))
+                .get(session_id)
+                .and_then(|space| space.tabs.get(tab_id))
                 .ok_or("ACCESS_DENIED")?;
-            tab.committed_url = Some(url);
             Ok(
                 json!({"content":[{"type":"text","text":serde_json::to_string(&tab).map_err(|error| error.to_string())?}],"structuredContent":tab.clone()}),
             )
@@ -856,30 +962,43 @@ async fn call_tool(
                 .map(|tab| tab.generation)
                 .ok_or("ACCESS_DENIED")?;
             let approval_id = match arguments.get("approvalId").and_then(Value::as_str) {
-                Some(id) => {
-                    let approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
-                    let approval = super::security::validate_approval(
-                        &approvals, id, session_id, tab_id, generation,
-                    )?;
-                    if approval.action != "submit" {
-                        return Err("APPROVAL_INVALIDATED".into());
-                    }
-                    id.to_owned()
-                }
+                Some(id) => id.to_owned(),
                 None => {
-                    let mut approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
-                    let approval = super::security::require_approval(
-                        &mut approvals,
-                        session_id,
-                        tab_id,
-                        "submit",
-                        generation,
-                    )?;
+                    let approval = {
+                        let mut approvals =
+                            host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+                        super::security::require_approval(
+                            &mut approvals,
+                            session_id,
+                            tab_id,
+                            "submit",
+                            generation,
+                        )?
+                    };
                     let approval_id = approval.approval_id.clone();
                     let _ = tauri::Emitter::emit(app, "aaw://browser-approval", approval);
-                    return Err(format!("APPROVAL_REQUIRED:{approval_id}"));
+                    super::security::wait_for_approval(
+                        &host.approvals,
+                        &approval_id,
+                        super::security::APPROVAL_WAIT_TIMEOUT,
+                    )
+                    .await?;
+                    approval_id
                 }
             };
+            {
+                let approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+                let approval = super::security::validate_approval(
+                    &approvals,
+                    &approval_id,
+                    session_id,
+                    tab_id,
+                    generation,
+                )?;
+                if approval.action != "submit" {
+                    return Err("APPROVAL_INVALIDATED".into());
+                }
+            }
             let selector_query =
                 super::action::locator_query(&super::action::parse_locator(selector)?)?;
             let webview = find_webview(app, &host, session_id, tab_id)?;
@@ -973,36 +1092,50 @@ async fn call_tool(
                 .ok_or("ACCESS_DENIED")?;
             let digest = sha2::Sha256::digest(script.as_bytes());
             let action = format!("script:{digest:x}");
-            if let Some(id) = arguments.get("approvalId").and_then(Value::as_str) {
+            let approval_id = if let Some(id) = arguments.get("approvalId").and_then(Value::as_str)
+            {
+                id.to_owned()
+            } else {
+                let approval = {
+                    let mut approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+                    super::security::require_approval(
+                        &mut approvals,
+                        session_id,
+                        tab_id,
+                        &action,
+                        generation,
+                    )?
+                };
+                let approval_id = approval.approval_id.clone();
+                tauri::Emitter::emit(app, "aaw://browser-approval", approval)
+                    .map_err(|error| error.to_string())?;
+                super::security::wait_for_approval(
+                    &host.approvals,
+                    &approval_id,
+                    super::security::APPROVAL_WAIT_TIMEOUT,
+                )
+                .await?;
+                approval_id
+            };
+            {
                 let approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
                 let approval = super::security::validate_approval(
-                    &approvals, id, session_id, tab_id, generation,
+                    &approvals,
+                    &approval_id,
+                    session_id,
+                    tab_id,
+                    generation,
                 )?;
                 if approval.action != action {
                     return Err("APPROVAL_INVALIDATED".into());
                 }
-            } else {
-                let mut approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
-                let approval = super::security::require_approval(
-                    &mut approvals,
-                    session_id,
-                    tab_id,
-                    &action,
-                    generation,
-                )?;
-                let id = approval.approval_id.clone();
-                tauri::Emitter::emit(app, "aaw://browser-approval", approval)
-                    .map_err(|error| error.to_string())?;
-                return Err(format!("APPROVAL_REQUIRED:{id}"));
             }
             let webview = find_webview(app, &host, session_id, tab_id)?;
             let result = evaluate(&webview, script).await?;
-            if let Some(id) = arguments.get("approvalId").and_then(Value::as_str) {
-                super::security::consume_approval(
-                    &mut *host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?,
-                    id,
-                )?;
-            }
+            super::security::consume_approval(
+                &mut *host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?,
+                &approval_id,
+            )?;
             Ok(
                 json!({"content":[{"type":"text","text":result}],"structuredContent":{"result":result,"restricted":true}}),
             )
@@ -1030,27 +1163,43 @@ async fn call_tool(
                 .map(|tab| tab.generation)
                 .ok_or("ACCESS_DENIED")?;
             let action = format!("upload:{path}");
-            if let Some(id) = arguments.get("approvalId").and_then(Value::as_str) {
+            let approval_id = if let Some(id) = arguments.get("approvalId").and_then(Value::as_str)
+            {
+                id.to_owned()
+            } else {
+                let approval = {
+                    let mut approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+                    super::security::require_approval(
+                        &mut approvals,
+                        session_id,
+                        tab_id,
+                        &action,
+                        generation,
+                    )?
+                };
+                let approval_id = approval.approval_id.clone();
+                tauri::Emitter::emit(app, "aaw://browser-approval", approval)
+                    .map_err(|error| error.to_string())?;
+                super::security::wait_for_approval(
+                    &host.approvals,
+                    &approval_id,
+                    super::security::APPROVAL_WAIT_TIMEOUT,
+                )
+                .await?;
+                approval_id
+            };
+            {
                 let approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
                 let approval = super::security::validate_approval(
-                    &approvals, id, session_id, tab_id, generation,
+                    &approvals,
+                    &approval_id,
+                    session_id,
+                    tab_id,
+                    generation,
                 )?;
                 if approval.action != action {
                     return Err("APPROVAL_INVALIDATED".into());
                 }
-            } else {
-                let mut approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
-                let approval = super::security::require_approval(
-                    &mut approvals,
-                    session_id,
-                    tab_id,
-                    &action,
-                    generation,
-                )?;
-                let id = approval.approval_id.clone();
-                tauri::Emitter::emit(app, "aaw://browser-approval", approval)
-                    .map_err(|error| error.to_string())?;
-                return Err(format!("APPROVAL_REQUIRED:{id}"));
             }
             let metadata = tokio::fs::metadata(path)
                 .await
@@ -1078,12 +1227,10 @@ async fn call_tool(
                 json!({"files":[path],"nodeId":node_id}),
             )
             .await?;
-            if let Some(id) = arguments.get("approvalId").and_then(Value::as_str) {
-                super::security::consume_approval(
-                    &mut *host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?,
-                    id,
-                )?;
-            }
+            super::security::consume_approval(
+                &mut *host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?,
+                &approval_id,
+            )?;
             Ok(
                 json!({"content":[{"type":"text","text":"文件已绑定到上传控件"}],"structuredContent":{"status":"completed","path":path,"nodeId":node_id}}),
             )

@@ -3,6 +3,8 @@
 // 拖拽平移、捏合缩放（用户定稿）。
 import { UiIcon } from "../UiIcon.tsx";
 import { IconButton } from "../IconButton.tsx";
+import { ActionButton } from "../controls.tsx";
+import { ContextMenu, type MenuPlacement } from "../ContextMenu.tsx";
 import {
   useCallback,
   useEffect,
@@ -11,9 +13,8 @@ import {
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
-  type ReactNode,
 } from "react";
-import { createPortal } from "react-dom";
+import { ModalShell } from "../ModalShell.tsx";
 import { ChevronDownIcon, XIcon } from "../icons.tsx";
 import {
   fitDiagramToViewport,
@@ -309,9 +310,13 @@ export function DiagramPreviewDialog({
   onClose: () => void;
   svg: string;
 }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
   const descriptionId = useId();
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [zoomMenu, setZoomMenu] = useState<{
+    dialog: HTMLDivElement;
+    trigger: HTMLButtonElement;
+    placement: MenuPlacement;
+  } | null>(null);
+  const dismissZoomMenu = useCallback(() => setZoomMenu(null), []);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const activePointersRef = useRef(new Map<number, PointerEvent>());
@@ -404,7 +409,13 @@ export function DiagramPreviewDialog({
 
     const frame = window.requestAnimationFrame(fitToViewport);
     return () => window.cancelAnimationFrame(frame);
-  }, [fitToViewport, open, svg]);
+  }, [fitToViewport, open]);
+
+  useEffect(() => {
+    const content = contentRef.current;
+    const graphic = content?.querySelector("svg");
+    if (open && content && graphic) applyPreviewSvgLayout(content, graphic);
+  }, [open, svg]);
 
   useEffect(() => {
     if (!open) {
@@ -565,159 +576,109 @@ export function DiagramPreviewDialog({
     viewport.addEventListener("wheel", handleWheel, { passive: false });
     return () => viewport.removeEventListener("wheel", handleWheel);
   }, [open, handleWheel]);
-  useEffect(() => {
-    if (!open) return;
-    const previousFocus = document.activeElement;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    dialogRef.current?.focus();
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        onClose();
-      }
-      if (event.key === "Tab") {
-        const nodes = dialogRef.current?.querySelectorAll<HTMLElement>(
-          'button, select, [tabindex="0"]',
-        );
-        if (!nodes?.length) return;
-        const first = nodes[0]!,
-          last = nodes[nodes.length - 1]!;
-        if (
-          event.shiftKey &&
-          (document.activeElement === first ||
-            document.activeElement === dialogRef.current)
-        ) {
-          event.preventDefault();
-          last.focus();
-        } else if (
-          !event.shiftKey &&
-          (document.activeElement === last ||
-            document.activeElement === dialogRef.current)
-        ) {
-          event.preventDefault();
-          first.focus();
-        }
-      }
-    };
-    window.addEventListener("keydown", handleKey, true);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", handleKey, true);
-      if (previousFocus instanceof HTMLElement) previousFocus.focus();
-    };
-  }, [open, onClose]);
   if (!open) return null;
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      onClick={onClose}
+  const activeZoomMenu = zoomMenu?.trigger.isConnected ? zoomMenu : null;
+  return (
+    <ModalShell
+      size="preview"
+      layer="foreground"
+      label="Mermaid 图表"
+      descriptionId={descriptionId}
+      onDismiss={() => {
+        if (activeZoomMenu) dismissZoomMenu();
+        else onClose();
+      }}
     >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Mermaid 图表"
-        aria-describedby={descriptionId}
-        tabIndex={-1}
-        className="flex h-[100dvh] w-screen flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-floating outline-none sm:h-[86vh] sm:w-[90vw]"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <span id={descriptionId} className="sr-only">
-          可缩放和平移的 Mermaid 图表预览。
-        </span>
-        <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-line px-3 text-ui-base">
-          <span className="font-medium text-ink">Mermaid 图表</span>
-          <div className="flex items-center gap-1">
-            <PreviewButton label="缩小" onClick={() => zoomBy(0.85)}>
-              <CircleIcon minus />
-            </PreviewButton>
-            <div className="relative">
-              <button
-                type="button"
-                aria-label="缩放比例"
-                aria-expanded={menuOpen}
-                onClick={() => setMenuOpen(!menuOpen)}
-                className="flex min-h-8 min-w-14 items-center justify-center gap-1 rounded px-1.5 font-mono text-ui-sm text-ink-mute hover:bg-raised"
-              >
-                {zoomPercent}%<ChevronDownIcon className="ui-icon-12" />
-              </button>
-              {menuOpen && (
-                <div
-                  role="menu"
-                  aria-label="图表缩放"
-                  className="absolute right-0 top-full z-10 min-w-36 rounded-lg border border-line bg-surface p-1 text-ui-base shadow-floating"
-                >
-                  {zoomScaleOptions.map((scale) => (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      key={scale}
-                      className="block w-full rounded px-2 py-1 text-left hover:bg-raised"
-                      onClick={() => {
-                        zoomToScale(scale);
-                        setMenuOpen(false);
-                      }}
-                    >
-                      {Math.round(scale * 100)}%
-                    </button>
-                  ))}
-                  <div className="my-1 border-t border-line" />
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="block w-full rounded px-2 py-1 text-left hover:bg-raised"
-                    onClick={() => {
-                      fitToViewport();
-                      setMenuOpen(false);
-                    }}
-                  >
-                    适应窗口
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="block w-full rounded px-2 py-1 text-left hover:bg-raised"
-                    onClick={() => {
-                      reset();
-                      setMenuOpen(false);
-                    }}
-                  >
-                    重置缩放
-                  </button>
-                </div>
-              )}
-            </div>
-            <PreviewButton label="放大" onClick={() => zoomBy(1.18)}>
-              <CircleIcon />
-            </PreviewButton>
-            <PreviewButton label="关闭" onClick={onClose}>
-              <XIcon className="ui-icon-14" />
-            </PreviewButton>
+      <span id={descriptionId} className="sr-only">
+        可缩放和平移的 Mermaid 图表预览。
+      </span>
+      <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-line px-3 text-ui-base">
+        <span className="font-medium text-ink">Mermaid 图表</span>
+        <div className="flex items-center gap-1">
+          <IconButton
+            appearance="toolbar"
+            aria-label="缩小"
+            onClick={() => zoomBy(0.85)}
+          >
+            <CircleIcon minus />
+          </IconButton>
+          <div className="relative">
+            <ActionButton
+              tone="ghost"
+              aria-label="缩放比例"
+              aria-haspopup="menu"
+              aria-expanded={activeZoomMenu !== null}
+              onClick={(event) => {
+                const trigger = event.currentTarget;
+                const dialog = trigger.closest<HTMLDivElement>('[role="dialog"]');
+                if (!dialog) return;
+                const bounds = trigger.getBoundingClientRect();
+                setZoomMenu(activeZoomMenu ? null : {
+                  dialog,
+                  trigger,
+                  placement: { x: bounds.right, y: bounds.bottom, align: "end", side: "bottom" },
+                });
+              }}
+              className="flex min-h-8 min-w-14 items-center justify-center gap-1 px-1.5 font-mono text-ui-sm"
+            >
+              {zoomPercent}%<ChevronDownIcon className="ui-icon-12" />
+            </ActionButton>
+            {activeZoomMenu && (
+              <ContextMenu
+                label="图表缩放"
+                placement={activeZoomMenu.placement}
+                trigger={activeZoomMenu.trigger}
+                portalContainer={activeZoomMenu.dialog}
+                closing={false}
+                onDismiss={dismissZoomMenu}
+                entries={[
+                  ...zoomScaleOptions.map((scale) => ({
+                    id: String(scale),
+                    label: Math.round(scale * 100) + "%",
+                    onSelect: () => zoomToScale(scale),
+                  })),
+                  { type: "separator" },
+                  { id: "fit", label: "适应窗口", onSelect: fitToViewport },
+                  { id: "reset", label: "重置缩放", onSelect: reset },
+                ]}
+              />
+            )}
           </div>
-        </div>
-        <div
-          ref={viewportRef}
-          data-diagram-viewport=""
-          className="relative min-h-0 flex-1 touch-none overflow-hidden bg-surface cursor-grab active:cursor-grabbing"
-          onPointerCancel={handlePointerEnd}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerEnd}
-        >
-          <div
-            ref={contentRef}
-            aria-label="Mermaid 图表内容"
-            className="absolute left-0 top-0 origin-top-left select-none [&_svg]:block [&_svg]:max-w-none"
-            dangerouslySetInnerHTML={{ __html: svg }}
-            role="img"
-            style={transformStyle}
-          />
+          <IconButton
+            appearance="toolbar"
+            aria-label="放大"
+            onClick={() => zoomBy(1.18)}
+          >
+            <CircleIcon />
+          </IconButton>
+          <IconButton
+            appearance="toolbar"
+            aria-label="关闭"
+            onClick={onClose}
+          >
+            <XIcon className="ui-icon-14" />
+          </IconButton>
         </div>
       </div>
-    </div>,
-    document.body,
+      <div
+        ref={viewportRef}
+        data-diagram-viewport=""
+        className="relative min-h-0 flex-1 touch-none overflow-hidden bg-surface cursor-grab active:cursor-grabbing"
+        onPointerCancel={handlePointerEnd}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerEnd}
+      >
+        <div
+          ref={contentRef}
+          aria-label="Mermaid 图表内容"
+          className="absolute left-0 top-0 origin-top-left select-none [&_svg]:block [&_svg]:max-w-none"
+          dangerouslySetInnerHTML={{ __html: svg }}
+          role="img"
+          style={transformStyle}
+        />
+      </div>
+    </ModalShell>
   );
 }
 function CircleIcon({ minus = false }: { minus?: boolean }) {
@@ -733,26 +694,5 @@ function CircleIcon({ minus = false }: { minus?: boolean }) {
       <path d="M8 12h8" />
       {!minus && <path d="M12 8v8" />}
     </UiIcon>
-  );
-}
-function PreviewButton({
-  label,
-  onClick,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <IconButton
-      type="button"
-      aria-label={label}
-      data-hint={label}
-      onClick={onClick}
-      className="flex items-center justify-center rounded text-ink-mute hover:bg-raised hover:text-ink"
-    >
-      {children}
-    </IconButton>
   );
 }

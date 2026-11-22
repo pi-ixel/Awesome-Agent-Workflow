@@ -1,4 +1,6 @@
+import { ActionButton } from "../../../../shared/ui/controls.tsx";
 import { IconButton } from "../../../../shared/ui/IconButton.tsx";
+import { NavigationRow } from "../../../../shared/ui/NavigationRow.tsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   XIcon,
@@ -148,15 +150,16 @@ export function QuestionPanel({
           </IconButton>
         )}
         <span className="flex-1" />
-        <button
+        <ActionButton
+          tone="secondary"
+          size="compact"
           type="button"
           disabled={!canSkip || stale || submitting}
           data-hint={!canSkip ? "此题为必填，不能跳过" : "跳过当前题"}
-          className="rounded-full border border-control-line px-3 py-1 text-ui-caption disabled:opacity-40 hover:bg-hover"
           onClick={onSkip}
         >
           跳过
-        </button>
+        </ActionButton>
         <IconButton
           type="button"
           disabled={!valid || stale || submitting}
@@ -186,32 +189,52 @@ export function QuestionChoices({
   multi?: boolean;
   onToggle: (value: string) => void;
 }) {
+  const currentIndex = options.findIndex(option => selected.includes(option.value));
   return (
     <div role={multi ? "group" : "radiogroup"} className="space-y-0.5">
       {options.map((option, index) => (
-        <button
+        <NavigationRow
           key={option.value}
-          type="button"
+          layout="choice"
           role={multi ? "checkbox" : "radio"}
           aria-checked={selected.includes(option.value)}
+          tabIndex={multi ? undefined : index === Math.max(0, currentIndex) ? 0 : -1}
           onClick={() => onToggle(option.value)}
-          className={`flex w-full items-start gap-2 rounded-lg px-2 py-1 text-left leading-5 hover:bg-hover ${selected.includes(option.value) ? "bg-selected" : ""}`}
+          onKeyDown={(event) => {
+            if (multi || event.altKey || event.ctrlKey || event.metaKey) return;
+            const { key } = event;
+            const count = options.length;
+            let nextIndex: number;
+            if (key === "ArrowDown" || key === "ArrowRight")
+              nextIndex = (index + 1) % count;
+            else if (key === "ArrowUp" || key === "ArrowLeft")
+              nextIndex = (index - 1 + count) % count;
+            else if (key === "Home") nextIndex = 0;
+            else if (key === "End") nextIndex = count - 1;
+            else return;
+            event.preventDefault();
+            const next = options[nextIndex];
+            if (!next) return;
+            if (!selected.includes(next.value)) onToggle(next.value);
+            const button = event.currentTarget.parentElement?.children[nextIndex];
+            if (button instanceof HTMLButtonElement) button.focus();
+          }}
         >
           <span
             aria-hidden="true"
-            className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded border border-control-line bg-raised text-ui-caption text-ink-mute"
+            className="mt-0.5 flex ui-icon-20 shrink-0 items-center justify-center rounded border border-control-line bg-raised text-ui-caption text-ink-mute"
           >
             {selected.includes(option.value) ? "✓" : index + 1}
           </span>
-          <span className="min-w-0">
+          <span className="min-w-0 wrap-anywhere">
             <span className="block">{option.label}</span>
             {option.description && (
-              <span className="mt-0.5 block text-ui-sm leading-5 text-ink-mute">
+              <span className="mt-0.5 block text-ui-sm leading-snug text-ink-mute">
                 {option.description}
               </span>
             )}
           </span>
-        </button>
+        </NavigationRow>
       ))}
     </div>
   );

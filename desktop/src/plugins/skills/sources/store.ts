@@ -16,12 +16,14 @@ export function createSkillsStore(host: SkillFiles, logger = createLogger("aaw")
   let scanSeq = 0;
   let contextRevision = 0;
   let stopping = false;
+  let lastScanAt = -Infinity;
   let installing: Promise<void> | undefined;
   const store = createStore<SkillsState>()((set) => {
     /** 扫描清单的落地归约器（真实扫描完成时调用）。 */
     function applyScan(destDir: string, entries: readonly SkillEntry[]): void {
       // 每次落地都推进序列号：让仍在途的旧扫描结果失效
       scanSeq += 1;
+      lastScanAt = Date.now();
       set({
         destDir,
         entries,
@@ -110,6 +112,7 @@ export function createSkillsStore(host: SkillFiles, logger = createLogger("aaw")
   function invalidateContext() {
     scanSeq++;
     contextRevision++;
+    lastScanAt = -Infinity;
     store.setState({
       destDir: null,
       entries: [],
@@ -121,6 +124,7 @@ export function createSkillsStore(host: SkillFiles, logger = createLogger("aaw")
   }
   return {
     store,
+    lastScanAt: () => lastScanAt,
     invalidateContext,
     async dispose() {
       stopping = true;

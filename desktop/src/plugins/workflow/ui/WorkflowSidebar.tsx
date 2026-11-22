@@ -4,14 +4,12 @@
  */
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
-import { focusVisibleRing, rowSelectedClass } from "../../../shared/ui/controls.tsx";
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { SidebarCreateButton } from "../../../shared/ui/SidebarCreateButton.tsx";
 import { SidebarItemTitle } from "../../../shared/ui/SidebarItemTitle.tsx";
 import { SparklesIcon } from "../../../shared/ui/icons.tsx";
 import type { WorkflowDraft, WorkflowService, WorkflowSummary } from "../types.ts";
 import type { LibraryTab, TemplateNavigation } from "./templateNavigation.ts";
-
-const row = `flex min-h-8 w-full items-center gap-2 rounded-lg px-2 text-left hover:bg-hover ${focusVisibleRing}`;
 
 export function WorkflowSidebar({ service, navigation, canCompose }: {
   readonly service: WorkflowService;
@@ -57,15 +55,14 @@ export function WorkflowSidebar({ service, navigation, canCompose }: {
         {categories.map(({ value, label }) => {
           const selected = tab === value;
           return <li key={value}>
-            <button
-              type="button"
-              className={`${row} ${selected ? rowSelectedClass : ""}`}
+            <NavigationRow
+              className="min-h-8 w-full items-center gap-2 px-2"
               aria-current={selected || undefined}
               onClick={() => navigation.setState({ tab: value, route: { kind: "library" } })}
             >
               <SidebarItemTitle>{label}</SidebarItemTitle>
               {counts[value] !== null && <span className="shrink-0 text-ui-sm text-ink-mute">{counts[value]}</span>}
-            </button>
+            </NavigationRow>
           </li>;
         })}
       </ul>

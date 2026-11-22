@@ -124,7 +124,7 @@ ws.addEventListener("message", (e) => {
 
 | 需要 | 用这个 | 位置 |
 |---|---|---|
-| 按钮（主 / 常规 / 弱 / 危险） | `primaryButton` `secondaryButton` `ghostButton` `iconButton`、`DangerButton` + `dangerSize` | `plugins/workflow/ui/buttons.ts`（只叠加尺寸，样式取自 `shared/ui/controls.tsx`） |
+| 按钮（主 / 常规 / 弱 / 危险） | `ActionButton` 的 tone 与 compact 规格、`IconButton`、`DangerButton` | `plugins/workflow/ui/buttons.ts`（图标与危险按钮尺寸），普通命令使用 `shared/ui/controls.tsx` |
 | 状态（已完成、运行中、已中断…） | `StatusWord`（内部是 `Badge` + `BadgeDot`） | `ui/WorkflowHierarchy.tsx`；语气映射 `STATE_TONE`、`runTone` 在 `ui/nodeText.ts` |
 | 其他徽标（预置 / 我的、子流程、编译通过） | `Badge` | `shared/ui/controls.tsx` |
 | 下拉选择 | `Listbox` | 同上 |

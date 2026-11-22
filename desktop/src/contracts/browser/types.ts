@@ -10,6 +10,11 @@ export interface BrowserTab {
   generation: number;
   lifecycle: BrowserTabLifecycle;
   committedUrl: string | null;
+  navigation?: {
+    canGoBack: boolean;
+    canGoForward: boolean;
+    isLoading: boolean;
+  };
   control: {
     controller: BrowserController;
     generation: number;
@@ -22,6 +27,13 @@ export interface BrowserZoomEvent {
   tabId: string;
   tabGeneration: number;
   zoom: number;
+}
+
+export interface BrowserPageEvent {
+  sessionId: string;
+  tabId: string;
+  tabGeneration: number;
+  event: string;
 }
 
 export interface BrowserSpace {

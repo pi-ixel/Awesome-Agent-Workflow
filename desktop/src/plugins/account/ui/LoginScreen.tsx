@@ -1,3 +1,4 @@
+import { settingsInputClass } from "../../../shared/ui/SettingsPageParts.tsx";
 /**
  * 登录界面（未登录时的全屏门槛）。
  *
@@ -15,14 +16,13 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useStore } from "zustand";
 
-import logo from "../../../shared/assets/aaw-logo.png";
+import { BrandMark } from "../../../shared/ui/BrandMark.tsx";
 import type { AccountService } from "../service.ts";
 import { useFeedback } from "../../../shared/ui/feedback.ts";
-import { btnGhost, btnPrimary } from "../../../shared/ui/controls.tsx";
+import { ActionButton } from "../../../shared/ui/controls.tsx";
 
 /** 输入框公共样式（对齐 SettingsPage 的行内输入）。 */
-const inputClass =
-  "w-full rounded-md border border-line-strong bg-surface px-2.5 py-1.5 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-focus-ring";
+const inputClass = `${settingsInputClass} py-1.5`;
 
 /**
  * 认证等待多久后先亮出手动兜底入口（毫秒）。轮询与登录窗不受影响——
@@ -102,12 +102,7 @@ export function LoginScreen({ account }: { readonly account: AccountService }) {
       <div className="w-full max-w-sm rounded-xl border border-line-strong bg-surface p-6 shadow-elev-3">
         {/* 品牌头 */}
         <div className="flex items-center gap-3">
-          <img
-            src={logo}
-            alt=""
-            draggable={false}
-            className="size-10 rounded-lg"
-          />
+          <BrandMark className="ui-icon-40 rounded-lg" />
           <div className="min-w-0">
             <h1 className="text-ui-xl font-semibold text-ink">登录 AAW</h1>
             <p className="truncate text-ui-sm text-ink-mute">
@@ -119,26 +114,28 @@ export function LoginScreen({ account }: { readonly account: AccountService }) {
         {/* SSO 主路径：直接尝试，无需任何配置展示 */}
         {ssoReady && (
           <div className="mt-6">
-            <button
+            <ActionButton
+              tone="primary"
               type="button"
               onClick={() => void loginWithSso()}
               disabled={ssoPending}
-              className={`${btnPrimary} min-h-9 w-full text-sm`}
+              className="min-h-9 w-full text-sm"
             >
               {ssoPending ? "正在认证…" : "企业身份登录"}
-            </button>
+            </ActionButton>
             {ssoPending && (
               <div className="mt-2 flex items-center justify-between gap-2">
                 <p className="text-ui-sm text-ink-mute" role="status">
                   正在检测已有登录态，需要登录时会弹出企业认证窗口
                 </p>
-                <button
+                <ActionButton
+                  tone="ghost"
                   type="button"
                   onClick={cancelSsoLogin}
-                  className={`${btnGhost} shrink-0 rounded-md px-2 py-1 text-ui-sm`}
+                  className="shrink-0 rounded-md px-2 py-1 text-ui-sm"
                 >
                   取消
-                </button>
+                </ActionButton>
               </div>
             )}
             {ssoError !== null && !ssoPending && (
@@ -153,13 +150,14 @@ export function LoginScreen({ account }: { readonly account: AccountService }) {
                 点击绕过统一身份认证）；认证失败立即出现，等待满 45s
                 也先亮出（不中止等待中的认证） */}
             {manualEntryVisible && (
-              <button
+              <ActionButton
+                tone="ghost"
                 type="button"
                 onClick={() => setShowManualForm(true)}
-                className={`${btnGhost} mt-2 min-h-8 w-full text-sm`}
+                className="mt-2 min-h-8 w-full text-sm"
               >
                 手动输入身份登录
-              </button>
+              </ActionButton>
             )}
           </div>
         )}
@@ -204,12 +202,13 @@ export function LoginScreen({ account }: { readonly account: AccountService }) {
                 {formError}
               </p>
             )}
-            <button
+            <ActionButton
+              tone="primary"
               type="submit"
-              className={`${btnPrimary} mt-1 min-h-9 text-sm`}
+              className="mt-1 min-h-9 text-sm"
             >
               登录
-            </button>
+            </ActionButton>
           </form>
         )}
       </div>

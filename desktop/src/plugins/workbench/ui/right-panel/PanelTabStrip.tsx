@@ -1,5 +1,8 @@
 import { IconButton } from "../../../../shared/ui/IconButton.tsx";
+import { NavigationRow } from "../../../../shared/ui/NavigationRow.tsx";
+import { focusVisibleRing } from "../../../../shared/ui/controls.tsx";
 import type { PanelTab } from "../../layout/types.ts";
+import { emptyPanel } from "../../layout/rightPanelStore.ts";
 import type { PanelTabPresentation } from "../../types.ts";
 import {
   useRightPanelValue,
@@ -22,7 +25,7 @@ import { useWorkbenchEntries } from "../bindings/react.ts";
  *   顺序，被拖 tab translateX 跟手、途经邻居按 tab 宽度平移让位，跨越中点
  *   更新落位 index，松手提交 store.moveTab。
  */
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { pathKey } from "../../../../shared/panelPaths.ts";
 import {
@@ -46,11 +49,11 @@ import {
 
 /** 完整视图对话 tab（ZCode ConversationTab.tsx:17-38 类串，token 换 desktop）。 */
 const CONVERSATION_TAB_CLASS =
-  "group relative inline-flex h-7 max-w-60 shrink-0 items-center justify-start gap-1.5 overflow-hidden whitespace-nowrap rounded-lg border px-1.5 pr-2 text-ui-base font-medium transition-colors outline-none cursor-default border-transparent bg-transparent text-ink-subtle hover:text-ink hover:bg-hover data-active:bg-selected data-active:text-ink focus-visible:ring-[3px] focus-visible:ring-focus-ring";
+  "group relative inline-flex! min-h-7 max-w-60 shrink-0 items-center justify-start gap-1.5 overflow-hidden whitespace-nowrap rounded-lg! border px-1.5 pr-2 text-ui-base font-medium cursor-default border-transparent bg-transparent text-ink-subtle hover:text-ink hover:bg-hover data-active:bg-selected data-active:text-ink";
 
 /** tab 触发器根类串（ZCode SidePaneTabTrigger.tsx:144-155，token 换 desktop）。 */
 const TAB_TRIGGER_CLASS =
-  "group relative inline-flex h-7 min-w-15 max-w-39 flex-[1_1_9.75rem] items-center justify-start gap-1 overflow-hidden whitespace-nowrap rounded-lg border px-1.5 pr-2 text-ui-base font-medium transition-colors outline-none cursor-default border-transparent bg-transparent text-ink-subtle hover:text-ink hover:bg-hover data-active:bg-selected data-active:text-ink focus-visible:ring-[3px] focus-visible:ring-focus-ring";
+  `group relative inline-flex h-7 min-w-15 max-w-39 flex-[1_1_9.75rem] items-center justify-start gap-1 overflow-hidden whitespace-nowrap rounded-lg border px-1.5 pr-2 text-ui-base font-medium transition-colors cursor-default border-transparent bg-transparent text-ink-subtle hover:text-ink hover:bg-hover data-active:bg-selected data-active:text-ink focus-visible:ring-inset ${focusVisibleRing}`;
 
 /** tab 标题行：向 × 区域 8px 渐隐防重叠（ZCode :240-247 原文）。 */
 const TAB_CONTENT_CLASS =
@@ -58,7 +61,7 @@ const TAB_CONTENT_CLASS =
 
 /** ×关闭钮（ZCode :164-184；基色 text-ink 对齐 ghost text-foreground 100%）。 */
 const TAB_CLOSE_CLASS =
-  "absolute right-1 top-1/2 flex -translate-y-1/2 items-center justify-center rounded-md text-ink transition-opacity hover:bg-hover hover:text-ink";
+  `absolute right-1 top-1/2 flex -translate-y-1/2 items-center justify-center rounded-md text-ink transition-opacity hover:bg-hover hover:text-ink focus-visible:ring-inset ${focusVisibleRing}`;
 
 const EMPTY_MASK_EDGES = { left: false, right: false } as const;
 
@@ -98,6 +101,7 @@ function PanelTabTrigger({
   fullViewActive,
   dragTransform,
   isDragged,
+  onClose,
   onDragPointerDown,
   onDragPointerMove,
   onDragPointerEnd,
@@ -112,6 +116,7 @@ function PanelTabTrigger({
   /** 拖拽中的位移：被拖 tab 跟手，邻居让位；null = 未参与。 */
   readonly dragTransform: string | null;
   readonly isDragged: boolean;
+  readonly onClose: (id: string, restoreFocus?: boolean) => void;
   readonly onDragPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
   readonly onDragPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   readonly onDragPointerEnd: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -128,14 +133,12 @@ function PanelTabTrigger({
     // 完整视图内点面板 tab：surface 同步回 side-pane（ZCode activateSidePaneTab 语义）。
     if (fullViewActive) store.fullViewPatch(project, { surface: "side-pane" });
   };
-  const close = (): void =>
-    readRightPanel(workbenchLayout).closeTab(project, tab.id);
   return (
     <>
       <div
         role="tab"
         aria-selected={active}
-        tabIndex={0}
+        tabIndex={active ? 0 : -1}
         data-side-pane-tab-id={tab.id}
         data-active={active ? "" : undefined}
         data-hint={tooltip ?? title}
@@ -166,7 +169,7 @@ function PanelTabTrigger({
           // 中键关闭：取消浏览器默认自动滚动，保持原激活 tab 不变（ZCode :134-143）。
           event.preventDefault();
           event.stopPropagation();
-          close();
+          onClose(tab.id);
         }}
         onContextMenu={(event) => {
           event.preventDefault();
@@ -204,7 +207,7 @@ function PanelTabTrigger({
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            close();
+            onClose(tab.id, event.detail === 0);
           }}
         >
           <XIcon className="ui-icon-12" />
@@ -218,7 +221,7 @@ function PanelTabTrigger({
               {
                 id: "close-tab",
                 label: "关闭标签",
-                onSelect: close,
+                onSelect: () => onClose(tab.id, true),
               },
               {
                 id: "close-other-tabs",
@@ -257,10 +260,12 @@ export function PanelTabStrip({
   const panel = useRightPanelValue(
     (state) => state.projects[pathKey(project)] ?? undefined,
   );
-  const tabs = panel?.tabs ?? [];
+  const tabs = panel?.tabs ?? emptyPanel.tabs;
   const fullView = panel?.open ? panel.fullView : undefined;
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const addTabRef = useRef<HTMLButtonElement | null>(null);
+  const pendingClosedTab = useRef<string | null>(null);
   const [overflowing, setOverflowing] = useState(false);
   const [maskEdges, setMaskEdges] = useState<{ left: boolean; right: boolean }>(
     EMPTY_MASK_EDGES,
@@ -378,6 +383,19 @@ export function PanelTabStrip({
     },
     [project, workbenchLayout],
   );
+  const closeTab = (id: string, restoreFocus = false): void => {
+    if (restoreFocus) pendingClosedTab.current = id;
+    readRightPanel(workbenchLayout).closeTab(project, id);
+  };
+  useLayoutEffect(() => {
+    const closed = pendingClosedTab.current;
+    if (!closed || tabs.some((tab) => tab.id === closed)) return;
+    pendingClosedTab.current = null;
+    const trigger = contentRef.current?.querySelector<HTMLElement>(
+      "[data-side-pane-tab-id][aria-selected='true']",
+    );
+    (trigger ?? addTabRef.current)?.focus();
+  }, [tabs]);
   // —— 拖拽排序（ZCode DndContext :1050-1130 的 desktop 等价）——
   // pointer 拖拽期间保持初始渲染顺序：被拖 tab translateX 跟手，落位区间内
   // 的邻居按被拖 tab 宽度平移让位；跨越相邻 tab 中点更新 to，松手提交。
@@ -496,10 +514,11 @@ export function PanelTabStrip({
   );
   const plusButton = (
     <IconButton
+      ref={addTabRef}
       type="button"
       aria-label="新增标签"
       data-side-pane-add-trigger=""
-      className={GHOST_ICON_MD}
+      className={`${GHOST_ICON_MD} focus-visible:ring-inset ${focusVisibleRing}`}
       onClick={() => {
         const store = readRightPanel(workbenchLayout);
         if (fullView) store.fullViewPatch(project, { surface: "side-pane" });
@@ -541,22 +560,20 @@ export function PanelTabStrip({
         {fullView && (
           // 对话 tab 槽（ZCode :1043，仅 fullView 存在时渲染）
           <div className="flex h-full shrink-0 items-center pr-1">
-            <button
-              type="button"
+            <NavigationRow
+              layout="compound"
               data-testid="full-view-conversation-tab"
               data-active={fullView.surface === "conversation" ? "" : undefined}
+              aria-current={fullView.surface === "conversation" ? "page" : undefined}
               data-hint="对话"
               className={CONVERSATION_TAB_CLASS}
               onClick={() => {
-                const store = readRightPanel(workbenchLayout);
-                if (fullView)
-                  store.fullViewPatch(project, { surface: "conversation" });
-                else store.fullViewOpen(project, "conversation");
+                readRightPanel(workbenchLayout).fullViewPatch(project, { surface: "conversation" });
               }}
             >
               <MessageCircleIcon className="ui-icon-16 shrink-0" />
               <span className="min-w-0 truncate">对话</span>
-            </button>
+            </NavigationRow>
           </div>
         )}
         <div
@@ -570,6 +587,31 @@ export function PanelTabStrip({
             aria-label="内容标签"
             data-side-pane-tabs-content=""
             className="flex w-full gap-1 py-2.5"
+            onKeyDown={(event) => {
+              const { target, key } = event;
+              if (!(target instanceof HTMLElement) || !target.dataset.sidePaneTabId ||
+                  event.ctrlKey || event.altKey || event.metaKey) return;
+              const index = tabs.findIndex(tab => tab.id === target.dataset.sidePaneTabId);
+              if (index === -1) return;
+              if (key === "Delete") {
+                event.preventDefault();
+                closeTab(tabs[index]!.id, true);
+                return;
+              }
+              let next: number;
+              if (key === "ArrowLeft") next = (index + tabs.length - 1) % tabs.length;
+              else if (key === "ArrowRight") next = (index + 1) % tabs.length;
+              else if (key === "Home") next = 0;
+              else if (key === "End") next = tabs.length - 1;
+              else if (key === "Enter" || key === " ") next = index;
+              else return;
+              event.preventDefault();
+              const tab = tabs[next];
+              if (!tab) return;
+              activateTab(tab.id);
+              const triggers = event.currentTarget.querySelectorAll<HTMLElement>("[data-side-pane-tab-id]");
+              Array.from(triggers).find(trigger => trigger.dataset.sidePaneTabId === tab.id)?.focus();
+            }}
           >
             {tabs.map((tab, index) => {
               const isDragged = tabDrag?.id === tab.id;
@@ -602,6 +644,7 @@ export function PanelTabStrip({
                   fullViewActive={fullView !== undefined}
                   dragTransform={dragTransform}
                   isDragged={isDragged}
+                  onClose={closeTab}
                   onDragPointerDown={(event) => beginTabDrag(event, tab)}
                   onDragPointerMove={moveTabDrag}
                   onDragPointerEnd={endTabDrag}

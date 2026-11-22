@@ -1,4 +1,6 @@
 import { IconButton } from "../IconButton.tsx";
+import { ModalShell } from "../ModalShell.tsx";
+import { ActionButton } from "../controls.tsx";
 /**
  * Markdown 图片(移植自 ZCode components/ai-elements/markdown-image.tsx,
  * 按 desktop 裁剪:无 artifact 引用通道;本地文件经 Tauri asset 协议加载;
@@ -6,6 +8,7 @@ import { IconButton } from "../IconButton.tsx";
  * 连续图片合组画廊)。
  */
 import { UiIcon } from "../UiIcon.tsx";
+import { ChevronRightIcon, MinusIcon, PlusIcon } from "../icons.tsx";
 import {
   Children,
   isValidElement,
@@ -110,25 +113,6 @@ export function MarkdownImageParagraph({
 }
 
 function ImagePlaceholderIcon({ failed }: { readonly failed: boolean }) {
-  if (failed) {
-    return (
-      <UiIcon
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.8}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="ui-icon-24"
-      >
-        <path d="M18 6 6 18" />
-        <path d="m6 6 12 12" />
-        <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
-        <circle cx="9" cy="9" r="2" />
-        <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
-      </UiIcon>
-    );
-  }
   return (
     <UiIcon
       viewBox="0 0 24 24"
@@ -139,38 +123,10 @@ function ImagePlaceholderIcon({ failed }: { readonly failed: boolean }) {
       strokeLinejoin="round"
       className="ui-icon-24"
     >
+      {failed && <path d="M18 6 6 18m0-12 12 12" />}
       <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
       <circle cx="9" cy="9" r="2" />
       <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
-    </UiIcon>
-  );
-}
-
-/** 预览浮层小图标(左右箭头 / 加减号;AAW 无 lucide 依赖,本文件局部内联)。 */
-function PreviewGlyphIcon({
-  kind,
-}: {
-  readonly kind: "left" | "right" | "plus" | "minus";
-}) {
-  return (
-    <UiIcon
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="ui-icon-20"
-    >
-      {kind === "left" ? <path d="m15 18-6-6 6-6" /> : null}
-      {kind === "right" ? <path d="m9 18 6-6-6-6" /> : null}
-      {kind === "plus" ? (
-        <>
-          <path d="M5 12h14" />
-          <path d="M12 5v14" />
-        </>
-      ) : null}
-      {kind === "minus" ? <path d="M5 12h14" /> : null}
     </UiIcon>
   );
 }
@@ -404,7 +360,6 @@ export function ImagePreviewDialog({
     y: 0,
   });
   const [isDownloading, setIsDownloading] = useState(false);
-  const overlayRef = useRef<HTMLDivElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const previewPointersRef = useRef(new Map<number, PreviewOffset>());
@@ -465,64 +420,6 @@ export function ImagePreviewDialog({
     },
     [items.length, resetPreviewTransform],
   );
-
-  // 手写 overlay 没有 Radix Dialog 的焦点陷阱,Tab 首尾循环手动圈定
-  const trapTabFocus = useCallback((event: KeyboardEvent): void => {
-    const overlay = overlayRef.current;
-    if (overlay === null) {
-      return;
-    }
-    const focusables = Array.from(
-      overlay.querySelectorAll<HTMLButtonElement>("button:not([disabled])"),
-    );
-    const first = focusables[0];
-    const last = focusables[focusables.length - 1];
-    const current = document.activeElement;
-    if (event.shiftKey) {
-      if (current === first || !overlay.contains(current)) {
-        event.preventDefault();
-        last?.focus();
-      }
-      return;
-    }
-    if (current === last || !overlay.contains(current)) {
-      event.preventDefault();
-      first?.focus();
-    }
-  }, []);
-
-  // 挂载即把焦点移入浮层,配合 Tab 圈定键盘用户直接可及下载/关闭
-  // (索引由父级 openPreview 夹取后经 useState 初始化,无需 effect 同步)
-  useEffect(() => {
-    overlayRef.current
-      ?.querySelectorAll<HTMLButtonElement>("button:not([disabled])")[0]
-      ?.focus();
-  }, []);
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        onClose();
-        return;
-      }
-      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-        if (hasMultiple) {
-          event.preventDefault();
-          navigate(event.key === "ArrowLeft" ? -1 : 1);
-        }
-        return;
-      }
-      if (event.key === "Tab") {
-        trapTabFocus(event);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown, true);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown, true);
-    };
-  }, [onClose, hasMultiple, navigate, trapTabFocus]);
 
   // 视口尺寸变化(窗口缩放/侧栏开合)后重新夹取,防止图片漂出可视区
   useEffect(() => {
@@ -667,37 +564,42 @@ export function ImagePreviewDialog({
     return null;
   }
   return (
-    <div
-      ref={overlayRef}
-      aria-label="图片预览"
-      aria-modal="true"
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 overflow-hidden bg-black/85 p-8"
-      onClick={onClose}
-      role="dialog"
+    <ModalShell
+      size="gallery"
+      layer="foreground"
+      label="图片预览"
+      onDismiss={onClose}
+      onPanelKeyDown={(event) => {
+        if (!hasMultiple || event.nativeEvent.isComposing) return;
+        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+          event.preventDefault();
+          navigate(event.key === "ArrowLeft" ? -1 : 1);
+        }
+      }}
     >
       {hasMultiple ? (
         <>
           <IconButton iconSize="large"
             type="button"
             aria-label="上一张"
-            className="absolute left-4 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-black/50 text-white hover:bg-white/10"
+            className="absolute left-4 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-full border border-media-ink/30 bg-overlay-shade/50 text-media-ink hover:bg-media-ink/10"
             onClick={(event) => {
               event.stopPropagation();
               navigate(-1);
             }}
           >
-            <PreviewGlyphIcon kind="left" />
+            <ChevronRightIcon className="ui-icon-20 rotate-180" strokeWidth={2} />
           </IconButton>
           <IconButton iconSize="large"
             type="button"
             aria-label="下一张"
-            className="absolute right-4 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-black/50 text-white hover:bg-white/10"
+            className="absolute right-4 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-full border border-media-ink/30 bg-overlay-shade/50 text-media-ink hover:bg-media-ink/10"
             onClick={(event) => {
               event.stopPropagation();
               navigate(1);
             }}
           >
-            <PreviewGlyphIcon kind="right" />
+            <ChevronRightIcon className="ui-icon-20" strokeWidth={2} />
           </IconButton>
         </>
       ) : null}
@@ -716,7 +618,7 @@ export function ImagePreviewDialog({
           alt={activeItem.alt}
           className="max-h-full max-w-full select-none rounded-xl bg-base object-contain"
           draggable={false}
-          onLoad={resetPreviewTransform}
+          onLoad={() => setPreviewOffset((current) => clampOffset(current, previewScale))}
           src={activeItem.src}
           style={{
             transform: `translate3d(${previewOffset.x}px, ${previewOffset.y}px, 0) scale(${previewScale})`,
@@ -727,52 +629,52 @@ export function ImagePreviewDialog({
         className="flex items-center gap-2"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center gap-1 rounded-full border border-white/20 bg-black/40 px-1 py-0.5">
+        <div className="flex items-center gap-1 rounded-full border border-media-ink/20 bg-overlay-shade/40 px-1 py-0.5">
           <IconButton
             type="button"
             aria-label="缩小"
-            className="flex items-center justify-center rounded-full text-white hover:bg-white/10 disabled:cursor-default disabled:opacity-40"
+            className="flex items-center justify-center rounded-full text-media-ink hover:bg-media-ink/10 disabled:cursor-default disabled:opacity-40"
             disabled={previewScale <= 0.5}
             onClick={() => {
               changePreviewScale(-0.5);
             }}
           >
-            <PreviewGlyphIcon kind="minus" />
+            <MinusIcon className="ui-icon-20" strokeWidth={2} />
           </IconButton>
-          <span className="min-w-12 text-center text-xs text-white">
+          <span className="min-w-12 text-center text-xs text-media-ink">
             {Math.round(previewScale * 100)}%
           </span>
           <IconButton
             type="button"
             aria-label="放大"
-            className="flex items-center justify-center rounded-full text-white hover:bg-white/10 disabled:cursor-default disabled:opacity-40"
+            className="flex items-center justify-center rounded-full text-media-ink hover:bg-media-ink/10 disabled:cursor-default disabled:opacity-40"
             disabled={previewScale >= 3}
             onClick={() => {
               changePreviewScale(0.5);
             }}
           >
-            <PreviewGlyphIcon kind="plus" />
+            <PlusIcon className="ui-icon-20" strokeWidth={2} />
           </IconButton>
         </div>
-        <button
-          type="button"
-          className="rounded-md border border-white/30 px-3 py-1 text-xs text-white hover:bg-white/10 disabled:cursor-default disabled:opacity-50"
+        <ActionButton
+          tone="media"
+          className="px-3 py-1 text-xs"
           disabled={activeItem.src === "" || isDownloading}
           onClick={() => {
             void downloadActiveImage();
           }}
         >
           下载图片
-        </button>
-        <button
-          type="button"
-          className="rounded-md border border-white/30 px-3 py-1 text-xs text-white hover:bg-white/10"
+        </ActionButton>
+        <ActionButton
+          tone="media"
+          className="px-3 py-1 text-xs"
           onClick={onClose}
         >
           关闭(Esc)
-        </button>
+        </ActionButton>
       </div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -820,20 +722,6 @@ export function MarkdownImage({
     source: string;
     status: "loading" | "loaded" | "error";
   }>({ source: "", status: "loading" });
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const focusTimerRef = useRef<number | null>(null);
-
-  // 关闭预览后的异步焦点恢复可能晚于消息节点卸载;取消旧任务,
-  // 避免定时器在组件卸载后触发(对齐 ZCode focusTimerRef 清理)
-  useEffect(
-    () => () => {
-      if (focusTimerRef.current !== null) {
-        window.clearTimeout(focusTimerRef.current);
-      }
-    },
-    [],
-  );
-
   // 本地文件:解析为绝对路径后走 Tauri asset 协议;不可解析直接失败占位
   const localAbsolute = useMemo(() => {
     if (!isLocalImagePath(resolvedSrc)) {
@@ -904,28 +792,17 @@ export function MarkdownImage({
     setPreviewOpen(true);
   };
   const imageAlt = alt === "" || alt === undefined ? "图片预览" : alt;
-  const closePreview = (): void => {
-    setPreviewOpen(false);
-    // 焦点归还触发按钮,键盘用户可从原图继续浏览;定时器句柄入 ref,
-    // 组件在触发前卸载时由 unmount 清理
-    if (focusTimerRef.current !== null) {
-      window.clearTimeout(focusTimerRef.current);
-    }
-    focusTimerRef.current = window.setTimeout(() => {
-      triggerRef.current?.focus();
-      focusTimerRef.current = null;
-    }, 0);
-  };
   return (
     <>
       {effectiveImageStatus === "loading" ? (
         <style>{markdownImageLoadingShimmerCss}</style>
       ) : null}
-      <button
-        ref={triggerRef}
+      <ActionButton
+        tone="ghost"
         type="button"
         aria-label="打开图片预览"
-        className={`group/img relative block w-fit overflow-hidden rounded-xl ${
+        aria-busy={effectiveImageStatus === "loading"}
+        className={`group/img relative block w-fit overflow-hidden rounded-xl! ${
           effectiveImageStatus === "loading"
             ? // 加载期定成方形占位且不可点开(cursor-default),画廊父级的
               // 响应式尺寸被 ! 压过,与 ZCode 加载态一致
@@ -965,14 +842,14 @@ export function MarkdownImage({
           src={displaySrc}
           {...props}
         />
-      </button>
+      </ActionButton>
       {previewOpen ? (
         // 打开期间才挂载:预览状态(索引/缩放/平移)随每次打开重新初始化,
         // 无需 open 同步 effect,也避免残留上一次的变换
         <ImagePreviewDialog
           initialIndex={previewIndex}
           items={previewItems}
-          onClose={closePreview}
+          onClose={() => setPreviewOpen(false)}
         />
       ) : null}
     </>

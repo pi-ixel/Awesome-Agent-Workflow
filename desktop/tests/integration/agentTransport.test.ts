@@ -86,6 +86,19 @@ it("Agent 插件等待迟到的独立探测进程并释放它，既有会话连�
         expect.anything(),
       ),
     );
+    expect(agents.probeState.getState().isBusy).toBe(true);
+    const duplicate = await agents.testConnection("native-opencode", {});
+    expect(duplicate.ok).toBe(false);
+    expect(duplicate.message).toContain("已有 ACP 诊断");
+    for (const depth of ["safe", "deep"] as const) {
+      await agents.runProtocolCheck("native-opencode", {
+        cwd: "D:/project",
+        depth,
+        toolPaths: {},
+      });
+    }
+    expect(agents.probeState.getState().phase).toBe("idle");
+    expect(createTauriStdioTransport).toHaveBeenCalledOnce();
     const finished = vi.fn();
     const stopping = agents.shutdown().then(finished);
     await Promise.resolve();
@@ -121,11 +134,30 @@ it("卸载 ACP Runtime 会结束自检并撤销探查工厂，重装后可再次
     const pending = agents.runProtocolCheck("native-opencode", {
       cwd: "D:/project", depth: "safe", toolPaths: {},
     });
-    await vi.waitFor(() => expect(agents.probeState.getState().step).toBe("收早期通知"));
+    await vi.waitFor(() =>
+      expect(agents.probeState.getState().step).toBe("收早期通知"),
+    );
+    const duplicate = await agents.testConnection("native-opencode", {});
+    expect(duplicate.ok).toBe(false);
+    expect(duplicate.message).toContain("已有 ACP 诊断");
+    await agents.runProtocolCheck("native-opencode", {
+      cwd: "D:/project",
+      depth: "deep",
+      toolPaths: {},
+    });
+    expect(agents.probeState.getState()).toMatchObject({
+      isBusy: true,
+      phase: "probing",
+      step: "收早期通知",
+    });
 
     await fiber.dispose();
     await pending;
-    expect(agents.probeState.getState()).toMatchObject({ phase: "idle", result: null });
+    expect(agents.probeState.getState()).toMatchObject({
+      isBusy: false,
+      phase: "idle",
+      result: null,
+    });
     expect(methods).toEqual(["initialize", "session/new"]);
     expect(kill).toHaveBeenCalledOnce();
     expect(client.isClosed).toBe(true);

@@ -4,7 +4,7 @@ import { Context } from "cordis";
 import type { DiagnosticsService } from "../plugins/diagnostics/service.ts";
 import { loadWindow } from "../plugins/diagnostics/index.ts";
 import { desktopSettingsKey } from "../plugins/configuration/service.ts";
-import { bindSecondaryWindowFontSize } from "../plugins/workbench/service.ts";
+import { bindSecondaryWindowAppearance } from "../plugins/workbench/service.ts";
 import { installDesktopFoundation } from "./foundation.ts";
 import { LoggerContext } from "../shared/logging/react.ts";
 import { HintTooltip } from "../shared/ui/controls/HintTooltip.tsx";
@@ -15,13 +15,13 @@ const root = createRoot(document.getElementById("root")!);
 const ready = installDesktopFoundation(context);
 let closed = false;
 let unsubscribe: (() => void) | undefined;
-let stopFontSizeSync: (() => void) | undefined;
+let stopAppearanceSync: (() => void) | undefined;
 
 function close() {
   if (closed) return;
   closed = true;
   unsubscribe?.();
-  stopFontSizeSync?.();
+  stopAppearanceSync?.();
   window.removeEventListener("pagehide", close);
   root.unmount();
   void ready
@@ -35,15 +35,15 @@ import.meta.hot?.dispose(close);
 void Promise.all([ready, loadWindow()])
   .then(([{ configuration }, DiagnosticsWindow]) => {
     if (closed) return;
-    let savedSize: unknown;
+    let saved;
     try {
-      savedSize = configuration.read(desktopSettingsKey)?.uiFontSize;
+      saved = configuration.read(desktopSettingsKey);
     } catch {
       // The live main-window value can still arrive over the channel.
     }
-    stopFontSizeSync = bindSecondaryWindowFontSize(
+    stopAppearanceSync = bindSecondaryWindowAppearance(
       document.documentElement,
-      savedSize,
+      saved,
     );
     let mounted: DiagnosticsService | undefined;
     let generation = 0;
@@ -51,11 +51,6 @@ void Promise.all([ready, loadWindow()])
       const diagnostics = context.diagnostics;
       if (diagnostics === mounted) return;
       mounted = diagnostics;
-      if (diagnostics)
-        document.documentElement.classList.toggle(
-          "theme-warm",
-          diagnostics.startupTheme() === "warm",
-        );
       root.render(
         diagnostics ? (
           <React.StrictMode>

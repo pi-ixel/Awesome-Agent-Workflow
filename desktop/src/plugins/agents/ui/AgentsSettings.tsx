@@ -1,3 +1,5 @@
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
+import { Disclosure } from "../../../shared/ui/Disclosure.tsx";
 import type { AgentSwitchGuard, AgentSwitchWork } from "../service.ts";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { DangerButton } from "../../../shared/ui/controls.tsx";
@@ -27,14 +29,7 @@ import {
 } from "./protocolChecks.ts";
 import type { AgentsService } from "../service.ts";
 import type { ConnectionTestResult } from "../types.ts";
-import {
-  Badge,
-  btnSecondary,
-  focusVisibleRing,
-  RadioDot,
-  Spinner,
-  ToggleSwitch,
-} from "../../../shared/ui/controls";
+import { ActionButton, Badge, btnSecondary, RadioDot, Spinner, ToggleSwitch } from "../../../shared/ui/controls";
 
 /** 路径 / 命令类输入（与设置页共用视觉）。 */
 const textInputClass = `${settingsInputClass} font-mono`;
@@ -136,6 +131,10 @@ function AgentListCard({
   const [testStep, setTestStep] = useState("");
 
   const phase = useStore(service.probeState, (state) => state.phase);
+  const isDiagnosticBusy = useStore(
+    service.probeState,
+    (state) => state.isBusy,
+  );
   const step = useStore(service.probeState, (state) => state.step);
   const probingAgentId = useStore(
     service.probeState,
@@ -344,7 +343,8 @@ function AgentListCard({
             aria-label={`agent-${row.name}`}
             className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-t border-line px-0 py-2.5"
           >
-            <button
+            <NavigationRow
+              layout="compound"
               type="button"
               aria-pressed={isSelected}
               onClick={() => {
@@ -358,15 +358,15 @@ function AgentListCard({
                     .then(setActiveWork)
                     .catch(() => setActiveWork([]));
               }}
-              className={`flex min-h-9 min-w-0 flex-1 basis-44 flex-wrap items-center gap-2.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-raised/60 ${focusVisibleRing}`}
+              className={`flex min-h-9 min-w-0 flex-1 basis-44 flex-wrap items-center gap-2.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-raised/60`}
             >
               <RadioDot checked={isSelected} appearance="neutral" />
-              <span className="min-w-0 break-all text-sm text-ink">
+              <span className="min-w-0 break-all text-ui-base text-ink">
                 {row.name}
               </span>
               <Badge tone={row.tone}>{row.source}</Badge>
               {isSelected ? <Badge tone="ok">当前使用</Badge> : null}
-            </button>
+            </NavigationRow>
             <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
               {isProbingThis ? (
                 <span className="flex shrink-0 items-center gap-1.5 text-xs text-ink-faint">
@@ -378,20 +378,25 @@ function AgentListCard({
               ) : (
                 <span className="shrink-0 text-2xs text-ink-ghost">未自检</span>
               )}
-              <button
+              <ActionButton
+                tone="secondary"
                 type="button"
-                disabled={testingId !== null || phase === "probing"}
+                disabled={
+                  testingId !== null || isDiagnosticBusy || phase === "probing"
+                }
                 onClick={() => {
                   void testConnection(row.key);
                 }}
-                className={`${btnSecondary} shrink-0 px-3 py-1.5 text-sm`}
+                className="shrink-0 px-3 py-1.5 text-sm"
               >
                 {testingId === row.key ? `${testStep}…` : "测试连接"}
-              </button>
-              <button
+              </ActionButton>
+              <ActionButton
+                tone="secondary"
                 type="button"
                 disabled={
                   phase === "probing" ||
+                  isDiagnosticBusy ||
                   testingId !== null ||
                   workspacePath === null
                 }
@@ -405,14 +410,16 @@ function AgentListCard({
                       toolPaths,
                     );
                 }}
-                className={`${btnSecondary} shrink-0 px-3 py-1.5 text-sm`}
+                className="shrink-0 px-3 py-1.5 text-sm"
               >
                 协议自检
-              </button>
-              <button
+              </ActionButton>
+              <ActionButton
+                tone="secondary"
                 type="button"
                 disabled={
                   phase === "probing" ||
+                  isDiagnosticBusy ||
                   testingId !== null ||
                   workspacePath === null
                 }
@@ -427,10 +434,10 @@ function AgentListCard({
                       toolPaths,
                     );
                 }}
-                className={`${btnSecondary} shrink-0 px-3 py-1.5 text-sm`}
+                className="shrink-0 px-3 py-1.5 text-sm"
               >
                 深度探查
-              </button>
+              </ActionButton>
               {!row.removable && (
                 <IconButton iconSize="dialog"
                   type="button"
@@ -520,7 +527,8 @@ function AgentListCard({
                   placeholder={configuration.placeholder}
                   className={textInputClass}
                 />
-                <button
+                <ActionButton
+                  tone="secondary"
                   type="button"
                   disabled={configuration.probing || testingId === row.key}
                   onClick={() => {
@@ -531,10 +539,10 @@ function AgentListCard({
                     });
                     void configuration.probe();
                   }}
-                  className={`${btnSecondary} shrink-0 px-3 py-1.5 text-sm`}
+                  className="shrink-0 px-3 py-1.5 text-sm"
                 >
                   {configuration.probing ? "检测中…" : "重新检测路径"}
-                </button>
+                </ActionButton>
                 {configuration.detectedPath ? (
                   <div className="flex min-w-0 items-center gap-2 @min-[560px]/settings:col-span-3">
                     <p
@@ -545,12 +553,13 @@ function AgentListCard({
                       检测到：{configuration.detectedPath}
                     </p>
                     {configuration.detectedPath !== configuration.value ? (
-                      <button
+                      <ActionButton
+                        tone="secondary"
                         type="button"
                         disabled={
                           testingId === row.key || configuration.probing
                         }
-                        className={`${btnSecondary} shrink-0 px-3 py-1.5 text-sm`}
+                        className="shrink-0 px-3 py-1.5 text-sm"
                         onClick={() => {
                           configuration.setValue(configuration.detectedPath!);
                           setConnectionResults((previous) => {
@@ -561,7 +570,7 @@ function AgentListCard({
                         }}
                       >
                         使用检测路径
-                      </button>
+                      </ActionButton>
                     ) : null}
                   </div>
                 ) : null}
@@ -574,9 +583,10 @@ function AgentListCard({
                   </p>
                 ) : null}
                 {isSelected ? (
-                  <button
+                  <ActionButton
+                    tone="secondary"
                     type="button"
-                    className={`${btnSecondary} px-3 py-1.5 text-sm`}
+                    className="px-3 py-1.5 text-sm"
                     onClick={() => {
                       setRemoveAfterSwitch(null);
                       setSwitchError(null);
@@ -584,7 +594,7 @@ function AgentListCard({
                     }}
                   >
                     应用到当前连接
-                  </button>
+                  </ActionButton>
                 ) : null}
               </div>
             ) : null}
@@ -616,15 +626,15 @@ function AgentListCard({
                   {connectionResults[row.key]?.message}
                 </p>
                 {connectionResults[row.key]?.stderr ? (
-                  <details
-                    open={!connectionResults[row.key]?.ok}
+                  <Disclosure
+                    summary="进程输出"
+                    defaultOpen={!connectionResults[row.key]?.ok}
                     className="mt-1 text-ink-mute"
                   >
-                    <summary className="cursor-pointer">进程输出</summary>
                     <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all">
                       {connectionResults[row.key]?.stderr}
                     </pre>
-                  </details>
+                  </Disclosure>
                 ) : null}
               </div>
             ) : null}
@@ -655,15 +665,17 @@ function AgentListCard({
           }}
           className={`${textInputClass} min-h-8 flex-1`}
         />
-        <button
+        <ActionButton
+          tone="secondary"
           type="button"
           onClick={submitAdd}
-          className={`${btnSecondary} min-h-8 justify-self-start px-2.5 py-1 text-sm`}
+          className="min-h-8 justify-self-start px-2.5 py-1 text-sm"
         >
           {editingId === null ? "添加" : "保存修改"}
-        </button>
+        </ActionButton>
         {editingId !== null ? (
-          <button
+          <ActionButton
+            tone="secondary"
             type="button"
             onClick={() => {
               setEditingId(null);
@@ -673,20 +685,18 @@ function AgentListCard({
               setSupportsCustomAnswers(false);
               setAddError(null);
             }}
-            className={`${btnSecondary} min-h-8 justify-self-start px-2.5 py-1 text-sm`}
+            className="min-h-8 justify-self-start px-2.5 py-1 text-sm"
           >
             取消
-          </button>
+          </ActionButton>
         ) : null}
       </div>
-      <details
+      <Disclosure
+        summary="高级配置"
         key={addError ?? editingId ?? "new"}
-        open={addError !== null || editingId !== null}
+        defaultOpen={addError !== null || editingId !== null}
         className="border-t border-line py-3"
       >
-        <summary className="cursor-pointer text-sm text-ink-mute">
-          高级配置
-        </summary>
         <label className="mt-3 grid gap-2 text-sm text-ink-mute">
           启动参数
           <input
@@ -706,13 +716,12 @@ function AgentListCard({
             </p>
           </div>
           <ToggleSwitch
-            appearance="neutral"
             label="支持自定义回答"
             checked={supportsCustomAnswers}
             onChange={setSupportsCustomAnswers}
           />
         </div>
-      </details>
+      </Disclosure>
       {addError !== null ? (
         <p role="alert" className="px-0 pb-3 text-xs text-danger-ink">
           {addError}
@@ -726,16 +735,17 @@ function AgentListCard({
               ? `本机发现 ${String(settings.discoveredAgents.length)} 个原生 ACP CLI（OpenCode 等）`
               : "未发现其他原生 ACP CLI（仅扫描内置候选清单）"}
         </p>
-        <button
+        <ActionButton
+          tone="secondary"
           type="button"
           disabled={isScanningAgents}
           onClick={() => {
             void service.scan();
           }}
-          className={`${btnSecondary} shrink-0 px-3 py-1.5 text-sm`}
+          className="shrink-0 px-3 py-1.5 text-sm"
         >
           重新扫描
-        </button>
+        </ActionButton>
       </div>
     </div>
   );
@@ -763,6 +773,10 @@ function ProtocolReportCard({
 }: Omit<AgentSettingsViewProps, "switchAgent">) {
   const result = useStore(service.probeState, (state) => state.result);
   const phase = useStore(service.probeState, (state) => state.phase);
+  const isDiagnosticBusy = useStore(
+    service.probeState,
+    (state) => state.isBusy,
+  );
   const step = useStore(service.probeState, (state) => state.step);
   const probingAgentId = useStore(
     service.probeState,
@@ -801,9 +815,12 @@ function ProtocolReportCard({
           </>
         ) : null}
         {result !== null ? (
-          <button
+          <ActionButton
+            tone="secondary"
             type="button"
-            disabled={phase === "probing" || workspacePath === null}
+            disabled={
+              isDiagnosticBusy || phase === "probing" || workspacePath === null
+            }
             onClick={() => {
               if (workspacePath !== null)
                 probeAgent(
@@ -814,13 +831,13 @@ function ProtocolReportCard({
                   toolPaths,
                 );
             }}
-            className={`${btnSecondary} ml-auto shrink-0 min-h-8 px-2.5 py-1 text-sm`}
+            className="ml-auto shrink-0 min-h-8 px-2.5 py-1 text-sm"
             data-hint="对刚自检的 agent 发两轮真实对话（轮 1 轻量回复；轮 2 列目录 + 跑命令，触发思考/工具/计划/审批）——消耗两次模型调用"
           >
             {phase === "probing" && probingAgentId === result.agentId
               ? (step ?? "深度探查中") + "…"
               : "深度探查（消耗两次模型调用）"}
-          </button>
+          </ActionButton>
         ) : null}
       </div>
       {/* 图例：先回答「我要不要管」——只有缺失/失败需要看，其余明示无需处理 */}

@@ -193,7 +193,7 @@ fn icode(loc: &Locations, query: &Query, result: &mut Catalog) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn list(loc: &Locations, query: &Query) -> Result<Catalog> {
+pub(super) fn discover_sources(loc: &Locations, query: &Query) -> Result<Catalog> {
     let mut result = Catalog {
         profiles: vec![],
         profile: None,
@@ -213,6 +213,11 @@ pub(super) fn list(loc: &Locations, query: &Query) -> Result<Catalog> {
             source.can_import = source.kind == Kind::Directory;
         }
     }
+    Ok(result)
+}
+
+pub(super) fn list(loc: &Locations, query: &Query) -> Result<Catalog> {
+    let mut result = discover_sources(loc, query)?;
     for root in &result.sources {
         if root.kind == Kind::Inline {
             continue;
@@ -241,12 +246,13 @@ pub(super) fn list(loc: &Locations, query: &Query) -> Result<Catalog> {
             result.warnings.push(format!("使用记录读取失败 · {e}"));
         }
     }
-    result.trash = changes::trash_items(loc, query.provider, &mut result.warnings)?;
+    result.trash =
+        changes::trash_items(loc, query.provider, &result.sources, &mut result.warnings)?;
     Ok(result)
 }
 
 // 绝对路径事件只计入对应目录。名称事件计入每个匹配的技能条目。
-fn usage(path: &Path, entries: &mut [Entry]) -> Result<()> {
+pub(super) fn usage(path: &Path, entries: &mut [Entry]) -> Result<()> {
     use std::collections::HashMap;
     use std::io::{BufRead, BufReader};
     let file = match fs::File::open(path) {

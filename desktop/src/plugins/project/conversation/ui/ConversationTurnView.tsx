@@ -1,3 +1,4 @@
+import { NavigationRow } from "../../../../shared/ui/NavigationRow.tsx";
 import { TurnUsageBadge } from "./TurnUsageBadge.tsx";
 import type { SessionItem } from "../types.ts";
 import {
@@ -13,7 +14,8 @@ import { groupTurnWork, type TurnUnit } from "./turnGrouping.ts";
 import { WorkGroupCard } from "./WorkGroupCard.tsx";
 import { useExpansionState } from "./useExpansionState.ts";
 import { AssistantMessage } from "./AssistantMessage.tsx";
-import { ChevronRightIcon, LoaderIcon } from "../../../../shared/ui/icons.tsx";
+import { ChevronRightIcon } from "../../../../shared/ui/icons.tsx";
+import { SessionRunningIndicator } from "../../ui/SessionRunningIndicator.tsx";
 import { formatWorkDuration } from "./clock.ts";
 
 /** 回合工作段时长：起点取用户消息落笔，终点取答案落笔（无答案则取最晚
@@ -145,15 +147,7 @@ function ConversationTurnViewBase({
           />
         ),
       )}
-      {turn.running && (
-        <div
-          role="status"
-          aria-label="工作中"
-          className="flex size-4 animate-spin items-center justify-center"
-        >
-          <LoaderIcon className="ui-icon-16 shrink-0 text-ink-mute" />
-        </div>
-      )}
+      {turn.running && <SessionRunningIndicator surface="conversation" />}
     </div>
   );
   return (
@@ -164,7 +158,8 @@ function ConversationTurnViewBase({
       {(units.length > 0 || turn.running || turn.stopped) && (
         <div>
           {canCollapse ? (
-            <button
+            <NavigationRow
+              layout="compound"
               type="button"
               aria-expanded={historyVisible}
               disabled={revealHistory}
@@ -175,7 +170,7 @@ function ConversationTurnViewBase({
               <ChevronRightIcon
                 className={`ui-icon-16 shrink-0 transition-transform ${historyVisible ? "rotate-90" : ""}`}
               />
-            </button>
+            </NavigationRow>
           ) : (
             <div className={statusClass}>{status}</div>
           )}

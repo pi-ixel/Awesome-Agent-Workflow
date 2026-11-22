@@ -1,6 +1,6 @@
 import { createTestDesktopRuntime } from "../../helpers/desktopRuntime.ts";
 import { installDesktopWorkbench } from "../../../src/bootstrap/installDesktopWorkbench.ts";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Feedback } from "../../../src/shared/ui/feedback.ts";
 import { expect, it, vi } from "vitest";
@@ -41,35 +41,283 @@ const catalog: SkillCatalog = {
   trash: [],
   warnings: [],
 };
-it("回收站卡片悬浮显示描述，缺少描述时不显示路径", async () => {
-  const data = {
-    ...catalog,
-    trash: [
-      { ...skill, id: "first" },
-      { ...skill, id: "second", name: "empty", description: "" },
-    ],
+
+it("启停只替换选中的技能，复用所在卡片和目录大小", async () => {
+  const sibling = {
+    ...skill,
+    name: "other",
+    path: root + "/other",
+    realPath: root + "/other",
+  };
+  const stored = {
+    id: "stopped",
+    name: skill.name,
+    description: skill.description,
+    source: skill.source,
+    path: skill.path,
+    kind: skill.kind,
+  };
+  const list = vi
+    .fn()
+    .mockResolvedValue({ ...catalog, entries: [skill, sibling] });
+  const toggle = vi
+    .fn<NonNullable<NativeSkillLibrary["toggle"]>>()
+    .mockResolvedValueOnce({
+      message: "sample · 已停用",
+      stopped: stored,
+      entry: null,
+    })
+    .mockResolvedValueOnce({
+      message: "sample · 已恢复",
+      stopped: null,
+      entry: { ...skill, revision: "r2" },
+    });
+  render(
+    <SkillLibrary
+      library={{
+        list,
+        toggle,
+        candidates: () => Promise.resolve([]),
+        change: () => Promise.resolve([]),
+        sizes: (_query, selections) =>
+          Promise.resolve(selections.map(() => 1024)),
+      }}
+      provider="codeagent"
+      storage={window.localStorage}
+      knownProjects={() => []}
+      pick={() => Promise.resolve(null)}
+      reveal={() => Promise.resolve()}
+    />,
+  );
+  const card = await screen.findByRole("article", { name: "sample" });
+  const other = screen.getByRole("article", { name: "other" });
+  const control = within(card).getByRole("switch");
+  await within(other).findByText(".cac · 1.0 KiB");
+  await userEvent.click(control);
+  await waitFor(() => expect(control).not.toBeChecked());
+  expect(await screen.findByRole("article", { name: "sample" })).toBe(card);
+  expect(screen.getByRole("article", { name: "other" })).toBe(other);
+  expect(within(other).getByText(".cac · 1.0 KiB")).toBeVisible();
+  expect(within(other).getByRole("switch")).toBeEnabled();
+  await userEvent.click(control);
+  await waitFor(() => expect(control).toBeChecked());
+  expect(list).toHaveBeenCalledTimes(1);
+  expect(toggle).toHaveBeenCalledTimes(2);
+});
+
+it("先显示技能卡片，随后补充当前列表的目录大小", async () => {
+  let resolveSize!: (bytes: (number | null)[]) => void;
+  const sizes = vi
+    .fn<NonNullable<NativeSkillLibrary["sizes"]>>()
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSize = resolve;
+        }),
+    )
+    .mockResolvedValue([3072]);
+  render(
+    <SkillLibrary
+      library={{
+        list: () => Promise.resolve(catalog),
+        candidates: () => Promise.resolve([]),
+        change: () => Promise.resolve([]),
+        sizes,
+      }}
+      provider="codeagent"
+      storage={window.localStorage}
+      knownProjects={() => []}
+      pick={() => Promise.resolve(null)}
+      reveal={() => Promise.resolve()}
+    />,
+  );
+  const card = await screen.findByRole("article", { name: "sample" });
+  expect(within(card).getByText(".cac")).toBeVisible();
+  await waitFor(() => expect(sizes).toHaveBeenCalledTimes(1));
+  await userEvent.click(screen.getByRole("button", { name: "刷新" }));
+  expect(await within(card).findByText(".cac · 3.0 KiB")).toBeVisible();
+  await act(() => {
+    resolveSize([512]);
+    return Promise.resolve();
+  });
+  expect(within(card).queryByText(/512 B/)).toBeNull();
+});
+
+it("详情浏览真实目录，在同一弹窗切换并复制完整原文", async () => {
+  const user = userEvent.setup();
+  const main = "---\r\nname: sample\r\n---\r\n# 真正文\r\n\r\n## 审查\r\n";
+  const example = '{"enabled":true}\r\n';
+  const files = vi.fn<NonNullable<NativeSkillLibrary["files"]>>(
+    (_query, _entry, request) => {
+      if (request.type === "directory") {
+        return Promise.resolve({
+          type: "directory",
+          truncated: false,
+          entries:
+            request.path === "templates"
+              ? [{ name: "example.json", kind: "file", bytes: 18 }]
+              : [
+                  { name: "templates", kind: "directory", bytes: null },
+                  { name: "SKILL.md", kind: "file", bytes: main.length },
+                  { name: "external", kind: "unavailable", bytes: null },
+                ],
+        });
+      }
+      return Promise.resolve({
+        type: "text",
+        text: request.path === "SKILL.md" ? main : example,
+        modifiedAt: Date.UTC(2026, 10, 20),
+      });
+    },
+  );
+  render(
+    <SkillLibrary
+      library={{
+        list: () => Promise.resolve(catalog),
+        candidates: () => Promise.resolve([]),
+        change: () => Promise.resolve([]),
+        files,
+      }}
+      provider="codeagent"
+      storage={window.localStorage}
+      knownProjects={() => []}
+      pick={() => Promise.resolve(null)}
+      reveal={() => Promise.resolve()}
+    />,
+  );
+  const opener = await screen.findByRole("button", {
+    name: "查看 sample 详情",
+  });
+  await user.click(opener);
+  const dialog = within(screen.getByRole("dialog", { name: "技能详情" }));
+  expect(
+    await dialog.findByRole("region", { name: "SKILL.md 正文" }),
+  ).toBeVisible();
+  const copy = dialog.getByRole("button", { name: "复制 SKILL.md" });
+  const idleGlyph = copy.querySelector("svg path")?.getAttribute("d");
+  expect(idleGlyph).toBeTruthy();
+  await user.click(copy);
+  expect(await navigator.clipboard.readText()).toBe(main);
+  expect(copy).toHaveTextContent("已复制 SKILL.md");
+  expect(copy.querySelector("svg path")?.getAttribute("d")).not.toBe(idleGlyph);
+  await user.click(dialog.getByRole("button", { name: "原文" }));
+  const original = dialog.getByRole("region", { name: "SKILL.md 原文" });
+  expect(original.querySelector("pre[aria-hidden=true]")).toHaveTextContent(
+    "1 2 3 4 5 6 7",
+  );
+  expect(dialog.getByRole("button", { name: /external/ })).toBeDisabled();
+  await user.click(dialog.getByRole("button", { name: "templates" }));
+  await user.click(await dialog.findByRole("button", { name: /example.json/ }));
+  expect(
+    await dialog.findByRole("region", { name: "templates/example.json 原文" }),
+  ).toHaveTextContent(example.trim());
+  expect(dialog.queryByRole("group", { name: "文档显示方式" })).toBeNull();
+  expect(dialog.getByText("最近更新")).toBeInTheDocument();
+  expect(files).toHaveBeenCalledWith(
+    { provider: "codeagent", profile: null, projects: [] },
+    expect.objectContaining({ path: skill.path, realPath: skill.realPath }),
+    { type: "read", path: "templates/example.json" },
+  );
+  await user.keyboard("{Escape}");
+  expect(opener).toHaveFocus();
+});
+
+it("配置内技能只展示当前定义且不请求目录文件", async () => {
+  const files = vi.fn<NonNullable<NativeSkillLibrary["files"]>>();
+  const inline = {
+    ...skill,
+    kind: "inline" as const,
+    preview: "name: sample\ndescription: 样例",
+    status: "配置内定义",
   };
   render(
     <SkillLibrary
-      trash
+      library={{
+        list: () => Promise.resolve({ ...catalog, entries: [inline] }),
+        candidates: () => Promise.resolve([]),
+        change: () => Promise.resolve([]),
+        files,
+      }}
+      provider="icode"
+      storage={window.localStorage}
+      knownProjects={() => []}
+      pick={() => Promise.resolve(null)}
+      reveal={() => Promise.resolve()}
+    />,
+  );
+  await userEvent.click(
+    await screen.findByRole("button", { name: "查看 sample 详情" }),
+  );
+  const dialog = within(screen.getByRole("dialog", { name: "技能详情" }));
+  expect(
+    dialog.getByRole("region", { name: "配置定义 原文" }),
+  ).toHaveTextContent("name: sample");
+  expect(dialog.getByRole("button", { name: "定位配置" })).toBeVisible();
+  expect(dialog.queryByText("目录文件")).toBeNull();
+  expect(files).not.toHaveBeenCalled();
+});
+it("旧回收记录作为停用卡片，可查看原文、恢复或删除", async () => {
+  const data = {
+    ...catalog,
+    trash: [
+      {
+        ...skill,
+        id: "old",
+        name: "旧技能",
+        kind: "inline" as const,
+        description: "旧版说明",
+        preview: "name: archived",
+      },
+    ],
+  };
+  const change = vi
+    .fn<NativeSkillLibrary["change"]>()
+    .mockResolvedValue(["已跳过，同名配置已存在"]);
+  const user = userEvent.setup();
+  render(
+    <SkillLibrary
       library={{
         list: () => Promise.resolve(data),
         candidates: () => Promise.resolve([]),
-        change: () => Promise.resolve([]),
+        change,
       }}
-      provider="codeagent"
+      provider="icode"
       storage={window.localStorage}
       knownProjects={() => []}
       pick={() => Promise.resolve(null)}
       reveal={async () => {}}
     />,
   );
+  await user.click(await screen.findByRole("combobox", { name: "技能状态" }));
+  await user.click(screen.getByRole("option", { name: "已停用" }));
+  const card = await screen.findByRole("article", { name: "旧技能" });
+  expect(screen.queryByRole("article", { name: "sample" })).toBeNull();
+  expect(within(card).getByText("旧版说明")).toBeVisible();
+  await user.click(
+    within(card).getByRole("button", { name: "查看 旧技能 详情" }),
+  );
+  const detail = screen.getByRole("dialog", { name: "技能详情" });
   expect(
-    await screen.findByRole("button", { name: "选择 sample" }),
-  ).toHaveAttribute("data-hint", skill.description);
-  expect(
-    screen.getByRole("button", { name: "选择 empty" }),
-  ).not.toHaveAttribute("data-hint");
+    within(detail).getByRole("region", { name: "配置定义 原文" }),
+  ).toHaveTextContent("name: archived");
+  expect(within(detail).queryByRole("button", { name: "定位配置" })).toBeNull();
+  await user.keyboard("{Escape}");
+  const control = within(card).getByRole("switch", { name: "旧技能 启用" });
+  expect(control).not.toBeChecked();
+  await user.click(control);
+  expect(change).toHaveBeenCalledWith(
+    { provider: "icode", profile: null, projects: [] },
+    { type: "restore", ids: ["old"] },
+  );
+  expect(await screen.findByText(/同名配置已存在/)).toBeVisible();
+  expect(control).not.toBeChecked();
+  expect(screen.queryByRole("dialog")).toBeNull();
+  await user.click(within(card).getByRole("button", { name: "旧技能 删除" }));
+  await user.click(screen.getByRole("button", { name: "永久删除" }));
+  expect(change).toHaveBeenLastCalledWith(
+    { provider: "icode", profile: null, projects: [] },
+    { type: "purge", ids: ["old"] },
+  );
 });
 it("从设置切换 Agent 时只请求当前来源，忽略旧请求及未适配的 Agent", async () => {
   let finishFirst!: (data: SkillCatalog) => void;
@@ -166,10 +414,10 @@ it("导入前显示目标目录，批量操作只提交勾选的名称", async (
   );
   expect(await screen.findByText(/sample · 已跳过/)).toBeInTheDocument();
 });
-it("同名技能按来源选择，删除提交当前配置及选中项的版本", async () => {
+it("同名技能按来源查看和删除，路径操作在详情工作台", async () => {
   const change = vi
     .fn<NativeSkillLibrary["change"]>()
-    .mockResolvedValue(["已移入回收站"]);
+    .mockResolvedValue(["已永久删除"]);
   const alt = root.replace(".cac", ".agents");
   const data = {
     ...catalog,
@@ -201,95 +449,51 @@ it("同名技能按来源选择，删除提交当前配置及选中项的版本"
   );
   const cards = await screen.findAllByRole("article", { name: "sample" });
   const user = userEvent.setup();
-  let finishCopy!: () => void;
-  const write = vi.spyOn(navigator.clipboard, "writeText").mockImplementation(
-    () =>
-      new Promise<void>((resolve) => {
-        finishCopy = resolve;
-      }),
+  await user.click(
+    within(cards[1]!).getByRole("switch", { name: "sample 启用" }),
   );
-  await user.click(within(cards[1]!).getByRole("button", { name: "更多" }));
+  const sharedConfirm = within(
+    screen.getByRole("dialog", { name: "确认技能操作" }),
+  );
+  expect(sharedConfirm.getByText(/共用此目录的 Agent 下次加载/)).toBeVisible();
+  await user.keyboard("{Escape}");
+  expect(change).not.toHaveBeenCalled();
+  const more = within(cards[1]!).getByRole("button", {
+    name: "sample 更多操作",
+  });
+  await user.click(more);
   expect(
     screen.getAllByRole("menuitem").map((item) => item.textContent),
-  ).toEqual(["详情", "打开目录", "复制路径"]);
-  await user.click(screen.getByRole("menuitem", { name: "打开目录" }));
+  ).toEqual(["查看详情"]);
+  await user.click(screen.getByRole("menuitem", { name: "查看详情" }));
+  const detail = within(screen.getByRole("dialog", { name: "技能详情" }));
+  expect(detail.getByText(alt + "/sample")).toBeInTheDocument();
+  await user.click(detail.getByRole("button", { name: "打开目录" }));
   expect(reveal).toHaveBeenCalledWith(alt + "/sample", "open-directory");
-  await user.click(within(cards[1]!).getByRole("button", { name: "更多" }));
-  const copy = screen.getByRole("menuitem", { name: "复制路径" });
-  await user.click(copy);
+  const write = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+  await user.click(detail.getByRole("button", { name: "复制路径" }));
   expect(write).toHaveBeenCalledWith(alt + "/sample");
-  expect(screen.getByRole("button", { name: "批量选择" })).toBeEnabled();
-  expect(
-    within(cards[0]!).getByRole("button", { name: "移入回收站" }),
-  ).toBeEnabled();
-  await act(async () => {
-    finishCopy();
-    await Promise.resolve();
-  });
   expect(notify).toHaveBeenCalledWith({
     message: "已复制",
     variant: "ok",
     dedupeKey: "skill-path-copy",
   });
-  expect(
-    within(cards[0]!).queryByRole("button", { name: "复制路径" }),
-  ).toBeNull();
-  expect(screen.queryByRole("status")).toBeNull();
   write.mockRestore();
-  expect(screen.queryByRole("checkbox")).toBeNull();
-  expect(screen.getAllByRole("region", { name: "全局技能" })).toHaveLength(1);
-  await user.click(within(cards[1]!).getByRole("button", { name: "更多" }));
-  await user.click(screen.getByRole("menuitem", { name: "详情" }));
-  const detail = screen.getByRole("dialog", { name: "技能详情" });
-  expect(within(detail).getByText(alt + "/sample")).toBeInTheDocument();
-  await userEvent.click(
-    within(detail).getByRole("button", { name: "移入回收站" }),
-  );
-  expect(screen.getAllByRole("dialog")).toHaveLength(1);
-  expect(
-    screen.getByRole("dialog", { name: "确认技能操作" }),
-  ).toBeInTheDocument();
-  await userEvent.keyboard("{Escape}");
-  expect(
-    within(screen.getByRole("dialog", { name: "技能详情" })).getByText(
-      alt + "/sample",
-    ),
-  ).toBeInTheDocument();
+  await user.keyboard("{Escape}");
+  expect(more).toHaveFocus();
+  const remove = within(cards[1]!).getByRole("button", { name: "sample 删除" });
+  await user.click(remove);
+  const dialog = within(screen.getByRole("dialog", { name: "确认技能操作" }));
+  expect(dialog.getByText(/仅删除本条链接/)).toBeInTheDocument();
+  await user.keyboard("{Escape}");
   expect(change).not.toHaveBeenCalled();
-  await userEvent.keyboard("{Escape}");
-  expect(within(cards[1]!).getByRole("button", { name: "更多" })).toHaveFocus();
-  await userEvent.click(screen.getByRole("button", { name: "批量选择" }));
-  expect(screen.queryByRole("checkbox")).toBeNull();
-  expect(screen.queryByRole("button", { name: "打开目录" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "查看 sample 详情" })).toBeNull();
-  expect(screen.getByRole("button", { name: "全选" })).toBeEnabled();
-  const recycleSelected = screen.getByRole("button", {
-    name: "将所选技能移入回收站",
-  });
-  expect(recycleSelected).toBeDisabled();
-  expect(recycleSelected).toHaveAttribute("data-icon-hover-button");
-  const choices = await screen.findAllByRole("button", {
-    name: "选择 sample",
-  });
-  const choice = choices[1]!;
-  expect(choice).toHaveTextContent(/^sample$/);
-  await userEvent.click(choice);
-  expect(choice).toHaveAttribute("aria-pressed", "true");
-  expect(screen.queryByRole("dialog")).toBeNull();
-  await userEvent.keyboard(" ");
-  expect(choice).toHaveAttribute("aria-pressed", "false");
-  await userEvent.click(choice);
-  await userEvent.click(recycleSelected);
-  const dialog = await screen.findByRole("dialog", { name: "确认技能操作" });
-  expect(within(dialog).getByText(/仅移除链接/)).toBeInTheDocument();
-  await userEvent.click(
-    within(dialog).getByRole("button", { name: "移入回收站" }),
-  );
+  await user.click(remove);
+  await user.click(screen.getByRole("button", { name: "永久删除" }));
   expect(change).toHaveBeenCalledWith(
     { provider: "icode", profile: "Code.yaml", projects: [] },
     {
-      type: "delete",
-      items: [{ path: alt + "/sample", revision: "r1", name: "sample" }],
+      type: "deletePermanent",
+      item: { path: alt + "/sample", revision: "r1", name: "sample" },
     },
   );
 });
@@ -347,41 +551,45 @@ it("全局分区优先，同一项目的多个来源合并，搜索和刷新保�
   await expectOrder();
   expect(list).toHaveBeenCalledTimes(2);
 });
-it("插件包技能支持单项回收和批量全选", async () => {
+it("插件包开关只停用当前技能，其他技能保持启用", async () => {
   const source = "C:/Users/test/.cac/plugins/cache/local/tools/1.0/skills";
   const entry = {
     ...skill,
     kind: "package" as const,
     source,
     path: source + "/sample",
+    realPath: source + "/sample",
   };
-  const sibling = { ...entry, name: "other", path: source + "/other" };
+  const sibling = {
+    ...entry,
+    name: "other",
+    path: source + "/other",
+    realPath: source + "/other",
+  };
+  const data = {
+    ...catalog,
+    entries: [entry, sibling],
+    sources: [
+      {
+        ...catalog.sources[0]!,
+        path: source,
+        kind: "package" as const,
+        canImport: false,
+      },
+    ],
+  };
+  const list = vi
+    .fn<NativeSkillLibrary["list"]>()
+    .mockResolvedValueOnce(data)
+    .mockResolvedValue({
+      ...data,
+      entries: [sibling],
+      trash: [{ ...entry, id: "paused" }],
+    });
   const change = vi.fn<NativeSkillLibrary["change"]>().mockResolvedValue([]);
-  const selection = ({ name, path, revision }: typeof entry) => ({
-    name,
-    path,
-    revision,
-  });
-  const query = { provider: "codeagent", profile: null, projects: [] };
   render(
     <SkillLibrary
-      library={{
-        list: () =>
-          Promise.resolve({
-            ...catalog,
-            entries: [entry, sibling],
-            sources: [
-              {
-                ...catalog.sources[0]!,
-                path: source,
-                kind: "package",
-                canImport: false,
-              },
-            ],
-          }),
-        candidates: () => Promise.resolve([]),
-        change,
-      }}
+      library={{ list, candidates: () => Promise.resolve([]), change }}
       provider="codeagent"
       storage={window.localStorage}
       knownProjects={() => []}
@@ -389,44 +597,24 @@ it("插件包技能支持单项回收和批量全选", async () => {
       reveal={async () => {}}
     />,
   );
-  const card = await screen.findByRole("article", { name: "sample" });
-  await userEvent.click(
-    within(card).getByRole("button", { name: "移入回收站" }),
+  const control = await screen.findByRole("switch", { name: "sample 启用" });
+  expect(control).toBeChecked();
+  await userEvent.click(control);
+  expect(change).toHaveBeenCalledWith(
+    { provider: "codeagent", profile: null, projects: [] },
+    {
+      type: "delete",
+      items: [{ name: entry.name, path: entry.path, revision: entry.revision }],
+    },
   );
-  const confirm = async () => {
-    const dialog = await screen.findByRole("dialog", {
-      name: "确认技能操作",
-    });
-    await userEvent.click(
-      within(dialog).getByRole("button", { name: "移入回收站" }),
-    );
-  };
-  await confirm();
-  expect(change).toHaveBeenLastCalledWith(query, {
-    type: "delete",
-    items: [selection(entry)],
-  });
-
-  await userEvent.click(screen.getByRole("button", { name: "批量选择" }));
-  await userEvent.click(screen.getByRole("button", { name: "全选" }));
-  expect(screen.getByRole("button", { name: "选择 sample" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
+  await waitFor(() =>
+    expect(
+      screen.getByRole("switch", { name: "sample 启用" }),
+    ).not.toBeChecked(),
   );
-  expect(screen.getByRole("button", { name: "选择 other" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  await userEvent.click(
-    screen.getByRole("button", { name: "将所选技能移入回收站" }),
-  );
-  await confirm();
-  expect(change).toHaveBeenLastCalledWith(query, {
-    type: "delete",
-    items: [selection(entry), selection(sibling)],
-  });
+  expect(screen.getByRole("switch", { name: "other 启用" })).toBeChecked();
+  expect(screen.queryByRole("dialog")).toBeNull();
 });
-
 it("保留已卸载插件包记录的原生重装能力", async () => {
   let items = [
     { id: "tools@local", scope: "user", installPath: "C:/plugins/tools" },

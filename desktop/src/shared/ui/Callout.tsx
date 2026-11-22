@@ -12,13 +12,14 @@ import { Disclosure } from "./Disclosure.tsx";
 import { XIcon } from "./icons.tsx";
 import { focusVisibleRing } from "./controls.tsx";
 
-export type CalloutTone = "danger" | "warn" | "info" | "ok";
+export type CalloutTone = "danger" | "warn" | "info" | "ok" | "neutral";
 
 const toneClass: Readonly<Record<CalloutTone, string>> = {
   danger: "border-danger-line bg-danger-bg/50",
   warn: "border-warn-line bg-warn-bg/50",
   info: "border-info-line bg-info-bg/50",
   ok: "border-ok-line bg-ok-bg/50",
+  neutral: "border-line-strong bg-surface",
 };
 
 const iconClass: Readonly<Record<CalloutTone, string>> = {
@@ -26,6 +27,7 @@ const iconClass: Readonly<Record<CalloutTone, string>> = {
   warn: "text-warn-ink",
   info: "text-info-ink",
   ok: "text-ok-ink",
+  neutral: "text-ink-mute",
 };
 
 function ToneIcon({ tone }: { readonly tone: CalloutTone }) {
@@ -52,7 +54,11 @@ function ToneIcon({ tone }: { readonly tone: CalloutTone }) {
       ) : (
         <>
           <circle cx="8" cy="8" r="5.8" />
-          {tone === "danger" ? <path d="M8 5v3.4M8 10.9v.1" /> : <path d="M8 7.3v3.6M8 5.2v.1" />}
+          {tone === "danger" ? (
+            <path d="M8 5v3.4M8 10.9v.1" />
+          ) : (
+            <path d="M8 7.3v3.6M8 5.2v.1" />
+          )}
         </>
       )}
     </UiIcon>
@@ -65,6 +71,7 @@ export function Callout({
   children,
   details,
   actions,
+  icon,
   onDismiss,
   dismissLabel = "关闭提示",
   role = "alert",
@@ -80,6 +87,7 @@ export function Callout({
   readonly details?: ReactNode;
   /** 右侧的操作按钮，最多两个。 */
   readonly actions?: ReactNode;
+  readonly icon?: ReactNode;
   readonly onDismiss?: () => void;
   readonly dismissLabel?: string;
   /** 需要立刻提醒用 alert（默认）；常驻的说明用 status 或 note。 */
@@ -93,7 +101,7 @@ export function Callout({
       aria-label={label}
       className={`flex items-start gap-2.5 rounded-lg border px-3 py-2 text-ui-sm text-ink ${toneClass[tone]} ${className}`}
     >
-      <ToneIcon tone={tone} />
+      {icon ?? <ToneIcon tone={tone} />}
       <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">
         <div className="font-medium">{title}</div>
         {children !== undefined && children !== null && children !== false && (
@@ -101,15 +109,23 @@ export function Callout({
         )}
         {details !== undefined && details !== null && details !== false && (
           <Disclosure summary="详情" className="mt-1 text-ink-mute">
-            <div className="max-h-24 overflow-y-auto font-mono text-ui-xs whitespace-pre-wrap">{details}</div>
+            <div className="max-h-24 overflow-y-auto font-mono text-ui-xs whitespace-pre-wrap">
+              {details}
+            </div>
           </Disclosure>
         )}
       </div>
-      {actions && <div className="flex shrink-0 flex-wrap items-center gap-1.5 self-center">{actions}</div>}
+      {actions && (
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5 self-center">
+          {actions}
+        </div>
+      )}
       {onDismiss && (
-        <IconButton iconSize="compact"
+        <IconButton
+          iconSize="compact"
           type="button"
           aria-label={dismissLabel}
+          data-hint={dismissLabel}
           onClick={onDismiss}
           className={`-mr-1 flex shrink-0 items-center justify-center rounded-md text-ink-mute hover:bg-raised/70 hover:text-ink ${focusVisibleRing}`}
         >

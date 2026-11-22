@@ -1,5 +1,7 @@
+import { TextLink } from "../../../shared/ui/TextLink.tsx";
+import { Callout } from "../../../shared/ui/Callout.tsx";
+import { fieldSurfaceClass } from "../../../shared/ui/inputStyles.ts";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
-import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
 import { projectConversationPageId, projectOverviewPageId } from "../workspace/pageIds.ts";
 import { useState } from "react";
 import type { ProjectViewProps, WorkbenchContributions } from "../../workbench/types.ts";
@@ -10,12 +12,12 @@ import { SessionReconnect } from "../conversation/ui/ReconnectButton.tsx";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { basenameOf } from "../../../shared/workspaceText.ts";
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
-import { useHeaderMenu } from "../../../shared/ui/useHeaderMenu.ts";
+import { useMenuController } from "../../../shared/ui/useMenuController.ts";
 import { useSessionRename } from "./useSessionRename.ts";
 import { sessionPinKey } from "../sessions/sessionPin.ts";
 import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
-import { btnSecondary } from "../../../shared/ui/controls.tsx";
-import { CopyIcon, EllipsisIcon, FolderGlyph, MessageCirclePlusIcon, PencilIcon, XIcon } from "../../../shared/ui/icons.tsx";
+import { ActionButton } from "../../../shared/ui/controls.tsx";
+import { ArrowLeftIcon, CopyIcon, EllipsisIcon, FolderGlyph, MessageCirclePlusIcon, PencilIcon } from "../../../shared/ui/icons.tsx";
 
 const BAR_BUTTON_CLASS =
   "flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink";
@@ -62,27 +64,16 @@ function BackButton({
 }) {
   const hint = hintTooltipProps(title);
   return (
-    <button
-      type="button"
+    <ActionButton
+      tone="ghost"
       onClick={onClick}
       aria-label="返回"
-      className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-xs text-ink-mute transition-colors hover:bg-raised hover:text-ink"
+      className="flex shrink-0 items-center gap-1 px-1.5 py-1 text-xs"
       {...hint}
     >
-      <UiIcon
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={2}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="ui-icon-14"
-      >
-        <path d="m12 19-7-7 7-7" />
-        <path d="M19 12H5" />
-      </UiIcon>
+      <ArrowLeftIcon className="ui-icon-14" strokeWidth={2} />
       返回
-    </button>
+    </ActionButton>
   );
 }
 
@@ -118,7 +109,7 @@ function SessionBar({ project: path }: { readonly project: string }) {
   const view = useProjectView();
   const sessionsByPath = useSessionValue((state) => state.sessionsByPath);
   const hintMore = hintTooltipProps("更多");
-  const { menu, open, dismiss } = useHeaderMenu();
+  const { menu, open, dismiss } = useMenuController();
   const entry = Object.entries(sessionsByPath)
     .filter(([projectPath]) => pathKey(projectPath) === pathKey(path))
     .flatMap(([, sessions]) => sessions)
@@ -137,7 +128,7 @@ function SessionBar({ project: path }: { readonly project: string }) {
       ? `${entry.nativeTitle}（双击重命名；清空提交恢复自动命名）`
       : "双击重命名；清空提交恢复自动命名";
 
-  function openMoreMenu(anchor: DOMRect): void {
+  function openMoreMenu(trigger: HTMLButtonElement): void {
     open(
       "more",
       "更多",
@@ -159,12 +150,7 @@ function SessionBar({ project: path }: { readonly project: string }) {
       ],
       // ZCode WorkspaceHeaderSections.tsx:580 会话更多菜单 align="start"：
       // 菜单左缘对齐触发器左缘（ZCode 菜单容器 w-48）
-      {
-        x: anchor.left,
-        y: anchor.bottom + 4,
-        side: "bottom",
-        align: "start",
-      },
+      { trigger, align: "start" },
     );
   }
 
@@ -183,7 +169,7 @@ function SessionBar({ project: path }: { readonly project: string }) {
           onChange={(event) => rename.setDraft(event.target.value)}
           onKeyDown={rename.onKeyDown}
           onBlur={rename.onBlur}
-          className="min-w-0 max-w-[16rem] truncate rounded border border-line-strong bg-surface px-1.5 py-0.5 text-title font-medium text-ink outline-none focus:border-ink-faint"
+          className={`${fieldSurfaceClass} max-w-[16rem] truncate px-1.5 py-0.5 text-title font-medium`}
         />
         {rename.error && <span role="alert" className="text-xs text-danger-ink">改名未保存，按回车重试。{rename.error}</span>}
         </div>
@@ -209,12 +195,11 @@ function SessionBar({ project: path }: { readonly project: string }) {
         aria-expanded={menu !== null && menu.id === "more" && !menu.closing}
         {...hintMore}
         onClick={(event) => {
-          const anchor = event.currentTarget.getBoundingClientRect();
           if (menu !== null && menu.id === "more" && !menu.closing) {
             dismiss();
             return;
           }
-          openMoreMenu(anchor);
+          openMoreMenu(event.currentTarget);
         }}
         className={BAR_BUTTON_CLASS}
       >
@@ -225,6 +210,7 @@ function SessionBar({ project: path }: { readonly project: string }) {
         <ContextMenu
           entries={menu.entries}
           placement={menu.placement}
+          trigger={menu.trigger}
           label={menu.label}
           closing={menu.closing}
           onDismiss={dismiss}
@@ -273,14 +259,15 @@ function OverviewBar({ project: path }: { readonly project: string }) {
       </span>
       {/* 仅在项目已打开（或连接中）时提供关闭；连接中禁闭防误触 */}
       {activePath === path && (
-        <button
+        <ActionButton
+          tone="secondary"
           type="button"
           onClick={closeWorkspace}
           disabled={isConnectingThis}
-          className={`${btnSecondary} ml-1 shrink-0 px-3 py-1 text-xs`}
+          className="ml-1 shrink-0 px-3 py-1 text-xs"
         >
           关闭项目
-        </button>
+        </ActionButton>
       )}
     </>
   );
@@ -292,7 +279,6 @@ function OverviewBar({ project: path }: { readonly project: string }) {
  * 由 store 管理）。连接态与总览态共用，向导 / 全屏页不显示。
  */
 function ConnectErrorBanner({ project: path }: { readonly project: string }) {
-  const hint = hintTooltipProps("关闭错误提示");
   const error = useWorkspaceValue((state) => state.lastConnectError);
   const dismissConnectError = useWorkspaceCommands()?.dismissConnectError;
   const openSettings = useProjectNavigation()?.openSettings;
@@ -312,35 +298,21 @@ function ConnectErrorBanner({ project: path }: { readonly project: string }) {
     return null;
   }
   return (
-    <div
-      role="alert"
-      className="flex items-center gap-2 border-t border-danger-line bg-danger-bg/50 px-3.5 py-1.5 text-xs text-danger-ink"
-    >
-      <span className="min-w-0 flex-1 truncate" data-hint={error.message}>
-        连接失败：{error.message}
-      </span>
-      <button
-        type="button"
-        onClick={() => {
-          openSettings?.();
-        }}
-        className="shrink-0 rounded px-1.5 py-0.5 underline decoration-dotted underline-offset-2 transition-colors hover:text-danger-ink/80"
-      >
-        打开设置
-      </button>
-      <IconButton iconSize="compact"
-        type="button"
-        aria-label="关闭错误提示"
-        {...hint}
-        onClick={() => {
-          setDismissed({ path: error.path, message: error.message });
-          dismissConnectError?.(path);
-        }}
-        className="flex shrink-0 items-center justify-center rounded text-danger-ink transition-colors hover:bg-danger-bg"
-      >
-        <XIcon className="ui-icon-12" />
-      </IconButton>
-    </div>
+    <Callout
+      tone="danger"
+      title={`连接失败：${error.message}`}
+      className="mx-2 my-1"
+      dismissLabel="关闭错误提示"
+      onDismiss={() => {
+        setDismissed({ path: error.path, message: error.message });
+        dismissConnectError?.(path);
+      }}
+      actions={
+        <TextLink type="button" onClick={() => openSettings?.()}>
+          打开设置
+        </TextLink>
+      }
+    />
   );
 }
 

@@ -1,36 +1,17 @@
 import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
+import { NavigationRow } from "../../../../shared/ui/NavigationRow.tsx";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { PlanEntry } from "../../../../contracts/acp/protocol.ts";
 import type { TaskProgressSummary } from "../sessionStatusModel.ts";
+import { EntryStatusIcon } from "./PlanCard.tsx";
 
 function TaskRows({ entries }: { entries: readonly PlanEntry[] }) {
   return (
     <ol className="space-y-2">
       {entries.map((entry, index) => (
-        <li key={index} className="flex items-start gap-2 text-sm leading-5">
-          <span
-            aria-label={
-              entry.status === "completed"
-                ? "已完成"
-                : entry.status === "in_progress"
-                  ? "进行中"
-                  : "待办"
-            }
-            className={
-              entry.status === "completed"
-                ? "text-ok-ink"
-                : entry.status === "in_progress"
-                  ? "text-info"
-                  : "text-ink-faint"
-            }
-          >
-            {entry.status === "completed"
-              ? "✓"
-              : entry.status === "in_progress"
-                ? "●"
-                : "○"}
-          </span>
+        <li key={index} className="flex items-start gap-2 text-ui-sm leading-snug">
+          <EntryStatusIcon status={entry.status} />
           <span
             data-hint={entry.content}
             className={`line-clamp-2 min-w-0 break-words ${entry.status === "completed" ? "text-ink-faint line-through" : "text-ink-soft"}`}
@@ -104,6 +85,7 @@ export function StatusTaskProgress({ model }: { model: TaskProgressSummary }) {
             else update();
           });
     observer?.observe(trigger);
+    if (popupRef.current) observer?.observe(popupRef.current);
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update, true);
     const outside = (event: PointerEvent): void => {
@@ -138,11 +120,11 @@ export function StatusTaskProgress({ model }: { model: TaskProgressSummary }) {
       ? `已完成 ${entries.length} 项`
       : `${side === "before" ? "前面" : "后面"} ${entries.length} 项`;
     return (
-      <button
+      <NavigationRow
         ref={side === "before" ? beforeRef : afterRef}
         type="button"
         aria-expanded={open === side}
-        className="w-full rounded px-2 py-1 text-left text-sm text-ink-faint hover:bg-raised focus-visible:outline-2 focus-visible:outline-focus-ring"
+        className="text-ink-mute"
         onMouseEnter={() => schedule(side, 120)}
         onMouseLeave={() => schedule(null, 80)}
         onFocus={() => {
@@ -159,7 +141,7 @@ export function StatusTaskProgress({ model }: { model: TaskProgressSummary }) {
         }}
       >
         {label} ›
-      </button>
+      </NavigationRow>
     );
   };
   const hidden =

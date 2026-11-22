@@ -1,3 +1,4 @@
+import { Disclosure } from "../../../shared/ui/Disclosure.tsx";
 import { BadgeDot, Listbox, StatusDot } from "../../../shared/ui/controls.tsx";
 import { useState, type ReactNode } from "react";
 import { MetricStrip } from "../../../shared/ui/MetricStrip.tsx";
@@ -222,20 +223,28 @@ export function ResourceReport({
               <StatusDot tone={tone} className="ui-icon-8" />
               {name}
             </h2>
-            <MetricStrip embedded label={name} metrics={[
-              { label: "CPU", value: cpu(metrics.cpuPercent) },
-              { label: "内存", value: memory(metrics.memoryBytes) },
-            ]} />
+            <MetricStrip
+              embedded
+              label={name}
+              metrics={[
+                { label: "CPU", value: cpu(metrics.cpuPercent) },
+                { label: "内存", value: memory(metrics.memoryBytes) },
+              ]}
+            />
           </section>
         ))}
         <section className={`${panel} p-4 md:col-span-2 xl:col-span-1`}>
           <h2 className="text-sm font-medium">连接负载</h2>
-          <MetricStrip embedded label="连接负载" metrics={[
-            { label: "ACP 连接", value: connections.length },
-            { label: "项目", value: projects.size },
-            { label: "session", value: ready.length },
-            { label: "执行中", value: ready.filter((s) => s.running).length },
-          ]} />
+          <MetricStrip
+            embedded
+            label="连接负载"
+            metrics={[
+              { label: "ACP 连接", value: connections.length },
+              { label: "项目", value: projects.size },
+              { label: "session", value: ready.length },
+              { label: "执行中", value: ready.filter((s) => s.running).length },
+            ]}
+          />
         </section>
       </div>
       {!resources ? (
@@ -266,11 +275,18 @@ export function ResourceReport({
               label="监控对象"
               value={selection}
               onChange={setSelected}
-              className="py-1.5 text-xs"
+              className="py-1.5 text-ui-sm"
               options={[
                 { value: "all", label: "Desktop 与全部 agent" },
-                ...latest.map(({ id, rootPid }) => ({ value: id, label: `${label(id)} · PID ${rootPid}` })),
-                ...historical.map(([id, pid]) => ({ value: id, label: `${label(id)} · PID ${pid}`, group: "历史进程组" })),
+                ...latest.map(({ id, rootPid }) => ({
+                  value: id,
+                  label: `${label(id)} · PID ${rootPid}`,
+                })),
+                ...historical.map(([id, pid]) => ({
+                  value: id,
+                  label: `${label(id)} · PID ${pid}`,
+                  group: "历史进程组",
+                })),
               ]}
             />
           </div>
@@ -306,27 +322,28 @@ export function ResourceReport({
                 (c) => handle !== null && c.processHandle === handle,
               );
               return (
-                <details key={id} className="group text-xs">
-                  <summary className="grid cursor-pointer list-none grid-cols-[minmax(0,1fr)_5rem_6rem] items-center gap-2 px-4 py-3 hover:bg-raised/50 [&::-webkit-details-marker]:hidden">
-                    <span className="min-w-0">
-                      <span className="text-sm font-medium">
-                        <span className="mr-2 inline-block text-ink-mute transition-transform group-open:rotate-90">
-                          ›
+                <Disclosure
+                  layout="row"
+                  key={id}
+                  className="text-xs"
+                  summary={
+                    <span className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_5rem_6rem] items-center gap-2 pr-4">
+                      <span className="min-w-0">
+                        <span className="text-sm font-medium">{label(id)}</span>
+                        <span className="mt-1 block pl-4 text-ink-mute">
+                          PID {rootPid}
+                          {group.incomplete && " · 读数不完整"}
                         </span>
-                        {label(id)}
                       </span>
-                      <span className="mt-1 block pl-4 text-ink-mute">
-                        PID {rootPid}
-                        {group.incomplete && " · 读数不完整"}
+                      <span className="text-right tabular-nums">
+                        {cpu(group.cpuPercent)}
+                      </span>
+                      <span className="text-right tabular-nums">
+                        {memory(group.memoryBytes)}
                       </span>
                     </span>
-                    <span className="text-right tabular-nums">
-                      {cpu(group.cpuPercent)}
-                    </span>
-                    <span className="text-right tabular-nums">
-                      {memory(group.memoryBytes)}
-                    </span>
-                  </summary>
+                  }
+                >
                   <div className="space-y-3 border-t border-line bg-base/50 p-4">
                     {id === "desktop" && (
                       <dl className="flex items-center justify-between gap-3">
@@ -379,7 +396,7 @@ export function ResourceReport({
                       </table>
                     </div>
                   </div>
-                </details>
+                </Disclosure>
               );
             })}
           </div>
@@ -389,10 +406,10 @@ export function ResourceReport({
             </p>
           )}
           {historical.length > 0 && (
-            <details className="border-t border-line px-4 py-3 text-xs text-ink-mute">
-              <summary className="cursor-pointer">
-                历史进程组 · {historical.length}
-              </summary>
+            <Disclosure
+              className="border-t border-line px-4 py-3 text-xs text-ink-mute"
+              summary={<>历史进程组 · {historical.length}</>}
+            >
               <ul className="mt-3 space-y-2">
                 {historical.map(([id, pid]) => {
                   const observedAt = exits.get(id);
@@ -406,7 +423,7 @@ export function ResourceReport({
                   );
                 })}
               </ul>
-            </details>
+            </Disclosure>
           )}
         </section>
         {children}

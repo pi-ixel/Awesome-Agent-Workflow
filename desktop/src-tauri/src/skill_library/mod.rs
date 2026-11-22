@@ -1,6 +1,7 @@
 mod catalog;
 mod changes;
 pub(crate) use changes::copy_tree;
+mod files;
 mod profiles;
 #[cfg(test)]
 mod tests;
@@ -154,6 +155,25 @@ pub async fn skill_library_candidates(from: PathBuf) -> std::result::Result<Vec<
 }
 static OPERATIONS: Mutex<()> = Mutex::new(());
 #[tauri::command]
+pub async fn skill_library_toggle(
+    app: AppHandle,
+    webview: tauri::Webview,
+    query: Query,
+    action: changes::Toggle,
+) -> std::result::Result<changes::ToggleResult, String> {
+    if webview.label() != "main" {
+        return Err("只有主窗口可以启停技能".into());
+    }
+    let locations = Locations::resolve(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _lock = OPERATIONS.lock().map_err(error)?;
+        changes::toggle(&locations, &query, action)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
+}
+#[tauri::command]
 pub async fn skill_library_list(
     app: AppHandle,
     query: Query,
@@ -177,6 +197,50 @@ pub async fn skill_library_change(
     tauri::async_runtime::spawn_blocking(move || {
         let _lock = OPERATIONS.lock().map_err(error)?;
         changes::apply(&locations, &query, action)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn skill_library_sizes(
+    app: AppHandle,
+    webview: tauri::Webview,
+    query: Query,
+    skills: Vec<files::Selection>,
+) -> std::result::Result<Vec<Option<u64>>, String> {
+    if webview.label() != "main" {
+        return Err("只有主窗口可以读取技能目录大小".into());
+    }
+    if skills.len() > files::MAX_SIZE_SELECTIONS {
+        return Err("请求的技能数量超过上限".into());
+    }
+    let locations = Locations::resolve(&app)?;
+    // 目录遍历不占用技能列表和修改操作的锁。
+    tauri::async_runtime::spawn_blocking(move || {
+        files::directory_sizes(&locations, &query, &skills)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn skill_library_files(
+    app: AppHandle,
+    webview: tauri::Webview,
+    query: Query,
+    skill: files::Selection,
+    request: files::Request,
+) -> std::result::Result<files::Response, String> {
+    if webview.label() != "main" {
+        return Err("只有主窗口可以查看技能文件".into());
+    }
+    let locations = Locations::resolve(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _lock = OPERATIONS.lock().map_err(error)?;
+        files::browse(&locations, &query, &skill, request)
     })
     .await
     .map_err(|e| e.to_string())?

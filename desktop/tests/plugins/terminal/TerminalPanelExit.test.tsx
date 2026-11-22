@@ -103,6 +103,18 @@ afterEach(async () => {
 });
 
 describe("终端退出语义（自然退出 → 删页签 + 收尾 PTY + 收面板）", () => {
+  it("展示原生终端启动错误字符串", async () => {
+    const rejectSpawn = vi.fn<() => Promise<never>>()
+      .mockRejectedValue("创建 PTY 失败：测试错误");
+    vi.mocked(invoke).mockImplementation((command) =>
+      command === "pty_spawn" ? rejectSpawn() : Promise.resolve(null),
+    );
+    render(
+      <TerminalPanel close={closeDock} terminal={terminal} project={PATH} visible={true} />,
+    );
+    expect(await screen.findByText("创建 PTY 失败：测试错误")).toBeInTheDocument();
+  });
+
   it("PTY exit 同步删页签；handle 走 kill→release；最后一张 shell 退出收面板", async () => {
     render(<TerminalPanel close={closeDock} terminal={terminal} project={PATH} visible={true} />);
 

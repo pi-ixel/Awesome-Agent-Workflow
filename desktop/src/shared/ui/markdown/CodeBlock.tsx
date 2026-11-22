@@ -1,10 +1,11 @@
+import { MarkdownAppearance } from "./theme.ts";
 import { IconButton } from "../IconButton.tsx";
 /**
  * 代码块 chrome(移植自 ZCode components/ai-elements/code-block.tsx 的
  * 头栏与动作按钮;高亮本体来自 streamdown 的 @streamdown/code 插件,
  * 这里只包壳:语言图标 + 语言标签 + 换行切换 + 复制 + mermaid 分支与放大预览)。
  */
-import { UiIcon } from "../UiIcon.tsx";
+import { Maximize2Icon, WrapTextIcon } from "../icons.tsx";
 import {
   createContext,
   useCallback,
@@ -121,18 +122,7 @@ function useDocumentVisibilityRevision(enabled: boolean): number {
   return revision;
 }
 
-function CodeBlockIcon({ children }: { readonly children: ReactNode }) {
-  return (
-    <span
-      aria-hidden={true}
-      className="inline-flex items-center justify-center"
-    >
-      {children}
-    </span>
-  );
-}
-
-/** 换行切换钮(无 lucide 依赖:内联 WrapText 语义图形)。 */
+/** 切换代码块的换行状态。 */
 function CodeBlockWrapButton() {
   const { toggleWrapLongLines, wrapLongLines } = useContext(CodeBlockContext);
   const hint = hintTooltipProps("自动换行");
@@ -147,21 +137,7 @@ function CodeBlockWrapButton() {
  wrapLongLines ? "bg-raised text-ink" : ""
  }`}
     >
-      <CodeBlockIcon>
-        <UiIcon
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.8}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M3 6h18" />
-          <path d="M3 12h13a3 3 0 1 1 0 6h-4" />
-          <path d="m14 16-2 2 2 2" />
-          <path d="M3 18h4" />
-        </UiIcon>
-      </CodeBlockIcon>
+      <WrapTextIcon />
     </IconButton>
   );
 }
@@ -184,21 +160,7 @@ function CodeBlockPreviewButton({
       onClick={onClick}
       className="flex shrink-0 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-raised hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
     >
-      <CodeBlockIcon>
-        <UiIcon
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.8}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M15 3h6v6" />
-          <path d="M9 21H3v-6" />
-          <path d="M21 3l-7 7" />
-          <path d="M3 21l7-7" />
-        </UiIcon>
-      </CodeBlockIcon>
+      <Maximize2Icon />
     </IconButton>
   );
 }
@@ -209,7 +171,7 @@ export type CodeBlockProps = HTMLAttributes<HTMLDivElement> & {
   readonly language: string;
   /** 高亮后的 pre > code 子树(由 streamdown 的 code 插件产出)。 */
   readonly children?: ReactNode;
-  readonly appTheme: "dark" | "warm";
+  readonly appTheme?: "dark" | "warm";
   /**
    * 消息是否仍在流式输出(由 MarkdownView 的 pre 映射从消息级 streaming
    * 透传;缺省 false 兼容静态渲染)。流式期按 ZCode 跳过 mermaid 分支、
@@ -227,9 +189,14 @@ export function CodeBlock({
   streaming = false,
   ...props
 }: CodeBlockProps) {
+  const appearance = useContext(MarkdownAppearance);
   const [isWrapped, setIsWrapped] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewSvg, setPreviewSvg] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ code: string; svg: string } | null>(null);
+  const previewSvg = preview?.code === code ? preview.svg : null;
+  const setPreviewSvg = useCallback((svg: string | null) => {
+    setPreview(svg === null ? null : { code, svg });
+  }, [code]);
   const containerRef = useRef<HTMLDivElement | null>(null);
   // 最新代码哈希（流式期逐 chunk 变化）；IO 回调经此取当前块
   const hashRef = useRef<string>("");
@@ -373,9 +340,9 @@ export function CodeBlock({
         <div className="p-2 pb-3 pt-0">
           {showMermaid ? (
             <MermaidBlock
-              key={`${appTheme}:${code}`}
+              key={code}
               code={code}
-              theme={appTheme}
+              theme={appTheme ?? appearance.theme}
               onOpenPreview={() => setPreviewOpen(true)}
               onPreviewSvgChange={setPreviewSvg}
             />

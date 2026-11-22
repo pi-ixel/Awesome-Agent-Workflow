@@ -14,11 +14,17 @@ import { useProject, useProjectNavigation } from "./bindings/projectView.tsx";
  * - 「添加项目」：系统目录对话框，添加成功后关面板并选中新项目进总览
  *   （见 addProjectFlow；进项目只到总览，连接是总览里显式的一步）。
  */
-import { useEffect, useRef, useState, type RefObject } from "react";
-
 import {
-  btnSecondary,
-} from "../../../shared/ui/controls.tsx";
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
+
+import { ActionButton } from "../../../shared/ui/controls.tsx";
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
+import { SidebarItemTitle } from "../../../shared/ui/SidebarItemTitle.tsx";
 import { basenameOf, formatLastOpened } from "../../../shared/workspaceText.ts";
 
 type AddPanelTab = "new-session" | "add-project";
@@ -46,26 +52,22 @@ function KnownProjectRow({
   const projectService = useProject();
   return (
     <li>
-      <button
-        type="button"
+      <NavigationRow
         data-hint={path}
         onClick={() => {
           void projectService?.sessions.startNewSession(path);
           onClose();
         }}
-        className="flex w-full items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-line hover:bg-raised/60"
       >
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm text-ink">
-            {basenameOf(path)}
-          </span>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <SidebarItemTitle>{basenameOf(path)}</SidebarItemTitle>
           {lastOpenedAt !== null && (
-            <span className="block truncate text-xs text-ink-ghost">
+            <span className="truncate text-ui-caption text-ink-mute">
               {formatLastOpened(lastOpenedAt)}
             </span>
           )}
         </span>
-      </button>
+      </NavigationRow>
     </li>
   );
 }
@@ -77,6 +79,17 @@ export function AddProjectPanel({ onClose, triggerRef }: AddProjectPanelProps) {
   const recentWorkspaces = useWorkspaceValue((state) => state.recentWorkspaces);
   const pinnedPaths = useWorkspaceValue((state) => state.pinnedPaths);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const active = document.activeElement;
+    opener.current =
+      active instanceof HTMLElement && active !== document.body
+        ? active
+        : triggerRef.current;
+    containerRef.current
+      ?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+      ?.focus({ preventScroll: true });
+  }, [triggerRef]);
 
   // 点外部 / Esc 关闭（与顶栏待办下拉同一收口模式）；触发按钮不视为外部
   useEffect(() => {
@@ -97,6 +110,12 @@ export function AddProjectPanel({ onClose, triggerRef }: AddProjectPanelProps) {
       if (event.key === "Escape") {
         // preventDefault 标记 Esc 已被浮层消费（SessionView 的全局停止让位）
         event.preventDefault();
+        if (containerRef.current?.contains(document.activeElement)) {
+          const previous = opener.current;
+          (previous?.isConnected ? previous : triggerRef.current)?.focus({
+            preventScroll: true,
+          });
+        }
         onClose();
       }
     }
@@ -148,14 +167,17 @@ export function AddProjectPanel({ onClose, triggerRef }: AddProjectPanelProps) {
           groupLabel="面板视图"
           value={tab}
           onChange={setTab}
-          options={[{ value: "new-session", label: "新建会话" }, { value: "add-project", label: "添加项目" }]}
+          options={[
+            { value: "new-session", label: "新建会话" },
+            { value: "add-project", label: "添加项目" },
+          ]}
         />
       </div>
 
       {tab === "new-session" ? (
         <div className="p-1.5">
           {knownProjects.length === 0 ? (
-            <p className="px-2 py-3 text-center text-xs text-ink-ghost">
+            <p className="px-2 py-3 text-center text-ui-xs text-ink-ghost">
               暂无已知项目；先在「添加项目」中选择目录。
             </p>
           ) : (
@@ -177,15 +199,16 @@ export function AddProjectPanel({ onClose, triggerRef }: AddProjectPanelProps) {
       ) : (
         <div className="flex flex-col gap-2 p-2">
           {/* 常规操作用 secondary 描边：添加项目是入口动作而非主操作 */}
-          <button
+          <ActionButton
+            tone="secondary"
             type="button"
             onClick={() => void handleAddProject()}
-            className={`${btnSecondary} px-3 py-2 text-sm`}
+            className="px-3 py-2 text-ui-sm"
           >
             添加项目…
-          </button>
+          </ActionButton>
           {isDialogUnavailable && (
-            <p className="text-xs text-warn-ink">
+            <p className="text-ui-xs text-warn-ink">
               目录选择不可用或已取消；可重试，或从「新建会话」列表选择已有项目。
             </p>
           )}

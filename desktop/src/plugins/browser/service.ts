@@ -9,3 +9,6 @@ declare module "cordis" {
 export interface BrowserService {
   readonly host: HostService["browser"];
 }
+
+export { BrowserAgentControlSettings } from "./ui/settings.tsx";
+export { useBrowserAgentControl } from "./ui/agentControl.ts";

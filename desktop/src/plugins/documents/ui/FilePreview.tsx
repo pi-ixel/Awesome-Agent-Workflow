@@ -1,7 +1,7 @@
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
 import { Breadcrumb } from "../../../shared/ui/Breadcrumb.tsx";
-import { btnGhost } from "../../../shared/ui/controls.tsx";
+import { ActionButton } from "../../../shared/ui/controls.tsx";
 import type { FilePreview as Preview } from "../../host/types.ts";
 import { describeUnknownError } from "../../../shared/errors.ts";
 import {
@@ -39,11 +39,11 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import hljs from "highlight.js/lib/common";
-import { CopyIcon, EllipsisIcon } from "../../../shared/ui/icons.tsx";
+import { CopyIcon, EllipsisIcon, WrapTextIcon } from "../../../shared/ui/icons.tsx";
 import { ContextMenu, type ContextMenuEntry } from "../../../shared/ui/ContextMenu.tsx";
 import { MermaidBlock } from "../../../shared/ui/markdown/MermaidBlock.tsx";
 import { FileMarkdownPreview } from "./FileMarkdownPreview.tsx";
-import { MarkdownTheme } from "../../../shared/ui/markdown/theme.ts";
+import { MarkdownAppearance } from "../../../shared/ui/markdown/theme.ts";
 import { useFeedback } from "../../../shared/ui/feedback.ts";
 import {
   insidePath,
@@ -55,10 +55,9 @@ import {
 } from "../../../shared/panelPaths.ts";
 import { FileDisplayIcon } from "../../../shared/ui/file-icons/fileDisplay.tsx";
 import { resolveIconName } from "../../../shared/ui/file-icons/fileDisplayHelpers.ts";
-import { FileCode2Icon } from "../../../shared/ui/file-icons/icons.tsx";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import { copyTextToClipboard } from "./file-tree/helpers.ts";
-import { useMenuController } from "./file-tree/menuController.ts";
+import { useMenuController } from "../../../shared/ui/useMenuController.ts";
 
 const fileViewOptions = [
   { value: "preview", label: "预览" },
@@ -209,7 +208,7 @@ function PreviewBody({
   const markdown = /\.(md|markdown)$/i.test(path);
   const svg = /\.svg$/i.test(path);
   const mermaid = /\.(mermaid|mmd)$/i.test(path);
-  const theme = useContext(MarkdownTheme);
+  const { theme } = useContext(MarkdownAppearance);
   const language = path.split(".").at(-1) ?? "text";
   const lines = useMemo(() => {
     // 超大/未知语言使用纯文本；避免高亮器在长单行上占满 UI。
@@ -346,12 +345,14 @@ function PreviewBody({
             </div>
           ))}
           {rawLines.length > visible && (
-            <button
-              className={`${btnGhost} p-3 text-sm`}
+            <ActionButton
+              tone="ghost"
+              type="submit"
+              className="p-3 text-sm"
               onClick={() => setVisible((old) => old + 1000)}
             >
               继续显示（共 {rawLines.length} 行）
-            </button>
+            </ActionButton>
           )}
         </div>
       )}
@@ -611,7 +612,7 @@ export function FilePreview({
       entries.push({
         id: "wrap-lines",
         label: "自动换行",
-        icon: <FileCode2Icon className="ui-icon-16" />,
+        icon: <WrapTextIcon className="ui-icon-16" />,
         radio: true,
         selected: wrap,
         onSelect: () => setWrapOverride(!wrap),
@@ -714,15 +715,14 @@ export function FilePreview({
           aria-label="更多"
           data-hint="更多"
           aria-haspopup="menu"
+          aria-expanded={menu !== null && !menu.closing}
           className="flex items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
           onClick={(event) => {
-            const rect = event.currentTarget.getBoundingClientRect();
-            openMenu("preview-more", "更多", menuEntries, {
-              x: rect.right,
-              y: rect.bottom,
-              side: "bottom",
-              align: "end",
-            });
+            if (menu && !menu.closing) {
+              dismissMenu();
+              return;
+            }
+            openMenu("preview-more", "更多", menuEntries, { trigger: event.currentTarget });
           }}
         >
           <EllipsisIcon className="ui-icon-14" />
@@ -781,6 +781,7 @@ export function FilePreview({
         <ContextMenu
           entries={menu.entries}
           placement={menu.placement}
+          trigger={menu.trigger}
           label={menu.label}
           closing={menu.closing}
           onDismiss={dismissMenu}

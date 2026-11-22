@@ -10,6 +10,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RunSessionLink, RunSessionLinks, WorkflowService } from "../types.ts";
 import { WorkflowIcon } from "../../../shared/ui/icons.tsx";
+import { ActionButton } from "../../../shared/ui/controls.tsx";
 import { grow, motionOff } from "./flowMotion.ts";
 import { STOPPING_CHIP, linkActivity } from "./sessionGroups.ts";
 import { ACTIVITY_WORD, needsYou } from "../status/nodeActivity.ts";
@@ -75,10 +76,10 @@ function Strip({ service, sessionId, found: { run, link }, onOpenRun }: {
       </span>}
       <span className="wf-strip-title" data-hint={run.title}>{run.title}</span>
       <span key={word} className={`wf-word tone-${tone} wf-strip-swap`}>{word}</span>
-      <button type="button" className="wf-strip-open" onClick={() => onOpenRun(run.runId)} aria-label="查看运行" data-hint="在 AAW 工作流面板里查看这次运行">
+      <ActionButton tone="ghost" className="wf-strip-open" onClick={() => onOpenRun(run.runId)} aria-label="查看运行" data-hint="在 AAW 工作流面板里查看这次运行">
         <WorkflowIcon className="ui-icon-14" aria-hidden="true" />
         <span>查看运行</span>
-      </button>
+      </ActionButton>
     </div>
   );
 }

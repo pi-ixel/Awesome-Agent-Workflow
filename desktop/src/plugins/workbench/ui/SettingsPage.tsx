@@ -1,12 +1,13 @@
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
-import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
+import { XIcon } from "../../../shared/ui/icons.tsx";
 import { DangerButton } from "../../../shared/ui/controls.tsx";
 import {
   readWorkbenchUi,
   useWorkbenchLayout,
   useWorkbenchUiValue,
 } from "./bindings/layoutView.ts";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { nativeConfigurationStatus } from "../../host/service.ts";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
@@ -17,6 +18,7 @@ import {
   useWorkbenchAppearance,
   useWorkbenchEntries,
 } from "./bindings/react.ts";
+import type { WorkbenchContributions } from "../types.ts";
 
 const settingsGroups = [
   { id: "basic", label: "基础设置" },
@@ -64,6 +66,7 @@ function ResetConfirm({
 
 function SettingsPage() {
   const initialTab = useWorkbenchUiValue((state) => state.settingsInitialTab);
+  const tabRequest = useWorkbenchUiValue((state) => state.settingsTabRequest);
   const workbenchLayout = useWorkbenchLayout();
   return (
     <ModalShell
@@ -71,25 +74,74 @@ function SettingsPage() {
       size="settings"
       onDismiss={() => readWorkbenchUi(workbenchLayout).closeOverlay()}
     >
-      <SettingsContent key={initialTab} initialTab={initialTab} />
+      <SettingsContent initialTab={initialTab} tabRequest={tabRequest} />
     </ModalShell>
   );
 }
 
-function SettingsContent({ initialTab }: { readonly initialTab: string }) {
-  const workbenchLayout = useWorkbenchLayout();
-  const tabs = [...useWorkbenchEntries("settings")].sort(
-    (left, right) => (left.order ?? 100) - (right.order ?? 100),
+const SettingsPanel = memo(function SettingsPanel({
+  tab,
+  active,
+  visited,
+}: {
+  readonly tab: WorkbenchContributions["settings"];
+  readonly active: boolean;
+  readonly visited: boolean;
+}) {
+  return (
+    <div
+      id={`settings-panel-${tab.id}`}
+      role="tabpanel"
+      aria-labelledby={`settings-tab-${tab.id}`}
+      hidden={!active}
+      className={tab.layoutClass}
+    >
+      {visited && <tab.View active={active} />}
+    </div>
   );
-  const [selectedTab, setActiveTab] = useState(initialTab);
+});
+
+function SettingsContent({
+  initialTab,
+  tabRequest,
+}: {
+  readonly initialTab: string;
+  readonly tabRequest: number;
+}) {
+  const workbenchLayout = useWorkbenchLayout();
+  const entries = useWorkbenchEntries("settings");
+  const tabs = useMemo(
+    () =>
+      [...entries].sort(
+        (left, right) => (left.order ?? 100) - (right.order ?? 100),
+      ),
+    [entries],
+  );
+  const [selection, setSelection] = useState({
+    initialTab,
+    tabRequest,
+    selected: initialTab,
+  });
+  const hasNewRequest =
+    selection.initialTab !== initialTab || selection.tabRequest !== tabRequest;
+  const selectedTab = hasNewRequest ? initialTab : selection.selected;
+  if (hasNewRequest)
+    setSelection({ initialTab, tabRequest, selected: initialTab });
   const activeEntry = tabs.find((tab) => tab.id === selectedTab) ?? tabs[0];
   const activeTab = activeEntry?.id;
+  const [visited, setVisited] = useState(() => new Set<string>());
+  if (activeTab !== undefined && !visited.has(activeTab)) {
+    setVisited(new Set(visited).add(activeTab));
+  }
   const HeaderAction = activeEntry?.HeaderAction;
   const [isResetConfirmOpen, setResetConfirmOpen] = useState(false);
   const resetTrigger = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const focusRequest = useWorkbenchUiValue((state) => state.settingsFocus);
   const handledFocus = useRef<typeof focusRequest>(null);
+  useEffect(() => {
+    if (contentRef.current) contentRef.current.scrollTop = 0;
+  }, [initialTab, tabRequest]);
   useEffect(() => {
     if (!focusRequest || handledFocus.current === focusRequest) return;
     const row = document.getElementById(focusRequest.elementId);
@@ -141,15 +193,7 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
           onClick={() => readWorkbenchUi(workbenchLayout).closeOverlay()}
           className={`flex items-center justify-center rounded-lg hover:bg-surface-hover ${focusVisibleRing}`}
         >
-          <UiIcon
-            className="ui-icon-16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          >
-            <path d="m6 6 12 12M18 6 6 18" />
-          </UiIcon>
+          <XIcon className="ui-icon-16" strokeWidth={1.5} />
         </IconButton>
       </header>
       <section className="relative flex min-h-0 flex-1 flex-row max-[560px]:flex-col">
@@ -164,6 +208,20 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
             aria-label="设置页签"
             aria-orientation="vertical"
             className="flex flex-col gap-5"
+            onKeyDown={(event) => {
+              const { key, target } = event;
+              if (!(target instanceof HTMLButtonElement) || target.getAttribute("role") !== "tab") return;
+              if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(key)) return;
+              const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+              const index = items.indexOf(target);
+              if (index === -1) return;
+              const next = key === "Home" ? 0
+                : key === "End" ? items.length - 1
+                : (index + (key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+              event.preventDefault();
+              items[next]?.focus();
+              items[next]?.click();
+            }}
           >
             {settingsGroups.map(({ id, label }) => {
               const groupTabs = tabs.filter(
@@ -186,29 +244,29 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
                   {groupTabs.map((tab) => {
                     const isActive = activeTab === tab.id;
                     return (
-                      <button
+                      <NavigationRow
                         key={tab.id}
-                        type="button"
                         role="tab"
                         id={`settings-tab-${tab.id}`}
                         aria-selected={isActive}
                         aria-controls={`settings-panel-${tab.id}`}
+                        tabIndex={isActive ? 0 : -1}
                         onClick={() => {
-                          setActiveTab(tab.id);
+                          setSelection({
+                            initialTab,
+                            tabRequest,
+                            selected: tab.id,
+                          });
                           if (contentRef.current)
                             contentRef.current.scrollTop = 0;
                         }}
-                        className={`flex min-h-8 w-full shrink-0 items-center gap-2 rounded-xl px-3 text-left text-ui-base leading-6 font-normal transition-colors ${
-                          isActive
-                            ? "bg-selected text-ink"
-                            : "text-ink-soft hover:bg-surface-hover hover:text-ink"
-                        } ${focusVisibleRing}`}
+                        className={isActive ? "text-ink" : "text-ink-soft hover:text-ink"}
                       >
                         <tab.Icon
                           className={`ui-icon-16 shrink-0 ${isActive ? "text-ink" : "text-ink-soft"}`}
                         />
                         {tab.label}
-                      </button>
+                      </NavigationRow>
                     );
                   })}
                 </div>
@@ -225,16 +283,12 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
         >
           <div className="mx-auto w-full max-w-[880px] px-6 pb-6 max-[880px]:px-4">
             {tabs.map((tab) => (
-              <div
+              <SettingsPanel
                 key={tab.id}
-                id={`settings-panel-${tab.id}`}
-                role="tabpanel"
-                aria-labelledby={`settings-tab-${tab.id}`}
-                hidden={activeTab !== tab.id}
-                className={tab.layoutClass}
-              >
-                <tab.View active={activeTab === tab.id} />
-              </div>
+                tab={tab}
+                active={activeTab === tab.id}
+                visited={visited.has(tab.id)}
+              />
             ))}
           </div>
         </div>

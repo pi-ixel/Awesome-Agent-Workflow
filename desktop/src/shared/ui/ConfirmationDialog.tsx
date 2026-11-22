@@ -1,6 +1,5 @@
 import { useId, type ReactNode } from "react";
-import { createPortal } from "react-dom";
-import { DangerButton, btnPrimary, btnSecondary } from "./controls.tsx";
+import { ActionButton } from "./controls.tsx";
 import { ModalShell } from "./ModalShell.tsx";
 
 export function ConfirmationDialog({
@@ -27,8 +26,7 @@ export function ConfirmationDialog({
   readonly children: ReactNode;
 }) {
   const descriptionId = useId();
-  const ConfirmButton = tone === "danger" ? DangerButton : "button";
-  return createPortal(
+  return (
     <ModalShell
       label={label}
       role={role}
@@ -43,26 +41,26 @@ export function ConfirmationDialog({
         >
           {children}
         </div>
-        <div className="flex justify-end gap-2">
-          <button
+        <div className="flex flex-wrap justify-end gap-2">
+          <ActionButton
+            tone="secondary"
             type="button"
             autoFocus
             onClick={onCancel}
-            className={`${btnSecondary} px-3 py-1.5 text-sm whitespace-nowrap`}
+            className="px-3 py-1.5 text-sm whitespace-nowrap"
           >
             {cancelLabel}
-          </button>
-          <ConfirmButton
-            type="button"
+          </ActionButton>
+          <ActionButton
+            tone={tone === "danger" ? "danger" : "primary"}
             onClick={onConfirm}
             disabled={confirmDisabled}
-            className={`${tone === "danger" ? "" : btnPrimary} px-3 py-1.5 text-sm whitespace-nowrap`}
+            className="px-3 py-1.5 text-sm whitespace-nowrap"
           >
             {confirmLabel}
-          </ConfirmButton>
+          </ActionButton>
         </div>
       </div>
-    </ModalShell>,
-    document.body,
+    </ModalShell>
   );
 }

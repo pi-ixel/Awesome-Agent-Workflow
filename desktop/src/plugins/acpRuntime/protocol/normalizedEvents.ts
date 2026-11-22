@@ -9,8 +9,6 @@ export interface AgentCommandEntry {
   readonly inputHint: string | null;
 }
 
-
-
 /** Optional counters: absence means unknown. Call totals are never context usage. */
 export interface AgentUsageReport {
   readonly sessionId: string;
@@ -66,8 +64,12 @@ export interface RuntimeSnapshot {
   readonly skillInvocations?: Readonly<Record<string, string>>;
   readonly skillNames: readonly string[];
   readonly toolNames: readonly string[];
+  /** 当前 Agent 是否上报了可判定的完整工具清单；未知时不据此判定工具缺失。 */
+  readonly toolInventoryKnown: boolean;
   readonly skillSources: readonly { source: string; count: number }[];
   readonly mcpServers: readonly McpServerEntry[];
+  readonly mcpToolsByServer?: Readonly<Record<string, readonly string[]>>;
+  readonly mcpFailuresKnown?: boolean;
   readonly mcpFailures: readonly {
     readonly name: string;
     readonly error: string;

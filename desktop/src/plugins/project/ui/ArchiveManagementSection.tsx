@@ -1,3 +1,4 @@
+import { fieldSurfaceClass } from "../../../shared/ui/SettingsPageParts.tsx";
 import { sessionArchiveKey } from "../sessions/sessionArchiveStore.ts";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import { DangerButton } from "../../../shared/ui/controls.tsx";
@@ -7,14 +8,11 @@ import {
   type SessionDeletion,
 } from "../sessions/sessionDeletion.ts";
 import { TreeBranch, treeChevronClass } from "../../../shared/ui/TreeMotion.tsx";
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { emptyCatalog } from "../sessions/catalog.ts";
-import {
-  Listbox,
-  btnSecondary,
-  focusVisibleRing,
-} from "../../../shared/ui/controls.tsx";
+import { ActionButton, Listbox } from "../../../shared/ui/controls.tsx";
+import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { ChevronDownIcon, FolderGlyph } from "../../../shared/ui/icons.tsx";
 import { PageHeader } from "../../../shared/ui/PageHeader.tsx";
 import { basenameOf } from "../../../shared/workspaceText.ts";
@@ -54,6 +52,9 @@ export function ArchiveManagementSection() {
   const [project, setProject] = useState("");
   const [sort, setSort] = useState("newest");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const section = useRef<HTMLElement>(null);
+  const searchField = useRef<HTMLInputElement>(null);
+  const restoring = useRef<{ key: string; groupKey: string } | null>(null);
   const rows = useMemo(
     () =>
       [...new Set([
@@ -123,8 +124,18 @@ export function ArchiveManagementSection() {
       entries: matches.filter((r) => r.projectKey === key),
     }))
     .filter((group) => group.entries.length);
+  useLayoutEffect(() => {
+    const target = restoring.current;
+    if (!target || rows.some((row) => row.key === target.key)) return;
+    restoring.current = null;
+    const group = section.current?.querySelector<HTMLButtonElement>(
+      `[data-archive-group="${CSS.escape(target.groupKey)}"]`,
+    );
+    (group ?? searchField.current)?.focus({ preventScroll: true });
+  }, [rows]);
+
   return (
-    <section aria-label={`已归档会话（${rows.length}）`} className="space-y-4">
+    <section ref={section} aria-label={`已归档会话（${rows.length}）`} className="space-y-4">
       {deleteError && (
         <p role="alert" className="text-ui-base text-danger-ink">
           {deleteError}
@@ -169,12 +180,13 @@ export function ArchiveManagementSection() {
       />
       <div className="flex flex-wrap items-center gap-2">
         <input
+          ref={searchField}
           type="search"
           aria-label="搜索已归档会话"
           placeholder="搜索已归档会话"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="min-h-10 min-w-40 flex-1 rounded-xl border border-line-strong bg-surface px-3 text-ui-base text-ink outline-none focus:border-ink-faint"
+          className={`${fieldSurfaceClass} min-h-10 min-w-40 flex-1 px-3 text-ui-base`}
         />
         <span className="text-ui-base text-ink-mute">排序方式</span>
         <Listbox
@@ -213,12 +225,11 @@ export function ArchiveManagementSection() {
           const open = !collapsed.has(group.key);
           return (
             <div key={group.key}>
-              <button
-                type="button"
+              <NavigationRow
                 aria-label={`归档项目 ${group.path}`}
                 aria-expanded={open}
+                data-archive-group={group.key}
                 data-hint={group.path}
-                className={`flex w-full items-center gap-2 py-2 text-left text-ui-base text-ink ${focusVisibleRing}`}
                 onClick={() =>
                   setCollapsed((previous) => {
                     const next = new Set(previous);
@@ -241,7 +252,7 @@ export function ArchiveManagementSection() {
                 <ChevronDownIcon
                   className={`ui-icon-16 shrink-0 text-ink-mute ${treeChevronClass} ${open ? "" : "-rotate-90"}`}
                 />
-              </button>
+              </NavigationRow>
               <TreeBranch open={open}>
                 <ul className="divide-y divide-line rounded-xl border border-line bg-selected px-4">
                   {group.entries.map((row) => {
@@ -255,12 +266,11 @@ export function ArchiveManagementSection() {
                     return (
                       <li
                         key={row.key}
-                        className="flex min-w-0 items-center gap-3 py-3"
+                        className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 py-3"
                       >
-                        <div className="min-w-0 flex-1">
-                          <button
-                            type="button"
-                            className={`block max-w-full truncate text-left text-ui-base text-ink hover:underline ${focusVisibleRing}`}
+                        <div className="min-w-0 flex-[1_1_11rem]">
+                          <NavigationRow
+                            layout="tree"
                             disabled={!!deletion || pending}
                             data-hint={row.title}
                             onClick={() => {
@@ -270,9 +280,9 @@ export function ArchiveManagementSection() {
                               );
                             }}
                           >
-                            {row.title}
-                          </button>
-                          <p className="mt-1 text-ui-caption text-ink-mute">
+                            <span className="truncate">{row.title}</span>
+                          </NavigationRow>
+                          <p className="px-1.5 text-ui-caption text-ink-mute">
                             {Number.isFinite(row.timestamp) ? (
                               <time
                                 dateTime={new Date(row.timestamp).toISOString()}
@@ -287,7 +297,7 @@ export function ArchiveManagementSection() {
                         {deletion?.error && (
                           <span
                             role="status"
-                            className="text-ui-sm text-danger-ink"
+                            className="order-last w-full break-words text-ui-sm text-danger-ink"
                           >
                             {deletion.phase === "local"
                               ? "历史已删除，本地清理未完成。"
@@ -295,37 +305,42 @@ export function ArchiveManagementSection() {
                             {deletion.error}
                           </span>
                         )}
-                        {canDelete && (
-                          <DangerButton
-                            aria-label={`彻底删除 ${row.title}`}
-                            disabled={deleting !== null}
+                        <div className="flex max-w-full flex-wrap items-center gap-2">
+                          {canDelete && (
+                            <DangerButton
+                              aria-label={`彻底删除 ${row.title}`}
+                              disabled={deleting !== null}
+                              className="shrink-0 px-2 py-1 text-ui-base"
+                              onClick={() =>
+                                setConfirmDelete({ ...target, title: row.title })
+                              }
+                            >
+                              {pending
+                                ? "正在删除…"
+                                : deletion
+                                  ? "重试删除"
+                                  : "彻底删除"}
+                            </DangerButton>
+                          )}
+                          <ActionButton
+                            tone="secondary"
+                            type="button"
+                            disabled={!!deletion || pending}
+                            aria-label={`取消归档 ${row.title}`}
                             className="shrink-0 px-2 py-1 text-ui-base"
-                            onClick={() =>
-                              setConfirmDelete({ ...target, title: row.title })
-                            }
+                            onClick={(event) => {
+                              if (document.activeElement === event.currentTarget)
+                                restoring.current = { key: row.key, groupKey: row.projectKey };
+                              projectService?.sessions.unarchiveSession(
+                                row.path,
+                                row.sessionId,
+                                agentKey,
+                              );
+                            }}
                           >
-                            {pending
-                              ? "正在删除…"
-                              : deletion
-                                ? "重试删除"
-                                : "彻底删除"}
-                          </DangerButton>
-                        )}
-                        <button
-                          type="button"
-                          disabled={!!deletion || pending}
-                          aria-label={`取消归档 ${row.title}`}
-                          className={`${btnSecondary} shrink-0 px-2 py-1 text-ui-base`}
-                          onClick={() =>
-                            projectService?.sessions.unarchiveSession(
-                              row.path,
-                              row.sessionId,
-                              agentKey,
-                            )
-                          }
-                        >
-                          取消归档
-                        </button>
+                            取消归档
+                          </ActionButton>
+                        </div>
                       </li>
                     );
                   })}

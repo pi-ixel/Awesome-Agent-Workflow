@@ -191,7 +191,7 @@ describe("InputStatusBar", () => {
     expect(menu).toHaveTextContent("deepseek-v4");
     // 选中 deepseek-v4
     await userEvent.click(
-      screen.getByRole("menuitem", { name: /deepseek-v4/ }),
+      screen.getByRole("menuitemradio", { name: "deepseek-v4" }),
     );
     expect(switchModel).toHaveBeenCalledWith("deepseek-v4");
   });

@@ -48,6 +48,7 @@ src/
     terminal/
     workflow/
     skills/
+    mcp/
     account/
     updates/
     scheduledTasks/
@@ -138,6 +139,7 @@ Project 的 `ProjectFactory` 和 `ProjectContext` 管理项目归属、历史目
 > [ADR 024](../workflow/adr.md)（原文归档：[history/skillsplice/024](../history/skillsplice/024-workflow-cordis-integration-adr.md)）。
 > 节点会话由 Project 收养，并通过 ACP 运行时使用配置分区及共享的物理连接额度；恢复规则见 ADR 032，连接额度见 [ACP 架构](acp-architecture.md#物理连接额度与配置复用)。
 > | **skills** | 技能目录、候选查询、安装来源、安装计划、执行与状态 | `skills`：查询候选、获取技能内容、安装/卸载、查询安装状态 | host、agents、configuration、diagnostics | 技能索引、安装任务、安装结果缓存；专属路径与规则由增强提供 | 技能管理、安装设置、对话技能候选扩展 | 结束或安全取消安装任务，停止索引/监听，清理本次安装临时资源和 UI |
+> | **mcp** | Agent 原生 MCP 配置与全局 AAW 会话注入 | `mcp` 提供 MCP 管理页、批量预览和提交，并登记会话工具提供方 | host、agents、project、diagnostics | 应用数据目录中按 Agent 保存的全局注入配置、Agent 原生配置更新、按实际会话归属的注入结果 | 统一 MCP 卡片页、HTTP 草稿测试和内置浏览器开关 | 取消登记会话工具提供方，临时 ACP 连接由 agents 回收 |
 
 project 内部包含 sessions、conversation、composer、queue、interactions 等功能模块，不将它们再拆成独立插件。
 

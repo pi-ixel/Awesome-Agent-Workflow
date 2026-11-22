@@ -93,9 +93,10 @@ describe("ContextMenu 容器", () => {
     renderMenu([{ id: "a", label: "动作一", onSelect: () => {} }], {
       closing: true,
     });
-    expect(screen.getByRole("menu", { name: "测试菜单" }).className).toContain(
-      "context-menu-out",
-    );
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    const menu = screen.getByRole("menu", { hidden: true });
+    expect(menu).toHaveClass("context-menu-out");
+    expect(menu).toHaveAttribute("inert");
   });
 });
 

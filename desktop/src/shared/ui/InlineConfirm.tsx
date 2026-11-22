@@ -4,8 +4,8 @@
  * 替换触发它的那颗按钮出现在原位；确认期间调用方隐藏相邻操作。
  * 焦点先落在「取消」上，Esc 等同取消——误触不会直接执行。
  */
-import { useEffect, useRef, type ReactNode } from "react";
-import { DangerButton, btnGhost, btnPrimary, btnSize } from "./controls.tsx";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
+import { ActionButton } from "./controls.tsx";
 
 export function InlineConfirm({
   message,
@@ -16,6 +16,7 @@ export function InlineConfirm({
   busy = false,
   onConfirm,
   onCancel,
+  getReturnFocus,
   className = "",
 }: {
   /** 确认后会发生什么。 */
@@ -28,31 +29,53 @@ export function InlineConfirm({
   readonly busy?: boolean;
   readonly onConfirm: () => void;
   readonly onCancel: () => void;
+  readonly getReturnFocus?: () => HTMLElement | null | undefined;
   readonly className?: string;
 }) {
   const cancel = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => {
+  const previous = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const active = document.activeElement;
+    previous.current = active instanceof HTMLElement ? active : null;
     cancel.current?.focus();
   }, []);
-  const size = btnSize;
+  const dismiss = () => {
+    onCancel();
+    requestAnimationFrame(() => {
+      if (document.activeElement === document.body)
+        (getReturnFocus?.() ?? previous.current)?.focus({
+          preventScroll: true,
+        });
+    });
+  };
   return (
     <div
       role="group"
       aria-label={label}
       onKeyDown={(event) => {
-        if (event.key !== "Escape") return;
+        if (event.key !== "Escape" || event.nativeEvent.isComposing) return;
+        event.preventDefault();
         event.stopPropagation();
-        onCancel();
+        dismiss();
       }}
       className={`flex flex-wrap items-center gap-2 rounded-md px-2 py-1.5 ${tone === "danger" ? "bg-danger-bg/60" : "bg-surface"} ${className}`}
     >
-      <span className={`min-w-0 flex-[1_1_12rem] text-ui-sm ${tone === "danger" ? "text-danger-ink" : "text-ink-soft"}`}>{message}</span>
-      {tone === "danger" ? (
-        <DangerButton className={size} disabled={busy} onClick={onConfirm}>{confirmLabel}</DangerButton>
-      ) : (
-        <button type="button" className={`${btnPrimary} ${size}`} disabled={busy} onClick={onConfirm}>{confirmLabel}</button>
-      )}
-      <button ref={cancel} type="button" className={`${btnGhost} ${size}`} onClick={onCancel}>{cancelLabel}</button>
+      <span
+        className={`min-w-0 flex-[1_1_12rem] text-ui-sm ${tone === "danger" ? "text-danger-ink" : "text-ink-soft"}`}
+      >
+        {message}
+      </span>
+      <ActionButton
+        tone={tone === "danger" ? "danger" : "primary"}
+        size="compact"
+        disabled={busy}
+        onClick={onConfirm}
+      >
+        {confirmLabel}
+      </ActionButton>
+      <ActionButton ref={cancel} tone="ghost" size="compact" onClick={dismiss}>
+        {cancelLabel}
+      </ActionButton>
     </div>
   );
 }

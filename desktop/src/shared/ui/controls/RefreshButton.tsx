@@ -2,15 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import { describeUnknownError } from "../../errors.ts";
 import { CheckIcon, RefreshIcon, XIcon } from "../icons.tsx";
 import { IconButton } from "../IconButton.tsx";
+import { ActionButton } from "../controls.tsx";
 
 /** Manual feedback only. Background invalidations never drive this animation. */
 export function RefreshButton({
   onRefresh,
   label = "刷新",
   disabled = false,
-  className = "rounded p-1 text-ink-faint transition-colors hover:bg-raised hover:text-ink",
-  iconClassName = "ui-icon-14",
   showLabel = false,
+  className = showLabel
+    ? ""
+    : "rounded p-1 text-ink-mute transition-colors enabled:hover:bg-raised enabled:hover:text-ink",
+  iconClassName = "ui-icon-14",
 }: {
   onRefresh: () => Promise<unknown>;
   label?: string;
@@ -64,29 +67,52 @@ export function RefreshButton({
         : phase === "error"
           ? `刷新失败：${error}`
           : label;
-  const Button = showLabel ? "button" : IconButton;
+  const isBusy = phase === "busy";
+  const buttonClass = `${className} ${isBusy ? "cursor-wait opacity-60" : ""}`;
+  const buttonProps = {
+    "aria-label": label,
+    "aria-busy": isBusy,
+    "aria-disabled": isBusy || undefined,
+    "data-hint": feedback,
+    disabled,
+  };
+  const handleClick = () => {
+    void run();
+  };
+  const glyph =
+    phase === "done" ? (
+      <CheckIcon className={`${iconClassName} text-ok-ink`} />
+    ) : phase === "error" ? (
+      <XIcon className={`${iconClassName} text-danger-ink`} />
+    ) : (
+      <RefreshIcon
+        className={`${iconClassName} ${isBusy ? "animate-spin motion-reduce:animate-none" : ""}`}
+      />
+    );
   return (
     <>
-      <Button
-        type="button"
-        aria-label={label}
-        aria-busy={phase === "busy"}
-        data-hint={feedback}
-        disabled={disabled || phase === "busy"}
-        className={className}
-        onClick={() => void run()}
-      >
-        {phase === "done" ? (
-          <CheckIcon className={`${iconClassName} text-ok-ink`} />
-        ) : phase === "error" ? (
-          <XIcon className={`${iconClassName} text-danger-ink`} />
-        ) : (
-          <RefreshIcon
-            className={`${iconClassName} ${phase === "busy" ? "animate-spin" : ""}`}
-          />
-        )}
-        {showLabel && <span>{phase === "idle" ? label : feedback}</span>}
-      </Button>
+      {showLabel ? (
+        <ActionButton
+          tone="secondary"
+          size="compact"
+          {...buttonProps}
+          className={`min-w-0 max-w-full whitespace-normal! ${buttonClass}`}
+          onClick={handleClick}
+        >
+          {glyph}
+          <span className="min-w-0 text-left [overflow-wrap:anywhere]">
+            {feedback}
+          </span>
+        </ActionButton>
+      ) : (
+        <IconButton
+          {...buttonProps}
+          className={buttonClass}
+          onClick={handleClick}
+        >
+          {glyph}
+        </IconButton>
+      )}
       <span
         className="sr-only"
         aria-live="polite"

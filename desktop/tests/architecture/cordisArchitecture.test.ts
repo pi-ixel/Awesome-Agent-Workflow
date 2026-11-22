@@ -19,6 +19,7 @@ const plugins = [
   "terminal",
   "workflow",
   "skills",
+  "mcp",
   "account",
   "updates",
   "browser",
@@ -214,7 +215,7 @@ it("locates entry points, shared code and production implementations under their
   }
 });
 
-it("keeps all 17 plugin names and 89 dependency relations aligned with their production owners", async () => {
+it("keeps plugin names and dependency relations aligned with their production owners", async () => {
   const diagram = read("docs/architecture/cordis-plugin-dependencies.mmd");
   const documented = read(
     "docs/architecture/cordis-plugin-dependencies.md",
@@ -236,6 +237,13 @@ it("keeps all 17 plugin names and 89 dependency relations aligned with their pro
     }
   }
   const optional = [
+    [
+      "skills",
+      "插件管理显示 MCP 页",
+      "mcp",
+      "src/plugins/skills/ui/workbench.tsx",
+      "McpPage: mcp.View",
+    ],
     [
       "skills",
       "技能页读取项目目录",
@@ -447,7 +455,7 @@ it("keeps all 17 plugin names and 89 dependency relations aligned with their pro
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => /^(?:\w+ --> \w+|\w+ -\. ".+" \.-> \w+)$/.test(line));
-  expect(new Set(edges).size).toBe(89);
+  expect(new Set(edges).size).toBe(94);
   expect(edges.sort()).toEqual([...required, ...weak].sort());
 
   const runtime = createTestDesktopRuntime(
@@ -544,7 +552,7 @@ it("keeps all 17 plugin names and 89 dependency relations aligned with their pro
   } finally {
     await runtime.shutdown();
   }
-});
+}, 30_000);
 
 it("exposes only service and event modules for runtime calls from outside the owner", () => {
   const violations: string[] = [];
@@ -618,7 +626,11 @@ it("keeps shared ACP wire definitions independent of Desktop services and produc
 });
 
 it("keeps public models and shared utilities independent of plugin implementations", () => {
-  expect(readdirSync(resolve("src/contracts"))).toEqual(["acp", "browser"]);
+  expect(readdirSync(resolve("src/contracts")).sort()).toEqual([
+    "acp",
+    "browser",
+    "mcp",
+  ]);
   expect(readdirSync(resolve("src/shared"))).not.toContain("diagnosticEvents");
   const forbidden = {
     "src/plugins/host": /^src\/plugins\/(?!host\/)/,

@@ -1,11 +1,13 @@
 import type { HistoryEvidence } from "../../host/types.ts";
+import type { AgentMcpManagement } from "../../../contracts/mcp/management.ts";
+import type { AcpDiagnosticPrivacy } from "../../../contracts/acp/diagnosticPrivacy.ts";
 import type { SkillProvider } from "../../host/types.ts";
 import type { AcpDialect, AgentDialectHooks } from "../../acpRuntime/types.ts";
 import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
 import type { AgentSettingsData } from "../configuration/types.ts";
 import type { AgentExecutableConfiguration } from "../configuration/types.ts";
 import type { SkillInstallation, SkillPackageManager } from "../../skills/types.ts";
-import type { HostAgentCommands, HostCommands } from "../../host/types.ts";
+import type { AcpProxyPolicy, HostAgentCommands, HostCommands } from "../../host/types.ts";
 import type { HostArchiveFiles } from "../../host/types.ts";
 import type { LoggerFactory } from "../../../shared/logging/logger.ts";
 
@@ -17,6 +19,7 @@ export interface AgentLaunch {
   readonly cwd: string | null;
   /** 追加的环境变量（与宿主环境合并）。 */
   readonly extraEnv: Readonly<Record<string, string>>;
+  readonly proxyPolicy?: AcpProxyPolicy;
 }
 
 /** buildLaunch 的入参。 */
@@ -34,6 +37,8 @@ export interface AgentConfigurationContext {
 }
 
 export interface AgentAdapter {
+  readonly diagnosticPrivacy?: AcpDiagnosticPrivacy;
+  readonly mcpManagement?: AgentMcpManagement;
   readonly deleteSession?: (
     host: HostArchiveFiles & HostCommands,
     launch: AgentLaunch,

@@ -1,8 +1,12 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod acp_process;
+#[cfg(windows)]
+mod acp_proxy;
 pub mod browser;
 mod commands;
 mod skill_library;
+mod mcp_management;
+mod config_edit;
 mod codeagent_history;
 mod codeagent_delete;
 mod codeagent_credit;
@@ -31,6 +35,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(panel_files::PanelWatchers::default())
         .manage(browser::host::BrowserHost::default())
+        .manage(mcp_management::ProxyHost::default())
         .manage(codeagent_credit::CreditQuota::default())
         .manage(workflow_service::WorkflowHost::default())
         .manage(desktop_update::Updates::new(&context.package_info().name))
@@ -39,6 +44,7 @@ pub fn run() {
         .manage(tray::SchedulerLease::default())
         .setup(|app| {
             storage_location::initialize(app.handle()).map_err(std::io::Error::other)?;
+            browser::host::initialize_agent_control(app.handle());
             if let Err(error) = diagnostics::start(app.handle()) {
                 eprintln!("日志服务启动失败: {error}");
             }
@@ -57,6 +63,7 @@ pub fn run() {
                 if webview.label() == "main" {
                     webview.state::<panel_files::PanelWatchers>().clear();
                     browser::host::retire_page(webview.app_handle(), "main");
+                    webview.state::<mcp_management::ProxyHost>().retire(None);
                 }
                 acp_process::retire_page(webview.label().to_owned());
                 terminal_pty::retire_page(webview.label().to_owned());
@@ -107,6 +114,12 @@ pub fn run() {
             browser::data::browser_clear_site_data,
             browser::data::browser_clear_workspace_data,
             browser::data::browser_clear_all_data,
+            browser::restore::browser_restore_read,
+            browser::restore::browser_restore_owners,
+            browser::restore::browser_restore_save,
+            browser::restore::browser_restore_clear,
+            browser::restore::browser_restore_list,
+            browser::restore::browser_restore_remove,
             browser::data::browser_cleanup_cancel,
             browser::evidence::browser_screenshot,
             browser::evidence::browser_evidence_read,
@@ -117,6 +130,7 @@ pub fn run() {
             browser::enhancements::browser_pick_cancel,
             browser::mcp::browser_mcp_create,
             browser::mcp::browser_mcp_status,
+            browser::mcp::browser_mcp_registration,
             browser::mcp::browser_mcp_bind,
             browser::mcp::browser_mcp_capabilities,
             browser::mcp::browser_mcp_revoke,
@@ -186,6 +200,27 @@ pub fn run() {
             skill_library::skill_library_list,
             skill_library::skill_library_candidates,
             skill_library::skill_library_change,
+            skill_library::skill_library_toggle,
+            skill_library::skill_library_files,
+            skill_library::skill_library_sizes,
+            mcp_management::mcp_native_read,
+            mcp_management::mcp_native_read_local,
+            mcp_management::mcp_native_change,
+            mcp_management::mcp_session_profile,
+            mcp_management::mcp_managed_read,
+            mcp_management::mcp_managed_change,
+            mcp_management::mcp_install_preview,
+            mcp_management::mcp_install_commit,
+            mcp_management::mcp_managed_resolve,
+            mcp_management::mcp_managed_retire,
+            mcp_management::mcp_managed_inspect,
+            mcp_management::mcp_inspection_read,
+            mcp_management::mcp_inspection_save,
+            mcp_management::mcp_browser_tools,
+            mcp_management::mcp_browser_inspect,
+            mcp_management::mcp_browser_set_tools,
+            mcp_management::mcp_managed_set_tools,
+            mcp_management::mcp_test_config,
             commands::read_text_file,
             commands::write_text_file,
             commands::user_data_dir,

@@ -1707,3 +1707,118 @@ fn td_024_u01i_turn_boundaries_without_browser_space_are_explicit_noops() {
             .is_empty()
     );
 }
+
+#[test]
+fn td_040_u01_wait_returns_after_approval() {
+    let registry = std::sync::Arc::new(std::sync::Mutex::new(
+        super::security::ApprovalRegistry::default(),
+    ));
+    let approval = super::security::require_approval(
+        &mut registry.lock().unwrap(),
+        "session-a",
+        "tab-1",
+        "submit",
+        1,
+    )
+    .unwrap();
+    let id = approval.approval_id.clone();
+    let other = registry.clone();
+    let other_id = id.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        super::security::decide_approval(&mut other.lock().unwrap(), &other_id, true).unwrap();
+    });
+    let result = tauri::async_runtime::block_on(super::security::wait_for_approval(
+        &registry,
+        &id,
+        std::time::Duration::from_secs(1),
+    ));
+    assert_eq!(result.unwrap().status, "approved");
+}
+
+#[test]
+fn td_040_u02_wait_returns_denied() {
+    let registry = std::sync::Arc::new(std::sync::Mutex::new(
+        super::security::ApprovalRegistry::default(),
+    ));
+    let approval = super::security::require_approval(
+        &mut registry.lock().unwrap(),
+        "session-a",
+        "tab-1",
+        "submit",
+        1,
+    )
+    .unwrap();
+    let id = approval.approval_id.clone();
+    let other = registry.clone();
+    let other_id = id.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        super::security::decide_approval(&mut other.lock().unwrap(), &other_id, false).unwrap();
+    });
+    let result = tauri::async_runtime::block_on(super::security::wait_for_approval(
+        &registry,
+        &id,
+        std::time::Duration::from_secs(1),
+    ));
+    assert_eq!(result.unwrap_err(), "APPROVAL_DENIED");
+}
+
+#[test]
+fn td_040_u03_wait_returns_invalidated() {
+    let registry = std::sync::Arc::new(std::sync::Mutex::new(
+        super::security::ApprovalRegistry::default(),
+    ));
+    let approval = super::security::require_approval(
+        &mut registry.lock().unwrap(),
+        "session-a",
+        "tab-1",
+        "submit",
+        1,
+    )
+    .unwrap();
+    let id = approval.approval_id.clone();
+    let other = registry.clone();
+    let other_id = id.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        other.lock().unwrap().records.get_mut(&other_id).unwrap().status = "invalidated".into();
+    });
+    let result = tauri::async_runtime::block_on(super::security::wait_for_approval(
+        &registry,
+        &id,
+        std::time::Duration::from_secs(1),
+    ));
+    assert_eq!(result.unwrap_err(), "APPROVAL_INVALIDATED");
+}
+
+#[test]
+fn td_040_u04_wait_times_out_with_retryable_error() {
+    let registry = std::sync::Mutex::new(super::security::ApprovalRegistry::default());
+    let approval = super::security::require_approval(
+        &mut registry.lock().unwrap(),
+        "session-a",
+        "tab-1",
+        "submit",
+        1,
+    )
+    .unwrap();
+    let id = approval.approval_id.clone();
+    let result = tauri::async_runtime::block_on(super::security::wait_for_approval(
+        &registry,
+        &id,
+        std::time::Duration::from_millis(50),
+    ));
+    assert_eq!(result.unwrap_err(), format!("APPROVAL_REQUIRED:{id}"));
+}
+
+#[test]
+fn td_040_u05_wait_rejects_missing_approval() {
+    let registry = std::sync::Mutex::new(super::security::ApprovalRegistry::default());
+    let result = tauri::async_runtime::block_on(super::security::wait_for_approval(
+        &registry,
+        "approval-missing",
+        std::time::Duration::from_millis(10),
+    ));
+    assert_eq!(result.unwrap_err(), "APPROVAL_NOT_FOUND");
+}

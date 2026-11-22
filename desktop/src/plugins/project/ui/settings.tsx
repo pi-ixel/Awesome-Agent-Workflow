@@ -1,4 +1,4 @@
-import { useState, type ComponentType } from "react";
+import type { ComponentType } from "react";
 import type { WorkbenchContributions } from "../../workbench/types.ts";
 import type { SkillsSettingsView } from "../../skills/types.ts";
 import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
@@ -10,6 +10,7 @@ import { useWorkbenchLanguage } from "../../workbench/service.ts";
 import {
   SegmentedControl,
   SettingCard,
+  IntegerSettingInput,
   SettingRow,
 } from "../../../shared/ui/SettingsPageParts.tsx";
 import { ToggleSwitch } from "../../../shared/ui/controls.tsx";
@@ -40,48 +41,6 @@ const APPROVAL_DESCRIPTIONS: Readonly<Record<ApprovalMode, string>> = {
   ask: "手动确认 — 每次敏感操作前询问。",
   "auto-allow": "自动放行 — 自动允许操作；无可用允许选项时仍会询问。",
 };
-
-/** 自动归档天数输入（1–365，失焦/回车提交；非法回落现值）。 */
-function ArchiveDaysInput({
-  value,
-  onChange,
-}: {
-  readonly value: number;
-  readonly onChange: (days: number) => void;
-}) {
-  const [draft, setDraft] = useState(String(value));
-  const commit = (): void => {
-    const parsed = Number(draft);
-    const next = Number.isFinite(parsed)
-      ? Math.min(365, Math.max(1, Math.floor(parsed)))
-      : value;
-    setDraft(String(next));
-    if (next !== value) {
-      onChange(next);
-    }
-  };
-  return (
-    <input
-      type="number"
-      inputMode="numeric"
-      min={1}
-      max={365}
-      step={1}
-      value={draft}
-      aria-label="自动归档闲置天数"
-      onChange={(event) => {
-        setDraft(event.target.value);
-      }}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          commit();
-        }
-      }}
-      className="w-20 rounded-md border border-line bg-surface px-2 py-1 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-    />
-  );
-}
 
 function SessionSettings({
   active,
@@ -130,7 +89,6 @@ function SessionSettings({
       <SettingCard label="会话策略">
         <SettingRow label="在消息流中显示任务步骤" desc="显示 Agent 的任务进度">
           <ToggleSwitch
-            appearance="neutral"
             label="在消息流中显示任务步骤"
             checked={messageStreamShowTodos}
             onChange={(value) => preferences?.setMessageStreamShowTodos(value)}
@@ -166,7 +124,6 @@ function SessionSettings({
           footerAlign="start"
         >
           <ToggleSwitch
-            appearance="neutral"
             label="问答自动应答"
             checked={autoAnswerQuestions}
             onChange={(value) => preferences?.setAutoAnswerQuestions(value)}
@@ -202,7 +159,6 @@ function ArchiveSettings({
           footerAlign="start"
         >
           <ToggleSwitch
-            appearance="neutral"
             label="自动归档闲置会话"
             checked={sessionAutoArchiveEnabled}
             onChange={(enabled) => preferences?.setSessionAutoArchive(enabled)}
@@ -212,7 +168,12 @@ function ArchiveSettings({
           label="闲置天数阈值"
           desc="会话最近活跃时间早于该天数即视为闲置（1–365）"
         >
-          <ArchiveDaysInput
+          <IntegerSettingInput
+            label="自动归档闲置天数"
+            min={1}
+            max={365}
+            round={Math.floor}
+            emptyValue={1}
             key={sessionAutoArchiveOlderThanDays}
             value={sessionAutoArchiveOlderThanDays}
             onChange={(days) => {
@@ -230,7 +191,13 @@ function ArchiveSettings({
   );
 }
 
-function ToolSettings({ skills }: { readonly skills?: SkillsSettingsView }) {
+function ToolSettings({
+  skills,
+  active,
+}: {
+  readonly skills?: SkillsSettingsView;
+  readonly active: boolean;
+}) {
   const SkillsInstaller = skills?.Installer;
   const SkillsSource = skills?.Source;
   const language = useWorkbenchLanguage();
@@ -241,7 +208,7 @@ function ToolSettings({ skills }: { readonly skills?: SkillsSettingsView }) {
         {SkillsSource && <SkillsSource />}
       </SettingCard>
 
-      {SkillsInstaller && <SkillsInstaller />}
+      {SkillsInstaller && <SkillsInstaller active={active} />}
     </>
   );
 }
@@ -258,12 +225,12 @@ export function createProjectSettings(
       order: 30,
       label: "工具路径",
       Icon: TerminalIcon,
-      View: function ToolSettingsView() {
+      View: function ToolSettingsView({ active }) {
         const skills = useRegisteredSnapshot(
           skillsSettings,
           (state) => state?.view,
         );
-        return <ToolSettings skills={skills} />;
+        return <ToolSettings skills={skills} active={active} />;
       },
       layoutClass: spaced,
     },

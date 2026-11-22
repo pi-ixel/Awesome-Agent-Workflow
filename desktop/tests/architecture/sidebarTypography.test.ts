@@ -26,15 +26,22 @@ it.each([
       node.expression &&
       ts.isJsxElement(node.parent)
     ) {
-      const title = node.expression.getText(source);
-      if (titles.some((expected) => expected === title)) {
-        found.add(title);
-        if (
-          node.parent.openingElement.tagName.getText(source) !==
-          "SidebarItemTitle"
-        )
-          violations.push(title);
+      const parentTag = node.parent.openingElement.tagName.getText(source);
+      function checkTitle(expression: ts.Expression): void {
+        if (ts.isConditionalExpression(expression)) {
+          checkTitle(expression.whenTrue);
+          checkTitle(expression.whenFalse);
+        } else if (ts.isParenthesizedExpression(expression)) {
+          checkTitle(expression.expression);
+        } else {
+          const title = expression.getText(source);
+          if (titles.some((expected) => expected === title)) {
+            found.add(title);
+            if (parentTag !== "SidebarItemTitle") violations.push(title);
+          }
+        }
       }
+      checkTitle(node.expression);
     }
     if (
       (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) &&
@@ -63,4 +70,15 @@ it("共享侧栏标题跟随界面字号并保持常规字体", () => {
   expect(source).not.toMatch(
     /text-ui-(?:sm|caption)|font-mono|font-(?:medium|bold)|font-size/,
   );
+});
+
+it("项目侧栏和信息流通过同一运行指示器管理尺寸和颜色", () => {
+  for (const file of ["ui/ProjectTree.tsx", "conversation/ui/ConversationTurnView.tsx"]) {
+    const source = readFileSync(`src/plugins/project/${file}`, "utf8");
+    expect(source, file).toContain("SessionRunningIndicator.tsx");
+    expect(source, file).toMatch(/<SessionRunningIndicator(?:\s+surface="conversation")?\s*\/>/);
+    expect(source, file).not.toMatch(/<Spinner\b/);
+  }
+  const indicator = readFileSync("src/plugins/project/ui/SessionRunningIndicator.tsx", "utf8");
+  expect(indicator).toContain('<Spinner className="ui-icon-16 shrink-0 text-ink-mute" />');
 });

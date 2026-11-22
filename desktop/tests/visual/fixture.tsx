@@ -12,7 +12,9 @@ import { createUsageSettingsEntry } from "../../src/plugins/project/usage/settin
 import { bindProjectStorage } from "../../src/plugins/project/lifecycle/persistence.ts";
 import type { HostManagedStorage } from "../../src/plugins/host/types.ts";
 import { StorageView } from "../../src/plugins/diagnostics/ui/StorageView.tsx";
+import type { StorageRow } from "../../src/plugins/diagnostics/capture/storageRegistry.ts";
 import { ResourceReport } from "../../src/plugins/diagnostics/ui/ResourceReport.tsx";
+import { MarkdownAppearance } from "../../src/shared/ui/markdown/theme.ts";
 import { initializeUsage } from "../../src/plugins/project/usage/service.ts";
 import {
   ProtocolFixtureActions,
@@ -20,6 +22,29 @@ import {
 } from "./protocolFixture.tsx";
 
 const params = new URLSearchParams(location.search);
+const DiagnosticsWindowFixture = params.has("diagnostics-window")
+  ? (await import("./diagnosticsWindowFixture.tsx")).DiagnosticsWindowFixture
+  : undefined;
+if (DiagnosticsWindowFixture || params.has("appearance")) {
+  const { bindSecondaryWindowAppearance } = await import("../../src/plugins/workbench/appearance/windowAppearance.ts");
+  bindSecondaryWindowAppearance(document.documentElement);
+}
+const sessionSettings = params.has("session-settings")
+  ? await (async () => {
+      const { bindSecondaryWindowAppearance } = await import("../../src/plugins/workbench/appearance/windowAppearance.ts");
+      const { createProjectSettings } = await import("../../src/plugins/project/ui/settings.tsx");
+      const { projectPreferencesWrapper, createTestProjectPreferences } = await import("../helpers/projectPreferences.tsx");
+      bindSecondaryWindowAppearance(document.documentElement);
+      const entry = createProjectSettings().find((item) => item.id === "session")!;
+      const Wrapper = projectPreferencesWrapper(createTestProjectPreferences());
+      return {
+        ...entry,
+        View: ({ active }: { active: boolean }) => (
+          <Wrapper><entry.View active={active} /></Wrapper>
+        ),
+      };
+    })()
+  : undefined;
 if (params.get("theme") === "dark")
   document.documentElement.classList.remove("theme-warm");
 const longModel =
@@ -69,12 +94,38 @@ const rows = [
     exact: true,
   },
 ];
+const storageRows: StorageRow[] = params.has("storage-scroll")
+  ? [
+      ...rows,
+      ...Array.from({ length: 24 }, (_, index) => ({
+        ...rows[0]!,
+        project: `D:/projects/project-${index + 1}`,
+      })),
+      {
+        id: "storage.legacy",
+        label: "迁移遗留数据",
+        bytes: 232_653,
+        count: 4,
+        protected: 0,
+        cleanable: true,
+        exact: false,
+      },
+    ]
+  : rows;
 const usageEntry = createUsageSettingsEntry([
   { id: "chrys", displayName: "iCode" },
   { id: "codeagent", displayName: "CodeAgent" },
 ]);
 const fixture = {
   settings: [
+    ...(sessionSettings ? [sessionSettings] : []),
+    ...(params.has("settings-keyboard") ? [{
+      id: "general",
+      label: "外观",
+      Icon: () => null,
+      View: () => <p>编辑外观偏好</p>,
+      group: "basic",
+    }] : []),
     {
       ...usageEntry,
       View: ({ active }: { active: boolean }) => (
@@ -88,7 +139,7 @@ const fixture = {
       id: "storage",
       label: "存储",
       Icon: () => null,
-      View: () => <StorageView request={() => Promise.resolve(rows)} />,
+      View: () => <StorageView request={() => Promise.resolve(storageRows)} />,
     },
   ],
 };
@@ -120,11 +171,30 @@ function renderAttachmentFixture() {
   );
 }
 
+const MarkdownPreview = params.has("markdown-toolbar")
+  ? (await import("../../src/shared/ui/MarkdownView.tsx")).MarkdownView
+  : null;
 createRoot(document.querySelector("#root")!).render(
   <div className="h-screen bg-base p-3 text-ink">
     <HintTooltip />
-    {params.has("image-attachments") ? (
+    {DiagnosticsWindowFixture ? (
+      <DiagnosticsWindowFixture />
+    ) : params.has("image-attachments") ? (
       renderAttachmentFixture()
+    ) : MarkdownPreview ? (
+      <MarkdownAppearance.Provider
+        value={{ theme: params.get("theme") === "dark" ? "dark" : "warm", uiFontSize: 14 }}
+      >
+        <MarkdownPreview
+          text={
+            "| 项目 | 数量 |\n| --- | --- |\n| 已完成 | 2 |\n" +
+            (params.has("long-table")
+              ? Array.from({ length: 50 }, (_, index) => `| 发布步骤 ${index + 1} | ${index + 1} |\n`).join("")
+              : "") +
+            "\n~~~mermaid\nflowchart LR\n A[草稿] --> B[完成]\n~~~"
+          }
+        />
+      </MarkdownAppearance.Provider>
     ) : params.has("hint-motion") ? (
       <HintMotionFixture />
     ) : params.has("performance") ? (

@@ -31,6 +31,17 @@ describe("tree motion architecture", () => {
     expect(code).toContain("<TreeBranch open={node.row.expanded}>");
     expect(code).toContain("virtualItems.map");
   });
+  it("keeps Git, project files and skill entries on the shared file label", () => {
+    for (const path of [
+      "plugins/git/ui/GitPanel.tsx",
+      "plugins/documents/ui/file-tree/FileTreeRow.tsx",
+      "plugins/skills/ui/SkillDetail.tsx",
+    ]) {
+      const code = readFileSync(join(src, path), "utf8");
+      expect(code, path).toContain("shared/ui/file-icons/FileEntryLabel.tsx");
+      expect(code, path).toContain("<FileEntryLabel");
+    }
+  });
   it("keeps all collapsible session status sections on the shared tree motion", () => {
     const code = readFileSync(
       join(src, "plugins/project/conversation/ui/SessionStatusOverlay.tsx"),
@@ -40,7 +51,8 @@ describe("tree motion architecture", () => {
     expect(code).toMatch(/function Section\([\s\S]*?<TreeBranch id=\{branchId\} open=\{open\}>/);
     expect(code).toContain("treeChevronClass");
     expect(code).not.toMatch(/<(?:details|summary)\b/);
-    expect(code.replace("aria-expanded={menu}", "").match(/aria-expanded=/g)).toHaveLength(1);
+    const sections = code.replace(/aria-haspopup="menu"\s+aria-expanded=\{[^}]+\}/, "");
+    expect(sections.match(/aria-expanded=/g)).toHaveLength(1);
     for (const title of ["Git 工具", "任务进度"]) {
       expect(code).toMatch(new RegExp(`<Section\\s+title="${title}"`));
     }

@@ -11,9 +11,9 @@ import { errorLine } from "../status/errorText.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { useNow } from "./time.ts";
 import { DEFAULT_RUN_FILTERS, groupByProject, matchesRun } from "./runSearch.ts";
-import { focusVisibleRing, Listbox, MultiListbox } from "../../../shared/ui/controls.tsx";
+import { ActionButton, Listbox, MultiListbox } from "../../../shared/ui/controls.tsx";
 import { settingsInputClass } from "../../../shared/ui/SettingsPageParts.tsx";
-import { ghostButton, primaryButton } from "./buttons.ts";
+
 import { attentionOf, ordinalOf } from "./runList.ts";
 import { RunMarkLegend, RunRow } from "./RunList.tsx";
 import { RUN_MARK_OPTIONS, runMarkKind } from "./runMarks.tsx";
@@ -141,8 +141,8 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
           void act(async () => { await service.renameRun(run.runId, title, where); setEditing(null); });
         }}>
           <input className={settingsInputClass} aria-label="运行标题" value={editing.title} autoFocus onChange={(event) => setEditing({ runId: run.runId, title: event.target.value })} />
-          <button type="submit" className={primaryButton} disabled={busy || editing.title.trim() === ""}>保存</button>
-          <button type="button" className={ghostButton} onClick={() => setEditing(null)}>取消</button>
+          <ActionButton type="submit" tone="primary" size="compact" disabled={busy || editing.title.trim() === ""}>保存</ActionButton>
+          <ActionButton type="button" tone="ghost" size="compact" onClick={() => setEditing(null)}>取消</ActionButton>
         </form>
         : <RunRow
           run={run}
@@ -205,14 +205,13 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
         onChange={(values) => updateFilters({ statuses: values })}
       />
       {/* 显示已归档：和两个下拉同高的图标开关，数字是归档了几条；窄屏时不单独占一行。 */}
-      <button type="button" aria-label="显示已归档" aria-pressed={showArchived}
+      <ActionButton tone="secondary" aria-label="显示已归档" aria-pressed={showArchived}
         {...hintTooltipProps(showArchived ? "隐藏已归档" : "显示已归档")}
-        className={`inline-flex min-h-8 min-w-8 shrink-0 items-center justify-center gap-1 rounded-md border px-2 text-ui-sm tabular-nums transition-colors ${focusVisibleRing} ${
-          showArchived ? "border-ink-faint bg-raised text-ink" : "border-line-strong bg-surface text-ink-soft hover:border-ink-faint hover:text-ink"}`}
+        className={`min-h-8 min-w-8 shrink-0 gap-1 px-2 tabular-nums ${showArchived ? "border-ink-faint bg-raised" : "text-ink-soft"}`}
         onClick={() => updateFilters({ showArchived: !showArchived })}>
         <ArchiveIcon className="ui-icon-14" />
         {archivedCount > 0 && <span>{archivedCount}</span>}
-      </button>
+      </ActionButton>
     </div>
     {error !== "" && <Callout tone="danger" className="workflow-callout" title={error} onDismiss={() => setError("")} />}
     {all && everywhere === null

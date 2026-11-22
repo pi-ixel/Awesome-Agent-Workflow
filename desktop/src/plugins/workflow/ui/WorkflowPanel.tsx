@@ -14,7 +14,8 @@ import { useEffect, useRef, useState } from "react";
 import type { RunManagerFilters, RunSummary, WorkflowPanelRequest, WorkflowService } from "../types.ts";
 import { RunView } from "./RunView.tsx";
 import "./workflowPanel.css";
-import { secondaryButton } from "./buttons.ts";
+import { ActionButton } from "../../../shared/ui/controls.tsx";
+
 import { Callout } from "../../../shared/ui/Callout.tsx";
 import { Breadcrumb } from "../../../shared/ui/Breadcrumb.tsx";
 import { DEFAULT_RUN_FILTERS } from "./runSearch.ts";
@@ -120,13 +121,13 @@ export function WorkflowPanel({ service, project, onOpenSession, onOpenProjectRu
   ];
 
   return <section className="workflow-panel" aria-label="AAW 工作流">
-    {crumbs && <Breadcrumb className="workflow-crumbs" items={crumbs} />}
+    {crumbs && <Breadcrumb className="workflow-crumbs" label="工作流路径" items={crumbs} />}
     {error && <Callout tone="danger" className="workflow-callout" title={error.title}
       details={error.code || error.detail ? [error.code, error.detail].filter(Boolean).join("\n") : undefined}
-      actions={<button type="button" className={secondaryButton} onClick={() => {
+      actions={<ActionButton type="button" tone="secondary" size="compact" onClick={() => {
         setError(null);
         void refreshAndLand();
-      }}>重试</button>}>{error.hint}</Callout>}
+      }}>重试</ActionButton>}>{error.hint}</Callout>}
     {route.kind === "runs" && <div className="workflow-scroll">
       <section className="workflow-library workflow-runs-page" aria-label="运行管理">
         <RunManager service={service} runs={service.allRuns()} onOpenRun={(runId) => go({ kind: "run", runId })}

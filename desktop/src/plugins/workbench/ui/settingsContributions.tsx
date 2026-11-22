@@ -1,10 +1,12 @@
+import { TextLink } from "../../../shared/ui/TextLink.tsx";
 import { version as desktopVersion } from "../../../../package.json";
 import {
   SettingCard,
+  IntegerSettingInput,
   SettingRow,
   SegmentedControl,
 } from "../../../shared/ui/SettingsPageParts";
-import { useState, type ReactNode } from "react";
+
 import {
   FILE_TREE_POSITION_SETTING_ID,
   languageOptions,
@@ -28,64 +30,6 @@ const fileTreePositionOptions = [
   { value: "left", label: "左侧" },
   { value: "right", label: "右侧" },
 ] as const;
-
-/**
- * 界面字号数字输入（复刻 ZCode 的 FontSizeInput）：草稿态编辑,失焦 /
- * 回车提交,取整夹取 12–20;非法输入回落当前值。
- */
-function FontSizeInput({
-  value,
-  onChange,
-}: {
-  readonly value: number;
-  readonly onChange: (px: number) => void;
-}) {
-  const [draft, setDraft] = useState(String(value));
-  const commit = (): void => {
-    const parsed = draft.trim() === "" ? Number.NaN : Number(draft);
-    const next = Number.isFinite(parsed)
-      ? Math.min(
-          MAX_UI_FONT_SIZE_PX,
-          Math.max(MIN_UI_FONT_SIZE_PX, Math.round(parsed)),
-        )
-      : value;
-    setDraft(String(next));
-    if (next !== value) {
-      onChange(next);
-    }
-  };
-  return (
-    <input
-      type="number"
-      inputMode="numeric"
-      min={MIN_UI_FONT_SIZE_PX}
-      max={MAX_UI_FONT_SIZE_PX}
-      step={1}
-      value={draft}
-      aria-label="界面字号"
-      onChange={(event) => {
-        setDraft(event.currentTarget.value);
-      }}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          event.currentTarget.blur();
-        }
-      }}
-      className="w-20 rounded-md border border-line-strong bg-surface px-2 py-1 text-center text-sm text-ink outline-none transition-colors focus:border-ink-faint"
-    />
-  );
-}
-
-/** 关于块的键值行。 */
-function AboutRow({ k, v }: { readonly k: string; readonly v: ReactNode }) {
-  return (
-    <div className="flex items-center justify-between border-t border-line px-4 py-3 first:border-t-0">
-      <span className="text-ui-base font-medium text-ink">{k}</span>
-      <span className="text-ui-base text-ink-mute">{v}</span>
-    </div>
-  );
-}
 
 function GeneralSettings() {
   const openExternal = useOpenExternal();
@@ -123,7 +67,17 @@ function GeneralSettings() {
           />
         </SettingRow>
         <SettingRow label="界面字号" desc="调整界面文字和图标大小（12–20px）">
-          <FontSizeInput key={uiFontSize} value={uiFontSize} onChange={(px) => appearance?.setUiFontSize(px)} />
+          <IntegerSettingInput
+            key={uiFontSize}
+            label="界面字号"
+            value={uiFontSize}
+            min={MIN_UI_FONT_SIZE_PX}
+            max={MAX_UI_FONT_SIZE_PX}
+            round={Math.round}
+            emptyValue={uiFontSize}
+            blurOnEnter
+            onChange={(px) => appearance?.setUiFontSize(px)}
+          />
         </SettingRow>
         <SettingRow id={FILE_TREE_POSITION_SETTING_ID} label="文件树位置" desc="适用于文件面板和目录标签">
           <SegmentedControl
@@ -136,25 +90,25 @@ function GeneralSettings() {
       </SettingCard>
 
       <SettingCard label="关于">
-        <AboutRow k="版本" v={desktopVersion} />
-        <AboutRow
-          k="仓库"
-          v={
-            <button
-              type="button"
-              className="text-info-ink hover:underline"
-              onClick={() => {
-                void openExternal?.(
-                  "https://github.com/pi-ixel/Awesome-Agent-Workflow",
-                ).catch(() => {});
-              }}
-            >
-              Awesome-Agent-Workflow
-            </button>
-          }
-        />
+        <SettingRow label="版本">
+          <span className="text-ui-base text-ink-mute">{desktopVersion}</span>
+        </SettingRow>
+        <SettingRow label="仓库">
+          <TextLink
+            type="button"
+            onClick={() => {
+              void openExternal?.(
+                "https://github.com/pi-ixel/Awesome-Agent-Workflow",
+              ).catch(() => {});
+            }}
+          >
+            Awesome-Agent-Workflow
+          </TextLink>
+        </SettingRow>
         {about.map(({ id, label, Value }) => (
-          <AboutRow key={id} k={label} v={<Value />} />
+          <SettingRow key={id} label={label}>
+            <div className="min-w-0 text-ui-base text-ink-mute"><Value /></div>
+          </SettingRow>
         ))}
       </SettingCard>
     </>

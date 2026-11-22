@@ -118,6 +118,7 @@ export async function testAgentConnection(
         requestTimeoutMs: REQUEST_TIMEOUT_MS,
         clientInfo: adapter.clientInfo,
       },
+      adapter.diagnosticPrivacy,
     );
     const session = lease.openSession();
     stage = "ACP 握手";
@@ -264,7 +265,7 @@ export async function runAgentProbe(
         run.permissionRequests += 1;
         return Promise.resolve({ outcome: "cancelled" });
       },
-    });
+    }, adapter.diagnosticPrivacy);
     const session = (openedSession = lease.openSession());
     session.onEvent((event) => tallyEvent(run, event));
     step("握手 initialize");

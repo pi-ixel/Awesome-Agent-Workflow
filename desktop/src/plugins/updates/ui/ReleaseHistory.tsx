@@ -1,5 +1,5 @@
+import { Disclosure } from "../../../shared/ui/Disclosure.tsx";
 import { useRef, useState } from "react";
-import { ChevronDownIcon } from "../../../shared/ui/icons.tsx";
 import { MarkdownView } from "../../../shared/ui/MarkdownView.tsx";
 import type { UpdatesService } from "../service.ts";
 import {
@@ -22,10 +22,10 @@ export function ReleaseHistory({
   const requested = useRef(false);
 
   return (
-    <details
-      className="group/history border-t border-line px-4"
-      onToggle={(event) => {
-        const open = event.currentTarget.open;
+    <Disclosure
+      layout="row"
+      className="border-t border-line px-4"
+      onOpenChange={(open) => {
         setExpanded(open);
         if (!open || requested.current) return;
         requested.current = true;
@@ -41,11 +41,8 @@ export function ReleaseHistory({
           },
         );
       }}
+      summary="详细更新日志"
     >
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-3 text-ui-base font-medium [&::-webkit-details-marker]:hidden">
-        详细更新日志
-        <ChevronDownIcon className="ui-icon-16 shrink-0 text-ink-mute group-open/history:rotate-180" />
-      </summary>
       {status === "loading" && (
         <p role="status" className="mb-2 text-ui-caption text-ink-mute">
           正在获取更新日志…
@@ -61,36 +58,37 @@ export function ReleaseHistory({
       {expanded && (
         <div className="divide-y divide-line pb-2">
           {releases.map((release, index) => (
-            <details
+            <Disclosure
+              layout="row"
               key={release.version}
-              open={index === 0}
-              className="group/release"
+              defaultOpen={index === 0}
+              summary={
+                <>
+                  <span className="font-medium">v{release.version}</span>
+                  {release.version === currentVersion && (
+                    <span className="text-ui-caption text-ink-mute">
+                      当前版本
+                    </span>
+                  )}
+                  <time
+                    dateTime={release.publishedAt}
+                    className="ml-auto text-ui-caption text-ink-mute"
+                  >
+                    {release.publishedAt.slice(0, 10)}
+                  </time>
+                </>
+              }
             >
-              <summary className="flex cursor-pointer list-none items-center gap-2 py-2 text-sm [&::-webkit-details-marker]:hidden">
-                <ChevronDownIcon className="ui-icon-12 shrink-0 -rotate-90 text-ink-mute group-open/release:rotate-0" />
-                <span className="font-medium">v{release.version}</span>
-                {release.version === currentVersion && (
-                  <span className="text-ui-caption text-ink-mute">
-                    当前版本
-                  </span>
-                )}
-                <time
-                  dateTime={release.publishedAt}
-                  className="ml-auto text-ui-caption text-ink-mute"
-                >
-                  {release.publishedAt.slice(0, 10)}
-                </time>
-              </summary>
               <div className="pb-3 pl-5 [overflow-wrap:anywhere] [&_h1]:text-ui-lg [&_h2]:text-sm [&_h3]:text-sm">
                 <MarkdownView
                   text={release.notes.trim() || "此版本暂无详细更新说明。"}
                   onOpenExternal={openExternal}
                 />
               </div>
-            </details>
+            </Disclosure>
           ))}
         </div>
       )}
-    </details>
+    </Disclosure>
   );
 }

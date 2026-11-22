@@ -1,4 +1,5 @@
 import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
+import { NavigationRow } from "../../../../shared/ui/NavigationRow.tsx";
 import {
   useCallback,
   useEffect,
@@ -23,6 +24,7 @@ export function ConversationNavigator({
   const railRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef<HTMLButtonElement | null>(null);
+  const pendingFocus = useRef<number | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [focusIndex, setFocusIndex] = useState<number | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
@@ -39,6 +41,17 @@ export function ConversationNavigator({
   });
   const activeIndex = items.findIndex((item) => item.id === activeId);
   const selected = items.find((item) => item.id === previewId);
+  function focusRow(index: number) {
+    pendingFocus.current = index;
+    virtualizer.scrollToIndex(index, { align: "auto" });
+    const button = railRef.current?.querySelector<HTMLButtonElement>(
+      `[data-query-row="${index}"]`,
+    );
+    if (button) {
+      pendingFocus.current = null;
+      button.focus({ preventScroll: true });
+    }
+  }
   const close = useCallback(() => {
     clearTimeout(timer.current);
     setPreviewId(null);
@@ -140,10 +153,10 @@ export function ConversationNavigator({
           setFocusIndex(null);
           scheduleClose();
         }}
-        className="conversation-query-rail pointer-events-auto absolute left-3 top-1/2 max-h-[calc(100%-6rem)] w-9 -translate-y-1/2 overflow-x-hidden overflow-y-auto py-1"
+        className="conversation-query-rail pointer-events-auto absolute left-3 top-1/2 max-h-[calc(100%-6rem)] w-[max(36px,calc(var(--ui-icon-unit)*36))] -translate-y-1/2 overflow-x-hidden overflow-y-auto py-1"
       >
         <div
-          className="relative w-9"
+          className="relative w-full"
           style={{ height: virtualizer.getTotalSize() }}
         >
           {virtualizer.getVirtualItems().map((row) => {
@@ -173,9 +186,17 @@ export function ConversationNavigator({
                         ? 0.72
                         : 0.58;
             return (
-              <button
+              <NavigationRow
+                layout="compound"
                 key={row.key}
+                ref={(button) => {
+                  if (button && pendingFocus.current === row.index) {
+                    pendingFocus.current = null;
+                    button.focus({ preventScroll: true });
+                  }
+                }}
                 type="button"
+                data-query-row={row.index}
                 aria-label={`跳到第 ${row.index + 1} 条提问`}
                 aria-posinset={row.index + 1}
                 aria-setsize={items.length}
@@ -183,8 +204,28 @@ export function ConversationNavigator({
                 aria-describedby={
                   previewId === item.id ? "query-navigation-preview" : undefined
                 }
-                className="absolute left-0 top-0 flex min-h-2.5 w-9 items-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-                style={{ transform: `translateY(${row.start}px)` }}
+                className="absolute left-0 top-0 w-full items-center rounded-sm!"
+                style={{
+                  height: row.size,
+                  transform: `translateY(${row.start}px)`,
+                }}
+                onKeyDown={(event) => {
+                  if (event.altKey || event.ctrlKey || event.metaKey) return;
+                  const last = items.length - 1;
+                  const next =
+                    event.key === "Home"
+                      ? 0
+                      : event.key === "End"
+                        ? last
+                        : event.key === "ArrowUp"
+                          ? Math.max(0, row.index - 1)
+                          : event.key === "ArrowDown"
+                            ? Math.min(last, row.index + 1)
+                            : null;
+                  if (next === null) return;
+                  event.preventDefault();
+                  focusRow(next);
+                }}
                 onPointerEnter={(event) =>
                   open(item.id, row.index, event.currentTarget, 120)
                 }
@@ -199,35 +240,35 @@ export function ConversationNavigator({
                 }}
               >
                 <span
-                  className={`block h-0.5 w-3 origin-left rounded-full transition-[transform,opacity] duration-150 motion-reduce:transition-none ${active || distance === 0 ? "bg-ink" : "bg-ink-faint"}`}
+                  className={`block h-[calc(var(--ui-icon-unit)*2)] w-[calc(var(--ui-icon-unit)*12)] origin-left rounded-full transition-[transform,opacity] duration-150 motion-reduce:transition-none ${active || distance === 0 ? "bg-ink" : "bg-ink-faint"}`}
                   style={{ opacity, transform: `scaleX(${scale})` }}
                 />
-              </button>
+              </NavigationRow>
             );
           })}
         </div>
       </div>
       {createPortal(
-          <HintSurface
-            open={selected !== undefined}
-            unfoldFrom="left"
-            ref={popupRef}
-            id="query-navigation-preview"
-            aria-label="提问与回复预览"
-            className="fixed z-50 space-y-2 p-3 text-xs leading-5"
-            style={position}
-            onPointerEnter={() => clearTimeout(timer.current)}
-            onPointerLeave={scheduleClose}
-          >
-            <p className="line-clamp-2 whitespace-pre-line break-words font-medium">
-              {selected?.question}
-            </p>
-            <p className="line-clamp-3 whitespace-pre-line break-words text-ink-soft">
-              {selected?.answer}
-            </p>
-          </HintSurface>,
-          document.body,
-        )}
+        <HintSurface
+          open={selected !== undefined}
+          unfoldFrom="left"
+          ref={popupRef}
+          id="query-navigation-preview"
+          aria-label="提问与回复预览"
+          className="fixed z-50 space-y-2 p-3 text-ui-sm leading-snug"
+          style={position}
+          onPointerEnter={() => clearTimeout(timer.current)}
+          onPointerLeave={scheduleClose}
+        >
+          <p className="line-clamp-2 whitespace-pre-line break-words font-medium">
+            {selected?.question}
+          </p>
+          <p className="line-clamp-3 whitespace-pre-line break-words text-ink-soft">
+            {selected?.answer}
+          </p>
+        </HintSurface>,
+        document.body,
+      )}
     </nav>
   );
 }

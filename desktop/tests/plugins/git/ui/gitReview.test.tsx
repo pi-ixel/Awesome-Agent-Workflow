@@ -1,4 +1,8 @@
-import type { GitChange, GitDiff, GitSnapshot } from "../../../../src/plugins/host/types.ts";
+import type {
+  GitChange,
+  GitDiff,
+  GitSnapshot,
+} from "../../../../src/plugins/host/types.ts";
 import { useRightPanelStore } from "../../../helpers/layout.ts";
 import { createGitWorkbench } from "../../../helpers/gitWorkbench.tsx";
 import { StrictMode } from "react";
@@ -118,14 +122,16 @@ describe("ZCode 风格 Git 审查", () => {
     expect(screen.queryByText("committed.txt")).not.toBeInTheDocument();
   });
   it("悬浮入口反复请求均展开目标组，不批量读取未跟踪文件", async () => {
-    const Panel = fixture.workbench.getSnapshot().panels.find(({ id }) => id === "git")!.View;
-    render(<Panel project="D:/repo" tab={undefined} visible openPath={vi.fn()} />);
+    const Panel = fixture.workbench
+      .getSnapshot()
+      .panels.find(({ id }) => id === "git")!.View;
+    render(
+      <Panel project="D:/repo" tab={undefined} visible openPath={vi.fn()} />,
+    );
     await screen.findByRole("button", { name: "Unversioned Files" });
     await waitFor(() => expect(panelService.gitDiff).toHaveBeenCalledTimes(2));
     for (let i = 0; i < 2; i++) {
-      act(() =>
-        fixture.review.navigation.open("D:/repo", "untracked"),
-      );
+      act(() => fixture.review.navigation.open("D:/repo", "untracked"));
       expect(
         screen.getByRole("button", { name: "Unversioned Files" }),
       ).toHaveAttribute("aria-expanded", "true");
@@ -168,7 +174,10 @@ describe("ZCode 风格 Git 审查", () => {
     vi.spyOn(panelService, "gitStatus").mockResolvedValue({ ...oneFile });
     vi.spyOn(panelService, "gitDiff").mockRejectedValue(new Error("读取失败"));
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "刷新" })).not.toBeDisabled(),
+      expect(screen.getByRole("button", { name: "刷新" })).not.toHaveAttribute(
+        "aria-disabled",
+        "true",
+      ),
     );
     await userEvent.click(screen.getByRole("button", { name: "刷新" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("显示上次内容");
@@ -256,7 +265,10 @@ it("查找命中按 ZCode 原值 token 高亮：当前命中 active 档，其余
   expect(hits[1]).toHaveClass("bg-find-highlight-active");
 });
 
-vi.mock(import("../../../../src/plugins/workbench/ui/bindings/layoutView.ts"), async (original) => {
-  const { layoutViewFixture } = await import("../../../helpers/layout.ts");
-  return { ...(await original()), ...layoutViewFixture() };
-});
+vi.mock(
+  import("../../../../src/plugins/workbench/ui/bindings/layoutView.ts"),
+  async (original) => {
+    const { layoutViewFixture } = await import("../../../helpers/layout.ts");
+    return { ...(await original()), ...layoutViewFixture() };
+  },
+);

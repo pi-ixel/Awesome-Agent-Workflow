@@ -1,10 +1,11 @@
+import { fieldSurfaceClass } from "../../../shared/ui/inputStyles.ts";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import type { FileEntry } from "../../host/types.ts";
 import { describeUnknownError } from "../../../shared/errors.ts";
 import { CollapsibleTreePane } from "../../../shared/ui/TreeMotion.tsx";
 import { webviewStorage } from "../../host/service.ts";
 import type { ProjectWorkspace } from "../../project/service.ts";
-import { useFrameTask } from "../../../shared/ui/controls/useFrameTask.ts";
+import { ColumnResizer } from "../../../shared/ui/controls/ColumnResizer.tsx";
 import { useStore } from "zustand";
 import type { DocumentsService } from "../service.ts";
 /**
@@ -27,17 +28,17 @@ import type { DocumentsService } from "../service.ts";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   CopyIcon,
   EllipsisIcon,
+  FolderGlyph,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
   PanelRightCloseIcon,
@@ -58,13 +59,10 @@ import {
   FILE_TREE_VIRTUAL_ROW_HEIGHT_PX,
 } from "./file-tree/constants.ts";
 import { FileTreeStickyFolders } from "./file-tree/FileTreeStickyFolders.tsx";
-import {
-  FolderIcon,
-  FolderOpenIcon,
-  GitCommitVerticalIcon,
-} from "../../../shared/ui/file-icons/icons.tsx";
+import { GitCommitVerticalIcon } from "../../../shared/ui/file-icons/icons.tsx";
 import {
   copyTextToClipboard,
+  focusFileTreeRow,
   getFileManagerOpenLabel,
   getFileManagerRevealLabel,
 } from "./file-tree/helpers.ts";
@@ -75,7 +73,7 @@ import {
   getRelativePath,
   type FileTreeRow,
 } from "./file-tree/model.ts";
-import { useMenuController } from "./file-tree/menuController.ts";
+import { useMenuController } from "../../../shared/ui/useMenuController.ts";
 import { getWatchPaths, useFileTreeData } from "./file-tree/useFileTreeData.ts";
 import { useFileSearchIndex } from "./file-tree/useFileSearchIndex.ts";
 import {
@@ -87,8 +85,15 @@ import type { FileTreeRowHandlers } from "./file-tree/FileTreeRow.tsx";
 
 /** 树列宽度边界（ZCode FileManagerPane：minSize 160px / maxSize 60%）。 */
 const TREE_MIN_WIDTH_PX = 160;
+const TREE_MIN_RATIO = 0.15;
 const TREE_MAX_RATIO = 0.6;
 const TREE_DEFAULT_RATIO = 0.5;
+const TREE_PREVIEW_WIDTH = "--file-tree-preview-width";
+
+function treeWidth(ratio: number, unit: "%" | "cqw") {
+  const cap = `${TREE_MAX_RATIO * 100}${unit}`;
+  return `clamp(min(${TREE_MIN_WIDTH_PX}px, ${cap}), ${ratio * 100}${unit}, ${cap})`;
+}
 /** 分割布局持久化（ZCode useDefaultLayout("file-manager-layout") 的
  *  desktop 等价；按根路径隔离，全局 localStorage）。 */
 const FILE_SPLIT_STORAGE_PREFIX = "aaw-desktop/file-split/";
@@ -108,7 +113,7 @@ function readSplitPref(root: string): FileSplitPref {
     return {
       ratio:
         typeof parsed.ratio === "number" && Number.isFinite(parsed.ratio)
-          ? Math.min(TREE_MAX_RATIO, Math.max(0.15, parsed.ratio))
+          ? Math.min(TREE_MAX_RATIO, Math.max(TREE_MIN_RATIO, parsed.ratio))
           : TREE_DEFAULT_RATIO,
       visible: parsed.visible !== false,
     };
@@ -158,6 +163,7 @@ export function FileTree({
   const notify = useFeedback();
   const listRef = useRef<HTMLDivElement | null>(null);
   const pendingRevealKeyRef = useRef<string | null>(null);
+  const pendingStickyFocus = useRef<string | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [preview, setPreview] = useState<{
     path: string;
@@ -173,20 +179,10 @@ export function FileTree({
   // 跟手（%列在拖动中会抖），松手折算回比例入库；双击复位。
   const [split, setSplit] = useState<FileSplitPref>(() => readSplitPref(root));
   const [resizingTree, setResizingTree] = useState(false);
-  const resizeFrame = useFrameTask();
-  const dragWidthRef = useRef<number | null>(null);
   const splitRowRef = useRef<HTMLDivElement | null>(null);
   const treeColRef = useRef<HTMLDivElement | null>(null);
-  const splitDragRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startWidth: number;
-    paneWidth: number;
-    direction: number;
-  } | null>(null);
   const treeVisible = split.visible;
   const treeOnRight = treePosition === "right";
-  const resizeDirection = treeOnRight ? -1 : 1;
   const TreeToggleIcon = treeOnRight
     ? (treeVisible ? PanelRightCloseIcon : PanelRightOpenIcon)
     : (treeVisible ? PanelLeftCloseIcon : PanelLeftOpenIcon);
@@ -224,6 +220,7 @@ export function FileTree({
     setSearchRefreshVersion(0);
     setSplit(readSplitPref(root));
     pendingRevealKeyRef.current = null;
+    pendingStickyFocus.current = null;
   }
   const title = useMemo(() => {
     const leaf = normalizePath(root).split("/").filter(Boolean).at(-1);
@@ -549,30 +546,6 @@ export function FileTree({
     [documents, loadDirectory, root, setExpandedKeys, preview],
   );
 
-  const handleRowKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLDivElement>, row: FileTreeRow) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        openPrimary(row);
-        return;
-      }
-      if (event.key === "ArrowRight" && row.type === "directory") {
-        event.preventDefault();
-        if (!row.expanded || hasFileSearchQuery) directoryAction(row);
-        return;
-      }
-      if (
-        event.key === "ArrowLeft" &&
-        row.type === "directory" &&
-        row.expanded
-      ) {
-        event.preventDefault();
-        toggleDirectory(row);
-      }
-    },
-    [directoryAction, hasFileSearchQuery, openPrimary, toggleDirectory],
-  );
-
   const copyPath = useCallback(async (text: string) => {
     const ok = await copyTextToClipboard(text);
     notify?.({
@@ -657,7 +630,7 @@ export function FileTree({
   );
 
   const openHeaderMenu = useCallback(
-    (anchor: DOMRect) => {
+    (trigger: HTMLButtonElement) => {
       openMenu(
         "header",
         "更多",
@@ -665,7 +638,7 @@ export function FileTree({
           {
             id: "open-in-file-manager",
             label: getFileManagerOpenLabel(),
-            icon: <FolderOpenIcon className="ui-icon-16" />,
+            icon: <FolderGlyph isExpanded className="ui-icon-16" />,
             onSelect: () => void openWorkspaceInFileManager(),
           },
           {
@@ -675,7 +648,7 @@ export function FileTree({
             onSelect: () => void copyPath(root),
           },
         ],
-        { x: anchor.right, y: anchor.bottom, side: "bottom", align: "end" },
+        { trigger },
       );
     },
     [copyPath, openMenu, openWorkspaceInFileManager, root],
@@ -690,9 +663,8 @@ export function FileTree({
       onToggleDirectory: directoryAction,
       onOpenFile: openPrimary,
       onOpenContextMenu: openRowMenu,
-      onKeyDown: handleRowKeyDown,
     }),
-    [documents, directoryAction, handleRowKeyDown, openPrimary, openRowMenu],
+    [documents, directoryAction, openPrimary, openRowMenu],
   );
 
   const virtualItems = rowVirtualizer.getVirtualItems();
@@ -702,11 +674,21 @@ export function FileTree({
     scrollOffset,
     enabled: hasScrollable && !hasFileSearchQuery,
   });
+  const restoreStickyFocus = useCallback(() => {
+    const key = pendingStickyFocus.current;
+    if (key && focusFileTreeRow(listRef.current, key))
+      pendingStickyFocus.current = null;
+  }, []);
   const revealStickyRow = useCallback(
-    (item: StickyFolderItem) =>
-      rowVirtualizer.scrollToIndex(item.index, { align: "start" }),
-    [rowVirtualizer],
+    (item: StickyFolderItem, stickyIndex: number) => {
+      pendingStickyFocus.current = item.row.key;
+      const offset = (item.index - stickyIndex) * FILE_TREE_VIRTUAL_ROW_HEIGHT_PX;
+      rowVirtualizer.scrollToOffset(offset);
+      restoreStickyFocus();
+    },
+    [rowVirtualizer, restoreStickyFocus],
   );
+  useLayoutEffect(restoreStickyFocus, [restoreStickyFocus, virtualItems, visibleRows]);
 
   // reveal 后行出现在虚拟列表中时滚动定位（数据逐层到达，多次尝试直到命中）。
   useEffect(() => {
@@ -745,71 +727,10 @@ export function FileTree({
     },
     [root],
   );
-  const onSplitPointerDown = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (event.button !== 0) return;
-      const paneWidth = splitRowRef.current?.clientWidth ?? 0;
-      const startWidth = treeColRef.current?.clientWidth ?? 0;
-      if (paneWidth <= 0) return;
-      event.preventDefault();
-      event.currentTarget.setPointerCapture(event.pointerId);
-      splitDragRef.current = {
-        pointerId: event.pointerId,
-        startX: event.clientX,
-        startWidth,
-        paneWidth,
-        direction: resizeDirection,
-      };
-      setResizingTree(true);
-    },
-    [resizeDirection],
-  );
-  const onSplitPointerMove = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      const drag = splitDragRef.current;
-      if (!drag || event.pointerId !== drag.pointerId) return;
-      const maxWidth = Math.max(
-        TREE_MIN_WIDTH_PX,
-        Math.floor(drag.paneWidth * TREE_MAX_RATIO),
-      );
-      const next = Math.min(
-        maxWidth,
-        Math.max(
-          TREE_MIN_WIDTH_PX,
-          drag.startWidth + (event.clientX - drag.startX) * drag.direction,
-        ),
-      );
-      dragWidthRef.current = next;
-      resizeFrame.schedule(() => {
-        if (treeColRef.current) treeColRef.current.style.width = `${next}px`;
-      });
-    },
-    [resizeFrame],
-  );
-  const onSplitPointerEnd = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      const drag = splitDragRef.current;
-      if (!drag || event.pointerId !== drag.pointerId) return;
-      splitDragRef.current = null;
-      resizeFrame.cancel();
-      const width = dragWidthRef.current;
-      dragWidthRef.current = null;
-      setResizingTree(false);
-      if (width !== null) {
-        const ratio = Math.min(
-          TREE_MAX_RATIO,
-          Math.max(0.15, width / drag.paneWidth),
-        );
-        if (treeColRef.current)
-          treeColRef.current.style.width = `${ratio * 100}%`;
-        commitSplit({
-          ratio,
-          visible: true,
-        });
-      }
-    },
-    [commitSplit, resizeFrame],
-  );
+  const restoreTreeRatio = (ratio: number) => {
+    treeColRef.current?.style.removeProperty(TREE_PREVIEW_WIDTH);
+    commitSplit({ ...split, ratio });
+  };
 
   const treeToggle = (
     <IconButton
@@ -838,7 +759,7 @@ export function FileTree({
           className="flex min-w-0 flex-1 items-center"
         >
           {!preview ? (
-            <span className="px-3 text-sm text-ink-subtle">文件</span>
+            <span className="px-3 text-ui-base text-ink-subtle">文件</span>
           ) : null}
         </div>
         {onOpenTreeSettings && (
@@ -855,7 +776,7 @@ export function FileTree({
         {treeOnRight && treeToggle}
       </div>
       {watch.error && !external ? (
-        <p role="alert" className="p-2 text-xs text-warn-ink">
+        <p role="alert" className="p-2 text-ui-sm text-warn-ink">
           {watch.error}
         </p>
       ) : null}
@@ -867,8 +788,8 @@ export function FileTree({
             <CollapsibleTreePane
               paneRef={treeColRef}
               open={treeVisible}
-              width={`${split.ratio * 100}%`}
-              contentWidth={`${split.ratio * 100}cqw`}
+              width={`var(${TREE_PREVIEW_WIDTH}, ${treeWidth(split.ratio, "%")})`}
+              contentWidth={treeWidth(split.ratio, "cqw")}
               resizing={resizingTree}
               scope={root}
             >
@@ -881,7 +802,7 @@ export function FileTree({
                     value={fileSearchQuery}
                     placeholder="搜索文件..."
                     aria-label="搜索文件"
-                    className="min-h-6 w-full rounded-md border border-line bg-transparent py-0.5 pl-[calc(14px_+_14*var(--ui-icon-unit))] pr-7 text-xs text-ink outline-none transition-colors placeholder:text-ink-subtlest hover:border-line-strong focus-visible:border-line-strong"
+                    className={`${fieldSurfaceClass} min-h-6 w-full py-0.5 pl-[calc(14px_+_14*var(--ui-icon-unit))] pr-7 text-ui-xs`}
                     onChange={(event) =>
                       setFileSearchQuery(event.currentTarget.value)
                     }
@@ -902,7 +823,7 @@ export function FileTree({
               <div className="flex shrink-0 items-center px-2 pb-1.5">
                 <div className="flex min-w-0 flex-1 items-center gap-1">
                   <h3
-                    className="min-w-0 truncate py-0.5 pl-2.5 pr-0.5 text-xs font-medium text-ink-subtlest"
+                    className="min-w-0 truncate py-0.5 pl-2.5 pr-0.5 text-ui-sm font-medium text-ink-subtlest"
                     style={{ whiteSpace: "nowrap" }}
                   >
                     {title}
@@ -913,10 +834,12 @@ export function FileTree({
                   aria-label="更多"
                   data-hint="更多"
                   aria-haspopup="menu"
+                  aria-expanded={menu?.id === "header" && !menu.closing}
                   className="flex items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
-                  onClick={(event) =>
-                    openHeaderMenu(event.currentTarget.getBoundingClientRect())
-                  }
+                  onClick={(event) => {
+                    if (menu?.id === "header" && !menu.closing) dismissMenu();
+                    else openHeaderMenu(event.currentTarget);
+                  }}
                 >
                   <EllipsisIcon className="ui-icon-14" />
                 </IconButton>
@@ -967,7 +890,7 @@ export function FileTree({
                   {hasFileSearchQuery && search.notice ? (
                     <p
                       role="status"
-                      className="px-2 py-1 text-xs text-warn-ink"
+                      className="px-2 py-1 text-ui-sm text-warn-ink"
                     >
                       {search.notice}
                     </p>
@@ -1003,45 +926,40 @@ export function FileTree({
                 </div>
               </div>
             </CollapsibleTreePane>
-            {/* 分割条（ZCode ResizableHandle 同交互）：拖拽/方向键调宽，
-                双击复位；指示条黑 50%（ColumnResizer 同款），静息只留灰中线，
-                预览列不再自带 border-l。 */}
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="调整目录列宽度"
-              hidden={!treeVisible}
-              tabIndex={0}
-              className={`group relative w-px shrink-0 cursor-col-resize touch-none bg-line outline-none after:pointer-events-none after:absolute after:inset-y-0 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:rounded-full after:bg-ink-subtlest/50 after:opacity-0 after:content-[''] group-hover:after:opacity-100 group-focus-visible:after:opacity-100${
-                resizingTree ? " after:opacity-100" : ""
-              }`}
-              onDoubleClick={() =>
-                commitSplit({ ...split, ratio: TREE_DEFAULT_RATIO })
-              }
-              onKeyDown={(event) => {
-                if (event.key !== "ArrowLeft" && event.key !== "ArrowRight")
-                  return;
-                event.preventDefault();
-                const paneWidth = splitRowRef.current?.clientWidth ?? 0;
-                if (paneWidth <= 0) return;
-                const current = treeColRef.current?.clientWidth ?? 0;
-                const next = Math.min(
-                  Math.max(
-                    TREE_MIN_WIDTH_PX,
-                    Math.floor(paneWidth * TREE_MAX_RATIO),
-                  ),
-                  Math.max(
-                    TREE_MIN_WIDTH_PX,
-                    current + (event.key === "ArrowLeft" ? -16 : 16) * resizeDirection,
-                  ),
-                );
-                commitSplit({ ...split, ratio: next / paneWidth });
-              }}
-              onPointerDown={onSplitPointerDown}
-              onPointerMove={onSplitPointerMove}
-              onPointerUp={onSplitPointerEnd}
-              onPointerCancel={onSplitPointerEnd}
-            />
+            {treeVisible && (
+              <ColumnResizer
+                key={root}
+                label="调整目录列宽度"
+                placement="seam"
+                growDirection={treeOnRight ? "start" : "end"}
+                minPx={TREE_MIN_WIDTH_PX}
+                maxPx={TREE_MIN_WIDTH_PX}
+                defaultWidthPx={TREE_MIN_WIDTH_PX}
+                paneRef={treeColRef}
+                readBounds={() => {
+                  const available = splitRowRef.current?.clientWidth ?? 0;
+                  const max = Math.floor(available * TREE_MAX_RATIO);
+                  return {
+                    min: Math.min(max, Math.max(TREE_MIN_WIDTH_PX, Math.ceil(available * TREE_MIN_RATIO))),
+                    max,
+                  };
+                }}
+                readWidth={() => treeColRef.current?.clientWidth ?? 0}
+                onPreviewWidth={(width) => {
+                  treeColRef.current?.style.setProperty(TREE_PREVIEW_WIDTH, `${width}px`);
+                }}
+                onCommitWidth={(width) => {
+                  const available = splitRowRef.current?.clientWidth ?? 0;
+                  if (available > 0)
+                    restoreTreeRatio(Math.min(TREE_MAX_RATIO, Math.max(TREE_MIN_RATIO, width / available)));
+                }}
+                onReset={() => restoreTreeRatio(TREE_DEFAULT_RATIO)}
+                onDraggingChange={(isResizing) => {
+                  if (!isResizing) treeColRef.current?.style.removeProperty(TREE_PREVIEW_WIDTH);
+                  setResizingTree(isResizing);
+                }}
+              />
+            )}
         </>
         {/* 预览区（ZCode PreviewPane 并列形态）：未选中文件显示空态，点击
             文件/预览内链只换预览内容；关闭路径 = 顶栏分段切换（面板级），
@@ -1065,8 +983,8 @@ export function FileTree({
             />
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
-              <FolderIcon className="ui-icon-32 text-ink-ghost" />
-              <p className="text-xs text-ink-subtlest">从目录中选择一个文件</p>
+              <FolderGlyph isExpanded={false} className="ui-icon-32 text-ink-ghost" />
+              <p className="text-ui-sm text-ink-subtlest">从目录中选择一个文件</p>
             </div>
           )}
         </div>
@@ -1075,6 +993,7 @@ export function FileTree({
         <ContextMenu
           entries={menu.entries}
           placement={menu.placement}
+          trigger={menu.trigger}
           label={menu.label}
           closing={menu.closing}
           onDismiss={dismissMenu}

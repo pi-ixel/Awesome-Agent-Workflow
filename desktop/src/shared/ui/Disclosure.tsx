@@ -10,22 +10,43 @@ export function Disclosure({
   summary,
   children,
   defaultOpen = false,
+  onOpenChange,
+  layout = "inline",
   className = "",
 }: {
   readonly summary: ReactNode;
   readonly children: ReactNode;
   readonly defaultOpen?: boolean;
+  readonly onOpenChange?: (open: boolean) => void;
+  readonly layout?: "inline" | "row";
   readonly className?: string;
 }) {
   return (
-    <details className={`group ${className}`} open={defaultOpen || undefined}>
+    <details
+      className={`[&[open]>summary>.disclosure-chevron]:rotate-90 ${className}`}
+      open={defaultOpen || undefined}
+      onToggle={
+        onOpenChange &&
+        ((event) => {
+          if (event.target === event.currentTarget)
+            onOpenChange(event.currentTarget.open);
+        })
+      }
+    >
       <summary
-        className={`inline-flex cursor-pointer list-none items-center gap-1 rounded-md py-0.5 pr-1.5 text-ui-sm select-none hover:bg-surface-hover hover:text-ink [&::-webkit-details-marker]:hidden ${focusVisibleRing}`}
+        className={`${layout === "row" ? "flex w-full gap-2 py-2" : "inline-flex gap-1 py-0.5 pr-1.5"} cursor-pointer list-none items-center rounded-md text-ui-sm select-none hover:bg-surface-hover hover:text-ink [&::-webkit-details-marker]:hidden ${focusVisibleRing}`}
       >
-        <ChevronRightIcon aria-hidden={true} className="ui-icon-14 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" />
+        <ChevronRightIcon
+          aria-hidden={true}
+          className="disclosure-chevron ui-icon-14 shrink-0 transition-transform motion-reduce:transition-none"
+        />
         {summary}
       </summary>
-      <div className="mt-1 pl-[18px]">{children}</div>
+      {layout === "row" ? (
+        children
+      ) : (
+        <div className="mt-1 pl-[18px]">{children}</div>
+      )}
     </details>
   );
 }

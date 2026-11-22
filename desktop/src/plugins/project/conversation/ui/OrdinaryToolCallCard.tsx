@@ -1,3 +1,6 @@
+import { NavigationRow } from "../../../../shared/ui/NavigationRow.tsx";
+import { diffAppearance } from "../../../../shared/ui/diffStyles.ts";
+import { Disclosure } from "../../../../shared/ui/Disclosure.tsx";
 import type { ToolCallItem } from "../types.ts";
 import { ToolContent } from "./ToolContent.tsx";
 import { FilePathButton } from "../../ui/FilePathButton.tsx";
@@ -330,10 +333,14 @@ export function OrdinaryToolCallCard({
       (editDiffStat.added > 0 || editDiffStat.removed > 0) ? (
         <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap font-mono leading-none tabular-nums">
           {editDiffStat.added > 0 ? (
-            <span className="text-diff-added">+{editDiffStat.added}</span>
+            <span className={diffAppearance.add.ink}>
+              +{editDiffStat.added}
+            </span>
           ) : null}
           {editDiffStat.removed > 0 ? (
-            <span className="text-diff-removed">-{editDiffStat.removed}</span>
+            <span className={diffAppearance.del.ink}>
+              -{editDiffStat.removed}
+            </span>
           ) : null}
         </span>
       ) : null}
@@ -365,19 +372,20 @@ export function OrdinaryToolCallCard({
           {summary}
         </div>
       ) : (
-        <button
+        <NavigationRow
+          layout="compound"
           type="button"
           aria-expanded={isOpen}
           onClick={() => setIsOpen((current) => !current)}
           data-hint={item.title}
-          className="group/tool inline-flex max-w-full cursor-pointer items-center gap-2 self-start text-left text-ui-base text-ink-mute transition-colors"
+          className="group/tool inline-flex! flex-none max-w-full cursor-pointer items-center gap-2 self-start text-left text-ui-base text-ink-mute transition-colors"
         >
           {summary}
           {/* chevron hover 浮现（对齐 ToolSummaryRow）；触屏设备常显兜底 */}
           <ChevronRightIcon
             className={`ui-icon-16 shrink-0 text-ink-mute opacity-0 transition-transform transition-opacity duration-200 ease-out will-change-transform group-hover/tool:opacity-100 group-focus-visible/tool:opacity-100 [@media(hover:none)]:opacity-100 ${isOpen ? "rotate-90 opacity-100" : "rotate-0"}`}
           />
-        </button>
+        </NavigationRow>
       )}
       {isOpen ? (
         <div className="mt-2 ml-2 space-y-3 border-line border-l py-1 pl-3.5">
@@ -450,12 +458,11 @@ export function OrdinaryToolCallCard({
               <>
                 <ToolContent content={item.content} />
                 {item.rawOutput !== undefined ? (
-                  <details>
-                    <summary>原始输出</summary>
+                  <Disclosure summary="原始输出">
                     <pre className="max-h-72 overflow-auto whitespace-pre-wrap">
                       {formatPayload(item.rawOutput)}
                     </pre>
-                  </details>
+                  </Disclosure>
                 ) : null}
               </>
             ) : item.toolKind === "execute" ? (

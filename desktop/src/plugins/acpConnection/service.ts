@@ -1,3 +1,4 @@
+import type { AcpDiagnosticPrivacy } from "../../contracts/acp/diagnosticPrivacy.ts";
 import type { AcpTransport, AcpTransportLaunchOptions } from "../host/types.ts";
 import type {
   AcpProbeResult,
@@ -24,10 +25,12 @@ export interface AcpConnectionService {
   probe(id: string): Promise<AcpProbeResult>;
   createTransport(
     options: AcpTransportLaunchOptions,
+    purpose?: "diagnostic",
   ): Promise<AcpTransport | null>;
   createConnection(
     transport: AcpTransport,
     maxConcurrentRequests: number,
+    diagnosticPrivacy?: AcpDiagnosticPrivacy,
   ): AcpConnectionPort;
   releaseConnection(
     connection: AcpConnectionPort,

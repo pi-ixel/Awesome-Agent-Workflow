@@ -1,4 +1,5 @@
 import type {
+  BrowserApproval,
   BrowserCleanupPreview,
   BrowserCleanupResult,
   BrowserDataCatalogEntry,
@@ -9,8 +10,11 @@ import type {
   BrowserPopup,
   BrowserSpace,
   BrowserZoomEvent,
+  BrowserPageEvent,
   BrowserTab,
 } from "../../../contracts/browser/types.ts";
+
+export type { BrowserApproval } from "../../../contracts/browser/types.ts";
 
 export interface BrowserBounds {
   x: number;
@@ -30,13 +34,10 @@ export interface BrowserMcpEndpoint {
   imageCapable: boolean;
 }
 
-export interface BrowserApproval {
-  approvalId: string;
-  sessionId: string;
-  tabId: string;
-  action: string;
-  status: "pending" | "approved" | "denied" | "invalidated" | "consumed";
-  generation: number;
+export interface BrowserMcpRegistration {
+  readonly endpointName: string;
+  readonly handshakeComplete: boolean;
+  readonly hasEnabledTools?: boolean;
 }
 
 export interface BrowserEvidence {
@@ -50,8 +51,26 @@ export interface BrowserEvidence {
 
 export type BrowserMcpStatus = "active" | "revoked" | "not_bound";
 
+export interface BrowserRestoreScope {
+  readonly workspaceId: string;
+  readonly sessionId: string;
+}
+
+export interface BrowserRestoreSnapshot {
+  readonly epoch: string;
+  readonly revision: string | null;
+  readonly urls: readonly string[];
+}
+
 export interface BrowserHost {
   isAvailable(): boolean;
+  readRestore(scope: BrowserRestoreScope): Promise<BrowserRestoreSnapshot>;
+  saveRestore(
+    scope: BrowserRestoreScope,
+    update: BrowserRestoreSnapshot & { enabled: boolean },
+  ): Promise<BrowserRestoreSnapshot>;
+  forgetRestore(scope: BrowserRestoreScope): Promise<void>;
+  migrateLegacyRestores(): () => void;
   agentControlEnabled(): Promise<boolean>;
   setAgentControl(enabled: boolean): Promise<boolean>;
   onAgentControl(
@@ -92,6 +111,7 @@ export interface BrowserHost {
   snapshot(sessionId: string): Promise<BrowserSpace>;
   createMcpEndpoint(): Promise<BrowserMcpEndpoint>;
   mcpStatus(sessionId: string): Promise<BrowserMcpStatus>;
+  mcpRegistration(sessionId: string): Promise<BrowserMcpRegistration | null>;
   bindMcpEndpoint(
     endpointId: string,
     sessionId: string,
@@ -192,12 +212,6 @@ export interface BrowserHost {
       permission: BrowserPermission;
     }) => void,
   ): Promise<() => void>;
-  onPage(
-    receive: (event: {
-      sessionId: string;
-      tabId: string;
-      event: string;
-    }) => void,
-  ): Promise<() => void>;
+  onPage(receive: (event: BrowserPageEvent) => void): Promise<() => void>;
   onZoom(receive: (event: BrowserZoomEvent) => void): Promise<() => void>;
 }

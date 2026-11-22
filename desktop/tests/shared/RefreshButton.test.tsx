@@ -18,7 +18,7 @@ it("点击立即反馈，慢请求结束前保持忙碌并禁止重复点击", a
   fireEvent.click(button);
   fireEvent.click(button);
   expect(refresh).toHaveBeenCalledOnce();
-  expect(button).toBeDisabled();
+  expect(button).toHaveAttribute("aria-disabled", "true");
   expect(button).toHaveAttribute("aria-busy", "true");
   await act(() => vi.advanceTimersByTimeAsync(1200));
   expect(screen.getByRole("status")).toHaveTextContent("正在刷新");
@@ -26,7 +26,7 @@ it("点击立即反馈，慢请求结束前保持忙碌并禁止重复点击", a
     finish?.();
     await vi.advanceTimersByTimeAsync(0);
   });
-  expect(button).not.toBeDisabled();
+  expect(button).not.toHaveAttribute("aria-disabled");
   expect(screen.getByRole("status")).toHaveTextContent("刷新完成");
 });
 

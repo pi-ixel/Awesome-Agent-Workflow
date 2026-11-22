@@ -40,7 +40,8 @@ import type { PtyConnection } from "../types.ts";
 import type { TerminalService } from "../service.ts";
 import { registerTerminalLinks, openTerminalUrl } from "../rendering/terminalLinks.ts";
 import { normalizePowerShellReadlineRedraw } from "../rendering/terminalDataTransform.ts";
-import { readTerminalTheme, watchTerminalTheme } from "../rendering/terminalTheme.ts";
+import { readTerminalTheme } from "../rendering/terminalTheme.ts";
+import { observeAppearance } from "../../../shared/ui/observeAppearance.ts";
 import { formatShellDisplayName } from "../tabs/terminalTabState.ts";
 import type { TerminalTab } from "../tabs/terminalTabState.ts";
 import {
@@ -99,12 +100,15 @@ function handleCustomKeyEvent(event: KeyboardEvent, term: Terminal, logger: Logg
   return true;
 }
 
-/** 错误对象 → 展示文案（ptyHost 抛的是可读 Error）。 */
+/** 原生 IPC 可能直接返回错误字符串。 */
 function describeError(error: unknown): string {
-  if (error instanceof Error && error.message !== "") {
-    return error.message;
-  }
-  return "终端启动失败";
+  const message =
+    typeof error === "string"
+      ? error
+      : error instanceof Error
+        ? error.message
+        : "";
+  return message.trim() || "终端启动失败";
 }
 
 export function TerminalSessionView({
@@ -115,6 +119,7 @@ export function TerminalSessionView({
   project,
   resizing = false,
   onExit,
+  shouldFocusOnShow,
 }: {
   readonly terminal: TerminalService;
   readonly openExternal?: (url: string) => Promise<void>;
@@ -125,6 +130,8 @@ export function TerminalSessionView({
   readonly resizing?: boolean;
   /** 进程退出上抛（页签壳层据此删页签并收尾 PTY，见 TerminalPanel.closeTab）。 */
   readonly onExit?: (exitCode: number | null) => void;
+  /** 页签区持有键盘焦点时，保留焦点供继续切换或关闭。 */
+  readonly shouldFocusOnShow?: () => boolean;
 }) {
   const logger = useLogger("terminal");
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -276,13 +283,14 @@ export function TerminalSessionView({
     }
     exitedRef.current = false;
     const openLink = (url: string) => void openTerminalUrl(url, openExternal, logger);
+    const appearanceRoot = host.ownerDocument.documentElement;
     const term = new Terminal({
       fontSize: readTerminalFontSize(host),
       fontFamily:
-        getComputedStyle(document.documentElement)
+        getComputedStyle(appearanceRoot)
           .getPropertyValue("--font-mono")
           .trim() || undefined,
-      theme: readTerminalTheme(),
+      theme: readTerminalTheme(appearanceRoot),
       linkHandler: {
         allowNonHttpProtocols: false,
         activate: (event, uri) => {
@@ -325,19 +333,17 @@ export function TerminalSessionView({
     // open 延迟到首次可见（组件级 openNow，见下）；PTY 输出在此期间进
     // pendingOutputRef 缓冲。
 
-    const unwatchTheme = watchTerminalTheme((theme) => {
-      term.options.theme = theme;
-    });
-    const watchFontSize = new MutationObserver(() => {
-      const fontSize = readTerminalFontSize(host);
-      if (fontSize === term.options.fontSize) return;
-      term.options.fontSize = fontSize;
-      if (visibleRef.current) scheduleFitAndResize("final");
-    });
-    watchFontSize.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["style"],
-    });
+    const unwatchAppearance = observeAppearance(
+      appearanceRoot,
+      ({ themeChanged, fontChanged }) => {
+        if (themeChanged) term.options.theme = readTerminalTheme(appearanceRoot);
+        if (!fontChanged) return;
+        const fontSize = readTerminalFontSize(host);
+        if (fontSize === term.options.fontSize) return;
+        term.options.fontSize = fontSize;
+        if (visibleRef.current) scheduleFitAndResize("final");
+      },
+    );
 
     // 键入回传（连接可能晚于本 effect 到位，经 connRef 间接；exited 停发）
     term.onData((data) => {
@@ -459,8 +465,7 @@ export function TerminalSessionView({
 
     return () => {
       cancelled = true;
-      unwatchTheme();
-      watchFontSize.disconnect();
+      unwatchAppearance();
       // 摘除本视图的消费回调：卸载窗口里连接的输出/退出不得再打进已
       // dispose 的 term——输出转入连接内缓冲、退出缓存码，重挂 adopt
       // 注册回调的瞬间补发（markExited 不丢）
@@ -482,8 +487,8 @@ export function TerminalSessionView({
     }
     openNow();
     scheduleFitAndResize("visible");
-    termRef.current?.focus();
-  }, [visible, scheduleFitAndResize, openNow]);
+    if (shouldFocusOnShow?.() !== false) termRef.current?.focus();
+  }, [visible, scheduleFitAndResize, openNow, shouldFocusOnShow]);
 
   // ResizeObserver → scheduleFitAndResize（拖拽中低频预览；conn 内去重 + 单飞）
   useEffect(() => {

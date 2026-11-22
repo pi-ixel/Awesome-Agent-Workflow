@@ -89,7 +89,7 @@ export function MemoryChart({
           className="fill-warn-ink"
         />
       </svg>
-      <figcaption className="flex items-baseline justify-between text-xs text-ink-ghost">
+      <figcaption className="flex flex-wrap items-baseline justify-between gap-x-3 text-xs text-ink-ghost">
         <span className="font-mono">
           当前 {mbOf(current)} · 最近 {windowMinutes} 分钟峰值 {mbOf(max)}
         </span>

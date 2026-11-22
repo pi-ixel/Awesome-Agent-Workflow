@@ -116,68 +116,63 @@ export type FileIconGlyph =
 
 export interface FileIconVariant {
   glyph: FileIconGlyph;
-  /** 品牌色 hex：观感对齐 ZCode 文件图标（docker 红、yaml 橙、md 蓝、图绿）。 */
+  /** 主题描边色：观感对齐 ZCode 文件图标（docker 红、yaml 橙、md 蓝、图绿）。 */
   color: string;
 }
 
 /** 图标名 → 形状 + 颜色。中性 document 兜底 = 灰线稿。 */
-const ICON_VARIANTS: Record<string, FileIconVariant> = {
-  audio: { glyph: "audio", color: "#8b7cf6" },
-  babel: { glyph: "code", color: "#d4a017" },
-  console: { glyph: "code", color: "#5fa04e" },
-  css: { glyph: "code", color: "#663399" },
-  database: { glyph: "database", color: "#c96442" },
-  docker: { glyph: "docker", color: "#dd4b39" },
-  document: { glyph: "text", color: "#8a8f98" },
-  editorconfig: { glyph: "config", color: "#f57d00" },
-  eslint: { glyph: "code", color: "#4b32c3" },
-  gemfile: { glyph: "code", color: "#cc342d" },
-  git: { glyph: "git", color: "#f05133" },
-  go: { glyph: "code", color: "#00a3c4" },
-  html: { glyph: "code", color: "#d2691e" },
-  image: { glyph: "image", color: "#46bf72" },
-  java: { glyph: "code", color: "#b07219" },
-  javascript: { glyph: "code", color: "#d4a017" },
-  jest: { glyph: "code", color: "#99424f" },
-  json: { glyph: "config", color: "#bf9c00" },
-  lock: { glyph: "lock", color: "#8a8f98" },
-  makefile: { glyph: "code", color: "#6a9e58" },
-  markdown: { glyph: "markdown", color: "#4099ff" },
-  nodejs_alt: { glyph: "code", color: "#43853d" },
-  npm: { glyph: "config", color: "#cb3837" },
-  pdf: { glyph: "text", color: "#e03131" },
-  php: { glyph: "code", color: "#7377ad" },
-  powerpoint: { glyph: "text", color: "#d24726" },
-  prettier: { glyph: "code", color: "#b96bc6" },
-  python: { glyph: "code", color: "#3572a5" },
-  react: { glyph: "code", color: "#2f9ee0" },
-  react_ts: { glyph: "code", color: "#3178c6" },
-  readme: { glyph: "markdown", color: "#4099ff" },
-  rust: { glyph: "code", color: "#c1542b" },
-  settings: { glyph: "config", color: "#8a8f98" },
-  snapcraft: { glyph: "code", color: "#5a9e6f" },
-  sql: { glyph: "database", color: "#c96442" },
-  storybook: { glyph: "code", color: "#d94474" },
-  svg: { glyph: "image", color: "#a071c9" },
-  table: { glyph: "text", color: "#1e7145" },
-  toml: { glyph: "config", color: "#f57d00" },
-  tsconfig: { glyph: "config", color: "#3178c6" },
-  typescript: { glyph: "code", color: "#3178c6" },
-  vitest: { glyph: "code", color: "#729b1b" },
-  word: { glyph: "text", color: "#2b569a" },
-  yaml: { glyph: "config", color: "#f57d00" },
-  yarn: { glyph: "config", color: "#2c8ebb" },
-  video: { glyph: "video", color: "#e06c75" },
-};
-
-const DEFAULT_VARIANT: FileIconVariant = {
-  glyph: "text",
-  color: "#8a8f98",
+export const ICON_VARIANTS: Record<string, FileIconVariant> = {
+  audio: { glyph: "audio", color: "var(--color-file-audio)" },
+  babel: { glyph: "code", color: "var(--color-file-javascript)" },
+  console: { glyph: "code", color: "var(--color-file-console)" },
+  css: { glyph: "code", color: "var(--color-file-css)" },
+  database: { glyph: "database", color: "var(--color-file-database)" },
+  docker: { glyph: "docker", color: "var(--color-file-docker)" },
+  document: { glyph: "text", color: "var(--color-file-document)" },
+  editorconfig: { glyph: "config", color: "var(--color-file-config-orange)" },
+  eslint: { glyph: "code", color: "var(--color-file-eslint)" },
+  gemfile: { glyph: "code", color: "var(--color-file-gemfile)" },
+  git: { glyph: "git", color: "var(--color-file-git)" },
+  go: { glyph: "code", color: "var(--color-file-go)" },
+  html: { glyph: "code", color: "var(--color-file-html)" },
+  image: { glyph: "image", color: "var(--color-file-image)" },
+  java: { glyph: "code", color: "var(--color-file-java)" },
+  javascript: { glyph: "code", color: "var(--color-file-javascript)" },
+  jest: { glyph: "code", color: "var(--color-file-jest)" },
+  json: { glyph: "config", color: "var(--color-file-json)" },
+  lock: { glyph: "lock", color: "var(--color-file-document)" },
+  makefile: { glyph: "code", color: "var(--color-file-makefile)" },
+  markdown: { glyph: "markdown", color: "var(--color-file-markdown)" },
+  nodejs_alt: { glyph: "code", color: "var(--color-file-nodejs-alt)" },
+  npm: { glyph: "config", color: "var(--color-file-npm)" },
+  pdf: { glyph: "text", color: "var(--color-file-pdf)" },
+  php: { glyph: "code", color: "var(--color-file-php)" },
+  powerpoint: { glyph: "text", color: "var(--color-file-powerpoint)" },
+  prettier: { glyph: "code", color: "var(--color-file-prettier)" },
+  python: { glyph: "code", color: "var(--color-file-python)" },
+  react: { glyph: "code", color: "var(--color-file-react)" },
+  react_ts: { glyph: "code", color: "var(--color-file-typescript)" },
+  readme: { glyph: "markdown", color: "var(--color-file-markdown)" },
+  rust: { glyph: "code", color: "var(--color-file-rust)" },
+  settings: { glyph: "config", color: "var(--color-file-document)" },
+  snapcraft: { glyph: "code", color: "var(--color-file-snapcraft)" },
+  sql: { glyph: "database", color: "var(--color-file-database)" },
+  storybook: { glyph: "code", color: "var(--color-file-storybook)" },
+  svg: { glyph: "image", color: "var(--color-file-svg)" },
+  table: { glyph: "text", color: "var(--color-file-table)" },
+  toml: { glyph: "config", color: "var(--color-file-config-orange)" },
+  tsconfig: { glyph: "config", color: "var(--color-file-typescript)" },
+  typescript: { glyph: "code", color: "var(--color-file-typescript)" },
+  vitest: { glyph: "code", color: "var(--color-file-vitest)" },
+  word: { glyph: "text", color: "var(--color-file-word)" },
+  yaml: { glyph: "config", color: "var(--color-file-config-orange)" },
+  yarn: { glyph: "config", color: "var(--color-file-yarn)" },
+  video: { glyph: "video", color: "var(--color-file-video)" },
 };
 
 /** 图标名（resolveIconName 的返回）→ 形状 + 颜色；未知名回退中性文档。 */
 export function fileIconVariantFor(iconName: string): FileIconVariant {
-  return ICON_VARIANTS[iconName] ?? DEFAULT_VARIANT;
+  return ICON_VARIANTS[Object.hasOwn(ICON_VARIANTS, iconName) ? iconName : DEFAULT_FILE_ICON_NAME]!;
 }
 
 /** 文件名/扩展名 → 图标名（含逐段 stem 回退，fileDisplayHelpers.ts:42-172）。 */

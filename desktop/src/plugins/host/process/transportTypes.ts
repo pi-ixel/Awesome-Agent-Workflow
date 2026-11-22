@@ -59,10 +59,13 @@ export interface AcpTransport {
   dispose?(): void | Promise<void>;
 }
 
+export type AcpProxyPolicy = "pythonHttpxLoopback";
+
 export interface AcpTransportLaunchOptions {
   readonly command: readonly string[];
   readonly cwd?: string;
   readonly extraEnv?: Readonly<Record<string, string>>;
+  readonly proxyPolicy?: AcpProxyPolicy;
   /** 兼容旧探测调用。宿主按页面归属管理，连接可以并存。 */
   readonly isolated?: boolean;
 }

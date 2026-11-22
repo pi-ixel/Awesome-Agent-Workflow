@@ -26,6 +26,7 @@ export async function createAgentTransport(
     command: launch.command,
     cwd: launch.cwd ?? undefined,
     extraEnv: launch.extraEnv,
+    ...(launch.proxyPolicy && { proxyPolicy: launch.proxyPolicy }),
     isolated: options.isolated,
   });
 }

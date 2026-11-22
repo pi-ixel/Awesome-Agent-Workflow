@@ -1,47 +1,58 @@
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import type { Ref } from "react";
 /**
  * 「⋯」更多菜单：把不常用的操作收起来，复用应用共用的下拉菜单。
  */
-import { useEffect, useRef, useState } from "react";
-import { ContextMenu, type ContextMenuEntry, type MenuPlacement } from "../../../shared/ui/ContextMenu.tsx";
+import {
+  ContextMenu,
+  type ContextMenuEntry,
+} from "../../../shared/ui/ContextMenu.tsx";
 import { EllipsisIcon } from "../../../shared/ui/icons.tsx";
+import { useMenuController } from "../../../shared/ui/useMenuController.ts";
 import { iconButton } from "./buttons.ts";
 
-const CLOSE_MS = 100;
-
-export function MoreMenu({ label = "更多", entries }: { label?: string; entries: readonly ContextMenuEntry[] }) {
-  const [menu, setMenu] = useState<{ placement: MenuPlacement; closing: boolean } | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
-  }, []);
+export function MoreMenu({
+  label = "更多",
+  entries,
+  triggerRef,
+}: {
+  label?: string;
+  entries: readonly ContextMenuEntry[];
+  triggerRef?: Ref<HTMLButtonElement>;
+}) {
+  const { menu, open, dismiss } = useMenuController();
   if (entries.length === 0) return null;
-  const dismiss = () => {
-    setMenu((current) => current === null ? null : { ...current, closing: true });
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setMenu(null), CLOSE_MS);
-  };
-  return <>
-    <IconButton iconSize="compact"
-      type="button"
-      className={`${iconButton} workflow-more`}
-      aria-label={label}
-      data-hint={label}
-      aria-haspopup="menu"
-      aria-expanded={menu !== null && !menu.closing}
-      onClick={(event) => {
-        const rect = event.currentTarget.getBoundingClientRect();
-        setMenu({ placement: { x: rect.right, y: rect.bottom + 4, side: "bottom", align: "end" }, closing: false });
-      }}
-    >
-      <EllipsisIcon className="ui-icon-14" />
-    </IconButton>
-    {menu && <ContextMenu
-      entries={entries}
-      placement={menu.placement}
-      label={label}
-      closing={menu.closing}
-      onDismiss={dismiss}
-    />}
-  </>;
+  return (
+    <>
+      <IconButton
+        ref={triggerRef}
+        iconSize="compact"
+        type="button"
+        className={`${iconButton} workflow-more`}
+        aria-label={label}
+        data-hint={label}
+        aria-haspopup="menu"
+        aria-expanded={menu !== null && !menu.closing}
+        onClick={(event) => {
+          if (menu && !menu.closing) {
+            dismiss();
+            return;
+          }
+          open(label, label, entries, { trigger: event.currentTarget });
+        }}
+      >
+        <EllipsisIcon className="ui-icon-14" />
+      </IconButton>
+      {menu && (
+        <ContextMenu
+          entries={entries}
+          placement={menu.placement}
+          trigger={menu.trigger}
+          label={label}
+          closing={menu.closing}
+          onDismiss={dismiss}
+        />
+      )}
+    </>
+  );
 }

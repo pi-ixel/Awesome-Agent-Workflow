@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CodeBlock } from "../../src/shared/ui/markdown/CodeBlock.tsx";
+import { MarkdownAppearance } from "../../src/shared/ui/markdown/theme.ts";
 import {
   fitDiagramToViewport,
   zoomDiagramAtPoint,
@@ -14,10 +15,10 @@ import {
 } from "../../src/shared/ui/markdown/diagramViewport.ts";
 vi.mock("@streamdown/mermaid", () => ({
   createMermaidPlugin: () => ({
-    getMermaid: () => ({
+    getMermaid: (config: { themeVariables: { fontSize: string } }) => ({
       render: () =>
         Promise.resolve({
-          svg: '<svg viewBox="0 0 3000 1200" width="100%" style="max-width:3000px"><text x="20" y="20">宽流程图</text></svg>',
+          svg: `<svg viewBox="0 0 3000 1200" width="100%" data-font="${config.themeVariables.fontSize}" style="max-width:3000px"><text x="20" y="20">宽流程图</text></svg>`,
         }),
     }),
   }),
@@ -33,6 +34,29 @@ beforeEach(() => {
   });
 });
 describe("ZCode Mermaid 预览", () => {
+  it("在已打开的图表内切换主题和字号时保留缩放、焦点和弹窗", async () => {
+    const diagram = (theme: "warm" | "dark", uiFontSize: number) =>
+      <MarkdownAppearance value={{ theme, uiFontSize }}>
+        <CodeBlock code="flowchart LR\nA-->B-->C" language="mermaid" appTheme={theme} />
+      </MarkdownAppearance>;
+    const view = render(diagram("warm", 14));
+    const open = screen.getByRole("button", { name: "放大预览图表" });
+    await waitFor(() => expect(open).toBeEnabled());
+    fireEvent.click(open);
+    const dialog = screen.getByRole("dialog");
+    await act(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+    const zoom = screen.getByRole("button", { name: /^放大$/ });
+    zoom.focus();
+    fireEvent.click(zoom);
+    const percent = screen.getByRole("button", { name: "缩放比例" }).textContent;
+    for (const [theme, size] of [["dark", 20], ["warm", 14]] as const) {
+      view.rerender(diagram(theme, size));
+      await waitFor(() => expect(dialog.querySelector(`svg[data-font="${size}px"]`)).not.toBeNull());
+      expect(screen.getByRole("dialog")).toBe(dialog);
+      expect(zoom).toHaveFocus();
+      expect(screen.getByRole("button", { name: "缩放比例" }).textContent).toBe(percent);
+    }
+  });
   it("宽图缩放进列宽（不强制自然尺寸），预览越过含 content-visibility 的祖先并支持缩放与 Esc", async () => {
     const { container } = render(
       <div style={{ contentVisibility: "auto", overflow: "hidden" }}>

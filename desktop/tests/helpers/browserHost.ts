@@ -1,14 +1,36 @@
 import type {
+  BrowserApproval,
   BrowserHost,
   BrowserMcpEndpoint,
 } from "../../src/plugins/host/browser/types.ts";
 
-export function createTestBrowserHost(): BrowserHost {
+export interface ApprovalDecision {
+  readonly approvalId: string;
+  readonly approved: boolean;
+}
+
+export interface TestBrowserHost extends BrowserHost {
+  /** 发起一条原生浏览器审批事件（同时写入快照）。 */
+  emitApproval(approval: BrowserApproval): void;
+  /** 已发生的原生审批决策，按调用顺序记录。 */
+  readonly approvalDecisions: readonly ApprovalDecision[];
+  /** 清空审批记录与决策日志，用于用例隔离。 */
+  resetApprovals(): void;
+}
+
+export function createTestBrowserHost(): TestBrowserHost {
   let sequence = 0;
   let controlEnabled = true;
   const controlListeners = new Set<(event: { enabled: boolean }) => void>();
+  const approvalListeners = new Set<(approval: BrowserApproval) => void>();
+  const approvals = new Map<string, BrowserApproval>();
+  const approvalDecisions: ApprovalDecision[] = [];
   const endpoints = new Map<string, BrowserMcpEndpoint>();
   return {
+    readRestore: () => Promise.resolve({ epoch: "", revision: null, urls: [] }),
+    saveRestore: (_scope, update) => Promise.resolve({ ...update, revision: update.enabled ? "saved" : null }),
+    forgetRestore: () => Promise.resolve(),
+    migrateLegacyRestores: () => () => {},
     isAvailable: () => true,
     agentControlEnabled: () => Promise.resolve(controlEnabled),
     setAgentControl: (enabled) => {
@@ -73,6 +95,7 @@ export function createTestBrowserHost(): BrowserHost {
             : "not_bound",
       );
     },
+    mcpRegistration: () => Promise.resolve(null),
     bindMcpEndpoint: (endpointId, sessionId) => {
       const endpoint = endpoints.get(endpointId);
       if (!endpoint || endpoint.revoked)
@@ -100,9 +123,38 @@ export function createTestBrowserHost(): BrowserHost {
       endpoints.set(endpointId, revoked);
       return Promise.resolve(revoked);
     },
-    approvalSnapshot: () => Promise.resolve([]),
-    decideApproval: () => Promise.reject(new Error("APPROVAL_NOT_FOUND")),
-    onApproval: () => Promise.resolve(() => {}),
+    approvalSnapshot: (sessionId) =>
+      Promise.resolve(
+        [...approvals.values()].filter(
+          (approval) =>
+            approval.sessionId === sessionId &&
+            (approval.status === "pending" || approval.status === "approved"),
+        ),
+      ),
+    decideApproval: (approvalId, approved) => {
+      const record = approvals.get(approvalId);
+      if (!record) return Promise.reject(new Error("APPROVAL_NOT_FOUND"));
+      const updated: BrowserApproval = {
+        ...record,
+        status: approved ? "approved" : "denied",
+      };
+      approvals.set(approvalId, updated);
+      approvalDecisions.push({ approvalId, approved });
+      return Promise.resolve(updated);
+    },
+    onApproval: (receive) => {
+      approvalListeners.add(receive);
+      return Promise.resolve(() => approvalListeners.delete(receive));
+    },
+    emitApproval: (approval) => {
+      approvals.set(approval.approvalId, approval);
+      for (const listener of approvalListeners) listener(approval);
+    },
+    approvalDecisions,
+    resetApprovals: () => {
+      approvals.clear();
+      approvalDecisions.length = 0;
+    },
     dialogSnapshot: () => Promise.resolve([]),
     decideDialog: () => Promise.reject(new Error("NOT_IMPLEMENTED")),
     onDialog: () => Promise.resolve(() => {}),

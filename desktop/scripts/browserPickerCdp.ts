@@ -145,11 +145,31 @@ try {
       throw new Error("PICKER_STATE_NOT_SERIALIZED");
     return JSON.parse(serialized) as PickerState;
   };
+  const waitFor = async (
+    predicate: (state: PickerState) => boolean,
+    label: string,
+  ) => {
+    const deadline = Date.now() + 5000;
+    let latest = await readPickerState();
+    while (!predicate(latest)) {
+      if (Date.now() > deadline)
+        throw new Error(
+          `PICKER_WAIT_TIMEOUT:${label}:${JSON.stringify(latest)}`,
+        );
+      await sleep(100);
+      latest = await readPickerState();
+    }
+    return latest;
+  };
   const hover = async (selector: string) => {
     await evaluate(
       `(()=>{const target=document.querySelector(${JSON.stringify(selector)});const rect=target.getBoundingClientRect();target.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientX:rect.x+rect.width/2,clientY:rect.y+rect.height/2}));return true;})()`,
     );
-    await sleep(100);
+    // 隐藏页面没有 rAF，拾取器走定时器兜底，等待真实状态而不是固定时长
+    await waitFor(
+      (state) => state.targetSelector === selector && state.overlayCount === 1,
+      `hover:${selector}`,
+    );
   };
   const assertGeometry = (state: PickerState, selector: string) => {
     assert.ok(state, "PUBLIC_PICKER_STATE_MISSING");
@@ -200,26 +220,34 @@ try {
   assert.notEqual(stateB.overlayRect?.width, stateA.overlayRect?.width);
   assert.notEqual(stateB.overlayRect?.height, stateA.overlayRect?.height);
 
+  const settleFrom = async (previous: PickerState) => {
+    const deadline = Date.now() + 2000;
+    let latest = await readPickerState();
+    while (JSON.stringify(latest) === JSON.stringify(previous)) {
+      if (Date.now() > deadline) return latest;
+      await sleep(100);
+      latest = await readPickerState();
+    }
+    return latest;
+  };
+
   await evaluate("window.scrollTo(0,120);true");
-  await sleep(150);
-  assertGeometry(await readPickerState(), "#semantic");
+  assertGeometry(await settleFrom(stateB), "#semantic");
   await invoke("browser_set_viewport", {
     sessionId,
     tabId: tab.tabId,
     width: 1000,
     height: 760,
   });
-  await sleep(150);
-  assertGeometry(await readPickerState(), "#semantic");
+  const afterViewport = await settleFrom(stateB);
+  assertGeometry(afterViewport, "#semantic");
   await invoke("browser_set_zoom", { sessionId, tabId: tab.tabId, zoom: 1.25 });
-  await sleep(150);
-  assertGeometry(await readPickerState(), "#semantic");
+  const afterZoom = await settleFrom(afterViewport);
+  assertGeometry(afterZoom, "#semantic");
   await invoke("browser_set_zoom", { sessionId, tabId: tab.tabId, zoom: 1 });
 
   await evaluate("document.querySelector('#semantic').remove();true");
-  await sleep(150);
-  const removed = await readPickerState();
-  assert.equal(removed.overlayCount, 0);
+  const removed = await waitFor((state) => state.overlayCount === 0, "removed");
 
   const snapshot = await callMcp("browser_snapshot", { tabId: tab.tabId });
   const snapshotContent = snapshot.result?.structuredContent as {
@@ -232,8 +260,7 @@ try {
   await evaluate(
     "document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));true",
   );
-  await sleep(100);
-  assert.equal((await readPickerState()).status, "inactive");
+  await waitFor((state) => state.status === "inactive", "escape");
   const normalClick = await callMcp("browser_click", {
     tabId: tab.tabId,
     selector: "#target",
@@ -247,9 +274,10 @@ try {
 
   await invoke("browser_pick_start", { sessionId, tabId: tab.tabId });
   await invoke("browser_pick_cancel", { sessionId, tabId: tab.tabId });
-  await sleep(100);
-  const cancelled = await readPickerState();
-  assert.equal(cancelled.status, "inactive");
+  const cancelled = await waitFor(
+    (state) => state.status === "inactive",
+    "cancel",
+  );
   assert.equal(cancelled.overlayCount, 0);
 
   console.log(

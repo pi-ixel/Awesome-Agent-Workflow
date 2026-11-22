@@ -13,6 +13,7 @@ export default defineConfig({
   },
   webServer: {
     command: "npm run dev -- --host 127.0.0.1 --port 4178 --strictPort",
+    env: { AAW_VITE_TEST_CACHE: "playwright" },
     url: "http://127.0.0.1:4178/tests/visual/fixture.html",
     reuseExistingServer: false,
   },

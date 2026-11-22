@@ -7,6 +7,7 @@ import type {
 import type { HostService } from "../service.ts";
 import { createTauriAcpProcessHost } from "../process/acpProcess.ts";
 import { createAccountHost } from "../adapters/account.ts";
+import { createMcpHost } from "../adapters/mcp.ts";
 import { webviewStorage } from "../storage/storage.ts";
 import { diagnosticsHost } from "../adapters/diagnostics.ts";
 import { createHostRuntime, isTauriEnv } from "../adapters/host.ts";
@@ -34,6 +35,7 @@ export class DesktopHost implements HostService {
   private readonly invoke: NativeInvoke;
   private bridge?: ReturnType<typeof createBridgeAcpClient>;
   readonly storage = webviewStorage;
+  readonly mcp: HostService["mcp"];
   readonly diagnostics = diagnosticsHost;
   readonly exitGate = createHostExitGate();
   private exitDiagnostics?: ExitDiagnostics;
@@ -167,6 +169,11 @@ export class DesktopHost implements HostService {
 
   constructor(options: HostOptions = {}) {
     this.invoke = createInvoke((options.createLogger ?? createLogger)("host"));
+    this.mcp = isTauriEnv()
+      ? createMcpHost((command, args) =>
+          this.resources.run(() => this.invoke(command, args)),
+        )
+      : undefined;
     this.browser = createBrowserHost(this.invoke);
     const backend = options.createBackend?.() ?? createHostRuntime(this.invoke);
     const runner = createHostProcessRunner(this.invoke);
@@ -220,6 +227,22 @@ export class DesktopHost implements HostService {
             change: (query, action) =>
               this.resources.run(() =>
                 this.invoke("skill_library_change", { query, action }),
+              ),
+            toggle: (query, action) =>
+              this.resources.run(() =>
+                this.invoke("skill_library_toggle", { query, action }),
+              ),
+            sizes: (query, skills) =>
+              this.resources.run(() =>
+                this.invoke("skill_library_sizes", { query, skills }),
+              ),
+            files: (query, { source, path, realPath, disabledId }, request) =>
+              this.resources.run(() =>
+                this.invoke("skill_library_files", {
+                  query,
+                  skill: { source, path, realPath, disabledId },
+                  request,
+                }),
               ),
           }
         : undefined,
