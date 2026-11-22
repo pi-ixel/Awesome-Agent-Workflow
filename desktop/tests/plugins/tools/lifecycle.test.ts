@@ -179,6 +179,16 @@ function machine() {
     savedEntries() {
       return readSavedEntries(api.userKey());
     },
+    /** 当前账号那一栏的第一条原始记录（含 settings 这类 `expectConsistent` 不看的字段）。 */
+    savedRaw(): Record<string, unknown> | undefined {
+      const key = api.userKey();
+      if (!key) return undefined;
+      const raw = localStorage.getItem(configKey);
+      if (!raw) return undefined;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const list = parsed[key];
+      return Array.isArray(list) ? list[0] as Record<string, unknown> : undefined;
+    },
     /** 启动一个"进程"。 */
     async start() { await boot(); },
     /** 关掉整个运行时，再用同一块盘、同一份配置起来——这就是"重启应用"。 */
@@ -754,5 +764,167 @@ describe("工具模块的状态转换（长序列与并发）", () => {
     expect(settled).toHaveLength(1);
     expect(settled[0]).toMatchObject({ package: { version: "2.0.0" }, dir: joinPath(installedRoot, "notes", "versions", "2.0.0") });
     await expectConsistent(app);
+  });
+});
+
+/**
+ * 第三轮：把前两轮修过的地方再压一遍，并补上"跨进程"与"降级"这两类。
+ *
+ * 前两轮的序列都在一次运行里走完；真实用户是"装完关机，第二天再想退回"。
+ * 重启之后退版依赖的 `previousDir` 与备份清单是不是都还在盘上、界面会不会
+ * 又把坏标记贴回去，只有跨进程才问得出来。
+ */
+describe("工具模块的状态转换（跨进程与降级）", () => {
+  it("关掉软件再退版：上一版目录与备份都还在，退得回去且界面、配置同步", async () => {
+    const app = await device();
+    const v1 = packageOf("1.0.0", "<p>v1</p>");
+    await app.workshopOf().installArchive(v1, runtimeFiles(v1));
+    const v2 = packageOf("1.1.0", "<p>v2</p>");
+    await app.workshopOf().installArchive(v2, runtimeFiles(v2));
+    await app.settle();
+
+    // 关机再开：跨进程之后记录里的 previousDir 必须还有效。
+    await app.restart();
+    const beforeRollback = app.tools().state.getState()[0];
+    expect(beforeRollback?.package.version).toBe("1.1.0");
+    expect(beforeRollback?.previousDir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0"));
+    expect(await app.exists(beforeRollback?.previousDir as string)).toBe(true);
+    await expectConsistent(app);
+
+    const back = await app.workshopOf().rollback("notes");
+    expect(back.error).toBeUndefined();
+    expect(back.text).toContain("已退回 随手记 v1.0.0");
+    const rolled = app.tools().state.getState()[0];
+    expect(rolled?.dir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0"));
+    expect(await app.text(joinPath(rolled?.dir as string, "index.html"))).toBe("<p>v1</p>");
+    expect(app.savedRaw()?.["previousVersion"]).toBe("1.1.0");
+    await expectConsistent(app);
+
+    // 再关一次再开：退版结果不能"重启回到解放前"。
+    await app.restart();
+    expect(app.tools().state.getState()[0]?.package.version).toBe("1.0.0");
+    expect(app.tools().state.getState()[0]?.dir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0"));
+    await expectConsistent(app);
+  });
+
+  it("坏标记 → 点打开自愈 → 标记消失 → 再重启不重复补", async () => {
+    const app = await device();
+    const tool = packageOf("1.0.0", "<p>页面</p>");
+    await app.workshopOf().installArchive(tool, runtimeFiles(tool));
+    const originalDir = app.tools().state.getState()[0]?.dir as string;
+
+    // 安装目录被清理工具扫走。重启时自愈会补一份——但这次补的时候磁盘写不进去
+    // （暂时不可写），自愈悄悄失败，卡片就停在"目录丢失"上——这正是用户会看到的中间态。
+    app.removeDir(originalDir);
+    app.failNextWrite((path) => path.endsWith("manifest.json"));
+    await app.restart();
+    app.healWrites();
+    expect(app.tools().state.getState()[0]?.broken?.kind).toBe("missing-dir");
+    expect(app.tools().state.getState()[0]?.dir).toBe(originalDir);
+    expect(app.savedEntries()[0]?.dir).toBe(originalDir);
+
+    // 用户点「打开」：自愈补一份，标记消失，配置改到新目录。
+    const healedDir = await app.workshopOf().resolveOpenDir("notes");
+    expect(healedDir).toBeDefined();
+    expect(await app.exists(healedDir as string)).toBe(true);
+    const healed = app.tools().state.getState()[0];
+    expect(healed?.broken).toBeUndefined();
+    expect(healed?.dir).toBe(healedDir);
+    expect(app.savedEntries()[0]?.dir).toBe(healedDir);
+    await expectConsistent(app);
+
+    // 再重启：目录在，不该又补一份（否则每开一次就多一个版本目录）。
+    await app.restart();
+    expect(app.tools().state.getState()[0]?.dir).toBe(healedDir);
+    expect(await app.versionDirs("notes")).toEqual(["1.0.0"]);
+    await expectConsistent(app);
+  });
+
+  it("更新后用户设置按新清单收敛：同名值保留、删掉的字段丢掉、新字段取默认", async () => {
+    const app = await device();
+    const schemaV1 = [
+      { id: "theme", label: "主题", type: "text" as const, default: "浅色" },
+      { id: "count", label: "条数", type: "number" as const, default: 2, min: 1, max: 9 },
+    ];
+    const v1 = packageOf("1.0.0", "<p>v1</p>", { settingsSchema: schemaV1 });
+    await app.workshopOf().installArchive(v1, runtimeFiles(v1));
+    app.tools().saveSettings("notes", { theme: "深色", count: 5 });
+
+    // 新一版删掉 count、加一个 mode（界面要按它的默认值显示）。
+    const schemaV2 = [
+      { id: "theme", label: "主题", type: "text" as const, default: "浅色" },
+      {
+        id: "mode",
+        label: "模式",
+        type: "select" as const,
+        default: "auto",
+        options: [{ label: "自动", value: "auto" }, { label: "手动", value: "manual" }],
+      },
+    ];
+    const v2 = packageOf("1.1.0", "<p>v2</p>", { settingsSchema: schemaV2 });
+    await app.workshopOf().installArchive(v2, runtimeFiles(v2));
+
+    // 界面（store）与配置（磁盘上的安装记录）必须是同一份值。
+    expect(app.tools().state.getState()[0]?.settings).toEqual({ theme: "深色", mode: "auto" });
+    expect(app.savedRaw()?.["settings"]).toEqual({ theme: "深色", mode: "auto" });
+    await expectConsistent(app);
+
+    // 退版回到旧清单：count 按旧默认值回来，mode 被丢掉。
+    const back = await app.workshopOf().rollback("notes");
+    expect(back.error).toBeUndefined();
+    expect(app.tools().state.getState()[0]?.settings).toEqual({ theme: "深色", count: 2 });
+    expect(app.savedRaw()?.["settings"]).toEqual({ theme: "深色", count: 2 });
+    await expectConsistent(app);
+  });
+
+  it("同版本连装三次：目录依次加后缀，上一版只留最近一份", async () => {
+    const app = await device();
+    for (const [index, html] of ["<p>第一次</p>", "<p>第二次</p>", "<p>第三次</p>"].entries()) {
+      const tool = packageOf("1.0.0", html);
+      await app.workshopOf().installArchive(tool, runtimeFiles(tool));
+      expect(app.tools().state.getState()[0]?.dir).toBe(
+        joinPath(installedRoot, "notes", "versions", index === 0 ? "1.0.0" : `1.0.0-${index + 1}`),
+      );
+      await expectConsistent(app);
+    }
+    const latest = app.tools().state.getState()[0];
+    expect(latest?.previousDir).toBe(joinPath(installedRoot, "notes", "versions", "1.0.0-2"));
+    expect(latest?.previousVersion).toBe("1.0.0");
+    expect(await app.text(joinPath(latest?.dir as string, "index.html"))).toBe("<p>第三次</p>");
+
+    // 退一格：回到第二次那份；再退一格：回到第三次（来回切，不往更早翻）。
+    await app.workshopOf().rollback("notes");
+    expect(await app.text(joinPath(app.tools().state.getState()[0]?.dir as string, "index.html"))).toBe("<p>第二次</p>");
+    await expectConsistent(app);
+    await app.workshopOf().rollback("notes");
+    expect(await app.text(joinPath(app.tools().state.getState()[0]?.dir as string, "index.html"))).toBe("<p>第三次</p>");
+    await expectConsistent(app);
+  });
+
+  it("卸载一个目录已经丢了的工具：不报错、配置清空、重启不复活", async () => {
+    const app = await device();
+    // 声明了 build.out 的工具凑不出副本，自愈会如实留着"目录丢失"，正好当这个场景。
+    const tool = packageOf("1.0.0", "<p>页面</p>", { build: { out: "dist/app.js" } });
+    await app.workshopOf().installArchive(tool, {
+      ...runtimeFiles(tool),
+      "dist/app.js": new TextEncoder().encode("console.log('v1')"),
+    });
+    const dir = app.tools().state.getState()[0]?.dir as string;
+    app.removeDir(dir);
+    await app.restart();
+    expect(app.tools().state.getState()[0]?.broken?.kind).toBe("missing-dir");
+
+    // 用户看到"目录丢失"的说明卡，选择卸载：不能因为目录已经不在就报错。
+    app.tools().remove("notes");
+    const note = await app.workshopOf().purge("notes");
+    expect(note.error).toBeUndefined();
+    expect(app.tools().state.getState()).toEqual([]);
+    expect(app.savedEntries()).toEqual([]);
+    expect(await app.versionDirs("notes")).toEqual([]);
+    expect(await app.filesOf(joinPath(installedRoot, "notes"))).toEqual([]);
+
+    await app.restart();
+    expect(app.tools().state.getState()).toEqual([]);
+    expect(await app.filesOf(joinPath(installedRoot, "notes"))).toEqual([]);
   });
 });
