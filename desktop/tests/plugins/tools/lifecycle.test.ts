@@ -124,8 +124,11 @@ function machine() {
   /** 每次回收被发起时的参数：验"什么时候扫了一遍"与"带的账号对不对"。 */
   const pruneCalls: { readonly toolId: string; readonly owner: string | undefined }[] = [];
   /**
-   * 目录归谁。真机上这条信息就在路径里（`installed/<账号>/<id>`），而演示宿主
-   * 的文件树不按账号分段——不自己记一份，B 的回收就会把 A 的副本当孤儿删掉。
+   * 目录归谁。真机上这条信息就在路径里（`installed/<账号>/<id>`：`tools_root_dir`
+   * 返回的根已经含账号段，前端从不自己拼），而演示宿主是一棵扁平树——它模拟的
+   * 正是"这台机器只有一个账号"的形态，所以**不是**缺陷。只有在这一类用例里同时
+   * 挂两个账号时才需要显式记一份归属；不记的话，B 的回收会把 A 的副本当孤儿删掉，
+   * 那是测试布景失真，不是产品行为。
    */
   const ownerOfDir = new Map<string, string>();
   const backend: DemoHost = {
