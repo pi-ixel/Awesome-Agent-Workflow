@@ -328,6 +328,31 @@ export async function sweepStagingDirs(
 }
 
 /**
+ * 回收孤儿版本副本，返回真正删掉的个数。
+ *
+ * 什么时候调：安装 / 退版成功之后，以及启动自愈扫到一个"目录还在"的条目时。
+ * 那几处都已经在 `serializeToolOp` 队列里——这是安全的必要条件：目录已经写
+ * 好、配置还没写的那一瞬间，任何看盘的人都会把它当成孤儿。
+ *
+ * 判断交给宿主而不是在这里比路径：只有宿主同时看得到安装记录与窗口表，能
+ * 回答"没有记录指向它，但用户正开着它"这种情况。前端连失败都不该报错——
+ * 回收是后台清洁，一次删不掉下次还会再试。
+ */
+export async function pruneOrphanVersions(
+  io: ToolProjectIO,
+  owner: string | undefined,
+  id: string,
+): Promise<number> {
+  if (!io.pruneVersions) return 0;
+  try {
+    const report = await io.pruneVersions(id, owner);
+    return report.removed.length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * 同一个工具的新装、更新、退版必须串行。
  *
  * 两次操作同时跑会互相覆盖：后提交的那次把前一次的 `previousDir` 冲掉，

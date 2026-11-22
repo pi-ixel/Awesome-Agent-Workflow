@@ -108,6 +108,32 @@ describe("demoHost 文件树", () => {
     expect(await host.pathExists("/data/tools/installed/notes/versions/.staging-abc")).toBe(false);
   });
 
+  it("pruneToolVersions 在预览环境是空操作：没有安装记录就不猜着删", async () => {
+    // 这个端口在真机上是"回收孤儿副本"，判据是安装记录 + 窗口表。内存宿主
+    // 两样都没有——照路径猜着删会把演示里的工具删掉，所以一律回空报告。
+    host.addDir("/data/tools/installed/notes/versions/1.0.0");
+    const report = await host.pruneToolVersions!("notes", "alice");
+    expect(report).toEqual({ removed: [], kept: [], skipped: [] });
+    expect(await host.pathExists("/data/tools/installed/notes/versions/1.0.0")).toBe(true);
+  });
+
+  it("toolPurge 连上一版清单一起清：卸载后它不再被任何记录引用", async () => {
+    host.addDir("/data/tools/installed/notes/versions/1.0.0");
+    await host.writeTextFile("/data/tools/installed/notes/versions/1.0.0/manifest.json", '{"id": "notes"}');
+    // 预览环境的备份不按账号分区：`%APPDATA%/tools/backups/<id>/previous.json`。
+    await host.writeTextFile("%APPDATA%/tools/backups/notes/previous.json", '{"id": "notes"}');
+
+    const report = await host.toolPurge({
+      toolId: "notes",
+      owner: "alice",
+      projectDirs: ["/data/tools/installed/notes/versions/1.0.0"],
+    });
+
+    expect(report.removedDirs).toHaveLength(1);
+    expect(report.removedBackup).toBe(true);
+    expect(await host.pathExists("%APPDATA%/tools/backups/notes")).toBe(false);
+  });
+
   it("runCommand 命中脚本返回预置结果，未脚本化给出错误", async () => {
     host.scriptCommand("chrys.exe", ["--version"], {
       code: 0,

@@ -90,6 +90,18 @@ export interface ToolPurgeReport {
   /** 校验没过或删除失败的目录，界面要如实告诉用户"这几个没删掉"。 */
   readonly skippedDirs: readonly string[];
   readonly removedData: boolean;
+  /** `backups/<账号>/<id>`（只有一份上一版清单）是否删掉了。 */
+  readonly removedBackup: boolean;
+}
+
+/** `tool_prune_versions` 的报告（与 Rust 侧 `ToolPruneReport` 一一对应）。 */
+export interface ToolPruneReport {
+  /** 真删掉了的目录。 */
+  readonly removed: readonly string[];
+  /** 被记录引用或正被窗口/进程使用，因此保留的目录。 */
+  readonly kept: readonly string[];
+  /** 该删但没删掉（被占用、权限不足），下次还会再试。 */
+  readonly skipped: readonly string[];
 }
 
 export interface HostRuntime {
@@ -160,6 +172,16 @@ export interface HostRuntime {
    * 别处一律拒绝——删目录是不可逆操作，宁可让它窄到只能干一件事。
    */
   dropToolStaging?(path: string): Promise<void>;
+  /**
+   * 回收一个工具的孤儿版本副本：`installed/<账号>/<id>/versions/` 下既没有
+   * 被安装记录（`dir` / `previousDir` / `sourceDir`）引用、也没有窗口或进程
+   * 正在用的目录。
+   *
+   * 判据在宿主：只有它同时看得到安装记录与窗口表，能回答"没有记录指向它，
+   * 但用户正开着它"。`owner` 是发起操作的账号；与宿主当前账号不一致时宿主
+   * 拒绝执行（换账号那一瞬间不能以新身份去扫别人的目录）。
+   */
+  pruneToolVersions?(toolId: string, owner?: string): Promise<ToolPruneReport>;
   /**
    * 打开（或唤起）SSO 登录窗口：首次调用创建 **隐藏** 窗口（给持久
    * cookie 的静默探测留窗口期），再次调用即唤起显示。语义见 sso_login.rs。
@@ -369,6 +391,8 @@ export type SkillFiles = Pick<
   | "userDataDir" | "listDirNames" | "pathExists" | "copyDir" | "writeTextFile" | "toolPurge" | "moveToolPath"
   // 安装失败清理：只删工具库 versions/ 下的副本目录
   | "dropToolStaging"
+  // 孤儿版本副本回收：判断在宿主（安装记录 + 窗口表），前端只发起
+  | "pruneToolVersions"
   // 工具带依赖之后要落二进制（node_modules / 图片 / wasm）并整树导出
   | "writeBinaryFile" | "readBinaryFile" | "listToolFiles"
   // 开发指导正文：用户改过的规范要贯通到 AGENTS.md 与技能目录

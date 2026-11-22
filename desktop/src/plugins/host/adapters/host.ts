@@ -20,7 +20,7 @@ import { listen } from "@tauri-apps/api/event";
 
 import { asSsoLoginPollWire } from "./ssoWire.ts";
 import type { SsoLoginPollWire } from "../types.ts";
-import type { CommandResult, HostRuntime, ToolPurgeReport } from "../types.ts";
+import type { CommandResult, HostRuntime, ToolPruneReport, ToolPurgeReport } from "../types.ts";
 import { createBridgeHost } from "../dev/bridgeClient.ts";
 
 // ---------------------------------------------------------------------------
@@ -149,6 +149,16 @@ export function createTauriHost(invoke: NativeInvoke = defaultInvoke): HostRunti
       // Rust 侧只接受 `installed/<账号>/<id>/versions/<名字>` 这个形状；
       // 传别处会明确报错，不会静默删掉什么。
       await invoke<null>("tool_drop_staging", { path });
+    },
+    async pruneToolVersions(toolId, owner) {
+      // 判据全在 Rust：安装记录与窗口表都只有它看得到。这里只把发起时的账号
+      // 带过去，让它在换账号那一瞬间能拒绝——路径按 owner 拼，不校验就删错人。
+      return invoke<ToolPruneReport>("tool_prune_versions", {
+        toolId,
+        // Rust 侧是 `String`：未登录（undefined）时传空串，由它按"账号不合法"
+        // 拒绝。这里不静默换成"当前账号"——那正是要防的越权。
+        owner: owner ?? "",
+      });
     },
     async ssoOpenLogin(loginUrl, attemptId) {
       try {
@@ -508,7 +518,18 @@ export function createDemoHost(): DemoHost {
       const dataSegments = ["%LOCALAPPDATA%", "com.aaw.desktop", "tools", "storage", input.owner, `${input.toolId}.json`];
       const removedData = nodeAt(dataSegments)?.type === "file";
       if (removedData) removeAt(dataSegments);
-      return Promise.resolve({ removedDirs, skippedDirs, removedData });
+      // 上一版清单同样落在一个独立目录里，卸载后没有任何记录指它。预览环境
+      // 不按账号分区（`userDataDir` 就是 `%APPDATA%/tools/backups`），所以这里
+      // 少一层账号段——按真实宿主的布局删会删空。
+      const backupSegments = ["%APPDATA%", "tools", "backups", input.toolId];
+      const removedBackup = nodeAt(backupSegments)?.type === "dir";
+      if (removedBackup) removeAt(backupSegments);
+      return Promise.resolve({ removedDirs, skippedDirs, removedData, removedBackup });
+    },
+    pruneToolVersions() {
+      // 预览环境没有安装记录，也就没有"谁引用了哪份副本"这回事。按路径猜着删
+      // 会把演示里的工具删掉，所以一律回空报告：真回收只在桌面宿主发生。
+      return Promise.resolve<ToolPruneReport>({ removed: [], kept: [], skipped: [] });
     },
     moveToolPath(from, to) {
       const sourceSegments = normalizeKey(from);
