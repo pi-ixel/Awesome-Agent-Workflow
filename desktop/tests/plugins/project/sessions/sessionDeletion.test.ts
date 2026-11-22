@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import {
+  browser,
   projectIndexes,
   projectFactory,
   bindRuntimeServices,
@@ -107,6 +108,40 @@ it("retries local cleanup without repeating an already completed source deletion
   await deleteArchivedSession(target, cleanup);
   expect(nativeDelete).toHaveBeenCalledOnce();
   expect(cleanup).toHaveBeenCalledTimes(2);
+});
+
+it("retries only local cleanup when deleting the target browser snapshot fails", async () => {
+  const forgot = vi
+    .spyOn(browser, "forgetRestore")
+    .mockRejectedValueOnce(new Error("浏览器恢复存储不可用"))
+    .mockResolvedValue(undefined);
+  const other = { ...target, workspacePath: "D:/Other" };
+  const clean = () => Promise.resolve();
+  projectIndexes.archive
+    .getState()
+    .archiveSession(other.workspacePath, other.sessionId, other.agentKey);
+  try {
+    await expect(deleteArchivedSession(target, clean)).rejects.toThrow(
+      "浏览器恢复存储不可用",
+    );
+    expect(
+      projectIndexes.deletions.store.getState().entries[deletionKey(target)]
+        ?.phase,
+    ).toBe("local");
+    await deleteArchivedSession(target, clean);
+    expect(nativeDelete).toHaveBeenCalledOnce();
+    const scope = {
+      workspaceId: target.workspacePath,
+      sessionId: target.sessionId,
+    };
+    expect(forgot.mock.calls).toEqual([[scope], [scope]]);
+    expect(projectIndexes.archive.getState().archivedSessions.size).toBe(1);
+    expect(
+      projectIndexes.deletions.store.getState().entries[deletionKey(other)],
+    ).toBeUndefined();
+  } finally {
+    forgot.mockRestore();
+  }
 });
 
 it("refuses sessions owned by another executor", async () => {

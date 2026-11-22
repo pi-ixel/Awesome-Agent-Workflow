@@ -625,6 +625,18 @@ it("keeps shared ACP wire definitions independent of Desktop services and produc
   }
 });
 
+it("keeps MCP contracts independent of Desktop runtime and plugins", () => {
+  for (const { path, targets } of productionImports("src/contracts/mcp")) {
+    expect(
+      targets.filter(
+        (target) =>
+          /^(?:src\/(?:plugins|bootstrap)\/|@tauri-apps\/)/.test(target),
+      ),
+      path,
+    ).toEqual([]);
+  }
+});
+
 it("keeps public models and shared utilities independent of plugin implementations", () => {
   expect(readdirSync(resolve("src/contracts")).sort()).toEqual([
     "acp",

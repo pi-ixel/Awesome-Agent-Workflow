@@ -76,7 +76,7 @@ export function sessionListEntries(
       title:
         agentSessionTitle(info.title) ??
         cachedTitle(info.sessionId) ??
-        sessionListTitleOf(info),
+        sessionListTitleOf(info.updatedAt),
       updatedAt: info.updatedAt ?? null,
     });
   }
@@ -87,13 +87,26 @@ export function sessionListEntries(
           ([path]) => pathKey(path) === pathKey(runtime.workspacePath),
         )?.[1] ?? [])
       : [];
-  for (const entry of [...catalogSessions, ...cachedSessions]) {
-    if (!entries.some((item) => item.id === entry.id)) entries.push(entry);
-  }
+  const retain = (entry: SessionSummary) => {
+    if (entries.some((item) => item.id === entry.id)) return;
+    const nativeTitle = entry.nativeTitle ?? entry.title;
+    if (!nativeTitle.trim() || agentSessionTitle(nativeTitle)) {
+      entries.push(entry);
+      return;
+    }
+    const fallback = sessionListTitleOf(entry.updatedAt);
+    entries.push({
+      ...entry,
+      nativeTitle: fallback,
+      title:
+        entry.title !== nativeTitle
+          ? entry.title
+          : displayTitleOf(entry.id, fallback, runtime.agentKey),
+    });
+  };
+  for (const entry of [...catalogSessions, ...cachedSessions]) retain(entry);
   // 索引可能滞后：本次进程的 session/list 不能隐藏仍在后台执行的会话。
-  for (const entry of retainedEntries) {
-    if (!entries.some((item) => item.id === entry.id)) entries.push(entry);
-  }
+  for (const entry of retainedEntries) retain(entry);
   // 展示序 = 最后活动时间倒序（ZCode 同语义）：当前会话不再人为置顶——
   // 打开历史会话时它回到自己的活动位置，列表不跳。
   entries.sort((a, b) => {
@@ -118,8 +131,8 @@ function hhmmOf(iso: string): string {
 }
 
 /** 历史会话的兜底标题（agent 未提供 title 时不露出 UUID）。 */
-function sessionListTitleOf(info: SessionInfo): string {
-  const hhmm = typeof info.updatedAt === "string" ? hhmmOf(info.updatedAt) : "";
+function sessionListTitleOf(updatedAt?: string | null): string {
+  const hhmm = typeof updatedAt === "string" ? hhmmOf(updatedAt) : "";
   return hhmm === "" ? "会话" : `会话 · ${hhmm}`;
 }
 
