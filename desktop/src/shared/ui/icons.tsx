@@ -477,6 +477,14 @@ export function PuzzleIcon(props: IconProps) {
   );
 }
 
+export function PlugIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M7 2v7m10-7v7M2.5 9h19v3a6 6 0 0 1-6 6h-7a6 6 0 0 1-6-6V9ZM12 18v4" />
+    </Svg>
+  );
+}
+
 export function TrashIcon(props: IconProps) {
   return (
     <Svg {...props}>
@@ -496,7 +504,9 @@ export function SkillIcon(props: IconProps) {
           <stop offset="100%" stopColor="var(--color-skill-reference-lilac)" />
         </linearGradient>
       </defs>
-      <path d="m5 7 7-4 7 4v10l-7 4-7-4zM5 7l7 4 7-4M5 12l7 4 7-4M12 11v10" />
+      <path d="M11 4c.7 4.1 2.4 5.8 6.5 6.5-4.1.7-5.8 2.4-6.5 6.5-.7-4.1-2.4-5.8-6.5-6.5C8.6 9.8 10.3 8.1 11 4Z" />
+      <path d="M19 2v6m-3-3h6" />
+      <path d="M5 15.5c.4 1.9 1.1 2.7 3 3.2-1.9.4-2.6 1.3-3 3.3-.4-2-1.1-2.9-3-3.3 1.9-.5 2.6-1.3 3-3.2Z" />
     </Svg>
   );
 }

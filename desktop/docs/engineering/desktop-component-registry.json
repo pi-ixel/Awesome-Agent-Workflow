@@ -972,7 +972,7 @@
     },
     "targets": [
       "apply/Installer → (inline)",
-      "apply/Sidebar/\"mcp\"/Icon → shared/ui/icons.tsx#GlobeIcon",
+      "apply/Sidebar/\"mcp\"/Icon → shared/ui/icons.tsx#PlugIcon",
       "apply/Sidebar/\"skills\"/Icon → shared/ui/icons.tsx#SkillIcon",
       "apply/Source → (inline)",
       "apply/sidebar/\"plugin-management\"/Icon → shared/ui/icons.tsx#PuzzleIcon",
@@ -1759,6 +1759,7 @@
         "PinIcon",
         "PinOffIcon",
         "PlusIcon",
+        "PlugIcon",
         "PuzzleIcon",
         "RefreshIcon",
         "SearchIcon",

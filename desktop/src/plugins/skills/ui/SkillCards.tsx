@@ -2,7 +2,10 @@ import { type ReactNode } from "react";
 import type { NativeSkill } from "../../host/types.ts";
 import { pathName } from "../../../shared/panelPaths.ts";
 import { ActionButton, ToggleSwitch } from "../../../shared/ui/controls.tsx";
-import { CapabilityCard } from "../../../shared/ui/CapabilityCard.tsx";
+import {
+  CapabilityCard,
+  capabilityGridClass,
+} from "../../../shared/ui/CapabilityCard.tsx";
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
 import { useMenuController } from "../../../shared/ui/useMenuController.ts";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
@@ -58,9 +61,7 @@ export function SkillGroup({
           {entries.length} 项
         </span>
       </h2>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(14rem,100%),1fr))] gap-2.5">
-        {children}
-      </div>
+      <div className={capabilityGridClass}>{children}</div>
     </section>
   );
 }
@@ -124,11 +125,13 @@ export function SkillCard({
   skill,
   actions,
   onDetail,
+  metadata,
   status,
 }: {
   skill: NativeSkill;
   actions: Actions;
   onDetail: (button: HTMLButtonElement) => void;
+  metadata: string;
   status?: string;
 }) {
   const { menu, open, dismiss } = useMenuController();
@@ -136,19 +139,32 @@ export function SkillCard({
     <CapabilityCard
       name={skill.name}
       description={skill.description}
+      metadata={metadata}
       status={status}
       icon={<SkillIcon className="ui-icon-16" />}
       onDetail={onDetail}
+      toggle={
+        <ToggleSwitch
+          appearance="neutral"
+          label={skill.name + " 启用"}
+          checked={!skill.disabledId}
+          disabled={actions.busy || !!skill.unavailable}
+          onChange={() => actions.toggle(skill)}
+        />
+      }
       actions={
         <>
-          <ToggleSwitch
-            appearance="neutral"
-            label={skill.name + " 启用"}
-            checked={!skill.disabledId}
-            disabled={actions.busy || !!skill.unavailable}
-            onChange={() => actions.toggle(skill)}
-          />
           <IconButton
+            iconSize="compact"
+            aria-label={skill.name + " 删除"}
+            data-hint="删除"
+            disabled={actions.busy || !!skill.unavailable}
+            onClick={(event) => actions.remove(skill, event.currentTarget)}
+          >
+            <TrashIcon className="ui-icon-14" />
+          </IconButton>
+          <IconButton
+            iconSize="compact"
             aria-label={skill.name + " 更多操作"}
             data-hint="更多操作"
             aria-haspopup="menu"
@@ -171,20 +187,12 @@ export function SkillCard({
                     icon: <FileIcon className="ui-icon-16" />,
                     onSelect: () => onDetail(anchor),
                   },
-                  {
-                    id: "remove",
-                    label: "删除",
-                    icon: <TrashIcon className="ui-icon-16" />,
-                    danger: true,
-                    disabled: !!skill.unavailable,
-                    onSelect: () => actions.remove(skill, anchor),
-                  },
                 ],
                 { trigger: anchor },
               );
             }}
           >
-            <EllipsisIcon className="ui-icon-16" />
+            <EllipsisIcon className="ui-icon-14" />
           </IconButton>
           {menu && (
             <ContextMenu

@@ -217,10 +217,37 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
   await expect(task).toHaveAttribute("aria-current", "true");
   const nav = collections.getByRole("navigation", { name: "插件管理" });
   const skills = nav.getByRole("button", { name: "技能", exact: true });
+  const mcp = nav.getByRole("button", { name: "MCP", exact: true });
   await expect(skills).toHaveAttribute("aria-current", "page");
   const title = "发布准备和回滚预案的完整审查";
   const card = collections.getByRole("article", { name: title });
   const detail = card.getByRole("button", { name: `查看 ${title} 详情` });
+  const longDescription = card.getByText(/^审查发布准备/);
+  const shortCard = collections.getByRole("article", { name: "旧版发布检查" });
+  await expect(longDescription).toBeVisible();
+  const clipping = longDescription.locator("..");
+  await expect(clipping).toHaveCSS("white-space", "nowrap");
+  await expect(clipping).toHaveCSS("overflow", "hidden");
+  const descriptionBounds = (await clipping.boundingBox())!;
+  expect(descriptionBounds.height).toBeLessThan(24);
+  expect((await longDescription.boundingBox())!.width).toBeGreaterThan(
+    descriptionBounds.width,
+  );
+  expect((await card.boundingBox())!.width).toBeGreaterThanOrEqual(256);
+  expect((await card.boundingBox())!.height).toBeCloseTo(
+    (await shortCard.boundingBox())!.height,
+    1,
+  );
+  const beforeHover = (await longDescription.boundingBox())!.x;
+  await card.hover();
+  await expect
+    .poll(async () => (await longDescription.boundingBox())!.x)
+    .toBeLessThan(beforeHover - 2);
+  await nav.hover();
+  await expect
+    .poll(async () => (await longDescription.boundingBox())!.x)
+    .toBeCloseTo(beforeHover, 1);
+  await expect(card.getByText("项目技能 · 6.8 KiB")).toBeVisible();
   await detail.press("Shift");
   for (const [theme, size] of appearanceSteps) {
     await selectAppearance(page, theme, size);
@@ -230,6 +257,41 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
     );
     await expect(task).toHaveAttribute("aria-current", "true");
     await expect(skills).toHaveAttribute("aria-current", "page");
+    const glyphs = await nav.locator("button > svg").evaluateAll((icons) =>
+      icons.map((element) => {
+        const icon = element as SVGSVGElement;
+        const box = icon.getBBox();
+        const rect = icon.getBoundingClientRect();
+        const { width, height } = icon.viewBox.baseVal;
+        return {
+          left: rect.left,
+          width: rect.width,
+          height: rect.height,
+          drawnWidth: (box.width / width) * rect.width,
+          drawnHeight: (box.height / height) * rect.height,
+          centerX: (box.x + box.width / 2) / width,
+          centerY: (box.y + box.height / 2) / height,
+        };
+      }),
+    );
+    expect(glyphs).toHaveLength(2);
+    const [skillGlyph, mcpGlyph] = glyphs;
+    expect(skillGlyph!.left).toBeCloseTo(mcpGlyph!.left, 1);
+    for (const glyph of glyphs) {
+      expect(glyph.width).toBeCloseTo((16 * size) / 14, 1);
+      expect(glyph.height).toBeCloseTo(glyph.width, 1);
+      expect(glyph.centerX).toBeCloseTo(0.5, 1);
+      expect(glyph.centerY).toBeCloseTo(0.5, 1);
+    }
+    expect(
+      mcpGlyph!.drawnWidth / skillGlyph!.drawnWidth,
+    ).toBeGreaterThanOrEqual(0.94);
+    expect(mcpGlyph!.drawnWidth / skillGlyph!.drawnWidth).toBeLessThanOrEqual(
+      1.06,
+    );
+    expect(
+      Math.abs(skillGlyph!.drawnHeight - mcpGlyph!.drawnHeight),
+    ).toBeLessThan(0.75);
     await expect(detail.getByText(title)).toHaveCSS("font-size", size + "px");
     await expect(detail).toBeFocused();
     await expect(detail).not.toHaveCSS("box-shadow", "none");
@@ -252,6 +314,36 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
   await expect(
     collections.getByRole("switch", { name: "旧版发布检查 启用" }),
   ).toBeVisible();
+  await mcp.click();
+  await expect(mcp).toHaveAttribute("aria-current", "page");
+  const mcpCard = collections.getByRole("article", { name: "发布服务" });
+  const browser = collections.getByRole("article", { name: "AAW 内置浏览器" });
+  await expect(browser.getByRole("switch")).toBeEnabled();
+  await expect(browser.getByRole("button")).toHaveCount(0);
+  const plugPath = await mcp.locator("svg path").getAttribute("d");
+  expect(plugPath).toBeTruthy();
+  await expect(browser.locator("svg path")).toHaveAttribute("d", plugPath!);
+  await expect(
+    mcpCard
+      .getByRole("button", { name: "发布服务", exact: true })
+      .locator("svg path"),
+  ).toHaveAttribute("d", plugPath!);
+  const transport = mcpCard.getByText("Streamable HTTP");
+  const remove = mcpCard.getByRole("button", { name: "发布服务 删除" });
+  const more = mcpCard.getByRole("button", { name: "发布服务 更多操作" });
+  await expect(more).toBeVisible();
+  expect((await transport.boundingBox())!.y).toBeLessThan(
+    (await remove.boundingBox())!.y,
+  );
+  expect((await remove.boundingBox())!.y).toBeCloseTo(
+    (await more.boundingBox())!.y,
+    1,
+  );
+  expect((await mcpCard.boundingBox())!.height).toBeCloseTo(
+    (await browser.boundingBox())!.height,
+    1,
+  );
+  expect((await mcpCard.boundingBox())!.width).toBeGreaterThanOrEqual(256);
 });
 
 test("技能详情宽屏并列大纲与技能信息，窄屏仍可浏览真实文件区域", async ({

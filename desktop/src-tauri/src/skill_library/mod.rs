@@ -185,6 +185,29 @@ pub async fn skill_library_change(
 }
 
 #[tauri::command]
+pub async fn skill_library_sizes(
+    app: AppHandle,
+    webview: tauri::Webview,
+    query: Query,
+    skills: Vec<files::Selection>,
+) -> std::result::Result<Vec<Option<u64>>, String> {
+    if webview.label() != "main" {
+        return Err("只有主窗口可以读取技能目录大小".into());
+    }
+    if skills.len() > files::MAX_SIZE_SELECTIONS {
+        return Err("请求的技能数量超过上限".into());
+    }
+    let locations = Locations::resolve(&app)?;
+    // 目录遍历不占用技能列表和修改操作的锁。
+    tauri::async_runtime::spawn_blocking(move || {
+        files::directory_sizes(&locations, &query, &skills)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn skill_library_files(
     app: AppHandle,
     webview: tauri::Webview,

@@ -2,7 +2,7 @@ import type { Context } from "cordis";
 import type { ComponentType } from "react";
 import { SkillLibrary } from "./SkillLibrary.tsx";
 import { createStore, useStore } from "zustand";
-import { GlobeIcon, PuzzleIcon, SkillIcon } from "../../../shared/ui/icons.tsx";
+import { PlugIcon, PuzzleIcon, SkillIcon } from "../../../shared/ui/icons.tsx";
 import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { knownWorkspacePaths } from "../../project/service.ts";
 import type { SkillsSettingsView } from "../types.ts";
@@ -57,7 +57,7 @@ export function apply(ctx: Context): void {
           {(
             [
               { label: "技能", Icon: SkillIcon, id: "skills" },
-              { label: "MCP", Icon: GlobeIcon, id: "mcp" },
+              { label: "MCP", Icon: PlugIcon, id: "mcp" },
             ] as const
           )
             .filter(({ id }) => id !== "mcp" || McpPage)

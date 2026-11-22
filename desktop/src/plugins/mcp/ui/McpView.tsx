@@ -13,6 +13,10 @@ import {
   ToggleSwitch,
 } from "../../../shared/ui/controls.tsx";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
+import {
+  CapabilityCard,
+  capabilityGridClass,
+} from "../../../shared/ui/CapabilityCard.tsx";
 import { PageHeader } from "../../../shared/ui/PageHeader.tsx";
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
@@ -20,10 +24,10 @@ import { useMenuController } from "../../../shared/ui/useMenuController.ts";
 import { fieldSurfaceClass } from "../../../shared/ui/inputStyles.ts";
 import {
   EllipsisIcon,
-  GlobeIcon,
+  PlugIcon,
   PlusIcon,
-  PuzzleIcon,
   SearchIcon,
+  TrashIcon,
 } from "../../../shared/ui/icons.tsx";
 import type { HostService } from "../../host/service.ts";
 import { useBrowserAgentControl } from "../../browser/service.ts";
@@ -51,10 +55,6 @@ type EntryAction =
   | { kind: "remove"; name: string };
 
 const browserName = "AAW 内置浏览器";
-const cardClass =
-  "flex min-h-[3.75rem] min-w-0 items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 hover:border-line-strong";
-const iconClass =
-  "flex size-7 shrink-0 items-center justify-center rounded-lg bg-skill-reference-lilac/10 text-skill-reference-lilac";
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -111,73 +111,73 @@ function McpServiceCard({
 }) {
   const { menu, open, dismiss } = useMenuController();
   return (
-    <li className={cardClass}>
-      <span className={iconClass}>
-        <PuzzleIcon className="ui-icon-16" aria-hidden="true" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <ActionButton
-          tone="ghost"
-          size="compact"
-          className="!block !h-auto max-w-full truncate !p-0 text-left text-ui-base font-semibold"
-          data-hint={entry.name}
-          onClick={onEdit}
-          disabled={disabled}
-        >
-          {entry.name}
-        </ActionButton>
-        {duplicate ? (
-          <p className="text-ui-caption text-warn-ink">
-            {duplicateNameMessage}
-          </p>
-        ) : (
-          <p className="truncate text-ui-caption text-ink-mute">
-            {entry.transport === "http" ? "Streamable HTTP" : entry.transport}
-          </p>
-        )}
-      </div>
-      <ToggleSwitch
-        appearance="neutral"
-        label={entry.name + " 启用"}
-        checked={entry.enabled}
-        onChange={onToggle}
-        disabled={disabled}
+    <li className="min-w-0">
+      <CapabilityCard
+        name={entry.name}
+        description={
+          entry.transport === "http" ? "Streamable HTTP" : entry.transport
+        }
+        metadata={duplicate ? undefined : entry.enabled ? "已启用" : "已停用"}
+        status={duplicate ? duplicateNameMessage : undefined}
+        icon={<PlugIcon className="ui-icon-16" />}
+        onDetail={onEdit}
+        detailLabel={entry.name}
+        detailDisabled={disabled}
+        toggle={
+          <ToggleSwitch
+            appearance="neutral"
+            label={entry.name + " 启用"}
+            checked={entry.enabled}
+            onChange={onToggle}
+            disabled={disabled}
+          />
+        }
+        actions={
+          <>
+            <IconButton
+              iconSize="compact"
+              aria-label={entry.name + " 删除"}
+              data-hint="删除"
+              disabled={disabled}
+              onClick={onRemove}
+            >
+              <TrashIcon className="ui-icon-14" />
+            </IconButton>
+            <IconButton
+              iconSize="compact"
+              aria-label={entry.name + " 更多操作"}
+              data-hint="更多操作"
+              aria-haspopup="menu"
+              aria-expanded={!!menu && !menu.closing}
+              disabled={disabled}
+              onClick={(event) => {
+                if (menu && !menu.closing) {
+                  dismiss();
+                  return;
+                }
+                open(
+                  "actions",
+                  entry.name + " 的操作",
+                  [{ id: "edit", label: "编辑", onSelect: onEdit }],
+                  { trigger: event.currentTarget },
+                );
+              }}
+            >
+              <EllipsisIcon className="ui-icon-14" />
+            </IconButton>
+            {menu && (
+              <ContextMenu
+                entries={menu.entries}
+                placement={menu.placement}
+                trigger={menu.trigger}
+                label={menu.label}
+                closing={menu.closing}
+                onDismiss={dismiss}
+              />
+            )}
+          </>
+        }
       />
-      <IconButton
-        iconSize="compact"
-        aria-label={entry.name + " 更多操作"}
-        data-hint="更多操作"
-        aria-haspopup="menu"
-        aria-expanded={!!menu && !menu.closing}
-        disabled={disabled}
-        onClick={(event) => {
-          if (menu && !menu.closing) {
-            dismiss();
-            return;
-          }
-          open(
-            "actions",
-            entry.name + " 的操作",
-            [
-              { id: "edit", label: "编辑", onSelect: onEdit },
-              { id: "remove", label: "删除", onSelect: onRemove, danger: true },
-            ],
-            { trigger: event.currentTarget },
-          );
-        }}
-      >
-        <EllipsisIcon className="ui-icon-14" />
-      </IconButton>
-      {menu && (
-        <ContextMenu
-          entries={menu.entries}
-          placement={menu.placement}
-          trigger={menu.trigger}
-          label={menu.label}
-          closing={menu.closing}
-          onDismiss={dismiss}
-        />
-      )}
     </li>
   );
 }
@@ -417,27 +417,31 @@ export function McpView({
             {browserControl.error}
           </p>
         )}
-        <ul
-          aria-label="MCP 服务"
-          className="grid auto-rows-fr grid-cols-[repeat(auto-fill,minmax(min(100%,15rem),1fr))] gap-2.5"
-        >
+        <ul aria-label="MCP 服务" className={capabilityGridClass}>
           {showBrowser && (
-            <li className={cardClass}>
-              <span className={iconClass}>
-                <GlobeIcon className="ui-icon-16" aria-hidden="true" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-ui-base font-semibold">{browserName}</p>
-                <p className="text-ui-caption text-ink-mute">内置浏览器工具</p>
-              </div>
-              <ToggleSwitch
-                appearance="neutral"
-                label={browserName + " 启用"}
-                checked={browserControl.enabled === true}
-                disabled={
-                  browserControl.pending || browserControl.enabled === null
+            <li className="min-w-0">
+              <CapabilityCard
+                name={browserName}
+                description="内置浏览器工具"
+                metadata={
+                  browserControl.enabled === null
+                    ? undefined
+                    : browserControl.enabled
+                      ? "已启用"
+                      : "已停用"
                 }
-                onChange={browserControl.change}
+                icon={<PlugIcon className="ui-icon-16" />}
+                toggle={
+                  <ToggleSwitch
+                    appearance="neutral"
+                    label={browserName + " 启用"}
+                    checked={browserControl.enabled === true}
+                    disabled={
+                      browserControl.pending || browserControl.enabled === null
+                    }
+                    onChange={browserControl.change}
+                  />
+                }
               />
             </li>
           )}

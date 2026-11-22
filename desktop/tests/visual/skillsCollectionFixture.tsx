@@ -1,6 +1,9 @@
 import { Context } from "cordis";
 import { createStore } from "zustand";
 import * as skillsWorkbench from "../../src/plugins/skills/ui/workbench.tsx";
+import { McpView } from "../../src/plugins/mcp/ui/McpView.tsx";
+import type { McpManagement } from "../../src/plugins/mcp/runtime/management.ts";
+import { createTestBrowserHost } from "../helpers/browserHost.ts";
 import {
   createTestSkills,
   skillsWorkbenchFixture,
@@ -59,7 +62,9 @@ export async function createSkillsCollection(isPreview = false) {
         source,
         path: source + "/review",
         description:
-          "审查发布准备、核对安装包和离线发布说明，并逐项验证升级路径和生产环境回滚预案。",
+          "审查发布准备、核对安装包和离线发布说明，并逐项验证升级路径和生产环境回滚预案。".repeat(
+            8,
+          ),
         realPath: source + "/review",
         preview,
         status: "正常",
@@ -171,9 +176,46 @@ export async function createSkillsCollection(isPreview = false) {
         candidates: () => Promise.resolve([]),
         change,
         files,
+        sizes: (_query: unknown, selected: readonly { path: string }[]) =>
+          Promise.resolve(
+            selected.map(({ path }) => (path === sample.path ? 6963 : 2048)),
+          ),
       },
     },
   } as unknown as Context["host"]);
+  const browser = createTestBrowserHost();
+  const mcp = {
+    host: {
+      managedRead: () =>
+        Promise.resolve({
+          revision: "r1",
+          entries: [
+            {
+              name: "发布服务",
+              enabled: true,
+              transport: "http",
+              url: "http://localhost:9000/mcp",
+              headers: [],
+            },
+          ],
+        }),
+    },
+  } as unknown as McpManagement;
+  ctx.provide("mcp", {
+    View: () => (
+      <McpView
+        service={mcp}
+        agentId="codeagent"
+        activeProfile={null}
+        browser={browser}
+        canManageNative={false}
+        canManageInjected
+        canTest={false}
+      />
+    ),
+    previewInstall: () => Promise.reject(new Error("预览安装未在夹具接入")),
+    commitInstall: () => Promise.reject(new Error("提交安装未在夹具接入")),
+  });
 
   await ctx.plugin(skillsWorkbench);
   const entry = workbench

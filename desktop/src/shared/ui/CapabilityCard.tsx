@@ -7,20 +7,31 @@ import {
 } from "react";
 import { NavigationRow } from "./NavigationRow.tsx";
 
+export const capabilityGridClass =
+  "grid grid-cols-[repeat(auto-fill,minmax(min(16rem,100%),1fr))] gap-2.5";
+
 export function CapabilityCard({
   name,
   description,
   icon,
+  toggle,
   actions,
+  metadata,
   status,
   onDetail,
+  detailLabel,
+  detailDisabled,
 }: {
   readonly name: string;
-  readonly description: string;
+  readonly description?: string;
   readonly icon: ReactNode;
-  readonly actions: ReactNode;
+  readonly toggle: ReactNode;
+  readonly actions?: ReactNode;
+  readonly metadata?: string;
   readonly status?: string;
-  readonly onDetail: (button: HTMLButtonElement) => void;
+  readonly onDetail?: (button: HTMLButtonElement) => void;
+  readonly detailLabel?: string;
+  readonly detailDisabled?: boolean;
 }) {
   const viewport = useRef<HTMLSpanElement>(null);
   const text = useRef<HTMLSpanElement>(null);
@@ -42,56 +53,76 @@ export function CapabilityCard({
     "--description-offset": `-${overflow}px`,
     "--description-duration": `${Math.max(1200, overflow * 28)}ms`,
   } as CSSProperties;
+  const heading = (
+    <>
+      <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-skill-reference-lilac/10 text-skill-reference-lilac">
+        {icon}
+      </span>
+      <span
+        className="min-w-0 truncate text-ui-base font-semibold"
+        data-hint={name}
+      >
+        {name}
+      </span>
+    </>
+  );
   return (
     <article
       aria-label={name}
-      className="group/capability-card flex min-h-16 min-w-0 items-stretch gap-1 rounded-xl border border-line bg-surface pr-2 transition-colors hover:border-line-strong focus-within:border-line-strong"
+      className="group/capability-card grid h-full min-w-0 grid-rows-[auto_auto_auto] gap-1.5 rounded-xl border border-line bg-surface px-3 py-2.5 transition-colors hover:border-line-strong focus-within:border-line-strong"
     >
-      <NavigationRow
-        layout="compound"
-        className="group/card-main items-center gap-2 px-2.5 py-2 leading-tight"
-        aria-label={`查看 ${name} 详情`}
-        onClick={(event) => onDetail(event.currentTarget)}
-      >
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-selected text-ink-mute">
-          {icon}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span
-            className="block truncate text-ui-base font-semibold"
-            data-hint={name}
+      <div className="flex min-w-0 items-center gap-2">
+        {onDetail ? (
+          <NavigationRow
+            layout="compound"
+            className="items-center gap-2"
+            aria-label={detailLabel ?? `查看 ${name} 详情`}
+            onClick={(event) => onDetail(event.currentTarget)}
+            disabled={detailDisabled}
           >
-            {name}
-          </span>
-          {description && (
-            <span
-              ref={viewport}
-              className="mt-0.5 block overflow-hidden whitespace-nowrap text-ui-caption text-ink-mute"
-            >
-              <span
-                ref={text}
-                style={overflow > 0 ? animation : undefined}
-                className={
-                  overflow > 0
-                    ? "inline-block transition-transform duration-0 ease-linear motion-safe:group-hover/capability-card:translate-x-(--description-offset) motion-safe:group-hover/capability-card:duration-(--description-duration) motion-safe:group-focus-visible/card-main:translate-x-(--description-offset) motion-safe:group-focus-visible/card-main:duration-(--description-duration)"
-                    : "inline-block"
-                }
-              >
-                {description}
-              </span>
+            {heading}
+          </NavigationRow>
+        ) : (
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            {heading}
+          </div>
+        )}
+        <div className="flex shrink-0 items-center">{toggle}</div>
+      </div>
+      <span
+        ref={viewport}
+        className="block h-[1lh] min-w-0 overflow-hidden whitespace-nowrap text-ui-caption text-ink-mute"
+      >
+        <span
+          ref={text}
+          style={overflow > 0 ? animation : undefined}
+          className={
+            overflow > 0
+              ? "inline-block whitespace-nowrap transition-transform duration-0 ease-linear motion-safe:group-hover/capability-card:translate-x-(--description-offset) motion-safe:group-hover/capability-card:duration-(--description-duration) motion-safe:group-has-[button:focus-visible]/capability-card:translate-x-(--description-offset) motion-safe:group-has-[button:focus-visible]/capability-card:duration-(--description-duration)"
+              : "inline-block whitespace-nowrap"
+          }
+        >
+          {description}
+        </span>
+      </span>
+      <div className="flex min-h-6 min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 text-ui-caption text-ink-mute">
+          {metadata && (
+            <span className="truncate" data-hint={metadata}>
+              {metadata}
             </span>
           )}
           {status && (
             <span
-              className="mt-0.5 block truncate text-ui-xs text-warn-ink"
+              className="min-w-0 max-w-full shrink-0 truncate text-warn-ink"
               data-hint={status}
             >
               {status}
             </span>
           )}
-        </span>
-      </NavigationRow>
-      <div className="flex shrink-0 items-center gap-1.5">{actions}</div>
+        </div>
+        {actions && <div className="flex shrink-0 items-center">{actions}</div>}
+      </div>
     </article>
   );
 }

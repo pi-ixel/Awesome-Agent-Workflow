@@ -25,7 +25,7 @@ import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import { SkillPackageActions } from "./SkillPackageActions.tsx";
 import { SkillCard, SkillGroup } from "./SkillCards.tsx";
 import { SkillDetail } from "./SkillDetail.tsx";
-import { projectGroups, skillKey } from "./skillGroups.ts";
+import { formatSize, projectGroups, skillKey } from "./skillGroups.ts";
 import type { SkillPackageManager } from "../types.ts";
 
 const buttonSize =
@@ -92,6 +92,10 @@ function LibraryPage(
   }>();
   const catalog = snapshot?.catalog;
   const scanError = snapshot?.scan === scan ? snapshot.error : undefined;
+  const [sizes, setSizes] = useState<{
+    scan: typeof scan;
+    bytes: ReadonlyMap<string, number>;
+  }>();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<SkillStatus>("all");
   const [detail, setDetail] = useState<NativeSkill | null>(null);
@@ -137,7 +141,54 @@ function LibraryPage(
       current = false;
     };
   }, [library, scan]);
+  useEffect(() => {
+    if (!library?.sizes || snapshot?.scan !== scan || !catalog) return;
+    const readSizes = library.sizes;
+    const selected = [
+      ...catalog.entries
+        .filter((entry) => entry.kind !== "inline")
+        .map(({ source, path, realPath }) => ({
+          key: JSON.stringify([source, path]),
+          selection: { source, path, realPath },
+        })),
+      ...catalog.trash
+        .filter((entry) => entry.kind !== "inline" && !entry.unavailable)
+        .map(({ id, path, source }) => ({
+          key: id,
+          selection: {
+            source: source ?? path,
+            path,
+            realPath: path,
+            disabledId: id,
+          },
+        })),
+    ];
+    let current = true;
+    async function loadSizes() {
+      const bytes = new Map<string, number>();
+      for (let index = 0; index < selected.length && current; index += 16) {
+        const batch = selected.slice(index, index + 16);
+        const result = await readSizes(
+          scan.query,
+          batch.map(({ selection }) => selection),
+        );
+        if (!current) return;
+        batch.forEach(({ key }, offset) => {
+          if (typeof result[offset] === "number")
+            bytes.set(key, result[offset]);
+        });
+        setSizes({ scan, bytes: new Map(bytes) });
+      }
+    }
+    void loadSizes().catch(() => {
+      // 大小是补充信息，读取失败时保留已显示的卡片和结果。
+    });
+    return () => {
+      current = false;
+    };
+  }, [catalog, library, scan, snapshot]);
   const manager = props.packages;
+  const sources = new Map(catalog?.sources.map((entry) => [entry.path, entry]));
   const destinations = catalog?.sources.filter((s) => s.canImport) ?? [];
   const source = destinations.find((s) => s.path === destination);
   const disabled: NativeSkill[] = (catalog?.trash ?? []).map((item) => ({
@@ -367,30 +418,48 @@ function LibraryPage(
             {!count && <p className="text-ink-mute">没有匹配的技能</p>}
             {groups.map((group) => (
               <SkillGroup key={group.project ?? ""} {...group}>
-                {group.entries.map((skill) => (
-                  <SkillCard
-                    key={skillKey(skill)}
-                    skill={skill}
-                    actions={actions}
-                    status={
-                      skill.unavailable ??
-                      (!skill.disabledId &&
-                      !["正常", "配置内定义"].includes(skill.status)
-                        ? (skill.statusLabel ?? skill.status)
-                        : !skill.disabledId &&
-                            catalog.sources.find(
-                              (entry) => entry.path === skill.source,
-                            )?.enabled === false
-                          ? "当前配置未加载来源"
-                          : undefined)
-                    }
-                    onDetail={(opener) => {
-                      detailOpener.current = opener;
-                      report([]);
-                      setDetail(skill);
-                    }}
-                  />
-                ))}
+                {group.entries.map((skill) => {
+                  const origin = sources.get(skill.source);
+                  const bytes =
+                    sizes?.scan === scan
+                      ? sizes.bytes.get(
+                          skill.disabledId ??
+                            JSON.stringify([skill.source, skill.path]),
+                        )
+                      : undefined;
+                  return (
+                    <SkillCard
+                      key={skillKey(skill)}
+                      skill={skill}
+                      actions={actions}
+                      metadata={[
+                        origin?.label ??
+                          (skill.kind === "inline"
+                            ? "配置内定义"
+                            : skill.kind === "package"
+                              ? "插件技能"
+                              : "目录技能"),
+                        bytes === undefined ? null : formatSize(bytes),
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                      status={
+                        skill.unavailable ??
+                        (!skill.disabledId &&
+                        !["正常", "配置内定义"].includes(skill.status)
+                          ? (skill.statusLabel ?? skill.status)
+                          : !skill.disabledId && origin?.enabled === false
+                            ? "当前配置未加载来源"
+                            : undefined)
+                      }
+                      onDetail={(opener) => {
+                        detailOpener.current = opener;
+                        report([]);
+                        setDetail(skill);
+                      }}
+                    />
+                  );
+                })}
               </SkillGroup>
             ))}
           </>
