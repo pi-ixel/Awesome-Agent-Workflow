@@ -118,7 +118,7 @@ describe("createDocumentFileHost + remoteFileProvider routing", () => {
 
     await expect(
       files.saveMarkdown(dirA.entries[0]!.path, "", "new", false),
-    ).rejects.toThrow("只读");
+    ).rejects.toThrow("写入服务尚未就绪");
     await expect(
       files.openInFileManager(dirA.entries[0]!.path, "reveal"),
     ).rejects.toThrow("暂不支持");

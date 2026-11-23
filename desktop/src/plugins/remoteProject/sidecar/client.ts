@@ -54,12 +54,31 @@ export class OpsSidecarClient {
   private unlistenExit: (() => void) | null = null;
   private nextId = 0;
   private readonly pending = new Map<string, PendingCall>();
+  private readonly eventListeners = new Map<string, Set<(params: unknown) => void>>();
   private disposed = false;
 
   constructor(
     private readonly host: OpsSidecarHost,
     private readonly logger: Logger,
   ) {}
+
+  subscribeEvent(
+    eventName: string,
+    handler: (params: unknown) => void,
+  ): () => void {
+    let listeners = this.eventListeners.get(eventName);
+    if (!listeners) {
+      listeners = new Set();
+      this.eventListeners.set(eventName, listeners);
+    }
+    listeners.add(handler);
+    return () => {
+      listeners?.delete(handler);
+      if (listeners && listeners.size === 0) {
+        this.eventListeners.delete(eventName);
+      }
+    };
+  }
 
   private async ensureListeners(): Promise<void> {
     if (!this.unlistenMessage) {
@@ -68,7 +87,21 @@ export class OpsSidecarClient {
         ({ payload }) => {
           if (payload.generation !== this.generation) return;
           const msg = payload.message;
-          if (!msg || typeof msg.id !== "string" || !msg.id) return;
+          if (!msg) return;
+          if (typeof msg.event === "string" && msg.event) {
+            const listeners = this.eventListeners.get(msg.event);
+            if (listeners) {
+              for (const listener of [...listeners]) {
+                try {
+                  listener(msg.params);
+                } catch {
+                  // 单个监听异常不阻断其它事件分发
+                }
+              }
+            }
+            return;
+          }
+          if (typeof msg.id !== "string" || !msg.id) return;
           const call = this.pending.get(msg.id);
           if (!call) return;
           this.pending.delete(msg.id);

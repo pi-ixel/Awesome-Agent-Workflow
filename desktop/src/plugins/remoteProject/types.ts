@@ -109,3 +109,43 @@ export interface RemoteProjectUi {
 export type RemoteFilePreviewResult = FilePreview & {
   readonly truncated?: boolean;
 };
+
+export interface RemoteFileReadResult {
+  readonly path: string;
+  readonly content: string;
+  readonly version: string;
+  readonly bytes: number;
+}
+
+export interface RemoteFileWriteResult {
+  readonly path: string;
+  readonly version: string;
+  readonly bytes: number;
+}
+
+export interface RemoteExecResult {
+  readonly opId: string;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+  readonly timedOut: boolean;
+  readonly cancelled: boolean;
+  readonly truncated: boolean;
+}
+
+export interface RemoteMcpBindResult {
+  readonly token: string;
+  readonly url: string;
+  readonly revision: number;
+}
+
+export interface RemoteApprovalRequestEvent {
+  readonly requestId: string;
+  readonly token: string;
+  readonly projectId: string;
+  readonly connectionId: string;
+  readonly sessionHint: string;
+  readonly tool: string;
+  readonly summary: string;
+  readonly input: Readonly<Record<string, unknown>>;
+}

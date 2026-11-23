@@ -2,6 +2,7 @@ import type { Context } from "cordis";
 import { createElement } from "react";
 import { createStore, useStore } from "zustand";
 import type { RemoteProjectRecord, RemoteProjectUi } from "../service.ts";
+import { createRemoteSessionToolProvider } from "../session/sessionBridge.ts";
 import { AddRemoteProjectModal } from "./AddRemoteProjectModal.tsx";
 
 export const name = "remoteProject-workbench";
@@ -17,6 +18,14 @@ export function apply(ctx: Context): void {
     },
   };
   ctx.provide("remoteProjectUi", ui);
+
+  ctx.effect(
+    () =>
+      project.sessions.registerSessionTools(
+        createRemoteSessionToolProvider(remoteProject),
+      ),
+    "remoteProject:session-tools",
+  );
 
   ctx.effect(
     () =>

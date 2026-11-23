@@ -21,6 +21,13 @@ export interface RemoteFileBackend {
   stat(connectionId: string, path: string): Promise<RemoteFSEntry>;
   preview(connectionId: string, path: string): Promise<RemoteFilePreviewResult>;
   listWorkspaceFiles(connectionId: string, root: string): Promise<readonly string[]>;
+  writeFile?(params: {
+    readonly connectionId: string;
+    readonly path: string;
+    readonly content: string;
+    readonly expectedContent?: string;
+    readonly force?: boolean;
+  }): Promise<unknown>;
 }
 
 function resolveTarget(
@@ -85,6 +92,24 @@ export function createRemoteDocumentFileProvider(
     async listWorkspaceFiles(root: string): Promise<readonly string[] | null> {
       const target = resolveTarget(backend, root);
       return backend.listWorkspaceFiles(target.connectionId, target.remotePath);
+    },
+    async saveMarkdown(
+      path: string,
+      expected: string,
+      contents: string,
+      force: boolean,
+    ): Promise<void> {
+      if (!backend.writeFile) {
+        throw new Error("远端项目文件写入服务尚未就绪");
+      }
+      const target = resolveTarget(backend, path);
+      await backend.writeFile({
+        connectionId: target.connectionId,
+        path: target.remotePath,
+        content: contents,
+        expectedContent: expected,
+        force,
+      });
     },
   };
 }

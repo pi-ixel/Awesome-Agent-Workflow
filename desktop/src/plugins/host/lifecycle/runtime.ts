@@ -4,6 +4,7 @@ import type {
   ExitDiagnostics,
   HostOptions,
   RemoteDocumentFileProvider,
+  RemoteGitProvider,
 } from "../types.ts";
 import type { HostService } from "../service.ts";
 import { createTauriAcpProcessHost } from "../process/acpProcess.ts";
@@ -147,6 +148,15 @@ export class DesktopHost implements HostService {
     };
   }
   readonly git: HostService["git"];
+  private remoteGit?: RemoteGitProvider;
+  registerRemoteGit(provider: RemoteGitProvider): () => void {
+    this.remoteGit = provider;
+    return () => {
+      if (this.remoteGit === provider) {
+        this.remoteGit = undefined;
+      }
+    };
+  }
   readonly terminal: HostService["terminal"];
   readonly process: HostService["process"];
   readonly skills: HostService["skills"];
@@ -279,7 +289,11 @@ export class DesktopHost implements HostService {
       this.invoke,
       () => this.remoteDocumentFiles,
     );
-    const git = createGitHost(this.exitGate.isExiting, panel);
+    const git = createGitHost(
+      this.exitGate.isExiting,
+      panel,
+      () => this.remoteGit,
+    );
     this.files = {
       ...files,
       watch: (...args) => this.resources.listen(() => files.watch(...args)),

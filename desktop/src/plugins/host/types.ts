@@ -22,6 +22,7 @@ export type {
   WatchPath,
   DocumentFileHost,
   RemoteDocumentFileProvider,
+  RemoteGitProvider,
   GitSource,
   GitChange,
   GitSnapshot,

@@ -27,6 +27,17 @@ export interface RemoteDocumentFileProvider {
   directory(path: string): Promise<DirectoryResult>;
   preview(path: string): Promise<FilePreview>;
   listWorkspaceFiles(path: string): Promise<readonly string[] | null>;
+  saveMarkdown?(
+    path: string,
+    expected: string,
+    contents: string,
+    force: boolean,
+  ): Promise<void>;
+}
+
+export interface RemoteGitProvider {
+  status(project: string): Promise<GitSnapshot>;
+  diff(project: string, change: GitChange): Promise<GitDiff>;
 }
 
 export interface DocumentFileHost {

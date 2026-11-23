@@ -49,7 +49,11 @@ export function createDocumentFileHost(
     saveMarkdown: (path, expected, contents, force) =>
       guardPanelRequest(isExiting, () => {
         if (isRemoteProjectPath(path)) {
-          return Promise.reject(new Error("远端项目当前为只读浏览模式，暂不支持直接保存"));
+          const remote = requireRemote();
+          if (!remote.saveMarkdown) {
+            return Promise.reject(new Error("远端项目当前为只读浏览模式，暂不支持直接保存"));
+          }
+          return remote.saveMarkdown(path, expected, contents, force);
         }
         return panel.saveMarkdown(path, expected, contents, force);
       }),

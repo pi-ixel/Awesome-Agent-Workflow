@@ -1,11 +1,17 @@
 import type { ReadonlySnapshot } from "../../shared/state/readonlySnapshot.ts";
+import type { GitChange, GitDiff, GitSnapshot } from "../host/types.ts";
 import type {
+  RemoteApprovalRequestEvent,
   RemoteConnectionDTO,
   RemoteConnectionInput,
   RemoteConnectionTestResult,
+  RemoteExecResult,
   RemoteFSEntry,
   RemoteFSListResult,
   RemoteFilePreviewResult,
+  RemoteFileReadResult,
+  RemoteFileWriteResult,
+  RemoteMcpBindResult,
   RemoteProjectRecord,
   RemoteProjectStoreSnapshot,
   RemoteProjectUi,
@@ -49,18 +55,62 @@ export interface RemoteProjectService {
     connectionId: string,
     root: string,
   ): Promise<readonly string[]>;
+  readFile(connectionId: string, path: string): Promise<RemoteFileReadResult>;
+  writeFile(params: {
+    readonly connectionId: string;
+    readonly path: string;
+    readonly content: string;
+    readonly expectedVersion?: string;
+    readonly expectedContent?: string;
+    readonly force?: boolean;
+  }): Promise<RemoteFileWriteResult>;
+  execCommand(params: {
+    readonly opId?: string;
+    readonly connectionId: string;
+    readonly remoteRoot: string;
+    readonly cwd?: string;
+    readonly command: string;
+    readonly timeoutSec?: number;
+  }): Promise<RemoteExecResult>;
+  cancelCommand(opId: string): Promise<boolean>;
+  gitStatus(connectionId: string, remoteRoot: string): Promise<GitSnapshot>;
+  gitDiff(
+    connectionId: string,
+    remoteRoot: string,
+    change: GitChange,
+  ): Promise<GitDiff>;
+  bindSessionMcp(params: {
+    readonly projectId: string;
+    readonly connectionId: string;
+    readonly remoteRoot: string;
+    readonly sessionHint?: string;
+  }): Promise<RemoteMcpBindResult>;
+  unbindSessionMcp(token: string): Promise<void>;
+  replyApproval(
+    requestId: string,
+    approved: boolean,
+    reason?: string,
+  ): Promise<void>;
+  onApprovalRequest(
+    handler: (event: RemoteApprovalRequestEvent) => void,
+  ): () => void;
   shutdown(): Promise<void>;
 }
 
 export type {
+  RemoteApprovalRequestEvent,
   RemoteBastionDTO,
   RemoteBastionInput,
   RemoteConnectionDTO,
   RemoteConnectionInput,
   RemoteConnectionTestResult,
+  RemoteExecResult,
   RemoteFSEntry,
   RemoteFSListResult,
   RemoteFilePreviewResult,
+  RemoteFileReadResult,
+  RemoteFileWriteResult,
+  RemoteMcpBindResult,
   RemoteProjectRecord,
   RemoteProjectStoreSnapshot,
   RemoteProjectUi,
