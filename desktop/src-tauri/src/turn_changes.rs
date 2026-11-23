@@ -525,8 +525,42 @@ fn relative(root: &Path, path: &str) -> Result<PathBuf, String> {
     }
     Ok(result)
 }
+// 统一 Windows 短路径、长路径及现存祖先；末端已删除时仍保留同一工作区身份。
+fn canonical_location(path: &Path) -> std::io::Result<PathBuf> {
+    let mut ancestor = path.to_path_buf();
+    let mut missing = Vec::new();
+    loop {
+        match fs::canonicalize(&ancestor) {
+            Ok(mut resolved) => {
+                for name in missing.into_iter().rev() {
+                    resolved.push(name);
+                }
+                return Ok(resolved);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let Some(name) = ancestor.file_name() else {
+                    return Err(error);
+                };
+                missing.push(name.to_os_string());
+                if !ancestor.pop() {
+                    return Err(error);
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
 fn evidence_path(root: &Path, path: &str) -> Result<String, String> {
     let path = path.replace('\\', "/");
+    let is_absolute = Path::new(&path).is_absolute();
+    let path = if is_absolute {
+        canonical_location(Path::new(&path))
+            .map_err(|error| error.to_string())?
+            .to_string_lossy()
+            .replace('\\', "/")
+    } else {
+        path
+    };
     let path = path.strip_prefix("//?/").unwrap_or(&path);
     let root_text = root.to_string_lossy().replace('\\', "/");
     let root_text = root_text.strip_prefix("//?/").unwrap_or(&root_text);
@@ -537,6 +571,8 @@ fn evidence_path(root: &Path, path: &str) -> Result<String, String> {
         && path.as_bytes()[root_text.len()] == b'/'
     {
         &path[root_text.len() + 1..]
+    } else if is_absolute {
+        return Err("路径超出工作区".into());
     } else {
         path
     };
@@ -1110,7 +1146,7 @@ fn execute_with_capture(
     let root = fs::canonicalize(&request.cwd)
         .or_else(|error| {
             if request.action == "clear" && Path::new(&request.cwd).is_absolute() {
-                Ok(PathBuf::from(&request.cwd))
+                canonical_location(Path::new(&request.cwd))
             } else {
                 Err(error)
             }
@@ -1827,7 +1863,9 @@ mod tests {
     #[test]
     fn reliable_rename_evidence_uses_both_paths_and_preserves_contents() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().join("work");
+        let anchor = dir.path().join("anchor");
+        fs::create_dir(&anchor).unwrap();
+        let root = anchor.join("..").join("work");
         let storage = dir.path().join("history");
         fs::create_dir(&root).unwrap();
         fs::write(root.join("old.ts"), "old\n").unwrap();
@@ -1906,8 +1944,11 @@ mod tests {
     #[test]
     fn session_cleanup_also_works_after_workspace_directory_was_removed() {
         let (_dir, root, storage, record) = edited_fixture();
+        let anchor = root.parent().unwrap().join("anchor");
+        fs::create_dir(&anchor).unwrap();
+        let alias = anchor.join("..").join(root.file_name().unwrap());
         fs::remove_dir_all(&root).unwrap();
-        execute(&storage, request("clear", &root, Some(&record.id))).unwrap();
+        execute(&storage, request("clear", &alias, Some(&record.id))).unwrap();
         assert!(fs::read_dir(&storage)
             .unwrap()
             .flatten()
