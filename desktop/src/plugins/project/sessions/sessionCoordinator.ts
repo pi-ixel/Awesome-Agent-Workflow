@@ -123,6 +123,7 @@ export interface ProjectSessionDependencies {
   readonly getProtocol: () => AcpProtocolResources;
   readonly getAgents: () => AgentsService;
   readonly getBrowser: () => HostService["browser"];
+  readonly resolveSessionCwd?: (workspacePath: string) => Promise<string>;
   readonly getApprovalMode: () => ApprovalMode;
   readonly interactionPreferences?: Pick<
     ProjectPreferences,
@@ -154,6 +155,7 @@ export function createSessionCoordinator({
   getProtocol,
   getAgents,
   getBrowser,
+  resolveSessionCwd = (workspacePath) => Promise.resolve(workspacePath),
   getApprovalMode,
   interactionPreferences,
   navigation,
@@ -1724,11 +1726,12 @@ export function createSessionCoordinator({
       if (!valid()) return null;
       setListStatus(workspacePath, agentKey, { state: "loading" });
       const project = projectFactory.open(workspacePath);
+      const historyCwd = await resolveSessionCwd(workspacePath);
       try {
         const listed = await project.refreshHistory(
           agentKey,
           (isCurrent) =>
-            protocol.readProjectHistory(session, workspacePath, isCurrent),
+            protocol.readProjectHistory(session, historyCwd, isCurrent),
           valid,
         );
         if (!listed) return null;
@@ -1797,12 +1800,16 @@ export function createSessionCoordinator({
       });
       return null;
     }
+    const resolvedCwd =
+      retained?.cwd ??
+      plugin?.cwd ??
+      (await resolveSessionCwd(workspacePath));
     const launch =
       retained?.launch ??
       getAgents().buildLaunch(
         adapter,
         workspaceStore.getState().toolPaths,
-        workspacePath,
+        resolvedCwd,
       );
     const viewStore =
         retained?.store ??
@@ -2036,9 +2043,7 @@ export function createSessionCoordinator({
       if (!session) throw new Error("后台 Agent 通道不可用");
       candidate = sessionFactory.create({
         workspacePath,
-        ...((retained?.cwd ?? plugin?.cwd)
-          ? { cwd: retained?.cwd ?? plugin?.cwd }
-          : {}),
+        ...(resolvedCwd !== workspacePath ? { cwd: resolvedCwd } : {}),
         ...((retained?.openTools ?? plugin?.openTools)
           ? { openTools: retained?.openTools ?? plugin?.openTools }
           : {}),
@@ -2720,7 +2725,7 @@ export function createSessionCoordinator({
     if (!session) throw new Error("后台 Agent 通道不可用");
     try {
       await session.initialize({ timeoutMs: 30_000 });
-      await session.newSession(workspacePath, { timeoutMs: 30_000 });
+      await session.newSession(await resolveSessionCwd(workspacePath), { timeoutMs: 30_000 });
       const models =
         modelConfig(session)?.options.map(({ value, name }) => ({
           value,

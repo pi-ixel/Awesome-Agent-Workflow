@@ -25,7 +25,7 @@ import {
 import { ActionButton } from "../../../shared/ui/controls.tsx";
 import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { SidebarItemTitle } from "../../../shared/ui/SidebarItemTitle.tsx";
-import { basenameOf, formatLastOpened } from "../../../shared/workspaceText.ts";
+import { basenameOf, formatLastOpened, formatWorkspacePathLabel } from "../../../shared/workspaceText.ts";
 
 type AddPanelTab = "new-session" | "add-project";
 
@@ -53,7 +53,7 @@ function KnownProjectRow({
   return (
     <li>
       <NavigationRow
-        data-hint={path}
+        data-hint={formatWorkspacePathLabel(path)}
         onClick={() => {
           void projectService?.sessions.startNewSession(path);
           onClose();

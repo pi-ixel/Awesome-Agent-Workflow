@@ -1,9 +1,17 @@
+import { parseRemoteProjectPath } from "./panelPaths.ts";
+
 /**
  * 项目页展示用的纯文本工具（UI 层不承载数据变换，只做展示格式化）。
  */
 
-/** 取路径最后一段作为显示名（兼容 Windows 反斜杠与 POSIX 正斜杠）。 */
+/** 取路径最后一段作为显示名（兼容 Windows 反斜杠、POSIX 正斜杠与远程项目虚拟路径）。 */
 export function basenameOf(path: string): string {
+  const remote = parseRemoteProjectPath(path);
+  if (remote) {
+    if (remote.remotePath === "/") return "SSH /";
+    const seg = remote.remotePath.split("/").filter(Boolean).at(-1);
+    return seg ?? remote.remotePath;
+  }
   const normalized = path.replace(/[\\/]+$/, "");
   if (normalized === "") {
     return path;
@@ -12,6 +20,15 @@ export function basenameOf(path: string): string {
   const backslash = normalized.lastIndexOf("\\");
   const cut = Math.max(slash, backslash);
   return cut === -1 ? normalized : normalized.slice(cut + 1);
+}
+
+/** 展示用项目路径：远程项目隐藏内部 `//aaw-remote/<projectId>` 前缀，展示 `SSH · <remotePath>`。 */
+export function formatWorkspacePathLabel(path: string): string {
+  const remote = parseRemoteProjectPath(path);
+  if (remote) {
+    return `SSH · ${remote.remotePath}`;
+  }
+  return path;
 }
 
 /** ISO 时间 → 中文相对时间（刚刚 / N 分钟前 / N 小时前 / 日期）。 */
