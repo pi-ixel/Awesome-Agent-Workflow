@@ -19,6 +19,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useFeedback } from "../feedback.ts";
+import { previewWheelZoomFactor } from "./previewZoom.ts";
 
 /** 仅由图片行构成的段落模式(画廊合并用)。 */
 const markdownImageOnlyLinePattern = /^\s*!\[[^\]]*]\([^\n]+\)\s*$/;
@@ -174,6 +175,18 @@ interface PreviewOffset {
   x: number;
   y: number;
 }
+
+interface ImagePreviewTransform {
+  readonly scale: number;
+  readonly offset: PreviewOffset;
+}
+
+const initialImageTransform: ImagePreviewTransform = {
+  scale: 1,
+  offset: { x: 0, y: 0 },
+};
+const minImageScale = 0.5;
+const maxImageScale = 3;
 
 const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024;
 
@@ -354,15 +367,17 @@ export function ImagePreviewDialog({
 }) {
   const notify = useFeedback();
   const [activeIndex, setActiveIndex] = useState(initialIndex);
-  const [previewScale, setPreviewScale] = useState(1);
-  const [previewOffset, setPreviewOffset] = useState<PreviewOffset>({
-    x: 0,
-    y: 0,
-  });
+  const [{ scale: previewScale, offset: previewOffset }, setPreviewTransform] =
+    useState(initialImageTransform);
   const [isDownloading, setIsDownloading] = useState(false);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const previewPointersRef = useRef(new Map<number, PreviewOffset>());
+  const backgroundPressRef = useRef<{
+    pointerId: number;
+    start: PreviewOffset;
+    released: boolean;
+  } | null>(null);
   const dragStartRef = useRef<{
     offset: PreviewOffset;
     pointer: PreviewOffset;
@@ -384,10 +399,10 @@ export function ImagePreviewDialog({
       }
     }
     previewPointersRef.current.clear();
+    backgroundPressRef.current = null;
     dragStartRef.current = null;
     pinchStartRef.current = null;
-    setPreviewScale(1);
-    setPreviewOffset({ x: 0, y: 0 });
+    setPreviewTransform(initialImageTransform);
   }, []);
 
   /** 按当前图片与视口尺寸夹取平移偏移。 */
@@ -421,28 +436,80 @@ export function ImagePreviewDialog({
     [items.length, resetPreviewTransform],
   );
 
-  // 视口尺寸变化(窗口缩放/侧栏开合)后重新夹取,防止图片漂出可视区
+  const clampCurrentOffset = useCallback(() => {
+    setPreviewTransform((current) => ({
+      ...current,
+      offset: clampOffset(current.offset, current.scale),
+    }));
+  }, [clampOffset]);
+  // 视口尺寸变化后重新夹取，防止图片漂出可视区。
   useEffect(() => {
-    const clampCurrentOffset = (): void => {
-      setPreviewOffset((current) => clampOffset(current, previewScale));
-    };
     window.addEventListener("resize", clampCurrentOffset);
     return () => {
       window.removeEventListener("resize", clampCurrentOffset);
     };
-  }, [previewScale, clampOffset]);
+  }, [clampCurrentOffset]);
 
-  const changePreviewScale = (delta: number): void => {
-    const nextScale = Math.min(3, Math.max(0.5, previewScale + delta));
-    setPreviewScale(nextScale);
-    setPreviewOffset((current) => clampOffset(current, nextScale));
-  };
+  const changePreviewScale = useCallback(
+    (nextScale: (scale: number) => number, anchor?: PreviewOffset): void => {
+      setPreviewTransform((current) => {
+        const scale = Math.min(
+          maxImageScale,
+          Math.max(minImageScale, nextScale(current.scale)),
+        );
+        if (scale === current.scale) return current;
+        const ratio = scale / current.scale;
+        return {
+          scale,
+          offset: clampOffset(
+            anchor
+              ? {
+                  x: anchor.x - (anchor.x - current.offset.x) * ratio,
+                  y: anchor.y - (anchor.y - current.offset.y) * ratio,
+                }
+              : current.offset,
+            scale,
+          ),
+        };
+      });
+    },
+    [clampOffset],
+  );
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const handleWheel = (event: WheelEvent): void => {
+      event.preventDefault();
+      const { left, top, width, height } = viewport.getBoundingClientRect();
+      const factor = previewWheelZoomFactor(event.deltaY);
+      changePreviewScale((scale) => scale * factor, {
+        x: event.clientX - left - width / 2,
+        y: event.clientY - top - height / 2,
+      });
+    };
+    viewport.addEventListener("wheel", handleWheel, { passive: false });
+    return () => viewport.removeEventListener("wheel", handleWheel);
+  }, [activeItem?.src, changePreviewScale]);
 
   const handlePointerDown = (
     event: ReactPointerEvent<HTMLDivElement>,
   ): void => {
-    event.currentTarget.setPointerCapture(event.pointerId);
+    if (event.button !== 0) return;
     const pointer = { x: event.clientX, y: event.clientY };
+    const isPinching =
+      event.pointerType === "touch" && previewPointersRef.current.size > 0;
+    if (event.target === event.currentTarget && !isPinching) {
+      if (event.isPrimary)
+        backgroundPressRef.current = {
+          pointerId: event.pointerId,
+          start: pointer,
+          released: false,
+        };
+      return;
+    }
+    backgroundPressRef.current = null;
+    event.currentTarget.setPointerCapture(event.pointerId);
     previewPointersRef.current.set(event.pointerId, pointer);
     if (previewPointersRef.current.size === 1) {
       dragStartRef.current = { offset: previewOffset, pointer };
@@ -482,16 +549,8 @@ export function ImagePreviewDialog({
         return;
       }
       const distance = Math.hypot(second.x - first.x, second.y - first.y);
-      const nextScale = Math.min(
-        3,
-        Math.max(
-          0.5,
-          pinchStartRef.current.scale *
-            (distance / pinchStartRef.current.distance),
-        ),
-      );
-      setPreviewScale(nextScale);
-      setPreviewOffset((current) => clampOffset(current, nextScale));
+      const start = pinchStartRef.current;
+      changePreviewScale(() => start.scale * (distance / start.distance));
       return;
     }
     const dragStart = dragStartRef.current;
@@ -499,23 +558,37 @@ export function ImagePreviewDialog({
     if (dragStart === null || pointer === undefined) {
       return;
     }
-    setPreviewOffset(
-      clampOffset(
+    setPreviewTransform((current) => ({
+      ...current,
+      offset: clampOffset(
         {
           x: dragStart.offset.x + pointer.x - dragStart.pointer.x,
           y: dragStart.offset.y + pointer.y - dragStart.pointer.y,
         },
-        previewScale,
+        current.scale,
       ),
-    );
+    }));
   };
 
   const handlePointerEnd = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const press = backgroundPressRef.current;
+    if (press?.pointerId === event.pointerId) {
+      if (event.type === "pointercancel") backgroundPressRef.current = null;
+      if (event.type === "pointerup")
+        press.released =
+          document.elementFromPoint(event.clientX, event.clientY) ===
+            event.currentTarget &&
+          Math.hypot(
+            event.clientX - press.start.x,
+            event.clientY - press.start.y,
+          ) <= 5;
+      return;
+    }
+    if (!previewPointersRef.current.delete(event.pointerId)) return;
     // 显式释放拖拽捕获;残留 capture 会让后续点击命中视口而非浮层按钮
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    previewPointersRef.current.delete(event.pointerId);
     pinchStartRef.current = null;
     const remainingPointer = Array.from(previewPointersRef.current.values())[0];
     dragStartRef.current =
@@ -605,8 +678,13 @@ export function ImagePreviewDialog({
       ) : null}
       <div
         ref={viewportRef}
-        className="flex w-full min-h-0 flex-1 touch-none cursor-grab items-center justify-center overflow-hidden active:cursor-grabbing"
-        onClick={(event) => event.stopPropagation()}
+        data-image-preview-viewport
+        className="flex w-full min-h-0 flex-1 touch-none cursor-zoom-out items-center justify-center overflow-hidden"
+        onClick={(event) => {
+          const released = backgroundPressRef.current?.released;
+          backgroundPressRef.current = null;
+          if (released && event.target === event.currentTarget) onClose();
+        }}
         onLostPointerCapture={handlePointerEnd}
         onPointerCancel={handlePointerEnd}
         onPointerDown={handlePointerDown}
@@ -616,9 +694,9 @@ export function ImagePreviewDialog({
         <img
           ref={imageRef}
           alt={activeItem.alt}
-          className="max-h-full max-w-full select-none rounded-xl bg-base object-contain"
+          className="max-h-full max-w-full select-none rounded-xl bg-base object-contain cursor-grab active:cursor-grabbing"
           draggable={false}
-          onLoad={() => setPreviewOffset((current) => clampOffset(current, previewScale))}
+          onLoad={clampCurrentOffset}
           src={activeItem.src}
           style={{
             transform: `translate3d(${previewOffset.x}px, ${previewOffset.y}px, 0) scale(${previewScale})`,
@@ -627,16 +705,22 @@ export function ImagePreviewDialog({
       </div>
       <div
         className="flex items-center gap-2"
-        onClick={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          if (
+            event.target instanceof Element &&
+            !event.target.closest("button")
+          )
+            onClose();
+        }}
       >
         <div className="flex items-center gap-1 rounded-full border border-media-ink/20 bg-overlay-shade/40 px-1 py-0.5">
           <IconButton
             type="button"
             aria-label="缩小"
             className="flex items-center justify-center rounded-full text-media-ink hover:bg-media-ink/10 disabled:cursor-default disabled:opacity-40"
-            disabled={previewScale <= 0.5}
+            disabled={previewScale <= minImageScale}
             onClick={() => {
-              changePreviewScale(-0.5);
+              changePreviewScale((scale) => scale - 0.5);
             }}
           >
             <MinusIcon className="ui-icon-20" strokeWidth={2} />
@@ -648,9 +732,9 @@ export function ImagePreviewDialog({
             type="button"
             aria-label="放大"
             className="flex items-center justify-center rounded-full text-media-ink hover:bg-media-ink/10 disabled:cursor-default disabled:opacity-40"
-            disabled={previewScale >= 3}
+            disabled={previewScale >= maxImageScale}
             onClick={() => {
-              changePreviewScale(0.5);
+              changePreviewScale((scale) => scale + 0.5);
             }}
           >
             <PlusIcon className="ui-icon-20" strokeWidth={2} />

@@ -18,7 +18,10 @@ import type { ProjectService } from "../../src/plugins/project/service.ts";
 import { sessionPinKey } from "../../src/plugins/project/sessions/sessionPin.ts";
 import { ConversationTurnView } from "../../src/plugins/project/conversation/ui/ConversationTurnView.tsx";
 
-export function renderProjectTree(root: Root, { running = false } = {}) {
+export function renderProjectTree(
+  root: Root,
+  { running = false, statuses = false } = {},
+) {
   const values = new Map<string, string>();
   const storage = {
     getItem: (key: string) => values.get(key) ?? null,
@@ -31,9 +34,15 @@ export function renderProjectTree(root: Root, { running = false } = {}) {
   const workspace = createWorkspaceStore(storage, () => true);
   workspace.store.setState({
     recentWorkspaces: [{ path, lastOpenedAt: "2026-10-20T10:00:00Z" }],
-    ...(running
-      ? { pinnedSessions: [sessionPinKey(path, "notes", agentKey)] }
-      : {}),
+    ...(statuses
+      ? {
+          pinnedSessions: ["failed", "unread"].map((id) =>
+            sessionPinKey(path, id, agentKey),
+          ),
+        }
+      : running
+        ? { pinnedSessions: [sessionPinKey(path, "notes", agentKey)] }
+        : {}),
   });
   const sidebar = createProjectSidebarState(storage);
   sidebar.store.setState({ treeViewMode: "projects" });
@@ -53,6 +62,25 @@ export function renderProjectTree(root: Root, { running = false } = {}) {
           title: "归档前复核",
           updatedAt: "2026-10-20T10:02:00Z",
         },
+        ...(statuses
+          ? [
+              {
+                id: "failed",
+                title: "执行失败的会话",
+                updatedAt: "2026-10-20T10:03:00Z",
+              },
+              {
+                id: "unread",
+                title: "有未查看结果的会话",
+                updatedAt: "2026-10-20T10:04:00Z",
+              },
+              {
+                id: "stopped",
+                title: "已取消的会话",
+                updatedAt: "2026-10-20T10:05:00Z",
+              },
+            ]
+          : []),
       ],
     },
   });
@@ -66,6 +94,23 @@ export function renderProjectTree(root: Root, { running = false } = {}) {
       pending: 0,
     });
   }
+  if (statuses) {
+    for (const [sessionId, status, unread, pending] of [
+      ["notes", "waiting", false, 1],
+      ["failed", "failed", false, 0],
+      ["unread", "completed", true, 0],
+      ["stopped", "cancelled", false, 0],
+    ] as const) {
+      indexes.activity.getState().update({
+        agentKey,
+        project: path,
+        sessionId,
+        status,
+        unread,
+        pending,
+      });
+    }
+  }
   const publisher = indexes.groups.register();
   publisher.publish(path, [
     {
@@ -73,8 +118,13 @@ export function renderProjectTree(root: Root, { running = false } = {}) {
       title: "发布准备",
       status: "waiting",
       attention: "等你回复",
+      ...(statuses ? { defaultExpanded: true, archive: () => {} } : {}),
       members: [
-        { sessionId: "design", title: "设计方案" },
+        {
+          sessionId: "design",
+          title: "设计方案",
+          ...(statuses ? { attention: "等你处理" } : {}),
+        },
         { sessionId: "review", title: "归档前复核", done: true },
       ],
     },
