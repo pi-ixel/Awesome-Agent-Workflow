@@ -133,9 +133,9 @@ HTTP 请求（`fetch`）。**代价**：作者要会跑一条命令。脚手架�
 
 **三条硬限制，缺一条它就变成纯负资产**：
 
-- **显式声明**：`runtime.kind === "process"`，导入时单独一屏告诉用户"这个工具会启动独立进程，拥有你账户下的文件与网络权限"，并点名包里所有可执行文件。
-- **体积单列**：`bin/` 不计入 4 MB 源码限额，但导入时会把真实体积显示出来。
-- **AI 不许生成 L3**（红线 R11）：许愿链路只产出 L1/L2；进程入口必须人工写、人工审。
+- **显式声明**：`runtime.kind === "process"`。验收时平台会出一条提示，说明"打开这个工具会启动独立进程，它以你的身份运行"，并把 `bin/` 里的文件逐个点名——来源由用户自己确认。
+- **体积单列**：`bin/` 不计入 4 MB 源码限额。
+- **入口必须真的在**：清单写得出 `bin/run.exe`，但写清单不等于有那个文件。验收前平台会按磁盘查一遍，入口不存在直接拦下（装上也打不开）；存在就把 `bin/` 里的文件点名给用户看，让他自己确认来源。
 
 L3 里 `store` / `sharedStore` / `secrets` / `settings` 这四项**必须走宿主**
 （`aaw.call("store", …)`）——数据的所有权在平台，自己写等于卸载时清不掉。
@@ -198,7 +198,7 @@ L3 里 `store` / `sharedStore` / `secrets` / `settings` 这四项**必须走宿�
 - `settingsSchema`：可选。`type` 只能是 text / number / boolean / select；select 的 `options` 是 `{ "label": "显示名", "value": "值" }` 数组。
 - `background`：可选。声明常驻/定时才写：`{ "reason": "剪切板历史", "schedule": true }`（`schedule` 省略表示只常驻不定时）。
 - `build`：可选，L2 的构建声明：`{ "entry": "src/main.js", "out": "app.js", "command": "npm run bundle" }`。**运行只认 `out`**；`entry` / `command` 是给人看的备注，平台不读、不执行、不检查文件是否存在。
-- `runtime`：可选，L3 的进程声明：`{ "kind": "process", "entry": "bin/run.exe", "protocol": 1 }`。`entry` 必须在 `bin/` 内。**AI 生成时出现它就装不上（R11）。**
+- `runtime`：可选，L3 的进程声明：`{ "kind": "process", "entry": "bin/run.exe", "protocol": 1 }`。`entry` 必须在 `bin/` 内。**这个文件不可能由你生成**：可执行文件要用户自己放进 `bin/`。入口不存在时验收会拦下（缺件），存在时平台会把 `bin/` 里的文件点名给用户确认。
 - `author` / `source`：可选，作者名与来源链接，分享别人的包时用于判断可信度。
 
 **没有 `preload` 这个字段了。** 第 2 代契约删掉了 Node 侧桥接层：出现 `preload` 会直接装不上。纯 JS 依赖走 `build`，需要进程走 `runtime`。
@@ -244,19 +244,18 @@ L3 里 `store` / `sharedStore` / `secrets` / `settings` 这四项**必须走宿�
 
 ## 红线
 
-| 编号 | 级别  | 规定                                                        | 怎么改                                                                                                                                                                   |
-| ---- | ----- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| R1   | block | id 创建后不可改                                             | 继续原工具就保持原 id；确实另起一个就在回复里说明这是新工具                                                                                                              |
-| R2   | block | 不得引用远程 script/style（相对路径可以）                   | 把依赖源码内联进同一个 <script>/<style>，或把文件放进工具目录用相对路径引用                                                                                              |
-| R3   | block | 清单声明的动作必须都有实现                                  | 在 <script> 末尾写 window.aawActions = { … }，与界面按钮共用同一函数                                                                                                     |
-| R4   | warn  | 设置只能经 settingsSchema 声明                              | 设置写进清单，代码读只读的 window.aawSettings                                                                                                                            |
-| R5   | warn  | 不得把密钥/口令写进 html                                    | 改成设置项由用户填，或运行时让用户输入                                                                                                                                   |
-| R6   | warn  | 需要留存的数据走 window.aawStore                            | await aawStore.set(k, v) / get(k)；localStorage 重启即清空                                                                                                               |
-| R7   | warn  | 不得写死 ≥800px 的宽度                                      | 用 width:100% + max-width，避免窄窗口横向溢出                                                                                                                            |
-| R8   | warn  | 联网的工具应该声明 permissions.network                      | 不声明也能跑（默认允许），但用户看不到「这个工具会联网」；补上 "permissions": { "network": true }，或写 hosts 限定域名                                                   |
-| R9   | block | 不得改动或夹带平台框架与关键契约文件                        | 工具包只保留 manifest.json、index.html、构建产物 app.js 或 bin/ 里的运行时，以及你自己写的源码；AGENTS.md / README.md / runtime 框架这些平台文件不该出现在包里，出现就删 |
-| R10  | warn  | 声明了 build 却没带 src/，别人拿到只有产物没法读            | 想让人读懂就把 src/ 一起带上；不想公开实现就不带——这只是提醒，平台不拦。运行只认 build.out                                                                               |
-| R11  | block | AI 许愿生成的工具不得声明进程载体（runtime.kind = process） | 许愿链路只产出 L1/L2；确实需要进程、原生模块或非 HTTP 协议时找人工接手，由人写 manifest 与 bin/、人审可执行文件                                                          |
+| 编号 | 级别  | 规定                                             | 怎么改                                                                                                                                                                   |
+| ---- | ----- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R1   | block | id 创建后不可改                                  | 继续原工具就保持原 id；确实另起一个就在回复里说明这是新工具                                                                                                              |
+| R2   | block | 不得引用远程 script/style（相对路径可以）        | 把依赖源码内联进同一个 <script>/<style>，或把文件放进工具目录用相对路径引用                                                                                              |
+| R3   | block | 清单声明的动作必须都有实现                       | 在 <script> 末尾写 window.aawActions = { … }，与界面按钮共用同一函数                                                                                                     |
+| R4   | warn  | 设置只能经 settingsSchema 声明                   | 设置写进清单，代码读只读的 window.aawSettings                                                                                                                            |
+| R5   | warn  | 不得把密钥/口令写进 html                         | 改成设置项由用户填，或运行时让用户输入                                                                                                                                   |
+| R6   | warn  | 需要留存的数据走 window.aawStore                 | await aawStore.set(k, v) / get(k)；localStorage 重启即清空                                                                                                               |
+| R7   | warn  | 不得写死 ≥800px 的宽度                           | 用 width:100% + max-width，避免窄窗口横向溢出                                                                                                                            |
+| R8   | warn  | 联网的工具应该声明 permissions.network           | 不声明也能跑（默认允许），但用户看不到「这个工具会联网」；补上 "permissions": { "network": true }，或写 hosts 限定域名                                                   |
+| R9   | block | 不得改动或夹带平台框架与关键契约文件             | 工具包只保留 manifest.json、index.html、构建产物 app.js 或 bin/ 里的运行时，以及你自己写的源码；AGENTS.md / README.md / runtime 框架这些平台文件不该出现在包里，出现就删 |
+| R10  | warn  | 声明了 build 却没带 src/，别人拿到只有产物没法读 | 想让人读懂就把 src/ 一起带上；不想公开实现就不带——这只是提醒，平台不拦。运行只认 build.out                                                                               |
 
 ## 交付流程
 
@@ -271,7 +270,7 @@ L3 里 `store` / `sharedStore` / `secrets` / `settings` 这四项**必须走宿�
 - [ ] 交付的功能范围就是用户确认过的，没有私自加减
 - [ ] 没有覆盖或伪造任何 `window.aaw*` 注入，也没有把内核框架文件带进工具包
 - [ ] 清单里没有 `preload` 字段；带依赖时 `build.out` 指向的产物确实在目录里
-- [ ] 没有自己造 `bin/` 进程（那是人工接手的路径，R11）
+- [ ] 如果声明了 `runtime`：`bin/` 里的可执行文件是用户自己放进去的（你生成不了二进制），并且确认过来源
 - [ ] 没有任何远程引用（http / https / 协议相对地址）；用相对路径引用自己目录里的文件可以
 - [ ] 界面只写在 `index.html`，清单的 `html` 字段留空
 - [ ] 每个 action 在 `aawActions` 里都有同名函数，界面按钮复用同一函数

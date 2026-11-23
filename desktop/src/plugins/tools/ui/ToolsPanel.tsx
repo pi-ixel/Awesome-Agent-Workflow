@@ -29,7 +29,11 @@ import { NewToolForm } from "./ToolBuilder.tsx";
 import { ToolManagement } from "./ToolManagement.tsx";
 import { ToolPreview } from "./ToolPreview.tsx";
 import { ToolProjectList } from "./ToolProjects.tsx";
-import { projectIO, describeInstall } from "./workshop.ts";
+import {
+  projectIO,
+  describeInstall,
+  describeProcessCarrier,
+} from "./workshop.ts";
 import type { WorkshopService } from "./workshop.ts";
 import { toolGlyph, toneOf } from "./mark.ts";
 import type { ToolsService } from "../service.ts";
@@ -273,8 +277,14 @@ export function ToolsPanel({
   async function installPackage(tool: ToolPackage) {
     setFeedback(undefined);
     try {
+      const outcome = await workshop.installArchive(tool);
       setFeedback({
-        text: describeInstall(await workshop.installArchive(tool), tool.name),
+        text: [
+          describeInstall(outcome, tool.name),
+          describeProcessCarrier(tool),
+        ]
+          .filter(Boolean)
+          .join("\n"),
       });
     } catch (error) {
       setFeedback({ text: errorText(error), error: true });
@@ -371,6 +381,9 @@ export function ToolsPanel({
           upload.files,
         );
         lines.push(describeInstall(outcome, upload.tool.name));
+        // 进程工具先说：它比"会联网"更该被看见，晚一步提示就等于没提示。
+        const carrier = describeProcessCarrier(upload.tool);
+        if (carrier) lines.push(carrier);
         if (upload.tool.permissions?.network)
           lines.push(`注意：${upload.tool.name} 会联网（作者声明的）。`);
         // 带依赖的包：说清依赖落在哪，用户以后想改/找不到时有个确切位置。
@@ -627,7 +640,14 @@ export function ToolsPanel({
                 upload.tool,
                 upload.files,
               );
-              setFeedback({ text: describeInstall(outcome, upload.tool.name) });
+              setFeedback({
+                text: [
+                  describeInstall(outcome, upload.tool.name),
+                  describeProcessCarrier(upload.tool),
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
+              });
             } catch (error) {
               setFeedback({ text: errorText(error), error: true });
             }

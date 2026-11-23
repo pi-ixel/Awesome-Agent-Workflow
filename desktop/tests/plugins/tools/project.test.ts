@@ -385,6 +385,59 @@ it("runtimeFiles 只含 manifest.json 与 index.html，字段与包严格一致"
   expect(new TextDecoder().decode(files["index.html"])).toBe(sampleTool.html);
 });
 
+it("L3 缺件必须拦，有件则把 bin/ 里的东西点名", async () => {
+  /** 造一个声明了进程入口的项目；`bin` 是真正落到磁盘上的文件。 */
+  async function processProject(bin: Record<string, string>) {
+    const { io } = memoryIO();
+    const { dir } = await createToolProject(io, {
+      id: "proc",
+      name: "进程工具",
+      owner: "u1",
+    });
+    await io.writeTextFile(`${dir}/index.html`, page);
+    await io.writeTextFile(
+      `${dir}/manifest.json`,
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          id: "proc",
+          name: "进程工具",
+          version: "1.0.0",
+          runtime: { kind: "process", entry: "bin/run.exe", protocol: 1 },
+        },
+        null,
+        2,
+      ),
+    );
+    for (const [path, text] of Object.entries(bin))
+      await io.writeTextFile(`${dir}/${path}`, text);
+    return { io, dir };
+  }
+
+  // 清单写得出 bin/run.exe，写清单不等于有那个文件：装上也只会报
+  // "找不到进程入口"，所以这里直接拦在验收之前。
+  const absent = await processProject({});
+  const blocked = await checkToolProject(absent.io, absent.dir);
+  expect(blocked.ready).toBe(false);
+  const missing = blocked.blocking.find(
+    (problem) => problem.where === "manifest.runtime",
+  );
+  expect(missing?.message).toContain("bin/run.exe");
+
+  // 文件在：不拦，但要把"会启动什么、bin/ 里还有什么"摆到用户眼前。
+  const present = await processProject({
+    "bin/run.exe": "MZ",
+    "bin/helper.dll": "MZ",
+  });
+  const checked = await checkToolProject(present.io, present.dir);
+  expect(checked.ready).toBe(true);
+  const notice = checked.warnings.find(
+    (problem) => problem.where === "manifest.runtime",
+  );
+  expect(notice?.message).toContain("bin/run.exe");
+  expect(notice?.message).toContain("bin/ 下现在有 2 项");
+});
+
 it("项目扫描跳过卸载暂存目录（.aaw-uninstall-*）", async () => {
   const { io } = memoryIO();
   const { dir } = await createToolProject(io, {

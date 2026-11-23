@@ -391,6 +391,55 @@ export async function createToolProject(
   return { dir: target.dir, id: target.id, name: input.name };
 }
 
+/**
+ * L3 的磁盘事实检查：入口在不在、bin/ 里都有些什么。
+ *
+ * 为什么放在这里而不在 `runToolRules`：红线只看清单与 html 文本（纯函数，点安装
+ * 时同步返回），而"那个 exe 到底在不在"只有读目录才知道。缺件的后果很具体——
+ * 装得上、卡片在、点开报"找不到进程入口"，用户不知道是自己少拷了文件还是平台
+ * 坏了。所以在**验收前**就按磁盘说清楚。
+ *
+ * 判据对所有来源一致（AI / 人工 / ZIP 导入后的项目目录）：文件存不存在与谁
+ * 写的清单无关，只有"这个程序会以你的身份跑"这件事需要人看见。
+ */
+async function checkProcessFiles(
+  io: ToolProjectIO,
+  dir: string,
+  tool: ToolPackage,
+): Promise<readonly ToolViolation[]> {
+  if (tool.runtime?.kind !== "process") return [];
+  const entry = tool.runtime.entry;
+  if (!(await io.pathExists(joinPath(dir, entry))))
+    return [
+      {
+        ruleId: "FIELD",
+        level: "block",
+        where: "manifest.runtime",
+        message: `清单声明了进程入口 ${entry}，但项目里没有这个文件。装进去也打不开——打开时会报"找不到进程入口"。`,
+        hint: `把可执行文件放到 ${entry}（它依赖的文件一起放进 bin/），或删掉 runtime 字段改用 L1/L2。`,
+      },
+    ];
+  // 有入口就把它点名：用户在点安装之前应该知道"等会儿会以我的身份跑哪个程序"。
+  let listing: readonly string[] = [];
+  try {
+    listing = await io.listDirNames(joinPath(dir, "bin"));
+  } catch {
+    /* 列不出来不影响判断入口在不在 */
+  }
+  const inventory = listing.length
+    ? `bin/ 下现在有 ${listing.length} 项：${listing.slice(0, 6).join("、")}${listing.length > 6 ? " 等" : ""}。`
+    : "";
+  return [
+    {
+      ruleId: "FIELD",
+      level: "warn",
+      where: "manifest.runtime",
+      message: `这是 L3 进程工具：打开时会启动 ${entry}，它以你的身份运行，拥有你账户下的文件与网络权限。${inventory}平台不检查这个程序做什么，装之前请自己确认来源。`,
+      hint: "只装你信得过的可执行文件；不确定来源就别装。只是做界面与数据处理的话，L1/L2 不需要进程，也不会有这道确认。",
+    },
+  ];
+}
+
 export type ToolProjectRead =
   | {
       readonly ok: true;
@@ -462,7 +511,11 @@ export async function readToolProject(
     previousId: (manifest as Record<string, unknown>).id as string | undefined,
     ...options,
   });
-  return { ok: true, tool: validated.tool, violations: problems };
+  return {
+    ok: true,
+    tool: validated.tool,
+    violations: [...problems, ...(await checkProcessFiles(io, dir, validated.tool))],
+  };
 }
 
 /** 把一份工具包写回目录（迁移与"编辑后保存"共用）。 */

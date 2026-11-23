@@ -21,7 +21,6 @@ export const ruleIds = [
   "R8",
   "R9",
   "R10",
-  "R11",
 ] as const;
 export type RuleId = (typeof ruleIds)[number];
 
@@ -118,11 +117,6 @@ export const ruleGuidance: Readonly<
     rule: "声明了 build 却没带 src/，别人拿到只有产物没法读",
     fix: "想让人读懂就把 src/ 一起带上；不想公开实现就不带——这只是提醒，平台不拦。运行只认 build.out",
   },
-  R11: {
-    level: "block",
-    rule: "AI 许愿生成的工具不得声明进程载体（runtime.kind = process）",
-    fix: "许愿链路只产出 L1/L2；确实需要进程、原生模块或非 HTTP 协议时找人工接手，由人写 manifest 与 bin/、人审可执行文件",
-  },
 };
 
 /** 手册里每条红线的一句话摘要，供提示文案与测试共用。 */
@@ -208,14 +202,6 @@ function violation(
 export interface ToolRuleOptions {
   /** 升级前该工具项目里记录的 id；与当前 id 不同即视为改名。 */
   readonly previousId?: string;
-  /**
-   * 这个包是谁产出的。`"ai"` 时 R11 生效——许愿链路只能产出 L1/L2。
-   *
-   * 为什么默认是 `"manual"`：人在「开发工具」里自己写 manifest 是正当入口，
-   * 默认拦下来会让所有老项目突然变红。AI 路径由 `workshop.ts` 显式传 `"ai"`，
-   * 责任边界才清楚。
-   */
-  readonly generatedBy?: "ai" | "manual";
 }
 
 /**
@@ -409,22 +395,6 @@ export function runToolRules(
         "这个工具声明了 build，但包里没有 src/。别人拿到只有 app.js 产物，没法读、没法改。",
         "想让人读懂就把源码放在 src/ 一起分发；不想公开实现就不带——这条只是提醒，不影响安装与运行。",
         "build",
-      ),
-    );
-
-  // R11 · AI 许愿链路不得产出进程工具。
-  //
-  // 许愿链路看不到用户机器上的可执行文件，也无法判断"这个 exe 到底做什么"。
-  // 一旦它开始生成 runtime，用户点一次「开始做」就可能得到一个能读全盘的进程。
-  // 所以不是"提醒作者小心"，是**这条链路根本不给这个出口**。
-  if (options.generatedBy === "ai" && tool.runtime !== undefined)
-    problems.push(
-      violation(
-        "R11",
-        "block",
-        "AI 许愿生成的工具不能声明进程载体（runtime.kind = process）。",
-        "改用 L1 单页或 L2 打包页（build）。确实需要进程、原生模块或非 HTTP 协议时，找人工接手：由人写 manifest 与 bin/，并人工审阅包里的可执行文件。",
-        "manifest.runtime",
       ),
     );
 

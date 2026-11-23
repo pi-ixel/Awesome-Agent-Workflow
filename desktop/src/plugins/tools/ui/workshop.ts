@@ -261,6 +261,20 @@ export function describeInstall(outcome: InstallOutcome, name: string): string {
   return `已更新 ${name}：v${outcome.previousVersion ?? "?"} → v${outcome.version}。`;
 }
 
+/**
+ * L3 进程工具的安装后提醒。
+ *
+ * 装完到打开之间是用户唯一还能反悔的窗口——进程只在"打开"那一刻才启动，所以
+ * 这句话要说全三件事：会跑哪个文件、以什么身份跑、平台没审它。能给人当判断依据
+ * 的就是这一句。
+ */
+export function describeProcessCarrier(
+  tool: Pick<ToolPackage, "name" | "runtime">,
+): string | undefined {
+  if (tool.runtime?.kind !== "process") return undefined;
+  return `注意：${tool.name} 会启动独立进程 ${tool.runtime.entry}，它以你的身份运行——能读写你账户下的文件、能联网。平台不检查这个程序做什么，确认来源后再打开。`;
+}
+
 /** 校验通过时说同一句话：AI 停下后自动校验、用户手点重新校验，走的是同一个结论。 */
 function passText(check: ToolProjectCheck): string {
   return check.warnings.length
@@ -377,9 +391,10 @@ export function createWorkshop(deps: {
   }
 
   async function readCheck(dir: string): Promise<ToolProjectCheck> {
-    // 这个项目是许愿链路产出的：R11 从第一次校验就生效，不等到装的时候才拦。
-    // 手动用「导入文件夹」进来的项目不走这里（那是人工路径，允许 L3）。
-    const result = await checkToolProject(io, dir, { generatedBy: "ai" });
+    // 校验只认磁盘事实：清单是否合法、声明的入口在不在。不再按"这个项目是谁
+    // 产出的"做区分——同一个包换个入口进来（ZIP 导入 vs 工作台）就该是同一套
+    // 结论，否则规则只是在拦某条路径，不是在拦问题。
+    const result = await checkToolProject(io, dir);
     // 读盘期间用户可能已经切到别的项目：这时的结果不再属于"当前项目"，
     // 写进状态会让卡片拿着 A 的校验结论去描述 B（比如给一个坏项目标"可以验收"）。
     const current = store.getState().project?.dir;
@@ -801,7 +816,14 @@ export function createWorkshop(deps: {
             patch({
               installed: true,
               drift: false,
-              note: { text: describeInstall(outcome, staged.tool.name) },
+              note: {
+                text: [
+                  describeInstall(outcome, staged.tool.name),
+                  describeProcessCarrier(staged.tool),
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
+              },
             });
             void refreshProjects();
             return true;
@@ -1384,7 +1406,14 @@ export function createWorkshop(deps: {
           };
         }
         const outcome = await installArchive(check.tool, extra.files);
-        return { text: describeInstall(outcome, check.tool.name) };
+        return {
+          text: [
+            describeInstall(outcome, check.tool.name),
+            describeProcessCarrier(check.tool),
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        };
       } catch (error) {
         return { text: errorText(error), error: true };
       }

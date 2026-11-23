@@ -166,9 +166,10 @@ export interface ToolPackage {
    */
   readonly build?: ToolBuild;
   /**
-   * L3 进程声明。有它就**没有沙箱**，导入时必须单独一屏让用户确认。
+   * L3 进程声明。有它就**没有沙箱**：进程以用户身份运行。
    *
-   * AI 许愿链路不得产出它（红线 R11）：进程入口必须人工写、人工审。
+   * 平台不检查 `bin/` 里的可执行文件做什么——验收时会按磁盘核对入口在不在，
+   * 并把 `bin/` 里的文件点名给用户，来源由他自己确认。
    */
   readonly runtime?: ToolRuntime;
   /**
