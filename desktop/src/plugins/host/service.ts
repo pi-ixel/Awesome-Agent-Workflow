@@ -24,6 +24,7 @@ import type {
   PtyNativeHost,
   RemoteDocumentFileProvider,
   RemoteGitProvider,
+  RemoteTerminalResolver,
   SkillFiles,
   UpdatesHost,
   WorkflowEngineHost,
@@ -60,6 +61,7 @@ export interface HostService {
   readonly git: GitHost;
   registerRemoteGit(provider: RemoteGitProvider): () => void;
   readonly terminal: PtyNativeHost;
+  registerRemoteTerminalResolver(resolver: RemoteTerminalResolver): () => void;
   readonly process: ProcessRunner;
   readonly skills: SkillFiles;
   readonly account: AccountHost;

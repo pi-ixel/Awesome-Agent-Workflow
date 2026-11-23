@@ -21,10 +21,17 @@ export interface PtySpawnWire {
 }
 
 export interface PtySpawnOptions {
+  readonly file?: string;
+  readonly args?: readonly string[];
+  readonly env?: Readonly<Record<string, string>>;
   readonly cwd: string | null;
   readonly cols: number;
   readonly rows: number;
 }
+
+export type RemoteTerminalResolver = (
+  request: PtySpawnOptions,
+) => Promise<PtySpawnOptions>;
 
 export interface PtyNativeHost {
   isNative(): boolean;

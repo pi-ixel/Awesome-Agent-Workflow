@@ -12,6 +12,7 @@ import type {
   RemoteFileReadResult,
   RemoteFileWriteResult,
   RemoteMcpBindResult,
+  RemoteTerminalPrepareResult,
 } from "./types.ts";
 import { OpsSidecarClient } from "./sidecar/client.ts";
 import { createRemoteProjectStore } from "./store/remoteProjectStore.ts";
@@ -177,6 +178,12 @@ export function apply(ctx: Context): void {
               : {},
         });
       });
+    },
+    async prepareTerminal(connectionId, remoteRoot) {
+      return sidecar.request<RemoteTerminalPrepareResult>(
+        "project/terminal-prepare",
+        { connectionId, remoteRoot },
+      );
     },
     shutdown: () => sidecar.shutdown(),
   };

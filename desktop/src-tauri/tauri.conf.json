@@ -33,7 +33,10 @@
   },
   "bundle": {
     "active": true,
-    "resources": { "../workflow-engine-rs/dist/": "workflow-engine/" },
+    "resources": {
+      "../workflow-engine-rs/dist/": "workflow-engine/",
+      "../ops-sidecar/dist/": "ops-sidecar/"
+    },
     "windows": {
       "nsis": {
         "template": "installer/installer.nsi",

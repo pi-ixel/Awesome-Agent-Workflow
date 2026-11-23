@@ -15,6 +15,7 @@ import type {
   RemoteProjectRecord,
   RemoteProjectStoreSnapshot,
   RemoteProjectUi,
+  RemoteTerminalPrepareResult,
 } from "./types.ts";
 
 import type {} from "cordis";
@@ -94,11 +95,16 @@ export interface RemoteProjectService {
   onApprovalRequest(
     handler: (event: RemoteApprovalRequestEvent) => void,
   ): () => void;
+  prepareTerminal(
+    connectionId: string,
+    remoteRoot: string,
+  ): Promise<RemoteTerminalPrepareResult>;
   shutdown(): Promise<void>;
 }
 
 export type {
   RemoteApprovalRequestEvent,
+  RemoteAuthType,
   RemoteBastionDTO,
   RemoteBastionInput,
   RemoteConnectionDTO,
@@ -114,4 +120,5 @@ export type {
   RemoteProjectRecord,
   RemoteProjectStoreSnapshot,
   RemoteProjectUi,
+  RemoteTerminalPrepareResult,
 } from "./types.ts";

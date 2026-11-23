@@ -1,9 +1,13 @@
 import type { FilePreview } from "../host/types.ts";
 
+export type RemoteAuthType = "password" | "key" | "agent";
+
 export interface RemoteBastionInput {
   readonly host: string;
   readonly port: number;
   readonly user: string;
+  readonly authType?: RemoteAuthType;
+  readonly privateKeyPath?: string;
   readonly password?: string;
   readonly hostKey?: string;
 }
@@ -13,6 +17,8 @@ export interface RemoteConnectionInput {
   readonly host: string;
   readonly port: number;
   readonly user: string;
+  readonly authType?: RemoteAuthType;
+  readonly privateKeyPath?: string;
   readonly password?: string;
   readonly hostKey?: string;
   readonly bastion?: RemoteBastionInput | null;
@@ -22,6 +28,8 @@ export interface RemoteBastionDTO {
   readonly host: string;
   readonly port: number;
   readonly user: string;
+  readonly authType?: RemoteAuthType;
+  readonly privateKeyPath?: string;
   readonly hasPassword: boolean;
   readonly hostKey?: string;
   readonly hostKeyFingerprint?: string;
@@ -33,6 +41,8 @@ export interface RemoteConnectionDTO {
   readonly host: string;
   readonly port: number;
   readonly user: string;
+  readonly authType?: RemoteAuthType;
+  readonly privateKeyPath?: string;
   readonly hasPassword: boolean;
   readonly hostKey?: string;
   readonly hostKeyFingerprint?: string;
@@ -148,4 +158,13 @@ export interface RemoteApprovalRequestEvent {
   readonly tool: string;
   readonly summary: string;
   readonly input: Readonly<Record<string, unknown>>;
+}
+
+export interface RemoteTerminalPrepareResult {
+  readonly sshArgs: readonly string[];
+  readonly env: Readonly<Record<string, string>>;
+  readonly knownHostsPath: string;
+  readonly authType: RemoteAuthType;
+  readonly requiresAskpass: boolean;
+  readonly summary: string;
 }

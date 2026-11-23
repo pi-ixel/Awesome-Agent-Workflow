@@ -63,6 +63,8 @@ const REAP_FORCE_DELAY_MS: u64 = 2_000;
 pub struct PtySpawnRequest {
     /// shell 可执行文件；None → 平台默认 shell。
     pub file: Option<String>,
+    /// 可选启动参数（如远程项目 OpenSSH 直连参数）。
+    pub args: Option<Vec<String>>,
     /// 工作目录；None → 用户主目录（USERPROFILE/HOME），再缺省则继承宿主 cwd。
     pub cwd: Option<String>,
     /// 初始列数（0 视为 80）。
@@ -334,6 +336,9 @@ pub(crate) async fn spawn_pty(
         None => resolve_default_shell(),
     };
     let mut command = CommandBuilder::new(&shell);
+    if let Some(args) = request.args.as_ref() {
+        command.args(args);
+    }
     match resolve_spawn_cwd(request.cwd.as_deref()) {
         SpawnCwd::Dir(dir) => command.cwd(dir),
         SpawnCwd::Inherit => {} // 无主目录可用：继承宿主 cwd（显式记录于此）

@@ -36,6 +36,7 @@ export type {
   PtySpawnWire,
   PtySpawnOptions,
   PtyNativeHost,
+  RemoteTerminalResolver,
 } from "./process/ptyTypes.ts";
 
 export type {

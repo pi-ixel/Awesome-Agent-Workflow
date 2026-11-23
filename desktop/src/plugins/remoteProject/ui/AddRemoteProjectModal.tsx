@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
 import { ActionButton, Badge, Spinner } from "../../../shared/ui/controls.tsx";
+import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { fieldSurfaceClass } from "../../../shared/ui/inputStyles.ts";
 import { FolderGlyph, SearchIcon, XIcon } from "../../../shared/ui/icons.tsx";
 import { describeUnknownError } from "../../../shared/errors.ts";
 import type {
+  RemoteAuthType,
   RemoteConnectionDTO,
   RemoteConnectionInput,
   RemoteConnectionTestResult,
@@ -22,6 +24,8 @@ interface ConnectionFormState {
   readonly host: string;
   readonly port: string;
   readonly user: string;
+  readonly authType: RemoteAuthType;
+  readonly privateKeyPath: string;
   readonly password: string;
   readonly hostKey: string;
   readonly useBastion: boolean;
@@ -40,6 +44,8 @@ function emptyForm(): ConnectionFormState {
     host: "",
     port: "22",
     user: "",
+    authType: "password",
+    privateKeyPath: "",
     password: "",
     hostKey: "",
     useBastion: false,
@@ -59,6 +65,8 @@ function formFromConnection(conn: RemoteConnectionDTO): ConnectionFormState {
     host: conn.host,
     port: String(conn.port || 22),
     user: conn.user,
+    authType: conn.authType ?? "password",
+    privateKeyPath: conn.privateKeyPath ?? "",
     password: "",
     hostKey: conn.hostKey ?? "",
     useBastion: Boolean(conn.bastion?.host),
@@ -78,7 +86,13 @@ function formToInput(form: ConnectionFormState): RemoteConnectionInput {
     host: form.host.trim(),
     port,
     user: form.user.trim(),
-    ...(form.password ? { password: form.password } : {}),
+    authType: form.authType,
+    ...(form.authType === "key" && form.privateKeyPath.trim()
+      ? { privateKeyPath: form.privateKeyPath.trim() }
+      : {}),
+    ...(form.authType !== "agent" && form.password
+      ? { password: form.password }
+      : {}),
     ...(form.hostKey.trim() ? { hostKey: form.hostKey.trim() } : {}),
     bastion:
       form.useBastion && form.bastionHost.trim()
@@ -562,15 +576,46 @@ export function AddRemoteProjectModal({
                     className={`${fieldSurfaceClass} px-2.5 py-1.5 text-ui-sm text-ink`}
                   />
                 </label>
-                <label className="flex flex-col gap-1 text-ui-xs text-ink-mute">
-                  密码{form.mode === "edit" ? "（留空保留已存密码）" : " *"}
-                  <input
-                    type="password"
-                    value={form.password}
-                    onChange={(e) => setForm({ ...form, password: e.target.value })}
-                    className={`${fieldSurfaceClass} px-2.5 py-1.5 text-ui-sm text-ink`}
+                <div className="col-span-2 flex flex-col gap-1 text-ui-xs text-ink-mute">
+                  <span>认证方式</span>
+                  <SegmentedControl
+                    groupLabel="SSH 认证方式"
+                    value={form.authType}
+                    onChange={(authType) => setForm({ ...form, authType })}
+                    options={[
+                      { value: "password", label: "密码" },
+                      { value: "key", label: "私钥文件" },
+                      { value: "agent", label: "SSH Agent" },
+                    ]}
                   />
-                </label>
+                </div>
+                {form.authType === "key" && (
+                  <label className="col-span-2 flex flex-col gap-1 text-ui-xs text-ink-mute">
+                    私钥文件路径 *
+                    <input
+                      type="text"
+                      placeholder="例如：C:\Users\name\.ssh\id_ed25519"
+                      value={form.privateKeyPath}
+                      onChange={(e) =>
+                        setForm({ ...form, privateKeyPath: e.target.value })
+                      }
+                      className={`${fieldSurfaceClass} px-2.5 py-1.5 font-mono text-ui-sm text-ink`}
+                    />
+                  </label>
+                )}
+                {form.authType !== "agent" && (
+                  <label className="flex flex-col gap-1 text-ui-xs text-ink-mute">
+                    {form.authType === "key"
+                      ? "私钥口令（未加密可留空）"
+                      : `密码${form.mode === "edit" ? "（留空保留已存密码）" : " *"}`}
+                    <input
+                      type="password"
+                      value={form.password}
+                      onChange={(e) => setForm({ ...form, password: e.target.value })}
+                      className={`${fieldSurfaceClass} px-2.5 py-1.5 text-ui-sm text-ink`}
+                    />
+                  </label>
+                )}
               </div>
 
               <div className="mt-3">

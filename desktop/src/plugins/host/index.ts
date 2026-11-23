@@ -29,6 +29,7 @@ export function apply(ctx: Context, options?: HostOptions): void {
     git: host.git,
     registerRemoteGit: host.registerRemoteGit.bind(host),
     terminal: host.terminal,
+    registerRemoteTerminalResolver: host.registerRemoteTerminalResolver.bind(host),
     process: host.process,
     skills: host.skills,
     account: host.account,

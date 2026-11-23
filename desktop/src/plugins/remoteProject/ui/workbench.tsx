@@ -3,13 +3,14 @@ import { createElement } from "react";
 import { createStore, useStore } from "zustand";
 import type { RemoteProjectRecord, RemoteProjectUi } from "../service.ts";
 import { createRemoteSessionToolProvider } from "../session/sessionBridge.ts";
+import { createRemoteTerminalResolver } from "../terminal/remoteTerminal.ts";
 import { AddRemoteProjectModal } from "./AddRemoteProjectModal.tsx";
 
 export const name = "remoteProject-workbench";
-export const inject = ["remoteProject", "workbench", "project"];
+export const inject = ["remoteProject", "workbench", "project", "host"];
 
 export function apply(ctx: Context): void {
-  const { remoteProject, workbench, project } = ctx;
+  const { remoteProject, workbench, project, host } = ctx;
   const modal = createStore<{ open: boolean }>(() => ({ open: false }));
 
   const ui: RemoteProjectUi = {
@@ -18,6 +19,23 @@ export function apply(ctx: Context): void {
     },
   };
   ctx.provide("remoteProjectUi", ui);
+
+  ctx.effect(
+    () =>
+      host.registerRemoteTerminalResolver(
+        createRemoteTerminalResolver({
+          service: remoteProject,
+          runCommand: host.commands.runCommand,
+          notifyWarning: (message) =>
+            workbench.showToast({
+              message,
+              variant: "warn",
+              dedupeKey: "remote-terminal-fallback",
+            }),
+        }),
+      ),
+    "remoteProject:terminal-resolver",
+  );
 
   ctx.effect(
     () =>

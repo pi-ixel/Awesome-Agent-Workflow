@@ -5,6 +5,7 @@ import type {
   HostOptions,
   RemoteDocumentFileProvider,
   RemoteGitProvider,
+  RemoteTerminalResolver,
 } from "../types.ts";
 import type { HostService } from "../service.ts";
 import { createTauriAcpProcessHost } from "../process/acpProcess.ts";
@@ -31,6 +32,7 @@ import { createBrowserHost } from "../browser/tauri.ts";
 import { createLogger } from "../../../shared/logging/logger.ts";
 import { NativePanelService } from "../filesystem/panelService.ts";
 import { HostResources, trackProcesses } from "./effects.ts";
+import { isRemoteProjectPath } from "../../../shared/panelPaths.ts";
 import type { PtySpawnWire } from "../types.ts";
 
 export class DesktopHost implements HostService {
@@ -158,6 +160,15 @@ export class DesktopHost implements HostService {
     };
   }
   readonly terminal: HostService["terminal"];
+  private remoteTerminalResolver?: RemoteTerminalResolver;
+  registerRemoteTerminalResolver(resolver: RemoteTerminalResolver): () => void {
+    this.remoteTerminalResolver = resolver;
+    return () => {
+      if (this.remoteTerminalResolver === resolver) {
+        this.remoteTerminalResolver = undefined;
+      }
+    };
+  }
   readonly process: HostService["process"];
   readonly skills: HostService["skills"];
   readonly account: HostService["account"];
@@ -328,7 +339,16 @@ export class DesktopHost implements HostService {
     );
     this.terminal = {
       ...terminalHost,
-      spawn: (request) => terminal.spawn(() => terminalHost.spawn(request)),
+      spawn: (request) =>
+        terminal.spawn(async () => {
+          const resolved =
+            request.cwd &&
+            isRemoteProjectPath(request.cwd) &&
+            this.remoteTerminalResolver
+              ? await this.remoteTerminalResolver(request)
+              : request;
+          return terminalHost.spawn(resolved);
+        }),
       listenOutput: (receive) =>
         this.resources.listen(() => terminalHost.listenOutput(receive)),
       listenExit: (receive) =>

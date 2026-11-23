@@ -96,6 +96,7 @@ function createMockService(overrides: Partial<RemoteProjectService> = {}): Remot
     unbindSessionMcp: vi.fn(),
     replyApproval: vi.fn(),
     onApprovalRequest: () => () => {},
+    prepareTerminal: vi.fn(),
     shutdown: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
