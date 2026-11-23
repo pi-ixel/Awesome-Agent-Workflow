@@ -1263,9 +1263,17 @@ export function createWorkshop(deps: {
             }
             return { text: "文件与工具数据已保留。" };
           }
+          // 刚卸掉的就是当前展开的那个项目：连"展开位置"一起收起来。
+          //
+          // 比较必须走 `pathKey`，不能用 `includes` 比字符串——`dirs` 是扫描
+          // 结果里的路径，`project.dir` 是用户点进来的路径，同一个目录在
+          // Windows 上可能大小写或分隔符不同。比不中的后果不只是"没收起"：
+          // 页签上的项目数会把它当成"还没出现在列表里的新项目"再加一，
+          // 于是卸载完仍然显示「开发工具 · 2」，要切一次页签才掉到 1。
+          const openProject = store.getState().project;
           if (
-            store.getState().project &&
-            dirs.includes(store.getState().project!.dir)
+            openProject &&
+            dirs.some((dir) => pathKey(dir) === pathKey(openProject.dir))
           )
             patch({
               project: null,
@@ -1278,7 +1286,6 @@ export function createWorkshop(deps: {
               missing: false,
               running: false,
             });
-          void refreshProjects();
           if (report.staged && finish) {
             try {
               await finish(id, owner, true);
@@ -1289,6 +1296,14 @@ export function createWorkshop(deps: {
               };
             }
           }
+          // 扫列表必须放在 `finish` **之后**。
+          //
+          // `toolPurge` 只是把目录改名暂存（`.aaw-uninstall-…`），真正删除在
+          // `finish(commit)` 里。以前这一句写在 finish 之前，扫到的是"还没删
+          // 干净"的磁盘：即使扫描已经跳过暂存目录，列表也该以删除后的状态为准。
+          // 顺手 `await` 它——卸载提示弹出来的时候列表已经是新的，用户不用再点
+          // 一下别处才看到它消失。
+          await refreshProjects();
           const parts: string[] = [];
           if (report.removedDirs.length)
             parts.push(

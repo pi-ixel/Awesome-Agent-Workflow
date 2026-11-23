@@ -311,7 +311,16 @@ export async function listToolProjects(
     options.parent ?? (await defaultToolProjectsDir(io, options.owner));
   if (!(await io.pathExists(root))) return [];
   const names = await io.listDirNames(root);
-  return names.map((name) => joinPath(root, name));
+  // 点开头的目录一律不算项目。
+  //
+  // 卸载工具时宿主把项目目录**原地改名**成 `.aaw-uninstall-<uuid>-<n>` 暂存，
+  // 等配置写成功后才真正删除。改名后的目录里还躺着 manifest.json，扫进来就
+  // 是一个"合法项目"——于是卸载完列表里仍然多出一个，要等下一次刷新（用户
+  // 切页签）才消失。工具 id 不允许以点开头，所以这里过滤的是纯内部目录，
+  // 不会误伤任何用户建的项目。
+  return names
+    .filter((name) => !name.startsWith("."))
+    .map((name) => joinPath(root, name));
 }
 
 /**

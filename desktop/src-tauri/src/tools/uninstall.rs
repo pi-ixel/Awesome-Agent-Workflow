@@ -38,6 +38,13 @@ struct Uninstall {
     tool_id: String,
     had_record: bool,
     committed: bool,
+    /// 安装分区里的工具根目录（`installed/<账号>/<id>`）。
+    ///
+    /// 删掉的是它下面的叶子目录，`versions/` 与根目录这两层会剩成空壳，所以
+    /// 提交后要回到这里收一遍。老版本写下的卸载日志没有这个字段，反序列化时
+    /// 缺省为空——那类日志按原来的行为处理（不动空壳），不影响正确性。
+    #[serde(default)]
+    tool_dir: Option<PathBuf>,
     entries: Vec<Entry>,
 }
 
@@ -92,6 +99,30 @@ fn move_file(from: &Path, to: &Path) -> Result<(), String> {
     fs::rename(from, to).map_err(|error| format!("无法移动 {}：{error}", from.display()))
 }
 
+/// 从叶子往上删空目录，返回这个目录是否已被删掉。
+///
+/// 卸载删的是 `versions/<版本>`、`.staging-*` 这些叶子，父目录 `versions/` 和
+/// `installed/<账号>/<id>/` 会剩下 0 字节的空壳：不占空间，但"磁盘上还有这个
+/// 工具"看起来像真的，排查问题时先怀疑这里。
+///
+/// 只删**空**目录：非空（用户或别的程序往工具目录里放过东西）时整棵原样留着，
+/// 一个字节都不动。符号链接不跟进也不算空——`file_type()` 不跟随链接，它会被
+/// 当成内容挡住这一层。
+fn prune_empty_dirs(dir: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return false;
+    };
+    let mut empty = true;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if entry.file_type().is_ok_and(|kind| kind.is_dir()) && prune_empty_dirs(&path) {
+            continue;
+        }
+        empty = false;
+    }
+    empty && fs::remove_dir(dir).is_ok()
+}
+
 fn finish(path: &Path, mut operation: Uninstall, commit: bool) -> Result<(), String> {
     if !commit && operation.committed {
         return Err("已提交的工具卸载只能继续清理。".into());
@@ -113,6 +144,15 @@ fn finish(path: &Path, mut operation: Uninstall, commit: bool) -> Result<(), Str
             result.map_err(|error| format!("无法清理 {}：{error}", entry.original.display()))?;
         } else {
             move_file(&entry.parked, &entry.original)?;
+        }
+    }
+    // 收空壳放在删完文件之后：目录刚空出来那一刻才删得掉。
+    //
+    // 尽力而为——删不掉只说明还有别的东西占着（句柄未释放、多出来的文件），
+    // 那是残留而不是卸载失败，不该让用户看到"卸载失败"。日志文件照常删。
+    if commit {
+        if let Some(dir) = operation.tool_dir.as_deref() {
+            prune_empty_dirs(dir);
         }
     }
     fs::remove_file(path).map_err(|error| format!("无法清理卸载记录：{error}"))
@@ -247,6 +287,7 @@ fn prepare(
         owner,
         tool_id,
         committed: false,
+        tool_dir: Some(installed),
         entries: files
             .into_iter()
             .enumerate()
@@ -401,5 +442,77 @@ mod tests {
                 .all(|entry| !entry.original.exists() && !entry.parked.exists())
         );
         assert_eq!(fs::read(&neighbor).unwrap(), b"neighbor");
+    }
+
+    #[test]
+    fn commit_removes_the_empty_shell_left_after_versions_are_gone() {
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path();
+        let prefs = data.join("configuration/preferences.json");
+        let account = data.join("tools/installed/alice");
+        let tool_dir = account.join("notes");
+        let version = tool_dir.join("versions/1.0.0");
+        let dirs = vec![version.to_string_lossy().into_owned()];
+        write(&version.join("manifest.json"), b"{ \"id\" : \"notes\" }");
+        write_record(
+            &prefs,
+            &json!({
+                "aaw-desktop.personal-tools.v1": json!({"user:alice":[{"package":{"id":"notes"}}]}).to_string()
+            }),
+        )
+        .unwrap();
+
+        let (_, operation, _) = prepare(data, "alice".into(), "notes".into(), dirs).unwrap();
+        for entry in &operation.entries {
+            move_file(&entry.original, &entry.parked).unwrap();
+        }
+        write_record(
+            &prefs,
+            &json!({"aaw-desktop.personal-tools.v1":"{\"user:alice\":[]}"}),
+        )
+        .unwrap();
+        recover_at(data).unwrap();
+
+        // 卸载只删叶子目录：`versions/` 与工具根目录会剩成空壳，一起收掉。
+        assert!(!tool_dir.join("versions").exists());
+        assert!(!tool_dir.exists());
+        // 账号目录不是这个工具的，留着。
+        assert!(account.is_dir());
+    }
+
+    #[test]
+    fn commit_keeps_the_tool_dir_when_something_else_is_inside() {
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path();
+        let prefs = data.join("configuration/preferences.json");
+        let tool_dir = data.join("tools/installed/alice/notes");
+        let version = tool_dir.join("versions/1.0.0");
+        // 用户自己往工具目录里放过东西——一个文件都不该被带走。
+        let kept = tool_dir.join("我的笔记.txt");
+        let dirs = vec![version.to_string_lossy().into_owned()];
+        write(&version.join("manifest.json"), b"{ \"id\" : \"notes\" }");
+        write(&kept, b"keep me");
+        write_record(
+            &prefs,
+            &json!({
+                "aaw-desktop.personal-tools.v1": json!({"user:alice":[{"package":{"id":"notes"}}]}).to_string()
+            }),
+        )
+        .unwrap();
+
+        let (_, operation, _) = prepare(data, "alice".into(), "notes".into(), dirs).unwrap();
+        for entry in &operation.entries {
+            move_file(&entry.original, &entry.parked).unwrap();
+        }
+        write_record(
+            &prefs,
+            &json!({"aaw-desktop.personal-tools.v1":"{\"user:alice\":[]}"}),
+        )
+        .unwrap();
+        recover_at(data).unwrap();
+
+        assert_eq!(fs::read(&kept).unwrap(), b"keep me");
+        assert!(!tool_dir.join("versions").exists());
+        assert!(tool_dir.is_dir(), "还有别的东西就不动这一层");
     }
 }

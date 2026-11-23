@@ -17,6 +17,7 @@ import {
 import { exampleTools } from "../../../src/plugins/tools/runtime/examples.ts";
 import { ToolManagement } from "../../../src/plugins/tools/ui/ToolManagement.tsx";
 import { fakeWorkshop } from "./fakeWorkshop.ts";
+import { createSnapshotView } from "../../../src/shared/state/readonlySnapshot.ts";
 
 it("defers a selected source update until dirty settings are explicitly discarded", () => {
   const update = vi.fn();
@@ -789,4 +790,55 @@ it("keeps the tool listed when file cleanup fails during uninstall", async () =>
   expect(service.remove).not.toHaveBeenCalled();
   expect(screen.getByRole("list", { name: "已安装工具" })).toBeVisible();
   expect(screen.getByText("JSON 格式化")).toBeVisible();
+});
+
+/**
+ * 卸载完成的那一刻，列表里就不该再有它。
+ *
+ * `service.state` 在生产里是 `createSnapshotView` 包出来的快照视图，这里照原样
+ * 包一层（而不是直接把裸 store 传进去），否则测不到订阅转发那一段。
+ */
+it("卸载完成后卡片立刻消失，不等下一次交互", async () => {
+  const store = createStore<readonly PersonalTool[]>(() => [
+    { package: sampleTool },
+  ]);
+  const view = createSnapshotView(store, (tools) => tools);
+  const service = {
+    state: view.snapshot,
+    install: vi.fn(),
+    rollback: vi.fn(),
+    setRunDir: vi.fn(),
+    setSourceDir: vi.fn(),
+    open: vi.fn(),
+    remove: vi.fn(async (id: string) => {
+      store.setState(
+        store.getState().filter((entry) => entry.package.id !== id),
+        true,
+      );
+    }),
+    saveSettings: vi.fn(),
+  } satisfies ToolsService;
+  const host = {
+    isNative: () => true,
+    openTool: vi.fn().mockResolvedValue(undefined),
+  } as unknown as HostService;
+  const purge = vi.fn(async (id: string) => {
+    await service.remove(id);
+    return { text: "已删除 1 个目录。" };
+  });
+  render(
+    <ToolsPanel
+      service={service}
+      host={host}
+      workshop={{ ...fakeWorkshop(), purge }}
+    />,
+  );
+  expect(screen.getByText(sampleTool.name)).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: `更多操作：${sampleTool.name}` }),
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "卸载" }));
+  fireEvent.click(await screen.findByRole("button", { name: "卸载" }));
+  await waitFor(() => expect(purge).toHaveBeenCalled());
+  await waitFor(() => expect(screen.queryByText(sampleTool.name)).toBeNull());
 });

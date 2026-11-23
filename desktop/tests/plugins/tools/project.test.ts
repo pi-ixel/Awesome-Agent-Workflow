@@ -384,3 +384,19 @@ it("runtimeFiles 只含 manifest.json 与 index.html，字段与包严格一致"
   expect(manifest).not.toHaveProperty("html");
   expect(new TextDecoder().decode(files["index.html"])).toBe(sampleTool.html);
 });
+
+it("项目扫描跳过卸载暂存目录（.aaw-uninstall-*）", async () => {
+  const { io } = memoryIO();
+  const { dir } = await createToolProject(io, {
+    id: "demo",
+    name: "演示",
+    owner: "u1",
+  });
+  expect(await listToolProjects(io, { owner: "u1" })).toEqual([dir]);
+  // 宿主卸载工具时把项目目录原地改名暂存，配置写成功后才真正删除。改名后的
+  // 目录里还躺着 manifest.json——扫进来就是一个"合法项目"，于是卸载完列表
+  // 里仍然多一个，要切一次页签才消失。
+  const parked = "/data/tools/projects/u1/.aaw-uninstall-5f2a-0";
+  await io.movePath(dir, parked);
+  expect(await listToolProjects(io, { owner: "u1" })).toEqual([]);
+});
