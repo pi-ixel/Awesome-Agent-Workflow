@@ -33,7 +33,7 @@ beforeEach(() => {
     sessionId: `test-${++sequence}`,
     agentKey,
   };
-  projectIndexes.deletions.store.setState({ entries: {} });
+  projectIndexes.deletions.store.setState({ entries: {}, batch: undefined });
   projectIndexes.archive.setState({
     archivedSessions: new Set(),
     metadata: {},
@@ -57,6 +57,84 @@ beforeEach(() => {
   projectIndexes.archive
     .getState()
     .archiveSession(target.workspacePath, target.sessionId, agentKey);
+});
+
+it("processes a fixed batch sequentially, retaining precheck failures for retry", async () => {
+  const owned = { ...target, sessionId: "owned" };
+  const last = { ...target, workspacePath: "D:/Other", sessionId: "last" };
+  const late = { ...target, sessionId: "late" };
+  const archive = projectIndexes.archive.getState().archiveSession;
+  for (const item of [owned, last])
+    archive(item.workspacePath, item.sessionId, agentKey);
+  const groups = projectIndexes.groups.register();
+  groups.publish(owned.workspacePath, [
+    {
+      id: "owner",
+      title: "定时任务",
+      status: "idle",
+      members: [{ sessionId: owned.sessionId, title: "会话" }],
+    },
+  ]);
+  let finish!: () => void;
+  nativeDelete.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const queue = [target, owned, last];
+  const cleanup = vi.fn(async () => {});
+  const deleting = projectIndexes.deletions.runBatch(
+    agentKey,
+    queue,
+    (item) => deleteArchivedSession(item, cleanup),
+    () => true,
+  );
+  await vi.waitFor(() => expect(nativeDelete).toHaveBeenCalledOnce());
+  expect(projectIndexes.deletions.store.getState().batch?.isRunning).toBe(true);
+  archive(late.workspacePath, late.sessionId, agentKey);
+  queue.push(late);
+  finish();
+  await deleting;
+  const status = projectIndexes.deletions.store.getState().batch;
+  expect(status).toMatchObject({ isRunning: false, succeeded: 2 });
+  expect(status?.failed[deletionKey(owned)]).toContain("定时任务或工作流拥有");
+  expect(nativeDelete.mock.calls.map((call) => call[2])).toEqual([
+    target.sessionId,
+    last.sessionId,
+  ]);
+  expect(cleanup).toHaveBeenCalledTimes(2);
+  expect(projectIndexes.archive.getState().archivedSessions.size).toBe(2);
+  groups.dispose();
+  await deleteArchivedSession(owned, cleanup);
+  expect(nativeDelete).toHaveBeenLastCalledWith(
+    agentKey,
+    owned.workspacePath,
+    owned.sessionId,
+  );
+});
+
+it("leaves untouched batch entries out of the persisted recovery log", async () => {
+  const later = { ...target, sessionId: "later" };
+  projectIndexes.archive
+    .getState()
+    .archiveSession(later.workspacePath, later.sessionId, agentKey);
+  let isOpen = true;
+  const task = projectIndexes.deletions.runBatch(
+    agentKey,
+    [target, later],
+    async (item) => {
+      await projectIndexes.deletions.save({ ...item, phase: "source" });
+      isOpen = false;
+    },
+    () => isOpen,
+  );
+  await task;
+  const restored = createSessionDeletions(webviewStorage).store.getState();
+  expect(restored.entries[deletionKey(target)]?.phase).toBe("source");
+  expect(restored.entries[deletionKey(later)]).toBeUndefined();
+  expect(restored.batch).toBeUndefined();
+  expect(projectIndexes.archive.getState().archivedSessions.size).toBe(2);
 });
 
 it("coalesces deletion and persists a tombstone that rejects reopening and late catalog fills", async () => {

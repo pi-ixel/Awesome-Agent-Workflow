@@ -1,4 +1,4 @@
-import { embeddedFieldClass } from "../../../../shared/ui/inputStyles.ts";
+import { composerFieldClass } from "../../../../shared/ui/inputStyles.ts";
 import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import { NavigationRow } from "../../../../shared/ui/NavigationRow.tsx";
 import { focusVisibleRing } from "../../../../shared/ui/controls.tsx";
@@ -369,7 +369,7 @@ export function TabOverviewPopover({
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="搜索标签页..."
-                className={`${embeddedFieldClass} w-full`}
+                className={`${composerFieldClass} w-full`}
               />
             </div>
           </div>

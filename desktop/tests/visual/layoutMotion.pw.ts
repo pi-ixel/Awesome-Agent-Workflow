@@ -222,6 +222,8 @@ test("溢出的页签可键盘访问，总览随换肤和窗口缩放保留搜�
   const search = overview.getByRole("textbox", { name: "查找标签页" });
   const query = "交接记录-02";
   await expect(search).toBeFocused();
+  await expect(search).toHaveCSS("box-shadow", "none");
+  await expect(search).toHaveCSS("outline-style", "none");
   await search.fill(query);
   await search.press("Home");
   await search.press("Shift+ArrowRight");
@@ -778,6 +780,8 @@ test("file find floats above the document and keeps the query when switching to 
   const query = find.getByRole("textbox", { name: "搜索当前文件" });
   const count = find.locator('[aria-live="polite"]');
   await expect(query).toBeFocused();
+  await expect(query).toHaveCSS("box-shadow", "none");
+  await expect(query).toHaveCSS("outline-style", "none");
   expect(await title.boundingBox()).toEqual(originalBox);
   await query.fill("alpha");
   await expect(count).toHaveText("1/3");
@@ -794,7 +798,11 @@ test("file find floats above the document and keeps the query when switching to 
   await page.getByRole("menuitemcheckbox", { name: "区分大小写" }).click();
   await expect(count).toHaveText(/\/2$/);
   await find.getByRole("button", { name: "替换", exact: true }).click();
-  await find.getByRole("textbox", { name: "替换为" }).fill("beta");
+  const replacement = find.getByRole("textbox", { name: "替换为" });
+  await replacement.fill("beta");
+  await expect(replacement).toBeFocused();
+  await expect(replacement).toHaveCSS("box-shadow", "none");
+  await expect(replacement).toHaveCSS("outline-style", "none");
   await query.press("ArrowDown");
   await find.getByRole("button", { name: "替换当前" }).click();
   await expect(count).toHaveText(/\/1$/);

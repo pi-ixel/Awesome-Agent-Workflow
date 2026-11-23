@@ -1,11 +1,11 @@
-import { embeddedFieldClass } from "../inputStyles.ts";
+import { composerFieldClass } from "../inputStyles.ts";
 import { IconButton } from "../IconButton.tsx";
 import { useEffect, type ReactNode, type RefObject } from "react";
 import { ArrowDownIcon, ArrowUpIcon, SearchIcon, XIcon } from "../icons.tsx";
 import { focusVisibleRing } from "../controls.tsx";
 import { HintSurface } from "./HintSurface.tsx";
 
-export const findFieldClass = `${embeddedFieldClass} flex-1 font-medium`;
+export const findFieldClass = `${composerFieldClass} flex-1 font-medium`;
 export const findActionClass = `flex shrink-0 items-center justify-center rounded-md text-ink transition-colors hover:bg-hover disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent ${focusVisibleRing}`;
 
 export function FindBar({

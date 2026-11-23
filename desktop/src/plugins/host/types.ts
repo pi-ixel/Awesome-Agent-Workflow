@@ -84,7 +84,6 @@ export interface HostRuntime {
   readAgentHistoryEvidence?(agentId: string, sessionId: string, cwd: string): Promise<HistoryEvidence | null>;
   deleteAgentSession?(
     agentId: string,
-    program: string,
     sessionId: string,
     cwd: string,
   ): Promise<void>;
@@ -172,6 +171,7 @@ export interface DesktopWindowHost extends WindowHost {
   isFocused(): Promise<boolean>;
   showAndFocus(): Promise<void>;
   setCloseToTray?(enabled: boolean): Promise<void>;
+  setTaskbarUnread?(count: number): Promise<void>;
   claimScheduledTasks?(): Promise<boolean>;
   listenForScheduledTasksTick?(tick: () => void): Promise<() => void>;
 }

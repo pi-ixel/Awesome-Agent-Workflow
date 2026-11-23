@@ -280,6 +280,7 @@ export function ChatInput({
     );
   }, [imagesByScope, imagesLoaded, imageStorage]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const slashCaretRef = useRef<number | null>(null);
   const skillRailRef = useRef<HTMLDivElement | null>(null);
   // 发送对象（ADR 039）：「/」里选中的扩展条目，带着它发送时内容交给扩展。
   const [sendTarget, setSendTarget] = useState<SlashItem | null>(null);
@@ -411,6 +412,15 @@ export function ChatInput({
     readonly index: number;
   } | null>(null);
   const slashOpen = slash !== null;
+  // 在草稿提交后立即恢复光标，避免下一帧把已开始输入的光标移回旧位置。
+  useLayoutEffect(() => {
+    const caret = slashCaretRef.current;
+    if (caret === null || slashOpen) return;
+    slashCaretRef.current = null;
+    const textarea = textareaRef.current;
+    textarea?.focus();
+    textarea?.setSelectionRange(caret, caret);
+  }, [draftText, slashOpen]);
   const listSlashCatalog = slashSkills?.listCatalog;
   const listSlashSkills = listSlashCatalog ?? slashSkills?.listDescriptions;
   const slashWorkspace =
@@ -816,19 +826,13 @@ export function ChatInput({
       )
         ? [...skillReferences, reference]
         : skillReferences;
+    slashCaretRef.current = result.caret;
     setDraft(withSkillReferences(result.text, references));
     setSlash(null);
     if (item.kind === "action" && !item.submit) {
       if (item.actionId) runSlashAction(item.actionId);
       else item.run?.();
     }
-    requestAnimationFrame(() => {
-      const node = textareaRef.current;
-      if (node !== null) {
-        node.focus();
-        node.setSelectionRange(result.caret, result.caret);
-      }
-    });
   };
 
   /** 选中 @ 候选：文件插 `@路径`，skill 插自然语言提示（agent 自行加载）。 */

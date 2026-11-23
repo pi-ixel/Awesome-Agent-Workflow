@@ -29,6 +29,9 @@ export const windowHost: DesktopWindowHost = {
   setCloseToTray: async (enabled) => {
     if (isTauriEnv()) await invoke("set_close_to_tray", { enabled });
   },
+  setTaskbarUnread: async (count) => {
+    if (isTauriEnv()) await invoke("set_taskbar_unread", { count });
+  },
   async listenForClose(onClose) {
     if (!isTauriEnv()) return () => {};
     const { listen } = await import("@tauri-apps/api/event");
