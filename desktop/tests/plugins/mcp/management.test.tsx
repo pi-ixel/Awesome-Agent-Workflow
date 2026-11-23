@@ -537,6 +537,8 @@ it("CodeAgent 仅在当前 ACP 连接声明 HTTP 时注入托管 MCP", async () 
 
 it("CodeAgent 工作区条目仅手动检测，列表和批量检测不会启动 stdio", async () => {
   const user = userEvent.setup();
+  const inspectionError =
+    "找不到 CodeAgent 安装目录中的 MCP 启动文件，请检查 Agent 启动路径和安装完整性";
   const { host } = fixture([
     {
       ...nativeTools,
@@ -550,11 +552,10 @@ it("CodeAgent 工作区条目仅手动检测，列表和批量检测不会启动
   ]);
   const inspect = vi.fn<NonNullable<NativeMcpHost["inspect"]>>(() =>
     Promise.resolve({
-      ok: true,
-      message: "检测成功",
+      ok: false,
+      message: inspectionError,
       checkedAt: Date.now(),
       durationMs: 1,
-      tools: [{ name: "example" }],
     }),
   );
   const managedProbe = vi.fn(() =>
@@ -631,6 +632,7 @@ it("CodeAgent 工作区条目仅手动检测，列表和批量检测不会启动
       "codeagent",
     ),
   );
+  expect(await within(detail).findByText(inspectionError)).toBeVisible();
 });
 
 it("释放会话时只注销该会话的托管 MCP 代理，重复释放不影响其他会话", async () => {

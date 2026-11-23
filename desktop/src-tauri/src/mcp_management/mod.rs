@@ -430,7 +430,7 @@ pub async fn mcp_native_inspect(
         Ok(codeagent::ProbeConfig::Http(config)) => tokio::time::timeout(std::time::Duration::from_secs(20), proxy::inspect(config)).await
             .map_err(|_| "MCP 检测超时".into()).and_then(|result| result.map_err(|_| "Streamable HTTP MCP 握手或工具列表读取失败".into())),
         Ok(codeagent::ProbeConfig::Stdio(config)) => stdio_probe::inspect(config).await,
-        Err(error) => return Err(error),
+        Err(error) => Err(error),
     };
     Ok(inspection_result(started, result))
 }

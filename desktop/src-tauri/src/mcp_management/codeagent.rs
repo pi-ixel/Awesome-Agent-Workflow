@@ -479,42 +479,56 @@ pub fn probe_config(
         .get("command")
         .and_then(Value::as_str)
         .ok_or("MCP 服务缺少启动命令")?;
-    let install_dir = executable
-        .is_absolute()
-        .then(|| executable.parent())
-        .flatten();
-    // 部分安装把 CLI 放在 bin，按配置命令的实际文件确定变量指向哪一级。
-    let install_dir = install_dir.and_then(|dir| {
-        let alternative = dir
+    // 插件目录已经用规范路径校验归属。传给子进程时移除 Windows 扩展路径前缀，
+    // 否则 Node 不能将展开后的脚本参数作为普通文件加载。
+    let process_path = |path: &Path| {
+        path.to_str()
+            .map(|_| crate::panel_files::display_path(path))
+    };
+    let plugin_root = plugin.as_deref().and_then(process_path);
+    let expand_plugin = |value: &str| -> Result<String> {
+        if !value.contains("${CODEAGENT3_PLUGIN_ROOT}") {
+            return Ok(value.to_owned());
+        }
+        let root = plugin_root
+            .as_deref()
+            .ok_or("无法定位 CodeAgent 插件目录")?;
+        Ok(value.replace("${CODEAGENT3_PLUGIN_ROOT}", root))
+    };
+    let command_template = expand_plugin(raw_command)?;
+    let cli_dir = executable.parent().filter(|dir| dir.is_absolute());
+    let install_dir = if command_template.contains("${CLI_INSTALL_DIR}") {
+        let dir = cli_dir.ok_or("无法定位 CodeAgent 安装目录，请在 Agent 设置中配置启动路径")?;
+        // 部分安装把 CLI 放在 bin，而运行时文件位于上一级。
+        let parent = dir
             .file_name()
             .filter(|name| name.eq_ignore_ascii_case("bin"))
             .and_then(|_| dir.parent());
-        if raw_command.contains("${CLI_INSTALL_DIR}") {
-            [Some(dir), alternative]
+        Some(
+            [Some(dir), parent]
                 .into_iter()
                 .flatten()
+                .filter_map(process_path)
                 .find(|candidate| {
-                    candidate.to_str().is_some_and(|path| {
-                        Path::new(&raw_command.replace("${CLI_INSTALL_DIR}", path)).is_file()
-                    })
+                    let expanded =
+                        PathBuf::from(command_template.replace("${CLI_INSTALL_DIR}", candidate));
+                    expanded.is_file()
+                        || (cfg!(windows)
+                            && expanded.extension().is_none()
+                            && expanded.with_extension("exe").is_file())
                 })
-                .or(Some(dir))
-        } else {
-            Some(dir)
-        }
-    });
+                .ok_or(
+                    "找不到 CodeAgent 安装目录中的 MCP 启动文件，请检查 Agent 启动路径和安装完整性",
+                )?,
+        )
+    } else {
+        cli_dir.and_then(process_path)
+    };
     let resolve = |value: &str| -> Result<String> {
-        let mut value = value.to_owned();
-        if value.contains("${CODEAGENT3_PLUGIN_ROOT}") {
-            let root = plugin
-                .as_ref()
-                .and_then(|path| path.to_str())
-                .ok_or("无法定位 CodeAgent 插件目录")?;
-            value = value.replace("${CODEAGENT3_PLUGIN_ROOT}", root);
-        }
+        let mut value = expand_plugin(value)?;
         if value.contains("${CLI_INSTALL_DIR}") {
             let root = install_dir
-                .and_then(Path::to_str)
+                .as_deref()
                 .ok_or("无法定位 CodeAgent 安装目录，请在 Agent 设置中配置启动路径")?;
             value = value.replace("${CLI_INSTALL_DIR}", root);
         }
@@ -652,22 +666,15 @@ mod tests {
         );
     }
 
-    #[test]
-    fn installed_plugin_paths_are_scoped_and_variables_resolved_only_for_testing() {
-        let home = tempfile::tempdir().unwrap();
-        let plugin = home.path().join(".cac/plugins/cache/market/scope/1.0");
+    fn install_stdio_fixture(home: &Path, definition: Value) -> PathBuf {
+        let plugin = home.join(".cac/plugins/cache/market/scope/1.0");
         fs::create_dir_all(&plugin).unwrap();
         fs::write(
             plugin.join(".mcp.json"),
-            json!({"mcpServers": {"fixture": {
-                "command": "${CLI_INSTALL_DIR}/node",
-                "args": ["${CODEAGENT3_PLUGIN_ROOT}/index.js"],
-                "env": {"SECRET": "fixture-secret"}
-            }}})
-            .to_string(),
+            json!({"mcpServers": {"fixture": definition}}).to_string(),
         )
         .unwrap();
-        let index = home.path().join(".cac/plugins/installed_plugins.json");
+        let index = home.join(".cac/plugins/installed_plugins.json");
         fs::write(
             index,
             json!({"plugins": {"scope@market": [
@@ -676,20 +683,14 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let local = read_local(home.path(), None).unwrap();
+        plugin
+    }
+
+    fn probe_fixture(home: &Path, program: &Path) -> Result<ProbeConfig> {
+        let local = read_local(home, None).unwrap();
         let entry = &local.snapshot.entries[0];
-        assert_eq!(entry.name, "plugin:scope:fixture");
-        assert_eq!(entry.read_only, Some(true));
-        assert_eq!(entry.effective, Some(false));
-        assert!(
-            !serde_json::to_string(entry)
-                .unwrap()
-                .contains("fixture-secret")
-        );
-        let program = home.path().join("bin").join("codeagent");
-        fs::write(home.path().join("node"), "").unwrap();
-        let probe = probe_config(
-            home.path(),
+        probe_config(
+            home,
             None,
             program.to_str().unwrap(),
             entry.id.as_deref(),
@@ -705,14 +706,91 @@ mod tests {
                 secret_changes: BTreeMap::new(),
             },
         )
-        .unwrap();
+    }
+
+    #[test]
+    fn installed_plugin_paths_are_scoped_and_variables_resolved_only_for_testing() {
+        let home = tempfile::tempdir().unwrap();
+        let plugin = install_stdio_fixture(
+            home.path(),
+            json!({
+                "command": "${CLI_INSTALL_DIR}/node/node.exe",
+                "args": ["${CODEAGENT3_PLUGIN_ROOT}/index.js"],
+                "env": {"SECRET": "fixture-secret", "PLUGIN_DIR": "${CODEAGENT3_PLUGIN_ROOT}"}
+            }),
+        );
+        let local = read_local(home.path(), None).unwrap();
+        let entry = &local.snapshot.entries[0];
+        assert_eq!(entry.name, "plugin:scope:fixture");
+        assert_eq!(entry.read_only, Some(true));
+        assert_eq!(entry.effective, Some(false));
+        assert!(
+            !serde_json::to_string(entry)
+                .unwrap()
+                .contains("fixture-secret")
+        );
+
+        let program = home.path().join("bin/codeagent.exe");
+        assert!(
+            matches!(probe_fixture(home.path(), &program), Err(error) if error.contains("MCP 启动文件"))
+        );
+        fs::create_dir(home.path().join("node")).unwrap();
+        fs::write(home.path().join("node/node.exe"), "").unwrap();
+        let raw = fs::read(plugin.join(".mcp.json")).unwrap();
+        let probe = probe_fixture(home.path(), &program).unwrap();
         let ProbeConfig::Stdio(probe) = probe else {
             panic!("需要 stdio 配置")
         };
-        assert!(!probe.command.ends_with("bin/node"));
-        assert!(probe.command.ends_with("/node"));
-        assert!(probe.args[0].ends_with("/index.js"));
+        assert_eq!(
+            probe.command,
+            format!("{}/node/node.exe", home.path().display())
+        );
+        let plugin_path = crate::panel_files::display_path(&plugin.canonicalize().unwrap());
+        assert_eq!(probe.args, [format!("{plugin_path}/index.js")]);
+        assert_eq!(probe.env["PLUGIN_DIR"], plugin_path);
+        assert!(!probe.args[0].starts_with(r"\\?\"));
         assert_eq!(probe.env["SECRET"], "fixture-secret");
+        assert_eq!(fs::read(plugin.join(".mcp.json")).unwrap(), raw);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_node_loads_the_expanded_plugin_script_and_lists_tools() {
+        let home = tempfile::tempdir().unwrap();
+        let plugin = install_stdio_fixture(
+            home.path(),
+            json!({
+                "command": "${CLI_INSTALL_DIR}/node.exe",
+                "args": ["${CODEAGENT3_PLUGIN_ROOT}/index.js"]
+            }),
+        );
+        fs::write(plugin.join("index.js"), r#"
+const lines = require('node:readline').createInterface({ input: process.stdin });
+lines.on('line', (line) => {
+  const { id, method } = JSON.parse(line);
+  if (method === 'notifications/initialized') return;
+  const result = method === 'initialize' ? { protocolVersion: '2025-03-26', capabilities: { tools: {} } }
+    : method === 'tools/list' ? { tools: [{ name: 'module_fixture' }] } : null;
+  if (!result) throw new Error('Unexpected method');
+  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\n');
+});
+"#).unwrap();
+        let crate::acp_process::SpawnTarget::Direct(node) =
+            crate::acp_process::resolve_windows_program("node")
+        else {
+            panic!("Windows MCP 回归测试需要 Node.js")
+        };
+        let node = PathBuf::from(node);
+        assert!(node.is_file(), "Windows MCP 回归测试需要 Node.js");
+        let launcher = node.with_file_name("codeagent.exe");
+        let ProbeConfig::Stdio(probe) = probe_fixture(home.path(), &launcher).unwrap() else {
+            panic!("需要 stdio 配置")
+        };
+        let tools = stdio_probe::inspect(probe).await.unwrap();
+        assert_eq!(
+            serde_json::to_value(tools).unwrap()[0]["name"],
+            "module_fixture"
+        );
     }
 
     #[test]
