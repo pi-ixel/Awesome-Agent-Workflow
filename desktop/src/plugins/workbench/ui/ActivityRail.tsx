@@ -2,7 +2,7 @@ import {
   IconButton,
   IconHoverProvider,
 } from "../../../shared/ui/IconButton.tsx";
-import type { ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import { SettingsIcon } from "../../../shared/ui/icons.tsx";
 import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
 import { BrandMark } from "../../../shared/ui/BrandMark.tsx";
@@ -14,6 +14,54 @@ import type { WorkbenchSnapshot } from "../types.ts";
 import { readWorkbenchUi, useWorkbenchLayout } from "./bindings/layoutView.ts";
 
 const iconButton = `grid shrink-0 place-items-center rounded-lg text-ink-mute transition-colors hover:bg-hover hover:text-ink data-[active=true]:bg-(--color-selected) data-[active=true]:text-ink focus-visible:ring-inset ${focusVisibleRing}`;
+
+const noUnread = () => 0;
+const noSubscription = () => () => {};
+
+function ActivityRailEntry({
+  entry,
+  selected,
+  expanded,
+}: {
+  readonly entry: WorkbenchSnapshot["sidebar"][number];
+  readonly selected: boolean;
+  readonly expanded: boolean;
+}) {
+  const { id, label, Icon, unread } = entry;
+  const layout = useWorkbenchLayout();
+  const count = useSyncExternalStore(
+    unread?.subscribe ?? noSubscription,
+    unread?.getCount ?? noUnread,
+  );
+  const description = count > 0 ? `${count} 项未读` : undefined;
+  return (
+    <IconButton
+      iconSize="rail"
+      className={iconButton}
+      aria-label={label}
+      aria-description={description}
+      aria-controls="workbench-sidebar"
+      aria-expanded={selected && expanded}
+      aria-current={selected ? "location" : undefined}
+      data-active={selected}
+      data-hint={description ? `${label} · ${description}` : label}
+      onClick={() => {
+        const state = readWorkbenchUi(layout);
+        if (selected && expanded) state.toggleSidebarCollapsed();
+        else state.openSidebar(id);
+      }}
+    >
+      <span className="relative inline-flex">
+        <Icon className="ui-icon-18" />
+        {count > 0 && (
+          <span className="pointer-events-none absolute -top-1.5 -right-1.5 z-10 inline-flex min-w-[1.25em] items-center justify-center rounded-full bg-danger-solid px-0.5 text-ui-xs leading-tight font-semibold text-danger-solid-ink tabular-nums ring-1 ring-sidebar">
+            {count > 99 ? "99+" : count}
+          </span>
+        )}
+      </span>
+    </IconButton>
+  );
+}
 
 export function ActivityRail({
   entries,
@@ -54,26 +102,13 @@ export function ActivityRail({
             />
           </div>
           <div className="flex min-h-0 flex-col items-center gap-1 overflow-y-auto px-0.5 pt-3 pb-1.5 [scrollbar-width:none]">
-            {entries.map(({ id, label, Icon }) => (
-              <IconButton iconSize="rail"
-                key={id}
-                type="button"
-                className={iconButton}
-                aria-label={label}
-                aria-controls="workbench-sidebar"
-                aria-expanded={selected === id && expanded}
-                aria-current={selected === id ? "location" : undefined}
-                data-active={selected === id}
-                data-hint={label}
-                onClick={() => {
-                  const state = readWorkbenchUi(layout);
-                  if (selected === id && expanded)
-                    state.toggleSidebarCollapsed();
-                  else state.openSidebar(id);
-                }}
-              >
-                <Icon className="ui-icon-18" />
-              </IconButton>
+            {entries.map((entry) => (
+              <ActivityRailEntry
+                key={entry.id}
+                entry={entry}
+                selected={selected === entry.id}
+                expanded={expanded}
+              />
             ))}
           </div>
         </div>
@@ -81,7 +116,8 @@ export function ActivityRail({
           <div
             className={`flex shrink-0 flex-col items-center gap-1 px-0.5 ${sidebarFooterInset}`}
           >
-            <IconButton iconSize="rail"
+            <IconButton
+              iconSize="rail"
               type="button"
               aria-label="设置"
               data-hint="设置"

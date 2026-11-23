@@ -27,8 +27,13 @@ it("persists the claim before dispatch and skips overlapping scheduled and manua
   await scheduler.runNow("task");
   expect(run).toHaveBeenCalledOnce();
   expect(saved.runs.map((item) => item.status)).toEqual(["skipped", "running"]);
+  expect(saved.runs[0]).toMatchObject({ unread: true, agentId: task.agent });
+  expect(saved.runs[1]?.unread).toBeUndefined();
+  await scheduler.openRunDetails(saved.runs[0]!.id);
+  expect(saved.runs[0]?.unread).toBeUndefined();
   finish();
   await vi.waitFor(() => expect(saved.runs[1]?.status).toBe("success"));
+  expect(saved.runs[1]).toMatchObject({ unread: true, agentId: task.agent });
   scheduler.dispose();
 });
 
@@ -43,7 +48,8 @@ it("does not restart an interrupted run or replay a missed occurrence", async ()
   await scheduler.tick();
   expect(run).not.toHaveBeenCalled();
   expect(saved.runs[0]?.status).toBe("missed");
-  expect(saved.runs[1]).toMatchObject({ status: "interrupted", session });
+  expect(saved.runs[0]?.unread).toBe(true);
+  expect(saved.runs[1]).toMatchObject({ status: "interrupted", session, unread: true });
   scheduler.dispose();
 });
 

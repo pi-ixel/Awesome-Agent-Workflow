@@ -1,10 +1,10 @@
-import { pathKey } from "../../../shared/panelPaths.ts";
+import { isAbsolutePath, pathKey } from "../../../shared/panelPaths.ts";
 import { sameSessionAgent, createSessionDeletions } from "./sessionDeletion.ts";
 import { createSessionGroups } from "./sessionGroups.ts";
 import type { HostStorage } from "../../host/types.ts";
 import { createSnapshotView } from "../../../shared/state/readonlySnapshot.ts";
 import { createSessionCatalog } from "./catalog.ts";
-import { createSessionActivityStore } from "./sessionActivityStore.ts";
+import { createSessionActivityStore, sessionActivityKey } from "./sessionActivityStore.ts";
 import type { DeleteSessionTarget } from "./sessionDeletion.ts";
 import { createSessionArchiveStore } from "./sessionArchiveStore.ts";
 import type { Logger } from "../../../shared/logging/logger.ts";
@@ -14,7 +14,18 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
   const deletions = createSessionDeletions(storage);
   const catalog = createSessionCatalog(scope.signal, deletions.blocked);
   const deletionView = createSnapshotView(deletions.store, (state) => state);
-  const activity = createSessionActivityStore(scope.signal);
+  const activity = createSessionActivityStore(scope.signal, storage);
+  const directoryStorageKey = "aaw-desktop/session-working-directories.v1";
+  let workingDirectories: Record<string, unknown> = {};
+  try {
+    const saved: unknown = JSON.parse(storage.getItem(directoryStorageKey) ?? "{}");
+    if (saved && typeof saved === "object" && !Array.isArray(saved))
+      workingDirectories = saved as Record<string, unknown>;
+  } catch (error) {
+    logger?.warn("读取会话工作目录失败", { error: String(error) });
+  }
+  const saveWorkingDirectories = () =>
+    storage.setItem(directoryStorageKey, JSON.stringify(workingDirectories));
   const archive = createSessionArchiveStore(
     storage,
     catalog.store.getState,
@@ -26,7 +37,7 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
   );
   const groups = createSessionGroups();
   const catalogView = createSnapshotView(catalog.store, (state) => state);
-  const activityView = createSnapshotView(activity, ({ entries }) => ({ entries }));
+  const activityView = createSnapshotView(activity, ({ entries, unreadReplies }) => ({ entries, unreadReplies }));
   const archiveView = createSnapshotView(archive, ({ notice, archivedSessions, metadata }) => ({
     notice,
     archivedSessions,
@@ -42,6 +53,23 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
     activityView: activityView.snapshot,
     archiveView: archiveView.snapshot,
     groups,
+    workingDirectory(project: string, agentKey: string, sessionId: string) {
+      const cwd = workingDirectories[sessionActivityKey(project, sessionId, agentKey)];
+      return typeof cwd === "string" && isAbsolutePath(cwd) ? cwd : undefined;
+    },
+    rememberWorkingDirectory(project: string, agentKey: string, sessionId: string, cwd: string) {
+      const key = sessionActivityKey(project, sessionId, agentKey);
+      if (!isAbsolutePath(cwd) || pathKey(cwd) === pathKey(project) || workingDirectories[key] === cwd) return;
+      workingDirectories[key] = cwd;
+      saveWorkingDirectories();
+    },
+    forgetSessionMetadata({ workspacePath, agentKey, sessionId }: DeleteSessionTarget) {
+      activity.getState().forget(workspacePath, sessionId, agentKey);
+      const key = sessionActivityKey(workspacePath, sessionId, agentKey);
+      if (!(key in workingDirectories)) return;
+      delete workingDirectories[key];
+      saveWorkingDirectories();
+    },
     async forgetArchived(target: DeleteSessionTarget): Promise<void> {
       const state = archive.getState();
       const archivedSessions = new Set(state.archivedSessions);

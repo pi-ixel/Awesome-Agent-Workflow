@@ -20,6 +20,43 @@ beforeEach(() => {
   useWorkspaceStore.setState({ pinnedSessions: [] });
 });
 
+it("restores unread replies without treating old session activity as new results", () => {
+  const create = () =>
+    createSessionActivityStore(new AbortController().signal, localStorage);
+  const unread = create();
+  const base = {
+    project: "D:/repo",
+    sessionId: "same",
+    status: "completed" as const,
+    pending: 0,
+    unread: true,
+  };
+  unread
+    .getState()
+    .update(
+      { ...base, agentKey: "a" },
+      { agentId: "alpha", unreadReply: true },
+    );
+  unread
+    .getState()
+    .update({ ...base, agentKey: "b" }, { agentId: "beta", unreadReply: true });
+  unread
+    .getState()
+    .update({ ...base, sessionId: "legacy", agentKey: "a", status: "waiting" });
+  unread.getState().reset();
+  const restored = create();
+  expect(restored.getState().entries).toEqual({});
+  expect(
+    Object.values(restored.getState().unreadReplies)
+      .map(({ agentId }) => agentId)
+      .sort(),
+  ).toEqual(["alpha", "beta"]);
+  restored.getState().read("d:/REPO", "same", "a");
+  expect(Object.values(create().getState().unreadReplies)).toEqual([
+    expect.objectContaining({ agentId: "beta" }),
+  ]);
+});
+
 it("isolates same-ID running, waiting and unread states, including marking one Agent read", () => {
   const activity = createSessionActivityStore(new AbortController().signal);
   const store = activity.getState();

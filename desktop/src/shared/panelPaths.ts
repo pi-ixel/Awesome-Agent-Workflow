@@ -40,6 +40,29 @@ export interface FileReference {
   path: string;
   line?: number;
 }
+const fileLineSuffix = /(?:#L(\d+)(?:-L?\d+)?|:(\d+)(?::\d+)?)$/;
+
+/** 明确的相对文件目标，保留行号，并拒绝协议、绝对路径和根目录逃逸。 */
+export function resolveRelativeFileReference(
+  root: string,
+  target: string,
+): FileReference | null {
+  try {
+    const decoded = decodeURIComponent(target.trim());
+    const path = decoded.replace(fileLineSuffix, "");
+    if (
+      !path ||
+      path.startsWith("#") ||
+      isAbsolutePath(path) ||
+      /[:\p{Cc}]/u.test(path)
+    )
+      return null;
+    // ./ 防止带冒号行号的裸文件名被识别为 URL scheme。
+    return resolveFileReference(root, `./${target.trim()}`);
+  } catch {
+    return null;
+  }
+}
 export function resolveFileReference(
   root: string,
   href: string,
@@ -61,7 +84,7 @@ export function resolveFileReference(
   } catch {
     return null;
   }
-  const suffix = /(?:#L(\d+)(?:-L?\d+)?|:(\d+)(?::\d+)?)$/.exec(target);
+  const suffix = fileLineSuffix.exec(target);
   const line = suffix ? Number(suffix[1] ?? suffix[2]) : undefined;
   if (suffix) target = target.slice(0, suffix.index);
   const absolute = isAbsolutePath(target);

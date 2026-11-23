@@ -3,9 +3,11 @@ import type { TurnUsageDetails } from "../turnUsage.ts";
 import { TurnUsageBadge } from "./TurnUsageBadge.tsx";
 import { describeUnknownError } from "../../../../shared/errors.ts";
 import { useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
+import { useConversation, useSessionValue } from "../../ui/bindings/conversationView.ts";
+import { useProject } from "../../ui/bindings/projectView.tsx";
 import { ConversationDocumentContext } from "./documentView.ts";
 import { MessageAttachments } from "./MessageAttachments.tsx";
-import { memo, useCallback, useContext, useState } from "react";
+import { memo, useCallback, useContext, useMemo, useState } from "react";
 import { useStreamingItem } from "./useStreamingItem.ts";
 /**
  * 助手消息：Markdown 渲染 + 整条复制（复制 Markdown 源文本）。
@@ -29,16 +31,34 @@ function AssistantMessageBase({
   readonly usage?: TurnUsageDetails | null;
 }) {
   const item = useStreamingItem(layoutItem);
-  const { assetUrl, openPath, openExternal } = useContext(ConversationDocumentContext) ?? {};
+  const { assetUrl, openPath, openExternal, verifyRelativeFile } = useContext(ConversationDocumentContext) ?? {};
   const project = useWorkspaceValue((state) => state.activePath);
+  const workspace = useProject()?.projects.workspace;
+  const foreground = useConversation()?.session;
+  const sessionId = useSessionValue((state) => state.activeSessionId ?? state.openingSessionId);
+  const agentKey = useSessionValue((state) => state.agentKey);
+  const workingDirectory = useSessionValue((state) => state.workingDirectory);
   const [fileError, setFileError] = useState<string | null>(null);
   const onOpenFile = useCallback((path: string, line?: number) => {
     if (!project || !openPath) return;
+    const isCurrent = () => {
+      const state = foreground?.getState();
+      return workspace?.getState().activePath === project &&
+        state?.agentKey === agentKey &&
+        (state?.activeSessionId ?? state?.openingSessionId ?? null) === sessionId &&
+        state?.workingDirectory === workingDirectory;
+    };
+    if (!isCurrent()) return;
     setFileError(null);
-    void openPath(project, path, line).catch((error: unknown) =>
-      setFileError(describeUnknownError(error)),
-    );
-  }, [openPath, project]);
+    void openPath(project, path, line, isCurrent).catch((error: unknown) => {
+      if (isCurrent()) setFileError(describeUnknownError(error));
+    });
+  }, [agentKey, foreground, openPath, project, sessionId, workingDirectory, workspace]);
+  const replyFiles = useMemo(() => ({
+    root: workingDirectory,
+    verify: verifyRelativeFile,
+    open: openPath ? onOpenFile : undefined,
+  }), [workingDirectory, verifyRelativeFile, openPath, onOpenFile]);
   return (
     // group：复制按钮随卡片 hover 浮现，不再常驻制造噪音
     <div
@@ -52,6 +72,7 @@ function AssistantMessageBase({
           text={item.text}
           streaming={item.isStreaming}
           fileRoot={project ?? undefined}
+          replyFiles={replyFiles}
           onOpenExternal={openExternal}
           assetUrl={assetUrl}
           onOpenFile={openPath ? onOpenFile : undefined}

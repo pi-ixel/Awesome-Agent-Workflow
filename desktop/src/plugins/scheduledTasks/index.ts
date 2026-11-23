@@ -89,6 +89,20 @@ export async function apply(ctx: Context) {
     Icon: ClockIcon,
     View: () => createElement(TaskSidebar, { scheduler }),
     WorkArea: () => createElement(TaskWorkspace, { scheduler, project, agents, openRun }),
+    unread: {
+      getCount() {
+        const { tasks, runs } = scheduler.store.getState();
+        const owners = new Map(tasks.map((task) => [task.id, task.agent]));
+        return runs.filter((run) => run.unread && (run.agentId ?? owners.get(run.taskId)) === agents.selectedId).length;
+      },
+      subscribe(listener) {
+        const stopRuns = scheduler.store.subscribe((next, previous) => {
+          if (next.runs !== previous.runs || next.tasks !== previous.tasks) listener();
+        });
+        const stopSelection = agents.subscribeSelection(listener);
+        return () => { stopRuns(); stopSelection(); };
+      },
+    },
   }));
   const setCloseToTray = host.window.setCloseToTray?.bind(host.window);
   if (setCloseToTray) {
@@ -154,6 +168,7 @@ export async function apply(ctx: Context) {
             workbench.navigation.getState().openSidebar(section);
             if (typeof extra?.scheduledRun === "string") {
               const runId = extra.scheduledRun;
+              void scheduler.openRunDetails(runId).catch(() => {});
               window.requestAnimationFrame(() => document.getElementById(`scheduled-run-${runId}`)?.scrollIntoView({ block: "nearest" }));
             }
           }).catch(() => {});

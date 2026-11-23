@@ -190,13 +190,21 @@ export function RightPanelFixture() {
   workbench.panels.getState().tool(path, "files");
   workbench.panels.getState().collapse(path);
   if (params.has("activity-rail")) {
+    const unread = createStore(() => ({ count: 101 }));
     workbench.register("sidebar", {
       id: "conversations",
       label: "会话",
       Icon: MessageCircleIcon,
+      unread: params.has("unread") ? {
+        getCount: () => unread.getState().count,
+        subscribe: unread.subscribe,
+      } : undefined,
       View: () => (
         <p className="pl-3.5">
           <span>项目和会话列表</span>
+          {params.has("unread") && (
+            <ActionButton size="compact" tone="secondary" onClick={() => unread.setState({ count: 0 })}>查看会话</ActionButton>
+          )}
         </p>
       ),
     });

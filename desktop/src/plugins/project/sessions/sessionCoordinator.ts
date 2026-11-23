@@ -44,7 +44,7 @@ import { knownWorkspacePaths } from "../workspace/knownPaths.ts";
 import type { SessionListStatus } from "./indexTypes.ts";
 import type { createProjectSessionIndexes } from "./sessionIndexes.ts";
 import { AcpResponseError } from "../../acpRuntime/service.ts";
-import { pathKey } from "../../../shared/panelPaths.ts";
+import { isAbsolutePath, pathKey } from "../../../shared/panelPaths.ts";
 import type { createProjectForeground } from "../conversation/foreground.ts";
 import { createSessionStore } from "../conversation/sessionStore.ts";
 import { createApprovalStore } from "../interactions/approvalStore.ts";
@@ -287,6 +287,8 @@ export function createSessionCoordinator({
         id =
           runtime.session.sessionId ?? runtime.store.getState().activeSessionId;
       if (!id) return;
+      if (runtime.cwd)
+        indexes.rememberWorkingDirectory(runtime.workspacePath, runtime.agentKey, id, runtime.cwd);
       const pending =
         runtime.approval.getState().pending.filter((item) => !item.stale)
           .length +
@@ -328,6 +330,17 @@ export function createSessionCoordinator({
         pathKey(view.contextPath ?? "") === pathKey(runtime.workspacePath) &&
         document.hasFocus() &&
         document.visibilityState !== "hidden";
+      let answered = false;
+      if (finished) {
+        for (let i = state.items.length - 1; i >= 0; i--) {
+          const item = state.items[i];
+          if (item?.kind === "user") break;
+          if (item?.kind === "assistant" && (item.text.length > 0 || item.attachments?.length)) {
+            answered = true;
+            break;
+          }
+        }
+      }
       activity.getState().update({
         agentKey: runtime.agentKey,
         externallyManaged:
@@ -342,6 +355,9 @@ export function createSessionCoordinator({
             (status === "failed" && old?.status !== "failed") ||
             pending > 0 ||
             old?.unread === true),
+      }, {
+        agentId: runtime.adapter.id,
+        unreadReply: visible || runtime.scheduled ? false : answered ? true : undefined,
       });
     };
     const stopState = runtime.store.subscribe((state, previous) => {
@@ -1163,6 +1179,11 @@ export function createSessionCoordinator({
       workspacePath,
       agentKey,
       () => !closing && !switchingAgent && agentKey === selectedAgentKey(),
+      undefined,
+      undefined,
+      preferredSessionId && !forceNew
+        ? { cwd: sessionWorkingDirectory(workspacePath, agentKey, preferredSessionId, catalogRuntime) }
+        : undefined,
     );
     if (
       !candidate ||
@@ -1322,6 +1343,7 @@ export function createSessionCoordinator({
         navigation
           .getState()
           .openView(projectConversationPageId, workspacePath);
+        activity.getState().read(workspacePath, restoredId, agentKey);
       }
 
       // 成功连接：清除该项目此前的连接失败态（错误横幅 / 失败徽标退场）
@@ -1444,6 +1466,17 @@ export function createSessionCoordinator({
     return (runtime && toolSwaps.get(runtime)) ?? Promise.resolve();
   }
 
+  function sessionWorkingDirectory(
+    workspacePath: string,
+    agentKey: string,
+    id: string,
+    listed = projectFactory.open(workspacePath).history(agentKey),
+  ) {
+    const cwd = indexes.workingDirectory(workspacePath, agentKey, id) ??
+      listed.find((info) => info.sessionId === id)?.cwd;
+    return cwd && isAbsolutePath(cwd) ? cwd : undefined;
+  }
+
   /** 插件打开会话；恢复已有会话时与用户那边的打开排在同一个会话的队里（见 SessionFactory.exclusive）。 */
   function openPluginSessionRuntime(
     options: PluginSessionOptions,
@@ -1512,7 +1545,10 @@ export function createSessionCoordinator({
       current,
       undefined,
       undefined,
-      { cwd: options.cwd, openTools: options.tools },
+      {
+        cwd: options.cwd ?? (resumeId ? sessionWorkingDirectory(workspacePath, agentKey, resumeId) : undefined),
+        openTools: options.tools,
+      },
     );
     if (!runtime) {
       const status =
@@ -1811,6 +1847,7 @@ export function createSessionCoordinator({
     if (!retained)
       viewStore.setState({
         sessionsByPath: catalogStore.getState().sessionsByPath,
+        workingDirectory: plugin?.cwd ?? workspacePath,
       });
     let candidate: SessionRuntime | null = null;
     let releaseBrowserApprovals = () => {};
@@ -2632,6 +2669,7 @@ export function createSessionCoordinator({
           });
         }
         await indexes.forgetArchived(target);
+        indexes.forgetSessionMetadata(target);
         await indexes.deletions.save({ ...target, phase: "done" });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

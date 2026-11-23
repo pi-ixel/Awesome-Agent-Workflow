@@ -25,6 +25,7 @@ import { createProjectViewNavigation } from "./bindings/workbenchNavigation.ts";
 import { createProjectSidebarState } from "./sidebarState.ts";
 import { openAnnotation } from "../conversation/ui/openAnnotation.ts";
 import type { ConversationDocumentView } from "../conversation/ui/documentView.ts";
+import { insidePath } from "../../../shared/panelPaths.ts";
 
 export const name = "project-workbench";
 export const inject = ["project", "workbench", "agents", "host", "diagnostics"];
@@ -138,12 +139,30 @@ export function apply(ctx: Context): void {
           currentTarget: project.drafts.annotationEditor.current,
           isCurrent,
         };
+        const lookups = new Map<string, ReturnType<typeof documents.stat>>();
+        function stat(path: string) {
+          const pending = lookups.get(path);
+          if (pending) return pending;
+          const request = documents.stat(path).finally(() => lookups.delete(path));
+          lookups.set(path, request);
+          return request;
+        }
         documentView.setState({
           openFileTree: documentsUi.openFileTree,
           view: {
             assetUrl: documents.assetUrl,
-            openPath: (path, target, line) =>
-              documentsUi.openPath(path, target, line, isCurrent),
+            openPath: (path, target, line, shouldOpen) =>
+              documentsUi.openPath(path, target, line, () => isCurrent() && (shouldOpen?.() ?? true)),
+            verifyRelativeFile: async (root, path) => {
+              if (!insidePath(root, path)) return null;
+              try {
+                const [directory, entry] = await Promise.all([stat(root), stat(path)]);
+                return isCurrent() && directory.directory && !entry.directory &&
+                  insidePath(directory.path, entry.path) ? entry.path : null;
+              } catch {
+                return null;
+              }
+            },
             openAnnotation: (annotation, draft) => openAnnotation(annotationNavigation, annotation, draft),
             ownsFindShortcut: (event) => documents.fileFind.owner(event) !== null,
             fileCandidates: {
@@ -170,6 +189,15 @@ export function apply(ctx: Context): void {
       keepMounted: true,
       Icon: MessageCircleIcon,
       View: Sidebar,
+      unread: {
+        getCount: () => Object.values(project.sessions.activity.getState().unreadReplies)
+          .filter((entry) => entry.agentId === agents.selectedId).length,
+        subscribe(listener) {
+          const stopActivity = project.sessions.activity.subscribe(listener);
+          const stopSelection = agents.subscribeSelection(listener);
+          return () => { stopActivity(); stopSelection(); };
+        },
+      },
     }),
   );
   for (const header of projectHeaders)

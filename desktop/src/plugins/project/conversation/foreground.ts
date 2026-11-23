@@ -35,6 +35,7 @@ export function createProjectForeground(
   const sessionSnapshot = createSnapshotView(view.session, (state) => ({
     performanceTotals: state.performanceTotals,
     agentKey: state.agentKey,
+    workingDirectory: state.workingDirectory,
     supportsImages: state.supportsImages,
     supportsSteer: state.supportsSteer,
     directSteering: state.directSteering,

@@ -108,7 +108,7 @@ import type { SessionGroup, SessionGroupMember } from "../sessions/sessionGroups
 import { arrangeSessionChildren, prioritizeStarredSessions, type SessionChildItem } from "./sessionGroupLayout.ts";
 import { useSessionRename } from "./useSessionRename.ts";
 
-const emptyActivity: SessionActivityState = { entries: {} };
+const emptyActivity: SessionActivityState = { entries: {}, unreadReplies: {} };
 const emptyArchiveKeys: ReadonlySet<string> = new Set<string>();
 
 function useProjectCatalog<T>(select: (state: SessionCatalogState) => T) {
