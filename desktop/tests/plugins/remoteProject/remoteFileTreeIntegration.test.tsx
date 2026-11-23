@@ -112,6 +112,28 @@ describe("Remote project FileTree + FilePreview end-to-end self-test", () => {
     fireEvent.click(screen.getByText("README.txt"));
     await screen.findByText(/HELLO FROM ALICE REMOTE/);
 
+    // 右键远程文件：不显示本地文件管理器项，且复制绝对路径输出真实远端路径
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    fireEvent.contextMenu(screen.getByText("alice-only.ts"));
+    expect(screen.queryByRole("menuitem", { name: /资源管理器|访达|文件管理器/ })).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: "复制绝对路径" }));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("/srv/shared-app/alice-only.ts");
+    });
+
+    // 文件树顶栏更多菜单：远程项目隐藏「在资源管理器中打开」，复制路径输出真实远端根目录
+    const moreButtons = screen.getAllByRole("button", { name: "更多" });
+    fireEvent.click(moreButtons[moreButtons.length - 1]!);
+    expect(screen.queryByRole("menuitem", { name: /资源管理器|访达|文件管理器/ })).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: "复制路径" }));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("/srv/shared-app");
+    });
+
     // 切换到同主机同路径的 Bob 远程项目：树与预览都必须切到 Bob
     rerender(
       <div style={{ width: 800, height: 600 }}>

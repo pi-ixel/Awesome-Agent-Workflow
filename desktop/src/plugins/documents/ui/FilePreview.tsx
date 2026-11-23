@@ -53,6 +53,7 @@ import {
   pathName,
   resolveFileReference,
 } from "../../../shared/panelPaths.ts";
+import { formatCopyablePath } from "../../../shared/workspaceText.ts";
 import { FileDisplayIcon } from "../../../shared/ui/file-icons/fileDisplay.tsx";
 import { resolveIconName } from "../../../shared/ui/file-icons/fileDisplayHelpers.ts";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
@@ -624,7 +625,7 @@ export function FilePreview({
         id: "copy-absolute-path",
         label: "复制绝对路径",
         icon: <CopyIcon className="ui-icon-16" />,
-        onSelect: () => void copyPath(path),
+        onSelect: () => void copyPath(formatCopyablePath(path)),
       },
       {
         id: "copy-relative-path",

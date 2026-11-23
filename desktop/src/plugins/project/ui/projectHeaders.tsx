@@ -10,7 +10,11 @@ import { useWorkspaceCommands, useWorkspaceService, useWorkspaceValue } from "./
 import { useProjectNavigation, useProjectView } from "./bindings/projectView.tsx";
 import { SessionReconnect } from "../conversation/ui/ReconnectButton.tsx";
 import { pathKey } from "../../../shared/panelPaths.ts";
-import { basenameOf, formatWorkspacePathLabel } from "../../../shared/workspaceText.ts";
+import {
+  basenameOf,
+  formatCopyablePath,
+  formatWorkspacePathLabel,
+} from "../../../shared/workspaceText.ts";
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
 import { useMenuController } from "../../../shared/ui/useMenuController.ts";
 import { useSessionRename } from "./useSessionRename.ts";
@@ -144,7 +148,9 @@ function SessionBar({ project: path }: { readonly project: string }) {
           label: "复制路径",
           icon: <CopyIcon className="ui-icon-16" />,
           onSelect: () => {
-            void navigator.clipboard?.writeText(path)?.catch(() => undefined);
+            void navigator.clipboard
+              ?.writeText(formatCopyablePath(path))
+              ?.catch(() => undefined);
           },
         },
       ],
