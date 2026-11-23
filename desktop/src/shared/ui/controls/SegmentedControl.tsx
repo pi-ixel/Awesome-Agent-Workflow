@@ -32,8 +32,8 @@ export function SegmentedControl<T extends string | number>({
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const hasMeasuredRef = useRef(false);
-  const [indicator, setIndicator] = useState<{
+  const prevRectRef = useRef<IndicatorRect | null>(null);
+  const [sliding, setSliding] = useState<{
     readonly rect: IndicatorRect;
     readonly animate: boolean;
   } | null>(null);
@@ -42,44 +42,51 @@ export function SegmentedControl<T extends string | number>({
   const isWarnSelected = selectedIndex >= 0 && value === warnValue;
 
   useLayoutEffect(() => {
-    const container = containerRef.current;
     const activeButton =
       selectedIndex >= 0 ? buttonRefs.current[selectedIndex] : null;
-    if (!container || !activeButton) return;
+    if (!activeButton) return;
+    const width = activeButton.offsetWidth;
+    const height = activeButton.offsetHeight;
+    if (width <= 0 || height <= 0) return;
 
-    const measure = (animate: boolean) => {
-      const width = activeButton.offsetWidth;
-      const height = activeButton.offsetHeight;
-      if (width <= 0 || height <= 0) return;
-      const next: IndicatorRect = {
-        left: activeButton.offsetLeft,
-        top: activeButton.offsetTop,
-        width,
-        height,
-      };
-      setIndicator((prev) => {
-        if (
-          prev &&
-          prev.rect.left === next.left &&
-          prev.rect.top === next.top &&
-          prev.rect.width === next.width &&
-          prev.rect.height === next.height
-        ) {
-          return prev;
-        }
-        return { rect: next, animate };
-      });
+    const next: IndicatorRect = {
+      left: activeButton.offsetLeft,
+      top: activeButton.offsetTop,
+      width,
+      height,
     };
+    const prev = prevRectRef.current;
+    prevRectRef.current = next;
 
-    measure(hasMeasuredRef.current);
-    hasMeasuredRef.current = true;
+    // 仅在从一个已测量位置切换到另一个位置时播放 200ms 滑动动画，
+    // 静态状态下由选中按钮自身承载完整视觉样式。
+    if (
+      !prev ||
+      (prev.left === next.left &&
+        prev.top === next.top &&
+        prev.width === next.width &&
+        prev.height === next.height)
+    ) {
+      return;
+    }
 
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => measure(false));
-    observer.observe(container);
-    observer.observe(activeButton);
-    return () => observer.disconnect();
-  }, [selectedIndex, options.length]);
+    let rafId = 0;
+    let timerId = 0;
+    rafId = window.requestAnimationFrame(() => {
+      setSliding({ rect: prev, animate: false });
+      rafId = window.requestAnimationFrame(() => {
+        setSliding({ rect: next, animate: true });
+        timerId = window.setTimeout(() => {
+          setSliding(null);
+        }, 210);
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.clearTimeout(timerId);
+    };
+  }, [selectedIndex]);
 
   return (
     <div
@@ -92,18 +99,18 @@ export function SegmentedControl<T extends string | number>({
           : "bg-base ring-1 ring-inset ring-line"
       }`}
     >
-      {indicator && (
+      {sliding && (
         <span
           aria-hidden={true}
           style={{
-            width: indicator.rect.width,
-            height: indicator.rect.height,
-            transform: `translate3d(${indicator.rect.left}px, ${indicator.rect.top}px, 0)`,
+            width: sliding.rect.width,
+            height: sliding.rect.height,
+            transform: `translate3d(${sliding.rect.left}px, ${sliding.rect.top}px, 0)`,
           }}
           className={`pointer-events-none absolute top-0 left-0 ${
             appearance === "quiet" ? "rounded-md" : "rounded-full"
           } border ${
-            indicator.animate
+            sliding.animate
               ? "transition-[transform,width,height,background-color,border-color] duration-200 ease-out motion-reduce:transition-none"
               : ""
           } ${
@@ -117,7 +124,7 @@ export function SegmentedControl<T extends string | number>({
       )}
       {options.map((option, index) => {
         const selected = option.value === value;
-        const showFallbackSurface = selected && !indicator;
+        const showStaticSurface = selected && !sliding;
         return (
           <button
             key={option.value}
@@ -157,11 +164,11 @@ export function SegmentedControl<T extends string | number>({
               appearance === "quiet" ? "rounded-md" : "rounded-full"
             } border px-3 text-ui-caption leading-none transition-colors ${focusVisibleRing} ${
               selected && option.value === warnValue
-                ? showFallbackSurface
+                ? showStaticSurface
                   ? "border-warn-line bg-warn-bg/70 font-medium text-warn-ink"
                   : "border-transparent bg-transparent font-medium text-warn-ink"
                 : selected
-                  ? showFallbackSurface
+                  ? showStaticSurface
                     ? appearance === "quiet"
                       ? "border-transparent bg-raised font-medium text-ink"
                       : "border-line-strong bg-surface font-medium text-ink"

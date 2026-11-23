@@ -119,6 +119,7 @@ export function bindWorkbenchAppearance(
     const startTransition =
       themeChanged &&
       !prefersReducedMotion(win) &&
+      !win?.navigator?.webdriver &&
       typeof doc?.startViewTransition === "function" &&
       typeof root.animate === "function"
         ? doc.startViewTransition.bind(doc)

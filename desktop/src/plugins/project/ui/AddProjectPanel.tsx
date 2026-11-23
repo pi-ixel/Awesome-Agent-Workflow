@@ -55,15 +55,12 @@ function KnownProjectRow({
         )}
         <span className="flex min-w-0 flex-1 flex-col">
           <SidebarItemTitle>{basenameOf(path)}</SidebarItemTitle>
-          <span className="truncate font-mono text-ui-caption text-ink-ghost">
-            {formatWorkspacePathLabel(path)}
-          </span>
+          {lastOpenedAt !== null && (
+            <span className="truncate text-ui-caption text-ink-mute">
+              {formatLastOpened(lastOpenedAt)}
+            </span>
+          )}
         </span>
-        {lastOpenedAt !== null && (
-          <span className="shrink-0 text-ui-caption text-ink-mute">
-            {formatLastOpened(lastOpenedAt)}
-          </span>
-        )}
       </NavigationRow>
     </li>
   );
