@@ -1,4 +1,4 @@
-import { useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import { ActionButton } from "../../../shared/ui/controls.tsx";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
@@ -79,8 +79,15 @@ export function AddProjectPanel({ onClose }: AddProjectPanelProps) {
   const embeddedAddProjectNode = projectNav?.renderAddProjectForm?.(onClose) ?? null;
   const [tab, setTab] = useState<AddPanelTab>("new-session");
   const [isDialogUnavailable, setIsDialogUnavailable] = useState(false);
+  const tabsContainerRef = useRef<HTMLDivElement | null>(null);
   const recentWorkspaces = useWorkspaceValue((state) => state.recentWorkspaces);
   const pinnedPaths = useWorkspaceValue((state) => state.pinnedPaths);
+
+  useEffect(() => {
+    tabsContainerRef.current
+      ?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+      ?.focus({ preventScroll: true });
+  }, []);
 
   const lastOpenedByPath = new Map(
     recentWorkspaces.map((entry) => [entry.path, entry.lastOpenedAt] as const),
@@ -122,7 +129,7 @@ export function AddProjectPanel({ onClose }: AddProjectPanelProps) {
 
       {/* 主体内容 */}
       <div className="flex flex-col gap-4 px-5 pb-5">
-        <div>
+        <div ref={tabsContainerRef}>
           <SegmentedControl
             tabs
             groupLabel="面板视图"
