@@ -61,7 +61,7 @@ export function TaskWorkspace({ scheduler, project, agents, openRun }: {
   readonly agents: AgentsService;
   readonly openRun: (run: TaskRun) => Promise<void>;
 }) {
-  const { tasks, runs, error, selected, editing, clock } = useStore(scheduler.store);
+  const { tasks, runs, error, selected, openedRun, editing, clock } = useStore(scheduler.store);
   const [viewError, setViewError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState("");
   const task = tasks.find((item) => item.id === selected);
@@ -105,15 +105,34 @@ export function TaskWorkspace({ scheduler, project, agents, openRun }: {
             <PageHeader size="section" title="运行记录" className="mb-2" />
             {!history.length && <p className="text-ui-sm text-ink-mute">暂无运行记录</p>}
             <ul className="divide-y divide-line rounded-xl border border-line">
-              {history.map((run) => (
-                <li key={run.id} id={`scheduled-run-${run.id}`} className="flex flex-wrap items-center justify-between gap-2 p-3">
-                  <div className="min-w-0">
-                    <p className="text-ui-sm">{status[run.status]} · {formatDate(run.at)}</p>
-                    {run.error && <p className="mt-1 break-words text-ui-caption text-danger-ink">{run.error}</p>}
-                  </div>
-                  {run.session && <ActionButton tone="secondary" type="button" className="min-h-8 px-3 text-ui-sm" onClick={() => invoke(openRun(run))}>打开会话</ActionButton>}
-                </li>
-              ))}
+              {history.map((run) => {
+                const isOpen = openedRun === run.id;
+                const detailsId = `scheduled-run-details-${run.id}`;
+                const time = formatDate(run.at);
+                return (
+                  <li key={run.id} id={`scheduled-run-${run.id}`} className="p-2">
+                    <NavigationRow
+                      aria-expanded={isOpen}
+                      aria-controls={detailsId}
+                      onClick={() => {
+                        if (isOpen) scheduler.store.setState({ openedRun: null });
+                        else invoke(scheduler.openRunDetails(run.id));
+                      }}
+                    >
+                      <ChevronDownIcon className={`ui-icon-14 ${treeChevronClass} ${isOpen ? "" : "-rotate-90"}`} />
+                      {status[run.status]} · {time}
+                      {run.unread && <span className="ml-auto text-ui-caption text-ink-mute">未读</span>}
+                    </NavigationRow>
+                    <TreeBranch id={detailsId} open={isOpen}>
+                      <div className="space-y-2 px-2 py-2 text-ui-sm">
+                        <p>{status[run.status]} · {time}</p>
+                        {run.error && <p className="wrap-anywhere text-ui-caption text-ink-mute">{run.error}</p>}
+                        {run.session && <ActionButton tone="secondary" size="compact" onClick={() => invoke(openRun(run))}>打开会话</ActionButton>}
+                      </div>
+                    </TreeBranch>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         </>

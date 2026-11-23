@@ -26,7 +26,10 @@ import {
   isValidElement,
   memo,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
+  useState,
   type ComponentProps,
   type ReactNode,
   type ContextType,
@@ -46,7 +49,9 @@ import type { Logger } from "../logging/logger.ts";
 import { LoggerContext, useLogger } from "../logging/react.ts";
 import { MarkdownAppearance } from "./markdown/theme.ts";
 import {
+  isAbsolutePath,
   resolveFileReference,
+  resolveRelativeFileReference,
   type FileReference,
 } from "../panelPaths.ts";
 import { FileIcon } from "./icons.tsx";
@@ -414,6 +419,27 @@ const markdownRehypePlugins: PluggableList = [
   ...Object.values(defaultRehypePlugins),
 ];
 
+// URL 安全层会归一化点段。先保留原相对目标，避免把越界路径误读为项目内同名文件。
+const relativeTargetPrefix = "/__aaw_reply_file__/";
+function preserveReplyFileTargets() {
+  return (tree: HastElementLike) => {
+    const visit = (node: HastElementLike): void => {
+      const properties = node.properties;
+      const href = node.tagName === "a" ? properties?.href : undefined;
+      if (properties && typeof href === "string" && href && !href.startsWith("#")) {
+        const decoded = decodeMarkdownHref(href);
+        if (!isAbsolutePath(decoded) &&
+            (!urlSchemePattern.test(decoded) || /\.[\w-]+:\d+(?::\d+)?$/.test(decoded))) {
+          properties.href = relativeTargetPrefix + encodeURIComponent(href);
+        }
+      }
+      node.children?.forEach(visit);
+    };
+    visit(tree);
+  };
+}
+const replyRehypePlugins: PluggableList = [preserveReplyFileTargets, ...markdownRehypePlugins];
+
 /**
  * harden/URL 归一后的 href 还原:盘符形态(/D:/x)剥前导 / 保住大小写;
  * 其余 /x 是 dummy-base 归一产物,还原成工程相对路径 ./x。还原结果同时
@@ -457,6 +483,57 @@ function isExternalWebHref(href: string): boolean {
  * inline 分支渲染成行内药丸)。
  */
 const BlockCodeContext = createContext(false);
+const LinkLabelContext = createContext(false);
+interface ReplyFiles {
+  readonly root?: string;
+  readonly verify?: (root: string, path: string) => Promise<string | null>;
+  readonly open?: (path: string, line?: number) => void;
+}
+const ReplyFilesContext = createContext<ReplyFiles | undefined>(undefined);
+
+function VerifiedReplyFile({ reference, children }: {
+  readonly reference: FileReference;
+  readonly children: ReactNode;
+}) {
+  const { root, verify, open } = useContext(ReplyFilesContext) ?? {};
+  const path = reference.path;
+  const lookup = useMemo(() =>
+    root && verify && open ? { root, verify, open, path } : null,
+  [root, verify, open, path]);
+  const [available, setAvailable] = useState<typeof lookup>(null);
+  const active = useRef<AbortController | null>(null);
+  useEffect(() => {
+    if (!lookup) return;
+    const controller = new AbortController();
+    active.current = controller;
+    void lookup.verify(lookup.root, lookup.path).then((file) => {
+      if (!controller.signal.aborted) setAvailable(file ? lookup : null);
+    }).catch(() => {});
+    return () => controller.abort();
+  }, [lookup]);
+  if (!lookup || available !== lookup) return <>{children}</>;
+  return (
+    <TextLink
+      type="button"
+      className="inline-flex max-w-full items-baseline gap-1 wrap-anywhere align-baseline"
+      data-hint={path}
+      onClick={() => {
+        const request = active.current;
+        if (!request || request.signal.aborted) return;
+        void lookup.verify(lookup.root, path).then((file) => {
+          if (request.signal.aborted) return;
+          if (file) lookup.open(file, reference.line);
+          else setAvailable(null);
+        }).catch(() => {
+          if (!request.signal.aborted) setAvailable(null);
+        });
+      }}
+    >
+      <FileIcon className="ui-icon-16 shrink-0 self-center" />
+      <span className="min-w-0 self-baseline">{children}</span>
+    </TextLink>
+  );
+}
 
 const languageClassNamePattern = /(?:^|\s)language-([^\s]+)/;
 
@@ -509,14 +586,17 @@ function MarkdownCode({
   ...props
 }: ComponentProps<"code"> & { node?: unknown }) {
   void _node;
-  if (useContext(BlockCodeContext)) {
+  const isBlock = useContext(BlockCodeContext);
+  const isLinkLabel = useContext(LinkLabelContext);
+  const files = useContext(ReplyFilesContext);
+  if (isBlock) {
     return (
       <code className={`font-mono text-ui-base text-ink ${className ?? ""}`}>
         {children}
       </code>
     );
   }
-  return (
+  const code = (
     <code
       className={`mx-0.5 rounded-md bg-raised px-1.5 py-0.5 font-mono text-ui-sm ${className ?? ""}`}
       {...props}
@@ -524,6 +604,13 @@ function MarkdownCode({
       {children}
     </code>
   );
+  const text = !isLinkLabel && files?.root ? inspectCodeChildren(children).text : "";
+  const inlinePath = text.length > 0 && !/[\n\r`|<>*?]/.test(text) &&
+    (/^(?:\.\.?[/\\]|[^\s/\\]+[/\\])/.test(text) ||
+      /^[^\s]+\.[\w-]+(?::\d+(?::\d+)?|#L\d+(?:-L?\d+)?)?$/.test(text));
+  if (!inlinePath || !files?.root) return code;
+  const reference = resolveRelativeFileReference(files.root, text.replaceAll("%", "%25"));
+  return reference ? <VerifiedReplyFile key={reference.path} reference={reference}>{code}</VerifiedReplyFile> : code;
 }
 
 /** 递归裁剪代码子树末尾的空行:只动最后一个字符串叶子,shiki span 树安全。 */
@@ -561,6 +648,7 @@ function buildMarkdownComponents(options: {
   logger: Logger;
   fileRoot?: string;
   fileBase?: string;
+  replyFileRoot?: string;
   onOpenFile?: (path: string, line?: number) => void;
   onOpenExternal?: (url: string) => Promise<void>;
   assetUrl?: (path: string) => string | undefined;
@@ -571,6 +659,7 @@ function buildMarkdownComponents(options: {
   const {
     fileRoot,
     fileBase,
+    replyFileRoot,
     onOpenFile,
     onOpenExternal,
     assetUrl,
@@ -622,6 +711,12 @@ function buildMarkdownComponents(options: {
       );
     },
     a: ({ children, href }) => {
+      const label = <LinkLabelContext.Provider value={true}>{children}</LinkLabelContext.Provider>;
+      if (typeof href === "string" && href.startsWith(relativeTargetPrefix)) {
+        const target = decodeMarkdownHref(href.slice(relativeTargetPrefix.length));
+        const reference = replyFileRoot && resolveRelativeFileReference(replyFileRoot, target);
+        return reference ? <VerifiedReplyFile key={reference.path} reference={reference}>{label}</VerifiedReplyFile> : label;
+      }
       if (fileRoot !== undefined && typeof href === "string") {
         const reference = resolveLocalReference(fileRoot, href, fileBase);
         if (reference !== null && onOpenFile !== undefined) {
@@ -633,7 +728,7 @@ function buildMarkdownComponents(options: {
               onClick={() => onOpenFile(reference.path, reference.line)}
             >
               <FileIcon className="ui-icon-16 shrink-0 self-center" />
-              <span className="min-w-0 self-baseline">{children}</span>
+              <span className="min-w-0 self-baseline">{label}</span>
             </TextLink>
           );
         }
@@ -650,7 +745,7 @@ function buildMarkdownComponents(options: {
               });
             }}
           >
-            {children}
+            {label}
           </TextLink>
         );
       }
@@ -660,7 +755,7 @@ function buildMarkdownComponents(options: {
           className="wrap-anywhere font-medium text-accent-ink no-underline"
           data-hint={typeof href === "string" ? href : undefined}
         >
-          {children}
+          {label}
         </span>
       );
     },
@@ -830,6 +925,7 @@ function MarkdownViewBase({
   text,
   fileRoot,
   fileBase,
+  replyFiles,
   onOpenFile,
   onOpenExternal,
   assetUrl,
@@ -839,6 +935,7 @@ function MarkdownViewBase({
   readonly text: string;
   readonly fileRoot?: string;
   readonly fileBase?: string;
+  readonly replyFiles?: ReplyFiles;
   readonly onOpenFile?: (path: string, line?: number) => void;
   readonly onOpenExternal?: (url: string) => Promise<void>;
   readonly assetUrl?: (path: string) => string | undefined;
@@ -854,6 +951,7 @@ function MarkdownViewBase({
       buildMarkdownComponents({
         fileRoot,
         fileBase,
+        replyFileRoot: replyFiles?.root,
         onOpenFile,
         onOpenExternal,
         assetUrl,
@@ -861,7 +959,7 @@ function MarkdownViewBase({
         logger,
         streaming,
       }),
-    [fileRoot, fileBase, onOpenFile, onOpenExternal, assetUrl, renderLocalImage, streaming, logger],
+    [fileRoot, fileBase, replyFiles?.root, onOpenFile, onOpenExternal, assetUrl, renderLocalImage, streaming, logger],
   );
   const normalized = normalizeConsecutiveMarkdownImageBlocks(
     normalizeMessageSingleDollarMath(text),
@@ -873,6 +971,7 @@ function MarkdownViewBase({
       data-markdown-theme={theme}
     >
       <MarkdownRenderBoundary fallbackText={normalized} resetKey={normalized}>
+        <ReplyFilesContext.Provider value={streaming ? undefined : replyFiles}>
         <Streamdown
           animated={false}
           isAnimating={streaming}
@@ -882,12 +981,13 @@ function MarkdownViewBase({
           mode={streaming ? "streaming" : "static"}
           parseIncompleteMarkdown={streaming}
           plugins={streamdownPlugins}
-          rehypePlugins={markdownRehypePlugins}
+          rehypePlugins={replyFiles ? replyRehypePlugins : markdownRehypePlugins}
           remarkPlugins={markdownRemarkPlugins}
           shikiTheme={["github-light", "github-dark"]}
         >
           {normalized}
         </Streamdown>
+        </ReplyFilesContext.Provider>
       </MarkdownRenderBoundary>
     </div>
   );

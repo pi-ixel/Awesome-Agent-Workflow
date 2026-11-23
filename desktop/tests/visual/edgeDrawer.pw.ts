@@ -5,6 +5,20 @@ const fixture =
   "/tests/visual/sessionStatusOverlayFixture.html?right-panel&workbench";
 const leftToggleName = "展开/收起侧边栏";
 
+test("入口未读徽标保留完整的无障碍计数，进入侧栏时保持未读", async ({ page }) => {
+  await page.setViewportSize({ width: 680, height: 650 });
+  await page.goto(`${fixture}&activity-rail&unread`);
+  const rail = page.getByRole("navigation", { name: "工作台导航" });
+  const conversations = rail.getByRole("button", { name: "会话" });
+  await expect(conversations).toHaveAccessibleDescription("101 项未读");
+  await expect(conversations.getByText("99+")).toBeVisible();
+  if (await conversations.getAttribute("aria-expanded") !== "true") await conversations.click();
+  await expect(conversations).toHaveAccessibleDescription("101 项未读");
+  await page.getByRole("button", { name: "查看会话" }).click();
+  await expect(conversations.getByText("99+")).toHaveCount(0);
+  await expect(conversations).not.toHaveAttribute("aria-description");
+});
+
 test("侧栏底部在两套主题下保留提醒和账号菜单，并在键盘开合时接续焦点", async ({
   page,
   context,

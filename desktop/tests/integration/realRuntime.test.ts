@@ -716,6 +716,20 @@ describe("openRealWorkspace：会话恢复装配", () => {
     expect(fakeSessionControl.loadCalls).toEqual(["sess-old"]);
   });
 
+  it("会话恢复沿用已记住的工作目录，并将它绑定到当前信息流", async () => {
+    const cwd = "D:/worktrees/feature";
+    const load = vi.spyOn(FakeAcpSession.prototype, "loadSession");
+    try {
+      const target = await openPluginSessionRuntime({ workspacePath: WORKSPACE, cwd });
+      await closeRealRuntime();
+      await openRealWorkspace(WORKSPACE, { sessionId: target.sessionId! });
+      expect(load).toHaveBeenCalledWith(target.sessionId, cwd, undefined);
+      expect(useSessionStore.getState().workingDirectory).toBe(cwd);
+    } finally {
+      load.mockRestore();
+    }
+  });
+
   it("插件在正开着的会话上装自己的工具：同一连接上悄悄重新载入，不进入恢复、信息流不重复", async () => {
     const load = vi.spyOn(FakeAcpSession.prototype, "loadSession");
     const tool = { name: "aaw-result", command: "result.exe", args: [], env: [] };
@@ -1533,7 +1547,11 @@ describe("后台会话执行隔离", () => {
       );
       finishA({ stopReason: "end_turn" });
       await vi.waitFor(() => expect(promptA).toHaveBeenCalledTimes(2));
+      const hasUnreadA = () => Object.values(projectIndexes.activity.getState().unreadReplies)
+        .some((reply) => reply.project === WORKSPACE && reply.sessionId === "A");
+      expect(hasUnreadA()).toBe(true);
       await openRealWorkspace(WORKSPACE, { sessionId: "A" });
+      expect(hasUnreadA()).toBe(false);
       await vi.waitFor(() =>
         expect(useSessionStore.getState().isAgentRunning).toBe(false),
       );
@@ -1572,6 +1590,9 @@ describe("后台会话执行隔离", () => {
         sessionActivityKey(WORKSPACE, "A", useSessionStore.getState().agentKey)
       ],
     ).toMatchObject({ status: "waiting", unread: true });
+    expect(Object.values(projectIndexes.activity.getState().unreadReplies)).not.toContainEqual(
+      expect.objectContaining({ project: WORKSPACE, sessionId: "A" }),
+    );
     const answerB = offerB("B", TOOL_CALL, CHRYS_PERMISSION_OPTIONS);
     expect(useApprovalStore.getState().pending).toHaveLength(1);
     useApprovalStore.getState().decidePermission("permission:call-1", "reject");

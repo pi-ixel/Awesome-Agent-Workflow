@@ -174,6 +174,7 @@ export interface ConversationValues {
   readonly performanceTotals?: PerformanceTotals;
   readonly hasCumulativePromptUsage?: boolean;
   readonly agentKey?: string;
+  readonly workingDirectory?: string;
   readonly supportsImages?: boolean;
   readonly recovery: {
     readonly state: "idle" | "reconnecting" | "failed" | "stopped";

@@ -1066,7 +1066,7 @@
   },
   "plugins/workbench/ui/ActivityRail.tsx": {
     "definitions": {
-      "导航与列表": ["ActivityRail"]
+      "导航与列表": ["ActivityRail", "ActivityRailEntry"]
     },
     "targets": []
   },
@@ -1493,12 +1493,13 @@
   },
   "shared/ui/MarkdownView.tsx": {
     "definitions": {
-      "布局与操纵": ["BlockCodeContext"],
+      "布局与操纵": ["BlockCodeContext", "LinkLabelContext", "ReplyFilesContext"],
       "内容与专用绘制": [
         "MarkdownCode",
         "MarkdownRenderBoundary",
         "MarkdownView",
         "MarkdownViewBase",
+        "VerifiedReplyFile",
         "buildMarkdownComponents/a",
         "buildMarkdownComponents/blockquote",
         "buildMarkdownComponents/h1",
