@@ -1,10 +1,14 @@
 import { expect, test } from "@playwright/test";
+import { color, ratio } from "./contrast.ts";
 
 const fixture = "/tests/visual/sessionStatusOverlayFixture.html?send-morph";
 const text = "把发送动效做得更连贯一些。";
 
 test("点击发送从按钮原位置变形到实际落笔的消息气泡", async ({ page }) => {
   await page.goto(fixture);
+  await page
+    .locator("html")
+    .evaluate((element) => element.classList.add("theme-warm"));
   const input = page.getByRole("textbox", { name: "消息输入框" });
   await input.fill(text);
   const button = page.getByRole("button", { name: "发送", exact: true });
@@ -83,4 +87,32 @@ test("气泡晚于发送落笔上屏时仍会播放飞行动效", async ({ page 
   await expect(layer).toBeVisible();
   await expect(page.locator("[data-user-message-bubble]")).toHaveText(text);
   await expect(layer).toBeHidden();
+});
+
+test("暗夜主题提亮起飞按钮和气泡，并保留足够的文字对比度", async ({ page }) => {
+  await page.goto(fixture);
+  await page
+    .locator("html")
+    .evaluate((element) => element.classList.remove("theme-warm"));
+  const input = page.getByRole("textbox", { name: "消息输入框" });
+  const button = page.getByRole("button", { name: "发送", exact: true });
+  await input.fill(text);
+  await expect(button).toHaveCSS("background-color", "rgb(138, 173, 210)");
+  expect(
+    ratio(
+      await color(button, "color"),
+      await color(button, "background-color"),
+    ),
+  ).toBeGreaterThanOrEqual(4.5);
+  await button.click();
+  const bubble = page.locator("[data-user-message-bubble]");
+  await expect(bubble).toHaveCSS("opacity", "1");
+  await expect(bubble).toHaveCSS("background-color", "rgb(64, 94, 123)");
+  const surface = await color(bubble, "background-color");
+  expect(ratio(await color(bubble, "color"), surface)).toBeGreaterThanOrEqual(
+    4.5,
+  );
+  expect(
+    ratio(surface, await color(bubble, "--color-base")),
+  ).toBeGreaterThanOrEqual(2.4);
 });
