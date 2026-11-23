@@ -4,6 +4,7 @@ mod acp_process;
 mod acp_proxy;
 pub mod browser;
 mod commands;
+mod turn_changes;
 mod skill_library;
 mod mcp_management;
 mod config_edit;
@@ -110,6 +111,7 @@ pub fn run() {
         // 工作区目录选择（@tauri-apps/plugin-dialog）
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            turn_changes::turn_changes,
             browser::host::browser_create_space,
             browser::host::browser_create_tab,
             browser::host::browser_recover_tab,

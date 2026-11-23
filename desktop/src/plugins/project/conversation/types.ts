@@ -1,4 +1,5 @@
 import type { MessageDisplay } from "../../../shared/messageDisplay.ts";
+import type { TurnChangesSession } from "./changes/service.ts";
 import type { PromptSkillReference } from "../composer/skillReferences.ts";
 import type {
   TurnPerformance,
@@ -163,6 +164,7 @@ export type TurnState =
   | "failed";
 
 export interface ConversationValues {
+  readonly turnChanges?: TurnChangesSession;
   readonly supportsSteer?: boolean;
   readonly directSteering?: boolean;
   readonly activeSteerIds?: readonly string[];

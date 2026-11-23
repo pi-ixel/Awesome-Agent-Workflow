@@ -380,6 +380,7 @@ export function restoreStoppedTurns(
     return match
       ? {
           ...item,
+          id: match.id,
           ...(match.stopped ? { stopped: true as const } : {}),
           ...(match.display ? { display: match.display } : {}),
           ...(match.skillReferences

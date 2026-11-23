@@ -1159,15 +1159,22 @@ export const createSessionStore = (
         lastError: null,
       });
       // 点击停止时已暂停队列；本轮正常完成不能撤销用户的停止意图。
-      if (get().queuedPrompts.length > 0) {
-        const failed = outcome.errorMessage !== undefined;
-        const cancelled = outcome.stopReason === "cancelled";
-        if (failed || cancelled) {
-          set({ queuePaused: true });
-        } else if (!get().queuePaused) {
-          drainNextQueued();
+      const changesFinished = get().turnChanges?.finish(outcome);
+      const finishedGeneration = turnGeneration;
+      const continueQueue = () => {
+        if (finishedGeneration !== turnGeneration) return;
+        if (get().queuedPrompts.length > 0) {
+          const failed = outcome.errorMessage !== undefined;
+          const cancelled = outcome.stopReason === "cancelled";
+          if (failed || cancelled) {
+            set({ queuePaused: true });
+          } else if (!get().queuePaused) {
+            drainNextQueued();
+          }
         }
-      }
+      };
+      if (changesFinished) void changesFinished.then(continueQueue);
+      else continueQueue();
       // 轮次收尾即时落盘（增量部分已按节流写入，这里保证结局不丢）
       flushSessionLogNow();
     };

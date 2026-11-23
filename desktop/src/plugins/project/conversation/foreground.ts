@@ -33,6 +33,7 @@ export function createProjectForeground(
     runtime: runtime.view,
   };
   const sessionSnapshot = createSnapshotView(view.session, (state) => ({
+    turnChanges: state.turnChanges,
     performanceTotals: state.performanceTotals,
     agentKey: state.agentKey,
     workingDirectory: state.workingDirectory,

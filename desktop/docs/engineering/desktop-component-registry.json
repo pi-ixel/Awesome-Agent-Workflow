@@ -379,6 +379,25 @@
       "import → ./McpView.tsx"
     ]
   },
+  "plugins/project/conversation/changes/DiffContent.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["DiffContent", "DiffContent/row"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/changes/TurnChangesDock.tsx": {
+    "definitions": {
+      "状态与统计": ["Statistics", "TurnChangesReview/summary"],
+      "布局与操纵": [
+        "TurnChangesDock",
+        "TurnChangesSlot",
+        "TurnChangesReview",
+        "TurnChangesReview/panel"
+      ],
+      "命令按钮": ["TurnChangesReview/controls"]
+    },
+    "targets": []
+  },
   "plugins/project/conversation/ui/AnnotationCards.tsx": {
     "definitions": {
       "提示与确认": ["AnnotationCards"]
@@ -1493,7 +1512,11 @@
   },
   "shared/ui/MarkdownView.tsx": {
     "definitions": {
-      "布局与操纵": ["BlockCodeContext", "LinkLabelContext", "ReplyFilesContext"],
+      "布局与操纵": [
+        "BlockCodeContext",
+        "LinkLabelContext",
+        "ReplyFilesContext"
+      ],
       "内容与专用绘制": [
         "MarkdownCode",
         "MarkdownRenderBoundary",
