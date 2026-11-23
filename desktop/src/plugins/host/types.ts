@@ -171,6 +171,7 @@ export interface DesktopWindowHost extends WindowHost {
   isFocused(): Promise<boolean>;
   showAndFocus(): Promise<void>;
   setCloseToTray?(enabled: boolean): Promise<void>;
+  setTaskbarUnread?(count: number): Promise<void>;
   claimScheduledTasks?(): Promise<boolean>;
   listenForScheduledTasksTick?(tick: () => void): Promise<() => void>;
 }
