@@ -109,9 +109,14 @@ it("R5 flags a secret but never blocks", () => {
   expect(r5[0]!.level).toBe("warn");
 });
 
-it("R8 blocks networking that was not declared, and passes once declared", () => {
+it("R8 warns about networking that was not declared, and stays quiet once declared", () => {
+  // R8 只是 warn：不声明也能跑，用户看不到的只有「这个工具会联网」这件事。
   const html = `<script>fetch("https://intranet.example/api").then(r=>r.json());window.aawActions={run:async()=>({})}</script>`;
-  expect(ids(runToolRules(tool({ html })))).toContain("R8");
+  const undeclared = runToolRules(tool({ html })).filter(
+    (problem) => problem.ruleId === "R8",
+  );
+  expect(undeclared).toHaveLength(1);
+  expect(undeclared[0]!.level).toBe("warn");
   expect(
     ids(runToolRules(tool({ html, permissions: { network: true } }))),
   ).not.toContain("R8");
