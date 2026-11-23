@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
-import { ActionButton, Badge, Spinner } from "../../../shared/ui/controls.tsx";
+import { ActionButton, Spinner } from "../../../shared/ui/controls.tsx";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { fieldSurfaceClass } from "../../../shared/ui/inputStyles.ts";
@@ -11,7 +11,6 @@ import type {
   RemoteAuthType,
   RemoteConnectionDTO,
   RemoteConnectionInput,
-  RemoteConnectionTestResult,
   RemoteFSEntry,
   RemoteProjectRecord,
   RemoteProjectService,
@@ -145,9 +144,6 @@ export function AddRemoteProjectModal({
   const [formBusy, setFormBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formStatus, setFormStatus] = useState<string | null>(null);
-  const [hostKeyPrompt, setHostKeyPrompt] = useState<
-    Extract<RemoteConnectionTestResult, { status: "host_key_untrusted" | "host_key_mismatch" }> | null
-  >(null);
   const [deleteBlockedRefs, setDeleteBlockedRefs] = useState<{
     readonly connectionId: string;
     readonly projects: readonly RemoteProjectRecord[];
@@ -291,7 +287,6 @@ export function AddRemoteProjectModal({
     setFormBusy(true);
     setFormError(null);
     setFormStatus(null);
-    setHostKeyPrompt(null);
     try {
       const result = await service.testConnection({
         connectionId: activeForm.editingId ?? undefined,
@@ -300,24 +295,13 @@ export function AddRemoteProjectModal({
       if (result.status === "ok") {
         setFormStatus(`连接成功，远端家目录：${result.homeDir}`);
       } else {
-        setHostKeyPrompt(result);
+        setFormError(`连接验证失败：${result.status}`);
       }
     } catch (error) {
       setFormError(describeUnknownError(error));
     } finally {
       setFormBusy(false);
     }
-  };
-
-  const acceptHostKeyAndRetry = () => {
-    if (!form || !hostKeyPrompt) return;
-    const nextForm: ConnectionFormState =
-      hostKeyPrompt.hop === 1
-        ? { ...form, bastionHostKey: hostKeyPrompt.hostKey }
-        : { ...form, hostKey: hostKeyPrompt.hostKey };
-    setForm(nextForm);
-    setHostKeyPrompt(null);
-    void runTestForm(nextForm);
   };
 
   const handleSaveForm = async () => {
@@ -332,7 +316,6 @@ export function AddRemoteProjectModal({
           ? await service.updateConnection(form.editingId, input)
           : await service.createConnection(input);
       setForm(null);
-      setHostKeyPrompt(null);
       await reloadConnections(saved.id);
     } catch (error) {
       setFormError(describeUnknownError(error));
@@ -414,7 +397,6 @@ export function AddRemoteProjectModal({
               onClick={() => {
                 setFormError(null);
                 setFormStatus(null);
-                setHostKeyPrompt(null);
                 setForm(emptyForm());
               }}
               className="shrink-0 px-2.5 py-1.5 text-ui-xs"
@@ -455,7 +437,6 @@ export function AddRemoteProjectModal({
                         type="button"
                         onClick={() => {
                           setForm(null);
-                          setHostKeyPrompt(null);
                           setSelectedConnectionId(conn.id);
                         }}
                         className="flex w-full flex-col items-stretch gap-0.5 px-0 py-0 text-left"
@@ -464,11 +445,6 @@ export function AddRemoteProjectModal({
                           <span className="truncate text-ui-sm font-medium text-ink">
                             {conn.name}
                           </span>
-                          {conn.hostKey ? (
-                            <Badge tone="ok">已信任</Badge>
-                          ) : (
-                            <Badge tone="warn">未确认指纹</Badge>
-                          )}
                         </div>
                         <span className="truncate text-ui-xs text-ink-mute">
                           {conn.user}@{conn.host}:{conn.port}
@@ -481,7 +457,6 @@ export function AddRemoteProjectModal({
                           onClick={() => {
                             setFormError(null);
                             setFormStatus(null);
-                            setHostKeyPrompt(null);
                             setForm(formFromConnection(conn));
                           }}
                           className="px-1 py-0.5 text-ui-caption"
@@ -677,49 +652,6 @@ export function AddRemoteProjectModal({
                 )}
               </div>
 
-              {hostKeyPrompt && (
-                <div
-                  role="alert"
-                  className={`mt-4 rounded-lg border p-3 text-ui-xs ${
-                    hostKeyPrompt.status === "host_key_mismatch"
-                      ? "border-danger-line bg-danger-soft/40 text-danger-ink"
-                      : "border-warn-line bg-warn-soft/40 text-warn-ink"
-                  }`}
-                >
-                  <p className="font-semibold">
-                    {hostKeyPrompt.status === "host_key_mismatch"
-                      ? `警告：主机 ${hostKeyPrompt.host}:${hostKeyPrompt.port} 的 SSH 指纹已发生变化！`
-                      : `首次连接 ${hostKeyPrompt.host}:${hostKeyPrompt.port}，请核对 SSH 主机指纹：`}
-                  </p>
-                  <p className="mt-1 font-mono break-all">
-                    {hostKeyPrompt.keyType} · {hostKeyPrompt.fingerprint}
-                  </p>
-                  {hostKeyPrompt.status === "host_key_mismatch" && (
-                    <p className="mt-1 font-mono break-all">
-                      原信任指纹：{hostKeyPrompt.expectedFingerprint}
-                    </p>
-                  )}
-                  <div className="mt-2.5 flex items-center gap-2">
-                    <ActionButton
-                      tone="primary"
-                      type="button"
-                      onClick={acceptHostKeyAndRetry}
-                      className="px-2.5 py-1 text-ui-xs"
-                    >
-                      信任此指纹并继续测试
-                    </ActionButton>
-                    <ActionButton
-                      tone="secondary"
-                      type="button"
-                      onClick={() => setHostKeyPrompt(null)}
-                      className="px-2.5 py-1 text-ui-xs"
-                    >
-                      取消
-                    </ActionButton>
-                  </div>
-                </div>
-              )}
-
               {formStatus && (
                 <p className="mt-3 text-ui-xs text-success-ink">{formStatus}</p>
               )}
@@ -754,7 +686,6 @@ export function AddRemoteProjectModal({
                   disabled={formBusy}
                   onClick={() => {
                     setForm(null);
-                    setHostKeyPrompt(null);
                   }}
                   className="px-3 py-1.5 text-ui-xs"
                 >
@@ -847,16 +778,6 @@ export function AddRemoteProjectModal({
                 ) : dirError ? (
                   <div role="alert" className="rounded-lg border border-danger-line bg-danger-soft/30 p-3 text-ui-xs text-danger-ink">
                     <p>{dirError}</p>
-                    {!selectedConnection.hostKey && (
-                      <ActionButton
-                        tone="secondary"
-                        type="button"
-                        onClick={() => setForm(formFromConnection(selectedConnection))}
-                        className="mt-2 px-2.5 py-1 text-ui-xs"
-                      >
-                        前往编辑并确认主机指纹
-                      </ActionButton>
-                    )}
                   </div>
                 ) : entries.length === 0 ? (
                   <p className="py-10 text-center text-ui-xs text-ink-mute">

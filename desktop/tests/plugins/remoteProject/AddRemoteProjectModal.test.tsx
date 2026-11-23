@@ -103,25 +103,14 @@ function createMockService(overrides: Partial<RemoteProjectService> = {}): Remot
 }
 
 describe("AddRemoteProjectModal", () => {
-  it("支持首次连接主机指纹确认（TOFU）并保存连接", async () => {
-    const testConnection = vi
-      .fn()
-      .mockResolvedValueOnce({
-        status: "host_key_untrusted",
-        host: "10.0.0.9",
-        port: 22,
-        hop: 0,
-        keyType: "ssh-ed25519",
-        fingerprint: "SHA256:newHostFingerprint",
-        hostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINewHostKey",
-      })
-      .mockResolvedValueOnce({
-        status: "ok",
-        homeDir: "/home/dev",
-        host: "10.0.0.9",
-        port: 22,
-        user: "dev",
-      });
+  it("支持直接测试连接并保存连接（无需主机指纹确认）", async () => {
+    const testConnection = vi.fn().mockResolvedValueOnce({
+      status: "ok",
+      homeDir: "/home/dev",
+      host: "10.0.0.9",
+      port: 22,
+      user: "dev",
+    });
     const createConnection = vi.fn().mockResolvedValue({
       id: "conn-new",
       name: "New Box",
@@ -129,7 +118,6 @@ describe("AddRemoteProjectModal", () => {
       port: 22,
       user: "dev",
       hasPassword: true,
-      hostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINewHostKey",
       revision: 0,
     });
     const service = createMockService({ testConnection, createConnection });
@@ -156,9 +144,6 @@ describe("AddRemoteProjectModal", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
-    await screen.findByText(/SHA256:newHostFingerprint/);
-
-    fireEvent.click(screen.getByRole("button", { name: "信任此指纹并继续测试" }));
     await screen.findByText(/连接成功，远端家目录：\/home\/dev/);
 
     fireEvent.click(screen.getByRole("button", { name: "保存连接" }));
@@ -167,7 +152,6 @@ describe("AddRemoteProjectModal", () => {
         expect.objectContaining({
           host: "10.0.0.9",
           user: "dev",
-          hostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINewHostKey",
         }),
       );
     });
