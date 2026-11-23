@@ -473,8 +473,23 @@ export function TerminalSessionView({
       connRef.current = null;
       termRef.current = null;
       fitRef.current = null;
-      // 连接不 dispose：留在 ptyHost 注册表，错误边界重挂后按 handle adopt
-      term.dispose();
+      // 连接不 dispose：留在 ptyHost 注册表，错误边界重挂后按 handle adopt。
+      // 先摘除 DOM 避免 StrictMode 重挂撞容器；延迟一拍再 dispose，规避
+      // xterm.js open() 排队中的 Viewport.syncScrollArea 在已销毁实例上读
+      // _renderService.dimensions 抛出未捕获 TypeError。
+      term.element?.remove();
+      const disposeTerm = () => {
+        try {
+          term.dispose();
+        } catch {
+          // 忽略已销毁实例的二次清理
+        }
+      };
+      if (typeof window !== "undefined" && typeof window.setTimeout === "function") {
+        window.setTimeout(disposeTerm, 0);
+      } else {
+        disposeTerm();
+      }
     };
   }, [terminal, tab.id, openExternal, logger, scheduleFitAndResize]);
 

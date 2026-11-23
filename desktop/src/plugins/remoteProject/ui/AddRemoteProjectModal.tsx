@@ -381,7 +381,7 @@ export function AddRemoteProjectModal({
             添加远程项目（SSH 远程目录）
           </h2>
           <p className="text-ui-xs text-ink-mute">
-            选择已保存的 SSH 连接并浏览远端 Linux 目录，首版支持只读文件树与文件预览。
+            选择已保存的 SSH 连接并浏览远端 Linux 目录，支持文件编辑、Git、Agent 远程任务与远程终端。
           </p>
         </div>
         <IconButton
