@@ -253,9 +253,9 @@ function OverviewBar({ project: path }: { readonly project: string }) {
       </h2>
       <span
         className="min-w-0 truncate font-mono text-xs text-ink-faint"
-        data-hint={path}
+        data-hint={formatWorkspacePathLabel(path)}
       >
-        {path}
+        {formatWorkspacePathLabel(path)}
       </span>
       {/* 仅在项目已打开（或连接中）时提供关闭；连接中禁闭防误触 */}
       {activePath === path && (
