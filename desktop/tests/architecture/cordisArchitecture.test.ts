@@ -642,6 +642,7 @@ it("keeps public models and shared utilities independent of plugin implementatio
     "acp",
     "browser",
     "mcp",
+    "turnChanges",
   ]);
   expect(readdirSync(resolve("src/shared"))).not.toContain("diagnosticEvents");
   const forbidden = {

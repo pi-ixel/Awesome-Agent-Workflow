@@ -36,6 +36,7 @@ export class DesktopHost implements HostService {
   private bridge?: ReturnType<typeof createBridgeAcpClient>;
   readonly storage = webviewStorage;
   readonly mcp: HostService["mcp"];
+  readonly turnChanges: HostService["turnChanges"];
   readonly diagnostics = diagnosticsHost;
   readonly exitGate = createHostExitGate();
   private exitDiagnostics?: ExitDiagnostics;
@@ -175,6 +176,12 @@ export class DesktopHost implements HostService {
 
   constructor(options: HostOptions = {}) {
     this.invoke = createInvoke((options.createLogger ?? createLogger)("host"));
+    this.turnChanges = isTauriEnv()
+      ? {
+          request: (request) =>
+            this.resources.run(() => this.invoke("turn_changes", { request })),
+        }
+      : undefined;
     this.mcp = isTauriEnv()
       ? createMcpHost((command, args) =>
           this.resources.run(() => this.invoke(command, args)),

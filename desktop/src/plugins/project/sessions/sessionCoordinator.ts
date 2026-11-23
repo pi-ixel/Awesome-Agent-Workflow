@@ -1,4 +1,5 @@
 import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
+import { createTurnChangesSession } from "../conversation/changes/service.ts";
 import {
   createSessionTools,
   type SessionToolProvider,
@@ -123,6 +124,7 @@ export interface ProjectSessionDependencies {
   readonly getProtocol: () => AcpProtocolResources;
   readonly getAgents: () => AgentsService;
   readonly getBrowser: () => HostService["browser"];
+  readonly getTurnChanges?: () => HostService["turnChanges"];
   readonly getApprovalMode: () => ApprovalMode;
   readonly interactionPreferences?: Pick<
     ProjectPreferences,
@@ -154,6 +156,7 @@ export function createSessionCoordinator({
   getProtocol,
   getAgents,
   getBrowser,
+  getTurnChanges,
   getApprovalMode,
   interactionPreferences,
   navigation,
@@ -1851,6 +1854,17 @@ export function createSessionCoordinator({
         workingDirectory: plugin?.cwd ?? workspacePath,
       });
     let candidate: SessionRuntime | null = null;
+    const changesHost = getTurnChanges?.();
+    if (changesHost && !viewStore.getState().turnChanges) {
+      viewStore.setState({
+        turnChanges: createTurnChangesSession(
+          changesHost,
+          viewStore,
+          workspacePath,
+          agentKey,
+        ),
+      });
+    }
     let releaseBrowserApprovals = () => {};
     let isBrowserEndpointDisposed = false;
     try {
@@ -2631,6 +2645,17 @@ export function createSessionCoordinator({
           phase = "local";
           await indexes.deletions.save({ ...target, phase });
         }
+        await getTurnChanges?.()?.request({
+          action: "clear",
+          cwd:
+            indexes.workingDirectory(
+              target.workspacePath,
+              target.agentKey,
+              target.sessionId,
+            ) ?? target.workspacePath,
+          agentKey: target.agentKey,
+          sessionId: target.sessionId,
+        });
         await cleanup();
         const browser = getBrowser();
         if (browser.isAvailable()) {

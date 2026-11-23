@@ -102,6 +102,7 @@ export async function apply(
       getProtocol: () => protocol,
       getAgents: () => agents,
       getBrowser: () => ctx.host.browser,
+      getTurnChanges: () => ctx.host.turnChanges,
       getApprovalMode: () => preferences.getState().approvalMode,
       interactionPreferences: preferences,
       navigation: {

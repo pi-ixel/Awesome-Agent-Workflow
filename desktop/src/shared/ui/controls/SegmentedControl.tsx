@@ -7,6 +7,7 @@ export function SegmentedControl<T extends string | number>({
   onChange,
   warnValue,
   tabs = false,
+  appearance = "default",
 }: {
   readonly groupLabel: string;
   readonly value: T;
@@ -19,12 +20,13 @@ export function SegmentedControl<T extends string | number>({
   readonly onChange: (next: T) => void;
   readonly warnValue?: T;
   readonly tabs?: boolean;
+  readonly appearance?: "default" | "quiet";
 }) {
   return (
     <div
       role={tabs ? "tablist" : "group"}
       aria-label={groupLabel}
-      className="inline-flex max-w-full flex-wrap gap-0.5 rounded-2xl bg-transparent p-0.5 ring-1 ring-inset ring-line"
+      className={`inline-flex max-w-full flex-wrap gap-0.5 rounded-2xl bg-transparent p-0.5 ${appearance === "quiet" ? "" : "ring-1 ring-inset ring-line"}`}
     >
       {options.map((option, index) => {
         const selected = option.value === value;
@@ -37,24 +39,40 @@ export function SegmentedControl<T extends string | number>({
             aria-pressed={tabs ? undefined : selected}
             tabIndex={tabs && !selected ? -1 : undefined}
             onClick={() => onChange(option.value)}
-            onKeyDown={tabs ? (event) => {
-              const last = options.length - 1;
-              const next = event.key === "ArrowRight" ? (index + 1) % options.length
-                : event.key === "ArrowLeft" ? (index + last) % options.length
-                : event.key === "Home" ? 0
-                : event.key === "End" ? last
-                : null;
-              if (next === null) return;
-              event.preventDefault();
-              const choice = options[next];
-              if (!choice) return;
-              event.currentTarget.parentElement?.querySelectorAll("button")[next]?.focus();
-              onChange(choice.value);
-            } : undefined}
-            className={`inline-flex min-h-6 shrink-0 items-center rounded-full border px-3 text-ui-caption leading-none transition-colors ${focusVisibleRing} ${
-              selected && option.value === warnValue ? "border-warn-line bg-warn-bg/70 text-warn-ink"
-                : selected ? "border-line bg-surface text-ink"
-                : "border-transparent bg-transparent text-ink-mute hover:text-ink"
+            onKeyDown={
+              tabs
+                ? (event) => {
+                    const last = options.length - 1;
+                    const next =
+                      event.key === "ArrowRight"
+                        ? (index + 1) % options.length
+                        : event.key === "ArrowLeft"
+                          ? (index + last) % options.length
+                          : event.key === "Home"
+                            ? 0
+                            : event.key === "End"
+                              ? last
+                              : null;
+                    if (next === null) return;
+                    event.preventDefault();
+                    const choice = options[next];
+                    if (!choice) return;
+                    event.currentTarget.parentElement
+                      ?.querySelectorAll("button")
+                      .item(next)
+                      ?.focus();
+                    onChange(choice.value);
+                  }
+                : undefined
+            }
+            className={`inline-flex min-h-6 shrink-0 items-center ${appearance === "quiet" ? "rounded-md" : "rounded-full"} border px-3 text-ui-caption leading-none transition-colors ${focusVisibleRing} ${
+              selected && option.value === warnValue
+                ? "border-warn-line bg-warn-bg/70 text-warn-ink"
+                : selected
+                  ? appearance === "quiet"
+                    ? "border-transparent bg-raised text-ink"
+                    : "border-line bg-surface text-ink"
+                  : "border-transparent bg-transparent text-ink-mute hover:text-ink"
             }`}
           >
             {option.label}
