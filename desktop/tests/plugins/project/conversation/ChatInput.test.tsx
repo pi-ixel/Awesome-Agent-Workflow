@@ -867,8 +867,11 @@ describe("ChatInput slash 命令面板", () => {
     expect(screen.getByText("当前项目技能")).toBeInTheDocument();
     expect(screen.getAllByRole("option")).toHaveLength(3);
     expect(screen.getByText("/review-all")).toBeInTheDocument();
-    await userEvent.clear(getTextarea());
-    await userEvent.type(getTextarea(), "/");
+    const textarea = getTextarea();
+    await userEvent.clear(textarea);
+    await userEvent.type(textarea, "后缀");
+    textarea.setSelectionRange(0, 0);
+    await userEvent.type(textarea, "/", { skipClick: true });
     await screen.findByText("项目检查");
     expect(
       screen.queryByText(/broken|\/alias|\/project-review/),
@@ -877,14 +880,16 @@ describe("ChatInput slash 命令面板", () => {
     fireEvent.mouseDown(screen.getByRole("option", { name: /项目检查/ }));
     const reference = screen.getByText("review", { exact: true }).parentElement;
     expect(reference?.querySelector("svg")).toBeInTheDocument();
-    expect(getTextarea()).toHaveValue("");
+    expect(textarea).toHaveValue("后缀");
+    expect(textarea.selectionStart).toBe(0);
 
     await userEvent.type(
-      getTextarea(),
+      textarea,
       "检查这次改动{Shift>}{Enter}{/Shift}核对结果{Enter}",
+      { skipClick: true },
     );
     expect(onSend).toHaveBeenCalledWith(
-      "/REVIEW 检查这次改动\n核对结果",
+      "/REVIEW 检查这次改动\n核对结果后缀",
       undefined,
       {
         skillReferences: [

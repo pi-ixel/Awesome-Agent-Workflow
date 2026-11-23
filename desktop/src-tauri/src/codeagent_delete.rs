@@ -169,10 +169,13 @@ fn verify_without_init(path: &Path, sid: &str, cwd: &str) -> Result<bool, &'stat
 }
 
 fn revision(path: &Path) -> Result<String, String> {
-    let meta = metadata(path)?.ok_or("会话文件已变化")?;
+    revision_of(&metadata(path)?.ok_or("会话文件已变化")?)
+}
+
+fn revision_of(meta: &fs::Metadata) -> Result<String, String> {
     Ok(format!(
         "{}:{}:{}",
-        created(&meta)?,
+        created(meta)?,
         meta.len(),
         meta.modified()
             .map_err(|e| e.to_string())?
@@ -182,7 +185,7 @@ fn revision(path: &Path) -> Result<String, String> {
     ))
 }
 
-fn locate(root: &Path, sid: &str, cwd: &str) -> Result<Plan, String> {
+fn locate(root: &Path, sid: &str, cwd: &str, exclude: Option<&str>) -> Result<Plan, String> {
     let mut result = Plan {
         cwd: cwd.into(),
         session_id: sid.into(),
@@ -200,6 +203,9 @@ fn locate(root: &Path, sid: &str, cwd: &str) -> Result<Plan, String> {
             return Err("会话目录扫描未完成，请稍后重试".into());
         }
         let entry = entry.map_err(|e| e.to_string())?;
+        if exclude.is_some_and(|name| entry.file_name() == name) {
+            continue;
+        }
         let Some(meta) = metadata(&entry.path())? else {
             continue;
         };
@@ -209,7 +215,15 @@ fn locate(root: &Path, sid: &str, cwd: &str) -> Result<Plan, String> {
         let _project = directory_guard(&entry.path())?;
         let transcript = entry.path().join(format!("{sid}.jsonl"));
         let sidecar = entry.path().join(sid);
-        if verify(&transcript, sid, cwd)? {
+        let existing = metadata(&transcript)?;
+        if let Some(meta) = existing {
+            let before = revision_of(&meta)?;
+            if !verify(&transcript, sid, cwd)? {
+                return Err("同一会话 ID 对应其他项目或历史格式无法核验".into());
+            }
+            if revision(&transcript)? != before {
+                return Err("会话文件身份已变化".into());
+            }
             if result.project.is_some() {
                 return Err("找到多份同一会话，无法确定删除目标".into());
             }
@@ -219,13 +233,11 @@ fn locate(root: &Path, sid: &str, cwd: &str) -> Result<Plan, String> {
                     .into_string()
                     .map_err(|_| "项目目录名无效")?,
             );
-            result.transcript_revision = Some(revision(&transcript)?);
+            result.transcript_revision = Some(before);
             result.directory_created = metadata(&sidecar)?.as_ref().map(created).transpose()?;
-        } else if metadata(&sidecar)?.is_some() && metadata(&transcript)?.is_none() {
+        } else if metadata(&sidecar)?.is_some() {
             // 历史文件已不存在时，只能依据先前核验过的删除记录处理附属目录。
             return Err("存在无法核验归属的会话附属目录".into());
-        } else if metadata(&transcript)?.is_some() {
-            return Err("同一会话 ID 对应其他项目或历史格式无法核验".into());
         }
     }
     Ok(result)
@@ -247,21 +259,35 @@ fn remove_tree(path: &Path, depth: usize, count: &mut usize) -> Result<(), Strin
         drop(guard);
         fs::remove_dir(path).map_err(|e| e.to_string())
     } else if meta.is_file() {
-        let mut options = OpenOptions::new();
-        options.read(true);
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::OpenOptionsExt;
-            options.custom_flags(0x0020_0000).share_mode(4);
-        }
-        let _guard = options
-            .open(path)
-            .map_err(|e| format!("文件仍被占用或无法访问：{e}"))?;
-        metadata(path)?;
-        fs::remove_file(path).map_err(|e| e.to_string())
+        remove_file(path, None)
     } else {
         Err("会话目录包含不支持的文件类型".into())
     }
+}
+
+fn remove_file(path: &Path, expected_revision: Option<&str>) -> Result<(), String> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(0x0020_0000).share_mode(4);
+    }
+    let guard = options
+        .open(path)
+        .map_err(|e| format!("文件仍被占用或无法访问：{e}"))?;
+    let meta = metadata(path)?.ok_or("待删除文件已变化")?;
+    if !meta.is_file() {
+        return Err("待删除文件不是普通文件".into());
+    }
+    if let Some(expected) = expected_revision {
+        if revision_of(&meta)? != expected
+            || revision_of(&guard.metadata().map_err(|e| e.to_string())?)? != expected
+        {
+            return Err("会话文件身份已变化".into());
+        }
+    }
+    fs::remove_file(path).map_err(|e| e.to_string())
 }
 
 #[cfg(windows)]
@@ -354,130 +380,8 @@ fn check_external(home: &Path, sid: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn command(program: &str, args: &[String], cwd: &str) -> Result<std::process::Command, String> {
-    #[cfg(windows)]
-    {
-        use crate::acp_process::{SpawnTarget, cmd_script_tail, resolve_windows_program};
-        use std::os::windows::process::CommandExt;
-        let mut cmd = match resolve_windows_program(program) {
-            SpawnTarget::Direct(path) => {
-                let mut cmd = std::process::Command::new(path);
-                cmd.args(args);
-                cmd
-            }
-            SpawnTarget::CmdScript { comspec, script } => {
-                if script.contains(['"', '%', '\r', '\n']) {
-                    return Err("CodeAgent 启动路径无法安全传给命令解释器".into());
-                }
-                let mut cmd = std::process::Command::new(comspec);
-                cmd.arg("/d")
-                    .arg("/s")
-                    .arg("/c")
-                    .raw_arg(cmd_script_tail(&script, args));
-                cmd
-            }
-        };
-        cmd.creation_flags(0x0800_0000);
-        cmd.current_dir(cwd);
-        Ok(cmd)
-    }
-    #[cfg(not(windows))]
-    {
-        let mut cmd = std::process::Command::new(program);
-        cmd.args(args).current_dir(cwd);
-        Ok(cmd)
-    }
-}
-
-struct CliFailure {
-    reason: String,
-    safe_to_fallback: bool,
-}
-fn stop_child(child: &mut std::process::Child) -> Result<(), String> {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        let status = std::process::Command::new("taskkill.exe")
-            .args(["/PID", &child.id().to_string(), "/T", "/F"])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .creation_flags(0x0800_0000)
-            .status()
-            .map_err(|e| e.to_string())?;
-        if !status.success() {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err("无法确认删除命令的进程树已经退出，请关闭 CodeAgent 后重试".into());
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        child.kill().map_err(|e| e.to_string())?;
-    }
-    child.wait().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-fn cli(program: &str, sid: &str, cwd: &str, timeout: Duration) -> Result<(), CliFailure> {
-    let safe_error = |reason: String| CliFailure {
-        reason,
-        safe_to_fallback: true,
-    };
-    // 非交互确认失败同样进入经过核验的文件删除兜底。
-    let mut child = command(
-        program,
-        &["sessions".into(), "delete".into(), sid.into()],
-        cwd,
-    )
-    .map_err(safe_error)?
-    .stdin(std::process::Stdio::null())
-    .stdout(std::process::Stdio::null())
-    .stderr(std::process::Stdio::null())
-    .spawn()
-    .map_err(|e| safe_error(e.to_string()))?;
-    let start = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                return if status.success() {
-                    Ok(())
-                } else {
-                    Err(safe_error(format!(
-                        "CodeAgent 删除退出码 {:?}",
-                        status.code()
-                    )))
-                };
-            }
-            Ok(None) => {}
-            Err(error) => {
-                return match stop_child(&mut child) {
-                    Ok(()) => Err(safe_error(error.to_string())),
-                    Err(reason) => Err(CliFailure {
-                        reason,
-                        safe_to_fallback: false,
-                    }),
-                };
-            }
-        }
-        if start.elapsed() > timeout {
-            return match stop_child(&mut child) {
-                Ok(()) => Err(safe_error("删除命令超时，已结束进程".into())),
-                Err(reason) => Err(CliFailure {
-                    reason,
-                    safe_to_fallback: false,
-                }),
-            };
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-}
-
 fn save_plan(path: &Path, plan: &Plan) -> Result<(), String> {
     use std::io::Write;
-    if path.exists() {
-        return Ok(());
-    }
     let temporary = path.with_extension("tmp");
     let mut file = OpenOptions::new()
         .write(true)
@@ -492,7 +396,7 @@ fn save_plan(path: &Path, plan: &Plan) -> Result<(), String> {
     fs::rename(temporary, path).map_err(|e| e.to_string())
 }
 
-fn delete(home: &Path, journal: &Path, sid: &str, cwd: &str, program: &str) -> Result<(), String> {
+fn delete(home: &Path, journal: &Path, sid: &str, cwd: &str) -> Result<(), String> {
     if sid.is_empty()
         || sid.len() > 128
         || !sid.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
@@ -503,7 +407,7 @@ fn delete(home: &Path, journal: &Path, sid: &str, cwd: &str, program: &str) -> R
     let _guard = DELETION.lock().map_err(|e| e.to_string())?;
     let cac = home.join(".cac");
     let root = cac.join("projects");
-    // CLI 和文件兜底执行期间，始终防止祖先目录被替换。
+    // 删除期间始终防止祖先目录被替换。
     let _home = directory_guard(home)?;
     let _cac = metadata(&cac)?.map(|_| directory_guard(&cac)).transpose()?;
     let _root = metadata(&root)?
@@ -529,20 +433,32 @@ fn delete(home: &Path, journal: &Path, sid: &str, cwd: &str, program: &str) -> R
     let _lock = lock_options
         .open(journal_path.with_extension("lock"))
         .map_err(|_| "其他窗口正在删除此会话，请稍后重试")?;
-    let plan = if metadata(&journal_path)?.is_some() {
-        serde_json::from_slice::<Plan>(&fs::read(&journal_path).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?
-    } else {
-        let plan = locate(&root, sid, cwd)?;
-        save_plan(&journal_path, &plan)?;
-        plan
-    };
-    if plan.session_id != sid || path_key(&plan.cwd) != path_key(cwd) {
+    let saved = metadata(&journal_path)?
+        .map(|_| {
+            serde_json::from_slice::<Plan>(&fs::read(&journal_path).map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())
+        })
+        .transpose()?;
+    if saved
+        .as_ref()
+        .is_some_and(|plan| plan.session_id != sid || path_key(&plan.cwd) != path_key(cwd))
+    {
         return Err("删除记录身份不匹配".into());
     }
     check_external(home, sid)?;
-    let Some(project) = plan.project else {
-        return Ok(());
+    let plan = match saved {
+        Some(plan) if plan.project.is_some() => plan,
+        _ => {
+            let plan = locate(&root, sid, cwd, None)?;
+            if plan.project.is_none() {
+                return Err("未找到可验证的 CodeAgent 历史".into());
+            }
+            save_plan(&journal_path, &plan)?;
+            plan
+        }
+    };
+    let (Some(project), Some(expected_revision)) = (plan.project, plan.transcript_revision) else {
+        return Err("删除记录缺少文件身份".into());
     };
     if !matches!(
         Path::new(&project).components().next(),
@@ -554,6 +470,10 @@ fn delete(home: &Path, journal: &Path, sid: &str, cwd: &str, program: &str) -> R
     {
         return Err("删除记录中的项目目录无效".into());
     }
+    // 重新扫描其他项目，识别在首次定位之后或重试时出现的同 ID 文件。
+    if locate(&root, sid, cwd, Some(&project))?.project.is_some() {
+        return Err("找到多份同一会话，无法确定删除目标".into());
+    }
     let project_path = root.join(project);
     let Some(_) = metadata(&project_path)? else {
         return Ok(());
@@ -561,75 +481,41 @@ fn delete(home: &Path, journal: &Path, sid: &str, cwd: &str, program: &str) -> R
     let _project = directory_guard(&project_path)?;
     let transcript = project_path.join(format!("{sid}.jsonl"));
     let sidecar = project_path.join(sid);
-    if metadata(&transcript)?.is_some() && !verify(&transcript, sid, cwd)? {
-        return Err("会话文件身份已变化".into());
-    }
-    if metadata(&transcript)?.is_some() && Some(revision(&transcript)?) != plan.transcript_revision
-    {
-        return Err("会话历史已被修改，请核验后再删除".into());
-    }
-    // 每次重试重新扫描，拒绝新增的同 ID 歧义记录。
-    if metadata(&transcript)?.is_some() {
-        locate(&root, sid, cwd)?;
-    }
-    if let Some(meta) = metadata(&sidecar)? {
-        if !meta.is_dir() || Some(created(&meta)?) != plan.directory_created {
-            return Err("附属目录身份已变化".into());
-        }
-    }
-    let _history = if metadata(&transcript)?.is_some() {
+    let history = if metadata(&transcript)?.is_some() {
         let mut options = OpenOptions::new();
         options.read(true);
         #[cfg(windows)]
         {
             use std::os::windows::fs::OpenOptionsExt;
-            options.custom_flags(0x0020_0000).share_mode(5);
+            // 核验与清理附属文件期间，禁止其他句柄写入或替换历史。
+            options.custom_flags(0x0020_0000).share_mode(1);
         }
-        Some(
-            options
-                .open(&transcript)
-                .map_err(|e| format!("会话历史仍被占用：{e}"))?,
-        )
+        let file = options
+            .open(&transcript)
+            .map_err(|e| format!("会话历史仍被占用：{e}"))?;
+        if revision_of(&file.metadata().map_err(|e| e.to_string())?)? != expected_revision
+            || revision(&transcript)? != expected_revision
+        {
+            return Err("会话历史已被修改，请核验后再删除".into());
+        }
+        if !verify(&transcript, sid, cwd)? || revision(&transcript)? != expected_revision {
+            return Err("会话文件身份已变化".into());
+        }
+        Some(file)
     } else {
         None
     };
-    // 取得禁止写入的历史句柄后复核，关闭先前核验与加锁之间的修改窗口。
-    if _history.is_some()
-        && (!verify(&transcript, sid, cwd)?
-            || Some(revision(&transcript)?) != plan.transcript_revision)
-    {
-        return Err("会话文件身份已变化".into());
-    }
-    let cli_result = cli(program, sid, cwd, Duration::from_secs(30));
-    if let Err(error) = &cli_result {
-        if !error.safe_to_fallback {
-            return Err(error.reason.clone());
-        }
-    }
-    crate::diagnostics::log(
-        if cli_result.is_ok() { "info" } else { "warn" },
-        "session-delete",
-        "CLI 删除结束，核验并清理文件残留",
-        serde_json::json!({
-            "cliSucceeded": cli_result.is_ok(),
-            "reason": cli_result.as_ref().err().map(|error| &error.reason),
-        }),
-    );
     check_external(home, sid)?;
-    drop(_history);
     if let Some(meta) = metadata(&sidecar)? {
-        if Some(created(&meta)?) != plan.directory_created {
+        if !meta.is_dir() || Some(created(&meta)?) != plan.directory_created {
             return Err("附属目录身份已变化".into());
         }
         remove_tree(&sidecar, 0, &mut 0)?;
     }
-    if metadata(&transcript)?.is_some() {
-        if !verify(&transcript, sid, cwd)?
-            || Some(revision(&transcript)?) != plan.transcript_revision
-        {
-            return Err("会话文件身份已变化".into());
-        }
-        remove_tree(&transcript, 0, &mut 0)?;
+    if let Some(history) = history {
+        // 删除需先关闭禁止重命名的句柄，最后在删除句柄持有期间复核版本。
+        drop(history);
+        remove_file(&transcript, Some(&expected_revision))?;
     }
     if metadata(&transcript)?.is_some() || metadata(&sidecar)?.is_some() {
         return Err("会话仍有残留数据".into());
@@ -643,7 +529,6 @@ pub async fn agent_delete_session(
     agent_id: String,
     session_id: String,
     cwd: String,
-    program: String,
 ) -> Result<(), String> {
     if agent_id != "codeagent" {
         return Err("此 Agent 不支持彻底删除会话".into());
@@ -651,7 +536,18 @@ pub async fn agent_delete_session(
     let home = app.path().home_dir().map_err(|e| e.to_string())?;
     let journal = crate::storage_location::data_dir(&app)?.join("session-deletions");
     tauri::async_runtime::spawn_blocking(move || {
-        delete(&home, &journal, &session_id, &cwd, &program)
+        let started = Instant::now();
+        let result = delete(&home, &journal, &session_id, &cwd);
+        crate::diagnostics::log(
+            if result.is_ok() { "info" } else { "warn" },
+            "session-delete",
+            "CodeAgent 文件删除结束",
+            serde_json::json!({
+                "succeeded": result.is_ok(),
+                "durationMs": started.elapsed().as_millis(),
+            }),
+        );
+        result
     })
     .await
     .map_err(|e| e.to_string())?
@@ -693,14 +589,7 @@ mod tests {
         );
         let (home, project) = fixture_without_init(history);
         for _ in 0..2 {
-            delete(
-                &home,
-                &home.join("journal"),
-                "session-1",
-                "D:/Repo",
-                "missing-codeagent-for-test",
-            )
-            .unwrap();
+            delete(&home, &home.join("journal"), "session-1", "D:/Repo").unwrap();
             assert!(!project.join("session-1.jsonl").exists());
             assert!(!project.join("session-1").exists());
         }
@@ -752,14 +641,7 @@ mod tests {
                 "D:/Repo"
             };
             assert!(
-                delete(
-                    &home,
-                    &home.join("journal"),
-                    "session-1",
-                    cwd,
-                    "missing-codeagent-for-test"
-                )
-                .is_err(),
+                delete(&home, &home.join("journal"), "session-1", cwd,).is_err(),
                 "{case}",
             );
             assert_eq!(
@@ -783,21 +665,12 @@ mod tests {
         fs::create_dir(&other).unwrap();
         let duplicate = other.join("session-1.jsonl");
         fs::write(&duplicate, "{\"type\":\"system\",\"subtype\":\"init\",\"sessionId\":\"session-1\",\"cwd\":\"D:/Repo\"}\n").unwrap();
-        assert!(
-            delete(
-                &home,
-                &journal,
-                "session-1",
-                "D:/Repo",
-                "missing-codeagent-for-test"
-            )
-            .is_err()
-        );
+        assert!(delete(&home, &journal, "session-1", "D:/Repo",).is_err());
         assert!(transcript.exists());
         assert!(duplicate.exists());
         fs::remove_file(duplicate).unwrap();
 
-        let plan = locate(&root, "session-1", "D:/Repo").unwrap();
+        let plan = locate(&root, "session-1", "D:/Repo", None).unwrap();
         let key = format!("{:x}.json", Sha256::digest(b"d:/repo\0session-1"));
         save_plan(&journal.join(key), &plan).unwrap();
         fs::write(
@@ -805,14 +678,7 @@ mod tests {
             format!("{history}{{\"type\":\"assistant\"}}\n"),
         )
         .unwrap();
-        let error = delete(
-            &home,
-            &journal,
-            "session-1",
-            "D:/Repo",
-            "missing-codeagent-for-test",
-        )
-        .unwrap_err();
+        let error = delete(&home, &journal, "session-1", "D:/Repo").unwrap_err();
         assert!(error.contains("修改"), "{error}");
         assert!(transcript.exists());
         assert!(project.join("session-1/model-io/data").exists());
@@ -820,27 +686,76 @@ mod tests {
     }
 
     #[test]
-    fn cli_failure_falls_back_and_retry_is_idempotent() {
+    fn directly_deletes_and_retry_is_idempotent() {
         let (home, project) = fixture();
         let journal = home.join("journal");
-        delete(
-            &home,
-            &journal,
-            "session-1",
-            "d:\\repo",
-            "missing-codeagent-for-test",
-        )
-        .unwrap();
+        delete(&home, &journal, "session-1", "d:\\repo").unwrap();
         assert!(!project.join("session-1.jsonl").exists());
         assert!(!project.join("session-1").exists());
-        delete(
-            &home,
-            &journal,
-            "session-1",
-            "D:/Repo",
-            "missing-codeagent-for-test",
+        delete(&home, &journal, "session-1", "D:/Repo").unwrap();
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn missing_history_cannot_create_or_reuse_an_unverified_plan() {
+        let (home, project) = fixture();
+        let root = home.join(".cac/projects");
+        let journal = home.join("journal");
+        let key = format!("{:x}.json", Sha256::digest(b"d:/repo\0session-1"));
+        let journal_path = journal.join(key);
+        fs::remove_file(project.join("session-1.jsonl")).unwrap();
+        fs::remove_dir_all(project.join("session-1")).unwrap();
+
+        let delete_session = || delete(&home, &journal, "session-1", "D:/Repo");
+        assert!(delete_session().unwrap_err().contains("未找到可验证"));
+        assert!(!journal_path.exists());
+
+        let empty = locate(&root, "session-1", "D:/Repo", None).unwrap();
+        save_plan(&journal_path, &empty).unwrap();
+        assert!(delete_session().unwrap_err().contains("未找到可验证"));
+        fs::write(project.join("session-1.jsonl"), "{\"type\":\"system\",\"subtype\":\"init\",\"sessionId\":\"session-1\",\"cwd\":\"D:/Repo\"}\n").unwrap();
+        delete_session().unwrap();
+        delete_session().unwrap();
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn retry_checks_other_projects_even_when_the_planned_history_disappeared() {
+        let (home, project) = fixture();
+        let root = home.join(".cac/projects");
+        let journal = home.join("journal");
+        fs::create_dir_all(&journal).unwrap();
+        let key = format!("{:x}.json", Sha256::digest(b"d:/repo\0session-1"));
+        let plan = locate(&root, "session-1", "D:/Repo", None).unwrap();
+        save_plan(&journal.join(key), &plan).unwrap();
+        let other = root.join("new-project");
+        fs::create_dir(&other).unwrap();
+        fs::rename(
+            project.join("session-1.jsonl"),
+            other.join("session-1.jsonl"),
         )
         .unwrap();
+        assert!(
+            delete(&home, &journal, "session-1", "D:/Repo")
+                .unwrap_err()
+                .contains("多份")
+        );
+        assert!(other.join("session-1.jsonl").exists());
+        assert!(project.join("session-1/model-io/data").exists());
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn keeps_sidecars_while_the_history_is_open_for_writing() {
+        let (home, project) = fixture();
+        let transcript = project.join("session-1.jsonl");
+        let writer = OpenOptions::new().write(true).open(&transcript).unwrap();
+        let delete_session = || delete(&home, &home.join("journal"), "session-1", "D:/Repo");
+        assert!(delete_session().unwrap_err().contains("占用"));
+        assert!(project.join("session-1/model-io/data").exists());
+        drop(writer);
+        delete_session().unwrap();
         fs::remove_dir_all(home).unwrap();
     }
     #[test]
@@ -853,26 +768,8 @@ mod tests {
             other.join("session-1.jsonl"),
         )
         .unwrap();
-        assert!(
-            delete(
-                &home,
-                &home.join("journal"),
-                "session-1",
-                "D:/Repo",
-                "missing-codeagent-for-test"
-            )
-            .is_err()
-        );
-        assert!(
-            delete(
-                &home,
-                &home.join("journal"),
-                "../session-1",
-                "D:/Repo",
-                "missing-codeagent-for-test"
-            )
-            .is_err()
-        );
+        assert!(delete(&home, &home.join("journal"), "session-1", "D:/Repo",).is_err());
+        assert!(delete(&home, &home.join("journal"), "../session-1", "D:/Repo",).is_err());
         assert!(project.join("session-1.jsonl").exists());
         fs::remove_dir_all(home).unwrap();
     }
@@ -882,7 +779,7 @@ mod tests {
         let root = home.join(".cac/projects");
         let journal = home.join("journal");
         fs::create_dir_all(&journal).unwrap();
-        let plan = locate(&root, "session-1", "D:/Repo").unwrap();
+        let plan = locate(&root, "session-1", "D:/Repo", None).unwrap();
         let key = format!("{:x}.json", Sha256::digest(b"d:/repo\0session-1"));
         save_plan(&journal.join(key), &plan).unwrap();
         use std::io::Write;
@@ -893,15 +790,9 @@ mod tests {
             .write_all(b"changed\n")
             .unwrap();
         assert!(
-            delete(
-                &home,
-                &journal,
-                "session-1",
-                "D:/Repo",
-                "missing-codeagent-for-test"
-            )
-            .unwrap_err()
-            .contains("修改")
+            delete(&home, &journal, "session-1", "D:/Repo",)
+                .unwrap_err()
+                .contains("修改")
         );
         assert!(project.join("session-1/model-io/data").exists());
         fs::remove_dir_all(home).unwrap();
@@ -909,41 +800,11 @@ mod tests {
         let (home, project) = fixture();
         let journal = home.join("journal");
         fs::create_dir_all(&journal).unwrap();
-        let plan = locate(&home.join(".cac/projects"), "session-1", "D:/Repo").unwrap();
+        let plan = locate(&home.join(".cac/projects"), "session-1", "D:/Repo", None).unwrap();
         let key = format!("{:x}.json", Sha256::digest(b"d:/repo\0session-1"));
         save_plan(&journal.join(key), &plan).unwrap();
         fs::remove_file(project.join("session-1.jsonl")).unwrap();
-        delete(
-            &home,
-            &journal,
-            "session-1",
-            "D:/Repo",
-            "missing-codeagent-for-test",
-        )
-        .unwrap();
-        assert!(!project.join("session-1").exists());
-        fs::remove_dir_all(home).unwrap();
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn runs_windows_shim_and_removes_sidecars_left_after_cli_success() {
-        let (home, project) = fixture();
-        let cwd = home.to_string_lossy().into_owned();
-        let init =
-            serde_json::json!({"type":"system","subtype":"init","sessionId":"session-1","cwd":cwd});
-        fs::write(project.join("session-1.jsonl"), format!("{init}\n")).unwrap();
-        let script = home.join("fake-codeagent.cmd");
-        fs::write(&script, "@echo off\r\nif not \"%~1\"==\"sessions\" exit /b 2\r\nif not \"%~2\"==\"delete\" exit /b 3\r\necho invoked>\"%~dp0invoked\"\r\ndel /q \"%~dp0.cac\\projects\\old-unicode-目录\\session-1.jsonl\"\r\nexit /b 0\r\n").unwrap();
-        delete(
-            &home,
-            &home.join("journal"),
-            "session-1",
-            &cwd,
-            &script.to_string_lossy(),
-        )
-        .unwrap();
-        assert!(home.join("invoked").exists());
+        delete(&home, &journal, "session-1", "D:/Repo").unwrap();
         assert!(!project.join("session-1").exists());
         fs::remove_dir_all(home).unwrap();
     }
@@ -979,16 +840,7 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        assert!(
-            delete(
-                &home,
-                &home.join("journal"),
-                "session-1",
-                "D:/Repo",
-                "missing-codeagent-for-test"
-            )
-            .is_err()
-        );
+        assert!(delete(&home, &home.join("journal"), "session-1", "D:/Repo",).is_err());
         assert!(outside.join("keep").exists());
         fs::remove_dir(junction).unwrap();
         let registry = home.join(".cac/sessions");
@@ -1002,15 +854,9 @@ mod tests {
         )
         .unwrap();
         assert!(
-            delete(
-                &home,
-                &home.join("journal"),
-                "session-1",
-                "D:/Repo",
-                "missing-codeagent-for-test"
-            )
-            .unwrap_err()
-            .contains("其他窗口")
+            delete(&home, &home.join("journal"), "session-1", "D:/Repo",)
+                .unwrap_err()
+                .contains("其他窗口")
         );
         assert!(project.join("session-1.jsonl").exists());
         File::options()
@@ -1020,34 +866,6 @@ mod tests {
             .set_modified(UNIX_EPOCH)
             .unwrap();
         check_external(&home, "session-1").unwrap();
-        fs::remove_dir_all(home).unwrap();
-    }
-    #[cfg(windows)]
-    #[test]
-    fn timeout_terminates_the_windows_shim_and_its_child_before_fallback() {
-        let (home, _) = fixture();
-        let script = home.join("slow-codeagent.cmd");
-        fs::write(
-            &script,
-            "@echo off\r\npowershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"%~dp0child.ps1\"\r\n",
-        )
-        .unwrap();
-        fs::write(home.join("child.ps1"), "$PID | Set-Content -LiteralPath (Join-Path $PSScriptRoot 'child.pid')\nStart-Sleep -Seconds 60").unwrap();
-        let result = cli(
-            &script.to_string_lossy(),
-            "session-1",
-            &home.to_string_lossy(),
-            Duration::from_secs(3),
-        );
-        let failure = result.err().expect("command must time out");
-        assert!(failure.safe_to_fallback, "{}", failure.reason);
-        assert!(failure.reason.contains("超时"), "{}", failure.reason);
-        let pid = fs::read_to_string(home.join("child.pid"))
-            .unwrap()
-            .trim()
-            .parse::<u32>()
-            .unwrap();
-        assert!(!process_running(pid, None).unwrap());
         fs::remove_dir_all(home).unwrap();
     }
 }

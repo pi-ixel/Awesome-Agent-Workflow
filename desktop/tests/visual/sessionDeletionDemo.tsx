@@ -75,6 +75,14 @@ const project = {
     canDeleteArchivedSession: () => true,
     openSessionFromEntry: async () => {},
     unarchiveSession: indexes.archive.getState().unarchiveSession,
+    deleteArchivedSessions(targets: readonly DeleteSessionTarget[]) {
+      return indexes.deletions.runBatch(
+        agentKey,
+        targets,
+        (target) => this.deleteArchivedSession(target),
+        () => true,
+      );
+    },
     async deleteArchivedSession(target: DeleteSessionTarget) {
       if (target.sessionId === "scheduled-report")
         throw new Error("此会话仍由定时任务或工作流拥有，请先在对应任务中处理");

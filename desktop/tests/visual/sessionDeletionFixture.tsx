@@ -17,18 +17,28 @@ if (params.has("appearance"))
 const records = new Map<string, string>();
 const indexes = createProjectSessionIndexes({
   getItem: (key) => records.get(key) ?? null,
-  setItem: (key, value) => { records.set(key, value); },
+  setItem: (key, value) => {
+    records.set(key, value);
+  },
 });
 const agentKey = JSON.stringify([
   "codeagent",
   { command: ["codeagent", "acp"], cwd: null, extraEnv: {} },
 ]);
-const initialSessions = [{ id: "session-1", title: "测试会话", updatedAt: null }];
-const sessionsByPath: Record<string, SessionSummary[]> = params.has("navigation")
+const initialSessions = [
+  { id: "session-1", title: "测试会话", updatedAt: null },
+];
+const sessionsByPath: Record<string, SessionSummary[]> = params.has(
+  "navigation",
+)
   ? {
       "D:/project": [
         ...initialSessions,
-        { id: "session-2", title: "发布准备和回滚检查", updatedAt: "2026-10-20T10:00:00Z" },
+        {
+          id: "session-2",
+          title: "发布准备和回滚检查",
+          updatedAt: "2026-10-20T10:00:00Z",
+        },
       ],
       "D:/release": [
         { id: "release", title: "其他项目的复核记录", updatedAt: null },
@@ -47,6 +57,14 @@ const project = {
     deletions: indexes.deletionView,
     canDeleteArchivedSession: () => true,
     unarchiveSession: indexes.archive.getState().unarchiveSession,
+    deleteArchivedSessions(targets: readonly DeleteSessionTarget[]) {
+      return indexes.deletions.runBatch(
+        agentKey,
+        targets,
+        (target) => this.deleteArchivedSession(target),
+        () => true,
+      );
+    },
     openSessionFromEntry(_path: string, sessionId: string) {
       document.documentElement.dataset.openedSession = sessionId;
       return Promise.resolve();
