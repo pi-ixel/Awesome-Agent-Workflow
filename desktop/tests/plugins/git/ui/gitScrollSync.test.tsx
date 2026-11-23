@@ -23,6 +23,11 @@ it("synchronizes both directions without affecting other diff instances", () => 
   fireEvent.scroll(a);
   expect(b.scrollLeft).toBe(90);
   expect(other.scrollLeft).toBe(0);
+  a.scrollLeft = 150;
+  fireEvent.scroll(b);
+  expect(a.scrollLeft).toBe(150);
+  fireEvent.scroll(a);
+  expect(b.scrollLeft).toBe(150);
   b.scrollLeft = 35;
   fireEvent.scroll(b);
   expect(a.scrollLeft).toBe(35);

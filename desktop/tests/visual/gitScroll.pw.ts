@@ -96,16 +96,12 @@ test("both diff columns follow equal pixel positions despite uneven content and 
     e.scrollLeft = 350;
   });
   await expect.poll(() => right.evaluate((e) => e.scrollLeft)).toBe(350);
-  await left.evaluate((e) => {
+  const end = await left.evaluate((e) => {
     e.scrollLeft = e.scrollWidth;
+    return e.scrollWidth - e.clientWidth;
   });
-  await expect
-    .poll(
-      async () =>
-        (await left.evaluate((e) => e.scrollLeft)) -
-        (await right.evaluate((e) => e.scrollLeft)),
-    )
-    .toBe(0);
+  await expect.poll(() => left.evaluate((e) => e.scrollLeft)).toBe(end);
+  await expect.poll(() => right.evaluate((e) => e.scrollLeft)).toBe(end);
   await expect(left.locator("span.sticky").first()).toHaveCSS(
     "position",
     "sticky",
