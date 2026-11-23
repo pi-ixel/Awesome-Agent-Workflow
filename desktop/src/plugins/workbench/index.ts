@@ -10,6 +10,7 @@ import { DesktopWorkbench } from "./composition/workbench.ts";
 import { bindPersistedColumnWidths } from "./ui/columnWidths.ts";
 import { WorkbenchWindow } from "./ui/WorkbenchWindow.tsx";
 import { createWindowChrome } from "./window/windowChrome.ts";
+import { observeTaskbarUnread } from "./window/taskbarUnread.ts";
 import { createLogger, type LoggerFactory } from "../../shared/logging/logger.ts";
 import type { PanelLayoutCompatibility } from "./types.ts";
 
@@ -60,6 +61,13 @@ export function apply(
   );
   ctx.provide(name, workbench.service);
   ctx.effect(() => () => workbench.dispose(), "workbench:resources");
+  if (ctx.host.isNative() && window.setTaskbarUnread) {
+    const write = window.setTaskbarUnread.bind(window);
+    ctx.effect(
+      () => observeTaskbarUnread(workbench.service, write, logger),
+      "workbench:taskbar-unread",
+    );
+  }
   if (chrome) ctx.effect(() => chrome.observe(), "workbench:window-chrome");
   if (options?.shutdownWindow)
     ctx.effect(() => workbench.observeWindowClose(), "workbench:window-close");

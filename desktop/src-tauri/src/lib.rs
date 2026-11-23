@@ -22,6 +22,7 @@ mod session_snapshots;
 mod sso_login;
 mod storage_location;
 mod storage_preferences;
+mod taskbar_badge;
 mod terminal_pty;
 mod tray;
 mod usage_statistics;
@@ -71,6 +72,12 @@ pub fn run() {
             notification_links::start(app.handle())?;
             if let Err(error) = tray::install(app.handle()) {
                 eprintln!("系统托盘初始化失败: {error}");
+            }
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main") {
+                if let Err(error) = taskbar_badge::install(&window) {
+                    eprintln!("任务栏徽标初始化失败: {error}");
+                }
             }
             tray::start_task_clock(app.handle().clone());
             resource_monitor::start();
@@ -263,6 +270,7 @@ pub fn run() {
             commands::force_close,
             tray::set_close_to_tray,
             tray::claim_scheduled_tasks,
+            taskbar_badge::set_taskbar_unread,
             // 系统通知：Windows 上点击打开 aaw:// 链接，可按标记替换和删除（ADR 034）
             notification_links::notification_show,
             notification_links::notification_remove,
