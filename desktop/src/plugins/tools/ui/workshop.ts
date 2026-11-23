@@ -7,13 +7,14 @@
  * 用户回到面板看到的是一张空卡片。所以状态与订阅都放在插件层（这个模块
  * 由 `tools-ui` 的 `apply()` 创建一次），面板只是它的一个视图。
  *
- * 三个身份维度在这里汇合，别混：
+ * 四个身份维度在这里汇合，别混：
  * - `owner`：账号，决定项目目录与工具数据落在哪一层；
  * - `projectDir`：当前在做的那个工具项目；
- * - `brief`：用户写的需求原文，只用于建项目与首条消息。
+ * - `brief`：用户写的需求原文，只用于建项目与首条消息；
+ * - `session`：这个项目最后停在会话列表的哪一条（见 `lastSessions`）。
  */
 import { createStore } from "zustand";
-import { joinPath, pathKey } from "../../../shared/panelPaths.ts";
+import { insidePath, joinPath, pathKey } from "../../../shared/panelPaths.ts";
 import { createSnapshotView } from "../../../shared/state/readonlySnapshot.ts";
 import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
 import type { HostService } from "../../host/service.ts";
@@ -305,6 +306,16 @@ export function createWorkshop(deps: {
   readonly settings?: {
     readonly read: () => string | undefined;
     readonly write: (value: string | undefined) => void;
+    /**
+     * 「每个工具项目最后用的那条会话」的存取（同一个配置记录里的另一个字段）。
+     *
+     * 省略时（预览模式 / 测试）只在本次进程里记着：重启后退回"按最后活动时间
+     * 猜"，不会错到别处去，只是少一层确定。
+     */
+    readonly sessions?: {
+      readonly read: () => Readonly<Record<string, string>> | undefined;
+      readonly write: (value: Readonly<Record<string, string>>) => void;
+    };
   };
 }): WorkshopService {
   const { tools, project, host } = deps;
@@ -344,6 +355,20 @@ export function createWorkshop(deps: {
   let refreshToken = 0;
   /** 每个项目最近一次被操作的时刻，用于列表排序（不落盘：重启后回归扫描顺序）。 */
   const touchedAt = new Map<string, number>();
+  /**
+   * 每个工具项目「最后用的那条会话」：`pathKey(项目目录)` → sessionId。
+   *
+   * 为什么需要它：一个工具会开发很多轮，用户中途还会自己新开一条会话换换
+   * 上下文。「继续开发」以前只会**新开**——上下文断了，用户还得自己去侧栏
+   * 翻历史，翻错一条就进了另一段对话。这里记的是"这个工具最后停在哪儿"。
+   *
+   * 值只是**提示**，不是硬指针：会话被删、换了 Agent、目录改名之后它就对不上，
+   * 打开失败必须退回"新开一条"。顺序按写入先后，超量时淘汰最早的。
+   */
+  const lastSessions = new Map<string, string>(
+    Object.entries(deps.settings?.sessions?.read() ?? {}),
+  );
+  const maxRememberedSessions = 200;
 
   const store = createStore<WorkshopSnapshot>(() => ({
     brief: "",
@@ -364,6 +389,132 @@ export function createWorkshop(deps: {
   }));
   const view = createSnapshotView(store, (snapshot) => snapshot);
   const patch = (next: Partial<WorkshopSnapshot>) => store.setState(next);
+
+  /**
+   * 记下"这个工具最后停在哪条会话"。
+   *
+   * 只有真变了才写盘：切会话、发消息这类动作会让订阅回调频繁跑，每次写一遍
+   * 配置没有必要。写失败（配置只读 / 换账号）不打断任何操作——它只是提示。
+   */
+  function rememberSession(dir: string, sessionId: string | null | undefined) {
+    if (!sessionId) return;
+    const key = pathKey(dir);
+    if (lastSessions.get(key) === sessionId) return;
+    // 先删再插：Map 保留插入顺序，这里就是"最近用的排后面"，超量时从头上淘汰。
+    lastSessions.delete(key);
+    lastSessions.set(key, sessionId);
+    while (lastSessions.size > maxRememberedSessions) {
+      const oldest = lastSessions.keys().next();
+      if (oldest.done) break;
+      lastSessions.delete(oldest.value);
+    }
+    try {
+      deps.settings?.sessions?.write(Object.fromEntries(lastSessions));
+    } catch {
+      /* 记不住只是下次少一层确定，不影响这次操作 */
+    }
+  }
+
+  /** 项目没了，指向它的记录也该走：留着只会在别的目录上瞎猜。 */
+  function forgetSession(dir: string) {
+    const key = pathKey(dir);
+    if (!lastSessions.delete(key)) return;
+    try {
+      deps.settings?.sessions?.write(Object.fromEntries(lastSessions));
+    } catch {
+      /* 同上 */
+    }
+  }
+
+  /**
+   * 这个目录是不是工具项目（工具中心自己的源码目录）。
+   *
+   * 只在工具项目上记会话：用户所有项目的会话都塞进这份记录，配置会变成一本
+   * 没人看得懂的账，而且那些记录永远不会被读到。判据按"能确认的都算"来取：
+   * 已扫描出来的项目、当前展开的项目、两个根目录底下——`projectsRoot` 是异步
+   * 取到的，只靠它会在启动那几秒漏记。
+   */
+  function isToolProject(path: string): boolean {
+    const state = store.getState();
+    const key = pathKey(path);
+    if (state.project && pathKey(state.project.dir) === key) return true;
+    if (state.projects.some((entry) => pathKey(entry.dir) === key)) return true;
+    return [state.projectsRoot, customRoot].some(
+      (root) => !!root && pathKey(root) !== key && insidePath(root, path),
+    );
+  }
+
+  /**
+   * 这条会话属于哪个项目。
+   *
+   * 不能直接拿"前台工作区"当答案：切项目与切会话是两个异步动作，取样的那
+   * 一刻两者可能还没对齐，于是 A 的会话会被记到 B 头上。会话索引里写死的
+   * 归属才是准的；查不到（刚建、索引还没回填）才退回前台工作区——那种情况
+   * 下 id 是新造的，不可能属于别的项目。
+   */
+  function pathOfSession(sessionId: string): string | undefined {
+    const catalog = project.sessions.catalog.getState();
+    for (const [path, entries] of Object.entries(catalog.sessionsByPath ?? {}))
+      if (entries.some((entry) => entry.id === sessionId)) return path;
+    return project.projects.workspace.getState().activePath ?? undefined;
+  }
+
+  /**
+   * 这个项目里**最后活动**的那条会话。
+   *
+   * 只给没有记录的存量项目兜底（这个功能上线之前建的项目）：工具目录只服务
+   * 一个工具，里面的会话都是它的开发会话，取最新的一条通常就是用户最后待着
+   * 的地方。列表没加载过时什么也不做——不能为了猜一条去连一次 Agent。
+   */
+  function latestSessionOf(dir: string): string | undefined {
+    const catalog = project.sessions.catalog.getState();
+    const entries = Object.entries(catalog.sessionsByPath ?? {}).find(
+      ([path]) => pathKey(path) === pathKey(dir),
+    )?.[1];
+    let latest: { id: string; at: number } | undefined;
+    for (const entry of entries ?? []) {
+      const time = entry.updatedAt ? Date.parse(entry.updatedAt) : NaN;
+      const at = Number.isNaN(time) ? 0 : time;
+      if (!latest || at > latest.at) latest = { id: entry.id, at };
+    }
+    return latest?.id;
+  }
+
+  /**
+   * 打开一条记录在案的会话；它已经不在了就返回 false。
+   *
+   * 判据只能是"打开之后前台真的停在了它上面"：`openSessionFromEntry` 在会话
+   * 不存在时是**静默回滚**的（乐观地先切视图，失败再退回原处），不抛错——只看
+   * 有没有抛错会把"没打开"当成"打开了"，于是永远停在一段打不开的历史上。
+   *
+   * 光比 id 还不够：上一个项目留下的 id 可能正好就是记录里的那个（前台会话
+   * store 是全局的，切项目不会立刻清空）。所以还要确认前台工作区确实换成了
+   * 这个目录；只有"本来就在这儿、本来就在这条会话上"才免检直接算数。
+   */
+  async function reopenSession(
+    dir: string,
+    sessionId: string,
+  ): Promise<boolean> {
+    const before = session.getState().activeSessionId;
+    const beforePath = project.projects.workspace.getState().activePath;
+    if (
+      before === sessionId &&
+      beforePath &&
+      pathKey(beforePath) === pathKey(dir)
+    )
+      return true;
+    try {
+      await project.sessions.openSessionFromEntry(dir, sessionId);
+    } catch {
+      return false;
+    }
+    const active = project.projects.workspace.getState().activePath;
+    return (
+      session.getState().activeSessionId === sessionId &&
+      !!active &&
+      pathKey(active) === pathKey(dir)
+    );
+  }
 
   /** 当前项目是不是前台会话所在的工作区——不是就别拿别的会话的停止事件来校验。 */
   function isForeground(dir: string): boolean {
@@ -510,7 +661,15 @@ export function createWorkshop(deps: {
     // 切会话（activeSessionId 变了）不是"AI 停了"：以前会把新会话的空闲状态
     // 当成上一轮结束，去给工坊当前项目做一次莫名其妙的自动校验/回灌。
     const switched = state.activeSessionId !== activeSessionId;
-    if (switched) activeSessionId = state.activeSessionId;
+    if (switched) {
+      activeSessionId = state.activeSessionId;
+      // 用户自己新开 / 切到另一条会话，同样是"这个工具最后待过的地方"：
+      // 只认开局与"继续开发"两处，会漏掉最要紧的那种情况——上下文太长，
+      // 用户自己开了新会话，第二天回来点「继续开发」却回到很久以前那条。
+      const id = state.activeSessionId;
+      const owner = id ? pathOfSession(id) : undefined;
+      if (id && owner && isToolProject(owner)) rememberSession(owner, id);
+    }
     const stopped = running && !state.isAgentRunning && !switched;
     running = state.isAgentRunning;
     // 「正在写」只算正在写**这个项目**：别的项目在跑时这里不该转圈。
@@ -1020,6 +1179,11 @@ export function createWorkshop(deps: {
           void refreshProjects();
           return;
         }
+        // 这条会话就是「这个工具最后用的那条」：下次从这里「继续开发」回到它。
+        rememberSession(
+          created.dir,
+          project.conversation.foreground.session.getState().activeSessionId,
+        );
         const agentKey = project.sessions.catalog.getState().agentKey ?? "";
         if (agentKey) {
           project.conversation.send(
@@ -1032,7 +1196,12 @@ export function createWorkshop(deps: {
             },
             briefMessage(brief, created),
           );
+          // 需求交出去了，输入框就该空着：以前这段文字会一直留在框里，用户
+          // 回到「开发工具」看到自己上次写的需求还在，分不清是"还没提交"
+          // 还是"已经做完了"。只有真的发出去了才清——发不出去（没连上 Agent /
+          // 报错）时留着原文，用户还得拿它去会话里再发一次。
           patch({
+            brief: "",
             note: { text: `${renamed}会话已开始，AI 写完后会自动校验。` },
           });
         } else {
@@ -1105,6 +1274,13 @@ export function createWorkshop(deps: {
         const result = await renameToolProject(io, { dir, ...input });
         // 改名会换目录：把它当成"刚动过"，排序里留在前面。
         touchedAt.set(pathKey(result.dir), Date.now());
+        // 会话记录挂在目录上，目录换了就得跟着搬，否则改名后「继续开发」
+        // 又从新的一条空会话开始（历史还在，只是记录找不到了）。
+        const carried = lastSessions.get(pathKey(dir));
+        if (carried && pathKey(result.dir) !== pathKey(dir)) {
+          forgetSession(dir);
+          rememberSession(result.dir, carried);
+        }
         if (current?.dir === dir)
           patch({
             project: { dir: result.dir, id: result.id, name: result.name },
@@ -1154,14 +1330,32 @@ export function createWorkshop(deps: {
         // 那会连本次读盘的失败原因一起擦掉，用户只看到"没反应"。
         await select(dir);
         project.projects.registerProject(dir);
+        // 回到这个项目上次待着的那条会话，而不是每次都新开一条。
+        //
+        // 一个工具往往要开发很多轮，中途用户还会自己新开会话换上下文。以前这里
+        // 无条件 `startNewSession`：每点一次「继续开发」就多一条空对话，AI 也
+        // 不记得前面做过什么——用户得自己去侧栏翻，还可能翻到错的那条。
+        //
+        // 两处来源，先准后猜：记录（开工 / 上次继续 / 用户自己切会话时写下）
+        // 优先；存量项目没有记录时退到"这个目录里最后活动的那条"。两者都要
+        // 过得去才用——打不开就老老实实新开一条，绝不能停在打不开的历史上。
+        const remembered =
+          lastSessions.get(pathKey(dir)) ?? latestSessionOf(dir);
+        if (remembered && (await reopenSession(dir, remembered))) return;
         const started = await project.sessions.startNewSession(dir);
-        if (!started.ok)
+        if (!started.ok) {
           patch({
             note: {
               text: `会话没连上（${started.reason}），可稍后重试。`,
               error: true,
             },
           });
+          return;
+        }
+        rememberSession(
+          dir,
+          project.conversation.foreground.session.getState().activeSessionId,
+        );
       } catch (error) {
         patch({ note: { text: errorText(error), error: true } });
       } finally {
@@ -1326,6 +1520,9 @@ export function createWorkshop(deps: {
           // 顺手 `await` 它——卸载提示弹出来的时候列表已经是新的，用户不用再点
           // 一下别处才看到它消失。
           await refreshProjects();
+          // 目录都删了，指向它们的会话记录也该走：留着只会在下次把这个 id
+          // 当成"上次用的会话"去开一条已经不存在的历史。
+          for (const dir of dirs) forgetSession(dir);
           const parts: string[] = [];
           if (report.removedDirs.length)
             parts.push(

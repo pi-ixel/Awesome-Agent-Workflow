@@ -167,6 +167,8 @@
   ],
   "plugins/tools/ui/ToolBuilder.tsx": [
     "NewToolForm · <button>",
+    "NewToolForm · <button>",
+    "NewToolForm · <button>",
     "NewToolForm · <textarea>",
     "ProjectDetail · <button>",
     "ProjectDetail · <button>",
@@ -208,8 +210,6 @@
     "ToolPreviewTab · <button>"
   ],
   "plugins/tools/ui/ToolProjects.tsx": [
-    "ToolProjectList · <button>",
-    "ToolProjectList · <button>",
     "ToolProjectList · <button>",
     "ToolProjectList · <button>",
     "ToolProjectList · <button>",

@@ -20,11 +20,16 @@ export const inject = [
 ];
 
 /**
- * 工坊级设置（独立记录，整条独占）：目前只有自定义项目根目录。
- * projectsParent 是用户选的绝对路径；不存在/为空表示用默认位置。
+ * 工坊级设置（独立记录，整条独占）：自定义项目根目录 + 每个工具项目
+ * 「最后用的那条会话」。
+ *
+ * - `projectsParent`：用户选的绝对路径；不存在/为空表示用默认位置。
+ * - `projectSessions`：`{ [项目目录]: sessionId }`。会话 id 只在"这个工具
+ *   停在哪儿"这件事上有意义，和根目录一起放，换账号/换机器都跟着这份配置走。
  */
 const workshopSettingsKey = "aaw-desktop.tools-workshop.v1";
 const projectsParentField = "projectsParent";
+const projectSessionsField = "projectSessions";
 
 /** 预览标签的 kind：`tool-preview:<目录>`，同一个项目只开一个标签。 */
 const previewKind = "tool-preview";
@@ -56,6 +61,33 @@ export function apply(ctx: Context): void {
       } catch {
         /* 写不进去只是本次不记住，不影响本次会话内的行为 */
       }
+    },
+    /**
+     * 「每个工具项目最后用的那条会话」。读的时候整份校验一遍：这份记录是
+     * 长期躺在配置里的，坏掉一个值不该让「继续开发」在每次点击时抛错。
+     */
+    sessions: {
+      read: () => {
+        try {
+          const value = settingsScope.read()?.[projectSessionsField];
+          if (!value || typeof value !== "object" || Array.isArray(value))
+            return undefined;
+          const entries = Object.entries(value).filter(
+            (entry): entry is [string, string] =>
+              typeof entry[0] === "string" && typeof entry[1] === "string",
+          );
+          return entries.length ? Object.fromEntries(entries) : undefined;
+        } catch {
+          return undefined;
+        }
+      },
+      write: (value: Readonly<Record<string, string>>) => {
+        try {
+          settingsScope.update({ [projectSessionsField]: value });
+        } catch {
+          /* 同上：记不住只是下次退回"按最后活动时间猜" */
+        }
+      },
     },
   };
 

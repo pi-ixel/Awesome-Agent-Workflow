@@ -157,6 +157,27 @@ function harness(
   const workspace = createStore<{ activePath: string | null }>(() => ({
     activePath: dir,
   }));
+  /**
+   * 会话索引：工坊靠它判断"这条会话属于哪个项目"（手动切会话时记归属）。
+   * 默认是空的——和"启动了但还没连过这个项目"一样。
+   */
+  const catalog = createStore<{
+    agentKey: string;
+    sessionsByPath: Record<
+      string,
+      readonly { id: string; updatedAt?: string | null }[]
+    >;
+  }>(() => ({ agentKey: "agent", sessionsByPath: {} }));
+  /**
+   * 打开历史会话：真实实现会切视图、连 Agent、把前台会话换成它。
+   * 这里只做"成功"的那一半（两份状态一起改）——失败是默认什么都不做，
+   * 正好用来模拟"这条会话已经不在了"。
+   */
+  const openSessionFromEntry = vi.fn((path: string, id: string) => {
+    workspace.setState({ activePath: path });
+    session.setState({ activeSessionId: id });
+    return Promise.resolve();
+  });
   const project = {
     projects: {
       workspace,
@@ -165,8 +186,9 @@ function harness(
       pickDirectory,
     },
     sessions: {
-      catalog: createStore(() => ({ agentKey: "agent" })),
+      catalog,
       startNewSession,
+      openSessionFromEntry,
     },
     conversation: { send, foreground: { session } },
   } as unknown as ProjectService;
@@ -189,6 +211,8 @@ function harness(
     setSourceDir,
     project,
     startNewSession,
+    openSessionFromEntry,
+    catalog,
     pickDirectory,
     tools: service,
     fakeTools: tools,
@@ -644,6 +668,135 @@ it("resumes once even if the button is double-clicked", async () => {
   startNewSession.mockResolvedValue({ ok: true });
   await Promise.all([workshop.resume(dir), workshop.resume(dir)]);
   expect(startNewSession).toHaveBeenCalledOnce();
+});
+
+/* ───────────────────────────────────── 需求框与会话记录（2026-11-23 用户反馈）*/
+
+/**
+ * 需求交出去之后，输入框要空着。
+ *
+ * 以前这段文字会一直留在框里：用户回到「开发工具」看到自己上次写的需求还在，
+ * 分不清是"还没提交"还是"已经做完了"。
+ */
+it("empties the brief once the request has been handed to the AI", async () => {
+  const { workshop, startNewSession, send } = harness();
+  startNewSession.mockResolvedValue({ ok: true });
+  workshop.setBrief("把接口返回的 JSON 转成表格");
+  await workshop.create();
+  expect(send).toHaveBeenCalledOnce();
+  expect(workshop.state.getState().brief).toBe("");
+});
+
+/** 没连上 Agent 时一个字都不能丢：用户还得拿这段原文去会话里再发一次。 */
+it("keeps the brief when the request never reached the AI", async () => {
+  const { workshop, startNewSession, send, catalog } = harness();
+  catalog.setState({ agentKey: "" });
+  startNewSession.mockResolvedValue({ ok: true });
+  workshop.setBrief("把接口返回的 JSON 转成表格");
+  await workshop.create();
+  expect(send).not.toHaveBeenCalled();
+  expect(workshop.state.getState().brief).toBe("把接口返回的 JSON 转成表格");
+});
+
+/**
+ * 「继续开发」回到这个工具最后待着的那条会话，而不是又开一条空对话。
+ *
+ * 用户的做法很常见：一个工具开发很多轮，上下文长了就自己新开一条会话。第二天
+ * 回来点「继续开发」，以前拿到的是第三条空会话——AI 不记得前面做过什么，用户
+ * 还得自己去侧栏翻，翻错了就进了另一段对话。
+ */
+it("resumes the session this tool was last on, including one the user opened by hand", async () => {
+  const {
+    workshop,
+    io,
+    dir,
+    startNewSession,
+    openSessionFromEntry,
+    session,
+    workspace,
+  } = harness();
+  await io.writeTextFile(
+    `${dir}/manifest.json`,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "demo",
+      name: "演示",
+      version: "1.0.0",
+      html: "",
+    }),
+  );
+  startNewSession.mockResolvedValue({ ok: true });
+  // 第一次：没有记录 → 新开一条，并把它记下来。
+  await workshop.resume(dir);
+  expect(startNewSession).toHaveBeenCalledOnce();
+
+  // 用户自己又开了一条会话换上下文（侧栏 ＋）。这也要算"最后待的地方"。
+  session.setState({ activeSessionId: "s2" });
+  // 然后他去别的项目干了一阵子，再回来点「继续开发」。
+  workspace.setState({ activePath: "/data/other-project" });
+
+  await workshop.resume(dir);
+  expect(openSessionFromEntry).toHaveBeenCalledWith(dir, "s2");
+  expect(startNewSession).toHaveBeenCalledOnce();
+});
+
+/** 记录里的会话已经没了（被删 / 换了 Agent）：老实新开一条，不能停在打不开的历史上。 */
+it("opens a new session when the remembered one no longer exists", async () => {
+  const { workshop, io, dir, startNewSession, openSessionFromEntry, session } =
+    harness();
+  await io.writeTextFile(
+    `${dir}/manifest.json`,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "demo",
+      name: "演示",
+      version: "1.0.0",
+      html: "",
+    }),
+  );
+  startNewSession.mockResolvedValue({ ok: true });
+  await workshop.resume(dir);
+  expect(startNewSession).toHaveBeenCalledOnce();
+
+  // 模拟"重启之后再点"：前台还没有任何会话，记录里的那条也已经不在盘上了。
+  session.setState({ activeSessionId: "" });
+  openSessionFromEntry.mockResolvedValueOnce(undefined);
+
+  await workshop.resume(dir);
+  expect(openSessionFromEntry).toHaveBeenCalledWith(dir, "s1");
+  expect(startNewSession).toHaveBeenCalledTimes(2);
+});
+
+/**
+ * 存量项目没有记录时，用"这个目录里最后活动的那条会话"兜底。
+ *
+ * 工具目录只服务一个工具，里面的会话都是它的开发会话——取最新一条通常就是
+ * 用户最后待着的地方。宁可猜一次，也不要张口就新开一条空对话。
+ */
+it("falls back to the project's most recently active session when there is no record", async () => {
+  const { workshop, io, dir, startNewSession, openSessionFromEntry, catalog } =
+    harness();
+  await io.writeTextFile(
+    `${dir}/manifest.json`,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "demo",
+      name: "演示",
+      version: "1.0.0",
+      html: "",
+    }),
+  );
+  catalog.setState({
+    sessionsByPath: {
+      [dir]: [
+        { id: "old", updatedAt: "2026-11-01T10:00:00.000Z" },
+        { id: "newer", updatedAt: "2026-11-20T10:00:00.000Z" },
+      ],
+    },
+  });
+  await workshop.resume(dir);
+  expect(openSessionFromEntry).toHaveBeenCalledWith(dir, "newer");
+  expect(startNewSession).not.toHaveBeenCalled();
 });
 
 /** 自定义根目录下的项目也是这个工具的源码：删除工具时必须一并交给宿主清理。 */

@@ -388,6 +388,60 @@ it("does not cap the brief to a single sentence, and drops the manual guide-sync
   expect(container.querySelector(".build-guide")).toBeNull();
 });
 
+/**
+ * 一个项目都没有的时候也要能改目录。
+ *
+ * 「更改目录」以前只长在项目列表的头部，而那条头部在没有项目时压根不渲染：
+ * 新用户看着一个写着路径的「目录」，却没有任何地方能改它——偏偏这是最想改的
+ * 时刻（第一次做工具，未必愿意放进 AppData）。
+ */
+it("lets you change the project root even before any project exists", () => {
+  const state = createStore<readonly PersonalTool[]>(() => []);
+  const service = {
+    state,
+    install: vi.fn(),
+    rollback: vi.fn(),
+    setRunDir: vi.fn(),
+    setSourceDir: vi.fn(),
+    open: vi.fn(),
+    remove: vi.fn(),
+    saveSettings: vi.fn(),
+  } satisfies ToolsService;
+  const host = { isNative: () => true } as unknown as HostService;
+  const chooseProjectsRoot = vi.fn(() => Promise.resolve());
+  const resetProjectsRoot = vi.fn();
+  const panel = render(
+    <ToolsPanel
+      service={service}
+      host={host}
+      workshop={{ ...fakeWorkshop(), chooseProjectsRoot, resetProjectsRoot }}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /开发工具/ }));
+  // 空状态照旧：这一屏确实一个项目都没有。
+  expect(screen.getByText("还没有工具项目")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "更改目录" }));
+  expect(chooseProjectsRoot).toHaveBeenCalledOnce();
+  // 恢复默认只在设置过自定义目录时才有意义——放一个点了没用的按钮等于骗人。
+  expect(screen.queryByRole("button", { name: "恢复默认" })).toBeNull();
+
+  panel.rerender(
+    <ToolsPanel
+      service={service}
+      host={host}
+      workshop={{
+        ...fakeWorkshop({ customRoot: "E:/my-tools" }),
+        chooseProjectsRoot,
+        resetProjectsRoot,
+      }}
+    />,
+  );
+  // 页签没变：面板常驻，重新渲染后仍在「开发工具」。
+  expect(screen.getByText("E:/my-tools")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "恢复默认" }));
+  expect(resetProjectsRoot).toHaveBeenCalledOnce();
+});
+
 /** 空状态是一个主 CTA + 两个统一尺寸的备选，不再是三种大小的按钮并排。 */
 it("gives the empty library one primary CTA and two equally-sized alternatives", () => {
   const state = createStore<readonly PersonalTool[]>(() => []);
@@ -810,11 +864,12 @@ it("卸载完成后卡片立刻消失，不等下一次交互", async () => {
     setRunDir: vi.fn(),
     setSourceDir: vi.fn(),
     open: vi.fn(),
-    remove: vi.fn(async (id: string) => {
+    remove: vi.fn((id: string) => {
       store.setState(
         store.getState().filter((entry) => entry.package.id !== id),
         true,
       );
+      return Promise.resolve();
     }),
     saveSettings: vi.fn(),
   } satisfies ToolsService;

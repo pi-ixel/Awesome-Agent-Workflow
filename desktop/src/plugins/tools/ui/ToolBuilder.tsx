@@ -45,9 +45,11 @@ export function ViolationList({
  * 工具"，不是"再做一个"。需求可以写得很细（功能、界面、边界），所以这里
  * 不再用"一句话"暗示只能随手写一句。
  *
- * 目录只有一处：列表头部的「根目录」。以前这里还有一个「选择目录」，
- * 于是"选目录"和"改根目录"成了两个概念，而列表只扫根目录——建在别处的
- * 项目做完就从列表里消失了。同一个概念只留一个入口。
+ * 目录的开关就在这一行上（「更改目录」/「恢复默认」）。它以前只长在项目列表
+ * 的头部：那条头部在没有项目时根本不渲染，于是「开发工具 · 0」的新用户看着
+ * 一个写了路径的「目录」，没有任何地方能改它——而这恰恰是最该改的时刻
+ * （第一次建工具，可能不想放进 AppData）。现在新建表单是唯一入口：它在这个
+ * 页签里始终存在，列表头部只保留"当前根目录是什么"这一条信息。
  */
 export function NewToolForm({
   workshop,
@@ -86,11 +88,31 @@ export function NewToolForm({
           disabled={!available || busy}
         />
         <div className="build-new-row">
-          {/* 目录只展示不打开：它是「源码会落在哪」的答案，完整路径可复制。 */}
+          {/* 路径本身只展示不打开：它是「源码会落在哪」的答案，完整值可复制。 */}
           <span className="build-target">
             <span className="build-target-label">目录</span>
             {root ? <ToolPath path={root} compact /> : <code>默认位置</code>}
           </span>
+          {available && (
+            <button
+              type="button"
+              className={btnGhost}
+              disabled={busy}
+              onClick={() => void workshop.chooseProjectsRoot()}
+            >
+              更改目录
+            </button>
+          )}
+          {available && customRoot && (
+            <button
+              type="button"
+              className={btnGhost}
+              disabled={busy}
+              onClick={() => workshop.resetProjectsRoot()}
+            >
+              恢复默认
+            </button>
+          )}
           <button
             type="submit"
             className={btnPrimary}

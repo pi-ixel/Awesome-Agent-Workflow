@@ -764,7 +764,6 @@ export function ToolsPanel({
             <ToolProjectList
               workshop={workshop}
               installed={tools}
-              available={host.isNative()}
               onPreview={(dir) => void previewProject(dir)}
             />
           </>

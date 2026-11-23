@@ -28,14 +28,11 @@ import type { WorkshopService } from "./workshop.ts";
 export function ToolProjectList({
   workshop,
   installed,
-  available,
   onPreview,
 }: {
   workshop: WorkshopService;
   /** 已安装列表：用来标出"这个项目装了没有 / 装的是哪一版"。 */
   installed: readonly PersonalTool[];
-  /** 桌面版才有目录选择器：没有时隐藏更改/恢复按钮，只展示当前位置。 */
-  available: boolean;
   onPreview: (dir: string) => void;
 }) {
   const snapshot = useStore(workshop.state);
@@ -121,7 +118,9 @@ export function ToolProjectList({
     <>
       <div className="build-projects-head">
         <span>{rows.length} 个项目</span>
-        {/* 根目录是项目落在哪的唯一开关：新建与列表用的是同一个值。 */}
+        {/* 根目录是项目落在哪的唯一取值：这里只回答"它是什么"。
+            改它的按钮在上面的新建表单里——那条头部在没有项目时压根不渲染，
+            而"一个项目都没有"正是最想换目录的时候。 */}
         {root ? (
           <ToolPath
             path={root}
@@ -130,26 +129,6 @@ export function ToolProjectList({
           />
         ) : (
           <span>根目录：AAW 数据目录 / tools / projects</span>
-        )}
-        {available && (
-          <span className="build-root-actions">
-            <button
-              type="button"
-              className={btnGhost}
-              onClick={() => void workshop.chooseProjectsRoot()}
-            >
-              {customRoot ? "更改目录" : "自定义目录"}
-            </button>
-            {customRoot && (
-              <button
-                type="button"
-                className={btnGhost}
-                onClick={() => workshop.resetProjectsRoot()}
-              >
-                恢复默认
-              </button>
-            )}
-          </span>
         )}
       </div>
       <ul aria-label="工具项目" className="build-projects">

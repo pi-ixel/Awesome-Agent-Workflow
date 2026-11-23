@@ -1170,23 +1170,12 @@
   color: var(--color-ink-subtle);
 }
 /* 窄栏（360px）下这里曾经被折成「1 个项 / 目」「自定义目 / 录」：
-   第一行固定放计数与按钮，根目录单独占第二行——比把按钮甩到下一行更像
-   "一组信息"而不是一段被挤坏的文本。 */
+   计数固定第一行，根目录单独占第二行——比把路径甩到下一行更像"一组信息"
+   而不是一段被挤坏的文本。改根目录的按钮不在这里，它在上面那张新建表单里。 */
 .aaw-tools .build-projects-head > span:first-child {
   flex: none;
   white-space: nowrap;
   order: 1;
-}
-.aaw-tools .build-root-actions {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 4px;
-  order: 2;
-  margin-left: auto;
-}
-.aaw-tools .build-root-actions button {
-  white-space: nowrap;
 }
 .aaw-tools .build-projects-head .tool-path {
   order: 3;
