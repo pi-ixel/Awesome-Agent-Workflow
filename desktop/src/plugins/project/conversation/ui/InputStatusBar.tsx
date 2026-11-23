@@ -346,7 +346,6 @@ export function ModelTag(): React.JSX.Element {
       entries={availableModels.map((model) => ({
         id: model.modelId,
         label: model.name,
-        description: model.description || undefined,
         radio: true,
         selected: model.modelId === effectiveCurrentId,
         onSelect: () => { switchModel(model.modelId); },
