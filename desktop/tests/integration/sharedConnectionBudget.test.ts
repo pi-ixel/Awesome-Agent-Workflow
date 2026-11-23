@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DesktopAcpConnection } from "../../src/plugins/acpConnection/lifecycle/connectionService.ts";
 import { RuntimeConnections } from "../../src/plugins/acpRuntime/sessions/connections.ts";
+import type { McpManagementHost } from "../../src/contracts/mcp/management.ts";
 import type { AgentAdapter } from "../../src/plugins/agents/types.ts";
 import type { HostService } from "../../src/plugins/host/service.ts";
 import { Logger } from "../../src/shared/logging/logger.ts";
@@ -59,6 +60,53 @@ afterEach(async () => {
 });
 
 describe("Desktop 共享 ACP 总额度", () => {
+  it("原生配置更新后草稿借用新进程，已建立会话继续使用原进程", async () => {
+    const { runtime, peers } = fixture();
+    let revision = 0;
+    const agent = {
+      ...adapter("a"),
+      mcpManagement: {
+        native: {
+          defaultProfile: "用户配置",
+          editableTransports: ["http" as const],
+          nativeHost: (host: McpManagementHost) => host.native("a"),
+          processConfig: {
+            revision: () => revision,
+            changed: () => {
+              revision += 1;
+            },
+          },
+        },
+      },
+    } satisfies AgentAdapter;
+    await runtime.prepare(agent, "a", {});
+    const active = runtime.open("a");
+    const draft = runtime.open("a");
+    await active.initialize();
+    await draft.initialize();
+    await active.newSession("/project");
+    const original = peers.find(({ peer }) =>
+      peer.received.some(({ method }) => method === "session/new"),
+    )!.peer;
+    await expect(draft.refreshForNewSession?.()).resolves.toBe(false);
+    revision += 1;
+    await expect(draft.refreshForNewSession?.()).resolves.toBe(true);
+    await draft.newSession("/project");
+    expect(peers).toHaveLength(5);
+    expect(original.client.isClosed).toBe(false);
+    expect(
+      peers
+        .at(-1)
+        ?.peer.received.some(({ method }) => method === "session/new"),
+    ).toBe(true);
+    await active.prompt("继续原会话");
+    expect(
+      original.received.some(({ method }) => method === "session/prompt"),
+    ).toBe(true);
+    await runtime.release(draft);
+    await runtime.release(active);
+  });
+
   it("其他配置慢启动时，健康配置仍可准备及分配后台会话", async () => {
     const { runtime, agents } = fixture();
     await runtime.prepare(adapter("a"), "a", {});

@@ -1,3 +1,5 @@
+mod codeagent;
+mod stdio_probe;
 pub(crate) mod inspection;
 mod managed;
 mod native;
@@ -15,7 +17,7 @@ use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
 };
-use tauri::{AppHandle, Webview};
+use tauri::{AppHandle, Manager, Webview};
 
 type Result<T> = std::result::Result<T, String>;
 const MAX_CONFIG_BYTES: u64 = 4 * 1024 * 1024;
@@ -106,6 +108,10 @@ fn lock(parent: &Path, name: &str) -> Result<File> {
 }
 
 fn write(path: &Path, before: Option<&[u8]>, bytes: &[u8]) -> Result<()> {
+    write_with_backup(path, before, bytes, None)
+}
+
+fn write_with_backup(path: &Path, before: Option<&[u8]>, bytes: &[u8], backup: Option<&Path>) -> Result<()> {
     if bytes.len() as u64 > MAX_CONFIG_BYTES {
         return Err("MCP 配置超过大小上限".into());
     }
@@ -120,6 +126,35 @@ fn write(path: &Path, before: Option<&[u8]>, bytes: &[u8]) -> Result<()> {
     tmp.as_file().sync_all().map_err(io_error)?;
     if read(path)?.as_deref() != before {
         return Err(CHANGED.into());
+    }
+    if let (Some(backup), Some(before)) = (backup, before) {
+        // 拒绝读取链接和特殊文件，备份只保留上一次成功写入前的内容。
+        let old_backup = read(backup)?;
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            use windows_sys::Win32::Storage::FileSystem::ReplaceFileW;
+            let _ = (before, old_backup);
+            let wide = |p: &Path| p.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
+            let target = wide(path);
+            let backup_name = wide(backup);
+            let tmp = tmp.into_temp_path();
+            let replacement = wide(&tmp);
+            let success = unsafe { ReplaceFileW(target.as_ptr(), replacement.as_ptr(), backup_name.as_ptr(), 0, std::ptr::null_mut(), std::ptr::null_mut()) };
+            if success == 0 {
+                let error = io::Error::last_os_error();
+                if matches!(error.raw_os_error(), Some(1177)) && !path.exists() {
+                    fs::rename(backup, path).map_err(io_error)?;
+                }
+                return Err(io_error(error));
+            }
+            return Ok(());
+        }
+        #[cfg(not(windows))]
+        {
+            write(backup, old_backup.as_deref(), before)?;
+            if read(path)?.as_deref() != Some(before) { return Err(CHANGED.into()); }
+        }
     }
     if before.is_none() {
         tmp.persist_noclobber(path).map_err(|error| {
@@ -196,12 +231,14 @@ fn display_url(value: &str) -> Option<String> {
 #[serde(rename_all = "lowercase")]
 pub enum NativeProvider {
     Chrys,
+    Codeagent,
 }
 
 impl NativeProvider {
     fn directory(self, directory: &str) -> Result<PathBuf> {
         let provider = match self {
             Self::Chrys => "chrys",
+            Self::Codeagent => return Err("此配置操作仅支持 iCode Profile".into()),
         };
         crate::commands::user_data_dir(provider.into(), directory.into()).map(PathBuf::from)
     }
@@ -227,26 +264,39 @@ pub enum TestTarget {
 
 #[tauri::command]
 pub async fn mcp_native_read(
+    app: AppHandle,
     webview: Webview,
     provider: NativeProvider,
     profile: native::Profile,
+    workspace: Option<String>,
 ) -> Result<Option<native::Snapshot>> {
     main_only(&webview)?;
+    if matches!(provider, NativeProvider::Codeagent) {
+        let home = codeagent_home(&app)?;
+        return blocking(move || codeagent::read_local(&home, workspace.as_deref()).map(|local| Some(local.snapshot))).await;
+    }
     blocking(move || native::read_snapshot(&provider.directory("agents")?, &profile)).await
 }
 
 #[tauri::command]
 pub async fn mcp_native_read_local(
+    app: AppHandle,
     webview: Webview,
     provider: NativeProvider,
     selector: String,
+    workspace: Option<String>,
 ) -> Result<Option<native::LocalProfile>> {
     main_only(&webview)?;
+    if matches!(provider, NativeProvider::Codeagent) {
+        let home = codeagent_home(&app)?;
+        return blocking(move || codeagent::read_local(&home, workspace.as_deref()).map(Some)).await;
+    }
     blocking(move || native::read_local(&provider.directory("agents")?, &selector)).await
 }
 
 #[tauri::command]
 pub async fn mcp_native_change(
+    app: AppHandle,
     webview: Webview,
     provider: NativeProvider,
     profile: native::Profile,
@@ -254,8 +304,16 @@ pub async fn mcp_native_change(
     change: Change<native::Draft>,
 ) -> Result<String> {
     main_only(&webview)?;
+    if matches!(provider, NativeProvider::Codeagent) {
+        let home = codeagent_home(&app)?;
+        return blocking(move || codeagent::change(&home, profile, &revision, change)).await;
+    }
     blocking(move || native::change(&provider.directory("agents")?, profile, &revision, change))
         .await
+}
+
+fn codeagent_home(app: &AppHandle) -> Result<PathBuf> {
+    app.path().home_dir().map_err(|_| "无法定位 CodeAgent 用户目录".into())
 }
 
 #[tauri::command]
@@ -350,6 +408,31 @@ pub fn mcp_managed_retire(
     main_only(&webview)?;
     proxy.retire(Some(&generation));
     Ok(())
+}
+
+#[tauri::command]
+pub async fn mcp_native_inspect(
+    app: AppHandle,
+    webview: Webview,
+    provider: NativeProvider,
+    workspace: Option<String>,
+    program: String,
+    entry_id: Option<String>,
+    entry_revision: Option<String>,
+    revision: String,
+    target: native::Draft,
+) -> Result<inspection::Inspection> {
+    main_only(&webview)?;
+    if !matches!(provider, NativeProvider::Codeagent) { return Err("此 Agent 暂未提供 Desktop 连接检测".into()); }
+    let home = codeagent_home(&app)?;
+    let started = std::time::Instant::now();
+    let result = match blocking(move || codeagent::probe_config(&home, workspace.as_deref(), &program, entry_id.as_deref(), entry_revision.as_deref(), &revision, target)).await {
+        Ok(codeagent::ProbeConfig::Http(config)) => tokio::time::timeout(std::time::Duration::from_secs(20), proxy::inspect(config)).await
+            .map_err(|_| "MCP 检测超时".into()).and_then(|result| result.map_err(|_| "Streamable HTTP MCP 握手或工具列表读取失败".into())),
+        Ok(codeagent::ProbeConfig::Stdio(config)) => stdio_probe::inspect(config).await,
+        Err(error) => return Err(error),
+    };
+    Ok(inspection_result(started, result))
 }
 
 #[tauri::command]

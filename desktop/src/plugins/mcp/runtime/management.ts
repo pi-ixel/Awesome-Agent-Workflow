@@ -92,10 +92,16 @@ export function createMcpManagement(
     return native;
   }
 
-  async function nativeRead(agentId: string, profile: McpProfile) {
+  async function nativeRead(
+    agentId: string,
+    profile: McpProfile,
+    workspace?: string,
+  ) {
     const provider = nativeAdapter(agentId);
     const native = provider.nativeHost(host);
-    const disk = await native.read(profile);
+    const disk = await (provider.scoped
+      ? native.read(profile, workspace)
+      : native.read(profile));
     if (disk) return disk;
     throw new Error("此 Profile 文件已移除，请重新加载");
   }
@@ -104,17 +110,21 @@ export function createMcpManagement(
     agentId: string,
     selector: string | null,
     fresh = false,
+    workspace?: string,
   ) {
     const provider = nativeAdapter(agentId);
     const name = selector ?? provider.defaultProfile;
-    const key = JSON.stringify([agentId, name]);
+    const scope = provider.scoped ? workspace : undefined;
+    const key = JSON.stringify([agentId, name, scope]);
     const existing = nativeReads.get(key);
     if (!fresh && existing && existing.expiresAt > performance.now())
       return existing.task;
 
     const entry = {
       expiresAt: Infinity,
-      task: provider.nativeHost(host).readLocal(name),
+      task: provider.scoped
+        ? provider.nativeHost(host).readLocal(name, scope)
+        : provider.nativeHost(host).readLocal(name),
     };
     nativeReads.delete(key);
     nativeReads.set(key, entry);
@@ -134,7 +144,8 @@ export function createMcpManagement(
   }
 
   async function nativeNames(agentId: string, selector: string | null) {
-    if (!agents.resolve(agentId)?.mcpManagement?.native) return [];
+    const provider = agents.resolve(agentId)?.mcpManagement?.native;
+    if (!provider || provider.scoped) return [];
     const current = await readNative(agentId, selector, true).catch(() => null);
     return current?.snapshot.entries.map(({ name }) => name) ?? [];
   }
@@ -183,7 +194,12 @@ export function createMcpManagement(
       try {
         if (provider.nativeNames) {
           excluded = await withDeadline(
-            provider.nativeNames({ host, client, sessionId }),
+            provider.nativeNames({
+              host,
+              client,
+              sessionId,
+              workspacePath: context.cwd ?? workspacePath,
+            }),
             3_000,
             "核对原生 MCP 超时",
           );
@@ -278,14 +294,16 @@ export function createMcpManagement(
     ) {
       return mutate(async () => {
         const name = newName(change);
-        if (name !== undefined) {
+        if (name !== undefined && !nativeAdapter(agentId).scoped) {
           const managed = await host.managedRead(agentId).catch(() => null);
           if (managed?.entries.some((entry) => entry.name === name))
             throw new Error(duplicateNameMessage);
         }
-        const receipt = await nativeAdapter(agentId)
+        const provider = nativeAdapter(agentId);
+        const receipt = await provider
           .nativeHost(host)
           .change(profile, revision, change);
+        if (receipt !== revision) provider.processConfig?.changed();
         nativeReads.clear();
         return receipt;
       });
@@ -325,6 +343,23 @@ export function createMcpManagement(
     async test(agentId: string, target: McpTestTarget) {
       if (target.source === "managed" && host.inspection)
         return host.inspection.probe(target.draft);
+      if (target.source === "native") {
+        const selected = agents.resolve(agentId);
+        const native = selected?.mcpManagement?.native;
+        const nativeHost = native?.hostInspection
+          ? native.nativeHost(host)
+          : undefined;
+        if (nativeHost?.inspect && selected) {
+          const launch = agents.buildLaunch(
+            selected,
+            toolPaths(),
+            target.workspace ?? null,
+          );
+          const program = launch.command[0];
+          if (!program) throw new Error("缺少 Agent 启动程序路径");
+          return nativeHost.inspect(target, program);
+        }
+      }
       const started = performance.now();
       const testHttp = adapter(agentId).testHttp;
       if (!testHttp) throw new Error("此 Agent 暂未提供 MCP 连接测试");
