@@ -116,7 +116,7 @@ export function renderProjectTree(
     {
       id: "workflow",
       title: "发布准备",
-      status: "waiting",
+      status: statuses ? "running" : "waiting",
       attention: "等你回复",
       ...(statuses ? { defaultExpanded: true, archive: () => {} } : {}),
       members: [

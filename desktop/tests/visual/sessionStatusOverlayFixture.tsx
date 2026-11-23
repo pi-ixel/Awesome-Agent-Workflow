@@ -66,7 +66,8 @@ if (contextPercent !== null) {
   });
 }
 foreground.view.session.setState({
-  items,
+  items: params.has("send-morph") ? [] : items,
+  ...(params.has("send-morph") ? { agentKey: "preview" } : {}),
   isBound: true,
   activeSessionId: "sample",
   ...(params.has("row-audit")
@@ -78,6 +79,12 @@ foreground.view.session.setState({
       }
     : {}),
 });
+if (params.has("send-morph")) {
+  foreground.view.session.getState().bindSession({
+    prompt: () => Promise.resolve({ stopReason: "end_turn" as const }),
+    cancel: () => {},
+  });
+}
 if (params.has("stream-playback")) {
   window.addEventListener("fixture-stream-chunk", (event) => {
     if (!(event instanceof CustomEvent) || typeof event.detail !== "string") return;
@@ -131,6 +138,18 @@ const binding = {
     } : {},
     conversation: {
       foreground: foreground.snapshot,
+      ...(params.has("send-morph") ? {
+        send: (_owner: unknown, text: string) => {
+          if (text === "拒绝这条消息") return false;
+          const previous = foreground.view.session.getState();
+          const accepted = previous.sendPrompt(text);
+          if (accepted && params.has("delay-bubble")) {
+            foreground.view.session.setState({ historyPreview: { items: previous.items } });
+            setTimeout(() => foreground.view.session.setState({ historyPreview: undefined }), 95);
+          }
+          return accepted;
+        },
+      } : {}),
       switchModel: (_owner: unknown, id: string) => foreground.view.session.setState({ currentModelId: id }),
       statusView,
       setStatusMode: (mode: SessionStatusViewState["mode"]) =>

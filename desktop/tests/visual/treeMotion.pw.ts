@@ -185,7 +185,9 @@ test("侧栏右侧在运行圈与操作间切换，并跟随信息流颜色和�
     expect((await running.boundingBox())!.width).toBeCloseTo(16 * px / 14, 1);
     const rowBox = (await row.boundingBox())!;
     const ringBox = (await running.boundingBox())!;
-    expect(rowBox.x + rowBox.width - ringBox.x - ringBox.width).toBeLessThan(12);
+    const inset = rowBox.x + rowBox.width - ringBox.x - ringBox.width;
+    expect(inset).toBeGreaterThanOrEqual(7);
+    expect(inset).toBeLessThan(12);
   }
 
   await expect(star).toHaveCSS("opacity", "0");
@@ -213,7 +215,7 @@ test("侧栏右侧在运行圈与操作间切换，并跟随信息流颜色和�
   await expect(recent.getByRole("button", { name: "星标会话" })).toHaveCSS("opacity", "1");
 });
 
-test("项目、置顶、最近和工作流分组的提示共用同一条右边线", async ({ page }) => {
+test("项目、置顶、最近和工作流分组只有文字提示共用右边线", async ({ page }) => {
   await page.setViewportSize({ width: 264, height: 620 });
   await page.goto("/tests/visual/treeMotionFixture.html?sessions&statuses");
   const tree = page.getByRole("main", { name: "项目与会话" });
@@ -225,7 +227,8 @@ test("项目、置顶、最近和工作流分组的提示共用同一条右边�
     pinned.getByRole("img", { name: "已完成，未查看" }),
   ).toBeVisible();
   const projectStatuses = tree.locator("[data-session-row-status]:visible");
-  await expect(projectStatuses).toHaveCount(8);
+  await expect(projectStatuses).toHaveCount(4);
+  await expect(projectStatuses.getByRole("img")).toHaveCount(0);
   for (const text of ["待处理", "已停止", "等你回复", "等你处理"]) {
     await expect(projectStatuses.filter({ hasText: text })).toHaveCount(1);
   }
@@ -257,6 +260,10 @@ test("项目、置顶、最近和工作流分组的提示共用同一条右边�
   await expect(session).toHaveAccessibleDescription("待处理");
 
   const group = tree.getByRole("button", { name: "发布准备，2 个会话" });
+  await expect(group.getByRole("img", { name: "运行中" })).toBeVisible();
+  const groupRing = (await group.getByRole("img", { name: "运行中" }).boundingBox())!;
+  const groupHint = (await group.locator("..").getByText("等你回复").boundingBox())!;
+  expect(groupHint.x - groupRing.x - groupRing.width).toBeGreaterThan(8);
   await group.hover();
   await expect(group.locator("..").getByText("等你回复")).toBeHidden();
   await expect(
@@ -269,6 +276,7 @@ test("项目、置顶、最近和工作流分组的提示共用同一条右边�
   const recent = tree.getByRole("navigation", { name: "最近活跃会话" });
   await expect(recent.getByText("待处理")).toBeVisible();
   await expect(recent.getByText("等你处理")).toBeVisible();
+  await expect(recent.locator("[data-session-row-status]").getByRole("img")).toHaveCount(0);
   await expect
     .poll(async () => {
       const edges = await getStatusEdges();
