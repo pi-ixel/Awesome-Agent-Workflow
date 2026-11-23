@@ -29,6 +29,7 @@ export interface BrowserMcpEndpoint {
   url: string;
   token: string;
   sessionId: string | null;
+  workspaceId?: string | null;
   generation: number;
   revoked: boolean;
   imageCapable: boolean;
@@ -115,6 +116,7 @@ export interface BrowserHost {
   bindMcpEndpoint(
     endpointId: string,
     sessionId: string,
+    workspaceId?: string,
   ): Promise<BrowserMcpEndpoint>;
   revokeMcpEndpoint(endpointId: string): Promise<BrowserMcpEndpoint>;
   setMcpCapabilities(

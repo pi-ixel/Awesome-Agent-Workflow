@@ -61,6 +61,7 @@ export const emptyApproval: ApprovalValues = {
 };
 
 export const emptyRuntime: RuntimeStatusValues = {
+  browserError: null,
   runtime: {
     agentProfile: null,
     displayName: null,

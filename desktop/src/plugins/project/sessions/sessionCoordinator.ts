@@ -101,11 +101,7 @@ import {
 import { resolveAutoPermission } from "../interactions/permissionPolicy.ts";
 import { attachBrowserApprovals } from "../interactions/browserApprovalBridge.ts";
 import { browserObservationUrl } from "../../../shared/urlPrivacy.ts";
-import {
-  browserContextUnavailable,
-  browserPageContextPrefix,
-  browserUnavailablePrompt,
-} from "../../../shared/browser/promptContext.ts";
+import { browserPageContextPrefix } from "../../../shared/browser/promptContext.ts";
 import { browserToolsUnavailable } from "../../../shared/browser/toolAvailability.ts";
 import { asRecord } from "../../../shared/valueGuards.ts";
 
@@ -1867,6 +1863,42 @@ export function createSessionCoordinator({
     }
     let releaseBrowserApprovals = () => {};
     let isBrowserEndpointDisposed = false;
+    const browserFailures = new Map<string, string>();
+    async function browserOperation<T>(
+      operation: string,
+      perform: () => Promise<T>,
+      sessionId?: string,
+      ignoredErrors: readonly string[] = [],
+    ): Promise<T | undefined> {
+      try {
+        const result = await perform();
+        browserFailures.delete(operation);
+        return result;
+      } catch (error) {
+        const reason = String(error).replace(/^Error: /, "");
+        if (ignoredErrors.includes(reason)) {
+          browserFailures.delete(operation);
+          return undefined;
+        }
+        browserFailures.set(
+          operation,
+          `${operation}失败，请在浏览器面板查看连接状态。`,
+        );
+        sessionLogger.warn(`${operation}失败`, {
+          workspacePath,
+          agentKey,
+          sessionId,
+          reason,
+        });
+        return undefined;
+      } finally {
+        if (!isBrowserEndpointDisposed) {
+          statusStore
+            .getState()
+            .setBrowserError([...browserFailures.values()].at(-1) ?? null);
+        }
+      }
+    }
     try {
       const protocol = backgroundAdapter
         ? getProtocol()
@@ -1874,10 +1906,12 @@ export function createSessionCoordinator({
       if (retained && !isCurrent()) return null;
       const browser = getBrowser();
       const browserEndpoint = browser.isAvailable()
-        ? await browser.createMcpEndpoint().catch((error: unknown) => {
-            if (String(error).includes("AGENT_CONTROL_DISABLED")) return null;
-            throw error;
-          })
+        ? await browserOperation(
+            "注册浏览器工具",
+            () => browser.createMcpEndpoint(),
+            undefined,
+            ["AGENT_CONTROL_DISABLED"],
+          )
         : null;
       const approval = approvalStore.getState();
       const acceptsRequests = () => {
@@ -1914,33 +1948,46 @@ export function createSessionCoordinator({
           : [],
         ...(browserEndpoint
           ? {
-              onSessionReady: (sessionId: string) =>
-                browser
-                  .bindMcpEndpoint(browserEndpoint.endpointId, sessionId)
-                  .then((endpoint) => {
-                    if (isBrowserEndpointDisposed) return;
-                    releaseBrowserApprovals();
-                    releaseBrowserApprovals = attachBrowserApprovals({
-                      browser,
-                      sessionId: endpoint.sessionId ?? sessionId,
-                      approvalStore: approvalStore.getState(),
-                      getApprovalMode,
-                      logger: approvalLogger,
-                    });
-                  }),
-              onCapabilitiesReady: (capabilities) =>
-                browser
-                  .setMcpCapabilities(
+              onSessionReady: async (sessionId: string) => {
+                const endpoint = await browserOperation(
+                  "绑定浏览器工具",
+                  () =>
+                    browser.bindMcpEndpoint(
+                      browserEndpoint.endpointId,
+                      sessionId,
+                      workspacePath,
+                    ),
+                  sessionId,
+                );
+                if (!endpoint || isBrowserEndpointDisposed) return;
+                releaseBrowserApprovals();
+                releaseBrowserApprovals = attachBrowserApprovals({
+                  browser,
+                  sessionId: endpoint.sessionId ?? sessionId,
+                  approvalStore: approvalStore.getState(),
+                  getApprovalMode,
+                  logger: approvalLogger,
+                });
+              },
+              onCapabilitiesReady: async (capabilities) => {
+                await browserOperation("配置浏览器工具", () =>
+                  browser.setMcpCapabilities(
                     browserEndpoint.endpointId,
                     asRecord(capabilities["promptCapabilities"])?.["image"] ===
                       true,
-                  )
-                  .then(() => {}),
+                  ),
+                );
+              },
 
               onCancel: (sessionId: string) =>
                 browser.cancelWork(sessionId).then(() => {}),
-              onPromptStart: (sessionId: string) =>
-                browser.beginWork(sessionId).then(() => {}),
+              onPromptStart: async (sessionId: string) => {
+                await browserOperation(
+                  "准备浏览器轮次",
+                  () => browser.beginWork(sessionId),
+                  sessionId,
+                );
+              },
               onPromptSettled: (sessionId: string) =>
                 browser.cancelWork(sessionId).then(() => {}),
             }
@@ -1961,49 +2008,46 @@ export function createSessionCoordinator({
           }
         },
         onPromptContext: async (sessionId: string) => {
-          if (!browser.isAvailable()) return [];
-          const enabled = await browser.agentControlEnabled();
-          const mcpStatus = await browser.mcpStatus(sessionId);
-          const registration =
-            mcpStatus === "active"
-              ? await browser.mcpRegistration(sessionId).catch(() => null)
-              : null;
-          const status = statusStore.getState();
-          const unavailable = browserToolsUnavailable({
-            enabled,
-            mcpStatus,
-            runtimeKnown: status.lastSessionId === sessionId,
-            toolInventoryKnown: status.runtime.toolInventoryKnown,
-            hasEnabledTools: registration?.hasEnabledTools,
-            toolNames: status.runtime.toolNames,
-          });
-          if (unavailable) {
-            return [
-              {
-                type: "text" as const,
-                text: browserUnavailablePrompt,
+          if (!browser.isAvailable() || !browserEndpoint) return [];
+          return (
+            (await browserOperation(
+              "读取浏览器页面",
+              async () => {
+                const enabled = await browser.agentControlEnabled();
+                const mcpStatus = await browser.mcpStatus(sessionId);
+                const registration =
+                  mcpStatus === "active"
+                    ? await browser.mcpRegistration(sessionId)
+                    : null;
+                const status = statusStore.getState();
+                const unavailable = browserToolsUnavailable({
+                  enabled,
+                  mcpStatus,
+                  runtimeKnown: status.lastSessionId === sessionId,
+                  toolInventoryKnown: status.runtime.toolInventoryKnown,
+                  hasEnabledTools: registration?.hasEnabledTools,
+                  toolNames: status.runtime.toolNames,
+                });
+                if (unavailable) return [];
+                const space = await browser.snapshot(sessionId);
+                const tab = space.tabs
+                  .filter((entry) => entry.lifecycle === "ready")
+                  .at(-1);
+                if (!tab) return [];
+                const url = browserObservationUrl(
+                  tab.committedUrl ?? "about:blank",
+                );
+                return [
+                  {
+                    type: "text" as const,
+                    text: `${browserPageContextPrefix}：URL=${url}；状态=${tab.lifecycle}。同一查询链优先用 browser_list_tabs 确认可用任务标签，再用 browser_navigate 继续。需要保留原页、并排比较或用户要求新开时使用 browser_open。`,
+                  },
+                ];
               },
-            ];
-          }
-          if (!browserEndpoint) return [];
-          try {
-            const space = await browser.snapshot(sessionId);
-            const tab = space.tabs
-              .filter((entry) => entry.lifecycle === "ready")
-              .at(-1);
-            if (!tab) return [];
-            const url = browserObservationUrl(
-              tab.committedUrl ?? "about:blank",
-            );
-            return [
-              {
-                type: "text" as const,
-                text: `${browserPageContextPrefix}：URL=${url}；状态=${tab.lifecycle}。同一查询链优先用 browser_list_tabs 确认可用任务标签，再用 browser_navigate 继续。需要保留原页、并排比较或用户要求新开时使用 browser_open。`,
-              },
-            ];
-          } catch {
-            return [{ type: "text" as const, text: browserContextUnavailable }];
-          }
+              sessionId,
+              ["SESSION_NOT_FOUND"],
+            )) ?? []
+          );
         },
         project: { id: pathKey(workspacePath), path: workspacePath },
         onElicitation: (form, signal, scopeMethod) => {

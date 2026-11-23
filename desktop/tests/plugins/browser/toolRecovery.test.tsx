@@ -136,7 +136,7 @@ it("TD-032-A04 原生开关事件驱动真实提示状态且不自动重连", as
   expect(recoverSession).not.toHaveBeenCalled();
 });
 
-it("TD-032-B01 关闭开关后的标准 ACP 会话无 MCP 且提示禁止系统浏览器降级", async ({
+it("TD-032-B01 关闭开关后的标准 ACP 会话无 MCP 且不注入浏览器异常", async ({
   onTestFinished,
 }) => {
   let root: Context | undefined;
@@ -198,14 +198,7 @@ it("TD-032-B01 关闭开关后的标准 ACP 会话无 MCP 且提示禁止系统�
   const prompt = peer.received.find((wire) => wire.method === "session/prompt");
   const blocks = prompt?.params?.prompt as
     readonly { type?: unknown; text?: unknown }[] | undefined;
-  expect(
-    blocks?.some(
-      (block) =>
-        block.type === "text" &&
-        typeof block.text === "string" &&
-        block.text.includes("不得改用系统默认浏览器"),
-    ),
-  ).toBe(true);
+  expect(blocks).toEqual([{ type: "text", text: "打开百度" }]);
   await runtime.shutdown();
   expect(closeBrowserSession).toHaveBeenCalledExactlyOnceWith(sessionId);
 });
@@ -317,7 +310,8 @@ it("TD-032-B02 旧 ACP 运行时工具列表不能绕过关闭后的恢复提示
   const textAt = (index: number) =>
     JSON.stringify(prompts[index]?.params?.prompt ?? []);
   expect(textAt(0)).not.toContain("不得改用系统默认浏览器");
-  expect(textAt(1)).toContain("不得改用系统默认浏览器");
+  expect(textAt(1)).not.toContain("不得改用系统默认浏览器");
+  expect(prompts[1]?.params?.prompt).toEqual([{ type: "text", text: "开启后再次检查" }]);
 });
 
 it("TD-032-U02 真实 runtimeDetails.mcp_tools 必须投影为运行时工具名", () => {

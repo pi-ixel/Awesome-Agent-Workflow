@@ -356,7 +356,7 @@ fn td_04_i01_u01_endpoints_are_unique_and_identity_is_trusted() {
         super::mcp::resolve_endpoint(&registry, &a.token).unwrap_err(),
         "ENDPOINT_NOT_BOUND"
     );
-    super::mcp::bind_endpoint(&mut registry, &a.endpoint_id, "session-a").unwrap();
+    super::mcp::bind_endpoint(&mut registry, &a.endpoint_id, "session-a", None).unwrap();
     assert_eq!(
         super::mcp::resolve_endpoint(&registry, &a.token)
             .unwrap()
@@ -522,14 +522,14 @@ fn td_03_b01_handshake_authenticates_before_session_binding() {
 fn td_04_b06_revoked_endpoint_never_enters_new_session() {
     let mut registry = super::mcp::McpRegistry::default();
     let endpoint = super::mcp::create_endpoint(&mut registry, 41003).unwrap();
-    super::mcp::bind_endpoint(&mut registry, &endpoint.endpoint_id, "session-a").unwrap();
+    super::mcp::bind_endpoint(&mut registry, &endpoint.endpoint_id, "session-a", None).unwrap();
     super::mcp::revoke_endpoint(&mut registry, &endpoint.endpoint_id).unwrap();
     assert_eq!(
         super::mcp::resolve_endpoint(&registry, &endpoint.token).unwrap_err(),
         "ENDPOINT_INVALIDATED"
     );
     assert_eq!(
-        super::mcp::bind_endpoint(&mut registry, &endpoint.endpoint_id, "session-b").unwrap_err(),
+        super::mcp::bind_endpoint(&mut registry, &endpoint.endpoint_id, "session-b", None).unwrap_err(),
         "ENDPOINT_INVALIDATED"
     );
 }
@@ -734,6 +734,7 @@ fn td_06_i04_global_control_switch_is_fail_closed_and_does_not_restore_bindings(
         &mut host.mcp.lock().unwrap(),
         &endpoint.endpoint_id,
         "session-a",
+        None,
     )
     .unwrap();
     host.set_agent_control(false).unwrap();
@@ -751,12 +752,12 @@ fn td_032_u03_session_mcp_status_uses_native_endpoint_facts() {
     let mut registry = super::mcp::McpRegistry::default();
     assert_eq!(super::mcp::session_status(&registry, "session-a"), "not_bound");
     let old = super::mcp::create_endpoint(&mut registry, 41016).unwrap();
-    super::mcp::bind_endpoint(&mut registry, &old.endpoint_id, "session-a").unwrap();
+    super::mcp::bind_endpoint(&mut registry, &old.endpoint_id, "session-a", None).unwrap();
     assert_eq!(super::mcp::session_status(&registry, "session-a"), "active");
     super::mcp::revoke_endpoint(&mut registry, &old.endpoint_id).unwrap();
     assert_eq!(super::mcp::session_status(&registry, "session-a"), "revoked");
     let current = super::mcp::create_endpoint(&mut registry, 41017).unwrap();
-    super::mcp::bind_endpoint(&mut registry, &current.endpoint_id, "session-a").unwrap();
+    super::mcp::bind_endpoint(&mut registry, &current.endpoint_id, "session-a", None).unwrap();
     assert_eq!(super::mcp::session_status(&registry, "session-a"), "active");
 }
 
@@ -1705,6 +1706,117 @@ fn td_024_u01i_turn_boundaries_without_browser_space_are_explicit_noops() {
         host.cancel_turn_work("session-without-browser")
             .unwrap()
             .is_empty()
+    );
+}
+
+#[test]
+fn mcp_cold_space_is_session_owned_and_preparation_is_idempotent() {
+    let host = super::host::BrowserHost::default();
+    host.begin_turn_work("scheduled").unwrap();
+    assert!(host.runtime.lock().unwrap().spaces.is_empty());
+    let mut registrations = 0;
+    for _ in 0..2 {
+        host.prepare_agent_space(
+            "scheduled",
+            Some("scheduled-workspace"),
+            |workspace, session| {
+                assert_eq!((workspace, session), ("scheduled-workspace", "scheduled"));
+                registrations += 1;
+                Ok(())
+            },
+        )
+        .unwrap();
+    }
+    host.prepare_agent_space("other", None, |_, _| Ok(()))
+        .unwrap();
+    assert_eq!(
+        host.prepare_agent_space("scheduled", Some("wrong-project"), |_, _| panic!(
+            "禁止注册"
+        )),
+        Err("ACCESS_DENIED".into())
+    );
+    let runtime = host.runtime.lock().unwrap();
+    assert_eq!(registrations, 2);
+    assert_eq!(runtime.spaces.len(), 2);
+    assert!(runtime.spaces["scheduled"].tabs.is_empty());
+    assert!(runtime.spaces["other"].tabs.is_empty());
+}
+
+#[test]
+fn mcp_endpoint_keeps_its_bound_project_identity() {
+    let mut registry = super::mcp::McpRegistry::default();
+    let endpoint = super::mcp::create_endpoint(&mut registry, 41055).unwrap();
+    let bound = super::mcp::bind_endpoint(
+        &mut registry,
+        &endpoint.endpoint_id,
+        "scheduled",
+        Some("project-a"),
+    )
+    .unwrap();
+    assert_eq!(bound.workspace_id.as_deref(), Some("project-a"));
+    assert_eq!(
+        super::mcp::bind_endpoint(
+            &mut registry,
+            &endpoint.endpoint_id,
+            "scheduled",
+            Some("project-b")
+        ),
+        Err("ENDPOINT_ALREADY_BOUND".into())
+    );
+    assert_eq!(
+        registry.endpoints[&endpoint.endpoint_id]
+            .workspace_id
+            .as_deref(),
+        Some("project-a")
+    );
+}
+
+#[test]
+fn mcp_cold_space_retries_failed_partition_registration() {
+    let host = super::host::BrowserHost::default();
+    assert_eq!(
+        host.prepare_agent_space("scheduled", None, |_, _| Err("PROFILE_FAILED".into())),
+        Err("PROFILE_FAILED".into())
+    );
+    host.prepare_agent_space("scheduled", None, |_, _| Ok(()))
+        .unwrap();
+    host.runtime
+        .lock()
+        .unwrap()
+        .begin_agent_activity("scheduled")
+        .unwrap();
+    assert!(host.runtime.lock().unwrap().spaces["scheduled"].agent_active);
+}
+
+#[test]
+fn mcp_preparation_keeps_disabled_cleanup_and_takeover_guards() {
+    let host = super::host::BrowserHost::default();
+    host.set_agent_control(false).unwrap();
+    assert_eq!(
+        host.prepare_agent_space("scheduled", None, |_, _| panic!("禁止注册")),
+        Err("AGENT_CONTROL_DISABLED".into())
+    );
+    assert!(host.runtime.lock().unwrap().spaces.is_empty());
+    host.set_agent_control(true).unwrap();
+    host.cleanup.lock().unwrap().acquire("scheduled").unwrap();
+    assert_eq!(
+        host.prepare_agent_space("scheduled", None, |_, _| panic!("禁止注册")),
+        Err("PARTITION_BUSY".into())
+    );
+    assert!(host.runtime.lock().unwrap().spaces.is_empty());
+    host.cleanup.lock().unwrap().release("scheduled");
+    host.prepare_agent_space("scheduled", None, |_, _| Ok(()))
+        .unwrap();
+    host.runtime
+        .lock()
+        .unwrap()
+        .spaces
+        .get_mut("scheduled")
+        .unwrap()
+        .manual_takeover = true;
+    assert_eq!(
+        host.prepare_agent_space("scheduled", None, |_, _| panic!("禁止注册")),
+        Err("CONTROL_NOT_GRANTED".into())
     );
 }
 
