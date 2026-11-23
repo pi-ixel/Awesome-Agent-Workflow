@@ -190,6 +190,10 @@ export interface ChatInputProps {
     attachments?: readonly ContentBlock[],
     options?: SendOptions,
   ) => boolean | void;
+  readonly onSendWithMotion?: (
+    button: HTMLButtonElement,
+    send: () => boolean | void,
+  ) => boolean | void;
   /** 运行中提交：消息加入队列（轮次结束后按序发出）。 */
   readonly onEnqueue: (
     text: string,
@@ -218,6 +222,7 @@ export function ChatInput({
   disabled = false,
   sendDisabled = false,
   onSend,
+  onSendWithMotion,
   onEnqueue,
   onSteer,
   onCancel,
@@ -280,6 +285,7 @@ export function ChatInput({
     );
   }, [imagesByScope, imagesLoaded, imageStorage]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const sendButtonRef = useRef<HTMLButtonElement>(null);
   const slashCaretRef = useRef<number | null>(null);
   const skillRailRef = useRef<HTMLDivElement | null>(null);
   // 发送对象（ADR 039）：「/」里选中的扩展条目，带着它发送时内容交给扩展。
@@ -949,13 +955,19 @@ export function ChatInput({
       const attachments = images.length
         ? images.map((image) => image.block)
         : undefined;
-      accepted = message.skillReferences.length
-        ? dispatch(prompt, attachments, {
-            skillReferences: message.skillReferences,
-          })
-        : attachments
-          ? dispatch(prompt, attachments)
-          : dispatch(prompt);
+      const send = () =>
+        message.skillReferences.length
+          ? dispatch(prompt, attachments, {
+              skillReferences: message.skillReferences,
+            })
+          : attachments
+            ? dispatch(prompt, attachments)
+            : dispatch(prompt);
+      const button = sendButtonRef.current;
+      accepted =
+        button && !running && onSendWithMotion && message.text.trim()
+          ? onSendWithMotion(button, send)
+          : send();
     } catch {
       rejected();
       return;
@@ -1554,9 +1566,7 @@ export function ChatInput({
               </IconButton>
             </ComposerActionHint>
           ) : (
-            /* 发送：rounded-lg 主钮（ZCode size-7 rounded-lg bg-brand
-               text-foreground-inverse hover:bg-brand/80：zai-dark 白底黑箭头
-               #ffffff/#000000，zai-light 黑底白字）；运行中即「加入队列」 */
+            /* 信息流的直接发送按钮是变形起点，运行中的操作沿用原按钮样式。 */
             <ComposerActionHint
               label={
                 running && !steering ? "加入队列，当前轮结束后按序发出" : "发送"
@@ -1565,7 +1575,8 @@ export function ChatInput({
             >
               <IconButton
                 type="button"
-                onClick={() => submit()}
+                ref={sendButtonRef}
+                onClick={submit}
                 disabled={
                   disabled ||
                   sendDisabled ||
@@ -1574,7 +1585,7 @@ export function ChatInput({
                   hasUnsupportedImages
                 }
                 aria-label={running && !steering ? "加入队列" : "发送"}
-                className="flex shrink-0 items-center justify-center rounded-lg bg-brand text-foreground-inverse transition-colors hover:bg-brand/80 disabled:pointer-events-none disabled:opacity-50"
+                className={`flex shrink-0 items-center justify-center transition-colors disabled:pointer-events-none disabled:opacity-50 ${onSendWithMotion && !running && !sendTarget ? "rounded-full bg-conversation-send text-conversation-send-ink" : "rounded-lg bg-brand text-foreground-inverse hover:bg-brand/80"}`}
               >
                 <ArrowUpIcon className="ui-icon-16" />
               </IconButton>

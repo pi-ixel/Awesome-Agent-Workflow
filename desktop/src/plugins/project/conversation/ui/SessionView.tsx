@@ -114,6 +114,7 @@ import {
   type TimelineUserScrollIntent,
 } from "./timelineScrollAnchor.ts";
 import { UserMessage } from "./UserMessage.tsx";
+import { useSendMorph } from "./useSendMorph.ts";
 import { SessionStatusOverlay } from "./SessionStatusOverlay.tsx";
 import { ConversationNavigator } from "./ConversationNavigator.tsx";
 import {
@@ -1009,6 +1010,11 @@ export function SessionView({
     return () => observer.disconnect();
   }, []);
 
+  const { layerRef: sendMorphLayerRef, sendWithMorph } = useSendMorph(
+    () => foregroundSession?.getState().items ?? [],
+    scrollRef,
+  );
+
   const handleScroll = (): void => {
     const element = scrollRef.current;
     if (element === null) {
@@ -1102,6 +1108,14 @@ export function SessionView({
         aria-label="会话视图"
         className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-base"
       >
+        <div
+          ref={sendMorphLayerRef}
+          data-send-morph-layer=""
+          className="pointer-events-none absolute inset-0 z-20 overflow-hidden"
+          aria-hidden="true"
+          inert
+          hidden
+        />
         <ArchiveNotice openSettings={openArchiveSettings} />
         {isDraftPreparing ? (
           <div
@@ -1363,6 +1377,7 @@ export function SessionView({
                         pendingModelId !== null
                       }
                       onSend={sendPrompt}
+                      onSendWithMotion={sendWithMorph}
                       onEnqueue={enqueuePrompt}
                       onSteer={steerPrompt}
                       onCancel={requestCancel}

@@ -456,23 +456,17 @@ function useActiveSessionIds(path: string): readonly string[] {
 }
 
 function SessionActivityBadge({
-  path,
-  id,
+  activity,
+  placement,
 }: {
-  readonly path: string;
-  readonly id: string;
+  readonly activity: SessionActivityState["entries"][string] | undefined;
+  readonly placement: "marker" | "text";
 }) {
-  const agentKey = useCatalogOwner();
-  const activity = useProjectActivity(
-    (state) => state.entries[sessionActivityKey(path, id, agentKey)],
-  );
   switch (activity?.status) {
-    case "running":
-      return <SessionRunningIndicator />;
     case "failed":
-      return <StatusDot tone="danger" label="失败" hint="失败" />;
+      return placement === "marker" ? <StatusDot tone="danger" label="失败" hint="失败" /> : null;
     case "completed":
-      return activity.unread ? (
+      return placement === "marker" && activity.unread ? (
         <StatusDot
           tone="info"
           label="已完成，未查看"
@@ -481,13 +475,13 @@ function SessionActivityBadge({
         />
       ) : null;
     case "waiting":
-      return (
+      return placement === "text" ? (
         <Badge tone="ok" compact>
           待处理
         </Badge>
-      );
+      ) : null;
     case "cancelled":
-      return <span className="shrink-0 text-ui-sm text-ink-mute">已停止</span>;
+      return placement === "text" ? <span className="shrink-0 text-ui-sm text-ink-mute">已停止</span> : null;
     default:
       return null;
   }
@@ -794,6 +788,11 @@ function SessionRow({
   const star = useSessionStar(path, session.id);
   const [archiveConfirm, setArchiveConfirm] = useState(false);
   const statusId = useId();
+  const agentKey = useCatalogOwner();
+  const activity = useProjectActivity(
+    (state) => state.entries[sessionActivityKey(path, session.id, agentKey)],
+  );
+  const marker = !display?.attention && <SessionActivityBadge activity={activity} placement="marker" />;
 
   const recent = variant === "recent";
   const menuEntries = () => buildSessionMenuEntries(
@@ -840,14 +839,14 @@ function SessionRow({
       >
         {!recent && (
           <span
-            aria-hidden="true"
             className="flex ui-icon-16 shrink-0 items-center justify-center"
           >
-            {variant === "pinned" && (
-              <PinIcon className="ui-icon-16 shrink-0 text-ink-subtle" />
-            )}
+            {variant === "pinned" ? (
+              <PinIcon className="ui-icon-16 shrink-0 text-ink-subtle" aria-hidden="true" />
+            ) : marker}
           </span>
         )}
+        {variant === "pinned" && marker}
         <SessionRowTitle starred={star.starred} rename={rename}>
           <SidebarItemTitle hint={!recent && display && display.title !== session.title ? session.title : undefined}>
             {recent ? session.title : (display?.title ?? session.title)}
@@ -857,10 +856,11 @@ function SessionRow({
         {recent ? (
           <div className="flex h-6 items-center gap-1.5 text-ui-base text-ink-subtle">
             <CornerDownRightIcon className="ui-icon-14 shrink-0" />
-            <span className="min-w-0 flex-1 truncate">
+            <span className="min-w-0 truncate">
               {basenameOf(path)}
               {display ? ` · ${groupTitle} · ${display.title}` : null}
             </span>
+            {marker}
           </div>
         ) : null}
       </SessionRowBody>
@@ -891,9 +891,14 @@ function SessionRow({
               {display.attention}
             </Badge>
           ) : (
-            <SessionActivityBadge path={path} id={session.id} />
+            <SessionActivityBadge activity={activity} placement="text" />
           )}
         </div>
+      )}
+      {!archiveConfirm && !display?.attention && activity?.status === "running" && (
+        <span className={`mr-1 flex shrink-0 items-center ${sessionRowStatusReveal}`}>
+          <SessionRunningIndicator />
+        </span>
       )}
     </li>
   );
@@ -986,7 +991,10 @@ function SessionGroupNode({
           className={`cursor-pointer items-center gap-2 py-1 ${group.open ? "pl-0.5" : "pl-2"}`}
         >
           {!group.open && <span aria-hidden="true" className="flex shrink-0">{chevron}</span>}
-          <SidebarItemTitle>{group.title}</SidebarItemTitle>
+          <span className="flex min-w-0 items-center gap-2">
+            <SidebarItemTitle>{group.title}</SidebarItemTitle>
+            {group.status !== "stopped" && <SessionGroupStatusBadge status={group.status} />}
+          </span>
         </NavigationRow>
         {group.archive ? (
           <ConfirmIconAction
@@ -1005,7 +1013,7 @@ function SessionGroupNode({
             data-session-row-status
             className={`${sessionRowStatusClass} ${group.archive ? sessionRowStatusReveal : ""}`}
           >
-            <SessionGroupStatusBadge status={group.status} />
+            {group.status === "stopped" && <SessionGroupStatusBadge status={group.status} />}
             {group.attention ? (
               <Badge tone="ok" compact>
                 {group.attention}

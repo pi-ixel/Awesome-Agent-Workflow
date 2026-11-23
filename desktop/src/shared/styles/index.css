@@ -500,6 +500,11 @@ html.theme-warm {
      同 success/diff-added-foreground 族 :780/:794） */
   --color-brand: #ffffff;
   --color-foreground-inverse: #000000;
+  --color-conversation-send: #3b526e;
+  --color-conversation-send-ink: #faf8f3;
+  --color-conversation-send-peak: #718faf;
+  --color-conversation-send-glow: #547da3;
+  --color-conversation-user: #273747;
 
   /* diff 行配色（ZCode lightweight-diff-preview.tsx:73-111 公式原值；
      var 引用惰性解析，公式两主题相同，仍按规则双作用域各写一份） */
@@ -773,6 +778,11 @@ html.theme-warm {
      text-foreground-inverse（zai-light #ffffff，styles.css:614） */
   --color-brand: #000000;
   --color-foreground-inverse: #ffffff;
+  --color-conversation-send: #3b526e;
+  --color-conversation-send-ink: #faf8f3;
+  --color-conversation-send-peak: #b6cee8;
+  --color-conversation-send-glow: #84aedb;
+  --color-conversation-user: #eaeff4;
 
   /* diff 行配色（同暗夜公式：lightweight-diff-preview.tsx:73-111；
      双作用域各写一份，与既有 token 覆盖机制一致） */
