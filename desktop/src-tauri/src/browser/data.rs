@@ -248,9 +248,11 @@ pub fn register_partition(
             crate::storage_preferences::read_record(&root.join("partitions.json"))?;
         partitions.extend(existing);
     }
-    partitions.retain(|item| item.session_id != session_id);
-    partitions.insert(record.clone());
-    persist_partitions(app, &partitions)?;
+    let mut updated = partitions.clone();
+    updated.retain(|item| item.session_id != session_id);
+    updated.insert(record.clone());
+    persist_partitions(app, &updated)?;
+    *partitions = updated;
     Ok(record)
 }
 

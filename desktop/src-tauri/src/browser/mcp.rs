@@ -18,6 +18,7 @@ pub struct McpEndpoint {
     pub url: String,
     pub token: String,
     pub session_id: Option<String>,
+    pub workspace_id: Option<String>,
     pub generation: u64,
     pub revoked: bool,
     pub image_capable: bool,
@@ -49,6 +50,7 @@ pub fn create_endpoint(registry: &mut McpRegistry, port: u16) -> Result<McpEndpo
         token: random_id(32)?,
         endpoint_id,
         session_id: None,
+        workspace_id: None,
         generation: 1,
         revoked: false,
         image_capable: false,
@@ -63,6 +65,7 @@ pub fn bind_endpoint(
     registry: &mut McpRegistry,
     endpoint_id: &str,
     session_id: &str,
+    workspace_id: Option<&str>,
 ) -> Result<McpEndpoint, String> {
     let endpoint = registry
         .endpoints
@@ -77,6 +80,17 @@ pub fn bind_endpoint(
         .is_some_and(|current| current != session_id)
     {
         return Err("ENDPOINT_ALREADY_BOUND".into());
+    }
+    if endpoint
+        .workspace_id
+        .as_deref()
+        .zip(workspace_id)
+        .is_some_and(|(current, next)| current != next)
+    {
+        return Err("ENDPOINT_ALREADY_BOUND".into());
+    }
+    if let Some(workspace) = workspace_id {
+        endpoint.workspace_id = Some(workspace.into());
     }
     if endpoint.session_id.is_none() {
         endpoint.session_id = Some(session_id.into());
@@ -156,10 +170,10 @@ fn registration_tracks_the_replacement_endpoint_and_its_handshake() {
     let mut registry = McpRegistry::default();
     let original = create_endpoint(&mut registry, 41022).unwrap();
     let replacement = create_endpoint(&mut registry, 41023).unwrap();
-    bind_endpoint(&mut registry, &original.endpoint_id, "session").unwrap();
+    bind_endpoint(&mut registry, &original.endpoint_id, "session", None).unwrap();
     complete_handshake(&mut registry, &original.endpoint_id).unwrap();
-    bind_endpoint(&mut registry, &replacement.endpoint_id, "session").unwrap();
-    bind_endpoint(&mut registry, &original.endpoint_id, "session").unwrap();
+    bind_endpoint(&mut registry, &replacement.endpoint_id, "session", None).unwrap();
+    bind_endpoint(&mut registry, &original.endpoint_id, "session", None).unwrap();
     revoke_endpoint(&mut registry, &original.endpoint_id).unwrap();
     let current = current_registration(&registry, "session").unwrap();
     assert_eq!(current.endpoint_name, replacement.name);
@@ -294,10 +308,11 @@ pub async fn browser_mcp_create(
 pub fn browser_mcp_bind(
     endpoint_id: String,
     session_id: String,
+    workspace_id: Option<String>,
     state: State<'_, BrowserHost>,
 ) -> Result<McpEndpoint, String> {
     let mut registry = state.mcp.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
-    bind_endpoint(&mut registry, &endpoint_id, &session_id)
+    bind_endpoint(&mut registry, &endpoint_id, &session_id, workspace_id.as_deref())
 }
 
 #[tauri::command]
@@ -568,13 +583,24 @@ async fn call_tool(
     let host = app.state::<BrowserHost>();
     let session_id = endpoint.session_id.as_deref().ok_or("ENDPOINT_NOT_BOUND")?;
     super::identity::resolve_session(session_id, runtime_meta)?;
-    if !host.agent_control_enabled() {
-        return Err("AGENT_CONTROL_DISABLED".into());
-    }
-    host.runtime
-        .lock()
-        .map_err(|_| "BROWSER_LOCK_FAILED")?
-        .assert_session_control(session_id, super::model::PageSource::Agent)?;
+    host.prepare_agent_space(
+        session_id,
+        endpoint.workspace_id.as_deref(),
+        |workspace_id, session_id| {
+            let registered = host
+                .partitions
+                .lock()
+                .map_err(|_| "BROWSER_LOCK_FAILED")?
+                .iter()
+                .any(|partition| {
+                    partition.session_id == session_id && partition.lifecycle == "active"
+                });
+            if !registered {
+                super::data::register_partition(app, &host, workspace_id, session_id)?;
+            }
+            Ok(())
+        },
+    )?;
     let activity = host
         .runtime
         .lock()
@@ -730,19 +756,6 @@ async fn call_tool(
                 .get("url")
                 .and_then(Value::as_str)
                 .unwrap_or("about:blank");
-            if !host
-                .runtime
-                .lock()
-                .map_err(|_| "BROWSER_LOCK_FAILED")?
-                .spaces
-                .contains_key(session_id)
-            {
-                host.runtime
-                    .lock()
-                    .map_err(|_| "BROWSER_LOCK_FAILED")?
-                    .create_space("main", session_id, session_id)?;
-                super::data::register_partition(app, &host, session_id, session_id)?;
-            }
             let tab = super::host::create_tab_for(
                 app,
                 &host,

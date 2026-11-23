@@ -213,10 +213,11 @@ export function createBrowserHost(
       nativeInvoke<BrowserMcpStatus>("browser_mcp_status", { sessionId }),
     mcpRegistration: (sessionId) =>
       nativeInvoke<BrowserMcpRegistration | null>("browser_mcp_registration", { sessionId }),
-    bindMcpEndpoint: (endpointId, sessionId) =>
+    bindMcpEndpoint: (endpointId, sessionId, workspaceId) =>
       nativeInvoke<BrowserMcpEndpoint>("browser_mcp_bind", {
         endpointId,
         sessionId,
+        workspaceId,
       }),
     setMcpCapabilities: (endpointId, imageCapable) =>
       nativeInvoke<BrowserMcpEndpoint>("browser_mcp_capabilities", {

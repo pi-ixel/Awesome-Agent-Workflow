@@ -195,7 +195,7 @@ pub(super) async fn measure(app: &AppHandle, url: &str, sessions: usize) -> Resu
             app.state(),
         )?;
         let endpoint = browser_mcp_create(app.clone(), app.state()).await?;
-        let endpoint = browser_mcp_bind(endpoint.endpoint_id, session.clone(), app.state())?;
+        let endpoint = browser_mcp_bind(endpoint.endpoint_id, session.clone(), None, app.state())?;
         let client = Client {
             http: http.clone(),
             endpoint,
@@ -330,5 +330,103 @@ pub(super) async fn measure(app: &AppHandle, url: &str, sessions: usize) -> Resu
         json!({"status":"ok","sessions":sessions,"reuse":reuse, "peak":peak,
         "settled":settled,"idle30":idle_30,"idle60":idle_60,
         "durationMs":finished.iter().map(|entry| entry.4).collect::<Vec<_>>(),"allSessionsResumed":true}),
+    )
+}
+
+/// 经真实 MCP 冷启动，不允许面板或测试预先创建浏览器空间。
+pub(super) async fn cold_start(app: &AppHandle, url: &str) -> Result<Value, String> {
+    let http = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let host = app.state::<BrowserHost>();
+    host.set_agent_control(true)?;
+    let mut clients = Vec::new();
+    let mut tabs = Vec::new();
+    let mut foreign_only_tab = None;
+    for index in 0..2 {
+        let session = format!("scheduled-cold-{index}");
+        if host
+            .runtime
+            .lock()
+            .map_err(|_| "BROWSER_LOCK_FAILED")?
+            .spaces
+            .contains_key(&session)
+        {
+            return Err("冷启动测试已被预热".into());
+        }
+        let endpoint = browser_mcp_create(app.clone(), app.state()).await?;
+        let endpoint = browser_mcp_bind(
+            endpoint.endpoint_id,
+            session.clone(),
+            Some("cold-workspace".into()),
+            app.state(),
+        )?;
+        let client = Client {
+            http: http.clone(),
+            endpoint,
+        };
+        client
+            .request("initialize", json!({"protocolVersion":"2025-03-26"}))
+            .await?;
+        client
+            .request("notifications/initialized", json!({}))
+            .await?;
+        if browser_begin_work(app.clone(), app.state(), session.clone())?.is_some() {
+            return Err("空会话不应提前创建浏览器空间".into());
+        }
+        // 一条会话直接首开；另一条先列空标签，覆盖两种工具首调顺序。
+        if index == 1 && client.tool("browser_list_tabs", json!({})).await?["tabs"] != json!([]) {
+            return Err("新会话标签应为空".into());
+        }
+        let path = format!("/cold-{index}");
+        let tab = client
+            .open(&format!("{}{path}", url.trim_end_matches('/')))
+            .await?;
+        client.read_and_mark(&tab, &path).await?;
+        if host
+            .runtime
+            .lock()
+            .map_err(|_| "BROWSER_LOCK_FAILED")?
+            .spaces[&session]
+            .workspace_id
+            != "cold-workspace"
+        {
+            return Err("冷启动空间未归属任务项目".into());
+        }
+        let listed = client.tool("browser_list_tabs", json!({})).await?;
+        if listed["tabs"].as_array().map(Vec::len) != Some(1) || listed["tabs"][0]["tabId"] != tab {
+            return Err("会话标签不匹配".into());
+        }
+        tabs.push(tab);
+        if index == 0 {
+            foreign_only_tab = Some(client.open(&format!("{}foreign-only", url)).await?);
+        }
+        clients.push(client);
+    }
+    for index in 0..2 {
+        // tab ID 在各会话内编号；同名 ID 应读到各自页面。
+        clients[index].check_title(&tabs[index], &format!("/cold-{index}:1")).await?;
+    }
+    let foreign = foreign_only_tab.ok_or("测试缺少独有标签")?;
+    if clients[1].tool("browser_snapshot", json!({"tabId":foreign})).await.is_ok() {
+        return Err("跨会话标签访问未拒绝".into());
+    }
+    for index in 0..2 {
+        let session = clients[index]
+            .endpoint
+            .session_id
+            .clone()
+            .ok_or("ENDPOINT_NOT_BOUND")?;
+        browser_cancel_work(app.clone(), app.state(), session.clone()).await?;
+        super::super::host::browser_close_session(app.clone(), app.state(), session)?;
+        super::super::mcp::browser_mcp_revoke(
+            clients[index].endpoint.endpoint_id.clone(),
+            app.state(),
+        )?;
+    }
+    Ok(
+        json!({"status":"ok","coldOpen":true,"emptyList":true,"navigationAndClick":true,"sessionIsolation":true}),
     )
 }

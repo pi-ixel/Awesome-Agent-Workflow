@@ -78,7 +78,8 @@ pub(crate) fn start(app: &AppHandle) -> bool {
 async fn run(app: &AppHandle) -> Result<Value, String> {
     let root = browser_root().ok_or("BENCH_ROOT_MISSING")??;
     let phase = std::env::var("AAW_WEBVIEW2_BENCH_PHASE").unwrap_or_else(|_| "perf".into());
-    let is_parallel = phase == "parallel";
+    let is_cold = phase == "cold";
+    let is_parallel = phase == "parallel" || is_cold;
     if (phase == "perf" || is_parallel) && root.try_exists().map_err(|err| err.to_string())? {
         return Err("benchmark browser directory must not exist yet".into());
     }
@@ -145,7 +146,9 @@ async fn run(app: &AppHandle) -> Result<Value, String> {
             });
         }
     });
-    let result = if is_parallel {
+    let result = if is_cold {
+        parallel::cold_start(app, &url).await
+    } else if is_parallel {
         parallel::measure(app, &url, sessions).await
     } else if phase == "perf" {
         measure(app, &url, sessions, shared, settle).await

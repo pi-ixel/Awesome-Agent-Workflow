@@ -24,6 +24,7 @@ export interface BrowserToolRecoveryProps {
   readonly workspacePath: string;
   readonly agentKey: string;
   readonly sessionId: string;
+  readonly browserError?: string | null;
   readonly runtime: {
     readonly lastSessionId: string | null;
     readonly toolNames: readonly string[];
@@ -50,6 +51,7 @@ function BrowserToolRecoverySession({
   workspacePath,
   agentKey,
   sessionId,
+  browserError,
   runtime,
 }: BrowserToolRecoveryProps) {
   const [enabled, setEnabled] = useState<boolean | null>(null);
@@ -220,9 +222,9 @@ function BrowserToolRecoverySession({
           </div>
         </section>
       )}
-      {error && (
+      {(error || browserError) && (
         <p role="alert" className="shrink-0 px-3 py-1 text-xs text-danger-ink">
-          {error}
+          {error || browserError}
         </p>
       )}
       {confirming && needsRecovery

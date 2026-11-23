@@ -1731,6 +1731,35 @@ fn register_user_message_bridge(
 }
 
 impl BrowserHost {
+    /// MCP 可从没有页面的会话启动；只初始化端点所属会话，不借用前台空间。
+    pub(super) fn prepare_agent_space(
+        &self,
+        session_id: &str,
+        workspace_id: Option<&str>,
+        register_partition: impl FnOnce(&str, &str) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if !self.agent_control_enabled() {
+            return Err("AGENT_CONTROL_DISABLED".into());
+        }
+        super::data::ensure_partition_available(self, session_id)?;
+        let workspace_id = {
+            let mut runtime = self.runtime.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+            if !runtime.spaces.contains_key(session_id) {
+                runtime.create_space("main", workspace_id.unwrap_or(session_id), session_id)?;
+            }
+            if workspace_id
+                .is_some_and(|workspace| runtime.spaces[session_id].workspace_id != workspace)
+            {
+                return Err("ACCESS_DENIED".into());
+            }
+            runtime.assert_session_control(session_id, PageSource::Agent)?;
+            runtime.spaces[session_id].workspace_id.clone()
+        };
+        // 注册失败时保留空空间；下一次调用仍会补全分区，不能跳过半初始化状态。
+        register_partition(&workspace_id, session_id)?;
+        super::data::ensure_partition_available(self, session_id)
+    }
+
     fn invalidate_session_approvals(&self, session_id: &str) -> Result<(), String> {
         let mut approvals = self.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
         for approval in approvals.records.values_mut() {

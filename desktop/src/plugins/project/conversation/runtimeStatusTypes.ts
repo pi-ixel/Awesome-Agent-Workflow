@@ -23,6 +23,8 @@ export interface UsageSnapshot {
 export type TurnSignal = "thought" | "message" | null;
 
 export interface RuntimeStatusValues {
+  /** 浏览器附属能力的本地错误，仅供面板展示，不进入 Agent 上下文。 */
+  readonly browserError?: string | null;
   readonly runtime: RuntimeSnapshot;
   readonly usage: UsageSnapshot | null;
   readonly cachedContext: ContextUsage | null;
