@@ -416,13 +416,21 @@ pub(crate) fn dispatch(
         // 让页面请求宿主"用标准动作链路调我自己的某个动作"。
         //
         // 为什么不直接让页面自己调 `aawActions[id]` 就完事：那样绕过了宿主，
-        // 验证不到"宿主 → eval → 动作 → 回传"这条链——而这条链才是 AI 与启动器
-        // 真正走的路。pilot 页面用它做验收，正式工具不需要这条能力。
+        // 验证不到"宿主 → 动作 → 回传"这条链——而这条链才是 AI 与启动器
+        // 真正走的路。pilot 页面用它做验收，带界面的进程工具用它做按钮回调。
+        //
+        // **两种载体是两条链路**：L3 的动作在进程里，页面里根本没有
+        // `aawActions` 可 eval。少了这条分叉时，进程工具的页面点一次按钮就得到
+        // "工具未实现动作 x"——而那个动作其实正躺在跑着的进程里。判断口径与
+        // `mod.rs::tool_act` 一致，都用会话上的 carrier，不看清单。
         "act.invoke" => (|| {
-            let app = need_app()?;
             let action = text(&payload, "action")?;
             let input = payload.get("input").cloned().unwrap_or(json!({}));
             let session = need_session()?;
+            if session.carrier == "process" {
+                return super::process_host::invoke(host, &session.tool_id, &action, input);
+            }
+            let app = need_app()?;
             let label = format!("tool-{}", session.tool_id);
             let window = tauri::Manager::get_webview_window(app, &label)
                 .ok_or_else(|| format!("找不到窗口 {label}。"))?;
@@ -583,6 +591,43 @@ mod tests {
         for name in ["notes.txt", "com3x.txt", "console.png", "导出.txt"] {
             assert!(!is_windows_reserved_name(name), "{name} 不应被拒绝");
         }
+    }
+
+    /// 进程工具的动作在进程里，页面里的 `aawActions` 永远是 `undefined`。
+    ///
+    /// 少了这条分叉时，带界面的进程工具（SSH 客户端这类）在页面里点一次按钮
+    /// 就得到"工具未实现动作 x"，而那个动作其实正躺在跑着的进程里——报错指向
+    /// 页面，病因在载体。
+    #[test]
+    fn act_invoke_sends_process_carrier_to_the_process_not_the_page() {
+        let host = ToolsHost::default();
+        let session = ToolSession {
+            tool_id: "ssh".into(),
+            dir: std::path::PathBuf::from("/data/tools/installed/u1/ssh"),
+            name: "SSH".into(),
+            network: crate::tools::manifest::NetworkRule {
+                enabled: true,
+                hosts: vec![],
+                insecure: vec![],
+            },
+            token: "token".into(),
+            carrier: "process".into(),
+            settings: "{}".into(),
+            keep_alive: std::sync::atomic::AtomicBool::new(false),
+            schedule: std::sync::Mutex::new(None),
+        };
+        // `app` 传 None：走到进程分支就不该碰窗口，更不该报"需要宿主上下文"。
+        let response = dispatch(
+            &host,
+            None,
+            "ssh",
+            Some(&session),
+            "act.invoke",
+            br#"{"action":"run"}"#,
+        );
+        let body = String::from_utf8(response.body().clone()).unwrap();
+        assert!(body.contains("进程没有在运行"), "应该走进程分支：{body}");
+        assert!(!body.contains("需要宿主上下文"), "{body}");
     }
 
     // ── 测试用的最小 PNG 构造 ────────────────────────────────────────────
