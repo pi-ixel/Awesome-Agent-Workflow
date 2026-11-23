@@ -257,8 +257,8 @@ pub fn assign_kill_on_close_job(child_pid: u32) -> Option<usize> {
             CloseHandle(job);
             return None;
         }
-        // 成功路径：job 与进程句柄都故意不关——KILL_ON_JOB_CLOSE 依赖 job
-        // 句柄活到桌面端进程死亡那一刻，OS 收走它的同时终止整棵 agent 树
+        // 调用方管理 Job 句柄，分配时临时打开的进程句柄可以立即关闭。
+        CloseHandle(process);
         Some(job as usize)
     }
 }
@@ -344,6 +344,20 @@ pub fn cmd_script_tail(script: &str, args: &[String]) -> String {
     tail
 }
 
+/// 为 Windows 批处理保留参数边界，拒绝会在 cmd 中重新解释的字符。
+#[cfg(target_os = "windows")]
+pub fn windows_program_args(program: &str, args: Vec<String>) -> Result<(String, Vec<String>, Option<String>), String> {
+    match resolve_windows_program(program) {
+        SpawnTarget::Direct(resolved) => Ok((resolved, args, None)),
+        SpawnTarget::CmdScript { comspec, script } => {
+            if std::iter::once(&script).chain(args.iter()).any(|s| s.chars().any(|c| matches!(c, '"' | '%' | '!' | '\r' | '\n'))) {
+                return Err("批处理路径或参数包含不支持的字符（引号、% 或 !）".into());
+            }
+            Ok((comspec, vec!["/d".into(), "/s".into(), "/c".into()], Some(cmd_script_tail(&script, &args))))
+        }
+    }
+}
+
 /// 拉起 ACP agent 子进程并注册进进程表。
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -369,17 +383,7 @@ pub async fn acp_spawn(
     }
     // Windows：无扩展名命令先做 PATH+PATHEXT 解析（见 resolve_windows_program）
     #[cfg(target_os = "windows")]
-    let (program, args, cmd_tail) = {
-        match resolve_windows_program(&program) {
-            SpawnTarget::Direct(resolved) => (resolved, args, None),
-            SpawnTarget::CmdScript { comspec, script } => {
-                if std::iter::once(&script).chain(args.iter()).any(|s| s.chars().any(|c| matches!(c, '"' | '%' | '!' | '\r' | '\n'))) {
-                    return Err("批处理路径或参数包含不支持的字符（引号、% 或 !）".to_string());
-                }
-                (comspec, vec!["/d".to_string(), "/s".to_string(), "/c".to_string()], Some(cmd_script_tail(&script, &args)))
-            },
-        }
-    };
+    let (program, args, cmd_tail) = windows_program_args(&program, args)?;
     let label = webview.label().to_owned();
     let generation = page_generation(&label);
     let _spawn_guard = spawn_gate().lock().await;

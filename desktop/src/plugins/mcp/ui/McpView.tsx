@@ -36,6 +36,7 @@ import {
   duplicateNameMessage,
   type McpManagement,
 } from "../runtime/management.ts";
+import { useFeedback } from "../../../shared/ui/feedback.ts";
 import { McpEditor } from "./McpEditor.tsx";
 import { McpServiceDetails } from "./McpServiceDetails.tsx";
 
@@ -50,7 +51,8 @@ type ManagedTarget = {
   entry?: ManagedMcpEntry;
   snapshot: ManagedMcpSnapshot;
 };
-type Target = NativeTarget | ManagedTarget;
+type Target =
+  (Omit<NativeTarget, "entry"> & { entry?: NativeMcpEntry }) | ManagedTarget;
 type Existing = NativeTarget | (ManagedTarget & { entry: ManagedMcpEntry });
 type ManagedExisting = Extract<Existing, { source: "managed" }>;
 type EntryAction =
@@ -199,7 +201,12 @@ function transportLabel(transport: string) {
 }
 
 function targetKey(target: Existing) {
-  return JSON.stringify([target.source, target.entry.name]);
+  return JSON.stringify([
+    target.source,
+    target.source === "native"
+      ? (target.entry.id ?? target.entry.name)
+      : target.entry.name,
+  ]);
 }
 
 function toolKey(serviceKey: string, name: string) {
@@ -235,7 +242,6 @@ function reportedTools(runtime: RuntimeSnapshot | undefined, name: string) {
 }
 
 function healthKey(agentId: string, profile: string | null, target: Existing) {
-  const { entry } = target;
   const version =
     target.source === "native"
       ? (target.entry.connectionRevision ?? target.snapshot.revision)
@@ -245,7 +251,7 @@ function healthKey(agentId: string, profile: string | null, target: Existing) {
           target.entry.url,
           target.entry.headers,
         ]));
-  return JSON.stringify([agentId, profile, target.source, entry.name, version]);
+  return JSON.stringify([agentId, profile, targetKey(target), version]);
 }
 
 export function McpView({
@@ -257,6 +263,9 @@ export function McpView({
   nativeTransports = [],
   canManageInjected,
   canTest,
+  nativeWorkspace,
+  hasScopedNative = false,
+  hasHostInspection = false,
   sessionId,
   runtime,
 }: {
@@ -268,9 +277,13 @@ export function McpView({
   nativeTransports?: readonly NativeMcpDraft["transport"][];
   canManageInjected: boolean;
   canTest: boolean;
+  nativeWorkspace?: string;
+  hasScopedNative?: boolean;
+  hasHostInspection?: boolean;
   sessionId?: string;
   runtime?: RuntimeSnapshot;
 }) {
+  const feedback = useFeedback();
   const [refresh, setRefresh] = useState(0);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
@@ -322,9 +335,21 @@ export function McpView({
   const native = useLoad(
     () =>
       service && canManageNative
-        ? service.readNative(agentId, activeProfile, refresh > 0)
+        ? service.readNative(
+            agentId,
+            activeProfile,
+            refresh > 0,
+            nativeWorkspace,
+          )
         : Promise.resolve(null),
-    [service, agentId, activeProfile, canManageNative, refresh],
+    [
+      service,
+      agentId,
+      activeProfile,
+      canManageNative,
+      refresh,
+      nativeWorkspace,
+    ],
   );
   const managed = useLoad(
     () =>
@@ -380,21 +405,26 @@ export function McpView({
     return list;
   }, [native.data, managed.data]);
   const inspectionProfile =
-    native.data?.profile.id ?? native.data?.profile.name ?? activeProfile;
+    (hasScopedNative ? nativeWorkspace : undefined) ??
+    native.data?.profile.id ??
+    native.data?.profile.name ??
+    activeProfile;
 
   const jobs = useMemo(() => {
     if (!service || !inspector) return [];
     const available = targets.flatMap((target) => {
       const { entry } = target;
-      if (
-        entry.transport !== "http" ||
-        (target.source === "native" && !canTest)
-      )
+      const transport = entry.transport;
+      const manualOnly = target.source === "native" && hasHostInspection;
+      if (transport !== "http" && !(manualOnly && transport === "stdio"))
         return [];
+      if (target.source === "native" && !canTest && !manualOnly) return [];
+      if (transport !== "http" && transport !== "stdio") return [];
       return [
         {
           key: healthKey(agentId, inspectionProfile, target),
           enabled: entry.enabled,
+          manualOnly,
           run: async (): Promise<McpInspection> => {
             if (target.source === "managed")
               return inspector.probe(target.entry);
@@ -402,8 +432,11 @@ export function McpView({
               source: "native",
               profile: target.profile,
               previousName: entry.name,
+              entryId: target.entry.id,
+              entryRevision: target.entry.connectionRevision,
+              workspace: nativeWorkspace,
               revision: target.snapshot.revision,
-              draft: { name: entry.name, transport: "http", secretChanges: {} },
+              draft: { name: entry.name, transport, secretChanges: {} },
             });
             return { ...result, checkedAt: Date.now() };
           },
@@ -414,6 +447,7 @@ export function McpView({
       available.unshift({
         key: browserKey,
         enabled: browserControl.enabled,
+        manualOnly: false,
         run: () => inspector.probeBrowser(),
       });
     return available;
@@ -422,6 +456,8 @@ export function McpView({
     inspector,
     targets,
     canTest,
+    hasHostInspection,
+    nativeWorkspace,
     agentId,
     inspectionProfile,
     browserControl.available,
@@ -480,7 +516,7 @@ export function McpView({
           if (!isCurrent) return;
           if (seen.current.has(job.key)) continue;
           if (cached[job.key]) seen.current.add(job.key);
-          else if (job.enabled) await runCheck(job);
+          else if (job.enabled && !job.manualOnly) await runCheck(job);
         }
       })
       .catch(() => {
@@ -524,7 +560,17 @@ export function McpView({
   function statusOf(target: Existing) {
     const name = target.entry.name;
     const usesNative =
-      target.source === "managed" && (names.get(name) ?? 0) > 1;
+      target.source === "managed" &&
+      (hasScopedNative
+        ? targets.some(
+            (item) =>
+              item.source === "native" &&
+              item.entry.effective &&
+              item.entry.name === name,
+          )
+        : (names.get(name) ?? 0) > 1);
+    if (usesNative && hasScopedNative && target.entry.enabled)
+      return "新会话优先使用同名原生配置";
     return summary(
       usesNative ? "" : name,
       healthKey(agentId, inspectionProfile, target),
@@ -787,33 +833,41 @@ export function McpView({
             operation,
           ),
         );
-        native.patch((data) =>
-          data?.snapshot.revision === expected
-            ? {
-                ...data,
-                snapshot: {
-                  ...data.snapshot,
-                  revision,
-                  entries: applyEntryAction(
-                    data.snapshot.entries,
-                    operation,
-                  ).map((entry) =>
-                    operation.kind === "toggle" &&
-                    entry.name === operation.name &&
-                    entry.redactedConfig
-                      ? {
-                          ...entry,
-                          redactedConfig: {
-                            ...entry.redactedConfig,
-                            enabled: operation.enabled,
-                          },
-                        }
-                      : entry,
-                  ),
-                },
-              }
-            : data,
-        );
+        if (hasScopedNative) {
+          if (revision !== expected)
+            feedback?.({
+              message: "原生 MCP 配置已保存，将在新会话中生效",
+              variant: "ok",
+            });
+          setRefresh((value) => value + 1);
+        } else
+          native.patch((data) =>
+            data?.snapshot.revision === expected
+              ? {
+                  ...data,
+                  snapshot: {
+                    ...data.snapshot,
+                    revision,
+                    entries: applyEntryAction(
+                      data.snapshot.entries,
+                      operation,
+                    ).map((entry) =>
+                      operation.kind === "toggle" &&
+                      entry.name === operation.name &&
+                      entry.redactedConfig
+                        ? {
+                            ...entry,
+                            redactedConfig: {
+                              ...entry.redactedConfig,
+                              enabled: operation.enabled,
+                            },
+                          }
+                        : entry,
+                    ),
+                  },
+                }
+              : data,
+          );
       } else {
         const revision = accept(
           await service.managedChange(
@@ -855,11 +909,18 @@ export function McpView({
   async function reloadEditor(target: Target) {
     if (!service) return;
     if (target.source === "native") {
-      const snapshot = await service.nativeRead(agentId, target.profile);
-      const entry = snapshot.entries.find(
-        ({ name }) => name === target.entry.name,
+      const snapshot = await service.nativeRead(
+        agentId,
+        target.profile,
+        nativeWorkspace,
       );
-      if (!entry) throw new Error("原服务已移除或改名，已保留表单输入。");
+      const entry = snapshot.entries.find(
+        (entry) =>
+          target.entry &&
+          (entry.id ?? entry.name) === (target.entry.id ?? target.entry.name),
+      );
+      if (target.entry && !entry)
+        throw new Error("原服务已移除或改名，已保留表单输入。");
       setEditing({ ...target, snapshot, entry });
     } else {
       const snapshot = await service.host.managedRead(agentId);
@@ -878,9 +939,10 @@ export function McpView({
   const currentKey = current && healthKey(agentId, inspectionProfile, current);
   const currentTools =
     current?.source === "native"
-      ? reportedTools(runtime, current.entry.name)?.map((name) => ({
+      ? (currentHealth?.tools ??
+        reportedTools(runtime, current.entry.name)?.map((name) => ({
           name,
-        }))
+        })))
       : currentHealth?.tools;
   const availableTransports = [
     ...new Set(targets.map(({ entry }) => entry.transport)),
@@ -895,9 +957,11 @@ export function McpView({
   const hasWriteConflict = failure?.startsWith("配置已变化");
   const canEditCurrent =
     current?.source === "managed" ||
-    nativeTransports.some(
-      (transport) => transport === current?.entry.transport,
-    );
+    (current?.source === "native" &&
+      !current.entry.readOnly &&
+      nativeTransports.some(
+        (transport) => transport === current.entry.transport,
+      ));
   function retryRead() {
     revisions.current.clear();
     setFailure(null);
@@ -943,7 +1007,7 @@ export function McpView({
           count={`${count} 服务 · ${enabledCount} 已启用 · ${activeToolCount === undefined ? "会话工具未知" : `${activeToolCount} 个会话工具`}${errorCount ? ` · ${errorCount} 个异常` : ""}`}
           actions={
             <>
-              {jobs.some((job) => job.enabled) && (
+              {jobs.some((job) => job.enabled && !job.manualOnly) && (
                 <ActionButton
                   tone="secondary"
                   size="compact"
@@ -951,7 +1015,8 @@ export function McpView({
                   onClick={() => {
                     void (async () => {
                       for (const job of jobs)
-                        if (job.enabled) await runCheck(job, true);
+                        if (job.enabled && !job.manualOnly)
+                          await runCheck(job, true);
                     })();
                   }}
                 >
@@ -966,6 +1031,20 @@ export function McpView({
                   onClick={() => startEditor("json")}
                 >
                   导入 JSON
+                </ActionButton>
+              )}
+              {hasScopedNative && (
+                <ActionButton
+                  tone="secondary"
+                  size="compact"
+                  disabled={!native.data}
+                  onClick={() => {
+                    if (!native.data) return;
+                    setInitialEditorTab("form");
+                    setEditing({ source: "native", ...native.data });
+                  }}
+                >
+                  新增原生 MCP
                 </ActionButton>
               )}
               {canManageInjected && (
@@ -1039,6 +1118,15 @@ export function McpView({
                 </ActionButton>
               </div>
             )}
+            {native.data?.snapshot.warnings?.map((warning) => (
+              <p
+                key={warning}
+                role="status"
+                className="text-ui-sm text-warn-ink"
+              >
+                {warning}
+              </p>
+            ))}
             {!service && (
               <p className="text-ui-sm text-ink-mute">
                 MCP 管理需要在 Desktop 桌面应用中使用。
@@ -1083,32 +1171,41 @@ export function McpView({
                     name={entry.name}
                     transport={transportLabel(entry.transport)}
                     detail={
-                      (names.get(entry.name) ?? 0) > 1
-                        ? duplicateNameMessage
-                        : (entry.description ?? "")
+                      target.source === "native" && target.entry.source
+                        ? target.entry.source +
+                          (target.entry.readOnly ? " · 只读" : "")
+                        : !hasScopedNative && (names.get(entry.name) ?? 0) > 1
+                          ? duplicateNameMessage
+                          : (entry.description ?? "")
                     }
                     status={statusOf(target)}
                     selected={isDetailOpen && current === target}
                     detailsId={detailsId}
                     onSelect={(event) => selectDetail(key, event.currentTarget)}
                     toggle={
-                      <ToggleSwitch
-                        label={entry.name + " 启用"}
-                        checked={entry.enabled}
-                        pending={pendingWrites.has(key)}
-                        onChange={(enabled) => toggleService(target, enabled)}
-                      />
+                      (target.source !== "native" ||
+                        !target.entry.readOnly) && (
+                        <ToggleSwitch
+                          label={entry.name + " 启用"}
+                          checked={entry.enabled}
+                          pending={pendingWrites.has(key)}
+                          onChange={(enabled) => toggleService(target, enabled)}
+                        />
+                      )
                     }
                     actions={
-                      <IconButton
-                        iconSize="compact"
-                        aria-label={entry.name + " 删除"}
-                        data-hint="删除"
-                        disabled={pendingWrites.has(key)}
-                        onClick={() => setConfirmation(target)}
-                      >
-                        <TrashIcon className="ui-icon-14" />
-                      </IconButton>
+                      (target.source !== "native" ||
+                        !target.entry.readOnly) && (
+                        <IconButton
+                          iconSize="compact"
+                          aria-label={entry.name + " 删除"}
+                          data-hint="删除"
+                          disabled={pendingWrites.has(key)}
+                          onClick={() => setConfirmation(target)}
+                        >
+                          <TrashIcon className="ui-icon-14" />
+                        </IconButton>
+                      )
                     }
                   />
                 );
@@ -1186,7 +1283,10 @@ export function McpView({
                   connection={
                     current.source === "native"
                       ? [
-                          ["所属配置", current.profile.name],
+                          [
+                            "所属配置",
+                            current.entry.source ?? current.profile.name,
+                          ],
                           ...(current.entry.transport === "stdio"
                             ? ([
                                 ["启动命令", current.entry.command ?? "—"],
@@ -1241,12 +1341,15 @@ export function McpView({
                         })
                   }
                   toggle={
-                    <ToggleSwitch
-                      label={current.entry.name + " 启用"}
-                      checked={current.entry.enabled}
-                      pending={pendingWrites.has(targetKey(current))}
-                      onChange={(enabled) => toggleService(current, enabled)}
-                    />
+                    (current.source !== "native" ||
+                      !current.entry.readOnly) && (
+                      <ToggleSwitch
+                        label={current.entry.name + " 启用"}
+                        checked={current.entry.enabled}
+                        pending={pendingWrites.has(targetKey(current))}
+                        onChange={(enabled) => toggleService(current, enabled)}
+                      />
+                    )
                   }
                   actions={
                     <>
@@ -1319,31 +1422,45 @@ export function McpView({
                   source: "native",
                   entry: editing.entry,
                   transports: nativeTransports,
+                  scoped: hasScopedNative,
+                  testStdio: hasHostInspection,
                   submit: async (draft) => {
                     const change = {
                       kind: "save" as const,
-                      previousName: editing.entry.name,
+                      previousName: editing.entry?.name ?? null,
                       draft,
                     };
                     checkName(change);
-                    await service.nativeChange(
+                    const revision = await service.nativeChange(
                       agentId,
                       editing.profile,
                       editing.snapshot.revision,
                       change,
                     );
+                    if (
+                      hasScopedNative &&
+                      revision !== editing.snapshot.revision
+                    )
+                      feedback?.({
+                        message: "原生 MCP 配置已保存，将在新会话中生效",
+                        variant: "ok",
+                      });
                     setRefresh((version) => version + 1);
                   },
-                  test: canTest
-                    ? (draft) =>
-                        service.test(agentId, {
-                          source: "native",
-                          profile: editing.profile,
-                          previousName: editing.entry.name,
-                          revision: editing.snapshot.revision,
-                          draft,
-                        })
-                    : undefined,
+                  test:
+                    canTest || hasHostInspection
+                      ? (draft) =>
+                          service.test(agentId, {
+                            source: "native",
+                            profile: editing.profile,
+                            previousName: editing.entry?.name ?? null,
+                            entryId: editing.entry?.id,
+                            entryRevision: editing.entry?.connectionRevision,
+                            workspace: nativeWorkspace,
+                            revision: editing.snapshot.revision,
+                            draft,
+                          })
+                      : undefined,
                 }
               : {
                   source: "managed",

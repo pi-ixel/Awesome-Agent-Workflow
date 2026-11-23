@@ -246,6 +246,7 @@ pub fn run() {
             mcp_management::mcp_managed_resolve,
             mcp_management::mcp_managed_retire,
             mcp_management::mcp_managed_inspect,
+            mcp_management::mcp_native_inspect,
             mcp_management::mcp_inspection_read,
             mcp_management::mcp_inspection_save,
             mcp_management::mcp_browser_tools,

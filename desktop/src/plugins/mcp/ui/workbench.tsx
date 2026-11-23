@@ -48,6 +48,13 @@ export function McpWorkbench({
     project.projects.workspace,
     (state) => state.toolPaths,
   );
+  const activePath = useStore(
+    project.projects.workspace,
+    (state) => state.activePath,
+  );
+  const nativeWorkspace = capabilities?.native?.scoped
+    ? (activePath ?? undefined)
+    : undefined;
   const sessionId =
     session.isBound &&
     session.activeSessionId &&
@@ -61,7 +68,10 @@ export function McpWorkbench({
       }
     >
       <McpView
-        key={JSON.stringify([agentId, profile])}
+        key={JSON.stringify([agentId, profile, nativeWorkspace])}
+        nativeWorkspace={nativeWorkspace}
+        hasScopedNative={!!capabilities?.native?.scoped}
+        hasHostInspection={!!capabilities?.native?.hostInspection}
         service={service}
         agentId={agentId}
         activeProfile={profile}
