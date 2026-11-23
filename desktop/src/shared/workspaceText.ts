@@ -31,6 +31,12 @@ export function formatWorkspacePathLabel(path: string): string {
   return path;
 }
 
+/** 可复制到剪贴板的项目/文件路径：远程项目还原为真实远端路径，本地项目原样返回。 */
+export function formatCopyablePath(path: string): string {
+  const remote = parseRemoteProjectPath(path);
+  return remote ? remote.remotePath : path;
+}
+
 /** ISO 时间 → 中文相对时间（刚刚 / N 分钟前 / N 小时前 / 日期）。 */
 export function formatLastOpened(iso: string, now: Date = new Date()): string {
   const time = Date.parse(iso);

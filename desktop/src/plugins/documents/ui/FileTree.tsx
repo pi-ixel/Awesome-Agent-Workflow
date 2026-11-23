@@ -50,7 +50,13 @@ import {
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
 import { RefreshButton } from "../../../shared/ui/controls/RefreshButton.tsx";
 import { FilePreview } from "./FilePreview.tsx";
-import { insidePath, normalizePath, pathKey } from "../../../shared/panelPaths.ts";
+import {
+  insidePath,
+  isRemoteProjectPath,
+  normalizePath,
+  pathKey,
+} from "../../../shared/panelPaths.ts";
+import { formatCopyablePath } from "../../../shared/workspaceText.ts";
 import { useFeedback } from "../../../shared/ui/feedback.ts";
 import { usePanelWatch } from "./usePanelWatch.ts";
 import { FileTreeList } from "./file-tree/FileTreeList.tsx";
@@ -582,6 +588,7 @@ export function FileTree({
       setSelectedKey(row.key);
       const deleted =
         row.type === "file" && tree.gitStatusByPath.get(row.key) === "deleted";
+      const remote = isRemoteProjectPath(row.path);
       openMenu(
         `row:${row.key}`,
         row.name,
@@ -598,16 +605,20 @@ export function FileTree({
             },
           },
           { type: "separator" },
-          {
-            id: "reveal",
-            label: getFileManagerRevealLabel(),
-            disabled: deleted,
-            onSelect: () => void revealEntry(row),
-          },
+          ...(remote
+            ? []
+            : [
+                {
+                  id: "reveal",
+                  label: getFileManagerRevealLabel(),
+                  disabled: deleted,
+                  onSelect: () => void revealEntry(row),
+                },
+              ]),
           {
             id: "copy-absolute-path",
             label: "复制绝对路径",
-            onSelect: () => void copyPath(row.path),
+            onSelect: () => void copyPath(formatCopyablePath(row.path)),
           },
           {
             id: "copy-relative-path",
@@ -631,21 +642,26 @@ export function FileTree({
 
   const openHeaderMenu = useCallback(
     (trigger: HTMLButtonElement) => {
+      const remote = isRemoteProjectPath(root);
       openMenu(
         "header",
         "更多",
         [
-          {
-            id: "open-in-file-manager",
-            label: getFileManagerOpenLabel(),
-            icon: <FolderGlyph isExpanded className="ui-icon-16" />,
-            onSelect: () => void openWorkspaceInFileManager(),
-          },
+          ...(remote
+            ? []
+            : [
+                {
+                  id: "open-in-file-manager",
+                  label: getFileManagerOpenLabel(),
+                  icon: <FolderGlyph isExpanded className="ui-icon-16" />,
+                  onSelect: () => void openWorkspaceInFileManager(),
+                },
+              ]),
           {
             id: "copy-path",
             label: "复制路径",
             icon: <CopyIcon className="ui-icon-16" />,
-            onSelect: () => void copyPath(root),
+            onSelect: () => void copyPath(formatCopyablePath(root)),
           },
         ],
         { trigger },

@@ -15,6 +15,7 @@ import { projectConversationPageId } from "../workspace/pageIds.ts";
 import type { WorkbenchUiState } from "../../workbench/types.ts";
 import type { AcpSessionPort } from "../../acpRuntime/types.ts";
 import { withDeadline } from "../../../shared/asyncDeadline.ts";
+import { isRemoteProjectPath } from "../../../shared/panelPaths.ts";
 import type {
   OpenSessionOptions,
   PluginSessionOptions,
@@ -1868,7 +1869,11 @@ export function createSessionCoordinator({
       });
     let candidate: SessionRuntime | null = null;
     const changesHost = getTurnChanges?.();
-    if (changesHost && !viewStore.getState().turnChanges) {
+    if (
+      changesHost &&
+      !isRemoteProjectPath(workspacePath) &&
+      !viewStore.getState().turnChanges
+    ) {
       viewStore.setState({
         turnChanges: createTurnChangesSession(
           changesHost,
