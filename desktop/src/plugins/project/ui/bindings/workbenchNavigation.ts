@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { pathKey } from "../../../../shared/panelPaths.ts";
 import { createSnapshotView } from "../../../../shared/state/readonlySnapshot.ts";
 import type { WorkbenchLayout } from "../../../workbench/types.ts";
@@ -12,7 +13,8 @@ export function createProjectViewNavigation(
   options: {
     readonly isCurrent: () => boolean;
     readonly openFileTree: (path: string) => void;
-    readonly openAddRemoteProject?: () => void;
+    readonly openAddRemoteProject?: () => boolean;
+    readonly renderAddProjectForm?: (onClose: () => void) => ReactNode;
   },
 ) {
   const { navigation, navigationGuard } = layout;
@@ -31,9 +33,12 @@ export function createProjectViewNavigation(
     commands: {
       page: page.snapshot,
       addProject: () => addProjectViaDialog(project, layout, isActive),
-      addRemoteProject: () => {
-        if (isActive()) options.openAddRemoteProject?.();
+      addRemoteProject: (): boolean => {
+        if (!isActive()) return false;
+        return options.openAddRemoteProject?.() ?? false;
       },
+      renderAddProjectForm: (onClose: () => void): ReactNode =>
+        options.renderAddProjectForm?.(onClose) ?? null,
       showOverview,
       showConversation: (path: string) => {
         if (isActive()) project.sessions.showConversation(path);

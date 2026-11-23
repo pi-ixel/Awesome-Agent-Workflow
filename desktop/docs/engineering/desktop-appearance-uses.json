@@ -101,18 +101,22 @@
   ],
   "plugins/project/usage/UsageSettings.tsx": ["Trend · <canvas>"],
   "plugins/remoteProject/ui/AddRemoteProjectModal.tsx": [
-    "AddRemoteProjectModal · <input>",
-    "AddRemoteProjectModal · <input>",
-    "AddRemoteProjectModal · <input>",
-    "AddRemoteProjectModal · <input>",
-    "AddRemoteProjectModal · <input>",
-    "AddRemoteProjectModal · <input>",
-    "AddRemoteProjectModal · <input>",
-    "AddRemoteProjectModal · <input>",
-    "AddRemoteProjectModal · <input>",
-    "AddRemoteProjectModal · <input>",
-    "AddRemoteProjectModal · <input>",
-    "AddRemoteProjectModal · <input>"
+    "CreateProjectFormBody · <input>"
+  ],
+  "plugins/remoteProject/ui/RemoteDirectoryPickerModal.tsx": [
+    "RemoteDirectoryPickerModal · <input>"
+  ],
+  "plugins/remoteProject/ui/RemoteHostFormModal.tsx": [
+    "RemoteHostFormModal · <input>",
+    "RemoteHostFormModal · <input>",
+    "RemoteHostFormModal · <input>",
+    "RemoteHostFormModal · <input>",
+    "RemoteHostFormModal · <input>",
+    "RemoteHostFormModal · <input>",
+    "RemoteHostFormModal · <input>",
+    "RemoteHostFormModal · <input>",
+    "RemoteHostFormModal · <input>",
+    "RemoteHostFormModal · <input>"
   ],
   "plugins/scheduledTasks/ui/TaskViews.tsx": [
     "TaskEditor · <input>",

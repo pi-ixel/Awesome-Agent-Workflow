@@ -799,6 +799,14 @@
     },
     "targets": []
   },
+  "plugins/project/ui/bindings/workbenchNavigation.ts": {
+    "definitions": {
+      "提示与确认": ["createProjectViewNavigation/renderAddProjectForm"]
+    },
+    "targets": [
+      "createProjectViewNavigation/renderAddProjectForm → (inline)"
+    ]
+  },
   "plugins/project/ui/preferencesView.tsx": {
     "definitions": {
       "布局与操纵": [
@@ -846,7 +854,8 @@
       "布局与操纵": [
         "apply/LegacyAgentData",
         "apply/Sidebar",
-        "apply/exitDetails/\"project-approvals\"/View"
+        "apply/exitDetails/\"project-approvals\"/View",
+        "apply/renderAddProjectForm"
       ]
     },
     "targets": [
@@ -856,6 +865,7 @@
       "apply/headers/header.id/View → withProjectView(header.View, projectView)",
       "apply/overlays/View → withProjectView(projectOverlay.View, projectView)",
       "apply/pages/View → withProjectView(page.View, projectView)",
+      "apply/renderAddProjectForm → (inline)",
       "apply/settings → plugins/project/usage/settingsEntry.ts#createUsageSettingsEntry",
       "apply/settings/View → withProjectView(settings.View, projectView)",
       "apply/sidebar/\"project-tree\"/Icon → shared/ui/icons.tsx#MessageCircleIcon",
@@ -914,16 +924,42 @@
   },
   "plugins/remoteProject/ui/AddRemoteProjectModal.tsx": {
     "definitions": {
-      "提示与确认": ["AddRemoteProjectModal"]
+      "提示与确认": ["AddRemoteProjectModal", "CreateProjectFormBody"]
+    },
+    "targets": []
+  },
+  "plugins/remoteProject/ui/RemoteDirectoryPickerModal.tsx": {
+    "definitions": {
+      "提示与确认": ["RemoteDirectoryPickerModal"]
+    },
+    "targets": []
+  },
+  "plugins/remoteProject/ui/RemoteHostFormModal.tsx": {
+    "definitions": {
+      "提示与确认": ["RemoteHostFormModal"]
+    },
+    "targets": []
+  },
+  "plugins/remoteProject/ui/RemoteHostsSettings.tsx": {
+    "definitions": {
+      "布局与操纵": ["RemoteHostsSettings"]
     },
     "targets": []
   },
   "plugins/remoteProject/ui/workbench.tsx": {
     "definitions": {
-      "提示与确认": ["apply/RemoteProjectModalOverlay"]
+      "布局与操纵": ["apply/settings/\"remote-hosts\"/View"],
+      "提示与确认": [
+        "apply/EmbeddedAddProjectForm",
+        "apply/RemoteProjectModalOverlay",
+        "apply/renderAddProjectForm"
+      ]
     },
     "targets": [
-      "apply/overlays/\"remote-project-add-modal\"/View → plugins/remoteProject/ui/workbench.tsx#apply/RemoteProjectModalOverlay"
+      "apply/overlays/\"remote-project-add-modal\"/View → plugins/remoteProject/ui/workbench.tsx#apply/RemoteProjectModalOverlay",
+      "apply/renderAddProjectForm → (inline)",
+      "apply/settings/\"remote-hosts\"/Icon → shared/ui/icons.tsx#GlobeIcon",
+      "apply/settings/\"remote-hosts\"/View → (inline)"
     ]
   },
   "plugins/scheduledTasks/index.ts": {

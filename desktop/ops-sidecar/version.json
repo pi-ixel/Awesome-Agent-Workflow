@@ -1,0 +1,22 @@
+{
+  "repo": "Tudou77826/OpsCopilot",
+  "tag": "ops-sidecar-v0.1.0",
+  "assets": {
+    "win32-x64": {
+      "file": "ops-sidecar-windows-amd64.exe",
+      "sha256": "6e0ea28d43833cdfe018dd06ec45b77f915c2dbb12b13ab50f8b4fb7b298c8ad"
+    },
+    "linux-x64": {
+      "file": "ops-sidecar-linux-amd64",
+      "sha256": "d467bbae312d0bef980e4c739da27d6c454162c431d8c27b555e4176280158a1"
+    },
+    "darwin-arm64": {
+      "file": "ops-sidecar-darwin-arm64",
+      "sha256": "96ecd03cefd6bb8f3aaaba06cef28febcbc0c8f2c22e939c16d15c69bf4de8cf"
+    },
+    "darwin-x64": {
+      "file": "ops-sidecar-darwin-amd64",
+      "sha256": "930073ab12f4a32e7a72e4638d7cc45a4b6ceb34c7f9bba14862d07ceaa2873e"
+    }
+  }
+}

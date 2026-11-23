@@ -1,31 +1,19 @@
+import { useState, type RefObject } from "react";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
-import { useWorkspaceValue } from "./bindings/workspaceView.ts";
-import { useProject, useProjectNavigation } from "./bindings/projectView.tsx";
-/**
- * 【+】弹出面板：树段头【+】与图标窄栏「新建会话」共用的落点，绝对定位
- * 小面板，点外部 / Esc 关闭。
- *
- * 两个 tab：
- * - 「新建会话」（默认）：列出已知项目（收藏 + 最近），点击任一项目 →
- *   关面板 → 直接在该项目里开始一条空对话（未连接先连接，见
- *   sessionStart）。AAW 入口向导不在这里强加：会话内想走 AAW 流程时
- *   从 AAW 面板拉起来。行尾只在项目**有连接状态**时显示徽标（未连接
- *   不渲染）。
- * - 「添加项目」：系统目录对话框，添加成功后关面板并选中新项目进总览
- *   （见 addProjectFlow；进项目只到总览，连接是总览里显式的一步）。
- */
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type RefObject,
-} from "react";
-
 import { ActionButton } from "../../../shared/ui/controls.tsx";
+import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { SidebarItemTitle } from "../../../shared/ui/SidebarItemTitle.tsx";
-import { basenameOf, formatLastOpened, formatWorkspacePathLabel } from "../../../shared/workspaceText.ts";
+import { FolderGlyph, GlobeIcon, XIcon } from "../../../shared/ui/icons.tsx";
+import { isRemoteProjectPath } from "../../../shared/panelPaths.ts";
+import {
+  basenameOf,
+  formatLastOpened,
+  formatWorkspacePathLabel,
+} from "../../../shared/workspaceText.ts";
+import { useWorkspaceValue } from "./bindings/workspaceView.ts";
+import { useProject, useProjectNavigation } from "./bindings/projectView.tsx";
 
 type AddPanelTab = "new-session" | "add-project";
 
@@ -34,12 +22,11 @@ const ADD_PANEL_LABEL = "新建会话面板";
 interface AddProjectPanelProps {
   /** 点外部 / Esc / 完成动作后的关闭回调。 */
   readonly onClose: () => void;
-  /** 【+】触发按钮的 ref：外部点击判定把它排除在外，
-   *  否则「点触发按钮收起」会先被 onClose 关掉再被 toggle 打开。 */
-  readonly triggerRef: RefObject<HTMLElement | null>;
+  /** 保留兼容：原下拉触发按钮 ref（弹窗形态下由 ModalShell 统一管理焦点）。 */
+  readonly triggerRef?: RefObject<HTMLElement | null>;
 }
 
-/** 已知项目（收藏 + 最近）的一行：名称 + 最近打开时间 + 连接徽标。 */
+/** 已知项目（收藏 + 最近）的一行：图标 + 名称 + 最近打开时间。 */
 function KnownProjectRow({
   path,
   lastOpenedAt,
@@ -50,6 +37,7 @@ function KnownProjectRow({
   readonly onClose: () => void;
 }) {
   const projectService = useProject();
+  const remote = isRemoteProjectPath(path);
   return (
     <li>
       <NavigationRow
@@ -58,76 +46,41 @@ function KnownProjectRow({
           void projectService?.sessions.startNewSession(path);
           onClose();
         }}
+        className="px-3 py-2"
       >
+        {remote ? (
+          <GlobeIcon className="ui-icon-16 shrink-0 text-ink-mute" />
+        ) : (
+          <FolderGlyph className="ui-icon-16 shrink-0 text-ink-mute" />
+        )}
         <span className="flex min-w-0 flex-1 flex-col">
           <SidebarItemTitle>{basenameOf(path)}</SidebarItemTitle>
-          {lastOpenedAt !== null && (
-            <span className="truncate text-ui-caption text-ink-mute">
-              {formatLastOpened(lastOpenedAt)}
-            </span>
-          )}
+          <span className="truncate font-mono text-ui-caption text-ink-ghost">
+            {formatWorkspacePathLabel(path)}
+          </span>
         </span>
+        {lastOpenedAt !== null && (
+          <span className="shrink-0 text-ui-caption text-ink-mute">
+            {formatLastOpened(lastOpenedAt)}
+          </span>
+        )}
       </NavigationRow>
     </li>
   );
 }
 
-export function AddProjectPanel({ onClose, triggerRef }: AddProjectPanelProps) {
+/**
+ * 左上角「新建会话」按钮弹窗：与「创建项目」弹窗保持一致的视觉样式。
+ * 区分「在现有项目中新建会话」和「新建项目」。
+ */
+export function AddProjectPanel({ onClose }: AddProjectPanelProps) {
   const projectNav = useProjectNavigation();
   const addProject = projectNav?.addProject;
-  const addRemoteProject = projectNav?.addRemoteProject;
+  const embeddedAddProjectNode = projectNav?.renderAddProjectForm?.(onClose) ?? null;
   const [tab, setTab] = useState<AddPanelTab>("new-session");
   const [isDialogUnavailable, setIsDialogUnavailable] = useState(false);
   const recentWorkspaces = useWorkspaceValue((state) => state.recentWorkspaces);
   const pinnedPaths = useWorkspaceValue((state) => state.pinnedPaths);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const opener = useRef<HTMLElement | null>(null);
-  useLayoutEffect(() => {
-    const active = document.activeElement;
-    opener.current =
-      active instanceof HTMLElement && active !== document.body
-        ? active
-        : triggerRef.current;
-    containerRef.current
-      ?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
-      ?.focus({ preventScroll: true });
-  }, [triggerRef]);
-
-  // 点外部 / Esc 关闭（与顶栏待办下拉同一收口模式）；触发按钮不视为外部
-  useEffect(() => {
-    function isOutside(node: Node): boolean {
-      const container = containerRef.current;
-      if (container !== null && container.contains(node)) {
-        return false;
-      }
-      const trigger = triggerRef.current;
-      return trigger === null || !trigger.contains(node);
-    }
-    function handlePointerDown(event: PointerEvent): void {
-      if (isOutside(event.target as Node)) {
-        onClose();
-      }
-    }
-    function handleKeyDown(event: KeyboardEvent): void {
-      if (event.key === "Escape") {
-        // preventDefault 标记 Esc 已被浮层消费（SessionView 的全局停止让位）
-        event.preventDefault();
-        if (containerRef.current?.contains(document.activeElement)) {
-          const previous = opener.current;
-          (previous?.isConnected ? previous : triggerRef.current)?.focus({
-            preventScroll: true,
-          });
-        }
-        onClose();
-      }
-    }
-    window.addEventListener("pointerdown", handlePointerDown);
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("pointerdown", handlePointerDown);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [onClose, triggerRef]);
 
   const lastOpenedByPath = new Map(
     recentWorkspaces.map((entry) => [entry.path, entry.lastOpenedAt] as const),
@@ -148,88 +101,95 @@ export function AddProjectPanel({ onClose, triggerRef }: AddProjectPanelProps) {
   async function handleAddProject(): Promise<void> {
     const path = await addProject?.();
     if (path) {
-      // 添加成功：addProjectFlow 已选中并进总览，这里收口关面板
       setIsDialogUnavailable(false);
       onClose();
       return;
     }
-    // 取消与环境不支持都返回 null；提示用户重试或从列表选择
     setIsDialogUnavailable(true);
   }
 
   return (
-    <div
-      ref={containerRef}
-      aria-label={ADD_PANEL_LABEL}
-      className="absolute top-full right-0 left-0 z-40 mt-1 overflow-hidden rounded-lg border border-line-strong bg-surface shadow-floating"
-    >
-      <div className="border-b border-line px-2 py-1.5">
-        <SegmentedControl
-          tabs
-          groupLabel="面板视图"
-          value={tab}
-          onChange={setTab}
-          options={[
-            { value: "new-session", label: "新建会话" },
-            { value: "add-project", label: "添加项目" },
-          ]}
-        />
+    <ModalShell onDismiss={onClose} label={ADD_PANEL_LABEL} size="default">
+      {/* 顶部标题栏：与创建项目弹窗视觉一致 */}
+      <div className="flex items-center justify-between px-5 pt-4 pb-3">
+        <h2 className="text-ui-lg font-semibold text-ink">
+          {tab === "new-session" ? "新建会话" : "新建项目"}
+        </h2>
+        <IconButton aria-label="关闭" onClick={onClose}>
+          <XIcon className="ui-icon-16" />
+        </IconButton>
       </div>
 
-      {tab === "new-session" ? (
-        <div className="p-1.5">
-          {knownProjects.length === 0 ? (
-            <p className="px-2 py-3 text-center text-ui-xs text-ink-ghost">
-              暂无已知项目；先在「添加项目」中选择目录。
-            </p>
-          ) : (
-            <ul
-              aria-label="选择项目开始新会话"
-              className="flex flex-col gap-0.5"
-            >
-              {knownProjects.map((entry) => (
-                <KnownProjectRow
-                  key={entry.path}
-                  path={entry.path}
-                  lastOpenedAt={entry.lastOpenedAt}
-                  onClose={onClose}
-                />
-              ))}
-            </ul>
-          )}
+      {/* 主体内容 */}
+      <div className="flex flex-col gap-4 px-5 pb-5">
+        <div>
+          <SegmentedControl
+            tabs
+            groupLabel="面板视图"
+            value={tab}
+            onChange={setTab}
+            options={[
+              { value: "new-session", label: "新建会话" },
+              { value: "add-project", label: "新建项目" },
+            ]}
+          />
         </div>
-      ) : (
-        <div className="flex flex-col gap-2 p-2">
-          {/* 常规操作用 secondary 描边：添加项目是入口动作而非主操作 */}
-          <ActionButton
-            tone="secondary"
-            type="button"
-            onClick={() => void handleAddProject()}
-            className="px-3 py-2 text-ui-sm"
-          >
-            添加项目…
-          </ActionButton>
-          {addRemoteProject && (
+
+        {tab === "new-session" ? (
+          <div className="max-h-[320px] min-h-[168px] overflow-y-auto rounded-xl border border-line-strong bg-raised/30 p-1.5">
+            {knownProjects.length === 0 ? (
+              <div className="flex min-h-[156px] flex-col items-center justify-center gap-2 px-4 text-center">
+                <p className="text-ui-sm text-ink-mute">
+                  暂无已有项目，请先新建一个项目。
+                </p>
+                <ActionButton
+                  tone="secondary"
+                  type="button"
+                  onClick={() => setTab("add-project")}
+                  className="px-3.5 py-1.5 text-ui-xs"
+                >
+                  去新建项目
+                </ActionButton>
+              </div>
+            ) : (
+              <ul
+                aria-label="选择项目开始新会话"
+                className="flex flex-col gap-0.5"
+              >
+                {knownProjects.map((entry) => (
+                  <KnownProjectRow
+                    key={entry.path}
+                    path={entry.path}
+                    lastOpenedAt={entry.lastOpenedAt}
+                    onClose={onClose}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : embeddedAddProjectNode !== null ? (
+          embeddedAddProjectNode
+        ) : (
+          <div className="flex min-h-[168px] flex-col items-center justify-center gap-3 rounded-xl border border-line-strong bg-raised/30 px-5 py-6 text-center">
+            <FolderGlyph className="ui-icon-20 text-ink-mute" />
             <ActionButton
-              tone="secondary"
+              tone="primary"
               type="button"
-              onClick={() => {
-                onClose();
-                addRemoteProject();
-              }}
-              className="px-3 py-2 text-ui-sm"
+              onClick={() => void handleAddProject()}
+              className="inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-ui-sm"
             >
-              添加远程项目（SSH）…
+              <FolderGlyph className="ui-icon-14 shrink-0" />
+              <span>选择本地文件夹…</span>
             </ActionButton>
-          )}
-          {isDialogUnavailable && (
-            <p className="text-ui-xs text-warn-ink">
-              目录选择不可用或已取消；可重试，或从「新建会话」列表选择已有项目。
-            </p>
-          )}
-        </div>
-      )}
-    </div>
+            {isDialogUnavailable && (
+              <p className="text-ui-xs text-warn-ink">
+                目录选择不可用或已取消；可重试，或从「新建会话」列表选择已有项目。
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    </ModalShell>
   );
 }
 

@@ -1,5 +1,5 @@
 import type { Context } from "cordis";
-import { createElement } from "react";
+import { createElement, type ReactNode } from "react";
 import { createStore } from "zustand";
 import { MessageCircleIcon } from "../../../shared/ui/icons.tsx";
 import type { SkillsService } from "../../skills/service.ts";
@@ -47,12 +47,18 @@ export function apply(ctx: Context): void {
   /** 插件给项目界面的扩展（project:extension 绑定）；会话页、侧栏与总览共用。 */
   const extension = createStore<{ view?: ProjectExtension }>(() => ({}));
   let openAddRemoteProject: (() => void) | undefined;
+  let renderAddProjectForm: ((onClose: () => void) => ReactNode) | undefined;
   let active = true;
   const isCurrent = () => active && project.isActive();
   const navigation = createProjectViewNavigation(workbench, project, {
     isCurrent,
     openFileTree: (path) => documentView.getState().openFileTree?.(path),
-    openAddRemoteProject: () => openAddRemoteProject?.(),
+    openAddRemoteProject: () => {
+      if (!openAddRemoteProject) return false;
+      openAddRemoteProject();
+      return true;
+    },
+    renderAddProjectForm: (onClose) => renderAddProjectForm?.(onClose) ?? null,
   });
   const projectView = {
     project,
@@ -122,8 +128,12 @@ export function apply(ctx: Context): void {
       const ui = scoped.remoteProjectUi;
       scoped.effect(() => {
         openAddRemoteProject = ui ? () => ui.openAddRemoteProject() : undefined;
+        renderAddProjectForm = ui?.renderAddProjectForm
+          ? (onClose) => ui.renderAddProjectForm?.(onClose) ?? null
+          : undefined;
         return () => {
           openAddRemoteProject = undefined;
+          renderAddProjectForm = undefined;
         };
       });
     });

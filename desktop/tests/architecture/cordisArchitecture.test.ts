@@ -536,6 +536,7 @@ it("keeps plugin names and dependency relations aligned with their production ow
       "archive",
       "browser",
       "general",
+      "remote-hosts",
       "scheduled-tasks",
       "session",
       "storage",

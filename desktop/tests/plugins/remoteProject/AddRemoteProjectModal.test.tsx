@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createStore } from "zustand";
 import { createSnapshotView } from "../../../src/shared/state/readonlySnapshot.ts";
 import { AddRemoteProjectModal } from "../../../src/plugins/remoteProject/ui/AddRemoteProjectModal.tsx";
+import { RemoteHostsSettings } from "../../../src/plugins/remoteProject/ui/RemoteHostsSettings.tsx";
 import type {
   RemoteConnectionDTO,
   RemoteFSListResult,
@@ -12,7 +13,9 @@ import type {
 } from "../../../src/plugins/remoteProject/service.ts";
 import { formatRemoteProjectPath } from "../../../src/shared/panelPaths.ts";
 
-function createMockService(overrides: Partial<RemoteProjectService> = {}): RemoteProjectService {
+function createMockService(
+  overrides: Partial<RemoteProjectService> = {},
+): RemoteProjectService {
   const store = createStore<RemoteProjectStoreSnapshot>(() => ({
     records: [],
     recentDirsByConnection: {},
@@ -26,19 +29,15 @@ function createMockService(overrides: Partial<RemoteProjectService> = {}): Remot
       port: 22,
       user: "alice",
       hasPassword: true,
-      hostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestAlice",
-      hostKeyFingerprint: "SHA256:alicefp",
       revision: 0,
     },
     {
       id: "conn-bob",
       name: "Dev Bob",
-      host: "10.0.0.1",
+      host: "10.0.0.2",
       port: 22,
       user: "bob",
       hasPassword: true,
-      hostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestBob",
-      hostKeyFingerprint: "SHA256:bobfp",
       revision: 0,
     },
   ];
@@ -48,13 +47,13 @@ function createMockService(overrides: Partial<RemoteProjectService> = {}): Remot
     getByPath: () => null,
     getById: () => null,
     listProjectsForConnection: () => [],
-    addProject: (connectionId, remoteRoot): RemoteProjectRecord => ({
+    addProject: (connectionId, remoteRoot, name): RemoteProjectRecord => ({
       projectId: `rp_${connectionId}`,
       connectionId,
       remoteRoot,
       workspacePath: formatRemoteProjectPath(`rp_${connectionId}`, remoteRoot),
       agentCwd: `remote-projects/rp_${connectionId}`,
-      name: remoteRoot.split("/").filter(Boolean).at(-1) ?? "/",
+      name: name ?? remoteRoot.split("/").filter(Boolean).at(-1) ?? "/",
       createdAt: "2026-01-01T00:00:00Z",
       lastOpenedAt: "2026-01-01T00:00:00Z",
     }),
@@ -65,24 +64,34 @@ function createMockService(overrides: Partial<RemoteProjectService> = {}): Remot
     updateConnection: vi.fn(),
     deleteConnection: vi.fn(),
     testConnection: vi.fn(),
-    listDirectory: vi.fn().mockImplementation((connectionId: string, path: string): Promise<RemoteFSListResult> => {
-      const resolved = path || (connectionId === "conn-alice" ? "/home/alice" : "/home/bob");
-      return Promise.resolve({
-        path: resolved,
-        parentPath: "/",
-        truncated: false,
-        entries: [
-          {
-            path: `${resolved}/repo`,
-            name: "repo",
-            directory: true,
-            symlink: false,
-            size: 0,
-            mtime: 1,
-          },
-        ],
-      });
-    }),
+    listDirectory: vi
+      .fn()
+      .mockImplementation(
+        (connectionId: string, path: string): Promise<RemoteFSListResult> => {
+          const resolved =
+            path ||
+            (connectionId === "conn-alice"
+              ? "/home/alice"
+              : connectionId === "conn-new"
+                ? "/home/dev"
+                : "/home/bob");
+          return Promise.resolve({
+            path: resolved,
+            parentPath: "/",
+            truncated: false,
+            entries: [
+              {
+                path: `${resolved}/repo`,
+                name: "repo",
+                directory: true,
+                symlink: false,
+                size: 0,
+                mtime: 1,
+              },
+            ],
+          });
+        },
+      ),
     stat: vi.fn(),
     preview: vi.fn(),
     listWorkspaceFiles: vi.fn().mockResolvedValue([]),
@@ -103,7 +112,31 @@ function createMockService(overrides: Partial<RemoteProjectService> = {}): Remot
 }
 
 describe("AddRemoteProjectModal", () => {
-  it("支持直接测试连接并保存连接（无需主机指纹确认）", async () => {
+  it("支持默认在此电脑选择本地目录并创建本地项目", async () => {
+    const service = createMockService();
+    const onPickLocalDirectory = vi.fn().mockResolvedValue("D:/work/demo-app");
+    const onLocalAdded = vi.fn();
+    const onClose = vi.fn();
+
+    render(
+      <AddRemoteProjectModal
+        service={service}
+        onClose={onClose}
+        onAdded={vi.fn()}
+        onPickLocalDirectory={onPickLocalDirectory}
+        onLocalAdded={onLocalAdded}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    await screen.findByText("D:/work/demo-app");
+
+    fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
+    expect(onLocalAdded).toHaveBeenCalledWith("D:/work/demo-app");
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("可通过设备胶囊菜单添加远程主机并自动切换至该主机", async () => {
     const testConnection = vi.fn().mockResolvedValueOnce({
       status: "ok",
       homeDir: "/home/dev",
@@ -127,40 +160,95 @@ describe("AddRemoteProjectModal", () => {
         service={service}
         onClose={vi.fn()}
         onAdded={vi.fn()}
+        onPickLocalDirectory={vi.fn().mockResolvedValue(null)}
+        onLocalAdded={vi.fn()}
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: /切换设备/ }));
     await screen.findByText("Dev Alice");
-    fireEvent.click(screen.getByRole("button", { name: "新建连接" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "添加远程主机" }));
 
-    fireEvent.change(screen.getByPlaceholderText("例如：测试机-Alice"), {
+    fireEvent.change(screen.getByLabelText("连接名称"), {
       target: { value: "New Box" },
     });
-    fireEvent.change(screen.getByPlaceholderText("10.0.0.1"), {
+    fireEvent.change(screen.getByLabelText("主机地址"), {
       target: { value: "10.0.0.9" },
     });
-    fireEvent.change(screen.getByPlaceholderText("dev"), {
+    fireEvent.change(screen.getByLabelText("用户名"), {
       target: { value: "dev" },
     });
 
     fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
     await screen.findByText(/连接成功，远端家目录：\/home\/dev/);
 
-    fireEvent.click(screen.getByRole("button", { name: "保存连接" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存主机" }));
     await waitFor(() => {
       expect(createConnection).toHaveBeenCalledWith(
         expect.objectContaining({
+          name: "New Box",
           host: "10.0.0.9",
           user: "dev",
         }),
       );
     });
+
+    // 保存后回到创建项目弹窗并自动选中 New Box
+    await screen.findByRole("button", { name: /切换设备，当前：New Box/ });
   });
 
-  it("连接仍被项目引用时阻止删除并展示引用项目，且浏览后可添加远程项目", async () => {
-    const deleteConnection = vi.fn();
+  it("切换远程主机后点击「添加」打开专用远端目录选择器，选定目录后可创建远程项目", async () => {
     const onAdded = vi.fn();
     const onClose = vi.fn();
+    const service = createMockService();
+
+    render(
+      <AddRemoteProjectModal
+        service={service}
+        onClose={onClose}
+        onAdded={onAdded}
+        onPickLocalDirectory={vi.fn().mockResolvedValue(null)}
+        onLocalAdded={vi.fn()}
+      />,
+    );
+
+    // 切换设备为 Dev Alice
+    fireEvent.click(screen.getByRole("button", { name: /切换设备/ }));
+    const aliceItem = await screen.findByRole("menuitemradio", {
+      name: /Dev Alice/,
+    });
+    fireEvent.click(aliceItem);
+
+    // 点击「添加」打开专用远端目录选择器
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    const repoBtn = await screen.findByRole("button", { name: "repo" });
+    fireEvent.click(repoBtn);
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("/home/alice/repo")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "选择此文件夹" }));
+
+    // 回到创建项目弹窗，确认已展示选中目录并可自定义项目名
+    await screen.findByText("/home/alice/repo");
+    fireEvent.change(screen.getByLabelText("项目名称"), {
+      target: { value: "My Remote Repo" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
+
+    expect(onAdded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionId: "conn-alice",
+        remoteRoot: "/home/alice/repo",
+        name: "My Remote Repo",
+      }),
+    );
+    expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe("RemoteHostsSettings", () => {
+  it("连接仍被项目引用时阻止删除并展示引用项目", async () => {
+    const deleteConnection = vi.fn();
     const service = createMockService({
       deleteConnection,
       listProjectsForConnection: (id) =>
@@ -170,7 +258,10 @@ describe("AddRemoteProjectModal", () => {
                 projectId: "rp_1",
                 connectionId: "conn-alice",
                 remoteRoot: "/home/alice/existing",
-                workspacePath: formatRemoteProjectPath("rp_1", "/home/alice/existing"),
+                workspacePath: formatRemoteProjectPath(
+                  "rp_1",
+                  "/home/alice/existing",
+                ),
                 agentCwd: "remote-projects/rp_1",
                 name: "existing",
                 createdAt: "2026-01-01T00:00:00Z",
@@ -180,33 +271,11 @@ describe("AddRemoteProjectModal", () => {
           : [],
     });
 
-    render(
-      <AddRemoteProjectModal
-        service={service}
-        onClose={onClose}
-        onAdded={onAdded}
-      />,
-    );
+    render(<RemoteHostsSettings service={service} />);
 
     await screen.findByText("Dev Alice");
-    const deleteButtons = screen.getAllByRole("button", { name: "删除" });
-    fireEvent.click(deleteButtons[0]!);
-    await screen.findByText(/该连接仍被以下远程项目引用/);
+    fireEvent.click(screen.getByRole("button", { name: "删除 Dev Alice" }));
+    await screen.findByText(/无法删除：以下远程项目仍在使用该主机/);
     expect(deleteConnection).not.toHaveBeenCalled();
-
-    // 进入子目录 repo 并点击添加项目
-    const repoBtn = await screen.findByRole("button", { name: "repo" });
-    fireEvent.click(repoBtn);
-    await waitFor(() => {
-      expect(screen.getByDisplayValue("/home/alice/repo")).toBeTruthy();
-    });
-    fireEvent.click(screen.getByRole("button", { name: "添加项目" }));
-    expect(onAdded).toHaveBeenCalledWith(
-      expect.objectContaining({
-        connectionId: "conn-alice",
-        remoteRoot: "/home/alice/repo",
-      }),
-    );
-    expect(onClose).toHaveBeenCalled();
   });
 });

@@ -142,6 +142,9 @@ jobs:
       - name: Build workflow engine sidecar
         run: npm run workflow:build:debug
 
+      - name: Fetch ops-sidecar binary
+        run: npm run ops:fetch
+
       - name: Workflow engine tests
         run: cargo test --manifest-path workflow-engine-rs/Cargo.toml --locked --no-fail-fast -- --skip real_icode
 

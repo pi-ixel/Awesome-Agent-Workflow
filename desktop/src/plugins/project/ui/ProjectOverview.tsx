@@ -77,6 +77,9 @@ function ProjectSetup() {
   const [isDialogUnavailable, setIsDialogUnavailable] = useState(false);
 
   const handleAddProject = (): void => {
+    if (addRemoteProject?.()) {
+      return;
+    }
     void addProject?.().then((path) => {
       if (path === null) {
         setIsDialogUnavailable(true);
@@ -90,21 +93,9 @@ function ProjectSetup() {
         title="从左侧选择或新建一个项目目录，开始与 agent 对话。"
         description="添加后自动检查项目环境。"
         action={
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            <ActionButton tone="primary" type="button" onClick={handleAddProject} className="px-4 py-2 text-ui-base">
-              添加项目
-            </ActionButton>
-            {addRemoteProject && (
-              <ActionButton
-                tone="secondary"
-                type="button"
-                onClick={addRemoteProject}
-                className="px-4 py-2 text-ui-base"
-              >
-                添加远程项目（SSH）
-              </ActionButton>
-            )}
-          </div>
+          <ActionButton tone="primary" type="button" onClick={handleAddProject} className="px-4 py-2 text-ui-base">
+            添加项目
+          </ActionButton>
         }
       />
       {isDialogUnavailable ? (
