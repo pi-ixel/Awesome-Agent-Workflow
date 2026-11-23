@@ -20,7 +20,9 @@ type TestResult = { ok: boolean; message: string; durationMs: number };
 type Editor =
   | {
       source: "native";
-      entry: NativeMcpEntry;
+      entry?: NativeMcpEntry;
+      scoped?: boolean;
+      testStdio?: boolean;
       transports: readonly NativeMcpDraft["transport"][];
       submit: (draft: NativeMcpDraft) => Promise<void>;
       test?: (draft: NativeMcpDraft) => Promise<TestResult>;
@@ -214,7 +216,9 @@ export function McpEditor({
   const isOriginalTransport = native?.transport === transport;
   const isHiddenUrl =
     transport === "http" && isOriginalTransport && native?.url === null;
-  const canTest = !!editor.test && transport === "http";
+  const canTest =
+    !!editor.test &&
+    (transport === "http" || (editor.source === "native" && editor.testStdio));
   const busy = pending !== null;
   const title = entry ? "编辑 MCP" : "新增 MCP";
 
@@ -372,6 +376,12 @@ export function McpEditor({
             disabled={busy}
             className="grid min-h-0 min-w-0 gap-4 overflow-y-auto px-5 py-4"
           >
+            {editor.source === "native" && editor.scoped && (
+              <p className="text-ui-sm text-ink-mute">
+                请求头和环境变量会以明文保存到 CodeAgent 用户配置文件
+                ~/.cac.json。
+              </p>
+            )}
             <Field label="服务名称">
               <input
                 className={settingsInputClass}
@@ -439,14 +449,16 @@ export function McpEditor({
                     onChange={(event) => setCommand(event.target.value)}
                   />
                 </Field>
-                <Field label="工作目录">
-                  <input
-                    className={settingsInputClass}
-                    value={cwd}
-                    placeholder="默认使用会话工作目录"
-                    onChange={(event) => setCwd(event.target.value)}
-                  />
-                </Field>
+                {!(editor.source === "native" && editor.scoped) && (
+                  <Field label="工作目录">
+                    <input
+                      className={settingsInputClass}
+                      value={cwd}
+                      placeholder="默认使用会话工作目录"
+                      onChange={(event) => setCwd(event.target.value)}
+                    />
+                  </Field>
+                )}
                 {replaceArgs || !native?.argsCount || !isOriginalTransport ? (
                   <Field label="启动参数">
                     <textarea

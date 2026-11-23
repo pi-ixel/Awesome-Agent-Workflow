@@ -305,6 +305,7 @@ export class RuntimeConnections implements AcpProtocolResources {
     return {
       ...sessionOptions,
       agentId,
+      processConfigRevision: adapter?.mcpManagement?.native?.processConfig?.revision,
       supportsCustomAnswers:
         agentId === undefined
           ? undefined

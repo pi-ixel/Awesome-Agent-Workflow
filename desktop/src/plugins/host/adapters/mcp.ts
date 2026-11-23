@@ -4,9 +4,10 @@ import type { NativeInvoke } from "./invoke.ts";
 export function createMcpHost(invoke: NativeInvoke): McpManagementHost {
   return {
     native: (provider) => ({
-      read: (profile) => invoke("mcp_native_read", { provider, profile }),
-      readLocal: (selector) =>
-        invoke("mcp_native_read_local", { provider, selector }),
+      read: (profile, workspace) =>
+        invoke("mcp_native_read", { provider, profile, workspace }),
+      readLocal: (selector, workspace) =>
+        invoke("mcp_native_read_local", { provider, selector, workspace }),
       change: (profile, revision, change) =>
         invoke("mcp_native_change", {
           provider,
@@ -17,6 +18,16 @@ export function createMcpHost(invoke: NativeInvoke): McpManagementHost {
       sessionProfile: (sessionId) =>
         invoke("mcp_session_profile", { provider, sessionId }),
       testConfig: (target) => invoke("mcp_test_config", { provider, target }),
+      inspect: (target, program) =>
+        invoke("mcp_native_inspect", {
+          provider,
+          workspace: target.workspace,
+          program,
+          entryId: target.entryId,
+          entryRevision: target.entryRevision,
+          revision: target.revision,
+          target: target.draft,
+        }),
     }),
     managedRead: (agentId) => invoke("mcp_managed_read", { agentId }),
     managedChange: (agentId, revision, change) =>

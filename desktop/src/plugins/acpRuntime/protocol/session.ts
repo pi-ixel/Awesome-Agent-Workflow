@@ -96,7 +96,8 @@ export class AcpSession implements AcpSessionPort {
     clearTimeout(this.cancellationTimer);
     this.cancellationTimer = undefined;
   }
-  private readonly connection: AcpSessionConnection;
+  private connection: AcpSessionConnection;
+  refreshForNewSession?: () => Promise<boolean>;
   private closingSession?: Promise<void>;
   private invalidated = false;
   private readonly elicitationResponder: AcpSessionOptions["onElicitation"];
@@ -142,7 +143,7 @@ export class AcpSession implements AcpSessionPort {
   constructor(
     connection: AcpSessionConnection,
     options: AcpSessionOptions,
-    private readonly releaseSession: () => void,
+    private releaseSession: () => void,
     private readonly logger = createLogger("acp"),
   ) {
     this.onCancellationTimeout = options.onCancellationTimeout;
@@ -164,6 +165,19 @@ export class AcpSession implements AcpSessionPort {
     this.onPromptStart = options.onPromptStart;
     this.onPromptSettled = options.onPromptSettled;
     this.onPromptContext = options.onPromptContext;
+    this.bindConnection();
+  }
+
+  /** 更新尚未创建会话的草稿通道，保持视图绑定和审批回调。 */
+  replaceDraftConnection(connection: AcpSessionConnection, release: () => void): void {
+    if (this.invalidated || this.sessionId !== null) throw new Error("ACP 草稿连接已失效");
+    this.handshake = null;
+    this.connection = connection;
+    this.releaseSession = release;
+    this.bindConnection();
+  }
+
+  private bindConnection(): void {
     this.connection.setNotificationHandler((method, params) => {
       this.dispatchNotification(method, params);
     });

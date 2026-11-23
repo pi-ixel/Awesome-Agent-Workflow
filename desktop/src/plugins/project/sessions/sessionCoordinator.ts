@@ -182,6 +182,7 @@ export function createSessionCoordinator({
     const explicit = runtime.openTools?.(session.agentInfo) ?? [];
     const resolved = await sessionTools.resolve({
       workspacePath: runtime.workspacePath,
+      cwd: runtime.cwd,
       agentKey: runtime.agentKey,
       agentId: runtime.adapter.id,
       sessionId,

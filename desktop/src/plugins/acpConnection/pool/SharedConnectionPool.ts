@@ -16,6 +16,7 @@ type Configuration = {
 type Slot = {
   readonly config: Configuration;
   readonly pool: AcpConnectionPool;
+  readonly processRevision: number;
   users: number;
   isRetiring?: boolean;
   cleanup?: () => Promise<unknown>;
@@ -97,9 +98,13 @@ export class SharedConnectionPool implements AcpSharedConnectionPoolPort {
     this.notify();
   }
 
-  private async create(config: Configuration): Promise<Slot> {
+  private async create(
+    config: Configuration,
+    processRevision = 0,
+  ): Promise<Slot> {
     const slot: Slot = {
       config,
+      processRevision,
       pool: new AcpConnectionPool(config.connect, undefined, undefined, 1),
       users: 0,
     };
@@ -121,9 +126,16 @@ export class SharedConnectionPool implements AcpSharedConnectionPoolPort {
   private async available(
     config: Configuration,
     evict: boolean,
+    minimumProcessRevision = 0,
   ): Promise<Slot | undefined> {
-    const matches = this.slots.filter((slot) => slot.config === config);
-    const ready = this.readySlots(config).sort((a, b) => a.users - b.users)[0];
+    const matches = this.slots.filter(
+      (slot) =>
+        slot.config === config &&
+        slot.processRevision >= minimumProcessRevision,
+    );
+    const ready = this.readySlots(config, minimumProcessRevision).sort(
+      (a, b) => a.users - b.users,
+    )[0];
     if (ready) return ready;
     // 故障槽的替换也必须先确认旧进程终止，由单槽池负责恢复。
     if (matches[0]) {
@@ -138,7 +150,7 @@ export class SharedConnectionPool implements AcpSharedConnectionPoolPort {
       if (idle) await this.remove(idle);
     }
     if (this.slots.length >= ACP_CONNECTION_POOL_SIZE) return undefined;
-    return this.create(config);
+    return this.create(config, minimumProcessRevision);
   }
 
   private async ensure(config: Configuration): Promise<void> {
@@ -192,9 +204,11 @@ export class SharedConnectionPool implements AcpSharedConnectionPoolPort {
     config: Configuration,
     options?: AcpChannelOptions,
   ): AcpChannelLease {
-    const slot = this.readySlots(config).sort(
+    const slot = this.readySlots(config, options?.minimumProcessRevision).sort(
       (a, b) =>
-        a.pool.runningRequests - b.pool.runningRequests || a.users - b.users,
+        b.processRevision - a.processRevision ||
+        a.pool.runningRequests - b.pool.runningRequests ||
+        a.users - b.users,
     )[0];
     if (this.isStopping) throw new Error("ACP pool is stopping");
     if (!slot) throw new Error("No ready ACP connection");
@@ -226,6 +240,7 @@ export class SharedConnectionPool implements AcpSharedConnectionPoolPort {
     };
     return {
       ...lease,
+      processRevision: slot.processRevision,
       close: () => {
         lease.close();
         release();
@@ -251,14 +266,20 @@ export class SharedConnectionPool implements AcpSharedConnectionPoolPort {
     config: Configuration,
     options?: AcpChannelOptions,
   ): Promise<AcpChannelLease> {
-    if (this.readySlots(config).length) return this.lease(config, options);
+    const minimum = options?.minimumProcessRevision;
+    if (this.readySlots(config, minimum).length)
+      return this.lease(config, options);
     for (;;) {
       const version = this.changed;
       const lease = await this.enqueue(async () => {
-        if (!(await this.available(config, true))) return undefined;
+        if (!(await this.available(config, true, minimum))) return undefined;
         return this.lease(config, options);
       });
       if (lease) return lease;
+      if (minimum)
+        throw new Error(
+          "新配置需要新的 ACP 进程，当前连接均在使用中，请稍后重试",
+        );
       await this.wait(version);
     }
   }
@@ -287,10 +308,16 @@ export class SharedConnectionPool implements AcpSharedConnectionPoolPort {
     };
   }
 
-  private readySlots(config: Configuration): Slot[] {
+  private readySlots(
+    config: Configuration,
+    minimumProcessRevision = 0,
+  ): Slot[] {
     return this.slots.filter(
       (slot) =>
-        slot.config === config && !slot.isRetiring && slot.pool.size > 0,
+        slot.config === config &&
+        slot.processRevision >= minimumProcessRevision &&
+        !slot.isRetiring &&
+        slot.pool.size > 0,
     );
   }
 

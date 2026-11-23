@@ -1,5 +1,6 @@
 import { createCodeAgentDialect, normalizePermission } from "./dialect.ts";
 import { codeAgentSkillPackages } from "./skillPackages.ts";
+import { codeAgentMcpManagement } from "./mcpManagement.ts";
 import { prepareCodeAgentLaunch } from "./executable.ts";
 import type { AgentAdapter } from "../../registry/adapterTypes.ts";
 import {
@@ -27,6 +28,7 @@ export const codeAgentAdapter: AgentAdapter = {
   readHistoryEvidence: async (host, sessionId, cwd) => await host.readAgentHistoryEvidence?.("codeagent", sessionId, cwd) ?? null,
   usageModelId: (model) => model && !model.includes("/") ? `w3/${model}` : model,
   id: "codeagent",
+  mcpManagement: codeAgentMcpManagement,
   skillLibrary: "codeagent",
   slashSkillSource: "catalog",
   skillPackages: codeAgentSkillPackages,
