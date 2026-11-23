@@ -210,7 +210,7 @@ function seedSecondProjectWithSession(): void {
 /** 打开【+】弹出面板并切到指定 tab（默认 tab 无需切换）。
  *  【+】现住各分组标题行尾（ZCode PurposeSections 段头动作位），两个分组
  *  各有一枚，点第一枚（收藏组）。 */
-async function openAddPanel(tab?: "添加项目"): Promise<void> {
+async function openAddPanel(tab?: "新建项目"): Promise<void> {
   await userEvent.click(
     screen.getAllByRole("button", { name: "新建会话或添加项目" })[0]!,
   );
@@ -280,18 +280,24 @@ describe("项目树 → 项目总览", () => {
     const add = within(screen.getByText(/从左侧选择或新建一个项目目录/).closest('[role="status"]') as HTMLElement)
       .getByRole("button", { name: "添加项目" });
     await userEvent.click(add);
-    expect(await screen.findByRole("alert")).toHaveTextContent("目录选择不可用或已取消");
-    await userEvent.click(add);
+    const pickButton = await screen.findByRole("button", { name: "添加" });
+    await userEvent.click(pickButton);
+    expect(await screen.findByText(/目录选择已取消或当前环境不可用/)).toBeInTheDocument();
+    await userEvent.click(pickButton);
+    await screen.findByText(PATH);
+    await userEvent.click(screen.getByRole("button", { name: "创建项目" }));
     await waitFor(() => expect(useWorkspaceStore.getState().selectedPath).toBe(PATH));
-    expect(screen.queryByText(/目录选择不可用或已取消/)).toBeNull();
+    expect(screen.queryByText(/目录选择已取消或当前环境不可用/)).toBeNull();
   });
 
-  it("【+】面板「添加项目」tab：目录对话框选择后进树并选中进总览", async () => {
+  it("【+】面板「新建项目」tab：目录对话框选择后进树并选中进总览", async () => {
     vi.mocked(dialogHost.pickDirectory).mockResolvedValue("D:/dev/new-project");
     renderDesktopApp(services.workbench);
-    await openAddPanel("添加项目");
+    await openAddPanel("新建项目");
 
-    await userEvent.click(screen.getByRole("button", { name: "添加项目…" }));
+    await userEvent.click(screen.getByRole("button", { name: "添加" }));
+    await screen.findByText("D:/dev/new-project");
+    await userEvent.click(screen.getByRole("button", { name: "创建项目" }));
     expect(
       await screen.findByRole("heading", { name: "new-project" }),
     ).toBeInTheDocument();
@@ -739,16 +745,17 @@ describe("【+】弹出面板", () => {
     expect(useWorkbenchUiStore.getState().contextPath).toBe(PATH);
   });
 
-  it("点面板外部与按 Esc 关闭；无已知项目时新建会话 tab 呈空态提示", async () => {
+  it("点遮罩外部与按 Esc 关闭；无已知项目时新建会话 tab 呈空态提示", async () => {
     renderDesktopApp(services.workbench);
     const trigger = screen.getAllByRole("button", {
       name: "新建会话或添加项目",
     })[0]!;
     await userEvent.click(trigger);
     const panel = screen.getByLabelText("新建会话面板");
-    expect(within(panel).getByText(/暂无已知项目/)).toBeInTheDocument();
+    expect(within(panel).getByText(/暂无已有项目/)).toBeInTheDocument();
 
-    fireEvent.pointerDown(document.body);
+    // ModalShell 点击遮罩关闭
+    fireEvent.click(panel.parentElement!);
     expect(screen.queryByLabelText("新建会话面板")).not.toBeInTheDocument();
 
     // 再开一次，按 Esc 关闭
@@ -758,14 +765,14 @@ describe("【+】弹出面板", () => {
     expect(screen.queryByLabelText("新建会话面板")).not.toBeInTheDocument();
   });
 
-  it("「添加项目」tab：对话框取消返回 null 时提示重试且面板不关", async () => {
+  it("「新建项目」tab：对话框取消返回 null 时提示重试且面板不关", async () => {
     vi.mocked(dialogHost.pickDirectory).mockResolvedValue(null);
     renderDesktopApp(services.workbench);
-    await openAddPanel("添加项目");
+    await openAddPanel("新建项目");
 
-    await userEvent.click(screen.getByRole("button", { name: "添加项目…" }));
+    await userEvent.click(screen.getByRole("button", { name: "添加" }));
     expect(
-      await screen.findByText(/目录选择不可用或已取消/),
+      await screen.findByText(/目录选择已取消或当前环境不可用/),
     ).toBeInTheDocument();
     // 取消不关面板：提示留在面板内供重试
     expect(screen.getByLabelText("新建会话面板")).toBeInTheDocument();

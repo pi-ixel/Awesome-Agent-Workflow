@@ -1,14 +1,12 @@
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { expect, it } from "vitest";
+import { productionPluginNames } from "../helpers/productionPluginNames";
 
 it("每个生产插件都有对应的专属测试目录和用例", () => {
   const production = resolve("src/plugins");
   const tests = resolve("tests/plugins");
-  const plugins = readdirSync(production, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
+  const plugins = productionPluginNames(production);
   const testPlugins = readdirSync(tests, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)

@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run workflow:build:debug && npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run workflow:build && npm run build",
+    "beforeBuildCommand": "npm run workflow:build && npm run ops:fetch && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -33,7 +33,10 @@
   },
   "bundle": {
     "active": true,
-    "resources": { "../workflow-engine-rs/dist/": "workflow-engine/" },
+    "resources": {
+      "../workflow-engine-rs/dist/": "workflow-engine/",
+      "../ops-sidecar/dist/": "ops-sidecar/"
+    },
     "windows": {
       "nsis": {
         "template": "installer/installer.nsi",

@@ -70,11 +70,16 @@ function ProjectStatusRow({ path }: { readonly path: string }) {
 
 /** 未选择项目时的空态引导：主行动入口（添加项目）+ 一行价值说明。 */
 function ProjectSetup() {
-  const addProject = useProjectNavigation()?.addProject;
+  const projectNav = useProjectNavigation();
+  const addProject = projectNav?.addProject;
+  const addRemoteProject = projectNav?.addRemoteProject;
   // 目录对话框不可用 / 取消时的重试提示
   const [isDialogUnavailable, setIsDialogUnavailable] = useState(false);
 
   const handleAddProject = (): void => {
+    if (addRemoteProject?.()) {
+      return;
+    }
     void addProject?.().then((path) => {
       if (path === null) {
         setIsDialogUnavailable(true);

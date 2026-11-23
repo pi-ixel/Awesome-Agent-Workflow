@@ -31,7 +31,9 @@
     "test:browser:element-acp": "tsx scripts/browserElementAcp.ts",
     "test:browser:coverage": "tsx scripts/browserCoverage.ts",
     "workflow:build": "node scripts/build-workflow-service.mjs",
-    "workflow:build:debug": "node scripts/build-workflow-service.mjs --debug"
+    "workflow:build:debug": "node scripts/build-workflow-service.mjs --debug",
+    "ops:build": "node scripts/build-ops-sidecar.mjs",
+    "ops:fetch": "node scripts/fetch-ops-sidecar.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^2.0.0",

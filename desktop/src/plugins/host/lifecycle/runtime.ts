@@ -3,6 +3,9 @@ import type {
   CodeAgentTokenResult,
   ExitDiagnostics,
   HostOptions,
+  RemoteDocumentFileProvider,
+  RemoteGitProvider,
+  RemoteTerminalResolver,
 } from "../types.ts";
 import type { HostService } from "../service.ts";
 import { createTauriAcpProcessHost } from "../process/acpProcess.ts";
@@ -23,11 +26,13 @@ import { createTerminalHost } from "../process/terminal.ts";
 import { createHostProcessRunner } from "../process/processRunner.ts";
 import { createUpdatesHost } from "../adapters/updates.ts";
 import { createWorkflowEngineHost } from "../adapters/workflowEngine.ts";
+import { createOpsSidecarHost } from "../adapters/opsSidecar.ts";
 import { createInvoke, type NativeInvoke } from "../adapters/invoke.ts";
 import { createBrowserHost } from "../browser/tauri.ts";
 import { createLogger } from "../../../shared/logging/logger.ts";
 import { NativePanelService } from "../filesystem/panelService.ts";
 import { HostResources, trackProcesses } from "./effects.ts";
+import { isRemoteProjectPath } from "../../../shared/panelPaths.ts";
 import type { PtySpawnWire } from "../types.ts";
 
 export class DesktopHost implements HostService {
@@ -142,14 +147,42 @@ export class DesktopHost implements HostService {
         : Promise.resolve(),
   };
   readonly files: HostService["files"];
+  private remoteDocumentFiles?: RemoteDocumentFileProvider;
+  registerRemoteDocumentFiles(provider: RemoteDocumentFileProvider): () => void {
+    this.remoteDocumentFiles = provider;
+    return () => {
+      if (this.remoteDocumentFiles === provider) {
+        this.remoteDocumentFiles = undefined;
+      }
+    };
+  }
   readonly git: HostService["git"];
+  private remoteGit?: RemoteGitProvider;
+  registerRemoteGit(provider: RemoteGitProvider): () => void {
+    this.remoteGit = provider;
+    return () => {
+      if (this.remoteGit === provider) {
+        this.remoteGit = undefined;
+      }
+    };
+  }
   readonly terminal: HostService["terminal"];
+  private remoteTerminalResolver?: RemoteTerminalResolver;
+  registerRemoteTerminalResolver(resolver: RemoteTerminalResolver): () => void {
+    this.remoteTerminalResolver = resolver;
+    return () => {
+      if (this.remoteTerminalResolver === resolver) {
+        this.remoteTerminalResolver = undefined;
+      }
+    };
+  }
   readonly process: HostService["process"];
   readonly skills: HostService["skills"];
   readonly account: HostService["account"];
   readonly updates: HostService["updates"];
   readonly workflowEngine: HostService["workflowEngine"] =
     createWorkflowEngineHost();
+  readonly opsSidecar: HostService["opsSidecar"] = createOpsSidecarHost();
   readonly acpProcess: HostService["acpProcess"];
   readonly browser: HostService["browser"];
 
@@ -278,8 +311,13 @@ export class DesktopHost implements HostService {
       this.exitGate.isExiting,
       panel,
       this.invoke,
+      () => this.remoteDocumentFiles,
     );
-    const git = createGitHost(this.exitGate.isExiting, panel);
+    const git = createGitHost(
+      this.exitGate.isExiting,
+      panel,
+      () => this.remoteGit,
+    );
     this.files = {
       ...files,
       watch: (...args) => this.resources.listen(() => files.watch(...args)),
@@ -314,7 +352,16 @@ export class DesktopHost implements HostService {
     );
     this.terminal = {
       ...terminalHost,
-      spawn: (request) => terminal.spawn(() => terminalHost.spawn(request)),
+      spawn: (request) =>
+        terminal.spawn(async () => {
+          const resolved =
+            request.cwd &&
+            isRemoteProjectPath(request.cwd) &&
+            this.remoteTerminalResolver
+              ? await this.remoteTerminalResolver(request)
+              : request;
+          return terminalHost.spawn(resolved);
+        }),
       listenOutput: (receive) =>
         this.resources.listen(() => terminalHost.listenOutput(receive)),
       listenExit: (receive) =>

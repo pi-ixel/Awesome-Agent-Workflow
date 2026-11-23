@@ -1439,3 +1439,18 @@ html.theme-warm {
   --workflow-icon-face:linear-gradient(180deg, var(--color-raised) 0%, color-mix(in srgb, var(--color-raised) 88%, var(--color-base)) 100%);
   --workflow-icon-edge:var(--color-line-strong);
 }
+
+/* 明暗主题圆形扩散切换（View Transitions API）：旧主题垫底，新主题从点击点向外铺开 */
+:root.theme-transitioning::view-transition-old(root),
+:root.theme-transitioning::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+:root.theme-transitioning::view-transition-old(root) {
+  z-index: 1;
+}
+
+:root.theme-transitioning::view-transition-new(root) {
+  z-index: 9999;
+}

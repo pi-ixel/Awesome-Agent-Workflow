@@ -23,6 +23,7 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import type { WorkbenchContributions } from "../../../../src/plugins/workbench/types.ts";
 let OverviewPage: WorkbenchContributions["pages"]["View"];
+let AddProjectOverlay: WorkbenchContributions["overlays"]["View"] | undefined;
 let useWorkspaceStore: ReturnType<typeof mutableWorkspace>;
 
 let workbench: WorkbenchService;
@@ -31,6 +32,7 @@ function render(ui: ReactElement) {
     wrapper: ({ children }) => (
       <WorkbenchContext.Provider value={workbench}>
         {children}
+        {AddProjectOverlay ? <AddProjectOverlay /> : null}
       </WorkbenchContext.Provider>
     ),
   });
@@ -80,11 +82,13 @@ describe("ProjectOverview", () => {
     expect(addButton).toBeEnabled();
     expect(screen.getByText(/添加后自动检查项目环境/)).toBeInTheDocument();
 
-    // jsdom 下目录对话框不可用（pickDirectory 捕获后按取消处理）：
-    // 点击给出重试提示而非无响应
+    // 点击「添加项目」打开创建项目弹窗；jsdom 下本地目录对话框不可用，
+    // 在弹窗中点击「添加」给出重试提示而非无响应
     await userEvent.click(addButton);
+    const pickLocalButton = await screen.findByRole("button", { name: "添加" });
+    await userEvent.click(pickLocalButton);
     expect(
-      await screen.findByText(/目录选择不可用或已取消/),
+      await screen.findByText(/目录选择已取消或当前环境不可用/),
     ).toBeInTheDocument();
   });
 
@@ -146,5 +150,8 @@ beforeAll(async () => {
   const overview = workbench.getSnapshot().pages.find(({ id }) => id === "project-overview");
   if (!overview) throw new Error("Project did not register its overview page");
   OverviewPage = overview.View;
+  AddProjectOverlay = workbench
+    .getSnapshot()
+    .overlays.find(({ id }) => id === "remote-project-add-modal")?.View;
   useWorkspaceStore = mutableWorkspace(ready.project);
 });

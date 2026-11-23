@@ -22,6 +22,24 @@ export interface WatchPath {
   recursive: boolean;
 }
 
+export interface RemoteDocumentFileProvider {
+  stat(path: string): Promise<FileEntry>;
+  directory(path: string): Promise<DirectoryResult>;
+  preview(path: string): Promise<FilePreview>;
+  listWorkspaceFiles(path: string): Promise<readonly string[] | null>;
+  saveMarkdown?(
+    path: string,
+    expected: string,
+    contents: string,
+    force: boolean,
+  ): Promise<void>;
+}
+
+export interface RemoteGitProvider {
+  status(project: string): Promise<GitSnapshot>;
+  diff(project: string, change: GitChange): Promise<GitDiff>;
+}
+
 export interface DocumentFileHost {
   openInFileManager(path: string, action: "open-directory" | "reveal"): Promise<void>;
   assetUrl(this: void, path: string): string | undefined;

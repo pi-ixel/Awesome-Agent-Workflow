@@ -6,8 +6,14 @@
  * 是工作流打开的、用户在侧栏里打开的，还是断线后自动重连的，都经同一处
  * 问到，所以行为一致。登记方按会话 id 判断要不要给；新建会话时 id 为 null。
  */
-import type { McpServer } from "../../../contracts/acp/protocol.ts";
-import type { AcpSessionPort } from "../../acpRuntime/types.ts";
+import type {
+  McpServer,
+  RequestPermissionOutcome,
+} from "../../../contracts/acp/protocol.ts";
+import type {
+  AcpSessionPort,
+  PermissionOption,
+} from "../../acpRuntime/types.ts";
 import type { Logger } from "../../../shared/logging/logger.ts";
 
 export interface SessionToolContext {
@@ -23,6 +29,11 @@ export interface SessionToolContext {
   /** 仅在这一代 ACP 会话建立后通知，使用 Agent 返回或恢复的会话标识。 */
   readonly onEstablished?: (listener: (sessionId: string) => void) => void;
   readonly onDispose?: (listener: () => Promise<void>) => void;
+  /** 让会话附加工具复用发起会话的审批。会话建立后可用。 */
+  readonly requestPermission?: (
+    toolCall: Readonly<Record<string, unknown>>,
+    options: readonly PermissionOption[],
+  ) => Promise<RequestPermissionOutcome>;
 }
 
 export type SessionToolProvider = (

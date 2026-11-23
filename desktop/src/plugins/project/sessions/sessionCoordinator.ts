@@ -120,6 +120,7 @@ export interface ProjectSessionDependencies {
   readonly getProtocol: () => AcpProtocolResources;
   readonly getAgents: () => AgentsService;
   readonly getBrowser: () => HostService["browser"];
+  readonly resolveSessionCwd?: (workspacePath: string) => Promise<string>;
   readonly getTurnChanges?: () => HostService["turnChanges"];
   readonly getApprovalMode: () => ApprovalMode;
   readonly interactionPreferences?: Pick<
@@ -152,6 +153,7 @@ export function createSessionCoordinator({
   getProtocol,
   getAgents,
   getBrowser,
+  resolveSessionCwd = (workspacePath) => Promise.resolve(workspacePath),
   getTurnChanges,
   getApprovalMode,
   interactionPreferences,
@@ -187,6 +189,16 @@ export function createSessionCoordinator({
       sessionId,
       agent: session.agentInfo,
       requestExtension: session.requestAgentExtension?.bind(session),
+      requestPermission: (toolCall, options) => {
+        const sessionId = session.sessionId;
+        if (runtime.disposed || runtime.session !== session || !sessionId) {
+          return Promise.resolve({ outcome: "cancelled" });
+        }
+        const automatic = resolveAutoPermission(getApprovalMode(), options);
+        if (automatic !== null) return Promise.resolve(automatic);
+        runtime.store.getState().sealStreamingItems();
+        return runtime.approval.getState().offerPermission({ sessionId, toolCall, options });
+      },
       onDispose: (listener) => {
         if (disposedToolSessions.has(session)) {
           void listener().catch(() => undefined);
@@ -1753,11 +1765,12 @@ export function createSessionCoordinator({
       if (!valid()) return null;
       setListStatus(workspacePath, agentKey, { state: "loading" });
       const project = projectFactory.open(workspacePath);
+      const historyCwd = await resolveSessionCwd(workspacePath);
       try {
         const listed = await project.refreshHistory(
           agentKey,
           (isCurrent) =>
-            protocol.readProjectHistory(session, workspacePath, isCurrent),
+            protocol.readProjectHistory(session, historyCwd, isCurrent),
           valid,
         );
         if (!listed) return null;
@@ -1826,12 +1839,16 @@ export function createSessionCoordinator({
       });
       return null;
     }
+    const resolvedCwd =
+      retained?.cwd ??
+      plugin?.cwd ??
+      (await resolveSessionCwd(workspacePath));
     const launch =
       retained?.launch ??
       getAgents().buildLaunch(
         adapter,
         workspaceStore.getState().toolPaths,
-        workspacePath,
+        resolvedCwd,
       );
     const viewStore =
         retained?.store ??
@@ -2131,9 +2148,7 @@ export function createSessionCoordinator({
       if (!session) throw new Error("后台 Agent 通道不可用");
       candidate = sessionFactory.create({
         workspacePath,
-        ...((retained?.cwd ?? plugin?.cwd)
-          ? { cwd: retained?.cwd ?? plugin?.cwd }
-          : {}),
+        ...(resolvedCwd !== workspacePath ? { cwd: resolvedCwd } : {}),
         ...((retained?.openTools ?? plugin?.openTools)
           ? { openTools: retained?.openTools ?? plugin?.openTools }
           : {}),
@@ -2827,7 +2842,7 @@ export function createSessionCoordinator({
     if (!session) throw new Error("后台 Agent 通道不可用");
     try {
       await session.initialize({ timeoutMs: 30_000 });
-      await session.newSession(workspacePath, { timeoutMs: 30_000 });
+      await session.newSession(await resolveSessionCwd(workspacePath), { timeoutMs: 30_000 });
       const models =
         modelConfig(session)?.options.map(({ value, name }) => ({
           value,

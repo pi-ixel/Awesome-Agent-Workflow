@@ -28,6 +28,7 @@ mod terminal_pty;
 mod tray;
 mod usage_statistics;
 mod workflow_service;
+mod ops_service;
 
 use tauri::{Emitter, Manager};
 
@@ -56,6 +57,7 @@ pub fn run() {
         .manage(mcp_management::ProxyHost::default())
         .manage(codeagent_credit::CreditQuota::default())
         .manage(workflow_service::WorkflowHost::default())
+        .manage(ops_service::OpsHost::default())
         .manage(desktop_update::Updates::new(&context.package_info().name))
         .manage(notification_links::NotificationRoutes::default())
         .manage(tray::TrayPreference::default())
@@ -118,6 +120,11 @@ pub fn run() {
         // 工作区目录选择（@tauri-apps/plugin-dialog）
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            ops_service::ops_service_running,
+            ops_service::ops_service_start,
+            ops_service::ops_service_write,
+            ops_service::ops_service_shutdown,
+            ops_service::ops_service_sidecar_path,
             turn_changes::turn_changes,
             browser::host::browser_create_space,
             browser::host::browser_create_tab,

@@ -18,6 +18,7 @@ import { createAnnotationDraftStore } from "./composer/annotationDraftStore.ts";
 import { createMessageImageHistory } from "./conversation/messageImageHistory.ts";
 import { createProjectComposer } from "./composer/service.ts";
 import { createWorkspaceStore } from "./workspace/workspaceStore.ts";
+import { parseRemoteProjectPath } from "../../shared/panelPaths.ts";
 import { projectPreferenceFields } from "./config.ts";
 import { createProjectPreferences } from "./configuration/preferences.ts";
 import { initializeUsage, usageStorageCategory } from "./usage/service.ts";
@@ -102,6 +103,22 @@ export async function apply(
       getProtocol: () => protocol,
       getAgents: () => agents,
       getBrowser: () => ctx.host.browser,
+      resolveSessionCwd: async (workspacePath) => {
+        const remote = parseRemoteProjectPath(workspacePath);
+        if (!remote) return workspacePath;
+        const dir = await ctx.host.commands.userDataDir(
+          "remote-projects",
+          remote.projectId,
+        );
+        const agentsMd = `${dir.replace(/[\\/]+$/, "")}/AGENTS.md`;
+        await ctx.host.skills
+          .writeTextFile(
+            agentsMd,
+            `# 远程项目说明\n\n当前会话绑定远端 Linux 项目（远端根目录：\`${remote.remotePath}\`）。\n请优先使用 \`aaw-remote-project\` MCP 提供的 \`read_file\`、\`edit_file\`、\`write_file\`、\`run_command\` 工具读取、修改远端文件及执行命令。\n本机当前目录仅用于保存会话状态，不包含远端源码。\n`,
+          )
+          .catch(() => undefined);
+        return dir;
+      },
       getTurnChanges: () => ctx.host.turnChanges,
       getApprovalMode: () => preferences.getState().approvalMode,
       interactionPreferences: preferences,

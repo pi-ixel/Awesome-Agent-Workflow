@@ -10,7 +10,7 @@ import { useWorkspaceCommands, useWorkspaceService, useWorkspaceValue } from "./
 import { useProjectNavigation, useProjectView } from "./bindings/projectView.tsx";
 import { SessionReconnect } from "../conversation/ui/ReconnectButton.tsx";
 import { pathKey } from "../../../shared/panelPaths.ts";
-import { basenameOf } from "../../../shared/workspaceText.ts";
+import { basenameOf, formatWorkspacePathLabel } from "../../../shared/workspaceText.ts";
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
 import { useMenuController } from "../../../shared/ui/useMenuController.ts";
 import { useSessionRename } from "./useSessionRename.ts";
@@ -88,7 +88,7 @@ function FolderButton({ path }: { readonly path: string }) {
       data-testid="workspace-path"
       aria-label={basenameOf(path)}
       placement="top"
-      data-hint={path}
+      data-hint={formatWorkspacePathLabel(path)}
       onClick={() => {
         showOverview?.(path);
       }}
@@ -253,9 +253,9 @@ function OverviewBar({ project: path }: { readonly project: string }) {
       </h2>
       <span
         className="min-w-0 truncate font-mono text-xs text-ink-faint"
-        data-hint={path}
+        data-hint={formatWorkspacePathLabel(path)}
       >
-        {path}
+        {formatWorkspacePathLabel(path)}
       </span>
       {/* 仅在项目已打开（或连接中）时提供关闭；连接中禁闭防误触 */}
       {activePath === path && (
