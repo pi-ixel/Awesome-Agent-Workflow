@@ -5,6 +5,7 @@ import { expect, it } from "vitest";
 
 it("原生复选框与单选框仅由登记的控件创建", () => {
   const checkboxes: string[] = [];
+  const anchoredCheckboxes: string[] = [];
   const radios: string[] = [];
   for (const file of readdirSync("src", {
     recursive: true,
@@ -36,7 +37,24 @@ it("原生复选框与单选框仅由登记的控件创建", () => {
             value && ts.isJsxExpression(value) ? value.expression : value;
           if (!expr || !ts.isStringLiteralLike(expr)) continue;
           const location = file.replaceAll("\\", "/") + "#" + owner;
-          if (expr.text === "checkbox") checkboxes.push(location);
+          if (expr.text === "checkbox") {
+            checkboxes.push(location);
+            // 浏览器聚焦隐藏输入时应滚动标签所在区域，不能滚动外层弹窗。
+            const label = node.parent;
+            if (
+              ts.isJsxElement(label) &&
+              label.openingElement.tagName.getText(source) === "label" &&
+              label.openingElement.attributes.properties.some(
+                (attribute) =>
+                  ts.isJsxAttribute(attribute) &&
+                  attribute.name.getText(source) === "className" &&
+                  /(?:^|[\s"'`])relative(?:$|[\s"'`])/.test(
+                    attribute.initializer?.getText(source) ?? "",
+                  ),
+              )
+            )
+              anchoredCheckboxes.push(location);
+          }
           if (expr.text === "radio") radios.push(location);
         }
       }
@@ -48,5 +66,6 @@ it("原生复选框与单选框仅由登记的控件创建", () => {
     "shared/ui/controls.tsx#Checkbox",
     "shared/ui/controls.tsx#ToggleSwitch",
   ]);
+  expect(anchoredCheckboxes.sort()).toEqual(checkboxes);
   expect(radios.sort()).toEqual([]);
 });

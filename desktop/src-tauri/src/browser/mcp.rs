@@ -18,6 +18,7 @@ pub struct McpEndpoint {
     pub url: String,
     pub token: String,
     pub session_id: Option<String>,
+    pub workspace_id: Option<String>,
     pub generation: u64,
     pub revoked: bool,
     pub image_capable: bool,
@@ -49,6 +50,7 @@ pub fn create_endpoint(registry: &mut McpRegistry, port: u16) -> Result<McpEndpo
         token: random_id(32)?,
         endpoint_id,
         session_id: None,
+        workspace_id: None,
         generation: 1,
         revoked: false,
         image_capable: false,
@@ -63,6 +65,7 @@ pub fn bind_endpoint(
     registry: &mut McpRegistry,
     endpoint_id: &str,
     session_id: &str,
+    workspace_id: Option<&str>,
 ) -> Result<McpEndpoint, String> {
     let endpoint = registry
         .endpoints
@@ -77,6 +80,17 @@ pub fn bind_endpoint(
         .is_some_and(|current| current != session_id)
     {
         return Err("ENDPOINT_ALREADY_BOUND".into());
+    }
+    if endpoint
+        .workspace_id
+        .as_deref()
+        .zip(workspace_id)
+        .is_some_and(|(current, next)| current != next)
+    {
+        return Err("ENDPOINT_ALREADY_BOUND".into());
+    }
+    if let Some(workspace) = workspace_id {
+        endpoint.workspace_id = Some(workspace.into());
     }
     if endpoint.session_id.is_none() {
         endpoint.session_id = Some(session_id.into());
@@ -156,10 +170,10 @@ fn registration_tracks_the_replacement_endpoint_and_its_handshake() {
     let mut registry = McpRegistry::default();
     let original = create_endpoint(&mut registry, 41022).unwrap();
     let replacement = create_endpoint(&mut registry, 41023).unwrap();
-    bind_endpoint(&mut registry, &original.endpoint_id, "session").unwrap();
+    bind_endpoint(&mut registry, &original.endpoint_id, "session", None).unwrap();
     complete_handshake(&mut registry, &original.endpoint_id).unwrap();
-    bind_endpoint(&mut registry, &replacement.endpoint_id, "session").unwrap();
-    bind_endpoint(&mut registry, &original.endpoint_id, "session").unwrap();
+    bind_endpoint(&mut registry, &replacement.endpoint_id, "session", None).unwrap();
+    bind_endpoint(&mut registry, &original.endpoint_id, "session", None).unwrap();
     revoke_endpoint(&mut registry, &original.endpoint_id).unwrap();
     let current = current_registration(&registry, "session").unwrap();
     assert_eq!(current.endpoint_name, replacement.name);
@@ -294,10 +308,11 @@ pub async fn browser_mcp_create(
 pub fn browser_mcp_bind(
     endpoint_id: String,
     session_id: String,
+    workspace_id: Option<String>,
     state: State<'_, BrowserHost>,
 ) -> Result<McpEndpoint, String> {
     let mut registry = state.mcp.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
-    bind_endpoint(&mut registry, &endpoint_id, &session_id)
+    bind_endpoint(&mut registry, &endpoint_id, &session_id, workspace_id.as_deref())
 }
 
 #[tauri::command]
@@ -568,13 +583,24 @@ async fn call_tool(
     let host = app.state::<BrowserHost>();
     let session_id = endpoint.session_id.as_deref().ok_or("ENDPOINT_NOT_BOUND")?;
     super::identity::resolve_session(session_id, runtime_meta)?;
-    if !host.agent_control_enabled() {
-        return Err("AGENT_CONTROL_DISABLED".into());
-    }
-    host.runtime
-        .lock()
-        .map_err(|_| "BROWSER_LOCK_FAILED")?
-        .assert_session_control(session_id, super::model::PageSource::Agent)?;
+    host.prepare_agent_space(
+        session_id,
+        endpoint.workspace_id.as_deref(),
+        |workspace_id, session_id| {
+            let registered = host
+                .partitions
+                .lock()
+                .map_err(|_| "BROWSER_LOCK_FAILED")?
+                .iter()
+                .any(|partition| {
+                    partition.session_id == session_id && partition.lifecycle == "active"
+                });
+            if !registered {
+                super::data::register_partition(app, &host, workspace_id, session_id)?;
+            }
+            Ok(())
+        },
+    )?;
     let activity = host
         .runtime
         .lock()
@@ -730,19 +756,6 @@ async fn call_tool(
                 .get("url")
                 .and_then(Value::as_str)
                 .unwrap_or("about:blank");
-            if !host
-                .runtime
-                .lock()
-                .map_err(|_| "BROWSER_LOCK_FAILED")?
-                .spaces
-                .contains_key(session_id)
-            {
-                host.runtime
-                    .lock()
-                    .map_err(|_| "BROWSER_LOCK_FAILED")?
-                    .create_space("main", session_id, session_id)?;
-                super::data::register_partition(app, &host, session_id, session_id)?;
-            }
             let tab = super::host::create_tab_for(
                 app,
                 &host,
@@ -930,6 +943,7 @@ async fn call_tool(
                 }
             }
             drop(runtime);
+            super::host::refresh_tab_memory(app, session_id, tab_id);
             let result = outcome?;
             let text = result.to_string();
             if let Some(code) = result.get("error").and_then(Value::as_str) {
@@ -1015,6 +1029,7 @@ async fn call_tool(
                 &mut *host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?,
                 &approval_id,
             )?;
+            super::host::refresh_tab_memory(app, session_id, tab_id);
             let text = result.to_string();
             Ok(
                 json!({"content":[{"type":"text","text":text}],"structuredContent":{"action":"submit","approvalId":approval_id,"result":result}}),
@@ -1136,6 +1151,7 @@ async fn call_tool(
                 &mut *host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?,
                 &approval_id,
             )?;
+            super::host::refresh_tab_memory(app, session_id, tab_id);
             Ok(
                 json!({"content":[{"type":"text","text":result}],"structuredContent":{"result":result,"restricted":true}}),
             )
@@ -1231,6 +1247,7 @@ async fn call_tool(
                 &mut *host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?,
                 &approval_id,
             )?;
+            super::host::refresh_tab_memory(app, session_id, tab_id);
             Ok(
                 json!({"content":[{"type":"text","text":"文件已绑定到上传控件"}],"structuredContent":{"status":"completed","path":path,"nodeId":node_id}}),
             )
@@ -1278,12 +1295,12 @@ async fn wait_for_page(
     if !timeout_ms.is_finite() || timeout_ms < 0.0 || timeout_ms > 30_000.0 {
         return Err("WAIT_BUDGET_EXCEEDED".into());
     }
+    let webview = find_webview(app, host, session_id, tab_id)?;
     let request_id = random_id(12)?;
     host.runtime
         .lock()
         .map_err(|_| "BROWSER_LOCK_FAILED")?
         .begin_request(&request_id, session_id, tab_id)?;
-    let webview = find_webview(app, host, session_id, tab_id)?;
     let started = tokio::time::Instant::now();
     let budget = Duration::from_millis(timeout_ms as u64);
     loop {
@@ -1305,6 +1322,7 @@ async fn wait_for_page(
                     .lock()
                     .map_err(|_| "BROWSER_LOCK_FAILED")?
                     .complete_observation_request(&request_id)?;
+                super::host::refresh_tab_memory(app, session_id, tab_id);
                 return Ok(
                     json!({"content":[{"type":"text","text":"WAIT_COMPLETED"}],"structuredContent":{"status":"completed","sideEffect":"none","requestId":request_id}}),
                 );
@@ -1313,6 +1331,7 @@ async fn wait_for_page(
                 .lock()
                 .map_err(|_| "BROWSER_LOCK_FAILED")?
                 .timeout_request(&request_id)?;
+            super::host::refresh_tab_memory(app, session_id, tab_id);
             return Ok(
                 json!({"content":[{"type":"text","text":"TIMEOUT"}],"isError":true,"structuredContent":{"status":"failed","sideEffect":"none","error":{"code":"TIMEOUT"},"requestId":request_id}}),
             );
@@ -1321,14 +1340,17 @@ async fn wait_for_page(
             let selector = serde_json::to_string(selector).map_err(|error| error.to_string())?;
             let script =
                 format!("JSON.stringify({{found:document.querySelector({selector})!==null}})");
-            match evaluate(&webview, &script).await {
-                Ok(raw) => {
-                    let result = decode_evaluation(&raw)?;
+            match evaluate(&webview, &script)
+                .await
+                .and_then(|raw| decode_evaluation(&raw))
+            {
+                Ok(result) => {
                     if result["found"].as_bool() == Some(true) {
                         host.runtime
                             .lock()
                             .map_err(|_| "BROWSER_LOCK_FAILED")?
                             .complete_observation_request(&request_id)?;
+                        super::host::refresh_tab_memory(app, session_id, tab_id);
                         return Ok(
                             json!({"content":[{"type":"text","text":"CONDITION_MET"}],"structuredContent":{"status":"completed","sideEffect":"none","requestId":request_id}}),
                         );
@@ -1339,6 +1361,7 @@ async fn wait_for_page(
                         .lock()
                         .map_err(|_| "BROWSER_LOCK_FAILED")?
                         .timeout_request(&request_id)?;
+                    super::host::refresh_tab_memory(app, session_id, tab_id);
                     return Err(error);
                 }
             }

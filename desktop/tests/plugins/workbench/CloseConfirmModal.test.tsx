@@ -39,6 +39,7 @@ describe("CloseConfirmModal", () => {
     const onCancel = vi.fn();
     const onConfirm = vi.fn();
     const activity = createStore<ReturnType<ProjectSessions["activity"]["getState"]>>(() => ({
+      unreadReplies: {},
       entries: {
         first: { project: "D:/test", sessionId: "first", pending: 1, status: "waiting", unread: false },
         second: { project: "D:/test", sessionId: "second", pending: 1, status: "waiting", unread: false },

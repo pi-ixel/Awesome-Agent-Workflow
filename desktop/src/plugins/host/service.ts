@@ -1,4 +1,5 @@
 import type { BrowserHost } from "./browser/types.ts";
+import type { TurnChangesHost } from "../../contracts/turnChanges/types.ts";
 import type { McpManagementHost } from "../../contracts/mcp/management.ts";
 import type {
   AcpProcessHost,
@@ -39,6 +40,7 @@ declare module "cordis" {
 }
 
 export interface HostService {
+  readonly turnChanges?: TurnChangesHost;
   readonly mcp?: McpManagementHost;
   isNative(): boolean;
   readonly acpProcess: AcpProcessHost;

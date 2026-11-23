@@ -13,6 +13,7 @@ import { SharedConnectionPool } from "../pool/SharedConnectionPool.ts";
 import { createTauriStdioTransport } from "../protocol/transport/tauriStdioTransport.ts";
 import { AcpClosedError } from "../protocol/errors.ts";
 import { budgetedTransport } from "./budgetedTransport.ts";
+import { withDeadline } from "../../../shared/asyncDeadline.ts";
 
 export class DesktopAcpConnection implements AcpConnectionService {
   private readonly connections = new Set<AcpConnection>();
@@ -22,6 +23,7 @@ export class DesktopAcpConnection implements AcpConnectionService {
   private readonly diagnosticTransports = new Set<AcpTransport>();
   private readonly unbudgeted = new Set<AcpConnection>();
   private readonly starting = new Set<Promise<AcpTransport | null>>();
+  private resourceWrites = Promise.resolve();
   private opening = 0;
   private isDiagnosticOpening = false;
   private stopping?: Promise<void>;
@@ -112,6 +114,22 @@ export class DesktopAcpConnection implements AcpConnectionService {
         this.connections.delete(connection);
         this.unbudgeted.delete(connection);
       },
+      transport.processHandle !== undefined
+        ? (mark) => {
+            this.resourceWrites = this.resourceWrites
+              .then(() =>
+                withDeadline(
+                  this.host.diagnostics.request<void>(
+                    "diagnostics_resource_turn",
+                    { mark },
+                  ),
+                  3000,
+                  "诊断轮次记录超时",
+                ),
+              )
+              .catch(() => {});
+          }
+        : undefined,
     );
     this.connections.add(connection);
     if (!isBudgeted) this.unbudgeted.add(connection);

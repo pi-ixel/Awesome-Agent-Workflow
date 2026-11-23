@@ -3,13 +3,22 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauriEnv } from "../adapters/host.ts";
 import { invoke } from "../adapters/invoke.ts";
 
-export const windowChromeHost: WindowChromeHost = {
+export const windowChromeHost = {
   minimize: async () => getCurrentWindow().minimize(),
   toggleMaximize: async () => getCurrentWindow().toggleMaximize(),
   requestClose: async () => getCurrentWindow().close(),
   isMaximized: async () => getCurrentWindow().isMaximized(),
   listenForResize: async (receive) => getCurrentWindow().onResized(receive),
-};
+  async isDisplayed() {
+    const window = getCurrentWindow();
+    const [visible, minimized] = await Promise.all([
+      window.isVisible(),
+      window.isMinimized(),
+    ]);
+    return visible && !minimized;
+  },
+  listenForFocusChange: async (receive) => getCurrentWindow().onFocusChanged(receive),
+} satisfies WindowChromeHost;
 
 export const windowHost: DesktopWindowHost = {
   listenForScheduledTasksTick: async (tick) => {
@@ -19,6 +28,9 @@ export const windowHost: DesktopWindowHost = {
   claimScheduledTasks: () => isTauriEnv() ? invoke("claim_scheduled_tasks") : Promise.resolve(true),
   setCloseToTray: async (enabled) => {
     if (isTauriEnv()) await invoke("set_close_to_tray", { enabled });
+  },
+  setTaskbarUnread: async (count) => {
+    if (isTauriEnv()) await invoke("set_taskbar_unread", { count });
   },
   async listenForClose(onClose) {
     if (!isTauriEnv()) return () => {};

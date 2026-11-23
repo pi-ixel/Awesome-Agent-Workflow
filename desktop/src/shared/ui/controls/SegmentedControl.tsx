@@ -15,6 +15,7 @@ export function SegmentedControl<T extends string | number>({
   onChange,
   warnValue,
   tabs = false,
+  appearance = "default",
 }: {
   readonly groupLabel: string;
   readonly value: T;
@@ -27,6 +28,7 @@ export function SegmentedControl<T extends string | number>({
   readonly onChange: (next: T) => void;
   readonly warnValue?: T;
   readonly tabs?: boolean;
+  readonly appearance?: "default" | "quiet";
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -84,7 +86,11 @@ export function SegmentedControl<T extends string | number>({
       ref={containerRef}
       role={tabs ? "tablist" : "group"}
       aria-label={groupLabel}
-      className="relative inline-flex max-w-full flex-wrap gap-0.5 rounded-2xl bg-base p-0.5 ring-1 ring-inset ring-line"
+      className={`relative inline-flex max-w-full flex-wrap gap-0.5 rounded-2xl p-0.5 ${
+        appearance === "quiet"
+          ? "bg-transparent"
+          : "bg-base ring-1 ring-inset ring-line"
+      }`}
     >
       {indicator && (
         <span
@@ -94,14 +100,18 @@ export function SegmentedControl<T extends string | number>({
             height: indicator.rect.height,
             transform: `translate3d(${indicator.rect.left}px, ${indicator.rect.top}px, 0)`,
           }}
-          className={`pointer-events-none absolute top-0 left-0 rounded-full border ${
+          className={`pointer-events-none absolute top-0 left-0 ${
+            appearance === "quiet" ? "rounded-md" : "rounded-full"
+          } border ${
             indicator.animate
               ? "transition-[transform,width,height,background-color,border-color] duration-200 ease-out motion-reduce:transition-none"
               : ""
           } ${
             isWarnSelected
               ? "border-warn-line bg-warn-bg/70"
-              : "border-line-strong bg-surface"
+              : appearance === "quiet"
+                ? "border-transparent bg-raised"
+                : "border-line-strong bg-surface"
           }`}
         />
       )}
@@ -143,14 +153,18 @@ export function SegmentedControl<T extends string | number>({
                   }
                 : undefined
             }
-            className={`relative z-10 inline-flex min-h-6 shrink-0 items-center rounded-full border px-3 text-ui-caption leading-none transition-colors ${focusVisibleRing} ${
+            className={`relative z-10 inline-flex min-h-6 shrink-0 items-center ${
+              appearance === "quiet" ? "rounded-md" : "rounded-full"
+            } border px-3 text-ui-caption leading-none transition-colors ${focusVisibleRing} ${
               selected && option.value === warnValue
                 ? showFallbackSurface
                   ? "border-warn-line bg-warn-bg/70 font-medium text-warn-ink"
                   : "border-transparent bg-transparent font-medium text-warn-ink"
                 : selected
                   ? showFallbackSurface
-                    ? "border-line-strong bg-surface font-medium text-ink"
+                    ? appearance === "quiet"
+                      ? "border-transparent bg-raised font-medium text-ink"
+                      : "border-line-strong bg-surface font-medium text-ink"
                     : "border-transparent bg-transparent font-medium text-ink"
                   : "border-transparent bg-transparent text-ink-mute hover:text-ink"
             }`}

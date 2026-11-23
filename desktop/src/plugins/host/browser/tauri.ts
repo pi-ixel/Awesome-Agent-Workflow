@@ -46,6 +46,18 @@ function listenBrowserEvent<T>(
   return listen<T>(event, receive);
 }
 
+function uniqueRestoreWorkspace(
+  owners: readonly BrowserRestoreScope[],
+  sessionId: string,
+) {
+  const workspaces = new Map<string, string>();
+  for (const owner of owners) {
+    if (owner.sessionId === sessionId)
+      workspaces.set(pathKey(owner.workspaceId), owner.workspaceId);
+  }
+  return workspaces.size === 1 ? workspaces.values().next().value : undefined;
+}
+
 export function createBrowserHost(
   nativeInvoke: NativeInvoke = invoke,
 ): BrowserHost {
@@ -55,9 +67,22 @@ export function createBrowserHost(
     nativeInvoke<BrowserRestoreScope[]>("browser_restore_owners").catch(
       () => [],
     );
+  const ownsLegacy = async (
+    scope: BrowserRestoreScope,
+    catalog?: BrowserRestoreScope[],
+  ) => {
+    const { sessionId, workspaceId } = scope;
+    const owner = sessionId.startsWith("manual:")
+      ? sessionId.slice(7)
+      : uniqueRestoreWorkspace(catalog ?? (await restoreOwners()), sessionId);
+    return owner !== undefined && pathKey(owner) === pathKey(workspaceId);
+  };
   const reading = new Map<string, Promise<BrowserRestoreSnapshot>>();
-  const readRestore = (scope: BrowserRestoreScope) => {
-    const key = JSON.stringify([scope.workspaceId, scope.sessionId]);
+  const readRestore = (
+    scope: BrowserRestoreScope,
+    catalog?: BrowserRestoreScope[],
+  ) => {
+    const key = JSON.stringify([pathKey(scope.workspaceId), scope.sessionId]);
     let request = reading.get(key);
     if (!request) {
       request = readWithLegacyRestore(
@@ -67,6 +92,7 @@ export function createBrowserHost(
             scope,
           }),
         (update) => saveRestore(scope, update),
+        () => ownsLegacy(scope, catalog),
       ).finally(() => reading.delete(key));
       reading.set(key, request);
     }
@@ -77,8 +103,10 @@ export function createBrowserHost(
     readRestore,
     saveRestore,
     async forgetRestore(scope) {
+      const removeLegacy =
+        !isLegacyRestoreEnabled(scope.sessionId) || (await ownsLegacy(scope));
       await nativeInvoke("browser_restore_clear", { scope });
-      removeLegacyRestore(scope.sessionId);
+      if (removeLegacy) removeLegacyRestore(scope.sessionId);
     },
     migrateLegacyRestores() {
       if (!isTauriEnv()) return () => {};
@@ -98,15 +126,11 @@ export function createBrowserHost(
           } else {
             catalog ??= await restoreOwners();
             if (stopped) return;
-            const owners = new Set(
-              catalog
-                .filter((item) => item.sessionId === sessionId)
-                .map((item) => item.workspaceId),
-            );
-            const workspaceId =
-              owners.size === 1 ? owners.values().next().value : undefined;
+            const workspaceId = uniqueRestoreWorkspace(catalog, sessionId);
             if (workspaceId)
-              await readRestore({ workspaceId, sessionId }).catch(() => {});
+              await readRestore({ workspaceId, sessionId }, catalog).catch(
+                () => {},
+              );
           }
           if (stopped) return;
           await new Promise<void>((resolve) => {
@@ -189,10 +213,11 @@ export function createBrowserHost(
       nativeInvoke<BrowserMcpStatus>("browser_mcp_status", { sessionId }),
     mcpRegistration: (sessionId) =>
       nativeInvoke<BrowserMcpRegistration | null>("browser_mcp_registration", { sessionId }),
-    bindMcpEndpoint: (endpointId, sessionId) =>
+    bindMcpEndpoint: (endpointId, sessionId, workspaceId) =>
       nativeInvoke<BrowserMcpEndpoint>("browser_mcp_bind", {
         endpointId,
         sessionId,
+        workspaceId,
       }),
     setMcpCapabilities: (endpointId, imageCapable) =>
       nativeInvoke<BrowserMcpEndpoint>("browser_mcp_capabilities", {
@@ -267,7 +292,12 @@ export function createBrowserHost(
       const result = await nativeInvoke<string>("browser_clear_session_data", {
         sessionId,
       });
-      removeLegacyRestoreTabs(sessionId);
+      if (
+        !isLegacyRestoreEnabled(sessionId) ||
+        sessionId.startsWith("manual:") ||
+        uniqueRestoreWorkspace(await restoreOwners(), sessionId)
+      )
+        removeLegacyRestoreTabs(sessionId);
       return result;
     },
     clearSiteData: (sessionId, origin) =>
@@ -281,18 +311,13 @@ export function createBrowserHost(
         },
       );
       if (result.status === "completed") {
-        const project = pathKey(workspaceId);
         const sessions = legacyRestoreSessions();
-        for (const id of sessions) {
-          if (id.startsWith("manual:") && pathKey(id.slice(7)) === project)
-            removeLegacyRestoreTabs(id);
-        }
-        if (sessions.some((id) => !id.startsWith("manual:"))) {
-          const catalog = await restoreOwners();
-          for (const entry of catalog) {
-            if (pathKey(entry.workspaceId) === project)
-              removeLegacyRestoreTabs(entry.sessionId);
-          }
+        const catalog = sessions.some((id) => !id.startsWith("manual:"))
+          ? await restoreOwners()
+          : [];
+        for (const sessionId of sessions) {
+          if (await ownsLegacy({ workspaceId, sessionId }, catalog))
+            removeLegacyRestoreTabs(sessionId);
         }
       }
       return result;

@@ -268,6 +268,11 @@ mod native {
                                         .map_err(|_| {
                                             windows_core::Error::from(windows_core::HRESULT(1))
                                         })?;
+                                        if status != "in_progress" {
+                                            super::super::host::refresh_tab_memory(
+                                                &state_app, &record.session_id, &record.tab_id,
+                                            );
+                                        }
                                         let _ = state_app.emit("aaw://browser-download", &record);
                                         Ok(())
                                     },
@@ -391,6 +396,9 @@ pub fn browser_download_decide(
     native::decide(&download_id, allowed)?;
     #[cfg(not(windows))]
     return Err("DOWNLOAD_BRIDGE_NOT_SUPPORTED".into());
+    if !allowed {
+        super::host::refresh_tab_memory(&app, &record.session_id, &record.tab_id);
+    }
     app.emit("aaw://browser-download", &record)
         .map_err(|error| error.to_string())?;
     Ok(record)

@@ -41,6 +41,7 @@ export type NotificationHandler = (
 ) => void;
 
 export interface AcpSessionConnection {
+  readonly diagnosticScope?: string;
   request(
     method: string,
     params?: Readonly<Record<string, unknown>>,
@@ -61,9 +62,11 @@ export interface AcpSessionConnection {
 }
 
 export interface AcpChannelOptions {
+  readonly diagnosticScope?: string;
   readonly background?: boolean;
   readonly elicitation?: boolean;
   readonly requestTimeoutMs?: number;
+  readonly minimumProcessRevision?: number;
   readonly onFailure?: (reason: string) => void;
   /** Product identity supplied by the project owner; absent for temporary channels. */
   readonly project?: { readonly id: string; readonly path: string };
@@ -77,6 +80,7 @@ export interface AcpChannel {
 }
 
 export interface AcpChannelLease extends AcpChannel {
+  readonly processRevision?: number;
   release(closeRemote: () => Promise<void>): Promise<void>;
   recover(): Promise<void>;
 }

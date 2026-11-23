@@ -5,6 +5,10 @@ export interface McpProfile {
 
 export interface NativeMcpEntry {
   readonly name: string;
+  readonly id?: string;
+  readonly source?: string;
+  readonly readOnly?: boolean;
+  readonly effective?: boolean;
   readonly description?: string;
   readonly connectionRevision?: string;
   readonly redactedConfig?: Readonly<Record<string, unknown>>;
@@ -19,6 +23,7 @@ export interface NativeMcpEntry {
 
 export interface NativeMcpSnapshot {
   readonly revision: string;
+  readonly warnings?: readonly string[];
   readonly entries: readonly NativeMcpEntry[];
 }
 
@@ -103,7 +108,10 @@ export type McpTestTarget =
   | {
       readonly source: "native";
       readonly profile: McpProfile;
-      readonly previousName: string;
+      readonly previousName: string | null;
+      readonly entryId?: string;
+      readonly entryRevision?: string;
+      readonly workspace?: string;
       readonly revision: string;
       readonly draft: NativeMcpDraft;
     }
@@ -130,13 +138,23 @@ export interface McpInstallResult {
 }
 
 export interface NativeMcpHost {
-  read(profile: McpProfile): Promise<NativeMcpSnapshot | null>;
-  readLocal(selector: string): Promise<LocalMcpProfile | null>;
+  read(
+    profile: McpProfile,
+    workspace?: string,
+  ): Promise<NativeMcpSnapshot | null>;
+  readLocal(
+    selector: string,
+    workspace?: string,
+  ): Promise<LocalMcpProfile | null>;
   change(
     profile: McpProfile,
     revision: string,
     change: McpChange<NativeMcpDraft>,
   ): Promise<string>;
+  inspect?(
+    target: Extract<McpTestTarget, { source: "native" }>,
+    program: string,
+  ): Promise<McpInspection>;
   sessionProfile(sessionId: string): Promise<string | null>;
   testConfig(
     target: Extract<McpTestTarget, { source: "native" }>,
@@ -211,6 +229,12 @@ export interface AgentExtensionClient {
 
 export interface NativeMcpManagement {
   readonly defaultProfile: string;
+  readonly scoped?: boolean;
+  readonly hostInspection?: boolean;
+  readonly processConfig?: {
+    readonly revision: () => number;
+    readonly changed: () => void;
+  };
   readonly editableTransports: readonly NativeMcpDraft["transport"][];
   nativeHost(host: McpManagementHost): NativeMcpHost;
 }
@@ -223,6 +247,7 @@ export interface AgentMcpManagement {
       readonly host: McpManagementHost;
       readonly client: AgentExtensionClient | undefined;
       readonly sessionId: string | null;
+      readonly workspacePath: string;
     }): Promise<readonly string[]>;
   };
   readonly testHttp?: (

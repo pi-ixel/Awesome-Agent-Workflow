@@ -5,11 +5,25 @@ import { createLogger } from "../../../shared/logging/logger.ts";
 
 export function createWindowChrome(host: WindowChromeHost, logger = createLogger("ui")) {
   const snapshot = createStore<boolean>(() => false);
+  const displayed = createStore<boolean>(() => true);
   let active = true;
   let revision = 0;
+  let visibilityRevision = 0;
+
+  function refreshVisibility() {
+    if (!active || !host.isDisplayed) return;
+    const current = ++visibilityRevision;
+    void host.isDisplayed().then((value) => {
+      if (active && current === visibilityRevision) displayed.setState(value);
+    }).catch((error: unknown) => {
+      if (active && current === visibilityRevision)
+        logger.warn("读取窗口可见状态失败", { reason: String(error) });
+    });
+  }
 
   function refresh() {
     if (!active) return;
+    refreshVisibility();
     const current = ++revision;
     void host
       .isMaximized()
@@ -34,13 +48,21 @@ export function createWindowChrome(host: WindowChromeHost, logger = createLogger
     getState: snapshot.getState,
     getInitialState: snapshot.getInitialState,
     subscribe: snapshot.subscribe,
-    minimize: () => run("minimize", () => host.minimize()),
+    displayed,
+    minimize: () => run("minimize", async () => {
+      await host.minimize();
+      refreshVisibility();
+    }),
     toggleMaximize: () => run("toggleMaximize", () => host.toggleMaximize()),
     requestClose: () => run("close", () => host.requestClose()),
   };
   return {
     service,
     observe() {
+      const focus = host.listenForFocusChange?.(refreshVisibility).catch((error: unknown) => {
+        if (active)
+          logger.warn("订阅窗口焦点变化失败", { reason: String(error) });
+      });
       const registration = host
         .listenForResize(refresh)
         .catch((error: unknown) => {
@@ -50,7 +72,8 @@ export function createWindowChrome(host: WindowChromeHost, logger = createLogger
       void registration.then(refresh);
       return async () => {
         active = false;
-        (await registration)?.();
+        const listeners = await Promise.all([registration, focus]);
+        for (const unlisten of listeners) unlisten?.();
       };
     },
   };

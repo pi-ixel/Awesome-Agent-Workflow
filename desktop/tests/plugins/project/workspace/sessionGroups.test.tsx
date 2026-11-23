@@ -197,7 +197,7 @@ describe("ProjectTree session groups", () => {
     });
     const row = screen.getByRole("button", { name: "AAW dev · run-1，2 个会话" });
     expect(screen.getByRole("button", { name: "收起 AAW dev · run-1" })).toHaveAttribute("aria-expanded", "true");
-    expect(within(row).getByText("等你回复")).toBeInTheDocument();
+    expect(row).toHaveAccessibleDescription("等你回复");
     const members = screen.getByRole("list", { name: "AAW dev · run-1 的会话" });
     expect(within(members).getByText("设计")).toBeInTheDocument();
     expect(within(members).getByText("· 设计修正")).toBeInTheDocument();
@@ -328,6 +328,6 @@ describe("ProjectTree session groups", () => {
     render(<ProjectTree />, { wrapper: fixture.Wrapper });
     const row = screen.getByRole("button", { name: "AAW dev · old，2 个会话" });
     expect(row).toHaveAttribute("aria-expanded", "false");
-    expect(within(row).getByText("2 个会话")).toBeInTheDocument();
+    expect(within(row.parentElement!).getByText("2 个会话")).toBeInTheDocument();
   });
 });

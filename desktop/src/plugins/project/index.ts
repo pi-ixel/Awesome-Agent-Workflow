@@ -119,6 +119,7 @@ export async function apply(
           .catch(() => undefined);
         return dir;
       },
+      getTurnChanges: () => ctx.host.turnChanges,
       getApprovalMode: () => preferences.getState().approvalMode,
       interactionPreferences: preferences,
       navigation: {

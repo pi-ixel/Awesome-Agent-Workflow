@@ -12,6 +12,7 @@ export function bindAcpSession<Channel extends AcpChannel>(
   const binding: { session?: AcpSession } = {};
   const channel = owner.openChannel({
     background: options.background,
+    diagnosticScope: options.diagnosticScope,
     project: options.project,
     elicitation: !!options.onElicitation,
     requestTimeoutMs: options.requestTimeoutMs,

@@ -3,7 +3,13 @@ import { BadgeDot, Listbox, StatusDot } from "../../../shared/ui/controls.tsx";
 import { useState, type ReactNode } from "react";
 import { MetricStrip } from "../../../shared/ui/MetricStrip.tsx";
 import type { AcpConnectionDiagnostic } from "../../acpConnection/types.ts";
-import type { ResourceGroup, ResourceSnapshot } from "../types.ts";
+import type {
+  DesktopMemoryPoint,
+  DesktopTurnMemory,
+  DiagnosticSessionKey,
+  ResourceGroup,
+  ResourceSnapshot,
+} from "../types.ts";
 
 type Totals = Pick<ResourceGroup, "cpuPercent" | "memoryBytes">;
 const empty: Totals = { cpuPercent: null, memoryBytes: null };
@@ -31,6 +37,116 @@ function label(id: string) {
   return id === "desktop" ? "Desktop" : `Agent · 句柄 ${id.slice(6)}`;
 }
 const panel = "min-w-0 rounded-xl border border-line bg-surface";
+
+function DesktopWorkingSetDetails({
+  current,
+  turn,
+}: {
+  readonly current: DesktopMemoryPoint | null | undefined;
+  readonly turn: DesktopTurnMemory | null | undefined;
+}) {
+  const rows = [
+    { key: "total", label: "Desktop 合计" },
+    { key: "executable", label: "主程序" },
+    { key: "interface", label: "主界面 WebView2" },
+    { key: "browser", label: "内嵌浏览器" },
+    { key: "other", label: "其他 Desktop 子进程" },
+  ] as const;
+  const columns = [
+    ...(turn
+      ? [
+          { label: "轮前", point: turn.before },
+          { label: "峰值时刻", point: turn.peak },
+        ]
+      : []),
+    { label: "当前", point: current },
+  ];
+  const showOther = columns.some(
+    ({ point }) => point && point.memory.other !== 0,
+  );
+  return (
+    <Disclosure
+      defaultOpen
+      layout="row"
+      className="mt-3 border-t border-line"
+      summary="工作集明细"
+    >
+      {turn?.hasOverlap && (
+        <p className="mb-2 text-ui-caption text-warn-ink">
+          本轮有其他会话同时运行。表中是这段时间整个 Desktop 的读数。
+        </p>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-ui-caption tabular-nums">
+          <thead className="text-ink-mute">
+            <tr>
+              <th scope="col" className="pb-1 font-normal">
+                组成
+              </th>
+              {columns.map(({ label, point }) => (
+                <th
+                  key={label}
+                  scope="col"
+                  className="pb-1 pl-2 text-right font-normal whitespace-nowrap"
+                >
+                  {label}
+                  {point && (
+                    <span className="block">
+                      {new Date(point.at).toLocaleTimeString()}
+                    </span>
+                  )}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows
+              .filter(({ key }) => key !== "other" || showOther)
+              .map(({ key, label }) => (
+                <tr key={key} className="border-t border-line">
+                  <th scope="row" className="py-1.5 pr-1 font-medium">
+                    {label}
+                  </th>
+                  {columns.map(({ label, point }) => {
+                    const bytes = point?.memory[key] ?? null;
+                    const before = turn?.before?.memory[key];
+                    const change =
+                      label === "峰值时刻" && bytes !== null && before != null
+                        ? bytes - before
+                        : 0;
+                    return (
+                      <td
+                        key={label}
+                        className="py-1.5 pl-2 text-right whitespace-nowrap"
+                      >
+                        {memory(bytes)}
+                        {change !== 0 && (
+                          <span
+                            className="block text-ink-mute"
+                            data-hint="较轮前变化"
+                          >
+                            {change > 0 ? "+" : "−"}
+                            {memory(Math.abs(change))}
+                          </span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-ui-caption text-ink-mute">
+        {turn?.peak && "峰值按 Desktop 合计取样，各项对应同一时刻。"}
+        {turn && !turn.peak && "本轮暂无有效读数，约每 2 秒采样一次。"}
+        {!turn && "当前会话暂无轮次对照。"}
+        工作集按进程相加，共享页可能重复计入。
+      </p>
+    </Disclosure>
+  );
+}
+
 type Series = {
   name: string;
   color: string;
@@ -155,12 +271,14 @@ function Chart({
 
 export function ResourceReport({
   resources,
+  focusedSession,
   connections,
   now,
   children,
   jsHeapBytes,
 }: {
   readonly resources: ResourceSnapshot | null;
+  readonly focusedSession?: DiagnosticSessionKey;
   readonly connections: readonly AcpConnectionDiagnostic[];
   readonly now?: number;
   readonly jsHeapBytes?: number;
@@ -170,6 +288,13 @@ export function ResourceReport({
   const latest = resources?.groups ?? [];
   const history = resources?.history ?? [];
   const desktop = latest.find((g) => g.id === "desktop");
+  const savedTurn = resources?.turnMemory;
+  const turn =
+    savedTurn &&
+    savedTurn.session.scope === focusedSession?.scope &&
+    savedTurn.session.sessionId === focusedSession.sessionId
+      ? savedTurn
+      : undefined;
   const agents = latest.filter((g) => g.handle !== null);
   const agentTotal =
     resources?.supported && history.length ? sum(agents) : empty;
@@ -213,26 +338,39 @@ export function ResourceReport({
   const newest = history.at(-1)?.at;
   return (
     <div className="space-y-5">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1.25fr]">
-        {[
-          { name: "Desktop", metrics: desktop ?? empty, tone: "info" as const },
-          { name: "全部 agent", metrics: agentTotal, tone: "ok" as const },
-        ].map(({ name, metrics, tone }) => (
-          <section key={name} className={`${panel} p-4`}>
-            <h2 className="flex items-center gap-2 text-sm font-medium">
-              <StatusDot tone={tone} className="ui-icon-8" />
-              {name}
-            </h2>
-            <MetricStrip
-              embedded
-              label={name}
-              metrics={[
-                { label: "CPU", value: cpu(metrics.cpuPercent) },
-                { label: "内存", value: memory(metrics.memoryBytes) },
-              ]}
-            />
-          </section>
-        ))}
+      <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1.8fr)_1fr_1.25fr]">
+        <section className={`${panel} p-4`}>
+          <h2 className="flex items-center gap-2 text-sm font-medium">
+            <StatusDot tone="info" className="ui-icon-8" />
+            Desktop
+          </h2>
+          <MetricStrip
+            embedded
+            label="Desktop"
+            metrics={[
+              { label: "CPU", value: cpu(desktop?.cpuPercent ?? null) },
+              { label: "工作集", value: memory(desktop?.memoryBytes ?? null) },
+            ]}
+          />
+          <DesktopWorkingSetDetails
+            current={resources?.desktopMemory}
+            turn={turn}
+          />
+        </section>
+        <section className={`${panel} p-4`}>
+          <h2 className="flex items-center gap-2 text-sm font-medium">
+            <StatusDot tone="ok" className="ui-icon-8" />
+            全部 agent
+          </h2>
+          <MetricStrip
+            embedded
+            label="全部 agent"
+            metrics={[
+              { label: "CPU", value: cpu(agentTotal.cpuPercent) },
+              { label: "内存", value: memory(agentTotal.memoryBytes) },
+            ]}
+          />
+        </section>
         <section className={`${panel} p-4 md:col-span-2 xl:col-span-1`}>
           <h2 className="text-sm font-medium">连接负载</h2>
           <MetricStrip
@@ -294,7 +432,7 @@ export function ResourceReport({
         <div className="grid gap-3 lg:grid-cols-2">
           <Chart title="CPU" unit="cpu" series={chartSeries("cpuPercent")} />
           <Chart
-            title="物理内存"
+            title="内存工作集"
             unit="memory"
             series={chartSeries("memoryBytes")}
           />

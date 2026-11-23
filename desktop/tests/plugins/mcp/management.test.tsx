@@ -21,11 +21,12 @@ import { BrowserAgentControlSettings } from "../../../src/plugins/browser/servic
 import { codeAgentAdapter } from "../../../src/plugins/agents/enhancements/codeagent/adapter.ts";
 import type { ProjectService } from "../../../src/plugins/project/service.ts";
 import { createTestBrowserHost } from "../../helpers/browserHost.ts";
+import { createSessionTools } from "../../../src/plugins/project/sessions/sessionTools.ts";
 import { createStore } from "zustand";
 
 afterEach(cleanup);
 
-it("服务开关逐项更新，连续写入使用新版本，筛选后仍保留原详情", async () => {
+it("服务开关逐项更新，连续写入使用新版本，筛选结果同步更新", async () => {
   const user = userEvent.setup();
   const { service, host, readLocal } = fixture();
   const [first] = managed.entries;
@@ -54,11 +55,11 @@ it("服务开关逐项更新，连续写入使用新版本，筛选后仍保留�
   );
   expect(screen.getByText(/会话工具未知/)).toBeVisible();
   const list = screen.getByRole("list", { name: "MCP 服务" });
+  await user.click(screen.getByRole("combobox", { name: "筛选状态" }));
+  await user.click(screen.getByRole("option", { name: "已启用" }));
   await user.click(
     await within(list).findByRole("button", { name: first!.name }),
   );
-  await user.click(screen.getByRole("combobox", { name: "筛选状态" }));
-  await user.click(screen.getByRole("option", { name: "已启用" }));
   const detail = screen.getByRole("complementary", {
     name: first!.name + " 详情",
   });
@@ -80,8 +81,7 @@ it("服务开关逐项更新，连续写入使用新版本，筛选后仍保留�
   expect(
     within(list).queryByRole("button", { name: first!.name }),
   ).not.toBeInTheDocument();
-  expect(firstToggle).not.toBeChecked();
-  expect(detail).toBeInTheDocument();
+  expect(detail).not.toBeVisible();
   expect(host.managedRead).toHaveBeenCalledTimes(1);
   expect(readLocal).toHaveBeenCalledTimes(1);
 });
@@ -269,6 +269,8 @@ it("复用已保存的检测结果，展示工具权限并按服务版本提交"
     message: "检测失败",
   } satisfies McpInspection);
   await user.click(within(detail).getByRole("button", { name: "测试连接" }));
+  expect(await within(detail).findByText("检测失败")).toBeVisible();
+  expect(within(detail).queryByText(/10 ms/)).not.toBeInTheDocument();
   expect(
     await within(detail).findByText(/显示上次检测到的工具清单/),
   ).toBeVisible();
@@ -363,12 +365,15 @@ function fixture(nativeEntries: readonly NativeMcpEntry[] = []) {
         }),
     ),
     commitInstall: vi.fn(() => Promise.resolve({ applied: [], skipped: [] })),
-    managedResolve: vi.fn(() =>
+    managedResolve: vi.fn<McpManagementHost["managedResolve"]>(() =>
       Promise.resolve({
         revision: managed.revision,
         servers: [server],
         skipped: [],
       }),
+    ),
+    retireManaged: vi.fn<NonNullable<McpManagementHost["retireManaged"]>>(() =>
+      Promise.resolve(),
     ),
     testConfig: vi.fn(() => Promise.resolve(server)),
   } satisfies McpManagementHost;
@@ -473,6 +478,230 @@ it("uses the archived Profile for a restored session and keeps other Agents isol
     }),
   ).toEqual([]);
   expect(host.managedResolve).toHaveBeenCalledTimes(2);
+});
+
+it("CodeAgent 仅在当前 ACP 连接声明 HTTP 时注入托管 MCP", async () => {
+  const { host, readLocal } = fixture([
+    { ...nativeTools, name: "enabled-native", effective: true },
+    { ...nativeTools, name: "disabled-native", effective: false },
+  ]);
+  const requestExtension = vi.fn();
+  const agents = {
+    resolve: () => codeAgentAdapter,
+  } as unknown as AgentsService;
+  const service = createMcpManagement(host, agents, () => ({}));
+  const context = {
+    agentId: "codeagent",
+    agentKey: "codeagent",
+    workspacePath: workspace,
+    agent: {
+      protocolVersion: 1,
+      agentInfo: { name: "CodeAgent" },
+      agentCapabilities: { mcpCapabilities: { http: true, sse: true } },
+    },
+    requestExtension,
+  };
+
+  for (const sessionId of [null, "restored"]) {
+    await expect(
+      service.sessionTools({ ...context, sessionId }),
+    ).resolves.toEqual([
+      {
+        type: "http",
+        name: "managed-tools",
+        url: "http://localhost:9010/mcp",
+        headers: [],
+      },
+    ]);
+  }
+  expect(host.managedResolve).toHaveBeenCalledTimes(2);
+  expect(host.managedResolve).toHaveBeenLastCalledWith(
+    "codeagent",
+    ["enabled-native"],
+    expect.any(String),
+  );
+  expect(readLocal).toHaveBeenLastCalledWith("CodeAgent 用户配置", workspace);
+  await expect(
+    service.sessionTools({
+      ...context,
+      sessionId: null,
+      agent: {
+        ...context.agent,
+        agentCapabilities: { mcpCapabilities: { sse: true } },
+      },
+    }),
+  ).resolves.toEqual([]);
+  expect(host.managedResolve).toHaveBeenCalledTimes(2);
+  expect(requestExtension).not.toHaveBeenCalled();
+});
+
+it("CodeAgent 工作区条目仅手动检测，列表和批量检测不会启动 stdio", async () => {
+  const user = userEvent.setup();
+  const inspectionError =
+    "找不到 CodeAgent 安装目录中的 MCP 启动文件，请检查 Agent 启动路径和安装完整性";
+  const { host } = fixture([
+    {
+      ...nativeTools,
+      id: "project:local",
+      name: "local-stdio",
+      source: "项目 .mcp.json",
+      readOnly: true,
+      transport: "stdio",
+      effective: true,
+    },
+  ]);
+  const inspect = vi.fn<NonNullable<NativeMcpHost["inspect"]>>(() =>
+    Promise.resolve({
+      ok: false,
+      message: inspectionError,
+      checkedAt: Date.now(),
+      durationMs: 1,
+    }),
+  );
+  const managedProbe = vi.fn(() =>
+    Promise.resolve({
+      ok: true,
+      message: "检测成功",
+      checkedAt: 1,
+      durationMs: 1,
+    }),
+  );
+  const codedHost: McpManagementHost = {
+    ...host,
+    native: (provider) => ({
+      ...host.native(),
+      ...(provider === "codeagent" && { inspect }),
+    }),
+    inspection: {
+      read: vi.fn(() => Promise.resolve({})),
+      save: vi.fn(() => Promise.resolve()),
+      probe: managedProbe,
+      browserTools: vi.fn(() =>
+        Promise.resolve({ tools: [], disabledTools: [] }),
+      ),
+      probeBrowser: managedProbe,
+      setBrowserTools: vi.fn(() => Promise.resolve([])),
+      setManagedTools: vi.fn(() => Promise.resolve("managed-rev")),
+    },
+  };
+  const agents = {
+    resolve: () => codeAgentAdapter,
+    buildLaunch: () => ({ command: ["codeagent"], cwd: null, extraEnv: {} }),
+  } as unknown as AgentsService;
+  const service = createMcpManagement(codedHost, agents, () => ({}));
+  render(
+    <McpView
+      service={service}
+      agentId="codeagent"
+      activeProfile={null}
+      browser={createTestBrowserHost()}
+      canManageNative
+      canManageInjected
+      canTest={false}
+      nativeTransports={["http", "stdio"]}
+      nativeWorkspace={workspace}
+      hasScopedNative
+      hasHostInspection
+    />,
+  );
+  const row = await screen.findByRole("button", { name: "local-stdio" });
+  expect(screen.getByText("项目 .mcp.json · 只读")).toBeVisible();
+  expect(
+    screen.queryByRole("switch", { name: "local-stdio 启用" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "local-stdio 删除" }),
+  ).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "全部检测" }));
+  expect(inspect).not.toHaveBeenCalled();
+  await user.click(row);
+  const detail = screen.getByRole("complementary", {
+    name: "local-stdio 详情",
+  });
+  expect(
+    within(detail).queryByRole("button", { name: "编辑配置" }),
+  ).not.toBeInTheDocument();
+  await user.click(within(detail).getByRole("button", { name: "测试连接" }));
+  await vi.waitFor(() =>
+    expect(inspect).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        entryId: "project:local",
+        workspace,
+        draft: { name: "local-stdio", transport: "stdio", secretChanges: {} },
+      }),
+      "codeagent",
+    ),
+  );
+  expect(await within(detail).findByText(inspectionError)).toBeVisible();
+});
+
+it("释放会话时只注销该会话的托管 MCP 代理，重复释放不影响其他会话", async () => {
+  const { service, host, request, warn } = fixture();
+  const tools = createSessionTools({ warn } as never);
+  tools.register(service.sessionTools);
+  const context = {
+    agentId: "chrys",
+    agentKey: "chrys",
+    workspacePath: workspace,
+    agent: {
+      protocolVersion: 1,
+      agentInfo: { name: "iCode" },
+      agentCapabilities: capabilities,
+    },
+    requestExtension: request,
+  };
+  const first = await tools.resolve({ ...context, sessionId: "first" });
+  const second = await tools.resolve({ ...context, sessionId: "second" });
+  const [firstGeneration, secondGeneration] =
+    host.managedResolve.mock.calls.map((call) => call[2]);
+  expect(firstGeneration).toEqual(expect.any(String));
+  expect(secondGeneration).not.toBe(firstGeneration);
+  expect(first.servers.map(({ name }) => name)).toEqual(["managed-tools"]);
+  await first.dispose?.();
+  await first.dispose?.();
+  expect(host.retireManaged.mock.calls).toEqual([[firstGeneration]]);
+  await second.dispose?.();
+  expect(host.retireManaged.mock.calls).toEqual([
+    [firstGeneration],
+    [secondGeneration],
+  ]);
+});
+
+it("会话已超时时回收迟到的托管 MCP 代理", async () => {
+  const { service, host, request } = fixture();
+  type Result = Awaited<ReturnType<McpManagementHost["managedResolve"]>>;
+  let finish!: (result: Result) => void;
+  const delayed = new Promise<Result>((resolve) => {
+    finish = resolve;
+  });
+  const onDispose = vi.fn();
+  host.managedResolve.mockReturnValueOnce(delayed);
+  vi.useFakeTimers();
+  try {
+    const pending = service.sessionTools({
+      agentId: "chrys",
+      agentKey: "chrys",
+      workspacePath: workspace,
+      sessionId: "late",
+      agent: {
+        protocolVersion: 1,
+        agentInfo: { name: "iCode" },
+        agentCapabilities: capabilities,
+      },
+      requestExtension: request,
+      onDispose,
+    });
+    await vi.advanceTimersByTimeAsync(6_000);
+    await expect(pending).resolves.toEqual([]);
+    const generation = host.managedResolve.mock.calls[0]?.[2];
+    expect(generation).toEqual(expect.any(String));
+    finish({ revision: "managed-rev", servers: [], skipped: [] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(host.retireManaged).toHaveBeenCalledExactlyOnceWith(generation);
+    expect(onDispose).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("tests the unsaved HTTP draft from the unified card editor and confirms deletion", async () => {
@@ -593,6 +822,52 @@ it("passes MCP to Agent after native lookup failure and isolates an independent 
   expect(
     results.get(resolutionKey("shared-agent", workspace, "fallback"))?.injected,
   ).toEqual(["managed-tools"]);
+});
+
+it("opens details on demand, switches cards in place, and dismisses from outside", async () => {
+  const user = userEvent.setup();
+  const { service } = fixture([nativeTools]);
+  render(
+    <McpView
+      service={service}
+      agentId="chrys"
+      activeProfile={null}
+      browser={createTestBrowserHost()}
+      canManageNative
+      canManageInjected
+      canTest
+    />,
+  );
+  const managed = await screen.findByRole("button", { name: "managed-tools" });
+  const native = await screen.findByRole("button", { name: nativeTools.name });
+  expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  expect(managed).toHaveAttribute("aria-expanded", "false");
+
+  await user.click(managed);
+  const drawer = screen.getByRole("complementary", {
+    name: "managed-tools 详情",
+  });
+  expect(drawer).toHaveAttribute("data-edge-drawer", "right");
+  await user.click(native);
+  expect(
+    screen.getByRole("complementary", { name: nativeTools.name + " 详情" }),
+  ).toBe(drawer);
+  expect(managed).toHaveAttribute("aria-expanded", "false");
+  expect(native).toHaveAttribute("aria-expanded", "true");
+
+  await user.click(screen.getByRole("searchbox", { name: "搜索 MCP" }));
+  expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  await user.click(native);
+  await user.click(within(drawer).getByRole("button", { name: "收起详情" }));
+  expect(native).toHaveFocus();
+  expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  await user.click(native);
+  await user.keyboard("{Escape}");
+  expect(native).toHaveFocus();
+  expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  await user.click(native);
+  await user.click(native);
+  expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
 });
 
 it("mixes native and Desktop cards, filters by configured state, and checks exact duplicate names", async () => {
@@ -719,13 +994,14 @@ it("reloads an externally changed revision in the existing editor and keeps type
 it("shows the built-in browser as a switch-only card with CodeAgent and mirrors the Settings switch", async () => {
   const user = userEvent.setup();
   const browser = createTestBrowserHost();
-  const { service } = fixture();
+  const { host } = fixture();
   const recoverSession = vi.fn(() => Promise.resolve());
   const agents = {
     configuration: createStore(() => ({ activeAgentId: "codeagent" })),
     resolve: () => codeAgentAdapter,
     selectionKey: () => "agent-key",
   } as unknown as AgentsService;
+  const service = createMcpManagement(host, agents, () => ({}));
   const project = {
     projects: {
       workspace: createStore(() => ({ activePath: workspace, toolPaths: {} })),
@@ -758,6 +1034,9 @@ it("shows the built-in browser as a switch-only card with CodeAgent and mirrors 
   );
   const settings = screen.getByRole("switch", { name: "Agent 浏览器控制" });
   const list = await screen.findByRole("list", { name: "MCP 服务" });
+  expect(screen.getByRole("button", { name: "新增原生 MCP" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "新增 MCP" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "导入 JSON" })).toBeVisible();
   const mcp = await within(list).findByRole("switch", {
     name: "AAW 内置浏览器 启用",
   });

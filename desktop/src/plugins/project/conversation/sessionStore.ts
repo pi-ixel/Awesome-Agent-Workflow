@@ -16,6 +16,7 @@ import { createSessionActions } from "./actions.ts";
 import type { createMessageImageHistory } from "./messageImageHistory.ts";
 import { readPersistedPromptQueue, readPromptQueue, writePromptQueue } from "./queuePersistence.ts";
 import { nativeSnapshots, sessionLogKey } from "./snapshotStorage.ts";
+import { initialStreamBatchEnd, STREAM_COMMIT_MS, streamBatchEnd } from "./streamPlayback.ts";
 import { collectPerformance, addPerformance, currentTurnItems, parsePerformanceTotals, type PerformanceTotals, beginPerformance, parsePerformance, performanceTool, performanceWait, type TurnPerformance } from "./sessionPerformance.ts";
 import { parseTurnUsage, type TurnUsage } from "./turnUsage.ts";
 import type { UsageScope, UsageStart } from "../usage/service.ts";
@@ -313,6 +314,7 @@ export interface SessionStoreState extends ConversationViewState {
   readonly sealStreamingItems: () => void;
   /** 立即提交缓冲中的流式文本（合并窗口不等待；测试 / 诊断用）。 */
   readonly flushStreamingChunks: () => void;
+  readonly setPlaybackActive: (active: boolean) => void;
   /** 性能基准：向当前消息流灌入 N 轮合成条目（用户 + Markdown + 工具卡）。 */
   readonly seedPerfMessages: (turns: number) => void;
   /** 轮次开始：落笔用户消息并置运行态（sendPrompt 的归约入口）。 */
@@ -434,14 +436,6 @@ export interface SessionStoreState extends ConversationViewState {
 export const SESSION_LOG_ITEM_LIMIT = 200;
 /** 增量事件的节流落盘间隔（ms）。 */
 const SESSION_LOG_THROTTLE_MS = 2000;
-
-/**
- * 流式分片的时间片合并窗口（ms）：agent_message_chunk / agent_thought_chunk
- * 高频到达，逐条 set 会让整棵消息流跟随重提交（长会话流式期间掉帧的根因）。
- * 追加文本先进缓冲、窗口内合并为一次提交；封口 / 其他条目变更 / 快照落盘
- * 前一律先 flush，条目顺序与内容语义和逐条提交完全一致。
- */
-export const CHUNK_COALESCE_MS = 120;
 
 /** 快照持久化形状（带版本号，形状变更时升版本）。 */
 interface SessionLogPayload {
@@ -803,6 +797,7 @@ export const createSessionStore = (
   annotationDrafts?: AnnotationDraftService,
   messageImages?: ReturnType<typeof createMessageImageHistory>,
   logger = createLogger("session"),
+  { playbackActive: playbackInitiallyActive = true }: { readonly playbackActive?: boolean } = {},
 ) => {
   const storeId = crypto.randomUUID();
   let itemSequence = 0;
@@ -849,46 +844,67 @@ export const createSessionStore = (
     let logTargetPath: string | null = null;
     let queueTargetPath: string | null = null;
     let logFlushTimer: ReturnType<typeof setTimeout> | null = null;
-    // 上次已落盘的条目引用：条目数组引用未变则跳过序列化（长会话全量
-    // JSON.stringify 单次几 MB，未变更的重复落盘是纯浪费）
-    let lastWrittenItems: readonly SessionItem[] | null = null;
-    let snapshotWrite = Promise.resolve();
+    type Checkpoint = {
+      source: readonly SessionItem[];
+      revision: number;
+      items: readonly SessionItem[];
+      totals: PerformanceTotals;
+    };
+    let lastCheckpoint: Pick<Checkpoint, "source" | "revision"> | undefined;
+    const pendingWrites = new Map<string, Checkpoint>();
+    let snapshotWrite: Promise<void> | undefined;
 
-    /** 立即落盘当前条目流（并取消挂起的节流定时器）。 */
+    const writeCheckpoint = (target: string, checkpoint: Checkpoint) => {
+      const { items, totals } = checkpoint;
+      void messageImages?.save(target, items).catch((error) => {
+        logger.warn("消息图片保存失败", { reason: String(error) });
+        get().pushNotice("warn", "消息图片保存失败，重新加载后可能无法显示");
+      });
+      return writeSessionLog(target, items, logger, totals);
+    };
+
+    const finishCheckpoint = (target: string, checkpoint: Checkpoint, error: string | null) => {
+      if (target !== logTargetPath) return;
+      if ((get().cacheSaveError ?? null) !== error) set({ cacheSaveError: error });
+      if (error && lastCheckpoint?.source === checkpoint.source && lastCheckpoint.revision === checkpoint.revision) lastCheckpoint = undefined;
+    };
+
+    async function drainCheckpoints(): Promise<void> {
+      try {
+        for (const [target, checkpoint] of pendingWrites) {
+          pendingWrites.delete(target);
+          finishCheckpoint(target, checkpoint, await writeCheckpoint(target, checkpoint));
+        }
+      } finally {
+        snapshotWrite = undefined;
+      }
+    }
+
+    /** 保存已接收的正文，同时保留当前上屏进度。 */
     const flushSessionLogNow = (): void => {
-      // 快照必须包含缓冲中的流式文本（否则丢最后 120ms 的内容）
-      flushPendingChunks();
       if (logFlushTimer !== null) {
         clearTimeout(logFlushTimer);
         logFlushTimer = null;
       }
-      if (logTargetPath === null || historyReplaySessionId !== null) {
-        return;
-      }
-      const items = get().items;
-      if (items === lastWrittenItems) {
-        return;
-      }
-      if (historyReplaySessionId === null)
-        void messageImages?.save(logTargetPath, items).catch((error) => {
-          logger.warn("消息图片保存失败", { reason: String(error) });
-          get().pushNotice("warn", "消息图片保存失败，重新加载后可能无法显示");
-        });
+      if (logTargetPath === null || historyReplaySessionId !== null) return;
+      const state = get();
+      const source = timelineItemsOf(state);
+      if (lastCheckpoint?.source === source && lastCheckpoint.revision === streamRevision) return;
+      const items = appendBufferedText(state.items, pendingText);
+      const base = state.performanceTotals;
+      const totals = base
+        ? state.isAgentRunning
+          ? addPerformance(base, collectPerformance(currentTurnItems(items), false, Date.now()))
+          : base
+        : collectPerformance(items, false, Date.now());
       const target = logTargetPath;
-      const base = get().performanceTotals;
-      const totals = base ? (get().isAgentRunning ? addPerformance(base, collectPerformance(currentTurnItems(items), false, Date.now())) : base) : collectPerformance(items, false, Date.now());
-      const finish = (cacheSaveError: string | null) => {
-        if (target !== logTargetPath) return;
-        if ((get().cacheSaveError ?? null) !== cacheSaveError) set({ cacheSaveError });
-        if (cacheSaveError && lastWrittenItems === items) lastWrittenItems = null;
-      };
-      lastWrittenItems = items;
+      const checkpoint = { source, revision: streamRevision, items, totals };
+      lastCheckpoint = { source, revision: streamRevision };
       if (nativeSnapshots.available()) {
-        snapshotWrite = snapshotWrite.then(async () => {
-          finish(await writeSessionLog(target, items, logger, totals));
-        });
+        pendingWrites.set(target, checkpoint);
+        snapshotWrite ??= Promise.resolve().then(drainCheckpoints);
       } else {
-        finish(writeSessionLog(target, items, logger, totals) as string | null);
+        finishCheckpoint(target, checkpoint, writeCheckpoint(target, checkpoint) as string | null);
       }
     };
 
@@ -920,136 +936,79 @@ export const createSessionStore = (
       );
     };
 
-    // 流式分片缓冲 + 匀速吐字泵：agent 的分片是突发到达的（停半秒、
-    // 吐一大段），整段直接上屏就是一顿一顿的蹦字。分片先入缓冲，泵按
-    // 显示帧率（rAF 对齐，60Hz 显示器即 60fps）每帧搬「一小段均匀的字
-    // 符」上屏（自适应：积压越多吐越快，保证 ~200ms 内追平）——把到达
-    // 节奏与显示节奏解耦。回合封口、工具事件等仍走 flushPendingChunks
-    // 全量排空，一个字不丢。rAF 不可用（测试环境）回落 16ms 定时器。
-    let pendingAssistantText = "";
-    let pendingThoughtText = "";
-    /** 取消当前泵帧的闭包（rAF 与 setTimeout 两种调度共用此形状）。 */
-    let chunkPumpCancel: (() => void) | null = null;
+    // 助手与思考切换时先封口，任意时刻只会有一个落笔目标。
+    let pendingText = "";
+    let queuedAt = 0;
+    let lastPublishedAt = 0;
+    let streamRevision = 0;
+    let playbackActive = playbackInitiallyActive;
+    let pumpTimer: ReturnType<typeof setTimeout> | undefined;
 
-    /** 泵每帧上屏的最小字符数（1 = 单字符打字机丝滑口径）。 */
-    const PUMP_MIN_CHARS = 1;
-    /** 积压消化预算（帧数）：单帧上屏 ≈ max(积压/预算, 最小值)。 */
-    const PUMP_CATCHUP_FRAMES = 12;
-    /** rAF 不可用时的定时器回落间隔（≈60fps）。 */
-    const PUMP_FALLBACK_INTERVAL_MS = 16;
-
-    /** 调度下一帧泵（rAF 对齐显示帧率；无 rAF 环境回落定时器）。 */
-    const schedulePumpFrame = (tick: () => void): void => {
-      if (typeof requestAnimationFrame === "function") {
-        const frame = requestAnimationFrame(() => {
-          chunkPumpCancel = null;
-          tick();
-        });
-        chunkPumpCancel = () => cancelAnimationFrame(frame);
-      } else {
-        const timer = setTimeout(() => {
-          chunkPumpCancel = null;
-          tick();
-        }, PUMP_FALLBACK_INTERVAL_MS);
-        chunkPumpCancel = () => clearTimeout(timer);
-      }
+    const stopPump = (): void => {
+      clearTimeout(pumpTimer);
+      pumpTimer = undefined;
     };
 
-    /** 泵的一帧：把缓冲开头的一小段拼进对应落笔条目；缓冲未排空则续排。 */
-    const pumpPendingChunks = (): void => {
-      const takeAssistant = Math.min(
-        pendingAssistantText.length,
-        Math.max(
-          PUMP_MIN_CHARS,
-          Math.ceil(pendingAssistantText.length / PUMP_CATCHUP_FRAMES),
-        ),
-      );
-      const takeThought = Math.min(
-        pendingThoughtText.length,
-        Math.max(
-          PUMP_MIN_CHARS,
-          Math.ceil(pendingThoughtText.length / PUMP_CATCHUP_FRAMES),
-        ),
-      );
-      const assistant = pendingAssistantText.slice(0, takeAssistant);
-      const thought = pendingThoughtText.slice(0, takeThought);
-      pendingAssistantText = pendingAssistantText.slice(takeAssistant);
-      pendingThoughtText = pendingThoughtText.slice(takeThought);
-      if (assistant !== "" || thought !== "") {
-        set((state) => ({
-          items: state.items.map((item) => {
-            if (
-              assistant !== "" &&
-              item.kind === "assistant" &&
-              item.id === openAssistantId &&
-              item.isStreaming
-            ) {
-              return { ...item, text: item.text + assistant };
-            }
-            if (
-              thought !== "" &&
-              item.kind === "thought" &&
-              item.id === openThoughtId &&
-              item.isStreaming
-            ) {
-              return { ...item, text: item.text + thought };
-            }
-            return item;
-          }),
-        }));
-      }
-      if (pendingAssistantText !== "" || pendingThoughtText !== "") {
-        schedulePumpFrame(pumpPendingChunks);
-      }
+    const appendBufferedText = (items: readonly SessionItem[], text: string): readonly SessionItem[] => {
+      if (!text) return items;
+      const openId = openAssistantId ?? openThoughtId;
+      const index = items.at(-1)?.id === openId
+        ? items.length - 1
+        : items.findIndex((item) => item.id === openId);
+      const item = items[index];
+      if (item?.kind !== "assistant" && item?.kind !== "thought") return items;
+      const next = items.slice();
+      next[index] = { ...item, text: item.text + text };
+      return next;
     };
 
-    /** 把缓冲中的流式文本一次性拼进对应落笔条目（空缓冲不提交，幂等）。
-     *  封口/工具事件前的全量排空入口——语义与泵不同：一个字不剩。 */
+    const publishText = (length: number): void => {
+      if (length === 0) return;
+      const text = pendingText.slice(0, length);
+      pendingText = pendingText.slice(length);
+      lastPublishedAt = Date.now();
+      set((state) => {
+        const items = appendBufferedText(state.items, text);
+        if (items !== state.items) timelineItems.set(items, timelineItemsOf(state));
+        return { items };
+      });
+    };
+
+    const schedulePump = (): void => {
+      if (!playbackActive || pumpTimer !== undefined || !pendingText) return;
+      const delay = Math.max(0, lastPublishedAt + STREAM_COMMIT_MS - Date.now());
+      pumpTimer = setTimeout(() => {
+        pumpTimer = undefined;
+        const length = streamBatchEnd(pendingText, Date.now(), queuedAt);
+        publishText(length);
+        // 只有一个未闭合字素时，下一次输入或封口会接管。
+        if (length > 0) schedulePump();
+      }, delay);
+    };
+
+    const bufferText = (text: string): void => {
+      if (!text) return;
+      if (!pendingText) queuedAt = Date.now();
+      pendingText += text;
+      streamRevision += 1;
+      schedulePump();
+    };
+
     const flushPendingChunks = (): void => {
-      chunkPumpCancel?.();
-      chunkPumpCancel = null;
-      const assistant = pendingAssistantText;
-      const thought = pendingThoughtText;
-      pendingAssistantText = "";
-      pendingThoughtText = "";
-      if (assistant === "" && thought === "") {
-        return;
-      }
-      set((state) => ({
-        items: state.items.map((item) => {
-          if (
-            assistant !== "" &&
-            item.kind === "assistant" &&
-            item.id === openAssistantId &&
-            item.isStreaming
-          ) {
-            return { ...item, text: item.text + assistant };
-          }
-          if (
-            thought !== "" &&
-            item.kind === "thought" &&
-            item.id === openThoughtId &&
-            item.isStreaming
-          ) {
-            return { ...item, text: item.text + thought };
-          }
-          return item;
-        }),
-      }));
+      stopPump();
+      publishText(pendingText.length);
     };
 
-    /** 丢弃未提交的流式缓冲（会话条目整体替换前用——不把旧会话文本拼进新流）。 */
+    /** 会话条目整体替换时，旧缓冲随会话丢弃。 */
     const dropPendingChunks = (): void => {
-      chunkPumpCancel?.();
-      chunkPumpCancel = null;
-      pendingAssistantText = "";
-      pendingThoughtText = "";
+      stopPump();
+      pendingText = "";
     };
 
-    /** 先 flush 流式缓冲再封口（「读当前条目并封口」的统一入口）。 */
     const sealedItems = (): SessionItem[] => {
-      flushPendingChunks();
-      return closeStreamingItems(get().items);
+      const items = appendBufferedText(get().items, pendingText);
+      dropPendingChunks();
+      return closeStreamingItems(items);
     };
 
     const pushSystemItem = (level: SystemNoticeLevel, text: string): void => {
@@ -1200,15 +1159,22 @@ export const createSessionStore = (
         lastError: null,
       });
       // 点击停止时已暂停队列；本轮正常完成不能撤销用户的停止意图。
-      if (get().queuedPrompts.length > 0) {
-        const failed = outcome.errorMessage !== undefined;
-        const cancelled = outcome.stopReason === "cancelled";
-        if (failed || cancelled) {
-          set({ queuePaused: true });
-        } else if (!get().queuePaused) {
-          drainNextQueued();
+      const changesFinished = get().turnChanges?.finish(outcome);
+      const finishedGeneration = turnGeneration;
+      const continueQueue = () => {
+        if (finishedGeneration !== turnGeneration) return;
+        if (get().queuedPrompts.length > 0) {
+          const failed = outcome.errorMessage !== undefined;
+          const cancelled = outcome.stopReason === "cancelled";
+          if (failed || cancelled) {
+            set({ queuePaused: true });
+          } else if (!get().queuePaused) {
+            drainNextQueued();
+          }
         }
-      }
+      };
+      if (changesFinished) void changesFinished.then(continueQueue);
+      else continueQueue();
       // 轮次收尾即时落盘（增量部分已按节流写入，这里保证结局不丢）
       flushSessionLogNow();
     };
@@ -1237,16 +1203,8 @@ export const createSessionStore = (
                 : item,
             ),
           }));
-        // 时间片合并：首个分片已建条目即时可见，后续分片进缓冲，
-        // CHUNK_COALESCE_MS 窗口内合并为一次提交（封口前必 flush）
-        if (isThought) {
-          pendingThoughtText += text;
-        } else {
-          pendingAssistantText += text;
-        }
-        if (chunkPumpCancel === null) {
-          schedulePumpFrame(pumpPendingChunks);
-        }
+        bufferText(text);
+        if (historyReplaySessionId !== null) flushPendingChunks();
         return;
       }
       // 换落笔目标：先把上一段的缓冲拼进旧条目再封口（顺序不可颠倒）
@@ -1257,11 +1215,16 @@ export const createSessionStore = (
       } else {
         openAssistantId = id;
       }
+      const initialLength = historyReplaySessionId !== null
+        ? text.length
+        : playbackActive ? initialStreamBatchEnd(text) : 0;
+      const initialText = text.slice(0, initialLength);
+      if (initialLength > 0) lastPublishedAt = Date.now();
       const item: ThoughtItem | AssistantMessageItem = isThought
         ? {
             kind: "thought",
             id,
-            text,
+            text: initialText,
             attachments,
             isStreaming: true,
             startedAt: Date.now(),
@@ -1270,12 +1233,13 @@ export const createSessionStore = (
         : {
             kind: "assistant",
             id,
-            text,
+            text: initialText,
             attachments,
             isStreaming: true,
             createdAt: new Date().toISOString(),
           };
       set({ items: [...closed, item] });
+      bufferText(text.slice(initialLength));
     };
 
     /** tool_call / tool_call_update 按 toolCallId 合并为一张卡片。 */
@@ -1486,6 +1450,13 @@ export const createSessionStore = (
 
       sealStreamingItems: () => {
         set({ items: sealedItems() });
+      },
+
+      setPlaybackActive: (active) => {
+        if (playbackActive === active) return;
+        playbackActive = active;
+        if (active) flushPendingChunks();
+        else stopPump();
       },
 
       /** 测试与诊断用：立即提交缓冲中的流式文本（合并窗口不等待）。 */
@@ -2042,6 +2013,7 @@ export const createSessionStore = (
       requestCancel: actions.requestCancel,
 
       clear: () => {
+        dropPendingChunks();
         actions.resetSteering();
         set({ performanceTotals: undefined, historyPreview: undefined });
         interruptedPrompt = null;
@@ -2081,6 +2053,7 @@ export const createSessionStore = (
       },
 
       restoreItems: (items, preserveQueue = false) => {
+        dropPendingChunks();
         actions.resetSteering();
         set({ performanceTotals: undefined, historyPreview: undefined });
         interruptedPrompt = null;
@@ -2125,8 +2098,9 @@ export const createSessionStore = (
         if (nativeSnapshots.available()) {
           const scope = workspacePath;
           const currentItems = get().items;
-          return snapshotWrite.then(() => readPersistedSessionLog(scope, logger, onTotals)).then((restored) => {
-              if (logTargetPath === scope && get().items === currentItems) restore(restored);
+          const revision = streamRevision;
+          return Promise.resolve(snapshotWrite).then(() => readPersistedSessionLog(scope, logger, onTotals)).then((restored) => {
+              if (logTargetPath === scope && get().items === currentItems && streamRevision === revision) restore(restored);
             });
         }
         restore(readSessionLog(workspacePath, logger, onTotals));
@@ -2145,7 +2119,7 @@ export const createSessionStore = (
         const previousQueueTarget = queueTargetPath;
         queueTargetPath = scope;
         logTargetPath = workspacePath;
-        lastWrittenItems = null;
+        lastCheckpoint = undefined;
         retryQueueRead = undefined;
         const mergeQueue = (restored: readonly QueuedPrompt[]) => {
           const incoming = previousTarget === null ? get().queuedPrompts : [];
@@ -2239,6 +2213,13 @@ export const createSessionStore = (
   });
   return store;
 };
+
+// 文本提交复用时间线布局，结构变更产生的新数组自然开始新的投影。
+const timelineItems = new WeakMap<readonly SessionItem[], readonly SessionItem[]>();
+
+export function timelineItemsOf(state: SessionStoreState): readonly SessionItem[] {
+  return timelineItems.get(state.items) ?? state.items;
+}
 
 export type SessionStore = ReturnType<typeof createSessionStore>;
 

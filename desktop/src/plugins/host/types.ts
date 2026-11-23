@@ -87,7 +87,6 @@ export interface HostRuntime {
   readAgentHistoryEvidence?(agentId: string, sessionId: string, cwd: string): Promise<HistoryEvidence | null>;
   deleteAgentSession?(
     agentId: string,
-    program: string,
     sessionId: string,
     cwd: string,
   ): Promise<void>;
@@ -175,6 +174,7 @@ export interface DesktopWindowHost extends WindowHost {
   isFocused(): Promise<boolean>;
   showAndFocus(): Promise<void>;
   setCloseToTray?(enabled: boolean): Promise<void>;
+  setTaskbarUnread?(count: number): Promise<void>;
   claimScheduledTasks?(): Promise<boolean>;
   listenForScheduledTasksTick?(tick: () => void): Promise<() => void>;
 }
@@ -185,6 +185,8 @@ export interface WindowChromeHost {
   requestClose(): Promise<void>;
   isMaximized(): Promise<boolean>;
   listenForResize(onResize: () => void): Promise<() => void>;
+  isDisplayed?(): Promise<boolean>;
+  listenForFocusChange?(onFocusChange: () => void): Promise<() => void>;
 }
 
 export interface HostDialogs {
@@ -276,6 +278,7 @@ export type DiagnosticsCommand =
   | "diagnostics_probe_request"
   | "diagnostics_probe_take"
   | "diagnostics_resources"
+  | "diagnostics_resource_turn"
   | "diagnostics_append"
   | "diagnostics_acp_append"
   | "diagnostics_flush"

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useSyncExternalStore } from "re
 import type { WorkbenchContributions, WorkbenchSlot } from "../../types.ts";
 import type { WorkbenchService } from "../../service.ts";
 import { defaultAppearance } from "../../config.ts";
+import { useRegisteredSnapshot } from "../../../../shared/state/useRegisteredSnapshot.ts";
 
 export const WorkbenchContext = createContext<WorkbenchService | null>(null);
 const noSubscription = () => () => {};
@@ -9,6 +10,11 @@ const noEntries: readonly never[] = [];
 
 export function useOpenExternal() {
   return useContext(WorkbenchContext)?.openExternal;
+}
+
+export function useWindowDisplayed() {
+  const displayed = useContext(WorkbenchContext)?.windowChrome?.displayed;
+  return useRegisteredSnapshot(displayed, (value) => value ?? true);
 }
 
 export function useWorkbenchEntries<Slot extends WorkbenchSlot>(

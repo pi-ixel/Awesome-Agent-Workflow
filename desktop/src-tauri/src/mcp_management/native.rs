@@ -4,50 +4,60 @@ use serde_yaml::{Mapping, Value};
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Profile {
-    id: Option<String>,
-    name: String,
+    pub(super) id: Option<String>,
+    pub(super) name: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Entry {
-    name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    description: Option<String>,
-    transport: String,
-    enabled: bool,
-    url: Option<String>,
-    command: Option<String>,
-    cwd: Option<String>,
-    args_count: usize,
-    secret_keys: Vec<String>,
-    connection_revision: String,
-    redacted_config: serde_json::Value,
+    pub(super) id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) read_only: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) effective: Option<bool>,
+    pub(super) name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) description: Option<String>,
+    pub(super) transport: String,
+    pub(super) enabled: bool,
+    pub(super) url: Option<String>,
+    pub(super) command: Option<String>,
+    pub(super) cwd: Option<String>,
+    pub(super) args_count: usize,
+    pub(super) secret_keys: Vec<String>,
+    pub(super) connection_revision: String,
+    pub(super) redacted_config: serde_json::Value,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
-    revision: String,
-    entries: Vec<Entry>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(super) warnings: Vec<String>,
+    pub(super) revision: String,
+    pub(super) entries: Vec<Entry>,
 }
 
 #[derive(Serialize)]
 pub struct LocalProfile {
-    profile: Profile,
-    snapshot: Snapshot,
+    pub(super) profile: Profile,
+    pub(super) snapshot: Snapshot,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Draft {
-    name: String,
-    transport: String,
-    url: Option<String>,
-    command: Option<String>,
-    cwd: Option<String>,
-    args: Option<Vec<String>>,
-    secret_changes: BTreeMap<String, Option<String>>,
+    pub(super) name: String,
+    pub(super) transport: String,
+    pub(super) url: Option<String>,
+    pub(super) command: Option<String>,
+    pub(super) cwd: Option<String>,
+    pub(super) args: Option<Vec<String>>,
+    pub(super) secret_changes: BTreeMap<String, Option<String>>,
 }
 
 fn text(value: &Value, key: &str) -> Option<String> {
@@ -326,6 +336,10 @@ fn entries(data: &Value) -> Result<Vec<Entry>> {
                     .as_bytes(),
             );
             Ok(Entry {
+                id: None,
+                source: None,
+                read_only: None,
+                effective: None,
                 name,
                 description: text(entry, "description"),
                 transport,
@@ -393,6 +407,7 @@ pub fn read_snapshot(root: &Path, profile: &Profile) -> Result<Option<Snapshot>>
     locate(root, profile)?
         .map(|source| {
             Ok(Snapshot {
+                warnings: Vec::new(),
                 revision: revision(&source.bytes),
                 entries: entries(&source.data)?,
             })

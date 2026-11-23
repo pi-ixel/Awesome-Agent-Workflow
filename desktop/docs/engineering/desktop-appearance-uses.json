@@ -56,7 +56,6 @@
   ],
   "plugins/mcp/ui/McpImportDialog.tsx": ["McpImportDialog · <textarea>"],
   "plugins/mcp/ui/McpServiceDetails.tsx": ["McpServiceDetails · <input>"],
-  "plugins/mcp/ui/McpView.tsx": ["McpView · <input>"],
   "plugins/mcp/ui/McpEditor.tsx": [
     "HeadersEditor · <input>",
     "HeadersEditor · <input>",
@@ -124,7 +123,6 @@
     "TaskEditor · <textarea>",
     "TaskWorkspace · <h1>"
   ],
-  "plugins/skills/ui/SkillLibrary.tsx": ["LibraryPage · <input>"],
   "plugins/skills/ui/SkillsSourceSettings.tsx": [
     "SkillsSourceSettings · <input>"
   ],
@@ -263,6 +261,7 @@
   ],
   "shared/ui/ModalShell.tsx": ["ModalShell/content · aria-modal"],
   "shared/ui/NavigationRow.tsx": ["NavigationRow · <button>"],
+  "shared/ui/PageFilterControls.tsx": ["PageFilterSearch · <input>"],
   "shared/ui/SettingsPageParts.tsx": ["IntegerSettingInput · <input>"],
   "shared/ui/TextLink.tsx": ["TextLink · <button>"],
   "shared/ui/UiIcon.tsx": ["UiIcon · <svg>"],

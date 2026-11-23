@@ -13,6 +13,8 @@ import {
 import { createHostExitGate } from "../../../src/plugins/host/lifecycle/exitGate.ts";
 import { createTestDesktopRuntime } from "../../helpers/desktopRuntime.ts";
 import type { WindowHost } from "../../../src/plugins/host/types.ts";
+import { createStore } from "zustand";
+import { observeTaskbarUnread } from "../../../src/plugins/workbench/window/taskbarUnread.ts";
 
 function windowHost() {
   return {
@@ -57,6 +59,47 @@ it("publishes immutable workbench snapshots and releases registrations with the 
     expect(changed).toHaveBeenCalledTimes(3);
     expect(() => workbench.register("pages", page)).toThrow("disposed");
   } finally {
+    await runtime.shutdown();
+  }
+});
+
+it("combines sidebar unread counts, coalesces an Agent switch and clears the taskbar on disposal", async () => {
+  const runtime = createTestDesktopRuntime({
+    attachPreloading: () => () => {},
+    close: () => Promise.resolve(),
+  });
+  const { workbench } = await runtime.ready;
+  const write = vi.fn<(count: number) => Promise<void>>().mockResolvedValue(undefined);
+  const logger = { warn: vi.fn() };
+  const stop = observeTaskbarUnread(workbench, write, logger);
+  const chat = createStore(() => 2);
+  const tasks = createStore(() => 1);
+  const entry = (id: string, source: typeof chat) => ({
+    id,
+    label: id,
+    View: () => null,
+    Icon: () => null,
+    unread: { getCount: source.getState, subscribe: source.subscribe },
+  });
+  try {
+    const releaseChat = workbench.register("sidebar", entry("unread-chat", chat));
+    workbench.register("sidebar", entry("unread-tasks", tasks));
+    await vi.waitFor(() => expect(write.mock.calls).toEqual([[3]]));
+
+    chat.setState(0);
+    tasks.setState(7);
+    await vi.waitFor(() => expect(write.mock.calls).toEqual([[3], [7]]));
+
+    chat.setState(1);
+    await vi.waitFor(() => expect(write).toHaveBeenLastCalledWith(8));
+    releaseChat();
+    await vi.waitFor(() => expect(write).toHaveBeenLastCalledWith(7));
+    chat.setState(100);
+    stop();
+    await vi.waitFor(() => expect(write.mock.calls).toEqual([[3], [7], [8], [7], [0]]));
+    expect(logger.warn).not.toHaveBeenCalled();
+  } finally {
+    stop();
     await runtime.shutdown();
   }
 });

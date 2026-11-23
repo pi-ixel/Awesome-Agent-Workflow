@@ -226,13 +226,19 @@ fn sync_session_control_bridges(
             space
                 .tabs
                 .values()
-                .filter(|tab| tab.lifecycle != super::model::TabLifecycle::Closed)
+                .filter(|tab| tab.lifecycle == super::model::TabLifecycle::Ready)
                 .map(|tab| (tab.tab_id.clone(), tab.control.generation))
                 .collect::<Vec<_>>(),
         )
     };
     for (tab_id, generation) in tabs {
-        find_webview(app, host, session_id, &tab_id)?
+        let view = match find_webview(app, host, session_id, &tab_id) {
+            Ok(view) => view,
+            // 窗口仍在创建或已离开原生命令路径时，其他已就绪标签仍可同步。
+            Err(error) if matches!(error.as_str(), "TAB_NOT_FOUND" | "NATIVE_PAGE_NOT_FOUND") => continue,
+            Err(error) => return Err(error),
+        };
+        view
             .eval(control_state_script(
                 agent_active,
                 manual_takeover,
@@ -248,14 +254,23 @@ pub(crate) fn publish_activity(
     host: &BrowserHost,
     snapshot: &BrowserSpaceSnapshot,
 ) -> Result<(), String> {
-    sync_session_control_bridges(app, host, &snapshot.session_id)?;
     for tab in &snapshot.tabs {
         if let Ok(view) = find_webview(app, host, &snapshot.session_id, &tab.tab_id) {
             refresh_memory(&view, app, &snapshot.session_id, &tab.tab_id);
         }
     }
+    sync_session_control_bridges(app, host, &snapshot.session_id)?;
     app.emit("aaw://browser-activity", snapshot)
         .map_err(|error| error.to_string())
+}
+
+pub(super) fn refresh_tab_memory(app: &AppHandle, session_id: &str, tab_id: &str) {
+    #[cfg(windows)]
+    if let Ok(view) = find_webview(app, &app.state::<BrowserHost>(), session_id, tab_id) {
+        refresh_memory(&view, app, session_id, tab_id);
+    }
+    #[cfg(not(windows))]
+    let _ = (app, session_id, tab_id);
 }
 
 fn refresh_memory(view: &tauri::Webview, app: &AppHandle, session_id: &str, tab_id: &str) {
@@ -458,13 +473,12 @@ async fn create_native_tab(
         .ok_or("SESSION_NOT_FOUND")?;
     let window = app.get_window(&window_id).ok_or("WINDOW_NOT_FOUND")?;
     let label = label_for(session_id, &tab.tab_id);
-    let data_directory = app
-        .path()
-        .data_dir()
-        .map_err(|error| error.to_string())?
-        .join("AAW")
-        .join("browser")
-        .join(session_partition(session_id));
+    #[cfg(windows)]
+    let profile = super::profile::SessionProfile::for_session(app, session_id, true)?;
+    #[cfg(windows)]
+    let initial_url = if profile.name.is_some() { "about:blank" } else { url };
+    #[cfg(not(windows))]
+    let initial_url = url;
     let popup_app = app.clone();
     let popup_session = session_id.to_owned();
     let popup_tab = tab.tab_id.clone();
@@ -474,9 +488,13 @@ async fn create_native_tab(
     let page_generation = tab.generation;
     let builder = WebviewBuilder::new(
         label.clone(),
-        WebviewUrl::External(url.parse().map_err(|_| "INVALID_URL")?),
-    )
-    .data_directory(data_directory)
+        WebviewUrl::External(initial_url.parse().map_err(|_| "INVALID_URL")?),
+    );
+    #[cfg(windows)]
+    let builder = profile.configure(builder);
+    #[cfg(not(windows))]
+    let builder = builder.data_directory(super::data::partition_root(app)?.join(session_partition(session_id)));
+    let builder = builder
     .initialization_script(super::native_dialog::restore_script())
     .initialization_script(super::native_dialog::ipc_lockdown_script())
     .initialization_script(control_bridge_script(session_id, &tab.tab_id))
@@ -515,8 +533,12 @@ async fn create_native_tab(
             LogicalSize::new(bounds.width, bounds.height),
         )
         .map_err(|error| error.to_string())?;
+    #[cfg(windows)]
+    crate::resource_monitor::observe_webview(&created, true);
     let setup = async {
         created.hide().map_err(|error| error.to_string())?;
+        #[cfg(windows)]
+        profile.verify(&created).await?;
         let (agent_active, manual_takeover) = {
             let runtime = host.runtime.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
             let space = runtime.spaces.get(session_id).ok_or("SESSION_NOT_FOUND")?;
@@ -545,6 +567,11 @@ async fn create_native_tab(
         )?;
         super::download::register_native(app, &created, session_id, &tab.tab_id, tab.generation)?;
         super::evidence::call_cdp(&created, "Page.enable", serde_json::json!({})).await?;
+        #[cfg(windows)]
+        if profile.name.is_some() && initial_url != url {
+            created.navigate(url.parse().map_err(|_| "INVALID_URL")?)
+                .map_err(|error| error.to_string())?;
+        }
         let runtime = host.runtime.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
         let current = runtime.spaces.get(session_id).and_then(|space| space.tabs.get(&tab.tab_id))
             .filter(|current| current.generation == tab.generation && current.lifecycle == super::model::TabLifecycle::Ready)
@@ -552,10 +579,21 @@ async fn create_native_tab(
         host.labels
             .lock()
             .map_err(|_| "BROWSER_LOCK_FAILED")?
-            .insert(format!("{session_id}::{}", tab.tab_id), label);
+            .insert(format!("{session_id}::{}", tab.tab_id), label.clone());
         Ok(current.clone())
     }.await;
+    let setup = setup.and_then(|current| {
+        // 创建期间可能开始或结束轮次，此处按登记后的最新控制代次同步。
+        sync_control_bridge(&created, app, session_id, &tab.tab_id)?;
+        Ok(current)
+    });
     if setup.is_err() {
+        if let Ok(mut labels) = host.labels.lock() {
+            let key = format!("{session_id}::{}", tab.tab_id);
+            if labels.get(&key) == Some(&label) {
+                labels.remove(&key);
+            }
+        }
         created.close().map_err(|error| error.to_string())?;
     } else {
         update_page(app, session_id, &tab.tab_id, tab.generation, "Ready", |_| {});
@@ -893,12 +931,20 @@ pub fn browser_stop(
 
 #[tauri::command]
 pub fn browser_approval_decide(
+    app: AppHandle,
     state: State<'_, BrowserHost>,
     approval_id: String,
     approved: bool,
 ) -> Result<super::security::ApprovalRecord, String> {
-    let mut approvals = state.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
-    super::security::decide_approval(&mut approvals, &approval_id, approved)
+    let record = super::security::decide_approval(
+        &mut *state.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?,
+        &approval_id,
+        approved,
+    )?;
+    if !approved {
+        refresh_tab_memory(&app, &record.session_id, &record.tab_id);
+    }
+    Ok(record)
 }
 
 #[tauri::command]
@@ -956,6 +1002,7 @@ fn complete_dialog_decision(
         dialog_id,
         if accept { "accepted" } else { "cancelled" },
     )?;
+    refresh_tab_memory(app, &record.session_id, &record.tab_id);
     app.emit("aaw://browser-dialog", &record)
         .map_err(|error| error.to_string())?;
     Ok(record)
@@ -1138,6 +1185,23 @@ pub async fn browser_cancel_requests(
             approval.status = "invalidated".into();
         }
     }
+    // 取消请求和审批后，按当前状态评估，仍打开的对话框会继续阻止降级。
+    let tab_ids = state
+        .runtime
+        .lock()
+        .map_err(|_| "BROWSER_LOCK_FAILED")?
+        .spaces
+        .get(&session_id)
+        .map(|space| {
+            space.tabs.values()
+                .filter(|tab| tab.lifecycle != super::model::TabLifecycle::Closed)
+                .map(|tab| tab.tab_id.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for tab_id in tab_ids {
+        refresh_tab_memory(&app, &session_id, &tab_id);
+    }
     let dialogs: Vec<_> = state
         .dialogs
         .lock()
@@ -1164,6 +1228,7 @@ pub async fn browser_cancel_requests(
             &dialog.dialog_id,
             "cancelled",
         )?;
+        refresh_tab_memory(&app, &record.session_id, &record.tab_id);
         app.emit("aaw://browser-dialog", record)
             .map_err(|error| error.to_string())?;
     }
@@ -1666,6 +1731,35 @@ fn register_user_message_bridge(
 }
 
 impl BrowserHost {
+    /// MCP 可从没有页面的会话启动；只初始化端点所属会话，不借用前台空间。
+    pub(super) fn prepare_agent_space(
+        &self,
+        session_id: &str,
+        workspace_id: Option<&str>,
+        register_partition: impl FnOnce(&str, &str) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if !self.agent_control_enabled() {
+            return Err("AGENT_CONTROL_DISABLED".into());
+        }
+        super::data::ensure_partition_available(self, session_id)?;
+        let workspace_id = {
+            let mut runtime = self.runtime.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+            if !runtime.spaces.contains_key(session_id) {
+                runtime.create_space("main", workspace_id.unwrap_or(session_id), session_id)?;
+            }
+            if workspace_id
+                .is_some_and(|workspace| runtime.spaces[session_id].workspace_id != workspace)
+            {
+                return Err("ACCESS_DENIED".into());
+            }
+            runtime.assert_session_control(session_id, PageSource::Agent)?;
+            runtime.spaces[session_id].workspace_id.clone()
+        };
+        // 注册失败时保留空空间；下一次调用仍会补全分区，不能跳过半初始化状态。
+        register_partition(&workspace_id, session_id)?;
+        super::data::ensure_partition_available(self, session_id)
+    }
+
     fn invalidate_session_approvals(&self, session_id: &str) -> Result<(), String> {
         let mut approvals = self.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
         for approval in approvals.records.values_mut() {

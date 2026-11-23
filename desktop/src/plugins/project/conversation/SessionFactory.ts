@@ -59,11 +59,21 @@ export class SessionFactory {
     const task = Promise.resolve()
       .then(async () => {
         this.assertCurrent(runtime, session);
-        const {
-          servers: mcpServers,
-          establish,
-          dispose,
-        } = await this.tools(runtime, null);
+        if (session.refreshForNewSession) await session.refreshForNewSession();
+        this.assertCurrent(runtime, session);
+        let resolution = await this.tools(runtime, null);
+        while (session.refreshForNewSession) {
+          try {
+            if (!(await session.refreshForNewSession())) break;
+          } catch (error) {
+            await resolution.dispose?.();
+            throw error;
+          }
+          await resolution.dispose?.();
+          this.assertCurrent(runtime, session);
+          resolution = await this.tools(runtime, null);
+        }
+        const { servers: mcpServers, establish, dispose } = resolution;
         try {
           this.assertCurrent(runtime, session);
           const result = await session.newSession(
@@ -370,6 +380,7 @@ export function restoreStoppedTurns(
     return match
       ? {
           ...item,
+          id: match.id,
           ...(match.stopped ? { stopped: true as const } : {}),
           ...(match.display ? { display: match.display } : {}),
           ...(match.skillReferences

@@ -20,6 +20,7 @@
 - [界面功能参考](features/ui-reference.md)。
 - [文档批注](features/document-annotations.md)。
 - [会话状态悬浮卡](features/session-status-card.md)。
+- [会话整轮工作区变更](features/turn-changes.md)：轮末净 diff、消息边界、撤销与恢复。
 - [CodeAgent 压缩历史验收](codeagent-compaction-acceptance.md)。
 - [用户登录](features/auth-login/README.md)。
 - [MCP 管理设计](mcp-management-design.md)记录统一卡片页与 iCode 首版的实现基线。

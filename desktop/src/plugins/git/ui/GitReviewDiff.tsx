@@ -24,6 +24,7 @@ export function GitReviewDiff({
   const ref = useRef<HTMLDivElement>(null);
   const sides = useRef<(HTMLDivElement | null)[]>([null, null]);
   const contents = useRef<(HTMLDivElement | null)[]>([null, null]);
+  const appliedOffsets = useRef([0, 0]);
   useEffect(() => {
     const container = ref.current;
     if (!container) return;
@@ -48,7 +49,11 @@ export function GitReviewDiff({
         );
         left.style.minWidth = `${leftViewport.clientWidth + range}px`;
         right.style.minWidth = `${rightViewport.clientWidth + range}px`;
-        for (const side of sides.current) if (side) side.scrollLeft = offset;
+        for (const [index, side] of sides.current.entries()) {
+          if (!side) continue;
+          side.scrollLeft = offset;
+          appliedOffsets.current[index] = side.scrollLeft;
+        }
       });
     };
     const observer =
@@ -66,13 +71,18 @@ export function GitReviewDiff({
   }, [model, query, match, navigation, page, expanded]);
   const synchronize = (side: number) => {
     const source = sides.current[side];
-    const target = sides.current[1 - side];
+    const opposite = 1 - side;
+    const target = sides.current[opposite];
+    // 同步另一栏也会排队触发滚动事件，旧事件不能覆盖下一次滚动。
     if (
-      source &&
-      target &&
-      Math.abs(target.scrollLeft - source.scrollLeft) > 0.5
+      !source ||
+      !target ||
+      Math.abs(source.scrollLeft - (appliedOffsets.current[side] ?? 0)) <= 0.5
     )
-      target.scrollLeft = source.scrollLeft;
+      return;
+    appliedOffsets.current[side] = source.scrollLeft;
+    target.scrollLeft = source.scrollLeft;
+    appliedOffsets.current[opposite] = target.scrollLeft;
   };
   const needle = query.trim().toLocaleLowerCase();
   const pageStart = match ? Math.floor(match.row / 1000) * 1000 : page;

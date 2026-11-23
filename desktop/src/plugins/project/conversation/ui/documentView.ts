@@ -8,12 +8,13 @@ export interface ConversationDocumentView {
   readonly assetUrl: DocumentsService["assetUrl"];
   readonly openAnnotation: (annotation: DocumentAnnotation, draft: boolean) => void;
   readonly openPath: DocumentNavigation["openPath"];
+  readonly verifyRelativeFile: (root: string, path: string) => Promise<string | null>;
   readonly ownsFindShortcut: (event: KeyboardEvent) => boolean;
   readonly fileCandidates: FileCandidates;
 }
 
 export const ConversationDocumentContext = createContext<
-  Partial<Pick<ConversationDocumentView, "assetUrl" | "openAnnotation" | "openPath">> & {
+  Partial<Pick<ConversationDocumentView, "assetUrl" | "openAnnotation" | "openPath" | "verifyRelativeFile">> & {
     readonly openExternal?: (url: string) => Promise<void>;
   } | undefined
 >(undefined);

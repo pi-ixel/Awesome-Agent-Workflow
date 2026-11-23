@@ -47,6 +47,10 @@ export function apply(ctx: Context): void {
             ctx.project.conversation.foreground.runtime,
             (state) => state.lastSessionId,
           );
+          const browserError = useStore(
+            ctx.project.conversation.foreground.runtime,
+            (state) => state.browserError,
+          );
           const toolNames = useStore(
             ctx.project.conversation.foreground.runtime,
             (state) => state.runtime.toolNames,
@@ -72,6 +76,7 @@ export function apply(ctx: Context): void {
                   workspacePath={project}
                   agentKey={agentKey}
                   sessionId={activeSessionId}
+                  browserError={browserError}
                   runtime={{
                     lastSessionId,
                     toolNames,

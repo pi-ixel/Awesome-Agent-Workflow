@@ -60,6 +60,7 @@ export interface WorkbenchWindowClose extends ReadonlySnapshot<WindowCloseState>
 }
 
 export interface WorkbenchWindowChrome extends ReadonlySnapshot<boolean> {
+  readonly displayed?: ReadonlySnapshot<boolean>;
   minimize(this: void): void;
   toggleMaximize(this: void): void;
   requestClose(this: void): void;
@@ -180,6 +181,10 @@ export interface WorkbenchContributions {
     default?: boolean;
     order?: number;
     keepMounted?: boolean;
+    unread?: {
+      readonly getCount: () => number;
+      readonly subscribe: (listener: () => void) => () => void;
+    };
     WorkArea?: ComponentType<{ readonly project: string | null }>;
     Icon: ComponentType<{ className?: string }>;
     View: ComponentType<{ readonly project: string | null }>;

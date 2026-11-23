@@ -163,14 +163,14 @@ const PUBLISHED_TOOLS: &[&str] = &[
 
 fn description(name: &str) -> &'static str {
     match name {
-        "browser_open" => "为当前会话打开浏览器标签，可以指定起始地址",
+        "browser_open" => "为当前会话新建浏览器标签。没有可用任务标签、需要保留原页或并排查看时使用。同一查询链优先列出标签并在原任务标签内导航。",
         "browser_request_control" => "请求获得指定标签的 Agent 控制权",
         "browser_handoff" => "将指定标签交给用户控制",
         "browser_list_tabs" => "列出当前会话的标签与页面状态",
         "browser_dialogs" => "查看当前会话中等待处理的网页对话框",
         "browser_handle_dialog" => "确认或取消指定的网页对话框",
         "browser_snapshot" => "读取页面结构与可交互元素",
-        "browser_navigate" => "在指定标签打开目标地址",
+        "browser_navigate" => "在当前会话的指定标签打开目标地址。同一查询链优先复用本任务的可用标签。",
         "browser_click" => "点击指定页面元素",
         "browser_fill" => "为页面输入控件填写内容",
         "browser_scroll" => "滚动指定标签的页面视口",

@@ -1,8 +1,7 @@
 import { createCodeAgentDialect, normalizePermission } from "./dialect.ts";
 import { codeAgentSkillPackages } from "./skillPackages.ts";
-import { prepareCodeAgentLaunch,
-  resolveCodeAgentExecutable,
-} from "./executable.ts";
+import { codeAgentMcpManagement } from "./mcpManagement.ts";
+import { prepareCodeAgentLaunch } from "./executable.ts";
 import type { AgentAdapter } from "../../registry/adapterTypes.ts";
 import {
   executableConfiguration,
@@ -22,19 +21,14 @@ export const codeAgentAdapter: AgentAdapter = {
       Object.keys(launch.extraEnv).length
     )
       throw new Error("无法核验 CodeAgent 启动配置");
-    let program = launch.command[0] ?? "codeagent";
-    try {
-      program = await resolveCodeAgentExecutable(program, host);
-    } catch {
-      /* 可执行文件缺失时仍进入原生文件删除兜底。 */
-    }
-    await host.deleteAgentSession("codeagent", program, sessionId, launch.cwd);
+    await host.deleteAgentSession("codeagent", sessionId, launch.cwd);
   },
   supportsSteer: true,
   imageOnlyPromptFallback: true,
   readHistoryEvidence: async (host, sessionId, cwd) => await host.readAgentHistoryEvidence?.("codeagent", sessionId, cwd) ?? null,
   usageModelId: (model) => model && !model.includes("/") ? `w3/${model}` : model,
   id: "codeagent",
+  mcpManagement: codeAgentMcpManagement,
   skillLibrary: "codeagent",
   slashSkillSource: "catalog",
   skillPackages: codeAgentSkillPackages,

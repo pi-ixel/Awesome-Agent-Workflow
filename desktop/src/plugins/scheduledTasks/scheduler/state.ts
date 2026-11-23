@@ -33,6 +33,8 @@ export interface TaskRun {
   readonly taskId: string;
   readonly at: number;
   readonly status: RunStatus;
+  readonly agentId?: string;
+  readonly unread?: true;
   readonly session?: RunSession;
   readonly error?: string;
 }
@@ -80,6 +82,7 @@ export function createScheduler(deps: SchedulerDeps) {
     ...initial,
     error: loadError,
     selected: null as string | null,
+    openedRun: null as string | null,
     editing: undefined as string | null | undefined,
     clock: now(),
   }));
@@ -110,7 +113,9 @@ export function createScheduler(deps: SchedulerDeps) {
     if (!initial.runs.some((item) => activeRun(item.status))) return;
     await persist({
       tasks: initial.tasks,
-      runs: initial.runs.map((run) => activeRun(run.status) ? { ...run, status: "interrupted" } : run),
+      runs: initial.runs.map((run) => activeRun(run.status)
+        ? { ...run, status: "interrupted", unread: true, error: "Desktop 退出时运行尚未结束。" }
+        : run),
     });
   });
   void recover.catch(() => { paused = true; });
@@ -124,9 +129,12 @@ export function createScheduler(deps: SchedulerDeps) {
     const data = store.getState();
     const current = data.runs.find((run) => run.id === id);
     if (!current) return;
-    const updated = { ...current, ...patch };
-    await persist({ tasks: data.tasks, runs: data.runs.map((run) => run.id === id ? updated : run) });
-    return updated;
+    const updated: TaskRun = { ...current, ...patch };
+    const next = activeRun(current.status) && !activeRun(updated.status)
+      ? { ...updated, unread: true as const }
+      : updated;
+    await persist({ tasks: data.tasks, runs: data.runs.map((run) => run.id === id ? next : run) });
+    return next;
   }
 
   async function settle(id: string, task: ScheduledTask, outcome: Partial<TaskRun>) {
@@ -148,17 +156,23 @@ export function createScheduler(deps: SchedulerDeps) {
     await serial(() => settle(run.id, task, outcome));
   }
 
-  async function begin(task: ScheduledTask, at: number, status: RunStatus, cursor = task.cursor) {
+  async function begin(task: ScheduledTask, at: number, status: RunStatus, cursor = task.cursor, reason?: string) {
     const data = store.getState();
     const busy = data.runs.some((run) => run.taskId === task.id && activeRun(run.status));
-    const run: TaskRun = { id: crypto.randomUUID(), taskId: task.id, at, status: busy && status === "running" ? "skipped" : status };
+    const skipped = busy && status === "running";
+    const outcome = skipped ? "skipped" : status;
+    const run: TaskRun = {
+      id: crypto.randomUUID(), taskId: task.id, agentId: task.agent, at, status: outcome,
+      unread: activeRun(outcome) ? undefined : true,
+      error: skipped ? "上一次运行尚未结束。" : reason,
+    };
     await persist({
       tasks: data.tasks.map((item) => item.id === task.id ? { ...item, cursor } : item),
       runs: [run, ...data.runs],
     });
     if (!disposed && run.status === "running") {
       if (deps.eligible()) void execute(task, run).catch(() => {});
-      else void updateRun(run.id, { status: "interrupted" }).catch(() => {});
+      else void updateRun(run.id, { status: "interrupted", error: "Desktop 已退出或当前未登录。" }).catch(() => {});
     }
   }
 
@@ -175,7 +189,10 @@ export function createScheduler(deps: SchedulerDeps) {
         let occurrence = nextOccurrence(task.schedule, task.cursor);
         while (occurrence && occurrence.at <= current) {
           const missed = occurrence.missingTime || occurrence.at <= last || current - last > 30_000;
-          await begin(task, occurrence.at, missed ? "missed" : "running", occurrence.at);
+          await begin(
+            task, occurrence.at, missed ? "missed" : "running", occurrence.at,
+            !missed ? undefined : occurrence.missingTime ? "该本地时间因夏令时调整而不存在。" : "Desktop 未能在计划时间触发。",
+          );
           occurrence = nextOccurrence(task.schedule, occurrence.at);
         }
       }
@@ -185,6 +202,14 @@ export function createScheduler(deps: SchedulerDeps) {
   return {
     store,
     tick,
+    openRunDetails(id: string) {
+      if (disposed || !store.getState().runs.some((run) => run.id === id)) return Promise.resolve();
+      store.setState({ openedRun: id });
+      return serial(async () => {
+        const run = store.getState().runs.find((entry) => entry.id === id);
+        if (run?.unread && !activeRun(run.status)) await persistRun(id, { unread: undefined });
+      });
+    },
     save(input: TaskInput, id?: string) {
       return serial(async () => {
         assertAvailable();

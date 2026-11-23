@@ -143,6 +143,62 @@ it("先显示技能卡片，随后补充当前列表的目录大小", async () =
   expect(within(card).queryByText(/512 B/)).toBeNull();
 });
 
+it("分批读取启用和停用技能的大小，后续批次失败时保留已有结果", async () => {
+  const entries = Array.from({ length: 16 }, (_, index) => {
+    const path = `${root}/skill-${index}`;
+    return { ...skill, name: `技能 ${index}`, path, realPath: path };
+  });
+  const stopped = {
+    ...skill,
+    name: "停用技能",
+    id: "stopped",
+    path: `${root}/stopped`,
+  };
+  const unavailable = {
+    ...stopped,
+    name: "失效技能",
+    id: "unavailable",
+    unavailable: "原目录不可用",
+  };
+  const data: SkillCatalog = {
+    ...catalog,
+    entries: [...entries, { ...skill, kind: "inline", name: "配置技能" }],
+    trash: [stopped, unavailable],
+  };
+  const sizes = vi
+    .fn<NonNullable<NativeSkillLibrary["sizes"]>>()
+    .mockResolvedValueOnce(entries.map(() => 1024))
+    .mockRejectedValueOnce(new Error("读取失败"));
+  render(
+    <SkillLibrary
+      library={{
+        list: () => Promise.resolve(data),
+        candidates: () => Promise.resolve([]),
+        change: () => Promise.resolve([]),
+        sizes,
+      }}
+      provider="codeagent"
+      storage={window.localStorage}
+      knownProjects={() => []}
+      pick={() => Promise.resolve(null)}
+      reveal={() => Promise.resolve()}
+    />,
+  );
+  const first = within(await screen.findByRole("article", { name: "技能 0" }));
+  expect(await first.findByText(".cac · 1.0 KiB")).toBeVisible();
+  expect(sizes.mock.calls.map(([, batch]) => batch.length)).toEqual([16, 1]);
+  expect(sizes.mock.calls[1]?.[1]).toEqual([
+    {
+      source: root,
+      path: stopped.path,
+      realPath: stopped.path,
+      disabledId: stopped.id,
+    },
+  ]);
+  expect(screen.getByRole("article", { name: "停用技能" })).toBeVisible();
+  expect(first.getByText(".cac · 1.0 KiB")).toBeVisible();
+});
+
 it("详情浏览真实目录，在同一弹窗切换并复制完整原文", async () => {
   const user = userEvent.setup();
   const main = "---\r\nname: sample\r\n---\r\n# 真正文\r\n\r\n## 审查\r\n";
@@ -198,7 +254,7 @@ it("详情浏览真实目录，在同一弹窗切换并复制完整原文", asyn
   expect(idleGlyph).toBeTruthy();
   await user.click(copy);
   expect(await navigator.clipboard.readText()).toBe(main);
-  expect(copy).toHaveTextContent("已复制 SKILL.md");
+  await waitFor(() => expect(copy).toHaveTextContent("已复制 SKILL.md"));
   expect(copy.querySelector("svg path")?.getAttribute("d")).not.toBe(idleGlyph);
   await user.click(dialog.getByRole("button", { name: "原文" }));
   const original = dialog.getByRole("region", { name: "SKILL.md 原文" });
@@ -220,6 +276,69 @@ it("详情浏览真实目录，在同一弹窗切换并复制完整原文", asyn
   );
   await user.keyboard("{Escape}");
   expect(opener).toHaveFocus();
+});
+
+it("切换文件后，迟到的预览不会替换当前正文或复制内容", async () => {
+  const user = userEvent.setup();
+  type TextFile = { type: "text"; text: string; modifiedAt: null };
+  let finishFirst!: (result: TextFile) => void;
+  const first = new Promise<TextFile>((resolve) => {
+    finishFirst = resolve;
+  });
+  const exact = '{"version":2}\r\n';
+  const files = vi.fn<NonNullable<NativeSkillLibrary["files"]>>(
+    (_query, _entry, request) => {
+      if (request.type === "directory")
+        return Promise.resolve({
+          type: "directory",
+          truncated: false,
+          entries: ["first.json", "second.json"].map((name) => ({
+            name,
+            kind: "file",
+            bytes: 20,
+          })),
+        });
+      if (request.path === "first.json") return first;
+      return Promise.resolve({
+        type: "text",
+        text: request.path === "second.json" ? exact : "# 技能",
+        modifiedAt: null,
+      });
+    },
+  );
+  render(
+    <SkillLibrary
+      library={{
+        list: () => Promise.resolve(catalog),
+        candidates: () => Promise.resolve([]),
+        change: () => Promise.resolve([]),
+        files,
+      }}
+      provider="codeagent"
+      storage={window.localStorage}
+      knownProjects={() => []}
+      pick={() => Promise.resolve(null)}
+      reveal={() => Promise.resolve()}
+    />,
+  );
+  await user.click(
+    await screen.findByRole("button", { name: "查看 sample 详情" }),
+  );
+  const dialog = within(screen.getByRole("dialog", { name: "技能详情" }));
+  await user.click(await dialog.findByRole("button", { name: /first\.json/ }));
+  expect(
+    dialog.queryByRole("button", { name: /^(复制原文|复制 SKILL\.md)$/ }),
+  ).toBeNull();
+  await user.click(dialog.getByRole("button", { name: /second\.json/ }));
+  await act(async () => {
+    finishFirst({ type: "text", text: '{"version":1}', modifiedAt: null });
+    await first;
+  });
+  expect(
+    await dialog.findByRole("region", { name: "second.json 原文" }),
+  ).toHaveTextContent(exact.trim());
+  await user.click(dialog.getByRole("button", { name: "复制原文" }));
+  expect(await navigator.clipboard.readText()).toBe(exact);
 });
 
 it("配置内技能只展示当前定义且不请求目录文件", async () => {
@@ -543,7 +662,7 @@ it("全局分区优先，同一项目的多个来源合并，搜索和刷新保�
   }
   await expectOrder();
   await userEvent.type(
-    screen.getByRole("textbox", { name: "搜索技能" }),
+    screen.getByRole("searchbox", { name: "搜索技能" }),
     "sam",
   );
   await expectOrder();

@@ -40,6 +40,7 @@ const sessionCounterKeys = [
 type SessionCounters = Partial<Pick<UsageSnapshot, (typeof sessionCounterKeys)[number]>>;
 
 export interface RuntimeStatusState extends RuntimeStatusValues {
+  setBrowserError: (error: string | null) => void;
   setCachedContext: (usage: ContextUsage | null) => void;
   restoreSessionCounters: (counters: SessionCounters) => void;
   setTurnUsage: (usage: TurnUsage | null) => void;
@@ -124,6 +125,7 @@ export const createRuntimeStatusStore = (logger?: Logger) => {
   const usageDiagnostics = createUsageDiagnostics(logger);
   const store = create<RuntimeStatusState>()((set, get) => ({
     ...emptyRuntime,
+    setBrowserError: (browserError) => set({ browserError }),
     setCachedContext: (cachedContext) => set({ cachedContext }),
     restoreSessionCounters: (counters) => set((state) => ({
       usage: {

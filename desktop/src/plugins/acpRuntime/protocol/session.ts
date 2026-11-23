@@ -96,7 +96,8 @@ export class AcpSession implements AcpSessionPort {
     clearTimeout(this.cancellationTimer);
     this.cancellationTimer = undefined;
   }
-  private readonly connection: AcpSessionConnection;
+  private connection: AcpSessionConnection;
+  refreshForNewSession?: () => Promise<boolean>;
   private closingSession?: Promise<void>;
   private invalidated = false;
   private readonly elicitationResponder: AcpSessionOptions["onElicitation"];
@@ -123,6 +124,8 @@ export class AcpSession implements AcpSessionPort {
   private readonly onPromptSettled: AcpSessionOptions["onPromptSettled"];
   private readonly onPromptContext: AcpSessionOptions["onPromptContext"];
   private disposal?: Promise<void>;
+  private browserTurn?: { started: Promise<void>; users: number };
+  private browserCleanup = Promise.resolve();
 
   /** 握手结果（initialize 成功后有效）。 */
   private handshake: InitializeResult | null = null;
@@ -140,7 +143,7 @@ export class AcpSession implements AcpSessionPort {
   constructor(
     connection: AcpSessionConnection,
     options: AcpSessionOptions,
-    private readonly releaseSession: () => void,
+    private releaseSession: () => void,
     private readonly logger = createLogger("acp"),
   ) {
     this.onCancellationTimeout = options.onCancellationTimeout;
@@ -162,6 +165,19 @@ export class AcpSession implements AcpSessionPort {
     this.onPromptStart = options.onPromptStart;
     this.onPromptSettled = options.onPromptSettled;
     this.onPromptContext = options.onPromptContext;
+    this.bindConnection();
+  }
+
+  /** 更新尚未创建会话的草稿通道，保持视图绑定和审批回调。 */
+  replaceDraftConnection(connection: AcpSessionConnection, release: () => void): void {
+    if (this.invalidated || this.sessionId !== null) throw new Error("ACP 草稿连接已失效");
+    this.handshake = null;
+    this.connection = connection;
+    this.releaseSession = release;
+    this.bindConnection();
+  }
+
+  private bindConnection(): void {
     this.connection.setNotificationHandler((method, params) => {
       this.dispatchNotification(method, params);
     });
@@ -404,6 +420,10 @@ export class AcpSession implements AcpSessionPort {
 
   // --------------------------------------------------------------- 交互
 
+  get diagnosticScope(): string | undefined {
+    return this.connection.diagnosticScope;
+  }
+
   /**
    * 发送一轮 prompt。响应到达前，通知流照常派发为事件；
    * 默认不限制整轮时长，直到完成、取消确认或连接退出；短请求的超时
@@ -424,27 +444,29 @@ export class AcpSession implements AcpSessionPort {
     const promptRevision = ++this.promptRevision;
     const content =
       typeof text === "string" ? [{ type: "text" as const, text }] : text;
-    if (this.onPromptStart) await this.onPromptStart(sessionId);
-    const context = this.onPromptContext
-      ? await this.onPromptContext(sessionId)
-      : [];
-    const blocks = [...content, ...context];
-    this.pendingPrompts++;
-    if (this.pendingPrompts === 1) {
-      // 本地轮次开始（真实 pendingPrompts 状态发声）：任何驱动方（用户
-      // 输入、工作流调度）一视同仁，会话视图运行态以它为准。
-      this.emit({ type: "turn_started", sessionId });
-    }
-    if (options.echo && typeof text === "string") {
-      this.emit({
-        type: "user_message_chunk",
-        sessionId,
-        text,
-        display: options.echo,
-      });
-    }
+    const browserTurn = this.retainBrowserTurn(sessionId);
     let result: PromptResult | null = null;
+    let hasStarted = false;
     try {
+      if (browserTurn) await browserTurn;
+      const context = this.onPromptContext
+        ? await this.onPromptContext(sessionId)
+        : [];
+      const blocks = [...content, ...context];
+      hasStarted = true;
+      this.pendingPrompts++;
+      if (this.pendingPrompts === 1) {
+        // 用户输入和工作流都以实际 prompt 运行状态更新会话视图。
+        this.emit({ type: "turn_started", sessionId });
+      }
+      if (options.echo && typeof text === "string") {
+        this.emit({
+          type: "user_message_chunk",
+          sessionId,
+          text,
+          display: options.echo,
+        });
+      }
       const raw = await this.connection
         .request(
           ACP_METHOD.sessionPrompt,
@@ -466,8 +488,8 @@ export class AcpSession implements AcpSessionPort {
         );
       }
     } finally {
-      this.pendingPrompts--;
-      if (!this.pendingPrompts) {
+      if (browserTurn) this.releaseBrowserTurn(sessionId);
+      if (hasStarted && --this.pendingPrompts === 0) {
         this.clearCancellation();
         // 本地轮次结束：stopReason 取自响应；失败（无响应）为 null——
         // 「取消绝不伪装成功」，结局语义由 store 的 endTurn 归约。
@@ -477,14 +499,6 @@ export class AcpSession implements AcpSessionPort {
           stopReason: result?.stopReason ?? null,
         });
       }
-      void Promise.resolve(this.onPromptSettled?.(sessionId)).catch(
-        (error: unknown) => {
-          this.logger.warn("浏览器轮次清理失败", {
-            sessionId,
-            reason: String(error),
-          });
-        },
-      );
     }
     if (
       this.dialect?.refreshSessionInfoAfterPrompt &&
@@ -493,6 +507,31 @@ export class AcpSession implements AcpSessionPort {
       void this.refreshSessionInfo(sessionId, generation, promptRevision);
     }
     return result;
+  }
+
+  private retainBrowserTurn(sessionId: string): Promise<void> | undefined {
+    if (!this.onPromptStart && !this.onPromptSettled) return undefined;
+    // 重叠的 prompt 共用同一浏览器轮次，前一轮的清理完成后再开始下一轮。
+    const turn = (this.browserTurn ??= {
+      users: 0,
+      started: this.browserCleanup.then(() => this.onPromptStart?.(sessionId)),
+    });
+    turn.users++;
+    return turn.started;
+  }
+
+  private releaseBrowserTurn(sessionId: string): void {
+    const turn = this.browserTurn;
+    if (!turn || --turn.users > 0) return;
+    this.browserTurn = undefined;
+    this.browserCleanup = Promise.resolve()
+      .then(() => this.onPromptSettled?.(sessionId))
+      .catch((error: unknown) => {
+        this.logger.warn("浏览器轮次清理失败", {
+          sessionId,
+          reason: String(error),
+        });
+      });
   }
 
   private async refreshSessionInfo(

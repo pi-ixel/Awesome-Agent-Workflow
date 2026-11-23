@@ -167,7 +167,7 @@ describe("InputStatusBar", () => {
     );
   });
 
-  it("模型切换器：无清单时纯展示；有清单时菜单可换（经 store switchModel）", async () => {
+  it("模型切换器无清单时纯展示，有清单时只显示名称并支持切换", async () => {
     seedRuntime();
     const { rerender } = render(<InputStatusRight />);
     // 无清单：纯展示标签（圆环测试另行覆盖，这里只看模型不带 menu）
@@ -179,7 +179,11 @@ describe("InputStatusBar", () => {
     useSessionStore.setState({
       availableModels: [
         { modelId: "glm-5", name: "glm-5", description: null },
-        { modelId: "deepseek-v4", name: "deepseek-v4", description: null },
+        {
+          modelId: "deepseek-v4",
+          name: "deepseek-v4",
+          description: "适合长文本推理",
+        },
       ],
       currentModelId: "glm-5",
       switchModel,
@@ -189,6 +193,8 @@ describe("InputStatusBar", () => {
     const menu = screen.getByRole("menu", { name: "模型选择" });
     expect(menu).toHaveTextContent("glm-5");
     expect(menu).toHaveTextContent("deepseek-v4");
+    expect(menu).not.toHaveTextContent("适合长文本推理");
+    expect(screen.getByRole("menuitemradio", { name: "glm-5" })).toBeChecked();
     // 选中 deepseek-v4
     await userEvent.click(
       screen.getByRole("menuitemradio", { name: "deepseek-v4" }),

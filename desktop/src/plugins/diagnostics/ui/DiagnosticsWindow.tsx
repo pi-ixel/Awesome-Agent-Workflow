@@ -27,6 +27,13 @@ const pressFeedback =
   "[&_button:enabled:active]:translate-y-px [&_button:enabled:active]:brightness-90 [&_summary:active]:brightness-90 [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-offset-2 [&_button:focus-visible]:outline-focus-ring";
 const PROBE_FEEDBACK_TIMEOUT_MS = 15_000;
 
+function focusedSession(snapshot: DiagnosticsSnapshot | null) {
+  const active = snapshot?.data.runtime?.find((entry) => entry.isActive);
+  return active?.diagnosticScope && active.sessionId
+    ? { scope: active.diagnosticScope, sessionId: active.sessionId }
+    : undefined;
+}
+
 export function DiagnosticsWindow({
   reader,
 }: {
@@ -196,7 +203,9 @@ export function DiagnosticsWindow({
         if (stopped) return;
         setSnapshot(state);
         syncProbeFeedback(state);
-        const resourceState = await reader.resources().catch(() => null);
+        const resourceState = await reader
+          .resources(focusedSession(state))
+          .catch(() => null);
         if (!stopped) {
           setResources(resourceState);
         }
@@ -606,6 +615,7 @@ export function DiagnosticsWindow({
           <>
             <ResourceReport
               resources={resources}
+              focusedSession={focusedSession(snapshot)}
               connections={snapshot?.data.connections ?? []}
               now={status?.now}
               jsHeapBytes={

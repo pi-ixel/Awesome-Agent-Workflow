@@ -31,13 +31,19 @@ export async function readWithLegacyRestore(
   save: (
     update: BrowserRestoreSnapshot & { enabled: boolean },
   ) => Promise<BrowserRestoreSnapshot>,
+  ownsLegacy: () => boolean | Promise<boolean> = () => true,
 ) {
   const current = await read();
   const { enabled, tabs } = keys(scope.sessionId);
   let urls: string[] = [];
   try {
     const storage = window.localStorage;
-    if (current.revision !== null || storage.getItem(enabled) !== "true") {
+    if (storage.getItem(enabled) !== "true") {
+      removeLegacyRestore(scope.sessionId);
+      return current;
+    }
+    if (!(await ownsLegacy())) return current;
+    if (current.revision !== null) {
       removeLegacyRestore(scope.sessionId);
       return current;
     }

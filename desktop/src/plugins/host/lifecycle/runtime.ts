@@ -41,6 +41,7 @@ export class DesktopHost implements HostService {
   private bridge?: ReturnType<typeof createBridgeAcpClient>;
   readonly storage = webviewStorage;
   readonly mcp: HostService["mcp"];
+  readonly turnChanges: HostService["turnChanges"];
   readonly diagnostics = diagnosticsHost;
   readonly exitGate = createHostExitGate();
   private exitDiagnostics?: ExitDiagnostics;
@@ -78,6 +79,12 @@ export class DesktopHost implements HostService {
           listenForResize: (receive) =>
             this.resources.listen(() =>
               windowChromeHost.listenForResize(() => {
+                if (this.resources.isActive()) receive();
+              }),
+            ),
+          listenForFocusChange: (receive) =>
+            this.resources.listen(() =>
+              windowChromeHost.listenForFocusChange(() => {
                 if (this.resources.isActive()) receive();
               }),
             ),
@@ -202,6 +209,12 @@ export class DesktopHost implements HostService {
 
   constructor(options: HostOptions = {}) {
     this.invoke = createInvoke((options.createLogger ?? createLogger)("host"));
+    this.turnChanges = isTauriEnv()
+      ? {
+          request: (request) =>
+            this.resources.run(() => this.invoke("turn_changes", { request })),
+        }
+      : undefined;
     this.mcp = isTauriEnv()
       ? createMcpHost((command, args) =>
           this.resources.run(() => this.invoke(command, args)),
@@ -232,9 +245,9 @@ export class DesktopHost implements HostService {
     this.archives = {
       deleteAgentSession:
         backend.deleteAgentSession &&
-        ((agentId, program, sessionId, cwd) =>
+        ((agentId, sessionId, cwd) =>
           this.resources.run(() =>
-            backend.deleteAgentSession!(agentId, program, sessionId, cwd),
+            backend.deleteAgentSession!(agentId, sessionId, cwd),
           )),
       readAgentHistoryEvidence:
         backend.readAgentHistoryEvidence &&

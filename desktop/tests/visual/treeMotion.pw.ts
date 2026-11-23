@@ -213,6 +213,101 @@ test("侧栏右侧在运行圈与操作间切换，并跟随信息流颜色和�
   await expect(recent.getByRole("button", { name: "星标会话" })).toHaveCSS("opacity", "1");
 });
 
+test("项目、置顶、最近和工作流分组的提示共用同一条右边线", async ({ page }) => {
+  await page.setViewportSize({ width: 264, height: 620 });
+  await page.goto("/tests/visual/treeMotionFixture.html?sessions&statuses");
+  const tree = page.getByRole("main", { name: "项目与会话" });
+  const pinned = tree.getByRole("list", { name: "置顶任务" });
+  await expect(
+    pinned.getByRole("img", { name: "失败", exact: true }),
+  ).toBeVisible();
+  await expect(
+    pinned.getByRole("img", { name: "已完成，未查看" }),
+  ).toBeVisible();
+  const projectStatuses = tree.locator("[data-session-row-status]:visible");
+  await expect(projectStatuses).toHaveCount(8);
+  for (const text of ["待处理", "已停止", "等你回复", "等你处理"]) {
+    await expect(projectStatuses.filter({ hasText: text })).toHaveCount(1);
+  }
+  const getStatusEdges = async () =>
+    tree
+      .locator("[data-session-row-status]:visible")
+      .evaluateAll((slots) =>
+        slots.map(
+          (slot) => slot.lastElementChild!.getBoundingClientRect().right,
+        ),
+      );
+  await expect
+    .poll(async () => {
+      const edges = await getStatusEdges();
+      return Math.max(...edges) - Math.min(...edges);
+    })
+    .toBeLessThanOrEqual(1);
+
+  const session = tree.getByRole("button", { name: /整理部署手册/ });
+  const row = session.locator("..");
+  await session.hover();
+  await expect(row.getByText("待处理")).toBeHidden();
+  await expect(row.getByRole("button", { name: "星标会话" })).toHaveCSS(
+    "opacity",
+    "1",
+  );
+  await page.mouse.move(1, 1);
+  await expect(row.getByText("待处理")).toBeVisible();
+  await expect(session).toHaveAccessibleDescription("待处理");
+
+  const group = tree.getByRole("button", { name: "发布准备，2 个会话" });
+  await group.hover();
+  await expect(group.locator("..").getByText("等你回复")).toBeHidden();
+  await expect(
+    group.locator("..").getByRole("button", { name: "归档", exact: true }),
+  ).toHaveCSS("opacity", "1");
+
+  await tree.getByRole("button", { name: "切换视角" }).click();
+  await page.getByRole("menuitemradio", { name: "最近会话" }).click();
+  await page.mouse.move(1, 1);
+  const recent = tree.getByRole("navigation", { name: "最近活跃会话" });
+  await expect(recent.getByText("待处理")).toBeVisible();
+  await expect(recent.getByText("等你处理")).toBeVisible();
+  await expect
+    .poll(async () => {
+      const edges = await getStatusEdges();
+      return Math.max(...edges) - Math.min(...edges);
+    })
+    .toBeLessThanOrEqual(1);
+});
+
+test("触屏侧栏同时显示行内操作和贴右的状态", async ({ browser }) => {
+  const context = await browser.newContext({
+    hasTouch: true,
+    isMobile: true,
+    viewport: { width: 264, height: 620 },
+  });
+  try {
+    const page = await context.newPage();
+    await page.goto("/tests/visual/treeMotionFixture.html?sessions&statuses");
+    const row = page
+      .getByRole("button", { name: /整理部署手册/ })
+      .locator("..");
+    const hint = row.getByText("待处理");
+    const action = row.getByRole("button", { name: "星标会话" });
+    await expect(hint).toBeVisible();
+    await expect(action).toHaveCSS("opacity", "1");
+    const [hintBox, actionBox, rowBox] = await Promise.all([
+      hint.boundingBox(),
+      action.boundingBox(),
+      row.boundingBox(),
+    ]);
+    expect(hintBox!.x).toBeGreaterThan(actionBox!.x + actionBox!.width);
+    expect(rowBox!.x + rowBox!.width - hintBox!.x - hintBox!.width).toBeCloseTo(
+      4,
+      0,
+    );
+  } finally {
+    await context.close();
+  }
+});
+
 test("最近会话列表在行内重命名期间切换外观，保留草稿、选区和焦点", async ({
   page,
   context,

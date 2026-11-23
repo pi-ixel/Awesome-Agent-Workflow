@@ -4,6 +4,7 @@ mod acp_process;
 mod acp_proxy;
 pub mod browser;
 mod commands;
+mod turn_changes;
 mod skill_library;
 mod mcp_management;
 mod config_edit;
@@ -22,6 +23,7 @@ mod session_snapshots;
 mod sso_login;
 mod storage_location;
 mod storage_preferences;
+mod taskbar_badge;
 mod terminal_pty;
 mod tray;
 mod usage_statistics;
@@ -33,6 +35,22 @@ use tauri::{Emitter, Manager};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let context = tauri::generate_context!();
+    #[cfg(all(windows, feature = "webview2-profile-ci"))]
+    let context = {
+        let mut context = context;
+        if browser::bench::output_path().is_some() {
+            let config = context.config_mut();
+            config.identifier.push_str(".profile-ci");
+            for window in &mut config.app.windows {
+                if window.label == "main" {
+                    window.url = tauri::WebviewUrl::External(
+                        tauri::Url::parse("about:blank").expect("合法的空白页地址"),
+                    );
+                }
+            }
+        }
+        context
+    };
     tauri::Builder::default()
         .manage(panel_files::PanelWatchers::default())
         .manage(browser::host::BrowserHost::default())
@@ -45,6 +63,10 @@ pub fn run() {
         .manage(tray::TrayPreference::default())
         .manage(tray::SchedulerLease::default())
         .setup(|app| {
+            #[cfg(all(windows, feature = "webview2-profile-ci"))]
+            if browser::bench::start(app.handle()) {
+                return Ok(());
+            }
             storage_location::initialize(app.handle()).map_err(std::io::Error::other)?;
             browser::host::initialize_agent_control(app.handle());
             if let Err(error) = diagnostics::start(app.handle()) {
@@ -54,15 +76,32 @@ pub fn run() {
             if let Err(error) = tray::install(app.handle()) {
                 eprintln!("系统托盘初始化失败: {error}");
             }
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main") {
+                if let Err(error) = taskbar_badge::install(&window) {
+                    eprintln!("任务栏徽标初始化失败: {error}");
+                }
+            }
             tray::start_task_clock(app.handle().clone());
             resource_monitor::start();
             desktop_update::start(app.handle().clone());
             Ok(())
         })
         .on_page_load(|webview, payload| {
+            #[cfg(all(windows, feature = "webview2-profile-ci"))]
+            if webview.label() == "main" && browser::bench::output_path().is_some() {
+                return;
+            }
+            #[cfg(windows)]
+            if matches!(webview.label(), "main" | "diagnostics")
+                && matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
+            {
+                resource_monitor::observe_webview(webview, false);
+            }
             // WebView 刷新不会保证 React 清理；原生监听随页面代次一并释放。
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
                 if webview.label() == "main" {
+                    resource_monitor::retire_main_page();
                     webview.state::<panel_files::PanelWatchers>().clear();
                     browser::host::retire_page(webview.app_handle(), "main");
                     webview.state::<mcp_management::ProxyHost>().retire(None);
@@ -86,6 +125,7 @@ pub fn run() {
             ops_service::ops_service_write,
             ops_service::ops_service_shutdown,
             ops_service::ops_service_sidecar_path,
+            turn_changes::turn_changes,
             browser::host::browser_create_space,
             browser::host::browser_create_tab,
             browser::host::browser_recover_tab,
@@ -166,6 +206,7 @@ pub fn run() {
             diagnostics::diagnostics_probe_request,
             diagnostics::diagnostics_probe_take,
             resource_monitor::diagnostics_resources,
+            resource_monitor::diagnostics_resource_turn,
             diagnostics::diagnostics_export,
             storage_preferences::storage_thresholds_read,
             storage_location::storage_location_read,
@@ -221,6 +262,7 @@ pub fn run() {
             mcp_management::mcp_managed_resolve,
             mcp_management::mcp_managed_retire,
             mcp_management::mcp_managed_inspect,
+            mcp_management::mcp_native_inspect,
             mcp_management::mcp_inspection_read,
             mcp_management::mcp_inspection_save,
             mcp_management::mcp_browser_tools,
@@ -237,6 +279,7 @@ pub fn run() {
             commands::force_close,
             tray::set_close_to_tray,
             tray::claim_scheduled_tasks,
+            taskbar_badge::set_taskbar_unread,
             // 系统通知：Windows 上点击打开 aaw:// 链接，可按标记替换和删除（ADR 034）
             notification_links::notification_show,
             notification_links::notification_remove,

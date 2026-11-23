@@ -15,6 +15,10 @@ import { StorageView } from "../../src/plugins/diagnostics/ui/StorageView.tsx";
 import type { StorageRow } from "../../src/plugins/diagnostics/capture/storageRegistry.ts";
 import { ResourceReport } from "../../src/plugins/diagnostics/ui/ResourceReport.tsx";
 import { MarkdownAppearance } from "../../src/shared/ui/markdown/theme.ts";
+import {
+  MarkdownImage,
+  MarkdownImageParagraph,
+} from "../../src/shared/ui/markdown/MarkdownImage.tsx";
 import { initializeUsage } from "../../src/plugins/project/usage/service.ts";
 import {
   ProtocolFixtureActions,
@@ -160,6 +164,23 @@ function renderAttachmentFixture() {
     data: canvas.toDataURL("image/png").split(",")[1]!,
   };
   const mode = params.get("image-attachments");
+  if (mode === "gallery") {
+    canvas.width = 960;
+    return (
+      <MarkdownImageParagraph>
+        <MarkdownImage
+          alt="图一"
+          src={`data:image/png;base64,${block.data}`}
+          node={{ tagName: "img" }}
+        />
+        <MarkdownImage
+          alt="图二"
+          src={canvas.toDataURL("image/png")}
+          node={{ tagName: "img" }}
+        />
+      </MarkdownImageParagraph>
+    );
+  }
   if (mode === "user" || mode === "agent") {
     return <MessageAttachments blocks={[block]} compact={mode === "user"} />;
   }

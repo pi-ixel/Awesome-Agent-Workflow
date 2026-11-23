@@ -35,6 +35,7 @@ export interface DiagnosticsSnapshot {
   data: {
     connections?: readonly AcpConnectionDiagnostic[];
     runtime: {
+      diagnosticScope?: string;
       sessionId?: string | null;
       workspacePath?: string;
       isActive?: boolean;
@@ -62,7 +63,7 @@ export interface DiagnosticsReader {
   status(): Promise<DiagnosticsStatus>;
   snapshot(): Promise<DiagnosticsSnapshot | null>;
   probeConnection(id: string): Promise<void>;
-  resources(): Promise<ResourceSnapshot>;
+  resources(session?: DiagnosticSessionKey): Promise<ResourceSnapshot>;
   query(
     filters: Readonly<Record<string, unknown>>,
   ): Promise<DiagnosticRecord[]>;
@@ -94,6 +95,33 @@ export interface ResourceSnapshot {
   readonly exited: readonly { readonly handle: number; readonly pid: number; readonly observedAt: number }[];
   readonly error: string | null;
   readonly collectionMs?: number | null;
+  readonly desktopMemory?: DesktopMemoryPoint | null;
+  readonly turnMemory?: DesktopTurnMemory | null;
+}
+
+export interface DiagnosticSessionKey {
+  readonly scope: string;
+  readonly sessionId: string;
+}
+
+export interface DesktopMemoryPoint {
+  readonly at: number;
+  readonly memory: {
+    readonly total: number | null;
+    readonly executable: number | null;
+    readonly interface: number | null;
+    readonly browser: number | null;
+    readonly other: number | null;
+  };
+}
+
+export interface DesktopTurnMemory {
+  readonly session: DiagnosticSessionKey;
+  readonly startedAt: number;
+  readonly endedAt: number | null;
+  readonly before: DesktopMemoryPoint | null;
+  readonly peak: DesktopMemoryPoint | null;
+  readonly hasOverlap: boolean;
 }
 
 export interface MemorySample {

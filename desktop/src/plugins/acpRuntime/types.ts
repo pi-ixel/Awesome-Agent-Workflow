@@ -146,6 +146,8 @@ export interface AcpSessionOptions {
 }
 
 export type ChannelSessionOptions = AcpSessionOptions & {
+  readonly diagnosticScope?: string;
+  readonly processConfigRevision?: () => number;
   readonly background?: boolean;
   readonly project?: { readonly id: string; readonly path: string };
 };
@@ -163,6 +165,7 @@ export type SessionSetupOptions = SessionRequestOptions & {
 
 /** One normalized ACP session. The runtime owns the underlying channel. */
 export interface AcpSessionPort {
+  readonly diagnosticScope?: string;
   requestAgentExtension?(
     method: string,
     params?: Readonly<Record<string, unknown>>,
@@ -173,6 +176,7 @@ export interface AcpSessionPort {
   readonly models: NewSessionResult["models"];
   readonly modes: NewSessionResult["modes"];
   readonly isInitialized: boolean;
+  refreshForNewSession?(): Promise<boolean>;
   readonly agentInfo: InitializeResult | null;
   closeSession(): Promise<void>;
   onEvent(listener: (event: AcpSessionEvent) => void): () => void;

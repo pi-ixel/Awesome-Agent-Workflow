@@ -19,6 +19,48 @@ function uiSources(): string[] {
   );
 }
 
+it("浏览器恢复旧键和原生命令仅由宿主及诊断入口访问", () => {
+  const allowed = new Map([
+    ["aaw-browser-restore", ["plugins/host/browser/legacyRestore.ts"]],
+    ["browser_restore_read", ["plugins/host/browser/tauri.ts"]],
+    ["browser_restore_save", ["plugins/host/browser/tauri.ts"]],
+    ["browser_restore_clear", ["plugins/host/browser/tauri.ts"]],
+    ["browser_restore_owners", ["plugins/host/browser/tauri.ts"]],
+    ["browser_restore_list", ["plugins/diagnostics/index.ts", "plugins/host/types.ts"]],
+    ["browser_restore_remove", ["plugins/diagnostics/index.ts", "plugins/host/types.ts"]],
+  ]);
+  const root = resolve("src");
+  const actual = new Map<string, string[]>();
+  for (const file of sources(root)) {
+    const path = file.slice(root.length + 1).replaceAll("\\", "/");
+    const code = readFileSync(file, "utf8");
+    for (const token of new Set(code.match(/\baaw-browser-restore(?=:)|\bbrowser_restore_\w+/g))) {
+      const paths = actual.get(token) ?? [];
+      paths.push(path);
+      actual.set(token, paths);
+    }
+  }
+  for (const paths of actual.values()) paths.sort();
+  expect(actual).toEqual(allowed);
+});
+
+it("MCP 宿主命令与原生注册一致，并限制在主窗口", () => {
+  const host = readFileSync("src/plugins/host/adapters/mcp.ts", "utf8");
+  const registrations = readFileSync("src-tauri/src/lib.rs", "utf8");
+  const native = readFileSync("src-tauri/src/mcp_management/mod.rs", "utf8");
+  const invoked = new Set([...host.matchAll(/\binvoke\(\s*"(mcp_\w+)"/g)].map((match) => match[1]));
+  const registered = new Set([...registrations.matchAll(/\bmcp_management::(mcp_\w+)/g)].map((match) => match[1]));
+  const guarded = new Set<string>();
+  const commands = native.matchAll(/#\[tauri::command\]\s*pub (?:async )?fn (mcp_\w+)\([\s\S]*?\n\}/g);
+  for (const [body, name] of commands) {
+    expect(body, name).toMatch(/\{\s*main_only\(&webview\)\?;/);
+    guarded.add(name!);
+  }
+  expect(invoked.size).toBeGreaterThan(0);
+  expect(invoked).toEqual(registered);
+  expect(registered).toEqual(guarded);
+});
+
 it("UI uses Project Service and Project and Workbench do not reach back into bootstrap", () => {
   const violations: string[] = [];
   const ui = new Set(uiSources());

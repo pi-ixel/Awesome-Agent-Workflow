@@ -18,6 +18,7 @@ import type { Logger } from "../../../shared/logging/logger.ts";
 
 export interface SessionToolContext {
   readonly workspacePath: string;
+  readonly cwd?: string;
   readonly agentKey: string;
   readonly agentId: string;
   /** 新建会话时为 null。 */

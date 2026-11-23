@@ -1,4 +1,5 @@
 import { NavigationRow } from "../../../../shared/ui/NavigationRow.tsx";
+import { TurnChangesDock } from "../changes/TurnChangesDock.tsx";
 import { TurnUsageBadge } from "./TurnUsageBadge.tsx";
 import type { SessionItem } from "../types.ts";
 import {
@@ -96,7 +97,8 @@ function ConversationTurnViewBase({
   const [historyExpanded, setHistoryExpanded] = useExpansionState(
     `turn-history-${turn.id}`,
   );
-  const canCollapse = collapseHistory && turn.canCollapseHistory && units.length > 0;
+  const canCollapse =
+    collapseHistory && turn.canCollapseHistory && units.length > 0;
   const historyVisible = !canCollapse || historyExpanded || revealHistory;
   const latestWorkGroup = useMemo(
     () =>
@@ -189,9 +191,13 @@ function ConversationTurnViewBase({
           )}
         </div>
       )}
-      {turn.answer && (!turn.running && usage !== undefined
-        ? <AssistantMessage item={turn.answer} usage={usage} />
-        : renderItem(turn.answer))}
+      {turn.answer &&
+        (!turn.running && usage !== undefined ? (
+          <AssistantMessage item={turn.answer} usage={usage} />
+        ) : (
+          renderItem(turn.answer)
+        ))}
+      <TurnChangesDock userId={turn.id} />
       {!turn.answer && !turn.running && usage !== undefined && (
         <div className="opacity-0 transition-opacity focus-within:opacity-100 group-hover/assistant-turn:opacity-100 [@media(hover:none)]:opacity-100">
           <TurnUsageBadge usage={usage} />

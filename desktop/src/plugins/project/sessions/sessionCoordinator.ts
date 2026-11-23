@@ -1,4 +1,5 @@
 import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
+import { createTurnChangesSession } from "../conversation/changes/service.ts";
 import {
   createSessionTools,
   type SessionToolProvider,
@@ -44,7 +45,7 @@ import { knownWorkspacePaths } from "../workspace/knownPaths.ts";
 import type { SessionListStatus } from "./indexTypes.ts";
 import type { createProjectSessionIndexes } from "./sessionIndexes.ts";
 import { AcpResponseError } from "../../acpRuntime/service.ts";
-import { pathKey } from "../../../shared/panelPaths.ts";
+import { isAbsolutePath, pathKey } from "../../../shared/panelPaths.ts";
 import type { createProjectForeground } from "../conversation/foreground.ts";
 import { createSessionStore } from "../conversation/sessionStore.ts";
 import { createApprovalStore } from "../interactions/approvalStore.ts";
@@ -100,11 +101,7 @@ import {
 import { resolveAutoPermission } from "../interactions/permissionPolicy.ts";
 import { attachBrowserApprovals } from "../interactions/browserApprovalBridge.ts";
 import { browserObservationUrl } from "../../../shared/urlPrivacy.ts";
-import {
-  browserContextUnavailable,
-  browserPageContextPrefix,
-  browserUnavailablePrompt,
-} from "../../../shared/browser/promptContext.ts";
+import { browserPageContextPrefix } from "../../../shared/browser/promptContext.ts";
 import { browserToolsUnavailable } from "../../../shared/browser/toolAvailability.ts";
 import { asRecord } from "../../../shared/valueGuards.ts";
 
@@ -124,6 +121,7 @@ export interface ProjectSessionDependencies {
   readonly getAgents: () => AgentsService;
   readonly getBrowser: () => HostService["browser"];
   readonly resolveSessionCwd?: (workspacePath: string) => Promise<string>;
+  readonly getTurnChanges?: () => HostService["turnChanges"];
   readonly getApprovalMode: () => ApprovalMode;
   readonly interactionPreferences?: Pick<
     ProjectPreferences,
@@ -156,6 +154,7 @@ export function createSessionCoordinator({
   getAgents,
   getBrowser,
   resolveSessionCwd = (workspacePath) => Promise.resolve(workspacePath),
+  getTurnChanges,
   getApprovalMode,
   interactionPreferences,
   navigation,
@@ -184,6 +183,7 @@ export function createSessionCoordinator({
     const explicit = runtime.openTools?.(session.agentInfo) ?? [];
     const resolved = await sessionTools.resolve({
       workspacePath: runtime.workspacePath,
+      cwd: runtime.cwd,
       agentKey: runtime.agentKey,
       agentId: runtime.adapter.id,
       sessionId,
@@ -299,6 +299,8 @@ export function createSessionCoordinator({
         id =
           runtime.session.sessionId ?? runtime.store.getState().activeSessionId;
       if (!id) return;
+      if (runtime.cwd)
+        indexes.rememberWorkingDirectory(runtime.workspacePath, runtime.agentKey, id, runtime.cwd);
       const pending =
         runtime.approval.getState().pending.filter((item) => !item.stale)
           .length +
@@ -340,6 +342,17 @@ export function createSessionCoordinator({
         pathKey(view.contextPath ?? "") === pathKey(runtime.workspacePath) &&
         document.hasFocus() &&
         document.visibilityState !== "hidden";
+      let answered = false;
+      if (finished) {
+        for (let i = state.items.length - 1; i >= 0; i--) {
+          const item = state.items[i];
+          if (item?.kind === "user") break;
+          if (item?.kind === "assistant" && (item.text.length > 0 || item.attachments?.length)) {
+            answered = true;
+            break;
+          }
+        }
+      }
       activity.getState().update({
         agentKey: runtime.agentKey,
         externallyManaged:
@@ -354,6 +367,9 @@ export function createSessionCoordinator({
             (status === "failed" && old?.status !== "failed") ||
             pending > 0 ||
             old?.unread === true),
+      }, {
+        agentId: runtime.adapter.id,
+        unreadReply: visible || runtime.scheduled ? false : answered ? true : undefined,
       });
     };
     const stopState = runtime.store.subscribe((state, previous) => {
@@ -849,6 +865,7 @@ export function createSessionCoordinator({
       }
       return {
         sessionId: runtime.session.sessionId ?? state.activeSessionId,
+        diagnosticScope: runtime.session.diagnosticScope,
         workspacePath: runtime.workspacePath,
         agentKey: state.agentKey,
         queueSaveError: state.queueSaveError,
@@ -881,6 +898,7 @@ export function createSessionCoordinator({
       annotationDrafts,
       messageImages,
       sessionLogger,
+      { playbackActive: false },
     );
     empty.setState({ sessionsByPath: history });
     selectForeground(empty);
@@ -894,6 +912,7 @@ export function createSessionCoordinator({
       annotationDrafts,
       messageImages,
       sessionLogger,
+      { playbackActive: false },
     );
     store.setState({
       sessionsByPath: history,
@@ -1172,6 +1191,11 @@ export function createSessionCoordinator({
       workspacePath,
       agentKey,
       () => !closing && !switchingAgent && agentKey === selectedAgentKey(),
+      undefined,
+      undefined,
+      preferredSessionId && !forceNew
+        ? { cwd: sessionWorkingDirectory(workspacePath, agentKey, preferredSessionId, catalogRuntime) }
+        : undefined,
     );
     if (
       !candidate ||
@@ -1331,6 +1355,7 @@ export function createSessionCoordinator({
         navigation
           .getState()
           .openView(projectConversationPageId, workspacePath);
+        activity.getState().read(workspacePath, restoredId, agentKey);
       }
 
       // 成功连接：清除该项目此前的连接失败态（错误横幅 / 失败徽标退场）
@@ -1453,6 +1478,17 @@ export function createSessionCoordinator({
     return (runtime && toolSwaps.get(runtime)) ?? Promise.resolve();
   }
 
+  function sessionWorkingDirectory(
+    workspacePath: string,
+    agentKey: string,
+    id: string,
+    listed = projectFactory.open(workspacePath).history(agentKey),
+  ) {
+    const cwd = indexes.workingDirectory(workspacePath, agentKey, id) ??
+      listed.find((info) => info.sessionId === id)?.cwd;
+    return cwd && isAbsolutePath(cwd) ? cwd : undefined;
+  }
+
   /** 插件打开会话；恢复已有会话时与用户那边的打开排在同一个会话的队里（见 SessionFactory.exclusive）。 */
   function openPluginSessionRuntime(
     options: PluginSessionOptions,
@@ -1521,7 +1557,10 @@ export function createSessionCoordinator({
       current,
       undefined,
       undefined,
-      { cwd: options.cwd, openTools: options.tools },
+      {
+        cwd: options.cwd ?? (resumeId ? sessionWorkingDirectory(workspacePath, agentKey, resumeId) : undefined),
+        openTools: options.tools,
+      },
     );
     if (!runtime) {
       const status =
@@ -1818,16 +1857,65 @@ export function createSessionCoordinator({
           annotationDrafts,
           messageImages,
           sessionLogger,
+          { playbackActive: false },
         ),
       approvalStore = retained?.approval ?? createApprovalStore(approvalLogger),
       statusStore = retained?.status ?? createRuntimeStatusStore(usageLogger);
     if (!retained)
       viewStore.setState({
         sessionsByPath: catalogStore.getState().sessionsByPath,
+        workingDirectory: plugin?.cwd ?? workspacePath,
       });
     let candidate: SessionRuntime | null = null;
+    const changesHost = getTurnChanges?.();
+    if (changesHost && !viewStore.getState().turnChanges) {
+      viewStore.setState({
+        turnChanges: createTurnChangesSession(
+          changesHost,
+          viewStore,
+          workspacePath,
+          agentKey,
+        ),
+      });
+    }
     let releaseBrowserApprovals = () => {};
     let isBrowserEndpointDisposed = false;
+    const browserFailures = new Map<string, string>();
+    async function browserOperation<T>(
+      operation: string,
+      perform: () => Promise<T>,
+      sessionId?: string,
+      ignoredErrors: readonly string[] = [],
+    ): Promise<T | undefined> {
+      try {
+        const result = await perform();
+        browserFailures.delete(operation);
+        return result;
+      } catch (error) {
+        const reason = String(error).replace(/^Error: /, "");
+        if (ignoredErrors.includes(reason)) {
+          browserFailures.delete(operation);
+          return undefined;
+        }
+        browserFailures.set(
+          operation,
+          `${operation}失败，请在浏览器面板查看连接状态。`,
+        );
+        sessionLogger.warn(`${operation}失败`, {
+          workspacePath,
+          agentKey,
+          sessionId,
+          reason,
+        });
+        return undefined;
+      } finally {
+        if (!isBrowserEndpointDisposed) {
+          statusStore
+            .getState()
+            .setBrowserError([...browserFailures.values()].at(-1) ?? null);
+        }
+      }
+    }
     try {
       const protocol = backgroundAdapter
         ? getProtocol()
@@ -1835,10 +1923,12 @@ export function createSessionCoordinator({
       if (retained && !isCurrent()) return null;
       const browser = getBrowser();
       const browserEndpoint = browser.isAvailable()
-        ? await browser.createMcpEndpoint().catch((error: unknown) => {
-            if (String(error).includes("AGENT_CONTROL_DISABLED")) return null;
-            throw error;
-          })
+        ? await browserOperation(
+            "注册浏览器工具",
+            () => browser.createMcpEndpoint(),
+            undefined,
+            ["AGENT_CONTROL_DISABLED"],
+          )
         : null;
       const approval = approvalStore.getState();
       const acceptsRequests = () => {
@@ -1855,6 +1945,9 @@ export function createSessionCoordinator({
         );
       };
       const sessionOptions: AcpProtocolSessionOptions = {
+        diagnosticScope: encodeURIComponent(
+          JSON.stringify([agentKey, pathKey(workspacePath)]),
+        ),
         mcpServers: browserEndpoint
           ? [
               {
@@ -1872,33 +1965,46 @@ export function createSessionCoordinator({
           : [],
         ...(browserEndpoint
           ? {
-              onSessionReady: (sessionId: string) =>
-                browser
-                  .bindMcpEndpoint(browserEndpoint.endpointId, sessionId)
-                  .then((endpoint) => {
-                    if (isBrowserEndpointDisposed) return;
-                    releaseBrowserApprovals();
-                    releaseBrowserApprovals = attachBrowserApprovals({
-                      browser,
-                      sessionId: endpoint.sessionId ?? sessionId,
-                      approvalStore: approvalStore.getState(),
-                      getApprovalMode,
-                      logger: approvalLogger,
-                    });
-                  }),
-              onCapabilitiesReady: (capabilities) =>
-                browser
-                  .setMcpCapabilities(
+              onSessionReady: async (sessionId: string) => {
+                const endpoint = await browserOperation(
+                  "绑定浏览器工具",
+                  () =>
+                    browser.bindMcpEndpoint(
+                      browserEndpoint.endpointId,
+                      sessionId,
+                      workspacePath,
+                    ),
+                  sessionId,
+                );
+                if (!endpoint || isBrowserEndpointDisposed) return;
+                releaseBrowserApprovals();
+                releaseBrowserApprovals = attachBrowserApprovals({
+                  browser,
+                  sessionId: endpoint.sessionId ?? sessionId,
+                  approvalStore: approvalStore.getState(),
+                  getApprovalMode,
+                  logger: approvalLogger,
+                });
+              },
+              onCapabilitiesReady: async (capabilities) => {
+                await browserOperation("配置浏览器工具", () =>
+                  browser.setMcpCapabilities(
                     browserEndpoint.endpointId,
                     asRecord(capabilities["promptCapabilities"])?.["image"] ===
                       true,
-                  )
-                  .then(() => {}),
+                  ),
+                );
+              },
 
               onCancel: (sessionId: string) =>
                 browser.cancelWork(sessionId).then(() => {}),
-              onPromptStart: (sessionId: string) =>
-                browser.beginWork(sessionId).then(() => {}),
+              onPromptStart: async (sessionId: string) => {
+                await browserOperation(
+                  "准备浏览器轮次",
+                  () => browser.beginWork(sessionId),
+                  sessionId,
+                );
+              },
               onPromptSettled: (sessionId: string) =>
                 browser.cancelWork(sessionId).then(() => {}),
             }
@@ -1919,47 +2025,46 @@ export function createSessionCoordinator({
           }
         },
         onPromptContext: async (sessionId: string) => {
-          if (!browser.isAvailable()) return [];
-          const enabled = await browser.agentControlEnabled();
-          const mcpStatus = await browser.mcpStatus(sessionId);
-          const registration =
-            mcpStatus === "active"
-              ? await browser.mcpRegistration(sessionId).catch(() => null)
-              : null;
-          const status = statusStore.getState();
-          const unavailable = browserToolsUnavailable({
-            enabled,
-            mcpStatus,
-            runtimeKnown: status.lastSessionId === sessionId,
-            toolInventoryKnown: status.runtime.toolInventoryKnown,
-            hasEnabledTools: registration?.hasEnabledTools,
-            toolNames: status.runtime.toolNames,
-          });
-          if (unavailable) {
-            return [
-              {
-                type: "text" as const,
-                text: browserUnavailablePrompt,
+          if (!browser.isAvailable() || !browserEndpoint) return [];
+          return (
+            (await browserOperation(
+              "读取浏览器页面",
+              async () => {
+                const enabled = await browser.agentControlEnabled();
+                const mcpStatus = await browser.mcpStatus(sessionId);
+                const registration =
+                  mcpStatus === "active"
+                    ? await browser.mcpRegistration(sessionId)
+                    : null;
+                const status = statusStore.getState();
+                const unavailable = browserToolsUnavailable({
+                  enabled,
+                  mcpStatus,
+                  runtimeKnown: status.lastSessionId === sessionId,
+                  toolInventoryKnown: status.runtime.toolInventoryKnown,
+                  hasEnabledTools: registration?.hasEnabledTools,
+                  toolNames: status.runtime.toolNames,
+                });
+                if (unavailable) return [];
+                const space = await browser.snapshot(sessionId);
+                const tab = space.tabs
+                  .filter((entry) => entry.lifecycle === "ready")
+                  .at(-1);
+                if (!tab) return [];
+                const url = browserObservationUrl(
+                  tab.committedUrl ?? "about:blank",
+                );
+                return [
+                  {
+                    type: "text" as const,
+                    text: `${browserPageContextPrefix}：URL=${url}；状态=${tab.lifecycle}。同一查询链优先用 browser_list_tabs 确认可用任务标签，再用 browser_navigate 继续。需要保留原页、并排比较或用户要求新开时使用 browser_open。`,
+                  },
+                ];
               },
-            ];
-          }
-          if (!browserEndpoint) return [];
-          try {
-            const space = await browser.snapshot(sessionId);
-            const tab = space.tabs.at(-1);
-            if (!tab) return [];
-            const url = browserObservationUrl(
-              tab.committedUrl ?? "about:blank",
-            );
-            return [
-              {
-                type: "text" as const,
-                text: `${browserPageContextPrefix}：URL=${url}；状态=${tab.lifecycle}`,
-              },
-            ];
-          } catch {
-            return [{ type: "text" as const, text: browserContextUnavailable }];
-          }
+              sessionId,
+              ["SESSION_NOT_FOUND"],
+            )) ?? []
+          );
         },
         project: { id: pathKey(workspacePath), path: workspacePath },
         onElicitation: (form, signal, scopeMethod) => {
@@ -2599,6 +2704,17 @@ export function createSessionCoordinator({
           phase = "local";
           await indexes.deletions.save({ ...target, phase });
         }
+        await getTurnChanges?.()?.request({
+          action: "clear",
+          cwd:
+            indexes.workingDirectory(
+              target.workspacePath,
+              target.agentKey,
+              target.sessionId,
+            ) ?? target.workspacePath,
+          agentKey: target.agentKey,
+          sessionId: target.sessionId,
+        });
         await cleanup();
         const browser = getBrowser();
         if (browser.isAvailable()) {
@@ -2638,6 +2754,7 @@ export function createSessionCoordinator({
           });
         }
         await indexes.forgetArchived(target);
+        indexes.forgetSessionMetadata(target);
         await indexes.deletions.save({ ...target, phase: "done" });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

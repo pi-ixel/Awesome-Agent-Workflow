@@ -1,9 +1,11 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
+  type MouseEvent,
   type ReactNode,
 } from "react";
 import type {
@@ -17,28 +19,24 @@ import type {
   NativeMcpSnapshot,
 } from "../../../contracts/mcp/management.ts";
 import type { RuntimeSnapshot } from "../../acpRuntime/types.ts";
-import {
-  ActionButton,
-  Listbox,
-  ToggleSwitch,
-} from "../../../shared/ui/controls.tsx";
+import { ActionButton, ToggleSwitch } from "../../../shared/ui/controls.tsx";
+import { EdgeDrawer } from "../../../shared/ui/controls/EdgeDrawer.tsx";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { PageHeader } from "../../../shared/ui/PageHeader.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
-import { fieldSurfaceClass } from "../../../shared/ui/inputStyles.ts";
 import {
-  PlugIcon,
-  PlusIcon,
-  SearchIcon,
-  TrashIcon,
-} from "../../../shared/ui/icons.tsx";
+  PageFilterListbox,
+  PageFilterSearch,
+} from "../../../shared/ui/PageFilterControls.tsx";
+import { PlugIcon, PlusIcon, TrashIcon } from "../../../shared/ui/icons.tsx";
 import type { HostService } from "../../host/service.ts";
 import { useBrowserAgentControl } from "../../browser/service.ts";
 import {
   duplicateNameMessage,
   type McpManagement,
 } from "../runtime/management.ts";
+import { useFeedback } from "../../../shared/ui/feedback.ts";
 import { McpEditor } from "./McpEditor.tsx";
 import { McpServiceDetails } from "./McpServiceDetails.tsx";
 
@@ -53,7 +51,8 @@ type ManagedTarget = {
   entry?: ManagedMcpEntry;
   snapshot: ManagedMcpSnapshot;
 };
-type Target = NativeTarget | ManagedTarget;
+type Target =
+  (Omit<NativeTarget, "entry"> & { entry?: NativeMcpEntry }) | ManagedTarget;
 type Existing = NativeTarget | (ManagedTarget & { entry: ManagedMcpEntry });
 type ManagedExisting = Extract<Existing, { source: "managed" }>;
 type EntryAction =
@@ -132,6 +131,7 @@ function McpServiceRow({
   transport,
   status,
   selected,
+  detailsId,
   toggle,
   actions,
   onSelect,
@@ -141,9 +141,10 @@ function McpServiceRow({
   transport: string;
   status: string;
   selected: boolean;
+  detailsId: string;
   toggle: ReactNode;
   actions?: ReactNode;
-  onSelect: () => void;
+  onSelect: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   return (
     <li className="min-w-0">
@@ -153,7 +154,9 @@ function McpServiceRow({
       >
         <NavigationRow
           layout="compound"
-          aria-current={selected ? "true" : undefined}
+          aria-expanded={selected}
+          aria-controls={detailsId}
+          data-mcp-detail-trigger=""
           className="items-center gap-3 px-3 py-2.5"
           aria-label={name}
           onClick={onSelect}
@@ -198,7 +201,12 @@ function transportLabel(transport: string) {
 }
 
 function targetKey(target: Existing) {
-  return JSON.stringify([target.source, target.entry.name]);
+  return JSON.stringify([
+    target.source,
+    target.source === "native"
+      ? (target.entry.id ?? target.entry.name)
+      : target.entry.name,
+  ]);
 }
 
 function toolKey(serviceKey: string, name: string) {
@@ -234,7 +242,6 @@ function reportedTools(runtime: RuntimeSnapshot | undefined, name: string) {
 }
 
 function healthKey(agentId: string, profile: string | null, target: Existing) {
-  const { entry } = target;
   const version =
     target.source === "native"
       ? (target.entry.connectionRevision ?? target.snapshot.revision)
@@ -244,7 +251,7 @@ function healthKey(agentId: string, profile: string | null, target: Existing) {
           target.entry.url,
           target.entry.headers,
         ]));
-  return JSON.stringify([agentId, profile, target.source, entry.name, version]);
+  return JSON.stringify([agentId, profile, targetKey(target), version]);
 }
 
 export function McpView({
@@ -256,6 +263,9 @@ export function McpView({
   nativeTransports = [],
   canManageInjected,
   canTest,
+  nativeWorkspace,
+  hasScopedNative = false,
+  hasHostInspection = false,
   sessionId,
   runtime,
 }: {
@@ -267,14 +277,38 @@ export function McpView({
   nativeTransports?: readonly NativeMcpDraft["transport"][];
   canManageInjected: boolean;
   canTest: boolean;
+  nativeWorkspace?: string;
+  hasScopedNative?: boolean;
+  hasHostInspection?: boolean;
   sessionId?: string;
   runtime?: RuntimeSnapshot;
 }) {
+  const feedback = useFeedback();
   const [refresh, setRefresh] = useState(0);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [transportFilter, setTransportFilter] = useState("all");
   const [selection, setSelection] = useState("");
+  const [isDetailClosing, setIsDetailClosing] = useState(false);
+  const detailsId = useId();
+  const detailDrawer = useRef<HTMLElement>(null);
+  const detailTrigger = useRef<HTMLButtonElement>(null);
+  const finishDetailClose = useCallback(() => {
+    setIsDetailClosing(false);
+    setSelection("");
+  }, []);
+  useEffect(() => {
+    if (!isDetailClosing) return;
+    const reducedMotion = window.matchMedia?.(
+      "(prefers-reduced-motion: reduce)",
+    );
+    const timer = window.setTimeout(finishDetailClose, 260);
+    reducedMotion?.addEventListener("change", finishDetailClose);
+    return () => {
+      window.clearTimeout(timer);
+      reducedMotion?.removeEventListener("change", finishDetailClose);
+    };
+  }, [isDetailClosing, finishDetailClose]);
   const [initialEditorTab, setInitialEditorTab] = useState<"form" | "json">(
     "form",
   );
@@ -301,9 +335,21 @@ export function McpView({
   const native = useLoad(
     () =>
       service && canManageNative
-        ? service.readNative(agentId, activeProfile, refresh > 0)
+        ? service.readNative(
+            agentId,
+            activeProfile,
+            refresh > 0,
+            nativeWorkspace,
+          )
         : Promise.resolve(null),
-    [service, agentId, activeProfile, canManageNative, refresh],
+    [
+      service,
+      agentId,
+      activeProfile,
+      canManageNative,
+      refresh,
+      nativeWorkspace,
+    ],
   );
   const managed = useLoad(
     () =>
@@ -359,21 +405,26 @@ export function McpView({
     return list;
   }, [native.data, managed.data]);
   const inspectionProfile =
-    native.data?.profile.id ?? native.data?.profile.name ?? activeProfile;
+    (hasScopedNative ? nativeWorkspace : undefined) ??
+    native.data?.profile.id ??
+    native.data?.profile.name ??
+    activeProfile;
 
   const jobs = useMemo(() => {
     if (!service || !inspector) return [];
     const available = targets.flatMap((target) => {
       const { entry } = target;
-      if (
-        entry.transport !== "http" ||
-        (target.source === "native" && !canTest)
-      )
+      const transport = entry.transport;
+      const manualOnly = target.source === "native" && hasHostInspection;
+      if (transport !== "http" && !(manualOnly && transport === "stdio"))
         return [];
+      if (target.source === "native" && !canTest && !manualOnly) return [];
+      if (transport !== "http" && transport !== "stdio") return [];
       return [
         {
           key: healthKey(agentId, inspectionProfile, target),
           enabled: entry.enabled,
+          manualOnly,
           run: async (): Promise<McpInspection> => {
             if (target.source === "managed")
               return inspector.probe(target.entry);
@@ -381,8 +432,11 @@ export function McpView({
               source: "native",
               profile: target.profile,
               previousName: entry.name,
+              entryId: target.entry.id,
+              entryRevision: target.entry.connectionRevision,
+              workspace: nativeWorkspace,
               revision: target.snapshot.revision,
-              draft: { name: entry.name, transport: "http", secretChanges: {} },
+              draft: { name: entry.name, transport, secretChanges: {} },
             });
             return { ...result, checkedAt: Date.now() };
           },
@@ -393,6 +447,7 @@ export function McpView({
       available.unshift({
         key: browserKey,
         enabled: browserControl.enabled,
+        manualOnly: false,
         run: () => inspector.probeBrowser(),
       });
     return available;
@@ -401,6 +456,8 @@ export function McpView({
     inspector,
     targets,
     canTest,
+    hasHostInspection,
+    nativeWorkspace,
     agentId,
     inspectionProfile,
     browserControl.available,
@@ -459,7 +516,7 @@ export function McpView({
           if (!isCurrent) return;
           if (seen.current.has(job.key)) continue;
           if (cached[job.key]) seen.current.add(job.key);
-          else if (job.enabled) await runCheck(job);
+          else if (job.enabled && !job.manualOnly) await runCheck(job);
         }
       })
       .catch(() => {
@@ -503,7 +560,17 @@ export function McpView({
   function statusOf(target: Existing) {
     const name = target.entry.name;
     const usesNative =
-      target.source === "managed" && (names.get(name) ?? 0) > 1;
+      target.source === "managed" &&
+      (hasScopedNative
+        ? targets.some(
+            (item) =>
+              item.source === "native" &&
+              item.entry.effective &&
+              item.entry.name === name,
+          )
+        : (names.get(name) ?? 0) > 1);
+    if (usesNative && hasScopedNative && target.entry.enabled)
+      return "新会话优先使用同名原生配置";
     return summary(
       usesNative ? "" : name,
       healthKey(agentId, inspectionProfile, target),
@@ -596,13 +663,27 @@ export function McpView({
         );
       }, 0)
     : undefined;
-  const current =
-    targets.find((target) => targetKey(target) === selection) ??
-    (selection !== browserKey && !showBrowser ? visible[0] : undefined);
-  const hasBrowserDetail =
-    !current &&
-    (showBrowser || (selection === browserKey && browserControl.available));
-  const isNarrowDetail = Boolean(selection && (hasBrowserDetail || current));
+  const current = selection
+    ? targets.find((target) => targetKey(target) === selection)
+    : undefined;
+  const hasBrowserDetail = selection === browserKey && browserControl.available;
+  const isDetailVisible = Boolean(hasBrowserDetail || current);
+  const isDetailOpen = isDetailVisible && !isDetailClosing;
+  function closeDetail(restoreFocus = true) {
+    if (restoreFocus) detailTrigger.current?.focus({ preventScroll: true });
+    if (window.matchMedia?.("(prefers-reduced-motion: no-preference)").matches)
+      setIsDetailClosing(true);
+    else finishDetailClose();
+  }
+  function selectDetail(key: string, trigger: HTMLButtonElement) {
+    if (isDetailOpen && selection === key) {
+      closeDetail();
+      return;
+    }
+    detailTrigger.current = trigger;
+    setIsDetailClosing(false);
+    setSelection(key);
+  }
   const isLoading =
     (canManageNative && native.isLoading && native.data === undefined) ||
     (canManageInjected && managed.isLoading && managed.data === undefined);
@@ -752,33 +833,41 @@ export function McpView({
             operation,
           ),
         );
-        native.patch((data) =>
-          data?.snapshot.revision === expected
-            ? {
-                ...data,
-                snapshot: {
-                  ...data.snapshot,
-                  revision,
-                  entries: applyEntryAction(
-                    data.snapshot.entries,
-                    operation,
-                  ).map((entry) =>
-                    operation.kind === "toggle" &&
-                    entry.name === operation.name &&
-                    entry.redactedConfig
-                      ? {
-                          ...entry,
-                          redactedConfig: {
-                            ...entry.redactedConfig,
-                            enabled: operation.enabled,
-                          },
-                        }
-                      : entry,
-                  ),
-                },
-              }
-            : data,
-        );
+        if (hasScopedNative) {
+          if (revision !== expected)
+            feedback?.({
+              message: "原生 MCP 配置已保存，将在新会话中生效",
+              variant: "ok",
+            });
+          setRefresh((value) => value + 1);
+        } else
+          native.patch((data) =>
+            data?.snapshot.revision === expected
+              ? {
+                  ...data,
+                  snapshot: {
+                    ...data.snapshot,
+                    revision,
+                    entries: applyEntryAction(
+                      data.snapshot.entries,
+                      operation,
+                    ).map((entry) =>
+                      operation.kind === "toggle" &&
+                      entry.name === operation.name &&
+                      entry.redactedConfig
+                        ? {
+                            ...entry,
+                            redactedConfig: {
+                              ...entry.redactedConfig,
+                              enabled: operation.enabled,
+                            },
+                          }
+                        : entry,
+                    ),
+                  },
+                }
+              : data,
+          );
       } else {
         const revision = accept(
           await service.managedChange(
@@ -820,11 +909,18 @@ export function McpView({
   async function reloadEditor(target: Target) {
     if (!service) return;
     if (target.source === "native") {
-      const snapshot = await service.nativeRead(agentId, target.profile);
-      const entry = snapshot.entries.find(
-        ({ name }) => name === target.entry.name,
+      const snapshot = await service.nativeRead(
+        agentId,
+        target.profile,
+        nativeWorkspace,
       );
-      if (!entry) throw new Error("原服务已移除或改名，已保留表单输入。");
+      const entry = snapshot.entries.find(
+        (entry) =>
+          target.entry &&
+          (entry.id ?? entry.name) === (target.entry.id ?? target.entry.name),
+      );
+      if (target.entry && !entry)
+        throw new Error("原服务已移除或改名，已保留表单输入。");
       setEditing({ ...target, snapshot, entry });
     } else {
       const snapshot = await service.host.managedRead(agentId);
@@ -843,9 +939,10 @@ export function McpView({
   const currentKey = current && healthKey(agentId, inspectionProfile, current);
   const currentTools =
     current?.source === "native"
-      ? reportedTools(runtime, current.entry.name)?.map((name) => ({
+      ? (currentHealth?.tools ??
+        reportedTools(runtime, current.entry.name)?.map((name) => ({
           name,
-        }))
+        })))
       : currentHealth?.tools;
   const availableTransports = [
     ...new Set(targets.map(({ entry }) => entry.transport)),
@@ -860,24 +957,57 @@ export function McpView({
   const hasWriteConflict = failure?.startsWith("配置已变化");
   const canEditCurrent =
     current?.source === "managed" ||
-    nativeTransports.some(
-      (transport) => transport === current?.entry.transport,
-    );
+    (current?.source === "native" &&
+      !current.entry.readOnly &&
+      nativeTransports.some(
+        (transport) => transport === current.entry.transport,
+      ));
   function retryRead() {
     revisions.current.clear();
     setFailure(null);
     setRefresh((version) => version + 1);
   }
   return (
-    <div className="@container flex h-full min-h-0 flex-col overflow-auto bg-base">
-      <section aria-label="MCP 管理" className="mx-auto w-full">
+    <div
+      className="@container flex h-full min-h-0 flex-col bg-base"
+      onClickCapture={(event) => {
+        const target = event.target;
+        if (
+          !isDetailOpen ||
+          !(target instanceof Element) ||
+          !event.currentTarget.contains(target) ||
+          detailDrawer.current?.contains(target) ||
+          target.closest("[data-mcp-detail-trigger]")
+        )
+          return;
+        closeDetail(
+          detailDrawer.current?.contains(document.activeElement) ?? false,
+        );
+      }}
+      onKeyDown={(event) => {
+        if (
+          event.key !== "Escape" ||
+          event.defaultPrevented ||
+          !isDetailOpen ||
+          editing ||
+          confirmation
+        )
+          return;
+        event.stopPropagation();
+        closeDetail();
+      }}
+    >
+      <section
+        aria-label="MCP 管理"
+        className="flex min-h-0 w-full flex-1 flex-col"
+      >
         <PageHeader
           bordered
           title="MCP"
           count={`${count} 服务 · ${enabledCount} 已启用 · ${activeToolCount === undefined ? "会话工具未知" : `${activeToolCount} 个会话工具`}${errorCount ? ` · ${errorCount} 个异常` : ""}`}
           actions={
             <>
-              {jobs.some((job) => job.enabled) && (
+              {jobs.some((job) => job.enabled && !job.manualOnly) && (
                 <ActionButton
                   tone="secondary"
                   size="compact"
@@ -885,7 +1015,8 @@ export function McpView({
                   onClick={() => {
                     void (async () => {
                       for (const job of jobs)
-                        if (job.enabled) await runCheck(job, true);
+                        if (job.enabled && !job.manualOnly)
+                          await runCheck(job, true);
                     })();
                   }}
                 >
@@ -902,6 +1033,20 @@ export function McpView({
                   导入 JSON
                 </ActionButton>
               )}
+              {hasScopedNative && (
+                <ActionButton
+                  tone="secondary"
+                  size="compact"
+                  disabled={!native.data}
+                  onClick={() => {
+                    if (!native.data) return;
+                    setInitialEditorTab("form");
+                    setEditing({ source: "native", ...native.data });
+                  }}
+                >
+                  新增原生 MCP
+                </ActionButton>
+              )}
               {canManageInjected && (
                 <ActionButton
                   tone="primary"
@@ -915,23 +1060,19 @@ export function McpView({
             </>
           }
         />
-        <div className="grid min-w-0 @min-[48rem]:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
-          <div
-            className={`min-w-0 space-y-4 px-6 py-4 ${isNarrowDetail ? "hidden @min-[48rem]:block" : ""}`}
-          >
+        <div
+          className={`relative flex min-h-0 min-w-0 flex-1 overflow-hidden [--mcp-drawer-width:min(46%,40rem)] motion-safe:transition-[padding-right] motion-safe:duration-200 motion-safe:ease-out ${isDetailOpen ? "@min-[48rem]:pr-(--mcp-drawer-width)" : ""}`}
+        >
+          <div className="mx-auto w-full min-w-0 max-w-[608px] space-y-4 overflow-auto px-6 py-4">
             <div className="flex flex-wrap items-center gap-2 border-b border-line pb-4">
-              <label className="relative flex min-w-40 flex-1 items-center">
-                <SearchIcon className="ui-icon-14 pointer-events-none absolute left-2.5 text-ink-mute" />
-                <input
-                  type="search"
-                  aria-label="搜索 MCP"
-                  className={`${fieldSurfaceClass} min-h-9 w-full pl-8 pr-2 text-ui-xs`}
-                  placeholder="搜索服务名、地址、命令或工具…"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                />
-              </label>
-              <Listbox
+              <PageFilterSearch
+                label="搜索 MCP"
+                className="basis-40 flex-1"
+                placeholder="搜索服务名、地址、命令或工具…"
+                value={search}
+                onChange={setSearch}
+              />
+              <PageFilterListbox
                 label="筛选状态"
                 value={filter}
                 onChange={setFilter}
@@ -942,7 +1083,7 @@ export function McpView({
                   { value: "error", label: "连接异常" },
                 ]}
               />
-              <Listbox
+              <PageFilterListbox
                 label="筛选传输方式"
                 value={transportFilter}
                 onChange={setTransportFilter}
@@ -977,6 +1118,15 @@ export function McpView({
                 </ActionButton>
               </div>
             )}
+            {native.data?.snapshot.warnings?.map((warning) => (
+              <p
+                key={warning}
+                role="status"
+                className="text-ui-sm text-warn-ink"
+              >
+                {warning}
+              </p>
+            ))}
             {!service && (
               <p className="text-ui-sm text-ink-mute">
                 MCP 管理需要在 Desktop 桌面应用中使用。
@@ -997,8 +1147,11 @@ export function McpView({
                   detail="内置浏览器工具"
                   transport="AAW 内置"
                   status={browserStatus}
-                  selected={hasBrowserDetail}
-                  onSelect={() => setSelection(browserKey)}
+                  selected={isDetailOpen && hasBrowserDetail}
+                  detailsId={detailsId}
+                  onSelect={(event) =>
+                    selectDetail(browserKey, event.currentTarget)
+                  }
                   toggle={browserToggle()}
                 />
               )}
@@ -1018,31 +1171,41 @@ export function McpView({
                     name={entry.name}
                     transport={transportLabel(entry.transport)}
                     detail={
-                      (names.get(entry.name) ?? 0) > 1
-                        ? duplicateNameMessage
-                        : (entry.description ?? "")
+                      target.source === "native" && target.entry.source
+                        ? target.entry.source +
+                          (target.entry.readOnly ? " · 只读" : "")
+                        : !hasScopedNative && (names.get(entry.name) ?? 0) > 1
+                          ? duplicateNameMessage
+                          : (entry.description ?? "")
                     }
                     status={statusOf(target)}
-                    selected={current === target}
-                    onSelect={() => setSelection(key)}
+                    selected={isDetailOpen && current === target}
+                    detailsId={detailsId}
+                    onSelect={(event) => selectDetail(key, event.currentTarget)}
                     toggle={
-                      <ToggleSwitch
-                        label={entry.name + " 启用"}
-                        checked={entry.enabled}
-                        pending={pendingWrites.has(key)}
-                        onChange={(enabled) => toggleService(target, enabled)}
-                      />
+                      (target.source !== "native" ||
+                        !target.entry.readOnly) && (
+                        <ToggleSwitch
+                          label={entry.name + " 启用"}
+                          checked={entry.enabled}
+                          pending={pendingWrites.has(key)}
+                          onChange={(enabled) => toggleService(target, enabled)}
+                        />
+                      )
                     }
                     actions={
-                      <IconButton
-                        iconSize="compact"
-                        aria-label={entry.name + " 删除"}
-                        data-hint="删除"
-                        disabled={pendingWrites.has(key)}
-                        onClick={() => setConfirmation(target)}
-                      >
-                        <TrashIcon className="ui-icon-14" />
-                      </IconButton>
+                      (target.source !== "native" ||
+                        !target.entry.readOnly) && (
+                        <IconButton
+                          iconSize="compact"
+                          aria-label={entry.name + " 删除"}
+                          data-hint="删除"
+                          disabled={pendingWrites.has(key)}
+                          onClick={() => setConfirmation(target)}
+                        >
+                          <TrashIcon className="ui-icon-14" />
+                        </IconButton>
+                      )
                     }
                   />
                 );
@@ -1061,153 +1224,166 @@ export function McpView({
               </p>
             )}
           </div>
-          {(hasBrowserDetail || current) && (
-            <div
-              className={
-                isNarrowDetail ? "min-w-0" : "hidden min-w-0 @min-[48rem]:block"
-              }
-            >
-              {hasBrowserDetail ? (
+          <EdgeDrawer
+            side="right"
+            id={detailsId}
+            open={isDetailOpen}
+            visible={isDetailVisible}
+            sliding
+            drawerRef={detailDrawer}
+            aria-label={
+              hasBrowserDetail
+                ? browserName + " 详情"
+                : current && current.entry.name + " 详情"
+            }
+            className="z-10 w-[min(100%,28rem)] min-w-0 flex-col overflow-auto border-l border-line bg-base @min-[48rem]:w-(--mcp-drawer-width)"
+          >
+            {hasBrowserDetail ? (
+              <McpServiceDetails
+                key={browserKey}
+                name={browserName}
+                transport="AAW 内置"
+                description="内置浏览器工具，提供导航、页面读取和交互等能力。"
+                summary={browserStatus}
+                connection={[
+                  ["控制范围", "Desktop 全局"],
+                  ["当前状态", browserStatus],
+                ]}
+                health={health[browserKey]}
+                config={{
+                  name: browserName,
+                  enabled: browserControl.enabled,
+                  transport: "builtin",
+                  disabledTools: browserTools.data?.disabledTools,
+                }}
+                tools={browserTools.data?.tools}
+                disabledTools={browserTools.data?.disabledTools ?? []}
+                toggle={browserToggle()}
+                actions={testButton(browserKey)}
+                onToggleTools={
+                  inspector
+                    ? (tools, enabled) => {
+                        void setTools(null, tools, enabled);
+                      }
+                    : undefined
+                }
+                onClose={closeDetail}
+                isToolPending={(name) =>
+                  pendingWrites.has(toolKey(browserKey, name))
+                }
+              />
+            ) : (
+              current && (
                 <McpServiceDetails
-                  key={browserKey}
-                  name={browserName}
-                  transport="AAW 内置"
-                  description="内置浏览器工具，提供导航、页面读取和交互等能力。"
-                  summary={browserStatus}
-                  connection={[
-                    ["控制范围", "Desktop 全局"],
-                    ["当前状态", browserStatus],
-                  ]}
-                  health={health[browserKey]}
-                  config={{
-                    name: browserName,
-                    enabled: browserControl.enabled,
-                    transport: "builtin",
-                    disabledTools: browserTools.data?.disabledTools,
-                  }}
-                  tools={browserTools.data?.tools}
-                  disabledTools={browserTools.data?.disabledTools ?? []}
-                  toggle={browserToggle()}
-                  actions={testButton(browserKey)}
-                  onToggleTools={
-                    inspector
-                      ? (tools, enabled) => {
-                          void setTools(null, tools, enabled);
+                  key={targetKey(current)}
+                  name={current.entry.name}
+                  transport={transportLabel(current.entry.transport)}
+                  description={current.entry.description ?? ""}
+                  summary={statusOf(current)}
+                  connection={
+                    current.source === "native"
+                      ? [
+                          [
+                            "所属配置",
+                            current.entry.source ?? current.profile.name,
+                          ],
+                          ...(current.entry.transport === "stdio"
+                            ? ([
+                                ["启动命令", current.entry.command ?? "—"],
+                                [
+                                  "工作目录",
+                                  current.entry.cwd ?? "会话工作目录",
+                                ],
+                              ] as const)
+                            : ([
+                                ["服务地址", current.entry.url ?? "已隐藏"],
+                              ] as const)),
+                          [
+                            "凭据字段",
+                            current.entry.secretKeys.join("、") || "—",
+                          ],
+                        ]
+                      : [
+                          ["服务地址", current.entry.url],
+                          [
+                            "请求头凭据引用",
+                            current.entry.headers
+                              .map(
+                                ({ name, reference }) =>
+                                  `${name} → ${reference}`,
+                              )
+                              .join("、") || "—",
+                          ],
+                        ]
+                  }
+                  health={currentHealth}
+                  tools={currentTools}
+                  disabledTools={
+                    current.source === "managed"
+                      ? (current.entry.disabledTools ?? [])
+                      : []
+                  }
+                  config={
+                    current.source === "managed"
+                      ? {
+                          name: current.entry.name,
+                          transport: current.entry.transport,
+                          enabled: current.entry.enabled,
+                          description: current.entry.description,
+                          url: current.entry.url,
+                          headers: current.entry.headers,
+                          disabledTools: current.entry.disabledTools,
                         }
-                      : undefined
+                      : (current.entry.redactedConfig ?? {
+                          name: current.entry.name,
+                          enabled: current.entry.enabled,
+                          transport: current.entry.transport,
+                        })
                   }
-                  onBack={() => setSelection("")}
-                  isToolPending={(name) =>
-                    pendingWrites.has(toolKey(browserKey, name))
-                  }
-                />
-              ) : (
-                current && (
-                  <McpServiceDetails
-                    key={targetKey(current)}
-                    name={current.entry.name}
-                    transport={transportLabel(current.entry.transport)}
-                    description={current.entry.description ?? ""}
-                    summary={statusOf(current)}
-                    connection={
-                      current.source === "native"
-                        ? [
-                            ["所属配置", current.profile.name],
-                            ...(current.entry.transport === "stdio"
-                              ? ([
-                                  ["启动命令", current.entry.command ?? "—"],
-                                  [
-                                    "工作目录",
-                                    current.entry.cwd ?? "会话工作目录",
-                                  ],
-                                ] as const)
-                              : ([
-                                  ["服务地址", current.entry.url ?? "已隐藏"],
-                                ] as const)),
-                            [
-                              "凭据字段",
-                              current.entry.secretKeys.join("、") || "—",
-                            ],
-                          ]
-                        : [
-                            ["服务地址", current.entry.url],
-                            [
-                              "请求头凭据引用",
-                              current.entry.headers
-                                .map(
-                                  ({ name, reference }) =>
-                                    `${name} → ${reference}`,
-                                )
-                                .join("、") || "—",
-                            ],
-                          ]
-                    }
-                    health={currentHealth}
-                    tools={currentTools}
-                    disabledTools={
-                      current.source === "managed"
-                        ? (current.entry.disabledTools ?? [])
-                        : []
-                    }
-                    config={
-                      current.source === "managed"
-                        ? {
-                            name: current.entry.name,
-                            transport: current.entry.transport,
-                            enabled: current.entry.enabled,
-                            description: current.entry.description,
-                            url: current.entry.url,
-                            headers: current.entry.headers,
-                            disabledTools: current.entry.disabledTools,
-                          }
-                        : (current.entry.redactedConfig ?? {
-                            name: current.entry.name,
-                            enabled: current.entry.enabled,
-                            transport: current.entry.transport,
-                          })
-                    }
-                    toggle={
+                  toggle={
+                    (current.source !== "native" ||
+                      !current.entry.readOnly) && (
                       <ToggleSwitch
                         label={current.entry.name + " 启用"}
                         checked={current.entry.enabled}
                         pending={pendingWrites.has(targetKey(current))}
                         onChange={(enabled) => toggleService(current, enabled)}
                       />
-                    }
-                    actions={
-                      <div className="flex flex-wrap items-center gap-2">
-                        {currentKey && testButton(currentKey)}
-                        {canEditCurrent && (
-                          <ActionButton
-                            tone="secondary"
-                            size="compact"
-                            disabled={pendingWrites.has(targetKey(current))}
-                            onClick={() => {
-                              setInitialEditorTab("form");
-                              setEditing(current);
-                            }}
-                          >
-                            编辑配置
-                          </ActionButton>
-                        )}
-                      </div>
-                    }
-                    onToggleTools={
-                      current.source === "managed" && inspector
-                        ? (tools, enabled) => {
-                            void setTools(current, tools, enabled);
-                          }
-                        : undefined
-                    }
-                    onBack={() => setSelection("")}
-                    isToolPending={(name) =>
-                      pendingWrites.has(toolKey(targetKey(current), name))
-                    }
-                  />
-                )
-              )}
-            </div>
-          )}
+                    )
+                  }
+                  actions={
+                    <>
+                      {currentKey && testButton(currentKey)}
+                      {canEditCurrent && (
+                        <ActionButton
+                          tone="secondary"
+                          size="compact"
+                          disabled={pendingWrites.has(targetKey(current))}
+                          onClick={() => {
+                            setInitialEditorTab("form");
+                            setEditing(current);
+                          }}
+                        >
+                          编辑配置
+                        </ActionButton>
+                      )}
+                    </>
+                  }
+                  onToggleTools={
+                    current.source === "managed" && inspector
+                      ? (tools, enabled) => {
+                          void setTools(current, tools, enabled);
+                        }
+                      : undefined
+                  }
+                  onClose={closeDetail}
+                  isToolPending={(name) =>
+                    pendingWrites.has(toolKey(targetKey(current), name))
+                  }
+                />
+              )
+            )}
+          </EdgeDrawer>
         </div>
         {((failure && !confirmation) || browserControl.error) && (
           <div
@@ -1246,31 +1422,45 @@ export function McpView({
                   source: "native",
                   entry: editing.entry,
                   transports: nativeTransports,
+                  scoped: hasScopedNative,
+                  testStdio: hasHostInspection,
                   submit: async (draft) => {
                     const change = {
                       kind: "save" as const,
-                      previousName: editing.entry.name,
+                      previousName: editing.entry?.name ?? null,
                       draft,
                     };
                     checkName(change);
-                    await service.nativeChange(
+                    const revision = await service.nativeChange(
                       agentId,
                       editing.profile,
                       editing.snapshot.revision,
                       change,
                     );
+                    if (
+                      hasScopedNative &&
+                      revision !== editing.snapshot.revision
+                    )
+                      feedback?.({
+                        message: "原生 MCP 配置已保存，将在新会话中生效",
+                        variant: "ok",
+                      });
                     setRefresh((version) => version + 1);
                   },
-                  test: canTest
-                    ? (draft) =>
-                        service.test(agentId, {
-                          source: "native",
-                          profile: editing.profile,
-                          previousName: editing.entry.name,
-                          revision: editing.snapshot.revision,
-                          draft,
-                        })
-                    : undefined,
+                  test:
+                    canTest || hasHostInspection
+                      ? (draft) =>
+                          service.test(agentId, {
+                            source: "native",
+                            profile: editing.profile,
+                            previousName: editing.entry?.name ?? null,
+                            entryId: editing.entry?.id,
+                            entryRevision: editing.entry?.connectionRevision,
+                            workspace: nativeWorkspace,
+                            revision: editing.snapshot.revision,
+                            draft,
+                          })
+                      : undefined,
                 }
               : {
                   source: "managed",

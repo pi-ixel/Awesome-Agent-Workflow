@@ -32,6 +32,14 @@ export interface SessionActivity {
 
 export interface SessionActivityState {
   readonly entries: Readonly<Record<string, SessionActivity>>;
+  readonly unreadReplies: Readonly<Record<string, UnreadSessionReply>>;
+}
+
+export interface UnreadSessionReply {
+  readonly agentId: string;
+  readonly agentKey: string;
+  readonly project: string;
+  readonly sessionId: string;
 }
 
 export interface ArchiveMetadata {

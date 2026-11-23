@@ -143,7 +143,7 @@
   "plugins/diagnostics/ui/ResourceReport.tsx": {
     "definitions": {
       "内容与专用绘制": ["Chart"],
-      "状态与统计": ["ResourceReport"]
+      "状态与统计": ["ResourceReport", "DesktopWorkingSetDetails"]
     },
     "targets": []
   },
@@ -378,6 +378,25 @@
       "default → plugins/mcp/ui/McpView.tsx#McpView",
       "import → ./McpView.tsx"
     ]
+  },
+  "plugins/project/conversation/changes/DiffContent.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["DiffContent", "DiffContent/row"]
+    },
+    "targets": []
+  },
+  "plugins/project/conversation/changes/TurnChangesDock.tsx": {
+    "definitions": {
+      "状态与统计": ["Statistics", "TurnChangesReview/summary"],
+      "布局与操纵": [
+        "TurnChangesDock",
+        "TurnChangesSlot",
+        "TurnChangesReview",
+        "TurnChangesReview/panel"
+      ],
+      "命令按钮": ["TurnChangesReview/controls"]
+    },
+    "targets": []
   },
   "plugins/project/conversation/ui/AnnotationCards.tsx": {
     "definitions": {
@@ -1116,7 +1135,7 @@
   },
   "plugins/workbench/ui/ActivityRail.tsx": {
     "definitions": {
-      "导航与列表": ["ActivityRail"]
+      "导航与列表": ["ActivityRail", "ActivityRailEntry"]
     },
     "targets": []
   },
@@ -1543,12 +1562,17 @@
   },
   "shared/ui/MarkdownView.tsx": {
     "definitions": {
-      "布局与操纵": ["BlockCodeContext"],
+      "布局与操纵": [
+        "BlockCodeContext",
+        "LinkLabelContext",
+        "ReplyFilesContext"
+      ],
       "内容与专用绘制": [
         "MarkdownCode",
         "MarkdownRenderBoundary",
         "MarkdownView",
         "MarkdownViewBase",
+        "VerifiedReplyFile",
         "buildMarkdownComponents/a",
         "buildMarkdownComponents/blockquote",
         "buildMarkdownComponents/h1",
@@ -1608,6 +1632,13 @@
   "shared/ui/NavigationRow.tsx": {
     "definitions": {
       "导航与列表": ["NavigationRow"]
+    },
+    "targets": []
+  },
+  "shared/ui/PageFilterControls.tsx": {
+    "definitions": {
+      "编辑输入": ["PageFilterSearch"],
+      "选择控件": ["PageFilterListbox"]
     },
     "targets": []
   },

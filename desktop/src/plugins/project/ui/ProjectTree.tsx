@@ -64,7 +64,15 @@ import type { SessionActivityState, SessionCatalogState } from "../sessions/inde
  *   「设置 / 诊断」入口在底部 footer（SidebarFooter，ZCode
  *   WorkspaceSidebarFooter 同位）。
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { sessionPinKey } from "../sessions/sessionPin.ts";
 import { SESSION_LIST_PAGE_SIZE } from "./sidebarState.ts";
@@ -108,7 +116,7 @@ import type { SessionGroup, SessionGroupMember } from "../sessions/sessionGroups
 import { arrangeSessionChildren, prioritizeStarredSessions, type SessionChildItem } from "./sessionGroupLayout.ts";
 import { useSessionRename } from "./useSessionRename.ts";
 
-const emptyActivity: SessionActivityState = { entries: {} };
+const emptyActivity: SessionActivityState = { entries: {}, unreadReplies: {} };
 const emptyArchiveKeys: ReadonlySet<string> = new Set<string>();
 
 function useProjectCatalog<T>(select: (state: SessionCatalogState) => T) {
@@ -206,8 +214,17 @@ const projectRowActionClass =
   focusVisibleRing;
 const sessionRowActionReveal =
   "opacity-0 group-hover/session-row:opacity-100 group-has-[:focus-visible]/session-row:opacity-100 [@media(hover:none)]:opacity-100";
-const sessionRowActionClass =
-  `shrink-0 rounded transition-opacity hover:bg-surface-hover ${sessionRowActionReveal} ${focusVisibleRing}`;
+const sessionRowActionClass = `shrink-0 rounded transition-opacity hover:bg-surface-hover ${sessionRowActionReveal} ${focusVisibleRing}`;
+const sessionRowFrameClass =
+  "group/session-row relative flex min-w-0 items-center gap-1 rounded-lg pr-1 transition-colors";
+const sessionRowStatusClass =
+  "flex min-w-0 shrink-0 items-center justify-end gap-2 empty:hidden";
+const sessionRowStatusReveal =
+  "group-hover/session-row:hidden [@media(hover:hover)]:group-has-[:focus-visible]/session-row:hidden";
+const sessionRowActionsClass = "flex shrink-0 items-center gap-1";
+// 鼠标移出时操作离开布局，但仍可由 Tab 聚焦并原位显示。
+const sessionRowActionsReveal =
+  "pointer-events-none absolute right-1 group-hover/session-row:pointer-events-auto group-hover/session-row:static group-has-[:focus-visible]/session-row:pointer-events-auto group-has-[:focus-visible]/session-row:static [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:static";
 
 /** 项目名切换展开，行尾按钮与菜单提供独立操作。 */
 function ProjectNodeRow({
@@ -438,37 +455,39 @@ function useActiveSessionIds(path: string): readonly string[] {
   );
 }
 
-/** 项目视角分开摆放前导标记和随行文字，会话视角把两种状态放在副行。 */
 function SessionActivityBadge({
   path,
   id,
-  placement = "combined",
 }: {
   readonly path: string;
   readonly id: string;
-  readonly placement?: "leading" | "trailing" | "combined" | "resting";
 }) {
   const agentKey = useCatalogOwner();
   const activity = useProjectActivity(
     (state) => state.entries[sessionActivityKey(path, id, agentKey)],
   );
-  if (placement === "resting")
-    return activity?.status === "running" ? (
-      <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center group-hover/session-row:invisible group-has-[:focus-visible]/session-row:invisible [@media(hover:none)]:static">
-        <SessionRunningIndicator />
-      </span>
-    ) : null;
   switch (activity?.status) {
+    case "running":
+      return <SessionRunningIndicator />;
     case "failed":
-      return placement !== "trailing" ? <StatusDot tone="danger" label="失败" hint="失败" /> : null;
+      return <StatusDot tone="danger" label="失败" hint="失败" />;
     case "completed":
-      return placement !== "trailing" && activity.unread
-        ? <StatusDot tone="info" label="已完成，未查看" hint="已完成，未查看" className="ui-icon-7" />
-        : null;
+      return activity.unread ? (
+        <StatusDot
+          tone="info"
+          label="已完成，未查看"
+          hint="已完成，未查看"
+          className="ui-icon-7"
+        />
+      ) : null;
     case "waiting":
-      return placement !== "leading" ? <Badge tone="ok" compact>待处理</Badge> : null;
+      return (
+        <Badge tone="ok" compact>
+          待处理
+        </Badge>
+      );
     case "cancelled":
-      return placement !== "leading" ? <span className="shrink-0 text-ui-sm text-ink-mute">已停止</span> : null;
+      return <span className="shrink-0 text-ui-sm text-ink-mute">已停止</span>;
     default:
       return null;
   }
@@ -613,10 +632,19 @@ function SessionRowTitle({ starred, rename, children }: {
   );
 }
 
-function SessionRowBody({ active, renaming, hint, className, onOpen, children }: {
+function SessionRowBody({
+  active,
+  renaming,
+  hint,
+  statusId,
+  className,
+  onOpen,
+  children,
+}: {
   readonly active: boolean;
   readonly renaming: boolean;
   readonly hint?: string;
+  readonly statusId?: string;
   readonly className: string;
   readonly onOpen: () => void;
   readonly children: ReactNode;
@@ -626,6 +654,7 @@ function SessionRowBody({ active, renaming, hint, className, onOpen, children }:
     <NavigationRow
       layout="compound"
       aria-current={active ? "true" : undefined}
+      aria-describedby={statusId}
       data-hint={hint}
       onClick={onOpen}
       className={`${className} cursor-pointer`}
@@ -764,6 +793,7 @@ function SessionRow({
   const rename = useSessionInlineRename(path, session);
   const star = useSessionStar(path, session.id);
   const [archiveConfirm, setArchiveConfirm] = useState(false);
+  const statusId = useId();
 
   const recent = variant === "recent";
   const menuEntries = () => buildSessionMenuEntries(
@@ -791,13 +821,14 @@ function SessionRow({
           );
         }
       }}
-      className={`group group/session-row flex min-w-0 items-center gap-1 rounded-lg pr-1 transition-colors ${
+      className={`group ${sessionRowFrameClass} ${
         isActive ? rowSelectedClass : "hover:bg-surface-hover"
       }`}
     >
       <SessionRowBody
         active={isActive}
         renaming={rename.renaming}
+        statusId={archiveConfirm ? undefined : statusId}
         hint={variant === "project" ? undefined : path}
         onOpen={() => {
           if (display?.open) display.open();
@@ -808,9 +839,13 @@ function SessionRow({
           : "flex min-w-0 flex-1 items-center gap-2 py-1 pl-2.5 text-left"}
       >
         {!recent && (
-          <span className="flex ui-icon-16 shrink-0 items-center justify-center">
-            {variant === "pinned" ? <PinIcon className="ui-icon-16 shrink-0 text-ink-subtle" />
-              : !display?.attention && <SessionActivityBadge path={path} id={session.id} placement="leading" />}
+          <span
+            aria-hidden="true"
+            className="flex ui-icon-16 shrink-0 items-center justify-center"
+          >
+            {variant === "pinned" && (
+              <PinIcon className="ui-icon-16 shrink-0 text-ink-subtle" />
+            )}
           </span>
         )}
         <SessionRowTitle starred={star.starred} rename={rename}>
@@ -826,19 +861,14 @@ function SessionRow({
               {basenameOf(path)}
               {display ? ` · ${groupTitle} · ${display.title}` : null}
             </span>
-            {display?.attention ? <Badge tone="ok" compact>{display.attention}</Badge>
-              : <SessionActivityBadge path={path} id={session.id} />}
           </div>
-        ) : display?.attention ? (
-          <Badge tone="ok" compact>{display.attention}</Badge>
-        ) : (
-          <SessionActivityBadge path={path} id={session.id} placement="trailing" />
-        )}
+        ) : null}
       </SessionRowBody>
-      <div className="relative flex shrink-0 items-center gap-1">
+      <div
+        className={`${sessionRowActionsClass} ${archiveConfirm ? "" : sessionRowActionsReveal}`}
+      >
         {!archiveConfirm && (
           <>
-            {!display?.attention && <SessionActivityBadge path={path} id={session.id} placement="resting" />}
             <SessionStarAction star={star} />
             <SessionPinAction path={path} sessionId={session.id} />
           </>
@@ -850,6 +880,21 @@ function SessionRow({
           setConfirming={setArchiveConfirm}
         />
       </div>
+      {!archiveConfirm && (
+        <div
+          id={statusId}
+          data-session-row-status
+          className={`${sessionRowStatusClass} ${sessionRowStatusReveal}`}
+        >
+          {display?.attention ? (
+            <Badge tone="ok" compact>
+              {display.attention}
+            </Badge>
+          ) : (
+            <SessionActivityBadge path={path} id={session.id} />
+          )}
+        </div>
+      )}
     </li>
   );
 }
@@ -878,6 +923,7 @@ function SessionGroupNode({
   readonly menu: SidebarMenuApi;
 }) {
   const { group, members } = item;
+  const statusId = useId();
   const [expanded, setExpanded] = useState(group.defaultExpanded ?? false);
   const [showDone, setShowDone] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
@@ -911,7 +957,7 @@ function SessionGroupNode({
   );
   return (
     <li className="flex min-w-0 flex-col">
-      <div className="group/session-row flex min-w-0 items-center gap-1 rounded-lg pr-1 transition-colors hover:bg-surface-hover">
+      <div className={`${sessionRowFrameClass} hover:bg-surface-hover`}>
         {group.open && (
           <IconButton
             iconSize="compact"
@@ -928,6 +974,7 @@ function SessionGroupNode({
           layout="compound"
           aria-expanded={group.open ? undefined : expanded}
           aria-label={`${group.title}，${members.length} 个会话`}
+          aria-describedby={confirmArchive ? undefined : statusId}
           data-hint={group.open ? group.openLabel ?? "打开" : undefined}
           onClick={() => {
             if (group.open) {
@@ -940,12 +987,6 @@ function SessionGroupNode({
         >
           {!group.open && <span aria-hidden="true" className="flex shrink-0">{chevron}</span>}
           <SidebarItemTitle>{group.title}</SidebarItemTitle>
-          <SessionGroupStatusBadge status={group.status} />
-          {group.attention ? (
-            <Badge tone="ok" compact>{group.attention}</Badge>
-          ) : expanded ? null : (
-            <span className="shrink-0 text-ui-sm text-ink-mute">{members.length} 个会话</span>
-          )}
         </NavigationRow>
         {group.archive ? (
           <ConfirmIconAction
@@ -954,9 +995,28 @@ function SessionGroupNode({
             confirming={confirmArchive}
             setConfirming={setConfirmArchive}
             onConfirm={group.archive}
-            revealClassName="opacity-0 group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100"
+            className={confirmArchive ? "" : sessionRowActionsReveal}
+            revealClassName={sessionRowActionReveal}
           />
         ) : null}
+        {!confirmArchive && (
+          <div
+            id={statusId}
+            data-session-row-status
+            className={`${sessionRowStatusClass} ${group.archive ? sessionRowStatusReveal : ""}`}
+          >
+            <SessionGroupStatusBadge status={group.status} />
+            {group.attention ? (
+              <Badge tone="ok" compact>
+                {group.attention}
+              </Badge>
+            ) : expanded ? null : (
+              <span aria-hidden="true" className="shrink-0 text-ui-sm text-ink-mute">
+                {members.length} 个会话
+              </span>
+            )}
+          </div>
+        )}
       </div>
       <TreeBranch open={expanded}>
         <ul className="flex flex-col gap-0.5 pl-4" aria-label={`${group.title} 的会话`}>
