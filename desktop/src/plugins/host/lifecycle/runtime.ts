@@ -205,9 +205,9 @@ export class DesktopHost implements HostService {
     this.archives = {
       deleteAgentSession:
         backend.deleteAgentSession &&
-        ((agentId, program, sessionId, cwd) =>
+        ((agentId, sessionId, cwd) =>
           this.resources.run(() =>
-            backend.deleteAgentSession!(agentId, program, sessionId, cwd),
+            backend.deleteAgentSession!(agentId, sessionId, cwd),
           )),
       readAgentHistoryEvidence:
         backend.readAgentHistoryEvidence &&

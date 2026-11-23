@@ -11,6 +11,17 @@ export interface SessionDeletion extends DeleteSessionTarget {
   readonly phase: "prepared" | "source" | "local" | "done";
   readonly error?: string;
 }
+export interface SessionDeletionBatch {
+  readonly agentKey: string;
+  readonly keys: ReadonlySet<string>;
+  readonly isRunning: boolean;
+  readonly succeeded: number;
+  readonly failed: Readonly<Record<string, string>>;
+}
+export interface SessionDeletionSnapshot {
+  readonly entries: Readonly<Record<string, SessionDeletion>>;
+  readonly batch?: SessionDeletionBatch;
+}
 export function sessionAgentId(key: string): string | null {
   try {
     const value: unknown = JSON.parse(key);
@@ -35,7 +46,7 @@ export const deletionKey = (target: DeleteSessionTarget) =>
 
 /** 持久化记录同时过滤迟到的目录响应，并阻止重新打开已删除历史。 */
 export function createSessionDeletions(storage: HostStorage) {
-  let initial: Record<string, SessionDeletion> = {};
+  const initial: Record<string, SessionDeletion> = {};
   const raw = storage.getItem(storageKey);
   if (raw) {
     const parsed: unknown = JSON.parse(raw);
@@ -51,10 +62,12 @@ export function createSessionDeletions(storage: HostStorage) {
         !["prepared", "source", "local", "done"].includes(item.phase)
       )
         throw new Error("会话删除记录损坏，无法安全加载会话");
-      initial = { ...initial, [deletionKey(item)]: item };
+      initial[deletionKey(item)] = item;
     }
   }
-  const store = createStore(() => ({ entries: initial }));
+  const store = createStore<SessionDeletionSnapshot>(() => ({
+    entries: initial,
+  }));
   const running = new Map<string, Promise<void>>();
   return {
     store,
@@ -93,6 +106,47 @@ export function createSessionDeletions(storage: HostStorage) {
         .finally(() => running.delete(key));
       running.set(key, task);
       return task;
+    },
+    async runBatch(
+      agentKey: string,
+      targets: readonly DeleteSessionTarget[],
+      execute: (target: DeleteSessionTarget) => Promise<void>,
+      canContinue: () => boolean,
+    ): Promise<void> {
+      if (store.getState().batch?.isRunning)
+        throw new Error("已有批量删除正在执行");
+      if (
+        !targets.length ||
+        targets.some((target) => target.agentKey !== agentKey)
+      )
+        throw new Error("批量删除范围与当前 Agent 不匹配");
+      const queue = new Map(
+        targets.map((target) => [deletionKey(target), { ...target }]),
+      );
+      let batch: SessionDeletionBatch = {
+        agentKey,
+        keys: new Set(queue.keys()),
+        isRunning: true,
+        succeeded: 0,
+        failed: {},
+      };
+      store.setState({ batch });
+      try {
+        for (const [key, target] of queue) {
+          if (!canContinue()) break;
+          try {
+            await execute(target);
+            batch = { ...batch, succeeded: batch.succeeded + 1 };
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : String(error);
+            batch = { ...batch, failed: { ...batch.failed, [key]: message } };
+          }
+          store.setState({ batch });
+        }
+      } finally {
+        store.setState({ batch: { ...batch, isRunning: false } });
+      }
     },
     settle: () =>
       running.size ? Promise.allSettled([...running.values()]) : undefined,

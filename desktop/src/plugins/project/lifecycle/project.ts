@@ -169,6 +169,14 @@ export class DesktopProject {
     );
     const { dismissNotice, archiveWithNotice, unarchiveSession } =
       this.archive.getState();
+    const deleteArchivedSession = (target: DeleteSessionTarget) => {
+      this.assertOpen();
+      if (!operations.deleteArchivedSession)
+        return Promise.reject(new Error("会话删除不可用"));
+      return operations.deleteArchivedSession(target, () =>
+        this.removeSessionData(target),
+      );
+    };
     this.service = {
       projects: {
         workspace: workspaceOwner.view,
@@ -194,12 +202,17 @@ export class DesktopProject {
                 .catch(() => {});
           }
         },
-        deleteArchivedSession: (target) => {
+        deleteArchivedSession,
+        deleteArchivedSessions: async (targets) => {
           this.assertOpen();
-          if (!operations.deleteArchivedSession)
-            return Promise.reject(new Error("会话删除不可用"));
-          return operations.deleteArchivedSession(target, () =>
-            this.removeSessionData(target),
+          const agentKey = indexes.catalog.store.getState().agentKey;
+          if (!agentKey || !operations.canDeleteArchivedSession?.(agentKey))
+            throw new Error("当前 Agent 不支持批量彻底删除会话");
+          await indexes.deletions.runBatch(
+            agentKey,
+            targets,
+            deleteArchivedSession,
+            () => !this.stopping,
           );
         },
         activity: indexes.activityView,

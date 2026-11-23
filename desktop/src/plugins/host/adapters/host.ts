@@ -67,8 +67,8 @@ function asRunCommandResult(raw: unknown): RunCommandWire {
 export function createTauriHost(invoke: NativeInvoke = defaultInvoke): HostRuntime {
   return {
     kind: "tauri",
-    deleteAgentSession: (agentId, program, sessionId, cwd) =>
-      invoke("agent_delete_session", { agentId, program, sessionId, cwd }),
+    deleteAgentSession: (agentId, sessionId, cwd) =>
+      invoke("agent_delete_session", { agentId, sessionId, cwd }),
     homeDir,
     readAgentHistoryEvidence: (agentId, sessionId, cwd) => invoke("agent_history_evidence", { agentId, sessionId, cwd }),
     async runCommand(program, args) {

@@ -84,7 +84,6 @@ export interface HostRuntime {
   readAgentHistoryEvidence?(agentId: string, sessionId: string, cwd: string): Promise<HistoryEvidence | null>;
   deleteAgentSession?(
     agentId: string,
-    program: string,
     sessionId: string,
     cwd: string,
   ): Promise<void>;

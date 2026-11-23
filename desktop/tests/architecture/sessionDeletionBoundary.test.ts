@@ -41,3 +41,28 @@ it("keeps destructive agent filesystem calls behind the host and agent capabilit
   }
   expect(violations).toEqual([]);
 });
+
+it("routes archives through the same session service without spawning the CodeAgent CLI", () => {
+  const ui = readFileSync(
+    "src/plugins/project/ui/ArchiveManagementSection.tsx",
+    "utf8",
+  );
+  const project = readFileSync(
+    "src/plugins/project/lifecycle/project.ts",
+    "utf8",
+  );
+  const native = readFileSync(
+    "src-tauri/src/codeagent_delete.rs",
+    "utf8",
+  ).split("#[cfg(test)]")[0];
+  expect(ui).toMatch(/\.deleteArchivedSessions\?\.\(confirmBatch\)/);
+  expect(ui).not.toMatch(
+    /deleteAgentSession|agent_delete_session|deleteSession\(/,
+  );
+  expect(project).toMatch(
+    /deletions\.runBatch\(\s*agentKey,\s*targets,\s*deleteArchivedSession,/,
+  );
+  expect(native).not.toMatch(
+    /std::process::Command|\.spawn\(|sessions.*delete/,
+  );
+});

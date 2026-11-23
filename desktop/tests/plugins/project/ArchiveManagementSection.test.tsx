@@ -3,11 +3,14 @@ import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ArchiveManagementSection } from "../../../src/plugins/project/ui/ArchiveManagementSection.tsx";
-import {
-  sessionArchiveKey,
-} from "../../../src/plugins/project/sessions/sessionArchiveStore.ts";
+import { sessionArchiveKey } from "../../../src/plugins/project/sessions/sessionArchiveStore.ts";
 import { createTestProjectIndexes } from "../../helpers/projectIndexes.ts";
 import { createTestProjectWorkbench } from "../../helpers/projectWorkbench.tsx";
+import {
+  createSessionDeletions,
+  type DeleteSessionTarget,
+} from "../../../src/plugins/project/sessions/sessionDeletion.ts";
+import { webviewStorage } from "../../../src/plugins/host/storage/storage.ts";
 const openSessionFromEntry = vi.fn(() => Promise.resolve());
 let indexes: ReturnType<typeof createTestProjectIndexes>;
 let fixture: ReturnType<typeof createTestProjectWorkbench>;
@@ -15,7 +18,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   indexes = createTestProjectIndexes();
-  fixture = createTestProjectWorkbench({ sessions: { ...indexes, openSessionFromEntry } });
+  fixture = createTestProjectWorkbench({
+    sessions: { ...indexes, openSessionFromEntry },
+  });
   indexes.archive.setState({
     archivedSessions: new Set(),
     metadata: {},
@@ -36,14 +41,23 @@ beforeEach(() => {
   archive("D:/beta", "unknown");
   useWorkbenchUiStore.setState({ overlay: "settings" });
 });
-afterEach(() => { fixture.dispose(); indexes.dispose(); });
+afterEach(() => {
+  fixture.dispose();
+  indexes.dispose();
+});
 
 it("groups by project, sorts newest first, and permits folding and filtering", async () => {
   const user = userEvent.setup();
   render(<ArchiveManagementSection />, { wrapper: fixture.Wrapper });
-  expect(screen.getByRole("searchbox", { name: "搜索已归档会话" })).toHaveClass("min-h-10");
-  expect(screen.getByRole("combobox", { name: "归档排序方式" })).toHaveClass("min-h-10");
-  expect(screen.getByRole("combobox", { name: "归档项目筛选" })).toHaveClass("min-h-10");
+  expect(screen.getByRole("searchbox", { name: "搜索已归档会话" })).toHaveClass(
+    "min-h-10",
+  );
+  expect(screen.getByRole("combobox", { name: "归档排序方式" })).toHaveClass(
+    "min-h-10",
+  );
+  expect(screen.getByRole("combobox", { name: "归档项目筛选" })).toHaveClass(
+    "min-h-10",
+  );
   expect(screen.getAllByRole("listitem")[0]).toHaveTextContent("新方案");
   expect(screen.getByText("更新时间未知")).toBeVisible();
   await user.click(screen.getByRole("combobox", { name: "归档排序方式" }));
@@ -103,10 +117,13 @@ it("clicking a title opens that session without cancelling its archive status", 
   expect(indexes.archive.getState().archivedSessions.size).toBe(3);
 });
 
-vi.mock(import("../../../src/plugins/workbench/ui/bindings/layoutView.ts"), async (original) => {
-  const { layoutViewFixture } = await import("../../helpers/layout.ts");
-  return { ...(await original()), ...layoutViewFixture() };
-});
+vi.mock(
+  import("../../../src/plugins/workbench/ui/bindings/layoutView.ts"),
+  async (original) => {
+    const { layoutViewFixture } = await import("../../helpers/layout.ts");
+    return { ...(await original()), ...layoutViewFixture() };
+  },
+);
 it("asks once before deleting a CodeAgent session and reports a retryable failure", async () => {
   const agentKey = JSON.stringify([
     "codeagent",
@@ -150,4 +167,99 @@ it("asks once before deleting a CodeAgent session and reports a retryable failur
     agentKey,
   });
   expect(screen.getByRole("button", { name: "新方案" })).toBeVisible();
+});
+
+it("confirms only the selected filtered targets, including a folded project, and fixes the scope before confirmation", async () => {
+  const agentKey = JSON.stringify(["codeagent"]);
+  const otherAgent = JSON.stringify(["chrys"]);
+  fixture.dispose();
+  indexes.catalog.setState({ agentKey });
+  const archive = indexes.archive.getState().archiveSession;
+  archive("D:/alpha", "new", agentKey);
+  archive("D:/alpha", "old", agentKey);
+  archive("D:/alpha", "other-agent", otherAgent);
+  archive("D:/beta", "unknown", agentKey);
+  const deleteArchivedSessions = vi
+    .fn<(targets: readonly DeleteSessionTarget[]) => Promise<void>>()
+    .mockResolvedValue(undefined);
+  fixture = createTestProjectWorkbench({
+    sessions: {
+      ...indexes,
+      openSessionFromEntry,
+      deleteArchivedSession: () => Promise.resolve(),
+      deleteArchivedSessions,
+      canDeleteArchivedSession: () => true,
+    },
+  });
+  const user = userEvent.setup();
+  render(<ArchiveManagementSection />, { wrapper: fixture.Wrapper });
+  await user.type(screen.getByRole("searchbox"), "alpha");
+  await user.click(screen.getByRole("button", { name: "批量选择" }));
+  await user.click(screen.getByRole("checkbox", { name: "选择 新方案" }));
+  expect(screen.getByText("已选 1 条")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "归档项目 D:/alpha" }));
+  await user.click(screen.getByRole("checkbox", { name: "全选当前筛选结果" }));
+  expect(screen.getByText("已选 2 条")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "彻底删除所选" }));
+  const dialog = screen.getByRole("dialog", { name: "批量彻底删除会话" });
+  expect(dialog).toHaveTextContent("彻底删除 2 条会话？");
+  expect(dialog).toHaveTextContent("D:/alpha");
+  expect(dialog).not.toHaveTextContent("D:/beta");
+  expect(deleteArchivedSessions).not.toHaveBeenCalled();
+  act(() => archive("D:/alpha", "late", agentKey));
+  await user.click(
+    within(dialog).getByRole("button", { name: "彻底删除 2 条" }),
+  );
+  expect(deleteArchivedSessions).toHaveBeenCalledExactlyOnceWith([
+    { agentKey, workspacePath: "D:/alpha", sessionId: "new" },
+    { agentKey, workspacePath: "D:/alpha", sessionId: "old" },
+  ]);
+});
+
+it("keeps processing the confirmed batch while the archive view is closed", async () => {
+  const agentKey = JSON.stringify(["codeagent"]);
+  fixture.dispose();
+  indexes.catalog.setState({ agentKey });
+  const { archiveSession, unarchiveSession } = indexes.archive.getState();
+  archiveSession("D:/alpha", "new", agentKey);
+  archiveSession("D:/alpha", "old", agentKey);
+  const queue = createSessionDeletions(webviewStorage);
+  const complete: (() => void)[] = [];
+  const deleteArchivedSession = vi.fn(async (item: DeleteSessionTarget) => {
+    await new Promise<void>((resolve) => complete.push(resolve));
+    unarchiveSession(item.workspacePath, item.sessionId, item.agentKey);
+  });
+  fixture = createTestProjectWorkbench({
+    sessions: {
+      ...indexes,
+      deletions: queue.store,
+      openSessionFromEntry,
+      deleteArchivedSession,
+      deleteArchivedSessions: (targets) =>
+        queue.runBatch(agentKey, targets, deleteArchivedSession, () => true),
+      canDeleteArchivedSession: () => true,
+    },
+  });
+  const user = userEvent.setup();
+  const page = render(<ArchiveManagementSection />, {
+    wrapper: fixture.Wrapper,
+  });
+  await user.click(screen.getByRole("button", { name: "批量选择" }));
+  await user.click(screen.getByRole("checkbox", { name: "全选当前筛选结果" }));
+  await user.click(screen.getByRole("button", { name: "彻底删除所选" }));
+  await user.click(screen.getByRole("button", { name: "彻底删除 2 条" }));
+  expect(screen.getByRole("status")).toHaveTextContent("正在删除（0/2）");
+  page.unmount();
+  await act(() => {
+    complete[0]?.();
+    return Promise.resolve();
+  });
+  expect(deleteArchivedSession).toHaveBeenCalledTimes(2);
+  render(<ArchiveManagementSection />, { wrapper: fixture.Wrapper });
+  expect(screen.getByRole("status")).toHaveTextContent("正在删除（1/2）");
+  await act(() => {
+    complete[1]?.();
+    return Promise.resolve();
+  });
+  expect(screen.getByRole("status")).toHaveTextContent("成功 2 条 · 失败 0 条");
 });

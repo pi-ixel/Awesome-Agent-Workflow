@@ -8,7 +8,7 @@ import type { SessionToolProvider } from "./sessions/sessionTools.ts";
 import type { SendOptions } from "./conversation/sessionStore.ts";
 import type {
   DeleteSessionTarget,
-  SessionDeletion,
+  SessionDeletionSnapshot,
 } from "./sessions/sessionDeletion.ts";
 export { projectOverviewPageId } from "./workspace/pageIds.ts";
 export { knownWorkspacePaths } from "./workspace/knownPaths.ts";
@@ -129,12 +129,13 @@ export interface ProjectSessions extends Pick<
   "catalog" | "activity"
 > {
   readonly archive: ReadonlySnapshot<SessionArchiveSnapshot>;
-  readonly deletions?: ReadonlySnapshot<{
-    entries: Readonly<Record<string, SessionDeletion>>;
-  }>;
+  readonly deletions?: ReadonlySnapshot<SessionDeletionSnapshot>;
   canDeleteArchivedSession?(agentKey: string): boolean;
   resumePendingDeletions?(): void;
   deleteArchivedSession?(target: DeleteSessionTarget): Promise<void>;
+  deleteArchivedSessions?(
+    targets: readonly DeleteSessionTarget[],
+  ): Promise<void>;
   /** 侧栏会话分组（各发布方推送，侧栏渲染）。 */
   readonly groups: ReadonlySnapshot<SessionGroupsState>;
   /**
