@@ -146,6 +146,7 @@ export const emptyCatalog: SessionCatalogState = {
 export function createSessionCatalog(
   signal: AbortSignal,
   deleted: (target: DeleteSessionTarget) => boolean = () => false,
+  retainedSessions: (agent: string) => { project: string; sessionId: string }[] = () => [],
 ) {
   const store = createStore<SessionCatalogState>()(() => emptyCatalog);
   const catalogCache = new Map<string, SessionCatalogState>();
@@ -156,12 +157,17 @@ export function createSessionCatalog(
     agent: string,
     path: string,
     entries: readonly SessionSummary[],
-  ) =>
-    entries.filter(
+  ) => {
+    const ids = new Set(entries.map((entry) => entry.id));
+    const missing = retainedSessions(agent)
+      .filter((owner) => pathKey(owner.project) === pathKey(path) && !ids.has(owner.sessionId))
+      .map(({ sessionId }) => ({ id: sessionId, title: "会话", updatedAt: null }));
+    return [...entries, ...missing].filter(
       (entry) =>
         !externalSessions.has(externalKey(agent, path, entry.id)) &&
         !deleted({ agentKey: agent, workspacePath: path, sessionId: entry.id }),
     );
+  };
 
   function excludeSessions(sessions: readonly SessionTarget[]): void {
     if (signal.aborted) return;
@@ -186,9 +192,13 @@ export function createSessionCatalog(
     if (current.agentKey !== agentKey) {
       if (current.agentKey) catalogCache.set(current.agentKey, current);
       invalidatePreviousPreparation();
+      const byPath = { ...catalogCache.get(agentKey)?.sessionsByPath };
+      for (const path of new Set(retainedSessions(agentKey).map((owner) => owner.project))) {
+        byPath[path] = visibleEntries(agentKey, path, byPath[path] ?? []);
+      }
       store.setState({
         agentKey,
-        sessionsByPath: catalogCache.get(agentKey)?.sessionsByPath ?? {},
+        sessionsByPath: byPath,
         statusByPath: {},
       });
     }

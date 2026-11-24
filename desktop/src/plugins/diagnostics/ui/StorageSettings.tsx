@@ -221,7 +221,7 @@ export function createStorageSettings(
       void load();
       const timer = setInterval(() => {
         void load();
-      }, 60_000);
+      }, 15 * 60_000);
       return () => {
         unsubscribe?.();
         clearInterval(timer);

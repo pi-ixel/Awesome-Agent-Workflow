@@ -40,7 +40,7 @@ export function conversationScope(scope: string): {
 
 export function draftScope(scope: string) {
   const parts = scope.split("/");
-  if (parts[2] === "v2" && parts.length >= 6)
+  if ((parts[2] === "v2" || parts[2] === "v3") && parts.length >= 6)
     return {
       agent: decodeURIComponent(parts[3]!),
       project: decodeURIComponent(parts[4]!),

@@ -19,6 +19,9 @@ mod panel_files;
 mod panel_git;
 mod panel_git_runtime;
 mod resource_monitor;
+mod session_layout;
+mod session_recovery;
+mod session_image_drafts;
 mod session_snapshots;
 mod sso_login;
 mod storage_location;
@@ -218,6 +221,9 @@ pub fn run() {
             storage_preferences::storage_configuration_load,
             storage_preferences::storage_configuration_write,
             session_snapshots::session_data_read,
+            session_snapshots::migrate_session_files,
+            session_snapshots::session_data_finish_deletion,
+            session_recovery::session_recovery_update,
             session_snapshots::session_data_write,
             session_snapshots::session_data_delete,
             session_snapshots::session_data_list,

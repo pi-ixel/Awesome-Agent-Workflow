@@ -14,8 +14,21 @@ if (process.platform !== "win32")
   throw new Error("Windows-only IPC smoke test");
 const handoff = process.argv[2] === "--isolated-handoff";
 const diagnostics = process.argv[2] === "--isolated-diagnostics";
+const promptLatency = process.argv[2] === "--isolated-prompt-latency";
+const sessionAbsent = process.argv[2] === "--isolated-session-absent";
+const crashRecovery = process.argv[2] === "--isolated-migration-crash";
+const lifecycle = process.argv[2] === "--isolated-migration-lifecycle";
+const sessionRecovery =
+  sessionAbsent ||
+  crashRecovery ||
+  process.argv[2] === "--isolated-session-recovery";
 const isolated =
-  handoff || diagnostics || process.argv[2] === "--isolated-window";
+  handoff ||
+  diagnostics ||
+  promptLatency ||
+  sessionRecovery ||
+  lifecycle ||
+  process.argv[2] === "--isolated-window";
 const root = path.resolve("src-tauri/target/update-ipc-tests");
 await fs.mkdir(root, { recursive: true });
 const fixture = isolated ? await prepareIsolatedWindow(handoff) : undefined;
@@ -27,6 +40,59 @@ const executable =
   );
 await fs.access(executable);
 const profile = await fs.mkdtemp(path.join(root, "profile-"));
+if (crashRecovery) {
+  const data = path.dirname(fixture.removalProjects[0]);
+  for (const stage of ["before-log", "during-cleanup", "after-cleanup"]) {
+    const child = spawn(executable, [], {
+      windowsHide: true,
+      env: {
+        ...process.env,
+        ...fixture.environment,
+        WEBVIEW2_USER_DATA_FOLDER: profile,
+        AAW_MIGRATION_CHECKPOINT: stage,
+      },
+    });
+    const exit = new Promise((resolve, reject) => {
+      child.once("exit", resolve);
+      child.once("error", reject);
+    });
+    try {
+      await waitFor(
+        stage,
+        async () =>
+          (await fs
+            .readFile(path.join(data, "migration-checkpoint"), "utf8")
+            .catch(() => "")) === stage,
+        60000,
+      );
+      const journals = await fs
+        .readdir(path.join(data, "session-recovery"))
+        .catch((e) => {
+          if (e.code === "ENOENT") return [];
+          throw e;
+        });
+      if (stage === "before-log") assert.equal(journals.length, 0);
+      else {
+        assert.equal(journals.length, 1);
+        const journal = JSON.parse(
+          await fs.readFile(
+            path.join(data, "session-recovery", journals[0]),
+            "utf8",
+          ),
+        );
+        assert.equal(
+          journal.phase,
+          stage === "during-cleanup" ? "cleaning" : "webview",
+        );
+        assert.equal(journal.owner.sessionId, "aaw-recovery-smoke");
+      }
+    } finally {
+      child.kill("SIGKILL");
+      await exit;
+    }
+    console.log("PASS: forced Desktop termination at", stage);
+  }
+}
 const listener = net.createServer();
 await new Promise((resolve, reject) => {
   listener.once("error", reject);
@@ -34,32 +100,36 @@ await new Promise((resolve, reject) => {
 });
 const port = listener.address().port;
 await new Promise((resolve) => listener.close(resolve));
-const child = spawn(executable, [], {
-  windowsHide: true,
-  stdio: "ignore",
-  env: {
-    ...process.env,
-    WEBVIEW2_USER_DATA_FOLDER: profile,
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:
-      "--remote-debugging-address=127.0.0.1 --remote-debugging-port=" + port,
-    ...fixture?.environment,
-  },
-});
+const launch = () =>
+  spawn(executable, [], {
+    windowsHide: true,
+    stdio: "ignore",
+    env: {
+      ...process.env,
+      WEBVIEW2_USER_DATA_FOLDER: profile,
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:
+        "--remote-debugging-address=127.0.0.1 --remote-debugging-port=" + port,
+      ...fixture?.environment,
+    },
+  });
+let child = launch();
 let ended = false;
 let exitCode;
 let spawnError;
-const exited = new Promise((resolve) => {
-  child.once("error", (error) => {
-    spawnError = error;
-    ended = true;
-    resolve();
+const observeExit = () =>
+  new Promise((resolve) => {
+    child.once("error", (error) => {
+      spawnError = error;
+      ended = true;
+      resolve();
+    });
+    child.once("exit", (code) => {
+      exitCode = code;
+      ended = true;
+      resolve();
+    });
   });
-  child.once("exit", (code) => {
-    exitCode = code;
-    ended = true;
-    resolve();
-  });
-});
+let exited = observeExit();
 const processFailure = () =>
   spawnError ??
   new Error(
@@ -120,7 +190,9 @@ try {
     return connection;
   }
   const desktopPage = (url) =>
-    (fixture ? url.startsWith(`${fixture.origin}/`) : /tauri|localhost|index\.html/.test(url)) &&
+    (fixture
+      ? url.startsWith(`${fixture.origin}/`)
+      : /tauri|localhost|index\.html/.test(url)) &&
     !url.includes("diagnostics=1");
   socket = await connectPage(desktopPage);
   let sequence = 0;
@@ -189,7 +261,41 @@ try {
   const dialog = `document.querySelector('[role="dialog"][aria-label="关闭确认"]')`;
   const clickDialog = (name) =>
     `[...${dialog}.querySelectorAll('button')].find(b => b.textContent.trim() === '${name}').click()`;
-  if (handoff) {
+  if (lifecycle) {
+    const { verifyLifecycle } = await import("./verifySessionLifecycle.mjs");
+    await verifyLifecycle({
+      evaluate,
+      invoke,
+      waitFor,
+      workspace: fixture.removalProjects[0],
+      destination: profile,
+      restart: async () => {
+        socket.close();
+        child.kill();
+        await exited;
+        ended = false;
+        child = launch();
+        exited = observeExit();
+        socket = await connectPage(desktopPage);
+      },
+    });
+  } else if (sessionRecovery) {
+    const { verifyRecovery } = await import("./verifySessionRecovery.mjs");
+    await verifyRecovery({
+      evaluate,
+      waitFor,
+      workspace: fixture.removalProjects[0],
+      absent: sessionAbsent,
+    });
+  } else if (promptLatency) {
+    const { verifyPromptLatency } = await import("./verifyPromptLatency.mjs");
+    await verifyPromptLatency({
+      evaluate,
+      invoke,
+      waitFor,
+      workspace: fixture.removalProjects[0],
+    });
+  } else if (handoff) {
     await waitFor("signed fixture update", () =>
       evaluate(
         "window.__TAURI_INTERNALS__.invoke('update_status').then(s => s.installed && s.phase === 'ready')",
@@ -241,7 +347,10 @@ try {
     await call("plugin:window|show");
     await waitFor(
       "Workbench window controls",
-      () => evaluate("Boolean(document.querySelector('[data-testid=\"desktop-window-controls\"]'))"),
+      () =>
+        evaluate(
+          "Boolean(document.querySelector('[data-testid=\"desktop-window-controls\"]'))",
+        ),
       30000,
     );
     await call("browser_create_space", {
@@ -249,13 +358,17 @@ try {
       workspaceId: sessionId,
       sessionId,
     });
-    const openBrowserTab = () => call("browser_create_tab", {
+    const openBrowserTab = () =>
+      call("browser_create_tab", {
         sessionId,
         url: `${fixture.origin}/favicon.ico`,
         bounds: { x: 0, y: 0, width: 320, height: 240 },
-    });
+      });
     const terminalRequest = { request: { cols: 80, rows: 24 } };
-    const acpRequest = { program: process.execPath, args: ["-e", "setInterval(() => {}, 1000)"] };
+    const acpRequest = {
+      program: process.execPath,
+      args: ["-e", "setInterval(() => {}, 1000)"],
+    };
     const checkTerminal = async () => {
       const { handle, shell } = await call("pty_spawn", terminalRequest);
       try {
@@ -277,7 +390,14 @@ try {
       await call("acp_release", { handle });
       const logBatch = {
         delivery: { epoch: sessionId, sequence: 1 },
-        entries: [{ level: "info", channel: "ipc-smoke", message: "诊断回归", context: {} }],
+        entries: [
+          {
+            level: "info",
+            channel: "ipc-smoke",
+            message: "诊断回归",
+            context: {},
+          },
+        ],
       };
       await call("diagnostics_append", logBatch);
       await call("diagnostics_append", logBatch);
@@ -290,10 +410,14 @@ try {
         },
       });
       await call("diagnostics_flush");
-      const persisted = await call("diagnostics_query", { query: { channel: "ipc-smoke" } });
+      const persisted = await call("diagnostics_query", {
+        query: { channel: "ipc-smoke" },
+      });
       assert.equal(persisted.length, 1);
       assert.ok(Array.isArray(await call("diagnostics_probe_take")));
-      assert.ok(await call("diagnostics_snapshot", { snapshot: { connections: [] } }));
+      assert.ok(
+        await call("diagnostics_snapshot", { snapshot: { connections: [] } }),
+      );
       const rows = await call("diagnostics_storage_list");
       assert.ok(rows.length > 0);
       const { key } = rows[0];
@@ -303,7 +427,9 @@ try {
       );
 
       await call("diagnostics_open");
-      const diagnosticSocket = await connectPage((url) => url.includes("diagnostics=1"));
+      const diagnosticSocket = await connectPage((url) =>
+        url.includes("diagnostics=1"),
+      );
       try {
         const read = (expression) => evaluateOn(diagnosticSocket, expression);
         const directList = invoke("diagnostics_storage_list", {});
@@ -316,37 +442,72 @@ try {
           ["acp_spawn", acpRequest, "只有主窗口可以启动 ACP 进程"],
           ["force_close", {}, "只有主窗口可以确认退出"],
         ]) {
-          assert.equal(await read(`${invoke(command, args)}.then(() => 'unexpected success', String)`), error);
+          assert.equal(
+            await read(
+              `${invoke(command, args)}.then(() => 'unexpected success', String)`,
+            ),
+            error,
+          );
         }
-        assert.equal((await read(invoke("codeagent_credit_quota", {}))).status, "unavailable");
-        assert.equal((await read(invoke("codeagent_token_quota", {}))).status, "unavailable");
+        assert.equal(
+          (await read(invoke("codeagent_credit_quota", {}))).status,
+          "unavailable",
+        );
+        assert.equal(
+          (await read(invoke("codeagent_token_quota", {}))).status,
+          "unavailable",
+        );
         assert.ok(await read(invoke("diagnostics_snapshot", {})));
         const storageTab = `[...document.querySelectorAll('button')].find(button => button.textContent.trim() === '存储')`;
         const logCategory = `[...document.querySelectorAll('[aria-label="Desktop 存储"] button[aria-controls]')].find(button => button.textContent.includes('诊断日志'))`;
-        await waitFor("diagnostics Storage tab", () => read(`Boolean(${storageTab})`));
+        await waitFor("diagnostics Storage tab", () =>
+          read(`Boolean(${storageTab})`),
+        );
         await read(`${storageTab}.click()`);
-        await waitFor("diagnostics log category via primary Webview", async () => {
-          const errors = await read(
-            `Array.from(document.querySelectorAll('[aria-label="Desktop 存储"] [role="alert"]'), alert => alert.textContent)`,
-          );
-          assert.deepEqual(
-            errors.filter((message) => /诊断日志|WebviewWindow|主窗口未返回/.test(message)),
-            [],
-          );
-          return read(`Boolean(${logCategory})`);
-        });
+        await waitFor(
+          "diagnostics log category via primary Webview",
+          async () => {
+            const errors = await read(
+              `Array.from(document.querySelectorAll('[aria-label="Desktop 存储"] [role="alert"]'), alert => alert.textContent)`,
+            );
+            assert.deepEqual(
+              errors.filter((message) =>
+                /诊断日志|WebviewWindow|主窗口未返回/.test(message),
+              ),
+              [],
+            );
+            return read(`Boolean(${logCategory})`);
+          },
+        );
         const logDetails = `document.getElementById((${logCategory}).getAttribute('aria-controls'))`;
-        const action = (label) => `[...${logDetails}.querySelectorAll('button')].find(button => button.textContent.trim() === ${JSON.stringify(label)})`;
+        const action = (label) =>
+          `[...${logDetails}.querySelectorAll('button')].find(button => button.textContent.trim() === ${JSON.stringify(label)})`;
         await read(`${logCategory}.click()`);
-        await waitFor("diagnostics log selection", () => read(`!(${action("全选")}).disabled`));
+        await waitFor("diagnostics log selection", () =>
+          read(`!(${action("全选")}).disabled`),
+        );
         await read(`${action("全选")}.click()`);
-        await waitFor("diagnostics cleanup action", () => read(`!(${action("清理")}).disabled`));
+        await waitFor("diagnostics cleanup action", () =>
+          read(`!(${action("清理")}).disabled`),
+        );
         await read(`${action("清理")}.click()`);
         const confirmation = `document.querySelector('[role="alertdialog"][aria-label="确认清理"]')`;
-        await waitFor("diagnostics cleanup preview", () => read(`Boolean(${confirmation}?.textContent.includes('清理 · 诊断日志'))`));
-        await read(`[...${confirmation}.querySelectorAll('button')].find(button => button.textContent.trim() === '确认清理').click()`);
-        const listed = async () => (await call("diagnostics_storage_list")).some((row) => row.key === key);
-        await waitFor("confirmed cleanup removed the isolated log", async () => !(await listed()));
+        await waitFor("diagnostics cleanup preview", () =>
+          read(
+            `Boolean(${confirmation}?.textContent.includes('清理 · 诊断日志'))`,
+          ),
+        );
+        await read(
+          `[...${confirmation}.querySelectorAll('button')].find(button => button.textContent.trim() === '确认清理').click()`,
+        );
+        const listed = async () =>
+          (await call("diagnostics_storage_list")).some(
+            (row) => row.key === key,
+          );
+        await waitFor(
+          "confirmed cleanup removed the isolated log",
+          async () => !(await listed()),
+        );
       } finally {
         diagnosticSocket.close();
       }
@@ -355,16 +516,24 @@ try {
     }
     assert.ok(Array.isArray(await call("diagnostics_storage_list")));
     await checkTerminal();
-    console.log("PASS: diagnostics, PTY and ACP with a native browser child, plus secondary-window denial");
+    console.log(
+      "PASS: diagnostics, PTY and ACP with a native browser child, plus secondary-window denial",
+    );
     sessionId = randomUUID();
-    await call("browser_create_space", { windowId: "main", workspaceId: sessionId, sessionId });
+    await call("browser_create_space", {
+      windowId: "main",
+      workspaceId: sessionId,
+      sessionId,
+    });
     await openBrowserTab();
     // 直接验证原生命令，避免正常退出准备流程先释放子视图。
     const forceClose = call("force_close").catch((error) => error);
     await Promise.race([exited, delay(15000)]);
     if (!ended) {
       const failure = await forceClose;
-      throw failure instanceof Error ? failure : new Error("Force close did not exit with a browser child");
+      throw failure instanceof Error
+        ? failure
+        : new Error("Force close did not exit with a browser child");
     }
     assert.equal(exitCode, 0);
     console.log("PASS: native force close with a browser child");
@@ -384,21 +553,31 @@ try {
       ),
     );
     await evaluate(invoke("plugin:window|show"));
-    const diagnosticsMenuItem =
-      `[...document.querySelectorAll('[role="menuitem"]')].find(item => item.textContent.trim() === '打开诊断')`;
-    await evaluate(`document.querySelector('[data-testid="help-menu-button"]').click()`);
-    await waitFor("diagnostics menu entry", () => evaluate(`Boolean(${diagnosticsMenuItem})`));
+    const diagnosticsMenuItem = `[...document.querySelectorAll('[role="menuitem"]')].find(item => item.textContent.trim() === '打开诊断')`;
+    await evaluate(
+      `document.querySelector('[data-testid="help-menu-button"]').click()`,
+    );
+    await waitFor("diagnostics menu entry", () =>
+      evaluate(`Boolean(${diagnosticsMenuItem})`),
+    );
     await evaluate(`${diagnosticsMenuItem}.click()`);
-    const diagnosticSocket = await connectPage((url) => url.includes("diagnostics=1"));
+    const diagnosticSocket = await connectPage((url) =>
+      url.includes("diagnostics=1"),
+    );
     try {
       await waitFor("standalone Diagnostics window", () =>
-        evaluateOn(diagnosticSocket, `
+        evaluateOn(
+          diagnosticSocket,
+          `
           document.querySelector('h1')?.textContent === 'AAW Desktop 诊断' &&
           Boolean(document.querySelector('[aria-label="诊断视图"]')) &&
           !document.querySelector('[data-testid="desktop-window-controls"]')
-        `),
+        `,
+        ),
       );
-      console.log("PASS: Workbench opens the standalone native Diagnostics window");
+      console.log(
+        "PASS: Workbench opens the standalone native Diagnostics window",
+      );
     } finally {
       diagnosticSocket.close();
     }
@@ -408,28 +587,45 @@ try {
     const removalDialog = `document.querySelector('[role="dialog"][aria-label="确认移除项目"]')`;
     const openRemoval = async () => {
       await waitFor("previous project menu dismissed", () =>
-        evaluate(`!document.querySelector('[role="menu"][aria-label="项目菜单"]')`),
+        evaluate(
+          `!document.querySelector('[role="menu"][aria-label="项目菜单"]')`,
+        ),
       );
-      await evaluate(`${projectRow(target)}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`);
+      await evaluate(
+        `${projectRow(target)}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`,
+      );
       const item = `[...document.querySelectorAll('[role="menuitem"]')].find(entry => entry.textContent.trim() === '从列表移除')`;
-      await waitFor("project removal menu entry", () => evaluate(`Boolean(${item})`));
+      await waitFor("project removal menu entry", () =>
+        evaluate(`Boolean(${item})`),
+      );
       await evaluate(`${item}.click()`);
-      await waitFor("project removal confirmation", () => evaluate(`Boolean(${removalDialog})`));
+      await waitFor("project removal confirmation", () =>
+        evaluate(`Boolean(${removalDialog})`),
+      );
     };
-    const chooseRemoval = (label) => evaluate(
-      `[...${removalDialog}.querySelectorAll('button')].find(button => button.textContent.trim() === ${JSON.stringify(label)}).click()`,
+    const chooseRemoval = (label) =>
+      evaluate(
+        `[...${removalDialog}.querySelectorAll('button')].find(button => button.textContent.trim() === ${JSON.stringify(label)}).click()`,
+      );
+    await waitFor("fixture projects", () =>
+      evaluate(`Boolean(${projectRow(target)} && ${projectRow(other)})`),
     );
-    await waitFor("fixture projects", () => evaluate(`Boolean(${projectRow(target)} && ${projectRow(other)})`));
     await openRemoval();
     await chooseRemoval("取消");
-    await waitFor("cancelled project removal", () => evaluate(`!${removalDialog} && Boolean(${projectRow(target)})`));
+    await waitFor("cancelled project removal", () =>
+      evaluate(`!${removalDialog} && Boolean(${projectRow(target)})`),
+    );
     await openRemoval();
     await chooseRemoval("确认移除");
-    await waitFor("confirmed project removal", () => evaluate(
-      `!(${projectRow(target)}) && Boolean(${projectRow(other)}) &&
+    await waitFor("confirmed project removal", () =>
+      evaluate(
+        `!(${projectRow(target)}) && Boolean(${projectRow(other)}) &&
         JSON.parse(localStorage.getItem('aaw-desktop/workspace/v1')).recent.every(entry => entry.path !== ${JSON.stringify(target)})`,
-    ));
-    console.log("PASS: native project removal confirms, persists and preserves the other project");
+      ),
+    );
+    console.log(
+      "PASS: native project removal confirms, persists and preserves the other project",
+    );
     for (const expected of [true, false]) {
       await evaluate(click("maximize"));
       await waitFor(`native maximized state ${expected}`, () =>
@@ -501,7 +697,9 @@ async function waitFor(label, read, timeoutMs = 12000) {
 }
 
 async function prepareIsolatedWindow(handoff) {
-  const devOrigin = process.env.AAW_CORDIS_SMOKE_DEV_ORIGIN ?? "http://localhost:1420";
+  let devOrigin =
+    process.env.AAW_CORDIS_SMOKE_DEV_ORIGIN ?? "http://localhost:1420";
+  let vite;
   const identifier = `com.aaw.cordis-smoke.${randomUUID()}`;
   assert.ok(process.env.LOCALAPPDATA, "LOCALAPPDATA is required");
   const dataRoot = await fs.realpath(process.env.LOCALAPPDATA);
@@ -517,16 +715,24 @@ async function prepareIsolatedWindow(handoff) {
   };
   const account = JSON.stringify({ version: 1, user: identity });
   const peer = path.join(dataDirectory, "acp-peer.mjs");
-  const removalProjects = ["remove-project", "keep-project"].map((name) => path.join(dataDirectory, name));
+  const removalProjects = ["remove-project", "keep-project"].map((name) =>
+    path.join(dataDirectory, name),
+  );
   const agent = {
     id: "custom-native-smoke",
     name: "Native smoke ACP peer",
     command: [process.execPath, peer],
   };
-  const preferences = JSON.stringify({ agents: [agent], activeAgentId: agent.id });
+  const preferences = JSON.stringify({
+    agents: [agent],
+    activeAgentId: lifecycle ? "codeagent" : agent.id,
+  });
   const workspaces = JSON.stringify({
     version: 1,
-    recent: removalProjects.map((path) => ({ path, lastOpenedAt: new Date().toISOString() })),
+    recent: removalProjects.map((path) => ({
+      path,
+      lastOpenedAt: new Date().toISOString(),
+    })),
   });
   const seed = `<script>
     localStorage.setItem("aaw-desktop.auth.v1", ${JSON.stringify(account)});
@@ -559,6 +765,7 @@ async function prepareIsolatedWindow(handoff) {
   const dispose = async () => {
     server.close();
     server.closeAllConnections();
+    await vite?.close();
     if (installedFixture && !installedFixture.uninstalled) {
       console.warn(`Preserved isolated update logs in ${dataDirectory}`);
       return;
@@ -587,6 +794,18 @@ async function prepareIsolatedWindow(handoff) {
     }
   };
   try {
+    if (
+      (promptLatency || sessionRecovery || lifecycle) &&
+      !process.env.AAW_CORDIS_SMOKE_DEV_ORIGIN
+    ) {
+      const { createServer } = await import("vite");
+      vite = await createServer({
+        cacheDir: "node_modules/.cache/aaw-vite-prompt-latency",
+        server: { host: "127.0.0.1", port: 0, hmr: false },
+      });
+      await vite.listen();
+      devOrigin = vite.resolvedUrls.local[0];
+    }
     assert.ok(
       (
         await fetch(devOrigin, {
@@ -597,9 +816,30 @@ async function prepareIsolatedWindow(handoff) {
     );
     await fs.mkdir(dataDirectory);
     ownsData = true;
-    if (!handoff) await Promise.all(removalProjects.map((path) => fs.mkdir(path)));
+    if (!handoff)
+      await Promise.all(removalProjects.map((path) => fs.mkdir(path)));
+    if (lifecycle) {
+      const { seedLifecycle } = await import("./verifySessionLifecycle.mjs");
+      await seedLifecycle(dataDirectory, removalProjects[0]);
+    }
     // Keep startup and exit independent of Agents installed on the test machine.
-    await fs.writeFile(peer, `
+    if (sessionRecovery) {
+      const { seedRecovery } = await import("./verifySessionRecovery.mjs");
+      await seedRecovery(dataDirectory, removalProjects[0], agent.id);
+      await fs.writeFile(
+        path.join(dataDirectory, "recovery-scenario"),
+        sessionAbsent ? "absent" : "retry",
+      );
+    }
+    if (promptLatency || sessionRecovery) {
+      await fs.copyFile(
+        new URL("../tests/fixtures/promptLatencyAgent.mjs", import.meta.url),
+        peer,
+      );
+    } else
+      await fs.writeFile(
+        peer,
+        `
       import { createInterface } from "node:readline";
       const requests = createInterface({ input: process.stdin, crlfDelay: Infinity });
       for await (const line of requests) {
@@ -610,7 +850,8 @@ async function prepareIsolatedWindow(handoff) {
           : { error: { code: -32601, message: "Method not found" } };
         process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, ...response }) + "\\n");
       }
-    `);
+    `,
+      );
     const updates = path.join(dataDirectory, "updates");
     await fs.mkdir(updates);
     await fs.writeFile(
@@ -649,6 +890,9 @@ async function prepareIsolatedWindow(handoff) {
       "cargo",
       [
         "rustc",
+        ...(crashRecovery || lifecycle
+          ? ["--features", "migration-smoke"]
+          : []),
         "--offline",
         "--example",
         "cordis_native_smoke",

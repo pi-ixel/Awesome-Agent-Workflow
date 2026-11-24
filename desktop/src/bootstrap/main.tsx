@@ -2,5 +2,7 @@
 if (new URLSearchParams(location.search).get("diagnostics") === "1") {
   void import("./diagnosticsMain.tsx");
 } else {
-  void import("./appMain.tsx");
+  void import("./migrateSessionFiles.tsx")
+    .then(({ migrateSessionFiles }) => migrateSessionFiles())
+    .then(() => import("./appMain.tsx"));
 }

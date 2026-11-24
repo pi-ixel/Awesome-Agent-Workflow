@@ -40,9 +40,11 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
   }
   const isModelProbe = (target: DeleteSessionTarget) =>
     modelProbes.has(modelProbeKey(target));
+  const retainedSessions = (agent: string) => storage.managed?.retainedSessions?.(agent) ?? [];
   const catalog = createSessionCatalog(
     scope.signal,
     (target) => deletions.blocked(target) || isModelProbe(target),
+    retainedSessions,
   );
   const deletionView = createSnapshotView(deletions.store, (state) => state);
   const activity = createSessionActivityStore(scope.signal, storage);
@@ -76,6 +78,8 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
   }));
   return {
     catalog,
+    retainedSessions,
+    finishSessionRecovery: storage.managed?.finishSessionRecovery,
     isModelProbe,
     rememberModelProbe(target: DeleteSessionTarget) {
       modelProbes.add(modelProbeKey(target));

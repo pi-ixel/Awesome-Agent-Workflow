@@ -26,6 +26,28 @@ const empty: ChangesView = {
   error: null,
   message: null,
 };
+const BASELINE_BUDGET_MS = 400;
+const SUBMISSION_BUDGET_MS = 475;
+const DISPOSE_BUDGET_MS = 250;
+
+async function withinDeadline<T>(
+  expiresAt: number,
+  run: () => Promise<T>,
+): Promise<T> {
+  const remaining = expiresAt - Date.now();
+  if (remaining <= 0) throw new Error("轮次快照等待超时");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("轮次快照等待超时")), remaining);
+  });
+  try {
+    const result = await Promise.race([deadline, Promise.resolve().then(run)]);
+    if (Date.now() > expiresAt) throw new Error("轮次快照等待超时");
+    return result;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 const object = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -117,7 +139,9 @@ export function createTurnChangesSession(
   const state = createStore<ChangesView>(() => empty);
   let active: TurnChangesRecord | null = null;
   let start = 0;
-  let pending = Promise.resolve();
+  let revision = 0;
+  let preparingUser: string | undefined;
+  let preparing: Promise<void> | undefined;
   let loadedSession = "";
   type Owner = Pick<TurnChangesRequest, "cwd" | "sessionId">;
   const owner = (): Owner => ({
@@ -131,29 +155,47 @@ export function createTurnChangesSession(
   let activeOwner: Owner | null = null;
   let loadedOwner: Owner | null = null;
   let loading: Promise<void> | null = null;
-  let loadFailed = false;
   let disposed = false;
   let isActionInFlight = false;
   let lastOperation: {
+    id: string;
     action: "restore" | "undo";
     paths?: readonly string[];
   } | null = null;
+  const updatePhase = (fallback: "idle" | "settling" = "idle") =>
+    state.setState({
+      phase: isActionInFlight ? "busy" : preparingUser ? "preparing" : fallback,
+    });
   const request = (
     action: TurnChangesRequest["action"],
     extra: Partial<TurnChangesRequest> = {},
-  ) => host.request({ action, ...owner(), agentKey, ...extra });
+  ) => host.request({ action, ...owner(), workspacePath: workspace, agentKey, ...extra });
   const merge = (records: readonly TurnChangesRecord[]) => {
     if (disposed) return;
     const view = state.getState();
     const next = new Map(view.records.map((record) => [record.id, record]));
-    for (const record of records)
+    for (const record of records) {
+      const previous = next.get(record.id);
+      if (
+        previous?.endedAt != null &&
+        (record.endedAt === null || previous.endedAt > record.endedAt)
+      )
+        continue;
+      const newest =
+        record.detailsDeferred &&
+        previous &&
+        !previous.detailsDeferred &&
+        previous.endedAt === record.endedAt
+          ? previous
+          : record;
       next.set(record.id, {
-        ...record,
+        ...newest,
         locked:
           record.locked ||
-          next.get(record.id)?.locked ||
+          previous?.locked ||
           (!!view.submittedUserId && record.userId !== view.submittedUserId),
       });
+    }
     state.setState({
       records: [...next.values()].sort((a, b) => a.startedAt - b.startedAt),
     });
@@ -165,7 +207,7 @@ export function createTurnChangesSession(
     loadedSession = id;
     const scope = owner();
     loadedOwner = scope;
-    loadFailed = false;
+    const loadRevision = revision;
     state.setState({
       records: [],
       selected: null,
@@ -176,6 +218,7 @@ export function createTurnChangesSession(
         const records = await request("list", scope);
         if (id !== session.getState().activeSessionId) return;
         merge(records);
+        if (loadRevision !== revision || active || preparingUser) return;
         active =
           [...records].reverse().find((record) => record.endedAt === null) ??
           null;
@@ -208,8 +251,11 @@ export function createTurnChangesSession(
           selected: visibleTurnChanges(state.getState().records)?.id ?? null,
         });
       } catch (error) {
-        loadFailed = true;
-        state.setState({ error: String(error), errorUserId: latestUser()?.id });
+        if (loadRevision === revision && !disposed)
+          state.setState({
+            error: String(error),
+            errorUserId: latestUser()?.id,
+          });
       }
     })().finally(() => {
       loading = null;
@@ -219,6 +265,7 @@ export function createTurnChangesSession(
   const submitted = () => {
     const userId = latestUser()?.id;
     if (!userId || state.getState().submittedUserId === userId) return;
+    revision++;
     // 提交即锁定，不等待 Agent 接收，也不会因发送失败重新开放旧卡。
     state.setState((view) => ({
       submittedUserId: userId,
@@ -228,110 +275,147 @@ export function createTurnChangesSession(
       error: null,
       message: null,
     }));
-    const scope = owner();
-    if (scope.sessionId)
-      pending = pending.then(async () => {
-        try {
-          merge(await request("lock", { ...scope, userId }));
-        } catch (error) {
-          state.setState({
-            error: `无法保存操作锁定状态：${String(error)}`,
-            errorUserId: userId,
-          });
-        }
-      });
   };
-  const prepare = () => {
+  const prepareUser = async (submittedAt: number) => {
     const items = session.getState().items;
     const user = latestUser();
-    const userId = user?.id ?? crypto.randomUUID();
-    const startIndex = Math.max(0, items.indexOf(user!));
+    const scope = owner();
+    if (!user || !scope.sessionId || disposed) return;
+    const userId = user.id;
+    const startIndex = items.indexOf(user);
     submitted();
-    pending = pending.then(async () => {
-      await load();
-      if (loadFailed || disposed || active?.userId === userId) return;
-      const scope = owner();
-      state.setState({ phase: "preparing" });
+    if (active?.userId === userId) return;
+    const preparation = ++revision;
+    const expiresAt = submittedAt + BASELINE_BUDGET_MS;
+    const isCurrent = () =>
+      !disposed &&
+      preparation === revision &&
+      scope.sessionId === owner().sessionId;
+    preparingUser = userId;
+    updatePhase();
+    try {
       try {
-        const evidence = active
-          ? changeEvidence(items.slice(0, startIndex), start)
-          : {};
-        // 原生 begin 使用同一采样封存上段并开启新段，包括执行中的引导消息。
-        const records = await request("begin", {
-          ...scope,
-          userId,
-          ...evidence,
-        });
+        await withinDeadline(expiresAt, () =>
+          request("lock", { ...scope, userId, expiresAt }),
+        );
+      } catch (error) {
+        throw new Error(
+          `无法保存变更操作的锁定状态，请重试。${String(error)}`,
+          {
+            cause: error,
+          },
+        );
+      }
+      if (!isCurrent()) return;
+      const evidence = active
+        ? changeEvidence(items.slice(0, startIndex), start)
+        : {};
+      active = null;
+      activeOwner = null;
+      try {
+        const records = await withinDeadline(expiresAt, () =>
+          request("begin", { ...scope, userId, expiresAt, ...evidence }),
+        );
+        if (!isCurrent()) return;
         active =
           records.find(
             (record) => record.userId === userId && record.endedAt === null,
           ) ?? null;
-        activeOwner = scope;
+        activeOwner = active ? scope : null;
         start = startIndex;
         merge(records);
       } catch (error) {
-        active = null;
-        activeOwner = null;
+        if (!isCurrent()) return;
         state.setState({
           error: `未能准备变更基线，本轮统计不可用。${String(error)}`,
           errorUserId: userId,
         });
-      } finally {
-        state.setState({ phase: isActionInFlight ? "busy" : "idle" });
       }
-    });
-    return pending;
+    } finally {
+      if (preparation === revision) {
+        preparingUser = undefined;
+        updatePhase();
+      }
+    }
   };
-  const settle = (
+  const prepare = (submittedAt = Date.now()) => {
+    if (preparing && preparingUser === latestUser()?.id) return preparing;
+    const operation = prepareUser(submittedAt).finally(() => {
+      if (preparing === operation) preparing = undefined;
+    });
+    preparing = operation;
+    return operation;
+  };
+  const beforeDispatch = async (submittedAt: number) => {
+    const userId = latestUser()?.id;
+    const scope = owner();
+    if (!userId || !scope.sessionId) return;
+    const id = active?.userId === userId ? active.id : undefined;
+    const expiresAt = submittedAt + SUBMISSION_BUDGET_MS;
+    try {
+      await withinDeadline(expiresAt, () =>
+        request("dispatch", { ...scope, userId, id, expiresAt }),
+      );
+    } catch (error) {
+      throw new Error(`无法确认变更操作的锁定状态，请重试。${String(error)}`, {
+        cause: error,
+      });
+    }
+  };
+  const settle = async (
     outcome: TurnOutcome | null,
     reason?: TurnChangesRecord["unknownReason"],
   ) => {
-    // 在入队时绑定消息身份，晚到的上一轮收尾不能结束新的统计段。
+    // 在发起时绑定消息身份，晚到的上一轮收尾不能结束新的统计段。
     const userId = latestUser()?.id ?? active?.userId;
     const items = session.getState().items;
-    pending = pending.then(async () => {
-      const record = active;
-      if (!record || record.userId !== userId) return;
-      const scope = activeOwner ?? owner();
-      active = null;
-      activeOwner = null;
-      state.setState({ phase: isActionInFlight ? "busy" : "settling" });
-      const status = reason
-        ? "unknown"
-        : outcome?.errorMessage
-          ? "failed"
-          : outcome?.stopReason === "cancelled"
-            ? "cancelled"
-            : "completed";
-      try {
-        merge(
-          await request(reason ? "uncertain" : "finish", {
-            ...scope,
-            id: record.id,
-            status,
-            unknownReason: reason,
-            ...changeEvidence(items, start),
-          }),
-        );
-      } catch (error) {
-        merge([
-          {
-            ...record,
-            status,
-            endedAt: Date.now(),
-            unknownReason: reason,
-            snapshotState: "failed",
-          },
-        ]);
+    if (preparingUser === userId && preparingUser) {
+      preparingUser = undefined;
+      revision++;
+      updatePhase();
+    }
+    const settlement = revision;
+    const record = active;
+    if (!record || record.userId !== userId) return;
+    const scope = activeOwner ?? owner();
+    active = null;
+    activeOwner = null;
+    updatePhase("settling");
+    const status = reason
+      ? "unknown"
+      : outcome?.errorMessage
+        ? "failed"
+        : outcome?.stopReason === "cancelled"
+          ? "cancelled"
+          : "completed";
+    try {
+      merge(
+        await request(reason ? "uncertain" : "finish", {
+          ...scope,
+          id: record.id,
+          status,
+          unknownReason: reason,
+          ...changeEvidence(items, start),
+        }),
+      );
+    } catch (error) {
+      merge([
+        {
+          ...record,
+          status,
+          endedAt: Date.now(),
+          unknownReason: reason,
+          snapshotState: "failed",
+        },
+      ]);
+      if (!disposed && revision === settlement)
         state.setState({
           error: `本轮已结束，但最终变更未保存。${String(error)}`,
           errorUserId: record.userId,
         });
-      } finally {
-        state.setState({ phase: isActionInFlight ? "busy" : "idle" });
-      }
-    });
-    return pending;
+    } finally {
+      if (revision === settlement) updatePhase();
+    }
   };
   const markUnknown = (
     reason: NonNullable<TurnChangesRecord["unknownReason"]>,
@@ -355,63 +439,57 @@ export function createTurnChangesSession(
     if (!record || record.locked || record.endedAt === null)
       return Promise.resolve();
     isActionInFlight = true;
-    lastOperation = { action, paths };
+    lastOperation = { id, action, paths };
     state.setState({
       phase: "busy",
       error: null,
       message: null,
       errorUserId: record.userId,
     });
-    const operation = pending
-      .then(async () => {
+    return (async () => {
+      try {
         if (state.getState().records.find((record) => record.id === id)?.locked)
           return;
-        try {
-          const records = await request(action, {
-            ...(loadedOwner ?? owner()),
-            id,
-            paths,
+        const records = await request(action, {
+          ...(loadedOwner ?? owner()),
+          id,
+          paths,
+        });
+        merge(records);
+        const results = records[0]?.results ?? [];
+        const conflicts = results.filter(
+          (result) => result.status === "conflict",
+        );
+        const failed = results.filter((result) => result.status === "failed");
+        const succeeded = results.filter(
+          (result) => result.status === "restored",
+        );
+        if (conflicts.length || failed.length)
+          state.setState({
+            error: conflicts.length
+              ? "文件已有后续修改，整批操作未执行。"
+              : `已完成 ${succeeded.length} 个文件，${failed.length} 个失败，${results.filter((r) => r.status === "skipped").length} 个未执行。`,
           });
-          merge(records);
-          const results = records[0]?.results ?? [];
-          const conflicts = results.filter(
-            (result) => result.status === "conflict",
-          );
-          const failed = results.filter((result) => result.status === "failed");
-          const succeeded = results.filter(
-            (result) => result.status === "restored",
-          );
-          if (conflicts.length || failed.length)
-            state.setState({
-              error: conflicts.length
-                ? "文件已有后续修改，整批操作未执行。"
-                : `已完成 ${succeeded.length} 个文件，${failed.length} 个失败，${results.filter((r) => r.status === "skipped").length} 个未执行。`,
-            });
-          else
-            state.setState({
-              message:
-                action === "undo"
-                  ? "已恢复改动"
-                  : `已撤销 ${succeeded.length} 个文件的改动`,
-            });
-        } catch (error) {
-          state.setState({ error: String(error) });
-        } finally {
-          isActionInFlight = false;
-          state.setState({ phase: "idle" });
-        }
-      })
-      .finally(() => {
+        else
+          state.setState({
+            message:
+              action === "undo"
+                ? "已恢复改动"
+                : `已撤销 ${succeeded.length} 个文件的改动`,
+          });
+      } catch (error) {
+        state.setState({ error: String(error) });
+      } finally {
         isActionInFlight = false;
-        state.setState({ phase: "idle" });
-      });
-    pending = operation;
-    return operation;
+        updatePhase();
+      }
+    })();
   };
   return {
     state,
     submitted,
     prepare,
+    beforeDispatch,
     markUnknown,
     finish,
     select(id: string) {
@@ -434,7 +512,7 @@ export function createTurnChangesSession(
       if (!id || isActionInFlight) return;
       state.setState({ phase: "busy", error: null, message: null });
       try {
-        const operation = lastOperation;
+        const operation = lastOperation?.id === id ? lastOperation : null;
         const records = await request(operation ? "check" : "get", {
           ...(loadedOwner ?? owner()),
           id,
@@ -449,13 +527,20 @@ export function createTurnChangesSession(
       } catch (error) {
         state.setState({ error: String(error) });
       } finally {
-        state.setState({ phase: "idle" });
+        updatePhase();
       }
     },
     async dispose() {
       stop();
-      await markUnknown("runtime");
-      disposed = true;
+      try {
+        await withinDeadline(Date.now() + DISPOSE_BUDGET_MS, () =>
+          markUnknown("runtime"),
+        );
+      } catch {
+        // 已发送目标会在再次打开历史时恢复，退出不等待完整采样。
+      } finally {
+        disposed = true;
+      }
     },
   };
 }

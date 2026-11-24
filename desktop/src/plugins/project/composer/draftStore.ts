@@ -1,13 +1,4 @@
-/**
- * 输入框草稿持久化：未发送草稿每项目一份，正式会话按 Agent × 项目 × 会话隔离，
- * 切走再切回、重启应用都能恢复；发送成功即清。
- *
- * 键：`aaw-desktop/draft/<encodeURIComponent(workspacePath)>/<sessionId|__new__>`——
- * 会话尚未建立（activeSessionId 为 null）时挂在工作区的 `__new__` 档位上，
- * 新会话首条消息发出前换会话也不丢草稿。
- *
- * 草稿直写，不做防抖。桌面端的写入状态由宿主存储统一报告。
- */
+/** 草稿按 Agent、项目和会话保存。未建立会话时使用该 Agent 在项目中的新会话档位。 */
 import { projectStorage } from "../lifecycle/persistence.ts";
 export {
   NEW_SESSION_DRAFT_SCOPE,

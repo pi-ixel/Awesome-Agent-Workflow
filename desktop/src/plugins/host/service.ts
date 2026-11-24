@@ -74,6 +74,7 @@ export interface HostService {
   readonly opsSidecar: OpsSidecarHost;
 }
 export { AcpWriteError } from "./process/transportErrors.ts";
+export { prepareSessionRecovery, type MigrationReport } from "./storage/sessionRecovery.ts";
 export { openWindowRequests } from "./storage/windowRequests.ts";
 export { desktopManagedStorage, flushNativeConfiguration, loadNativeConfiguration, nativeConfigurationStatus,
   nativeConversationTextStatus, webviewStorage } from "./storage/storage.ts";

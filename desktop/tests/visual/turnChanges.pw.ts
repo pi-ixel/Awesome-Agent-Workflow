@@ -5,6 +5,17 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/tests/visual/turnChanges.html");
   await expect(page.getByText("3 个文件变更", { exact: true })).toBeVisible();
 });
+test("折叠时展示历史摘要，展开后按轮读取正文", async ({ page }) => {
+  await page.goto("/tests/visual/turnChanges.html?deferred-details");
+  const dock = page.locator("[data-turn-changes]");
+  await expect(dock.getByText("3 个文件变更", { exact: true })).toBeVisible();
+  await expect(dock.locator("[data-diff-row]")).toHaveCount(0);
+  await dock.getByRole("button", { name: "查看 Diff", exact: true }).click();
+  await expect(dock.locator("[data-diff-row]").first()).toBeVisible();
+  await expect(
+    dock.getByRole("button", { name: "收起", exact: true }),
+  ).toBeVisible();
+});
 test("三态切换保留文件与设置，确认默认取消，成功提示关闭后仍可撤销", async ({
   page,
 }) => {

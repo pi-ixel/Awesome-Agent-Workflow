@@ -33,12 +33,13 @@ describe("draftStore", () => {
     expect(readDraft(key)).toBe("");
   });
 
-  it("未发送草稿按项目共用，切换 Agent 不产生副本；正式会话仍按 Agent 隔离", () => {
+  it("新草稿和正式会话按 Agent 隔离，启动命令变化保留新草稿", () => {
     const a = draftScopeKey("D:/w", null, "agent-a");
     const b = draftScopeKey("D:/w", null, "agent-b");
-    expect(a).toBe(b);
+    expect(a).not.toBe(b);
+    expect(draftScopeKey("D:/w", null, JSON.stringify(["agent-a", "updated.exe"]))).toBe(a);
     writeDraft(a, "当前输入");
-    expect(readDraft(b)).toBe("当前输入");
+    expect(readDraft(b)).toBe("");
     expect(localStorage.length).toBe(1);
     expect(draftScopeKey("D:/w", "same", "agent-a")).not.toBe(
       draftScopeKey("D:/w", "same", "agent-b"),

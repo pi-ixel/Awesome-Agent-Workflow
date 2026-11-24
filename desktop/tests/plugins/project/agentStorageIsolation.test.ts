@@ -54,11 +54,12 @@ it("persists child tool details under the parent and restores them without a liv
   });
 });
 
-it("未发送草稿随 Agent 切换共用，正式会话草稿及输入历史仍隔离", () => {
+it("未发送草稿、正式会话草稿及输入历史按 Agent 隔离", () => {
   const a = draftScopeKey("D:/work", null, "A");
   const b = draftScopeKey("D:/work", null, "B");
   writeDraft(a, "draft A");
-  expect(readDraft(b)).toBe("draft A");
+  expect(readDraft(b)).toBe("");
+  writeDraft(b, "draft B");
   expect(readDraft(a)).toBe("draft A");
   const formalA = draftScopeKey("D:/work", "same", "A");
   const formalB = draftScopeKey("D:/work", "same", "B");

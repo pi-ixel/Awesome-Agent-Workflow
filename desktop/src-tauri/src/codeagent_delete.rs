@@ -533,6 +533,9 @@ pub async fn agent_delete_session(
     if agent_id != "codeagent" {
         return Err("此 Agent 不支持彻底删除会话".into());
     }
+    #[cfg(feature = "migration-smoke")]
+    let home = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("fixture-home");
+    #[cfg(not(feature = "migration-smoke"))]
     let home = app.path().home_dir().map_err(|e| e.to_string())?;
     let journal = crate::storage_location::data_dir(&app)?.join("session-deletions");
     tauri::async_runtime::spawn_blocking(move || {

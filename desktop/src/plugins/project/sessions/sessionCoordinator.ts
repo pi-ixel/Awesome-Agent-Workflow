@@ -1267,6 +1267,9 @@ export function createSessionCoordinator({
     }
     viewStore.getState().setConnecting(true);
     if (!createFromDraft && mayFocus()) focusRuntime(candidate);
+    const recoveryOwner=indexes.retainedSessions(agentKey).find(owner=>
+      owner.sessionId===preferredSessionId && pathKey(owner.project)===pathKey(workspacePath));
+    let confirmedAbsent=false;
     try {
       let restoredId: string | null = null;
       let restoredHistoric = false;
@@ -1296,6 +1299,10 @@ export function createSessionCoordinator({
             })
           )
             throw new Error("此会话正在删除或已删除");
+          if(recoveryOwner && candidate.session.agentInfo && !candidate.session.agentInfo.agentCapabilities.loadSession){
+            confirmedAbsent=true;
+            throw new Error("Agent 已确认不支持恢复会话");
+          }
           await sessionFactory.load(candidate, targetId);
           restoredId = targetId;
           restoredHistoric = true;
@@ -1305,6 +1312,8 @@ export function createSessionCoordinator({
             preferred: preferredSessionId !== null,
           });
         } catch (error) {
+          if (recoveryOwner && error instanceof AcpResponseError && error.sessionUnavailable)
+            confirmedAbsent = true;
           throw new Error(
             "原会话恢复失败，历史及草稿保留；请重试或主动新建会话。原因：" +
               String(error),
@@ -1364,6 +1373,12 @@ export function createSessionCoordinator({
           ),
       });
       if (binding) await binding;
+      if(recoveryOwner && restoredHistoric){
+        await viewStore.getState().flushSessionLog();
+        const failure=viewStore.getState().cacheSaveError;
+        if(failure)throw new Error(failure);
+        await indexes.finishSessionRecovery?.(recoveryOwner,"restored");
+      }
       if (createFromDraft) focusRuntime(candidate);
 
       // 恢复了历史会话：内容区自动切到该项目的会话视图（重启后直接回到
@@ -1388,6 +1403,14 @@ export function createSessionCoordinator({
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       reportFailure(`连接 agent 失败：${reason}`);
+      if(confirmedAbsent && recoveryOwner){
+        await disposeRuntime(candidate);
+        await indexes.finishSessionRecovery?.(recoveryOwner,"absent");
+        directory.excludeSessions([{workspacePath,agentKey,sessionId:recoveryOwner.sessionId}]);
+        if(previousRuntime && projectFactory.hasSession(previousRuntime))focusRuntime(previousRuntime);
+        else unfocusRealRuntime();
+        return null;
+      }
       if (candidate && preferredSessionId && !previousRuntime) {
         candidate.recovering = true;
         candidate.detachViews();
@@ -2761,6 +2784,7 @@ export function createSessionCoordinator({
         }
         await getTurnChanges?.()?.request({
           action: "clear",
+          workspacePath: target.workspacePath,
           cwd:
             indexes.workingDirectory(
               target.workspacePath,

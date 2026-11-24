@@ -16,10 +16,11 @@ export function useBrowserRestore(
   sessionId: string,
   space: BrowserSpace | null,
   createTab: (url: string) => Promise<BrowserTab | undefined>,
+  agentKey?: string,
 ) {
   const scope = useMemo(
-    () => ({ workspaceId, sessionId }),
-    [workspaceId, sessionId],
+    () => ({ workspaceId, sessionId, ...(agentKey ? { agentKey } : {}) }),
+    [workspaceId, sessionId, agentKey],
   );
   const hasSpace = space !== null;
   const liveSpace = useRef(space);

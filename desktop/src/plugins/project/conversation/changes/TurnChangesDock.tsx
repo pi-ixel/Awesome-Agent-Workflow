@@ -1,4 +1,4 @@
-import { useContext, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
 import { ConversationDocumentContext } from "../ui/documentView.ts";
 import { resolveFileReference } from "../../../../shared/panelPaths.ts";
@@ -112,6 +112,10 @@ export function TurnChangesReview({
   const position = useRef<DiffPosition>({ left: 0, right: 0 });
   const [lastOpen, setLastOpen] = useState(view.openRevision);
   const [openError, setOpenError] = useState<string | null>(null);
+  const deferredId = record?.detailsDeferred ? record.id : undefined;
+  useEffect(() => {
+    if (deferredId && (isExpanded || isFull)) void changes.refresh(deferredId);
+  }, [changes, deferredId, isExpanded, isFull]);
   const [previousRestored, setPreviousRestored] = useState(isFullyRestored);
   if (previousRestored !== isFullyRestored) {
     setPreviousRestored(isFullyRestored);
@@ -530,6 +534,19 @@ export function TurnChangesReview({
       )}
     </>
   );
+  const loadingDetails = record.detailsDeferred ? (
+    <div className="flex flex-1 flex-col items-center justify-center gap-2 text-ui-caption text-ink-mute">
+      <p role="status">{view.error ?? "正在读取变更内容…"}</p>
+      {view.error && (
+        <ActionButton
+          tone="secondary"
+          onClick={() => void changes.refresh(record.id)}
+        >
+          重试
+        </ActionButton>
+      )}
+    </div>
+  ) : null;
   return (
     <>
       <div
@@ -542,7 +559,7 @@ export function TurnChangesReview({
             className="flex h-[390px] min-h-0 flex-col border-t border-line"
             data-turn-diff-body
           >
-            {panel()}
+            {loadingDetails ?? panel()}
           </div>
         )}
         {!isExpanded && notice && (
@@ -562,7 +579,7 @@ export function TurnChangesReview({
           <div className="flex min-h-0 flex-1 flex-col bg-surface">
             {summary(true)}
             <div className="flex min-h-0 flex-1 flex-col border-t border-line">
-              {panel()}
+              {loadingDetails ?? panel()}
             </div>
             {!isLocked && confirmPaths && (
               <ConfirmationDialog
