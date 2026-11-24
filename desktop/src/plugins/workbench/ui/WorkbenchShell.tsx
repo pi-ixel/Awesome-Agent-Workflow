@@ -23,7 +23,8 @@ import {
 
 const activityRailWidth = "2.75rem";
 const fullBrandName = "Awesome Agent WorkSpace";
-const fullWordmarkClass = "font-brand text-sm font-normal italic";
+const fullWordmarkClass =
+  "pe-px font-brand text-sm font-normal italic [-webkit-text-stroke-width:0.018em]";
 
 function SidebarWordmark() {
   const slot = useRef<HTMLSpanElement>(null);
