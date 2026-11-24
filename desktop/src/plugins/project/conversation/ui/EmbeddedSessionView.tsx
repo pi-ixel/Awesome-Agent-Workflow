@@ -45,7 +45,7 @@ function EmbeddedUserRow({ item }: { readonly item: UserMessageItem }) {
   const foldLabel = item.display?.foldLabel ?? "附加说明";
   return (
     <div className="flex flex-col items-end gap-1">
-      <div className="max-w-[90%] rounded-xl border border-line bg-raised px-3 py-2 text-ui-sm whitespace-pre-wrap break-words text-ink">
+      <div className="max-w-[90%] rounded-popover border border-line bg-raised px-3 py-2 text-ui-sm whitespace-pre-wrap break-words text-ink">
         {visible}
       </div>
       {folded !== "" && (
@@ -53,7 +53,7 @@ function EmbeddedUserRow({ item }: { readonly item: UserMessageItem }) {
           className="max-w-[90%] text-ink-mute"
           summary={<span className="text-ui-xs">{foldLabel}</span>}
         >
-          <pre className="mt-1 max-h-48 overflow-auto rounded-md border border-line bg-surface p-2 text-ui-xs whitespace-pre-wrap break-words text-ink-mute">
+          <pre className="mt-1 max-h-48 overflow-auto rounded-control border border-line bg-surface p-2 text-ui-xs whitespace-pre-wrap break-words text-ink-mute">
             {folded}
           </pre>
         </Disclosure>
@@ -99,7 +99,7 @@ function EmbeddedToolRow({ item }: { readonly item: ToolCallItem }) {
   const failed = item.status === "failed";
   const label = item.title?.trim() || item.toolName || "工具调用";
   return (
-    <div className="flex items-center gap-1.5 rounded-md border border-line/70 bg-surface px-2.5 py-1.5 text-ui-xs text-ink-mute">
+    <div className="flex items-center gap-1.5 rounded-control border border-line/70 bg-surface px-2.5 py-1.5 text-ui-xs text-ink-mute">
       {running ? (
         <Spinner className="ui-icon-14" />
       ) : failed ? (
@@ -216,7 +216,7 @@ function BoundEmbeddedSession({
         )}
       </div>
       <div className="shrink-0 border-t border-line p-2.5">
-        <div className="flex items-end gap-2 rounded-lg border border-line bg-surface px-2.5 py-2 focus-within:border-line-strong">
+        <div className="flex items-end gap-2 rounded-control border border-line bg-surface px-2.5 py-2 focus-within:border-line-strong">
           <textarea
             className={`${composerFieldClass} max-h-28 min-h-9 flex-1 resize-none text-ui-sm leading-5 outline-none focus:outline-none`}
             aria-label="向 AI 补充修改要求"
@@ -240,7 +240,7 @@ function BoundEmbeddedSession({
           {isRunning ? (
             <IconButton
               iconSize="compact"
-              className="shrink-0 rounded-md bg-raised text-ink hover:bg-surface-hover"
+              className="shrink-0 rounded-control bg-raised text-ink hover:bg-surface-hover"
               aria-label="停止生成"
               data-hint="停止生成"
               onClick={() => cancel(target)}
@@ -250,7 +250,7 @@ function BoundEmbeddedSession({
           ) : (
             <IconButton
               iconSize="compact"
-              className="shrink-0 rounded-md bg-brand text-foreground-inverse hover:opacity-90 disabled:opacity-40"
+              className="shrink-0 rounded-control bg-brand text-foreground-inverse hover:opacity-90 disabled:opacity-40"
               aria-label="发送"
               data-hint="发送"
               disabled={draft.trim() === ""}
