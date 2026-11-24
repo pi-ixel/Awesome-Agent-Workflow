@@ -26,6 +26,11 @@ export const inject = [
  * - `projectsParent`：用户选的绝对路径；不存在/为空表示用默认位置。
  * - `projectSessions`：`{ [项目目录]: sessionId }`。会话 id 只在"这个工具
  *   停在哪儿"这件事上有意义，和根目录一起放，换账号/换机器都跟着这份配置走。
+ *
+ * **这里的键必须同时出现在 `host/storage/storage.ts` 的原生配置白名单里**，
+ * 否则 `ctx.configuration` 写下去只是 WebView2 的 localStorage：搬资料目录、
+ * 换机器、换 WebView2 profile 就全丢了（2026-11-24 实机核对到的差异）。
+ * `tests/plugins/tools/storageGuard.test.ts` 盯着这一条。
  */
 const workshopSettingsKey = "aaw-desktop.tools-workshop.v1";
 const projectsParentField = "projectsParent";

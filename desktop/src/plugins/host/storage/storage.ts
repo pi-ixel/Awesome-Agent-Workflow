@@ -15,6 +15,11 @@ const configurationKeys = new Set([
   "aaw-desktop/storage-reminders.v1",
   "aaw-desktop/scheduled-tasks.v1",
   "aaw-desktop/skill-packages.v1",
+  // 工坊的两项设置（自定义项目根目录 + 每个工具项目最后用的那条会话）。
+  // 以前漏在这里，于是它只写进了 WebView2 的 localStorage：搬资料目录、换机器、
+  // 换一个 WebView2 profile，这两项全丢——「继续开发」回到哪条会话就没保证了。
+  // 2026-11-24 实机 `workshop-store-difference.json` 记的就是这个差异。
+  "aaw-desktop.tools-workshop.v1",
   "aaw-desktop/close-to-tray.v1",
   "aaw-desktop/right-panel/zcode-v1",
   "aaw-desktop/right-panel/v1",

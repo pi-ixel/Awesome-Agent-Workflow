@@ -200,8 +200,20 @@ function violation(
 }
 
 export interface ToolRuleOptions {
-  /** 升级前该工具项目里记录的 id；与当前 id 不同即视为改名。 */
+  /** 该工具项目创建时记录的 id；与当前 id 不同即视为改名。 */
   readonly previousId?: string;
+  /**
+   * `previousId` 是从哪看出来的。
+   *
+   * - `record`：项目里的身份文件（`.aaw-project.json`，创建 / 正式改名时写），
+   *   能确定"id 被改过"；
+   * - `dir`：没有身份文件时拿目录名当弱证据——平台建项目时目录名恒等于 id，
+   *   导入也按清单 id 建目录，所以不一致说明清单被动过。
+   *
+   * 两者的出路不一样，所以文案分开写：前者是"改回去或者承认这是新工具"，
+   * 后者还要先说清"目录名和清单对不上"这件事本身。
+   */
+  readonly previousIdSource?: "record" | "dir";
 }
 
 /**
@@ -218,15 +230,26 @@ export function runToolRules(
   const html = tool.html;
 
   // R1 · 改 id = 新工具。改名会让用户的设置与存储数据失联，必须显式二选一。
+  //
+  // 判据在调用方（`readToolProject` 读项目身份），这里只负责说清后果：规则
+  // 是纯函数，看不到磁盘，没有"原来叫什么"就没法判断。
   if (options.previousId !== undefined && options.previousId !== tool.id)
     problems.push(
-      violation(
-        "R1",
-        "block",
-        `插件 id 从 ${options.previousId} 改成了 ${tool.id}。改 id 等于新建一个工具，旧工具的设置与数据会留在原 id 下。`,
-        `二选一：想继续演进原工具就把 id 改回 "${options.previousId}"；确实要另起一个就把 id 保留为新值，并在回复里说明这是新工具。`,
-        "manifest.id",
-      ),
+      options.previousIdSource === "dir"
+        ? violation(
+            "R1",
+            "block",
+            `项目目录叫 ${options.previousId}，清单里写的 id 是 ${tool.id}。id 在创建时就定下了，改它等于换一个工具——旧的安装项、设置与数据都还挂在 ${options.previousId} 名下。`,
+            `二选一：把 manifest.json 里的 id 改回「${options.previousId}」；确实要另起一个工具，就用「开发工具」列表里的「改名」把目录和 id 一起改掉（它会同步会话记录）。`,
+            "manifest.id",
+          )
+        : violation(
+            "R1",
+            "block",
+            `插件 id 从 ${options.previousId} 改成了 ${tool.id}。改 id 等于新建一个工具，旧工具的设置与数据会留在原 id 下。`,
+            `二选一：想继续演进原工具就把 id 改回「${options.previousId}」；确实要另起一个就把 id 保留为新值，并在回复里说明这是新工具。`,
+            "manifest.id",
+          ),
     );
 
   // R2 · 远程资源在沙箱里加载不到，用户看到的是"样式没生效/按钮点不动"的白屏。

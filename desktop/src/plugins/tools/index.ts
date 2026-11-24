@@ -584,7 +584,7 @@ export function apply(ctx: Context): void {
         let backup: ToolPackage | undefined;
         if (dir && (await canRunToolDir(io, dir, id))) {
           assertOwner();
-          const read = await readToolProject(io, dir);
+          const read = await readToolProject(io, dir, { runtimeCopy: true });
           // 版本号对不上时宁可不动：记录说"上一版是 1.0.0"、目录里却是别的
           // 版本，切过去等于装了一个用户没要求过的版本。
           backup =

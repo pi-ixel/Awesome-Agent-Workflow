@@ -1579,7 +1579,10 @@ export function createWorkshop(deps: {
           text: `所选文件夹里没有 manifest.json：${dir}\n请选择包含 manifest.json 与 index.html 的工具目录。`,
           error: true,
         };
-      const check = await checkToolProject(io, dir);
+      // 导入的源目录是用户在资源管理器里随便起的名字（`my-tool`），清单 id
+      // 可能是别的（`wordcount`）。这里不能拿目录名当身份证据，也不该往
+      // 别人的文件夹里写任何东西。
+      const check = await checkToolProject(io, dir, { trustDirName: false });
       if (!check.ready || !check.tool) {
         const first = check.blocking[0];
         return {

@@ -134,3 +134,43 @@ test("浏览器清理确认跟随外观，Esc 归还发起按钮焦点", async (
   await expect(confirm).toBeHidden();
   await expect(trigger).toBeFocused();
 });
+
+/**
+ * 窄栏：浏览器工具条的横向溢出不能冒到祖先。
+ *
+ * 2026-11-24 实机（暗夜 300 CSS px）：7 个图标按钮 + 64 px 地址栏的下限宽度
+ * 超过容器，溢出冒到右栏那个 `overflow-hidden` 的共同祖先；键盘 Tab 到
+ * 「新建标签页」，浏览器为了让焦点可见把祖先的 scrollLeft 推到 43.2——同屏
+ * 工具中心的管理内容左侧整块被裁掉（管理页自己 clientWidth == scrollWidth
+ * == 289，只量它看不出来）。
+ *
+ * 这里把面板所在的框收成 300 px 并设成 overflow-hidden，就是那个共同祖先的
+ * 形态：断言它既不横向溢出、聚焦也不被推着滚。
+ */
+test("窄栏 300px 时浏览器工具条的横向溢出不外泄到祖先", async ({ page }) => {
+  await page.goto(
+    "/tests/visual/uiScaleFixture.html?secondary&browser-appearance",
+  );
+  const panel = page.getByTestId("browser-panel");
+  await expect(panel).toBeVisible();
+  const frame = panel.locator("xpath=..");
+  await frame.evaluate((el) => {
+    const node = el as HTMLElement;
+    node.style.width = "300px";
+    node.style.overflow = "hidden";
+  });
+  const before = await frame.evaluate((el) => ({
+    client: el.clientWidth,
+    scroll: el.scrollWidth,
+    left: el.scrollLeft,
+  }));
+  expect(before.client).toBeGreaterThan(200);
+  // 修复前这里是 316 > 300：溢出量就是要被裁掉的那 40 多像素。
+  expect(before.scroll).toBeLessThanOrEqual(before.client + 1);
+
+  // 焦点走到工具条最右边那个按钮——真机上正是这一步把祖先滚了 43.2。
+  const newTab = page.getByRole("button", { name: "新建标签页" });
+  await newTab.focus();
+  await expect(newTab).toBeFocused();
+  expect(await frame.evaluate((el) => el.scrollLeft)).toBe(0);
+});

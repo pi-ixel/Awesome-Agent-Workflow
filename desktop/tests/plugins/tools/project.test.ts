@@ -5,6 +5,7 @@ import {
   listToolProjects,
   migrateLegacyTools,
   listToolProjectSummaries,
+  readToolDirFiles,
   readToolProject,
   renameToolProject,
   runtimeFiles,
@@ -452,4 +453,145 @@ it("项目扫描跳过卸载暂存目录（.aaw-uninstall-*）", async () => {
   const parked = "/data/tools/projects/u1/.aaw-uninstall-5f2a-0";
   await io.movePath(dir, parked);
   expect(await listToolProjects(io, { owner: "u1" })).toEqual([]);
+});
+
+/* ------------------------------------------------- R1：id 创建后不可改 */
+
+/** 直接改项目清单里的 id（模拟用户/AI 手改文件）。 */
+function tamperManifestId(files: Map<string, string>, dir: string, id: string) {
+  const path = `${dir}/manifest.json`;
+  const manifest = JSON.parse(files.get(path)!) as Record<string, unknown>;
+  files.set(path, JSON.stringify({ ...manifest, id }, null, 2));
+}
+
+it("手改清单 id 会被 R1 拦住（身份文件作证）", async () => {
+  const { io, files } = memoryIO();
+  const { dir } = await createToolProject(io, {
+    id: "demo",
+    name: "演示",
+    owner: "u1",
+  });
+  await io.writeTextFile(`${dir}/index.html`, page);
+  // 创建时就写下了身份：这是"它原来叫什么"的唯一凭据。
+  expect(JSON.parse(files.get(`${dir}/.aaw-project.json`)!)).toEqual({
+    schemaVersion: 1,
+    id: "demo",
+  });
+  expect((await checkToolProject(io, dir)).blocking).toHaveLength(0);
+
+  tamperManifestId(files, dir, "demo-renamed");
+  const checked = await checkToolProject(io, dir);
+  const r1 = checked.blocking.find((problem) => problem.ruleId === "R1");
+  expect(r1?.message).toContain("从 demo 改成了 demo-renamed");
+  // 拦住安装：ready 必须是 false，否则「确认安装」照样能点。
+  expect(checked.ready).toBe(false);
+});
+
+it("正式改名不会被自己的 R1 拦住，身份跟着更新", async () => {
+  const { io, files } = memoryIO();
+  const { dir } = await createToolProject(io, {
+    id: "demo",
+    name: "演示",
+    owner: "u1",
+  });
+  await io.writeTextFile(`${dir}/index.html`, page);
+  const moved = await renameToolProject(io, { dir, id: "demo-next" });
+  expect(
+    (JSON.parse(files.get(`${moved.dir}/.aaw-project.json`)!) as { id: string })
+      .id,
+  ).toBe("demo-next");
+  const checked = await checkToolProject(io, moved.dir);
+  expect(checked.blocking).toHaveLength(0);
+  expect(checked.ready).toBe(true);
+});
+
+it("没有身份文件的存量项目按当前 id 自愈补写", async () => {
+  const dir = "/data/tools/projects/u1/legacy";
+  const { io, files } = memoryIO({
+    [`${dir}/manifest.json`]: JSON.stringify({
+      schemaVersion: 1,
+      id: "legacy",
+      name: "老项目",
+      version: "1.0.0",
+    }),
+    [`${dir}/index.html`]: page,
+  });
+  // 老项目（身份文件这个概念之前建的）第一次校验：不报 R1，顺手补上身份。
+  expect((await checkToolProject(io, dir)).blocking).toHaveLength(0);
+  expect(
+    (JSON.parse(files.get(`${dir}/.aaw-project.json`)!) as { id: string }).id,
+  ).toBe("legacy");
+  // 补上之后，再改 id 就拦得住了——这正是 mtx-01.01 漏掉的那一步。
+  tamperManifestId(files, dir, "legacy-2");
+  expect(
+    (await checkToolProject(io, dir)).blocking.map((p) => p.ruleId),
+  ).toContain("R1");
+});
+
+it("目录名与清单 id 不一致（无身份文件）也按 R1 断开，并说清出路", async () => {
+  // 手工放进 projects/ 的目录，目录名 my-tool、清单写 wordcount：平台建目录时
+  // 这两者恒等，所以不一致本身就是"清单被动过"的信号。
+  const dir = "/data/tools/projects/u1/my-tool";
+  const { io, files } = memoryIO({
+    [`${dir}/manifest.json`]: JSON.stringify({
+      schemaVersion: 1,
+      id: "wordcount",
+      name: "字数",
+      version: "1.0.0",
+    }),
+    [`${dir}/index.html`]: page,
+  });
+  const checked = await checkToolProject(io, dir);
+  const r1 = checked.blocking.find((problem) => problem.ruleId === "R1");
+  expect(r1?.message).toContain("项目目录叫 my-tool");
+  expect(r1?.message).toContain("清单里写的 id 是 wordcount");
+  expect(checked.ready).toBe(false);
+  // 不能自作主张把清单 id 当成身份写下去——那等于当场把这次改动洗白。
+  expect(files.has(`${dir}/.aaw-project.json`)).toBe(false);
+});
+
+it("迁移来的老工具补上身份", async () => {
+  const { io, files } = memoryIO();
+  const migrated = await migrateLegacyTools(io, [
+    { ...sampleTool, id: "old-tool", name: "老工具" },
+  ]);
+  expect(migrated.created).toHaveLength(1);
+  const dir = migrated.created[0]!;
+  expect(
+    (JSON.parse(files.get(`${dir}/.aaw-project.json`)!) as { id: string }).id,
+  ).toBe("old-tool");
+});
+
+it("导出的包不带身份文件", async () => {
+  const { io, files } = memoryIO();
+  const created = await createToolProject(io, {
+    id: "demo",
+    name: "演示",
+    owner: "u1",
+  });
+  await io.writeTextFile(`${created.dir}/index.html`, page);
+  // 显式放一份身份文件：不管创建流程写不写它，导出都必须跳过。
+  await io.writeTextFile(
+    `${created.dir}/.aaw-project.json`,
+    JSON.stringify({ schemaVersion: 1, id: "demo" }),
+  );
+  const ioWithFiles: ToolProjectIO = {
+    ...io,
+    listFiles: (root) =>
+      Promise.resolve(
+        [...files.keys()]
+          .filter((key) => key.startsWith(`${root}/`))
+          .map((key) => key.slice(root.length + 1)),
+      ),
+    readBinaryFile: (path) => {
+      const value = files.get(path);
+      return value === undefined
+        ? Promise.reject(new Error(`ENOENT ${path}`))
+        : Promise.resolve(Buffer.from(value, "utf8").toString("base64"));
+    },
+  };
+  const exported = await readToolDirFiles(ioWithFiles, created.dir);
+  expect(Object.keys(exported.files)).toContain("manifest.json");
+  expect(Object.keys(exported.files)).not.toContain(".aaw-project.json");
+  expect(exported.skipped).toEqual([]);
 });

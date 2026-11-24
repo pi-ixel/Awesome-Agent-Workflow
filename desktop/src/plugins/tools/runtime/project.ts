@@ -164,7 +164,109 @@ export const toolProjectFileNames = {
   html: "index.html",
   guide: "AGENTS.md",
   notes: "NOTES.md",
+  /**
+   * 项目身份：这个目录**是谁**（创建 / 正式改名时由平台写）。
+   *
+   * 为什么清单里的 id 不够：`manifest.json` 是给人改的（AI 会改、编辑器会改），
+   * 改完之后磁盘上再没有第二处记着"它原来叫什么"。于是 R1（id 创建后不可改）
+   * 只能拿清单里的 id 和清单里的 id 比，永远相等——规则等于不存在。
+   * 2026-11-24 实机 `mtx-01.01` 就是这么绕过去的：手改清单 id，无 R1 提示，
+   * 新 id 直接进了安装配置。
+   *
+   * 点开头：`listToolProjects` 只过滤点开头的**目录**，这个文件名本身不会被
+   * 当成项目；导出与安装副本都明确跳过它（见 `readToolDirFiles`）。
+   */
+  identity: ".aaw-project.json",
 } as const;
+
+/** 身份文件的内容。故意只有两个字段：它要能被用户打开看懂、能手写修复。 */
+export interface ToolProjectIdentity {
+  readonly schemaVersion: 1;
+  readonly id: string;
+}
+
+/**
+ * 读项目身份。读不出来（老项目没有这个文件 / 文件坏了）返回 `undefined`——
+ * 这是"未知"，不是错误：调用方会用目录名当弱证据继续判。
+ */
+export async function readToolProjectIdentity(
+  io: Pick<ToolProjectIO, "readTextFile">,
+  dir: string,
+): Promise<string | undefined> {
+  try {
+    const parsed = JSON.parse(
+      await io.readTextFile(joinPath(dir, toolProjectFileNames.identity)),
+    ) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return undefined;
+    const id = (parsed as { id?: unknown }).id;
+    return typeof id === "string" && toolIdPattern.test(id) ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 写 / 改写项目身份。创建项目、正式改名、老项目自愈三处调它。
+ *
+ * 不是"安全边界"：用户当然可以删掉这个文件。它的作用是让**无意的** id 改动
+ * 会撞上一句话，而不是悄悄变成另一个工具。
+ */
+export async function writeToolProjectIdentity(
+  io: Pick<ToolProjectIO, "writeTextFile">,
+  dir: string,
+  id: string,
+): Promise<void> {
+  const identity: ToolProjectIdentity = { schemaVersion: 1, id };
+  await io.writeTextFile(
+    joinPath(dir, toolProjectFileNames.identity),
+    JSON.stringify(identity, null, 2) + "\n",
+  );
+}
+
+/** R1 的判据：清单里的 id 和"它原来叫什么"不一样。 */
+interface ProjectIdEvidence {
+  readonly previousId: string;
+  /**
+   * `record` = 项目里的身份文件（准）；`dir` = 没有身份文件时拿目录名当弱证据。
+   * 两者文案不同：前者是"你把 id 改了"，后者是"目录名和清单对不上"。
+   */
+  readonly source: "record" | "dir";
+}
+
+/**
+ * 这个项目原来叫什么。
+ *
+ * 三级判据，从准到弱：
+ * 1. 有身份文件 → 以它为准（目录名被用户手工挪过也不影响）；
+ * 2. 没有身份文件，但目录名是合法 id 且与清单 id 不同 → 拿目录名当证据。
+ *    平台创建项目时目录名恒等于 id，导入也按清单 id 建目录，所以"不一致"
+ *    本身就是"清单被动过"的信号；
+ * 3. 都没有 → 说明这是老项目或手工放进来的目录，**补一份身份**记下当前 id。
+ *    只在这一步写盘：前两步如果写盘，等于当场把改动洗白。
+ */
+async function projectIdEvidence(
+  io: ToolProjectIO,
+  dir: string,
+  manifestId: string,
+  trustDirName: boolean,
+): Promise<ProjectIdEvidence | undefined> {
+  const recorded = await readToolProjectIdentity(io, dir);
+  if (recorded !== undefined)
+    return recorded === manifestId
+      ? undefined
+      : { previousId: recorded, source: "record" };
+  if (!trustDirName) return undefined;
+  const dirName = pathName(dir);
+  if (toolIdPattern.test(dirName) && dirName !== manifestId)
+    return { previousId: dirName, source: "dir" };
+  try {
+    await writeToolProjectIdentity(io, dir, manifestId);
+  } catch {
+    /* 目录只读 / 预览环境没有写通道：下次读到时再补，不影响这次结论 */
+  }
+  return undefined;
+}
 
 /**
  * manifest 里可选的可信度字段：谁做的、从哪来。
@@ -388,6 +490,9 @@ export async function createToolProject(
     joinPath(target.dir, toolProjectFileNames.manifest),
     JSON.stringify(manifest, null, 2),
   );
+  // 身份先于任何一次校验写下来：不写的话，第一次校验会走"目录名==id"的自愈
+  // 分支去补——那条路只在目录名可信时才成立，而这里我们本来就知道答案。
+  await writeToolProjectIdentity(io, target.dir, target.id);
   return { dir: target.dir, id: target.id, name: input.name };
 }
 
@@ -448,6 +553,28 @@ export type ToolProjectRead =
     }
   | { readonly ok: false; readonly violations: readonly ToolViolation[] };
 
+/** 读项目时的额外上下文。 */
+export interface ReadToolProjectOptions extends ToolRuleOptions {
+  /**
+   * 读的是**运行副本**（`installed/<账号>/<id>/versions/<版本>/`），不是
+   * 用户/作者的源码目录。
+   *
+   * 运行副本没有"身份"可言：它每次安装都是重新解出来的一份，谈"改过 id"
+   * 没有意义；而且往里写 `.aaw-project.json` 会变成安装垃圾（`stageVersion`
+   * 回读校验时就会把它写进暂存目录，跟着 move 进版本目录）。
+   */
+  readonly runtimeCopy?: boolean;
+  /**
+   * 允许拿目录名当"它原来叫什么"的弱证据。默认开：工坊里的项目目录就是
+   * `projects/<账号>/<id>`，目录名恒等于 id，不一致说明清单被动过。
+   *
+   * 关掉它的场合只有一个——读的是**任意目录**："导入文件夹"选中的那个文件夹
+   * 名字是用户在资源管理器里起的（`my-tool`），清单 id 可能是 `wordcount`，
+   * 拿目录名当证据会把一次正常导入拦下来。
+   */
+  readonly trustDirName?: boolean;
+}
+
 /**
  * 读一个工具项目：manifest.json 是主文件，index.html 作为运行入口覆盖 `html`。
  *
@@ -457,7 +584,7 @@ export type ToolProjectRead =
 export async function readToolProject(
   io: ToolProjectIO,
   dir: string,
-  options: ToolRuleOptions = {},
+  options: ReadToolProjectOptions = {},
 ): Promise<ToolProjectRead> {
   const manifestPath = joinPath(dir, toolProjectFileNames.manifest);
   let text: string;
@@ -507,14 +634,30 @@ export async function readToolProject(
       : manifest;
   const validated = validateToolPackage(value);
   if (!validated.ok) return { ok: false, violations: validated.violations };
+  // R1 要看的是"这个项目原来叫什么"，不是"清单里现在写什么"。以前这里传的是
+  // 清单自己的 id，自己和自己比永远相等，规则从来没生效过。
+  const { runtimeCopy, trustDirName, ...rules } = options;
+  const evidence = runtimeCopy
+    ? undefined
+    : await projectIdEvidence(
+        io,
+        dir,
+        validated.tool.id,
+        trustDirName !== false,
+      );
   const problems = runToolRules(validated.tool, {
-    previousId: (manifest as Record<string, unknown>).id as string | undefined,
-    ...options,
+    ...(evidence
+      ? { previousId: evidence.previousId, previousIdSource: evidence.source }
+      : {}),
+    ...rules,
   });
   return {
     ok: true,
     tool: validated.tool,
-    violations: [...problems, ...(await checkProcessFiles(io, dir, validated.tool))],
+    violations: [
+      ...problems,
+      ...(await checkProcessFiles(io, dir, validated.tool)),
+    ],
   };
 }
 
@@ -534,6 +677,10 @@ export async function writeToolProject(
     joinPath(dir, toolProjectFileNames.manifest),
     JSON.stringify(manifest, null, 2),
   );
+  // 已有身份不动：这是"把内容写回已存在的项目"，不是"换一个身份"。缺了才补
+  // ——迁移来的老项目第一次落盘时没有这个文件，补上才能从下一次开始拦住改 id。
+  if ((await readToolProjectIdentity(io, dir)) === undefined)
+    await writeToolProjectIdentity(io, dir, tool.id);
 }
 
 export interface ToolProjectCheck {
@@ -621,6 +768,9 @@ export async function renameToolProject(
     joinPath(dir, toolProjectFileNames.manifest),
     JSON.stringify({ ...manifest, id: nextId, name }, null, 2),
   );
+  // 正式改名是**唯一**允许换 id 的路径：身份跟着改，否则下一次校验会拿旧身份
+  // 报 R1，用户刚用界面改完的名字立刻被自己拦住。
+  await writeToolProjectIdentity(io, dir, nextId);
   // AGENTS.md 是平台生成的（里面写着 id 与名字），改名后要重新生成——
   // 并按当前开发指导正文生成：用户改过的规范同样要体现在新目录里。
   await io.writeTextFile(
@@ -634,7 +784,7 @@ export async function renameToolProject(
 export async function checkToolProject(
   io: ToolProjectIO,
   dir: string,
-  options: ToolRuleOptions = {},
+  options: ReadToolProjectOptions = {},
 ): Promise<ToolProjectCheck> {
   const read = await readToolProject(io, dir, options);
   if (!read.ok) {
@@ -852,6 +1002,9 @@ export async function writeToolFiles(
         const [name, bytes] = next;
         if (!safeSourcePath(name))
           throw new Error(`工具包内含不安全路径：${name}`);
+        // 包里带来的身份文件一律不收：身份是"这台机器上这个目录是谁"，不该由
+        // 外来的包指定——写进去等于让任何 ZIP 都能冒充一个已经装过的工具。
+        if (name === toolProjectFileNames.identity) continue;
         const target = joinPath(dir, name);
         const text = decodeUtf8(bytes);
         if (text !== undefined) await io.writeTextFile(target, text);
@@ -888,7 +1041,14 @@ export async function readToolDirFiles(
   let bytes = 0;
   // 串行读：这里不是热路径（用户主动点导出），串行换来可预测的内存占用。
   for (const name of names) {
-    if (name === "AGENTS.md" || name === "NOTES.md") continue;
+    // 平台生成的三份不进包：AGENTS.md / NOTES.md 是给人看的说明，身份文件是
+    // 这台机器对这个目录的记录。带出去再导入，等于让对方的项目顶着别人的身份。
+    if (
+      name === toolProjectFileNames.guide ||
+      name === toolProjectFileNames.notes ||
+      name === toolProjectFileNames.identity
+    )
+      continue;
     try {
       const base64 = await io.readBinaryFile(joinPath(dir, name), limit);
       const data = fromBase64(base64);

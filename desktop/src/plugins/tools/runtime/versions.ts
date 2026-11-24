@@ -201,7 +201,9 @@ export async function stageVersion(
   const staging = joinPath(versionsRoot, `${toolStagingPrefix}${nonce}`);
   try {
     await writeToolFiles(io, staging, input.files);
-    const read = await readToolProject(io, staging);
+    // 运行副本不认身份：这里只是"回读一遍确认写得对"，不该顺手往里写
+    // `.aaw-project.json`——它会跟着 move 进版本目录，变成安装垃圾。
+    const read = await readToolProject(io, staging, { runtimeCopy: true });
     if (!read.ok) {
       throw new Error(
         `安装内容校验不通过：${read.violations[0]?.message ?? "原因未知"}`,
