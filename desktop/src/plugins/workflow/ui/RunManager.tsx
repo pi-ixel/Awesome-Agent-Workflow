@@ -217,7 +217,7 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
     {all && everywhere === null
       ? <p className="workflow-muted">正在读取…</p>
       : shown.length === 0
-      ? <EmptyState title={source.length === 0 ? "还没有运行" : "没有符合条件的运行"} description={source.length === 0 ? "在工作流库里选一个工作流，点「运行」。" : "换个关键词，或者改一下状态筛选。"} />
+      ? <EmptyState title={source.length === 0 ? "还没有运行" : "没有符合条件的运行"} description={source.length === 0 ? "在项目会话中输入 / 选择工作流起点即可发起运行。" : "换个关键词，或者改一下状态筛选。"} />
       : <>
         {pendingIds.size > 0 && <section className="workflow-run-section" aria-label="待处理">
           <h3>待处理</h3>

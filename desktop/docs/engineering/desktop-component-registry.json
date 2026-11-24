@@ -463,6 +463,23 @@
     },
     "targets": []
   },
+  "plugins/project/conversation/ui/EmbeddedSessionView.tsx": {
+    "definitions": {
+      "布局与操纵": [
+        "BoundEmbeddedSession",
+        "createEmbeddedSessionView/EmbeddedSessionView"
+      ],
+      "内容与专用绘制": [
+        "EmbeddedAssistantRow",
+        "EmbeddedItemRow",
+        "EmbeddedNoticeRow",
+        "EmbeddedThoughtRow",
+        "EmbeddedToolRow",
+        "EmbeddedUserRow"
+      ]
+    },
+    "targets": []
+  },
   "plugins/project/conversation/ui/ImageAttachmentThumbnail.tsx": {
     "definitions": {
       "图标与内容标识": ["ImageAttachmentThumbnail"]
@@ -822,9 +839,7 @@
     "definitions": {
       "提示与确认": ["createProjectViewNavigation/renderAddProjectForm"]
     },
-    "targets": [
-      "createProjectViewNavigation/renderAddProjectForm → (inline)"
-    ]
+    "targets": ["createProjectViewNavigation/renderAddProjectForm → (inline)"]
   },
   "plugins/project/ui/preferencesView.tsx": {
     "definitions": {
@@ -1294,6 +1309,12 @@
       "apply/settings → plugins/workbench/ui/workbench.ts#apply/settings"
     ]
   },
+  "plugins/workflow/editing/draftSessions.ts": {
+    "definitions": {
+      "布局与操纵": ["createDraftEditor/renderSession"]
+    },
+    "targets": ["createDraftEditor/renderSession → (inline)"]
+  },
   "plugins/workflow/ui/AiComposeDialog.tsx": {
     "definitions": {
       "编辑输入": ["AiComposeDialog"]
@@ -1308,8 +1329,7 @@
   },
   "plugins/workflow/ui/DraftPage.tsx": {
     "definitions": {
-      "布局与操纵": ["DraftPage"],
-      "内容与专用绘制": ["GraphPane"]
+      "布局与操纵": ["DraftPage"]
     },
     "targets": []
   },

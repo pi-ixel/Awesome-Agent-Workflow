@@ -969,6 +969,13 @@ impl Service {
                 .create_draft(args["base"].as_str(), args["from"].as_str())
                 .and_then(|info| serde_json::to_value(info).map_err(|e| e.to_string())),
             "draft-check" => self.draft_check(string(args, "draftId")?),
+            "draft-patch" => {
+                let id = string(args, "draftId")?;
+                let patch: aaw_workflow_core::package::DraftPatch =
+                    serde_json::from_value(args["patch"].clone()).map_err(|e| e.to_string())?;
+                self.library.patch_draft(id, &patch)?;
+                self.draft_check(id)
+            }
             "draft-save" => Ok(json!({"id": self.library.save_draft(string(args, "draftId")?)?})),
             "draft-discard" => self.library.discard_draft(string(args, "draftId")?).map(|_| Value::Null),
             "preflight" => Ok(self.preflight(&args["input"])),

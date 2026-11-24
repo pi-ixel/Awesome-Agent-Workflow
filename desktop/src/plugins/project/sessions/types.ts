@@ -38,6 +38,11 @@ export interface PluginSessionOptions {
    * 重连时用 registerSessionTools 登记的提供方给。
    */
   readonly tools?: (agent: AcpSessionPort["agentInfo"]) => readonly McpServer[];
+  /**
+   * 临时/内置插件会话（如工作流草稿编辑）：不写入业务项目侧栏列表、不启用项目 Git 变更追踪，
+   * 用完后由调用方通过 closePluginSession 释放 runtime 与连接池租约。
+   */
+  readonly ephemeral?: boolean;
 }
 
 /** 会话的轮次事件（不管这一轮是谁发起的）。 */

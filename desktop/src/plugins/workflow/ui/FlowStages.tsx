@@ -493,6 +493,12 @@ export function FlowStages({
             const isOpen = open.stage === view.id;
             const tone = toneOf(view);
             const names = view.steps.map((step) => step.label).join(" → ");
+            const subtitle =
+              view.steps.length > 1
+                ? names
+                : view.steps[0]?.does && view.steps[0].does !== view.label
+                  ? view.steps[0].does
+                  : "";
             return <NavigationRow layout="compound" key={view.id} className={`wf-stage${isOpen ? " open" : ""}`} data-stage={view.id} aria-expanded={isOpen}
               aria-label={`${view.no} ${view.label}，${view.word}，${isOpen ? "收起" : "展开"}步骤`} onClick={() => void toggleStage(view.id)}>
               {/* 左边序号圆是视觉重点，颜色就是状态（完成换成对勾）；右边名字、步骤名、胶囊 */}
@@ -502,7 +508,7 @@ export function FlowStages({
                   <b className="wf-stage-title" data-hint={view.label}>{view.label}</b>
                   {snapshot && (tone === "running" || tone === "alert") && <span className={`wf-word tone-${tone}`}>{view.word}</span>}
                 </span>
-                <small className="wf-stage-span" data-hint={names}>{names}</small>
+                {subtitle && <small className="wf-stage-span" data-hint={subtitle}>{subtitle}</small>}
                 {pills(`g:${view.id}`, view.steps, isOpen)}
               </span>
             </NavigationRow>;

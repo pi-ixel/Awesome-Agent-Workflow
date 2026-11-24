@@ -9,7 +9,7 @@ import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { Callout } from "../../../shared/ui/Callout.tsx";
 import { Spinner } from "../../../shared/ui/controls.tsx";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
-import { embeddedFieldClass } from "../../../shared/ui/inputStyles.ts";
+import { composerFieldClass } from "../../../shared/ui/inputStyles.ts";
 import {
   ArrowUpIcon,
   SparklesIcon,
@@ -102,7 +102,7 @@ export function AiComposeDialog({
         </IconButton>
       </header>
       <textarea
-        className={`${embeddedFieldClass} workflow-compose-input`}
+        className={`${composerFieldClass} workflow-compose-input`}
         ref={input}
         autoFocus
         aria-label={title}
@@ -130,6 +130,11 @@ export function AiComposeDialog({
         />
       )}
       <div className="workflow-compose-bar">
+        {busy && (
+          <span className="workflow-compose-status">
+            正在创建工作流并连接 AI…
+          </span>
+        )}
         <IconButton
           iconSize="dialog"
           className="workflow-compose-send"
