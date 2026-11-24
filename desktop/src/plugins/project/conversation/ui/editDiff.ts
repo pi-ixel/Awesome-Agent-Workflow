@@ -114,7 +114,7 @@ function collapseContextRuns(
       return;
     }
     if (run.length <= 2 * context + 2) {
-      out.push(...run);
+      for (const row of run) out.push(row);
     } else {
       out.push(...run.slice(0, context));
       out.push({ type: "gap", oldNo: null, newNo: null, text: "⋯" });

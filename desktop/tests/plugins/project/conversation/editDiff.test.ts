@@ -1,4 +1,3 @@
-
 /**
  * editDiff 纯函数：宽容提取（edit_file / write_file / file_path 别名 /
  * 非法形状回落）、行级 LCS diff（前后缀裁剪、±1 上下文 hunk 折叠、
@@ -12,9 +11,21 @@ import {
   WRITE_PREVIEW_LINE_LIMIT,
 } from "../../../../src/plugins/project/conversation/ui/editDiff.ts";
 
-
-
 describe("buildDiffRows 行级 diff", () => {
+  it("展开大量未修改的短行时保留全部上下文", () => {
+    const context = "\n".repeat(200_000);
+    const result = buildDiffRows(
+      `old\n${context}`,
+      `new\n${context}`,
+      Infinity,
+    );
+    expect(result.rows).toHaveLength(200_002);
+    expect(result.rows.at(-1)).toMatchObject({
+      type: "context",
+      oldNo: 200_001,
+    });
+  });
+
   it("单行替换：一行删一行增，无上下文可折叠", () => {
     const result = buildDiffRows("const a = 1;", "const a = 2;", 1);
     expect(result.added).toBe(1);
