@@ -104,7 +104,6 @@ import {
   clearDraft,
   clearSentDraft,
   draftScopeKey,
-  legacyNewDraftScopeKey,
   readDraft,
   readDraftRecoveries,
   writeDraft,
@@ -516,16 +515,6 @@ export function ChatInput({
     if (draftKey === null) {
       return;
     }
-    const legacyScope =
-      activePath && activeSessionId === null && agentKey
-        ? legacyNewDraftScopeKey(activePath, agentKey)
-        : null;
-    if (legacyScope && annotationDrafts) {
-      // 热更新仍持有旧 scope 的当前输入优先，避免迁移时重复拼接。
-      if (previousKey === legacyScope)
-        writeDraft(draftKey, draftTextRef.current);
-      annotationDrafts.prepareLegacyDraft(draftKey, legacyScope);
-    }
     if (previousKey === draftKey) {
       if (!draftTextRef.current && readDraft(draftKey))
         setDraft(readDraft(draftKey));
@@ -535,12 +524,9 @@ export function ChatInput({
       previousKey !== null &&
       annotationDrafts?.consumeMigration(previousKey, draftKey)
     ) {
-      const nextText =
-        previousKey === legacyScope
-          ? readDraft(draftKey)
-          : [readDraft(draftKey), draftTextRef.current]
-              .filter(Boolean)
-              .join("\n\n");
+      const nextText = [readDraft(draftKey), draftTextRef.current]
+        .filter(Boolean)
+        .join("\n\n");
       writeDraft(draftKey, nextText);
       clearDraft(previousKey);
       if (activeSessionId !== null)

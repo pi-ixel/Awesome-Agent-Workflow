@@ -241,9 +241,11 @@ export interface HostStorage {
 }
 
 export interface HostManagedStorage {
+  retainedSessions?(agent: string): { agentId: string; project: string; sessionId: string }[];
+  finishSessionRecovery?(this: void, owner: { agentId: string; project: string; sessionId: string }, action: "restored" | "absent"): Promise<void>;
   available(): boolean;
   request<T>(command:
-      | "session_data_read" | "session_data_write" | "session_data_list"
+      | "session_data_read" | "session_data_write" | "session_data_list" | "migrate_session_files" | "session_recovery_update" | "session_data_finish_deletion"
       | "session_data_delete"
       |
     "session_data_remove" | "storage_titles_load" | "storage_title_write" |

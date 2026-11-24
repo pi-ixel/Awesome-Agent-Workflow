@@ -4,9 +4,9 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
-    io::{Read, Seek, SeekFrom, Write},
+    io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     path::{Component, Path, PathBuf},
-    sync::{Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock, Weak},
     time::{Duration, Instant},
 };
 use tauri::Manager;
@@ -14,7 +14,7 @@ use tauri::Manager;
 const FILE_LIMIT: u64 = 256 * 1024;
 const TOTAL_LIMIT: usize = 16 * 1024 * 1024;
 const FILE_COUNT: usize = 20_000;
-static OPERATIONS: Mutex<()> = Mutex::new(());
+static OPERATIONS: Mutex<BTreeMap<PathBuf, Weak<Mutex<()>>>> = Mutex::new(BTreeMap::new());
 static OWNER: OnceLock<String> = OnceLock::new();
 fn owner() -> &'static str {
     OWNER.get_or_init(|| uuid::Uuid::new_v4().to_string())
@@ -85,6 +85,10 @@ pub struct Record {
     restored: Vec<String>,
     can_undo: bool,
     results: Vec<ResultEntry>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    details_deferred: bool,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    submission: u64,
 }
 #[derive(Clone, Serialize, Deserialize)]
 struct Undo {
@@ -98,6 +102,8 @@ struct Undo {
 }
 #[derive(Serialize, Deserialize)]
 struct Stored {
+    #[serde(default)]
+    requires_dispatch: bool,
     #[serde(default)]
     previous_undo: Option<Undo>,
     #[serde(default)]
@@ -118,6 +124,7 @@ pub struct Move {
 pub struct Request {
     action: String,
     cwd: String,
+    workspace_path: Option<String>,
     agent_key: String,
     session_id: String,
     id: Option<String>,
@@ -129,6 +136,43 @@ pub struct Request {
     undo: Option<bool>,
     has_operations: Option<bool>,
     moves: Option<Vec<Move>>,
+    expires_at: Option<i64>,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+struct Boundary {
+    submitted: Option<String>,
+    record_id: Option<String>,
+    #[serde(default)]
+    sequence: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
+}
+
+#[derive(Deserialize, Serialize)]
+struct Summary {
+    record: Record,
+    owner: String,
+    requires_dispatch: bool,
+    has_journal: bool,
+}
+
+impl From<&Stored> for Summary {
+    fn from(stored: &Stored) -> Self {
+        let mut record = stored.record.clone();
+        for file in record.files.iter_mut().chain(&mut record.unverified) {
+            record.details_deferred |= file.before.take().is_some();
+            record.details_deferred |= file.after.take().is_some();
+        }
+        Self {
+            record,
+            owner: stored.owner.clone(),
+            requires_dispatch: stored.requires_dispatch,
+            has_journal: stored.undo.as_ref().is_some_and(|undo| undo.in_progress),
+        }
+    }
 }
 
 fn read_version(path: &Path) -> Result<Option<Version>, String> {
@@ -472,17 +516,133 @@ fn differences(before: &Snapshot, after: &Snapshot) -> Vec<Change> {
         })
         .collect()
 }
-fn save(path: &Path, stored: &Stored) -> Result<(), String> {
+fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
     fs::create_dir_all(path.parent().ok_or("记录目录无效")?).map_err(|e| e.to_string())?;
-    let mut file =
-        tempfile::NamedTempFile::new_in(path.parent().unwrap()).map_err(|e| e.to_string())?;
-    serde_json::to_writer(&mut file, stored).map_err(|e| e.to_string())?;
+    let parent = path
+        .parent()
+        .unwrap()
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+    let mut file = tempfile::NamedTempFile::new_in(&parent).map_err(|e| e.to_string())?;
+    {
+        let mut writer = BufWriter::with_capacity(64 * 1024, &mut file);
+        serde_json::to_writer(&mut writer, value).map_err(|e| e.to_string())?;
+        writer.flush().map_err(|e| e.to_string())?;
+    }
     file.as_file().sync_all().map_err(|e| e.to_string())?;
-    file.persist(path).map_err(|e| e.to_string())?;
+    file.persist(parent.join(path.file_name().ok_or("缺少记录文件名")?))
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, String> {
+    let file = File::open(path).map_err(|e| e.to_string())?;
+    serde_json::from_reader(BufReader::with_capacity(64 * 1024, file)).map_err(|e| e.to_string())
+}
+fn save(path: &Path, stored: &Stored) -> Result<(), String> {
+    let summary = path.with_extension("summary");
+    // 正文先提交。意外退出留下缺失索引时，下次读取由正文重建。
+    match fs::remove_file(&summary) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
+    }
+    write_json(path, stored)?;
+    let _ = write_json(&summary, &Summary::from(stored));
     Ok(())
 }
 fn load(path: &Path) -> Result<Stored, String> {
-    serde_json::from_reader(File::open(path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    read_json(path)
+}
+fn load_summary(path: &Path) -> Result<Option<Summary>, String> {
+    let index = path.with_extension("summary");
+    match File::open(index) {
+        Ok(file) => Ok(serde_json::from_reader(BufReader::new(file)).ok()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+fn load_tracked_summary(path: &Path, boundary: &Boundary) -> Result<Option<Summary>, String> {
+    let summary = load_summary(path)?;
+    // 已确认发送的轮次可能在正文落盘与摘要写入之间崩溃。
+    if summary.is_none()
+        && boundary
+            .record_id
+            .as_deref()
+            .is_some_and(|id| path.file_stem().and_then(|stem| stem.to_str()) == Some(id))
+    {
+        return Ok(Some(Summary::from(&load(path)?)));
+    }
+    Ok(summary)
+}
+fn read_boundary(directory: &Path) -> Result<Boundary, String> {
+    let path = directory.join(".dispatch");
+    match File::open(path) {
+        Ok(file) => serde_json::from_reader(BufReader::new(file)).map_err(|e| e.to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Boundary::default()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+fn ensure_time(expires_at: Option<i64>) -> Result<(), String> {
+    if expires_at.is_some_and(|deadline| now() >= deadline) {
+        return Err("轮次快照等待超时".into());
+    }
+    Ok(())
+}
+fn acquire_file_lock(path: &Path, expires_at: Option<i64>) -> Result<File, String> {
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .map_err(|e| e.to_string())?;
+    loop {
+        ensure_time(expires_at)?;
+        match file.try_lock() {
+            Ok(()) => return Ok(file),
+            Err(std::fs::TryLockError::WouldBlock) if expires_at.is_some() => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => return Err(format!("另一项操作正在处理此工作区：{error}")),
+        }
+    }
+}
+fn workspace_operation(workspace: &Path) -> Result<Arc<Mutex<()>>, String> {
+    let mut operations = OPERATIONS.lock().map_err(|_| "轮次快照服务不可用")?;
+    if let Some(lock) = operations.get(workspace).and_then(Weak::upgrade) {
+        return Ok(lock);
+    }
+    operations.retain(|_, lock| lock.strong_count() > 0);
+    let lock = Arc::new(Mutex::new(()));
+    operations.insert(workspace.to_owned(), Arc::downgrade(&lock));
+    Ok(lock)
+}
+fn acquire_operation(
+    operation: &Mutex<()>,
+    expires_at: Option<i64>,
+) -> Result<std::sync::MutexGuard<'_, ()>, String> {
+    if expires_at.is_none() {
+        return operation.lock().map_err(|_| "轮次快照服务不可用".into());
+    }
+    loop {
+        ensure_time(expires_at)?;
+        match operation.try_lock() {
+            Ok(guard) => return Ok(guard),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(_) => return Err("轮次快照服务不可用".into()),
+        }
+    }
+}
+fn apply_boundary(record: &mut Record, boundary: &Boundary) {
+    record.locked |= boundary
+        .submitted
+        .as_ref()
+        .is_some_and(|user| *user != record.user_id || boundary.sequence != record.submission);
+}
+fn was_dispatched(requires_dispatch: bool, record: &Record, boundary: &Boundary) -> bool {
+    !requires_dispatch || boundary.record_id.as_deref() == Some(record.id.as_str())
 }
 fn records(directory: &Path) -> Vec<PathBuf> {
     fs::read_dir(directory)
@@ -630,7 +790,7 @@ fn remove_locked(file: File, path: &Path) -> Result<(), String> {
     {
         use std::os::windows::io::AsRawHandle;
         use windows_sys::Win32::Storage::FileSystem::{
-            FileDispositionInfo, SetFileInformationByHandle, FILE_DISPOSITION_INFO,
+            FILE_DISPOSITION_INFO, FileDispositionInfo, SetFileInformationByHandle,
         };
         let info = FILE_DISPOSITION_INFO { DeleteFile: true };
         let ok = unsafe {
@@ -1133,16 +1293,284 @@ fn close_record(stored: &mut Stored, status: &str, reason: Option<String>) {
     stored.record.unknown_reason = reason;
     stored.record.snapshot_state = Some("pending".into());
 }
+fn discard_snapshot(stored: &mut Stored) {
+    stored.baseline = Snapshot::default();
+    stored.final_state = None;
+    stored.record.files.clear();
+    stored.record.unverified.clear();
+    stored.record.snapshot_state = Some("failed".into());
+    stored
+        .record
+        .incomplete
+        .push("无法确认本轮工作区的结束边界".into());
+}
+fn finish_snapshot(
+    directory: &Path,
+    stored: &mut Stored,
+    root: &Path,
+    after: Snapshot,
+    request: &Request,
+) -> Result<(), String> {
+    if was_dispatched(
+        stored.requires_dispatch,
+        &stored.record,
+        &read_boundary(directory)?,
+    ) {
+        apply_snapshot(stored, root, after, request, true);
+    } else {
+        discard_snapshot(stored);
+    }
+    Ok(())
+}
 
+pub(crate) fn forget_references(
+    data: &Path,
+    owner: &crate::session_layout::SessionIdentity,
+) -> Result<(), String> {
+    let index = data.join("turn-workspaces");
+    let dirs = match fs::read_dir(&index) {
+        Ok(dirs) => dirs,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e.to_string()),
+    };
+    let filename = format!(
+        "{}.json",
+        digest(&serde_json::to_vec(owner).map_err(|e| e.to_string())?)
+    );
+    for entry in dirs {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if !entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+            continue;
+        }
+        let path = entry.path().join(&filename);
+        if path.try_exists().map_err(|e| e.to_string())? {
+            let saved: crate::session_layout::SessionIdentity = read_json(&path)?;
+            if saved != *owner {
+                return Err("轮次索引身份不一致".into());
+            }
+            fs::remove_file(path).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+pub(crate) fn migrate_owner(
+    data: &Path,
+    storage: &Path,
+    agent_key: &str,
+    owner: &crate::session_layout::SessionIdentity,
+    cwd_key: &str,
+) -> Result<PathBuf, String> {
+    let session_id = owner.session_id.as_deref().ok_or("缺少会话 ID")?;
+    let dir = owner
+        .ensure(data)
+        .map_err(|e| e.to_string())?
+        .join("turns")
+        .join(cwd_key);
+    let index = data.join("turn-workspaces").join(cwd_key);
+    let identity_bytes = serde_json::to_vec(owner).map_err(|e| e.to_string())?;
+    let reference = index.join(format!("{}.json", digest(&identity_bytes)));
+    if !reference.try_exists().map_err(|e| e.to_string())? {
+        fs::create_dir_all(&index).map_err(|e| e.to_string())?;
+        write_json(&reference, owner)?;
+    }
+    let source = storage
+        .join(cwd_key)
+        .join(digest(format!("{agent_key}\0{session_id}").as_bytes()));
+    let entries = match fs::read_dir(&source) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(dir),
+        Err(e) => return Err(e.to_string()),
+    };
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if !entry.file_type().map_err(|e| e.to_string())?.is_file() {
+            return Err("旧轮次目录中存在未知条目".into());
+        }
+        let source_path = entry.path();
+        let reader = BufReader::new(File::open(&source_path).map_err(|e| e.to_string())?);
+        let validation = match source_path.extension().and_then(|ext| ext.to_str()) {
+            Some("json") => serde_json::from_reader::<_, Stored>(reader).map(drop),
+            Some("summary") => serde_json::from_reader::<_, Summary>(reader).map(drop),
+            _ if entry.file_name() == ".dispatch" => {
+                serde_json::from_reader::<_, Boundary>(reader).map(drop)
+            }
+            _ => Ok(()),
+        };
+        if let Err(error) = validation {
+            if error.is_io() {
+                return Err(error.to_string());
+            }
+            crate::session_recovery::save(data, owner, crate::session_recovery::Phase::Cleaning)?;
+        }
+        crate::session_snapshots::move_verified(&source_path, &dir.join(entry.file_name()))
+            .map_err(|e| e.to_string())?;
+    }
+    fs::remove_dir(source).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+pub(crate) fn migrate_known_turns(
+    data: &Path,
+    storage: &Path,
+    agent: &str,
+    owner: &crate::session_layout::SessionIdentity,
+) -> Result<(), String> {
+    migrate_for_cwd(data, storage, agent, owner, &owner.project)
+}
+
+fn migrate_for_cwd(
+    data: &Path,
+    storage: &Path,
+    agent: &str,
+    owner: &crate::session_layout::SessionIdentity,
+    cwd: &str,
+) -> Result<(), String> {
+    let Some(id) = owner.session_id.as_ref() else {
+        return Ok(());
+    };
+    let path = canonical_location(Path::new(cwd))
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| cwd.replace('\\', "/"));
+    let normalized = path.strip_prefix("//?/").unwrap_or(&path);
+    let normalized = if cfg!(windows) {
+        normalized.to_ascii_lowercase()
+    } else {
+        normalized.to_owned()
+    };
+    let workspace = digest(normalized.as_bytes());
+    if storage
+        .join(&workspace)
+        .join(digest(format!("{agent}\0{id}").as_bytes()))
+        .try_exists()
+        .map_err(|e| e.to_string())?
+    {
+        migrate_owner(data, storage, agent, owner, &workspace)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn migrate_indexed_turns(data: &Path, storage: &Path) -> Result<(), String> {
+    if !storage.try_exists().map_err(|e| e.to_string())? {
+        return Ok(());
+    }
+    use crate::session_layout::SessionIdentity;
+    let config: BTreeMap<String, Option<String>> =
+        crate::storage_preferences::read_record(&data.join("configuration/preferences.json"))?;
+    if let Some(Some(raw)) = config.get("aaw-desktop/session-working-directories.v1") {
+        let map: BTreeMap<String, serde_json::Value> =
+            serde_json::from_str(raw).map_err(|e| e.to_string())?;
+        for (key, value) in map {
+            if let (Ok([agent, project, id]), Some(cwd)) =
+                (serde_json::from_str::<[String; 3]>(&key), value.as_str())
+            {
+                if let Some(owner) = SessionIdentity::new(&agent, &project, Some(&id)) {
+                    migrate_for_cwd(data, storage, &agent, &owner, cwd)?;
+                }
+            }
+        }
+    }
+    if let Some(Some(raw)) = config.get("aaw-desktop/archived-session-metadata.v1") {
+        let map: BTreeMap<String, serde_json::Value> =
+            serde_json::from_str(raw).map_err(|e| e.to_string())?;
+        for key in map.keys() {
+            let parts: Vec<_> = key.split('\0').collect();
+            if let [project, id, encoded] = parts.as_slice() {
+                if let Ok(agent) = percent_encoding::percent_decode_str(encoded).decode_utf8() {
+                    if let Some(owner) = SessionIdentity::new(&agent, project, Some(id)) {
+                        migrate_known_turns(data, storage, &agent, &owner)?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn finish_legacy_assignments(
+    data: &Path,
+    storage: &Path,
+    keys: &std::collections::BTreeSet<String>,
+) -> Result<(), String> {
+    let workspaces = match fs::read_dir(storage) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e.to_string()),
+    };
+    let mut candidates = std::collections::HashMap::<String, Vec<_>>::new();
+    for owner in crate::session_layout::identities(data).map_err(|e| e.to_string())? {
+        let Some(id) = owner.session_id.as_ref() else {
+            continue;
+        };
+        for agent in keys.iter().chain(std::iter::once(&owner.agent_id)) {
+            if crate::session_layout::SessionIdentity::new(agent, &owner.project, Some(id)).as_ref()
+                != Some(&owner)
+            {
+                continue;
+            }
+            let hash = digest(format!("{agent}\0{id}").as_bytes());
+            let entries = candidates.entry(hash).or_default();
+            if !entries.iter().any(|(known, _)| known == &owner) {
+                entries.push((owner.clone(), agent.clone()));
+            }
+        }
+    }
+    for workspace in workspaces {
+        let workspace = workspace.map_err(|e| e.to_string())?;
+        if !workspace.file_type().map_err(|e| e.to_string())?.is_dir() {
+            continue;
+        }
+        for session in fs::read_dir(workspace.path()).map_err(|e| e.to_string())? {
+            let session = session.map_err(|e| e.to_string())?;
+            if session.file_type().map_err(|e| e.to_string())?.is_dir()
+                && fs::read_dir(session.path())
+                    .map_err(|e| e.to_string())?
+                    .next()
+                    .transpose()
+                    .map_err(|e| e.to_string())?
+                    .is_some()
+            {
+                let cwd = workspace.file_name();
+                let cwd = cwd.to_str().ok_or("无效的旧 Diff 路径")?;
+                if cwd.len() == 64 && cwd.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    if let Some([(owner, agent)]) = candidates
+                        .get(session.file_name().to_string_lossy().as_ref())
+                        .map(Vec::as_slice)
+                    {
+                        migrate_owner(data, storage, agent, owner, cwd)?;
+                        continue;
+                    }
+                }
+                return Err(format!(
+                    "无法确定旧 Diff 历史的会话归属，已保留目录以供重试 · {}",
+                    session.path().display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
 fn execute(storage: &Path, request: Request) -> Result<Vec<Record>, String> {
     execute_with_capture(storage, request, capture)
 }
+#[cfg(test)]
 fn execute_with_capture(
     storage: &Path,
     request: Request,
     capture: impl Fn(&Path) -> Snapshot,
 ) -> Result<Vec<Record>, String> {
-    let _guard = OPERATIONS.lock().map_err(|_| "轮次快照服务不可用")?;
+    execute_stored(storage, None, request, capture)
+}
+
+fn execute_stored(
+    storage: &Path,
+    data: Option<&Path>,
+    request: Request,
+    capture: impl Fn(&Path) -> Snapshot,
+) -> Result<Vec<Record>, String> {
+    ensure_time(request.expires_at)?;
     let root = fs::canonicalize(&request.cwd)
         .or_else(|error| {
             if request.action == "clear" && Path::new(&request.cwd).is_absolute() {
@@ -1159,8 +1587,50 @@ fn execute_with_capture(
     } else {
         identity.to_owned()
     };
-    let workspace = storage.join(digest(identity.as_bytes()));
+    let cwd_key = digest(identity.as_bytes());
+    let workspace = storage.join(&cwd_key);
+    let legacy = workspace.join(digest(
+        format!("{}\0{}", request.agent_key, request.session_id).as_bytes(),
+    ));
+    let directory = if let Some(data) = data {
+        let owner = crate::session_layout::SessionIdentity::new(
+            &request.agent_key,
+            request.workspace_path.as_deref().unwrap_or(&request.cwd),
+            Some(&request.session_id),
+        )
+        .ok_or("轮次快照缺少会话身份")?;
+        migrate_owner(data, storage, &request.agent_key, &owner, &cwd_key)?
+    } else {
+        legacy
+    };
     fs::create_dir_all(&workspace).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+    let fence = workspace.join(".dispatch.lock");
+    if matches!(request.action.as_str(), "lock" | "dispatch") {
+        let _guard = acquire_file_lock(&fence, request.expires_at)?;
+        let user_id = request.user_id.ok_or("缺少轮次锚点")?;
+        let mut boundary = read_boundary(&directory)?;
+        if request.action == "lock" {
+            if boundary.submitted.as_deref() != Some(&user_id) {
+                boundary.sequence += 1;
+            }
+            boundary.submitted = Some(user_id);
+        } else {
+            if boundary.submitted.as_deref() != Some(&user_id) {
+                return Err("轮次已被更新的消息取代".into());
+            }
+            if let Some(id) = request.id.as_deref() {
+                uuid::Uuid::parse_str(id).map_err(|_| "轮次 ID 无效")?;
+            }
+            boundary.record_id = request.id;
+        }
+        ensure_time(request.expires_at)?;
+        write_json(&directory.join(".dispatch"), &boundary)?;
+        return Ok(vec![]);
+    }
+    let operation = workspace_operation(&workspace)?;
+    let _guard = acquire_operation(&operation, request.expires_at)?;
+    ensure_time(request.expires_at)?;
     // Windows 共享模式锁随句柄释放，进程异常退出后不会留下失效锁。
     let mut lock_options = OpenOptions::new();
     lock_options.read(true).write(true).create(true);
@@ -1172,110 +1642,142 @@ fn execute_with_capture(
     let _workspace_lock = lock_options
         .open(workspace.join(".operation.lock"))
         .map_err(|e| format!("另一窗口正在处理此工作区，请稍后重试：{e}"))?;
-    let directory = workspace.join(digest(
-        format!("{}\0{}", request.agent_key, request.session_id).as_bytes(),
-    ));
-    fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+    #[cfg(not(windows))]
+    _workspace_lock.try_lock().map_err(|e| e.to_string())?;
+    let boundary = read_boundary(&directory)?;
     if request.action == "list" {
         let mut list = Vec::new();
         let mut recovery = None;
-        let entries = records(&directory)
-            .into_iter()
-            .map(|path| load(&path).map(|stored| (path, stored)))
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut entries = Vec::new();
+        for path in records(&directory) {
+            if let Some(summary) = load_tracked_summary(&path, &boundary)? {
+                entries.push((path, summary));
+            }
+        }
         let latest_start = entries
             .iter()
-            .map(|(_, stored)| stored.record.started_at)
+            .map(|(_, summary)| summary.record.started_at)
             .max()
             .unwrap_or(0);
-        for (path, mut stored) in entries {
-            if stored.record.started_at < latest_start && !stored.record.locked {
-                stored.record.locked = true;
-                save(&path, &stored)?;
+        for (path, mut summary) in entries {
+            if summary.has_journal {
+                let _guard = acquire_file_lock(&fence, Some(now() + 250))?;
+                let mut stored = load(&path)?;
+                reconcile_operation(&root, &path, &mut stored)?;
+                summary = Summary::from(&stored);
             }
-            reconcile_operation(&root, &path, &mut stored)?;
-            if stored.owner != owner()
-                && (active(&stored.record)
-                    || stored.record.snapshot_state.as_deref() == Some("pending"))
+            if summary.owner != owner()
+                && (active(&summary.record)
+                    || summary.record.snapshot_state.as_deref() == Some("pending"))
             {
-                let after = recovery.get_or_insert_with(|| capture(&root)).clone();
-                let (status, reason) = if active(&stored.record) {
+                let mut stored = load(&path)?;
+                let (status, reason) = if active(&summary.record) {
                     ("unknown".to_owned(), Some("runtime".to_owned()))
                 } else {
-                    (
-                        stored.record.status.clone(),
-                        stored.record.unknown_reason.clone(),
-                    )
+                    (summary.record.status, summary.record.unknown_reason)
                 };
                 close_record(&mut stored, &status, reason);
-                apply_snapshot(&mut stored, &root, after, &request, true);
+                if was_dispatched(stored.requires_dispatch, &stored.record, &boundary) {
+                    let after = recovery.get_or_insert_with(|| capture(&root)).clone();
+                    finish_snapshot(&directory, &mut stored, &root, after, &request)?;
+                } else {
+                    discard_snapshot(&mut stored);
+                }
                 save(&path, &stored)?;
+                summary = Summary::from(&stored);
             }
-            list.push(stored.record);
+            // 未发送的新基线只用于原生收尾，不能作为可操作的历史恢复。
+            if active(&summary.record)
+                && !was_dispatched(summary.requires_dispatch, &summary.record, &boundary)
+            {
+                continue;
+            }
+            summary.record.locked |= summary.record.started_at < latest_start;
+            apply_boundary(&mut summary.record, &boundary);
+            list.push(summary.record);
         }
         list.sort_by_key(|r| r.started_at);
         return Ok(list);
     }
     if request.action == "clear" {
+        let _guard = acquire_file_lock(&fence, Some(now() + 250))?;
         fs::remove_dir_all(&directory).map_err(|e| e.to_string())?;
         return Ok(vec![]);
     }
-    if request.action == "lock" {
-        let mut result = Vec::new();
-        for path in records(&directory) {
-            let mut stored = load(&path)?;
-            if Some(&stored.record.user_id) != request.user_id.as_ref() && !stored.record.locked {
-                stored.record.locked = true;
-                save(&path, &stored)?;
-                result.push(stored.record);
-            }
-        }
-        return Ok(result);
-    }
     if request.action == "begin" {
         let user_id = request.user_id.clone().ok_or("缺少轮次锚点")?;
+        let requires_dispatch = request.expires_at.is_some();
+        if requires_dispatch && boundary.submitted.as_deref() != Some(&user_id) {
+            return Err("轮次已被更新的消息取代".into());
+        }
         let mut local = Vec::new();
+        let mut latest_start = 0;
         for path in records(&directory) {
-            let mut previous = load(&path)?;
-            let changed = !previous.record.locked || active(&previous.record);
-            if !previous.record.locked {
-                previous.record.locked = true;
-                save(&path, &previous)?;
+            ensure_time(request.expires_at)?;
+            let Some(previous) = load_tracked_summary(&path, &boundary)? else {
+                continue;
+            };
+            latest_start = latest_start.max(previous.record.started_at);
+            if active(&previous.record) {
+                local.push(path);
             }
-            local.push((path, previous, changed));
         }
         // 一次采样同时封存引导前的变化和建立新基线，避免两次扫描间漏算。
         let baseline = capture(&root);
-        let started_at = now().max(
-            local
-                .iter()
-                .map(|(_, s, _)| s.record.started_at + 1)
-                .max()
-                .unwrap_or(0),
-        );
+        ensure_time(request.expires_at)?;
+        if requires_dispatch && read_boundary(&directory)?.sequence != boundary.sequence {
+            return Err("轮次已被更新的消息取代".into());
+        }
+        let started_at = now().max(latest_start + 1);
         let mut result = Vec::new();
-        for (path, mut previous, changed) in local {
-            if active(&previous.record) {
-                close_record(&mut previous, "completed", None);
-                apply_snapshot(&mut previous, &root, baseline.clone(), &request, true);
-                save(&path, &previous)?;
-            }
-            if changed {
-                result.push(previous.record);
-            }
+        for path in local {
+            ensure_time(request.expires_at)?;
+            let mut previous = load(&path)?;
+            previous.record.locked = true;
+            close_record(&mut previous, "completed", None);
+            finish_snapshot(&directory, &mut previous, &root, baseline.clone(), &request)?;
+            save(&path, &previous)?;
+            result.push(previous.record);
         }
         let mut concurrent = false;
-        for path in all_records(&workspace) {
+        let mut peers = all_records(&workspace);
+        if let Some(data) = data {
+            let index = data.join("turn-workspaces").join(&cwd_key);
+            for entry in fs::read_dir(index).map_err(|e| e.to_string())? {
+                let entry = entry.map_err(|e| e.to_string())?;
+                if entry.path().extension().is_some_and(|ext| ext == "json") {
+                    let peer: crate::session_layout::SessionIdentity = serde_json::from_reader(
+                        fs::File::open(entry.path()).map_err(|e| e.to_string())?,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    peers.extend(records(&peer.directory(data).join("turns").join(&cwd_key)));
+                }
+            }
+        }
+        for path in peers {
             if path.parent() == Some(directory.as_path()) {
                 continue;
             }
-            let mut previous = load(&path)?;
-            if active(&previous.record) {
+            ensure_time(request.expires_at)?;
+            let Some(previous) = load_summary(&path)? else {
+                continue;
+            };
+            if active(&previous.record)
+                && was_dispatched(
+                    previous.requires_dispatch,
+                    &previous.record,
+                    &read_boundary(path.parent().unwrap())?,
+                )
+            {
                 concurrent = true;
-                previous.record.concurrent = true;
-                save(&path, &previous)?;
+                if !previous.record.concurrent {
+                    let mut previous = load(&path)?;
+                    previous.record.concurrent = true;
+                    save(&path, &previous)?;
+                }
             }
         }
+        ensure_time(request.expires_at)?;
         let id = uuid::Uuid::new_v4().to_string();
         let record = Record {
             id: id.clone(),
@@ -1294,8 +1796,11 @@ fn execute_with_capture(
             restored: vec![],
             can_undo: false,
             results: vec![],
+            details_deferred: false,
+            submission: boundary.sequence,
         };
         let stored = Stored {
+            requires_dispatch,
             previous_undo: None,
             unresolved: BTreeMap::new(),
             record: record.clone(),
@@ -1305,6 +1810,7 @@ fn execute_with_capture(
             owner: owner().into(),
         };
         save(&directory.join(format!("{id}.json")), &stored)?;
+        ensure_time(request.expires_at)?;
         result.sort_by_key(|r| r.started_at);
         result.insert(0, record);
         return Ok(result);
@@ -1313,14 +1819,40 @@ fn execute_with_capture(
     uuid::Uuid::parse_str(&id).map_err(|_| "轮次 ID 无效")?;
     let path = directory.join(format!("{id}.json"));
     let mut stored = load(&path)?;
-    reconcile_operation(&root, &path, &mut stored)?;
+    let _mutation_guard = (matches!(request.action.as_str(), "restore" | "undo" | "check")
+        || stored.undo.as_ref().is_some_and(|undo| undo.in_progress))
+    .then(|| acquire_file_lock(&fence, Some(now() + 250)))
+    .transpose()?;
+    if _mutation_guard.is_some() {
+        reconcile_operation(&root, &path, &mut stored)?;
+    }
+    let boundary = read_boundary(&directory)?;
+    apply_boundary(&mut stored.record, &boundary);
     match request.action.as_str() {
-        "get" => {}
+        "get" => {
+            stored.record.locked |= if stored.requires_dispatch {
+                !was_dispatched(true, &stored.record, &boundary)
+            } else {
+                load_summary(&path)?.is_none()
+            };
+            if !stored.record.locked
+                && records(&directory).into_iter().any(|other| {
+                    other != path
+                        && load_summary(&other).is_ok_and(|summary| {
+                            summary.is_some_and(|summary| {
+                                summary.record.started_at > stored.record.started_at
+                            })
+                        })
+                })
+            {
+                stored.record.locked = true;
+            }
+        }
         "uncertain" => {
             if active(&stored.record) {
                 close_record(&mut stored, "unknown", request.unknown_reason.clone());
                 save(&path, &stored)?;
-                apply_snapshot(&mut stored, &root, capture(&root), &request, true);
+                finish_snapshot(&directory, &mut stored, &root, capture(&root), &request)?;
                 save(&path, &stored)?;
             }
         }
@@ -1342,25 +1874,28 @@ fn execute_with_capture(
                 save(&path, &stored)?;
             }
             let after = capture(&root);
-            apply_snapshot(
-                &mut stored,
-                &root,
-                after,
-                &request,
-                request.action == "finish",
-            );
+            if request.action == "finish" {
+                finish_snapshot(&directory, &mut stored, &root, after, &request)?;
+            } else {
+                apply_snapshot(&mut stored, &root, after, &request, false);
+            }
             save(&path, &stored)?;
         }
         "restore" | "undo" | "check" => {
-            let has_later_message = records(&directory)
-                .into_iter()
-                .filter(|p| p != &path)
-                .map(|p| load(&p))
-                .collect::<Result<Vec<_>, _>>()?
-                .iter()
-                .any(|other| other.record.started_at > stored.record.started_at);
-            if stored.record.locked || has_later_message {
-                return Err("已发送新消息，本轮改动仅供查看，不能撤销或恢复。".into());
+            if stored.record.locked
+                || !was_dispatched(stored.requires_dispatch, &stored.record, &boundary)
+                || (!stored.requires_dispatch && load_summary(&path)?.is_none())
+            {
+                return Err("本轮改动仅供查看，不能撤销或恢复。".into());
+            }
+            for other in records(&directory).into_iter().filter(|p| p != &path) {
+                let summary = load_summary(&other)?;
+                // 旧版没有提交标记，缺少摘要时无法确认这条记录是不是最新。
+                if summary.as_ref().map_or(!stored.requires_dispatch, |other| {
+                    other.record.started_at > stored.record.started_at
+                }) {
+                    return Err("无法确认本轮仍为最新记录，不能撤销或恢复。".into());
+                }
             }
             restore(
                 &root,
@@ -1377,14 +1912,33 @@ fn execute_with_capture(
 }
 #[tauri::command]
 pub async fn turn_changes(app: tauri::AppHandle, request: Request) -> Result<Vec<Record>, String> {
+    let data = crate::storage_location::data_dir(&app)?;
     let storage = app
         .path()
         .app_data_dir()
         .map_err(|e| e.to_string())?
         .join("turn-changes");
-    tauri::async_runtime::spawn_blocking(move || execute(&storage, request))
-        .await
-        .map_err(|e| e.to_string())?
+    let called = Instant::now();
+    tauri::async_runtime::spawn_blocking(move || {
+        let queue_ms = called.elapsed().as_millis();
+        let started = Instant::now();
+        let action = request.action.clone();
+        let result = execute_stored(&storage, Some(&data), request, capture);
+        crate::diagnostics::log(
+            if result.is_ok() { "debug" } else { "warn" },
+            "turn_changes",
+            "轮次快照操作结束",
+            serde_json::json!({
+                "action": action,
+                "queueMs": queue_ms,
+                "durationMs": started.elapsed().as_millis(),
+                "ok": result.is_ok(),
+            }),
+        );
+        result
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -1394,6 +1948,7 @@ mod tests {
         Request {
             action: action.into(),
             cwd: root.to_string_lossy().into(),
+            workspace_path: None,
             agent_key: "test".into(),
             session_id: "session".into(),
             id: id.map(str::to_owned),
@@ -1405,7 +1960,45 @@ mod tests {
             undo: None,
             has_operations: Some(true),
             moves: None,
+            expires_at: None,
         }
+    }
+    #[test]
+    fn migrated_history_can_undo_changes_and_keeps_workspace_coordination() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("work");
+        let legacy = temp.path().join("legacy");
+        let data = temp.path().join("data");
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("code"), "before").unwrap();
+        let begin = execute(&legacy, request("begin", &root, None))
+            .unwrap()
+            .remove(0);
+        fs::write(root.join("code"), "after").unwrap();
+        execute(&legacy, request("finish", &root, Some(&begin.id))).unwrap();
+        let owner = crate::session_layout::SessionIdentity::new(
+            "test",
+            root.to_str().unwrap(),
+            Some("session"),
+        )
+        .unwrap();
+        migrate_known_turns(&data, &legacy, "test", &owner).unwrap();
+        let list =
+            execute_stored(&legacy, Some(&data), request("list", &root, None), capture).unwrap();
+        assert_eq!(list[0].id, begin.id);
+        let mut undo = request("restore", &root, Some(&begin.id));
+        undo.paths = Some(vec!["code".into()]);
+        execute_stored(&legacy, Some(&data), undo, capture).unwrap();
+        assert_eq!(fs::read(root.join("code")).unwrap(), b"before");
+        execute_stored(
+            &legacy,
+            Some(&data),
+            request("undo", &root, Some(&begin.id)),
+            capture,
+        )
+        .unwrap();
+        assert_eq!(fs::read(root.join("code")).unwrap(), b"after");
+        assert!(owner.directory(&data).join("turns").is_dir());
     }
     #[test]
     fn net_changes_preserve_dirty_baseline_and_undo() {
@@ -1683,6 +2276,188 @@ mod tests {
         assert!(listed.iter().find(|r| r.id == first.id).unwrap().locked);
         assert!(execute(&storage, request("restore", &root, Some(&first.id))).is_err());
     }
+    fn boundary_request(action: &str, root: &Path, user: &str, id: Option<&str>) -> Request {
+        let mut request = request(action, root, id);
+        request.expires_at = Some(now() + 2_000);
+        request.user_id = Some(user.into());
+        request
+    }
+    #[test]
+    fn late_baseline_and_skipped_dispatch_cannot_assign_later_edits_to_an_earlier_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("work");
+        let storage = dir.path().join("history");
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("a"), "before").unwrap();
+        execute(&storage, boundary_request("lock", &root, "first", None)).unwrap();
+        let first = execute(&storage, boundary_request("begin", &root, "first", None))
+            .unwrap()
+            .remove(0);
+        execute(
+            &storage,
+            boundary_request("dispatch", &root, "first", Some(&first.id)),
+        )
+        .unwrap();
+        fs::write(root.join("a"), "first turn").unwrap();
+
+        let ended = execute_with_capture(
+            &storage,
+            request("finish", &root, Some(&first.id)),
+            |root| {
+                // 下一条消息等不到本次收尾，跳过基线后发送，已送达 Agent 可以写入。
+                execute(&storage, boundary_request("lock", root, "next", None)).unwrap();
+                execute(&storage, boundary_request("dispatch", root, "next", None)).unwrap();
+                fs::write(root.join("a"), "next turn").unwrap();
+                capture(root)
+            },
+        )
+        .unwrap()
+        .remove(0);
+        assert_eq!(ended.status, "completed");
+        assert_eq!(ended.snapshot_state.as_deref(), Some("failed"));
+        assert!(ended.files.is_empty());
+        assert!(execute(&storage, request("restore", &root, Some(&first.id))).is_err());
+    }
+    #[test]
+    fn staged_record_requires_dispatch_and_unindexed_history_is_skipped() {
+        let (_dir, root, storage, first) = edited_fixture();
+        let path = all_records(
+            &fs::read_dir(&storage)
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap()
+                .path(),
+        )
+        .into_iter()
+        .next()
+        .unwrap();
+        let bytes = fs::read(&path).unwrap();
+        fs::remove_file(path.with_extension("summary")).unwrap();
+        let listed = execute(&storage, request("list", &root, None)).unwrap();
+        assert!(listed.is_empty());
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        assert!(!path.with_extension("summary").exists());
+        let old = execute(&storage, request("get", &root, Some(&first.id)))
+            .unwrap()
+            .remove(0);
+        assert!(old.locked);
+        assert!(!old.files.is_empty());
+        assert!(!path.with_extension("summary").exists());
+
+        // 列表和发送准备都不应尝试解析这份旧正文。
+        fs::write(path.with_file_name("legacy-corrupt.json"), b"invalid json").unwrap();
+        assert!(
+            execute(&storage, request("list", &root, None))
+                .unwrap()
+                .is_empty()
+        );
+
+        execute(&storage, boundary_request("lock", &root, "next", None)).unwrap();
+        let staged = execute(&storage, boundary_request("begin", &root, "next", None))
+            .unwrap()
+            .remove(0);
+        assert!(
+            !execute(&storage, request("list", &root, None))
+                .unwrap()
+                .iter()
+                .any(|record| record.id == staged.id)
+        );
+        execute(
+            &storage,
+            boundary_request("dispatch", &root, "next", Some(&staged.id)),
+        )
+        .unwrap();
+        assert!(
+            execute(&storage, request("list", &root, None))
+                .unwrap()
+                .iter()
+                .any(|record| record.id == staged.id)
+        );
+
+        // 重试历史消息也不能令已锁定的记录重新开放。
+        execute(
+            &storage,
+            boundary_request("lock", &root, &first.user_id, None),
+        )
+        .unwrap();
+        let first = execute(&storage, request("get", &root, Some(&first.id)))
+            .unwrap()
+            .remove(0);
+        assert!(first.locked);
+        assert!(execute(&storage, request("restore", &root, Some(&first.id))).is_err());
+    }
+    #[test]
+    fn confirmed_turn_can_recover_after_its_summary_was_not_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("work");
+        let storage = dir.path().join("history");
+        fs::create_dir(&root).unwrap();
+        execute(&storage, boundary_request("lock", &root, "first", None)).unwrap();
+        let first = execute(&storage, boundary_request("begin", &root, "first", None))
+            .unwrap()
+            .remove(0);
+        execute(
+            &storage,
+            boundary_request("dispatch", &root, "first", Some(&first.id)),
+        )
+        .unwrap();
+        let workspace = fs::read_dir(&storage)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let path = all_records(&workspace).into_iter().next().unwrap();
+        let mut stored = load(&path).unwrap();
+        stored.owner = "previous-runtime".into();
+        save(&path, &stored).unwrap();
+        fs::remove_file(path.with_extension("summary")).unwrap();
+        fs::write(root.join("changed"), "text").unwrap();
+        let recovered = execute(&storage, request("list", &root, None))
+            .unwrap()
+            .remove(0);
+        assert_eq!(recovered.id, first.id);
+        assert_eq!(recovered.snapshot_state.as_deref(), Some("saved"));
+        assert_eq!(recovered.files[0].path, "changed");
+    }
+    #[test]
+    fn separate_workspaces_and_submission_fence_progress_during_blocked_capture() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("first");
+        let other = dir.path().join("second");
+        let storage = dir.path().join("history");
+        fs::create_dir(&root).unwrap();
+        fs::create_dir(&other).unwrap();
+        std::thread::scope(|scope| {
+            let (capturing, entered) = std::sync::mpsc::channel();
+            let (release, held) = std::sync::mpsc::channel();
+            let storage_ref = &storage;
+            let root_ref = &root;
+            let holder = scope.spawn(move || {
+                execute_with_capture(storage_ref, request("begin", root_ref, None), |root| {
+                    capturing.send(()).unwrap();
+                    held.recv().unwrap();
+                    capture(root)
+                })
+            });
+            entered.recv().unwrap();
+            let (finished, outcome) = std::sync::mpsc::channel();
+            let visitor = scope.spawn(move || {
+                let status = execute(
+                    storage_ref,
+                    boundary_request("lock", root_ref, "second", None),
+                )
+                .and_then(|_| execute(storage_ref, request("list", &other, None)));
+                finished.send(status).unwrap();
+            });
+            let status = outcome.recv_timeout(Duration::from_secs(2));
+            release.send(()).unwrap();
+            holder.join().unwrap().unwrap();
+            visitor.join().unwrap();
+            status.unwrap().unwrap();
+        });
+    }
     #[test]
     fn interruption_and_restart_capture_unobserved_changes_once() {
         for restart in [false, true] {
@@ -1717,7 +2492,12 @@ mod tests {
             assert_eq!(ended.files.len(), 1);
             assert_eq!(ended.files[0].path, "hello.ts");
             fs::write(root.join("hello.ts"), "later change").unwrap();
-            let loaded = execute(&storage, request("list", &root, None))
+            let listed = execute(&storage, request("list", &root, None))
+                .unwrap()
+                .remove(0);
+            assert!(listed.details_deferred);
+            assert!(listed.files[0].after.is_none());
+            let loaded = execute(&storage, request("get", &root, Some(&listed.id)))
                 .unwrap()
                 .remove(0);
             assert_eq!(loaded.files[0].after.as_deref(), Some("hello"));
@@ -1949,9 +2729,11 @@ mod tests {
         let alias = anchor.join("..").join(root.file_name().unwrap());
         fs::remove_dir_all(&root).unwrap();
         execute(&storage, request("clear", &alias, Some(&record.id))).unwrap();
-        assert!(fs::read_dir(&storage)
-            .unwrap()
-            .flatten()
-            .all(|entry| all_records(&entry.path()).is_empty()));
+        assert!(
+            fs::read_dir(&storage)
+                .unwrap()
+                .flatten()
+                .all(|entry| all_records(&entry.path()).is_empty())
+        );
     }
 }

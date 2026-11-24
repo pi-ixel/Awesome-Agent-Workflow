@@ -53,6 +53,7 @@ export interface BrowserEvidence {
 export type BrowserMcpStatus = "active" | "revoked" | "not_bound";
 
 export interface BrowserRestoreScope {
+  readonly agentKey?: string;
   readonly workspaceId: string;
   readonly sessionId: string;
 }

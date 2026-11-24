@@ -9,17 +9,21 @@ function keys(sessionId: string) {
 
 export function removeLegacyRestore(sessionId: string) {
   try {
-    const { enabled, tabs } = keys(sessionId);
-    window.localStorage.removeItem(tabs);
-    window.localStorage.removeItem(enabled);
+    clearLegacyRestore(sessionId);
   } catch {
     // 原生快照可用时，旧键清理失败不影响浏览器。
   }
 }
 
+export function clearLegacyRestore(sessionId: string) {
+  const { enabled, tabs } = keys(sessionId);
+  localStorage.removeItem(tabs);
+  localStorage.removeItem(enabled);
+}
+
 export function removeLegacyRestoreTabs(sessionId: string) {
   try {
-    window.localStorage.removeItem(keys(sessionId).tabs);
+    localStorage.removeItem(keys(sessionId).tabs);
   } catch {
     /* 清理旧键不影响原生操作。 */
   }
@@ -37,7 +41,7 @@ export async function readWithLegacyRestore(
   const { enabled, tabs } = keys(scope.sessionId);
   let urls: string[] = [];
   try {
-    const storage = window.localStorage;
+    const storage = localStorage;
     if (storage.getItem(enabled) !== "true") {
       removeLegacyRestore(scope.sessionId);
       return current;
@@ -74,7 +78,7 @@ export function legacyRestoreSessions(): string[] {
   try {
     return Array.from(
       new Set(
-        Object.keys(window.localStorage).flatMap((key) => {
+        Object.keys(localStorage).flatMap((key) => {
           const match = /^aaw-browser-restore:(.+):(?:tabs|enabled)$/.exec(key);
           return match?.[1] ? [match[1]] : [];
         }),
@@ -87,7 +91,7 @@ export function legacyRestoreSessions(): string[] {
 
 export function isLegacyRestoreEnabled(sessionId: string): boolean {
   try {
-    return window.localStorage.getItem(keys(sessionId).enabled) === "true";
+    return localStorage.getItem(keys(sessionId).enabled) === "true";
   } catch {
     return false;
   }

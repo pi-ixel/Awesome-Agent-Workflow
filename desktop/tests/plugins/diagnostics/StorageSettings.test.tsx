@@ -96,7 +96,9 @@ it("polls for new over-limit storage with the settings page unopened", async () 
   try {
     await act(async () => vi.advanceTimersByTimeAsync(0));
     expect(screen.queryByText("存储超阈值")).not.toBeInTheDocument();
-    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    await act(async () => vi.advanceTimersByTimeAsync(15 * 60_000 - 1));
+    expect(storage).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
     expect(screen.getByText("存储超阈值")).toBeInTheDocument();
     expect(storage.mock.calls).toEqual([
       [{ action: "usage" }],

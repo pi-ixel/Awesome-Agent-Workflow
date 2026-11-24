@@ -466,6 +466,8 @@ export function createSessionActions(
     },
     drainNextQueued,
     sendPrompt: (text, attachments = [], options = {}) => {
+      const submittedAt = Date.now();
+      const isSessionEstablished = get().activeSessionId !== null;
       const trimmed = text.trim();
       if (
         (steering.active && !steering.dispatching) ||
@@ -582,10 +584,17 @@ export function createSessionActions(
       const send = (beforeDispatch?: () => void) => {
         const changes = get().turnChanges;
         if (!changes) return dispatch(beforeDispatch);
-        return (changesPrepared ?? changes.prepare()).then(() => {
+        const preparationStartedAt =
+          isSessionEstablished ? submittedAt : Date.now();
+        const prepared = changesPrepared ?? changes.prepare(preparationStartedAt);
+        return prepared.then(() => {
           if (context.cancelledByUser) throw new PreparationCancelled("已取消发送");
           if (!isCurrent()) throw new AcpClosedError("旧连接已失效");
-          return dispatch(beforeDispatch);
+          return changes.beforeDispatch(preparationStartedAt).then(() => {
+            if (context.cancelledByUser) throw new PreparationCancelled("已取消发送");
+            if (!isCurrent()) throw new AcpClosedError("旧连接已失效");
+            return dispatch(beforeDispatch);
+          });
         });
       };
       if (!context.replaying) {
@@ -663,7 +672,10 @@ export function createSessionActions(
       set({ turnError: null });
       get().turnChanges?.submitted();
       // 已有会话按提交边界切段，不等待连接准备或 Agent 接收。
-      if (get().activeSessionId) changesPrepared = get().turnChanges?.prepare();
+      if (get().activeSessionId) {
+        changesPrepared = get().turnChanges?.prepare(submittedAt);
+        void changesPrepared?.catch(() => undefined);
+      }
       logger.info("用户消息已提交", { length: trimmed.length });
       const generation = context.turnGeneration;
       if (first) first.generation = generation;

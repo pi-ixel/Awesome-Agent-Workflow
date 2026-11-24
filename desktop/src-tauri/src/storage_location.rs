@@ -127,6 +127,24 @@ pub fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     )
 }
 
+pub(crate) fn migration_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Some(location) = app.try_state::<StorageLocation>() {
+        if let Some(message) = location.error.lock().map_err(|e| e.to_string())?.as_ref() {
+            return Err(message.clone());
+        }
+    }
+    if let Some(root) = active_dir(app) {
+        if !std::fs::metadata(&root)
+            .map_err(|e| format!("无法访问数据目录 {} · {e}", root.display()))?
+            .is_dir()
+        {
+            return Err("配置的数据目录不可用".into());
+        }
+        return Ok(root);
+    }
+    data_dir(app)
+}
+
 pub fn logs_dir(app: &AppHandle) -> Result<PathBuf, String> {
     active_dir(app)
         .map_or_else(
@@ -154,6 +172,10 @@ fn managed_paths(
     let mut paths = [
         "configuration",
         "session-snapshots",
+        "agents",
+        "turn-workspaces",
+        "session-recovery",
+        "session-deletions",
         "conversation",
         "browser-restore",
         "statistics",
@@ -224,7 +246,9 @@ pub(crate) fn same_data(source: &Path, target: &Path) -> io::Result<bool> {
     if let Ok(link) = fs::read_link(source) {
         return Ok(fs::read_link(target).is_ok_and(|other| other == link));
     }
-    if fs::read_link(target).is_ok() { return Ok(false); }
+    if fs::read_link(target).is_ok() {
+        return Ok(false);
+    }
     if source_kind.is_dir() && target_kind.is_dir() {
         let entries = fs::read_dir(source)?.collect::<io::Result<Vec<_>>>()?;
         if entries.len() != fs::read_dir(target)?.collect::<io::Result<Vec<_>>>()?.len() {
@@ -305,7 +329,9 @@ fn migrate_with_copy(
             }
             if *name == "trash" {
                 crate::skill_library::copy_tree(source, &target)?;
-                if !same_data(source, &target)? { return Err(io::Error::other("回收站复制校验失败")); }
+                if !same_data(source, &target)? {
+                    return Err(io::Error::other("回收站复制校验失败"));
+                }
             } else {
                 copy(source, &target)?;
             }

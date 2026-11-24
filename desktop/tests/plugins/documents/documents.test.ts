@@ -283,13 +283,14 @@ it("keeps a mounted file annotation editor on the original draft, follows promot
     expect(workbench.navigation.getState().viewId).toBe("project-overview");
 
     act(() => session.setState({ activeSessionId: null }));
-    const newDraft = editor.current(path)!;
+    const otherDraft = editor.current(path)!;
     act(() => session.setState({ agentKey: "agent-c" }));
-    expect(editor.current(path)).toBe(newDraft);
+    const newDraft = editor.current(path)!;
+    expect(newDraft).not.toBe(otherDraft);
     edit("转正后仍在编辑");
     act(() => {
       annotationDraftOwner(project.drafts.annotationDrafts).migrate(
-        draftScopeKey(path, null),
+        draftScopeKey(path, null, "agent-c"),
         draftScopeKey(path, "created", "agent-c"),
       );
       session.setState({ activeSessionId: "created" });

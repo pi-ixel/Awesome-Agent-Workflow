@@ -21,6 +21,7 @@ export class AcpResponseError extends AcpError {
     readonly jsonRpcCode: number,
     readonly jsonRpcMessage: string,
     readonly data?: unknown,
+    readonly sessionUnavailable = false,
   ) {
     super(
       "ACP_RESPONSE_ERROR",

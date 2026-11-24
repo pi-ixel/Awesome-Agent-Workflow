@@ -38,6 +38,7 @@ export interface BrowserPanelProps {
   host: HostService["browser"];
   sessionId: string;
   workspaceId?: string;
+  agentKey?: string;
   visible: boolean;
 }
 
@@ -56,6 +57,7 @@ function BrowserPanelSession({
   host,
   sessionId,
   workspaceId = sessionId,
+  agentKey,
   visible,
 }: BrowserPanelProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -356,7 +358,7 @@ function BrowserPanelSession({
     },
     [bounds, host, sessionId],
   );
-  const restore = useBrowserRestore(host, workspaceId, sessionId, space, createTab);
+  const restore = useBrowserRestore(host, workspaceId, sessionId, space, createTab, agentKey);
 
   useEffect(() => {
     let active = true;

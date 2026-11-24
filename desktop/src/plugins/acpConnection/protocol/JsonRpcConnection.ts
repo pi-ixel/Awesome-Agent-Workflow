@@ -473,6 +473,11 @@ export class JsonRpcConnection implements AcpSessionConnection {
           rpcError.code,
           safeMessage,
           safeData,
+          entry.method === "session/load" && (
+            rpcError.code === -32601 ||
+            (isParamsRecord(rpcError.data) && rpcError.data.code === "SESSION_NOT_FOUND") ||
+            /^(session not found|unknown session)[.!]?$/i.test(rpcError.message.trim())
+          ),
         ),
       );
       return;

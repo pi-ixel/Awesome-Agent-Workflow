@@ -204,7 +204,7 @@ describe("轮次净变更生命周期", () => {
     await changes.dispose();
     await other.changes.dispose();
   });
-  it("并发准备共用一个基线，完成快照后才准备下一轮", async () => {
+  it("并发准备共用一个基线，上一轮收尾与下一轮的基线请求各自绑定", async () => {
     const { changes, requests, store } = setup();
     await Promise.all([changes.prepare(), changes.prepare()]);
     expect(
@@ -322,8 +322,17 @@ describe("轮次净变更生命周期", () => {
     ensureReply();
     await changes.dispose();
   });
-  it("排队不切段，前一轮采集结束后实际出队发送才建立新基线", async () => {
-    const { changes, store, requests } = setup();
+  it("排队不切段，慢收尾不阻塞下一条消息出队发送", async () => {
+    const { changes, store, requests, host } = setup();
+    const original = host.request.bind(host);
+    let finishFirst: () => void = () => {};
+    host.request = (request) => {
+      const result = original(request);
+      if (request.action !== "finish" || request.id !== "turn-1") return result;
+      return new Promise((resolve) => {
+        finishFirst = () => void result.then(resolve);
+      });
+    };
     const replies: ((result: { stopReason: "end_turn" }) => void)[] = [];
     store.getState().bindSession({
       prompt: () =>
@@ -346,6 +355,7 @@ describe("轮次净变更生命周期", () => {
         .map((request) => request.action),
     ).toEqual(["begin", "finish", "begin"]);
     expect(changes.state.getState().records[0]?.locked).toBe(true);
+    finishFirst();
     replies[1]!({ stopReason: "end_turn" });
     await vi.waitFor(() =>
       expect(
@@ -450,7 +460,7 @@ describe("轮次净变更生命周期", () => {
   });
   it("真实 prompt 在基线落盘之前不会执行", async () => {
     const { changes, store, host } = setup();
-    let release: (value: readonly TurnChangesRecord[]) => void = () => {};
+    let release: ((value: readonly TurnChangesRecord[]) => void) | undefined;
     host.request = (request) =>
       request.action === "begin"
         ? new Promise((resolve) => {
@@ -462,12 +472,65 @@ describe("轮次净变更生命周期", () => {
     );
     store.getState().bindSession({ prompt, cancel: () => {} });
     expect(store.getState().sendPrompt("edit a file")).toBe(true);
-    await vi.waitFor(() =>
-      expect(changes.state.getState().phase).toBe("preparing"),
-    );
+    await vi.waitFor(() => expect(release).toBeDefined());
     expect(prompt).not.toHaveBeenCalled();
-    release([initial]);
+    release?.([initial]);
     await vi.waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    await changes.dispose();
+  });
+  it("基线超过预算时照常发送，忽略迟到的结果", async () => {
+    vi.useFakeTimers();
+    try {
+      const { changes, store, host } = setup();
+      let delayed:
+        ((records: readonly TurnChangesRecord[]) => void) | undefined;
+      let userId: string | undefined;
+      const dispatch = vi.fn(() => Promise.resolve([]));
+      host.request = (request) => {
+        if (request.action === "list") return new Promise(() => {});
+        if (request.action === "dispatch") return dispatch();
+        if (request.action !== "begin") return Promise.resolve([]);
+        userId = request.userId;
+        return new Promise((resolve) => {
+          delayed = resolve;
+        });
+      };
+      // 建立一次仍在进行的历史读取，之后的基线可以独立发起。
+      store.setState({ activeSessionId: "other-session" });
+      const prompt = vi.fn(() =>
+        Promise.resolve({ stopReason: "end_turn" as const }),
+      );
+      store.getState().bindSession({ prompt, cancel: () => {} });
+      expect(store.getState().sendPrompt("edit a file")).toBe(true);
+      await vi.advanceTimersByTimeAsync(399);
+      expect(delayed).toBeDefined();
+      expect(prompt).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(prompt).toHaveBeenCalledTimes(1);
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(changes.state.getState().error).toContain("本轮统计不可用");
+      delayed?.([{ ...initial, userId: userId! }]);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(changes.state.getState().records).toEqual([]);
+      expect(prompt).toHaveBeenCalledTimes(1);
+      await changes.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("持久化锁定失败时不会把消息交给 Agent", async () => {
+    const { changes, store, host } = setup();
+    host.request = (request) =>
+      request.action === "lock"
+        ? Promise.reject(new Error("磁盘写入失败"))
+        : Promise.resolve([]);
+    const prompt = vi.fn(() =>
+      Promise.resolve({ stopReason: "end_turn" as const }),
+    );
+    store.getState().bindSession({ prompt, cancel: () => {} });
+    expect(store.getState().sendPrompt("edit a file")).toBe(true);
+    await vi.waitFor(() => expect(store.getState().turnState).toBe("failed"));
+    expect(prompt).not.toHaveBeenCalled();
     await changes.dispose();
   });
   it("统计覆盖标准 ACP、局部 edit 和子代理工具，不读取可见窗口", () => {

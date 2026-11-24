@@ -34,11 +34,14 @@ export interface TurnChangesRecord {
   readonly restored: readonly string[];
   readonly canUndo: boolean;
   readonly results: readonly TurnChangeResult[];
+  /** 列表只携带摘要，展开后按轮次读取文件内容。 */
+  readonly detailsDeferred?: boolean;
 }
 export interface TurnChangesRequest {
   readonly action:
     | "begin"
     | "lock"
+    | "dispatch"
     | "list"
     | "get"
     | "check"
@@ -49,6 +52,7 @@ export interface TurnChangesRequest {
     | "undo"
     | "clear";
   readonly cwd: string;
+  readonly workspacePath?: string;
   readonly agentKey: string;
   readonly sessionId: string;
   readonly id?: string;
@@ -60,6 +64,7 @@ export interface TurnChangesRequest {
   readonly undo?: boolean;
   readonly hasOperations?: boolean;
   readonly moves?: readonly { readonly from: string; readonly to: string }[];
+  readonly expiresAt?: number;
 }
 export interface TurnChangesHost {
   request(request: TurnChangesRequest): Promise<readonly TurnChangesRecord[]>;

@@ -90,6 +90,7 @@ export function apply(ctx: Context): void {
                   host={ctx.host.browser}
                   sessionId={sessionId}
                   workspaceId={project}
+                  agentKey={agentKey ?? undefined}
                   visible={visible}
                 />
               </div>

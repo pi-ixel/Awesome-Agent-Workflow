@@ -1,6 +1,7 @@
 import type { HostManagedStorage, HostStorage } from "../types.ts";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { createStore } from "zustand/vanilla";
+import { retainedSessions, finishSessionRecovery } from "./sessionRecovery.ts";
 
 const configurationKeys = new Set([
   "aaw-desktop.settings.v1",
@@ -156,6 +157,8 @@ export async function flushNativeConfiguration(): Promise<void> {
 }
 
 export const desktopManagedStorage: HostManagedStorage = {
+  retainedSessions,
+  finishSessionRecovery,
   available: () => isTauri(),
   request: (command, args) => invoke(command, args),
   load: loadNativeConfiguration,

@@ -66,7 +66,9 @@ const base: TurnChangesRecord = {
     },
   ],
 };
-const useLargeDiff = new URLSearchParams(location.search).has("large-diff");
+const demo = new URLSearchParams(location.search);
+const useLargeDiff = demo.has("large-diff");
+const useDeferredDetails = demo.has("deferred-details");
 const largeDiff: TurnChangesRecord = {
   ...base,
   files: [
@@ -106,8 +108,22 @@ function Preview() {
   const [warm, setWarm] = useState(false);
   const [state] = useState(() =>
     createStore<ChangesView>(() => ({
-      openRevision: 1,
-      records: [useLargeDiff ? largeDiff : base],
+      openRevision: useDeferredDetails ? 0 : 1,
+      records: [
+        useDeferredDetails
+          ? {
+              ...base,
+              detailsDeferred: true,
+              files: base.files.map((file) => ({
+                ...file,
+                before: null,
+                after: null,
+              })),
+            }
+          : useLargeDiff
+            ? largeDiff
+            : base,
+      ],
       selected: base.id,
       phase: "idle",
       error: null,
@@ -119,6 +135,7 @@ function Preview() {
       state,
       submitted: () => {},
       prepare: () => Promise.resolve(),
+      beforeDispatch: () => Promise.resolve(),
       markUnknown: () => Promise.resolve(),
       finish: () => Promise.resolve(),
       select: (id) =>
@@ -129,6 +146,10 @@ function Preview() {
       dispose: () => Promise.resolve(),
       dismiss: () => state.setState({ message: null }),
       refresh: () => {
+        if (useDeferredDetails) {
+          state.setState({ records: [base] });
+          return Promise.resolve();
+        }
         state.setState({ error: "文件仍有后续修改，未执行撤销。" });
         return Promise.resolve();
       },

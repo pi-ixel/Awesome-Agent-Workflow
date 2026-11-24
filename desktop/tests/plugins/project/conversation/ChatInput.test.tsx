@@ -44,7 +44,6 @@ import { createAnnotationDraftStore } from "../../../../src/plugins/project/comp
 import { webviewStorage } from "../../../../src/plugins/host/storage/storage.ts";
 import {
   draftScopeKey,
-  legacyNewDraftScopeKey,
   readDraft,
   writeDraft,
 } from "../../../../src/plugins/project/composer/draftStore.ts";
@@ -1071,65 +1070,13 @@ describe("图片粘贴和拖入", () => {
   });
 });
 
-it("旧版当前 Agent 的草稿完整迁入项目档位，后续切换不恢复其他旧副本", async () => {
+it("新会话不导入旧版项目级草稿", async () => {
   const project = "D:/legacy-agent-draft";
-  const from = legacyNewDraftScopeKey(project, "legacy-a");
-  const scope = draftScopeKey(project, null, "legacy-a");
-  writeDraft(from, "旧版未发送文字");
-  writeDraft(
-    legacyNewDraftScopeKey(project, "legacy-b"),
-    "不能复活的旧 B 草稿",
-  );
-  annotationDrafts.put(from, [
-    {
-      id: "legacy-comment",
-      project,
-      path: `${project}/a.md`,
-      source: false,
-      quote: "原文",
-      prefix: "",
-      suffix: "",
-      offset: 0,
-      revision: "r1",
-      comment: "旧版批注",
-    },
-  ]);
-  await testComposer.imageDrafts.save({
-    [from]: [
-      {
-        name: "old.png",
-        block: { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
-      },
-    ],
-  });
+  writeDraft(draftScopeKey(project, null), "旧版未发送文字");
   useWorkspaceStore.setState({ activePath: project });
-  useSessionStore.setState({
-    agentKey: "legacy-a",
-    activeSessionId: null,
-    supportsImages: true,
-  });
-  const view = setup();
-  expect(getTextarea()).toHaveValue("旧版未发送文字");
-  expect(
-    await screen.findByRole("button", { name: "预览 old.png" }),
-  ).toBeInTheDocument();
-  await waitFor(async () => {
-    expect((await testComposer.imageDrafts.load())[scope]).toHaveLength(1);
-    expect((await testComposer.imageDrafts.load())[from]).toBeUndefined();
-    expect(localStorage.getItem(`${scope}/project-draft-migration-v1`)).toBe(
-      "done",
-    );
-  });
-  expect(readDraft(from)).toBe("");
-  expect(
-    annotationDrafts.getState().drafts[scope]?.annotations[0]?.comment,
-  ).toBe("旧版批注");
-  expect(annotationDrafts.getState().drafts[from]?.annotations).toHaveLength(0);
-  view.unmount();
-  writeDraft(scope, "");
-  await testComposer.imageDrafts.save({});
-  useSessionStore.setState({ agentKey: "legacy-b" });
+  useSessionStore.setState({ agentKey: "agent-a", activeSessionId: null });
   setup();
+  await act(async () => {});
   expect(getTextarea()).toHaveValue("");
 });
 
@@ -1232,40 +1179,34 @@ it("草稿 A→B→A 保留文字图片和批注，等待和图片不兼容时�
     useSessionStore.setState({ agentKey: "agent-b", supportsImages: false }),
   );
   view.rerender(<ChatInput {...props} sendDisabled={true} />);
-  expect(getTextarea()).toBeEnabled();
-  fireEvent.change(getTextarea(), {
-    target: { value: "未发送文字，继续编辑" },
-  });
+  expect(getTextarea()).toHaveValue("");
+  expect(screen.queryByRole("button", { name: "预览 图片 1" })).toBeNull();
+  fireEvent.change(getTextarea(), { target: { value: "B 的草稿" } });
   fireEvent.keyDown(getTextarea(), { key: "Enter" });
   expect(send).not.toHaveBeenCalled();
-  expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
   view.rerender(<ChatInput {...props} sendDisabled={false} />);
-  expect(screen.getByRole("alert")).toHaveTextContent("请移除图片或切换");
-  fireEvent.keyDown(getTextarea(), { key: "Enter" });
-  expect(send).not.toHaveBeenCalled();
-  expect(getTextarea()).toHaveValue("未发送文字，继续编辑");
   expect(
     annotationDrafts.getState().drafts[scope]?.annotations[0]?.comment,
   ).toBe("保留批注");
   act(() =>
     useSessionStore.setState({ agentKey: "agent-a", supportsImages: true }),
   );
-  expect(getTextarea()).toHaveValue("未发送文字，继续编辑");
+  expect(getTextarea()).toHaveValue("未发送文字");
   expect(screen.getByRole("button", { name: "发送" })).toBeEnabled();
   expect(
     screen.getByRole("button", { name: "预览 图片 1" }),
   ).toBeInTheDocument();
-  expect(readDraft(scope)).toBe("未发送文字，继续编辑");
+  expect(readDraft(scope)).toBe("未发送文字");
   await waitFor(async () =>
     expect((await testComposer.imageDrafts.load())[scope]).toHaveLength(1),
   );
   const draftKeys = Object.keys(localStorage).filter(
     (key) => key.startsWith("aaw-desktop/draft/") && key.endsWith("/__new__"),
   );
-  expect(draftKeys).toEqual([scope]);
+  expect(draftKeys.sort()).toEqual([scope, draftScopeKey(project, null, "agent-b")].sort());
   view.unmount();
   render(<ChatInput {...props} />);
-  expect(getTextarea()).toHaveValue("未发送文字，继续编辑");
+  expect(getTextarea()).toHaveValue("未发送文字");
   expect(
     await screen.findByRole("button", { name: "预览 图片 1" }),
   ).toBeInTheDocument();

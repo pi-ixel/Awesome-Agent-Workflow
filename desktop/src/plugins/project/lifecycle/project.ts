@@ -345,7 +345,7 @@ export class DesktopProject {
   private async removeSessionData(target: DeleteSessionTarget): Promise<void> {
     const { workspacePath: path, sessionId: id, agentKey: agent } = target;
     const paths = [...new Set([path, pathKey(path)])];
-        const historyScope = `${pathKey(path)}#${id}`;
+    const historyScope = `${pathKey(path)}#${id}`;
     const agents = new Set([agent]);
     const matches = (scope: string) => {
       try {
@@ -482,6 +482,12 @@ export class DesktopProject {
       managedProjectStorage()?.configurationError?.() ||
       managedProjectStorage()?.conversationError?.();
     if (error) throw new Error(error);
+    const managed = managedProjectStorage();
+    if (managed?.available()) {
+      await managed.request("session_data_finish_deletion", {
+        scope: JSON.stringify([agent, historyScope]),
+      });
+    }
   }
 
   private assertOpen(): void {

@@ -51,6 +51,9 @@ pub fn storage_configuration_load(
     conversation_text: bool,
 ) -> Result<Titles, String> {
     let _guard = WRITER.lock().map_err(|e| e.to_string())?;
+    if conversation_text {
+        return load_composer(&data_dir(&app)?, legacy);
+    }
     load_with_legacy(&configuration_path(&app, conversation_text)?, legacy)
 }
 
@@ -61,10 +64,137 @@ pub fn storage_configuration_write(
     conversation_text: bool,
 ) -> Result<(), String> {
     let _guard = WRITER.lock().map_err(|e| e.to_string())?;
+    if conversation_text {
+        let data = data_dir(&app)?;
+        return save_composer(&data, changes, false);
+    }
     let path = configuration_path(&app, conversation_text)?;
     let mut current: Titles = read_record(&path)?;
     current.extend(changes);
     write_record(&path, &current)
+}
+
+pub(crate) fn discarded_draft(key: &str) -> bool {
+    key.strip_prefix("aaw-desktop/draft/").is_some_and(|tail| {
+        let mut parts = tail.split('/');
+        parts.next().is_some_and(|project| !project.is_empty()) && parts.next() == Some("__new__")
+    })
+}
+
+pub(crate) fn matches_unowned_composer(
+    key: &str,
+    owner: &crate::session_layout::SessionIdentity,
+) -> bool {
+    let Some(tail) = key
+        .strip_prefix("aaw-desktop/draft/")
+        .or_else(|| key.strip_prefix("aaw-desktop/prompt-history/"))
+    else {
+        return false;
+    };
+    let mut parts = tail.split('/');
+    let (Some(project), Some(id)) = (parts.next(), parts.next()) else {
+        return false;
+    };
+    let (Ok(project), Ok(id)) = (
+        percent_encoding::percent_decode_str(project).decode_utf8(),
+        percent_encoding::percent_decode_str(id).decode_utf8(),
+    ) else {
+        return false;
+    };
+    crate::session_layout::SessionIdentity::new(&owner.agent_id, &project, Some(&id)).as_ref()
+        == Some(owner)
+}
+pub(crate) fn clear_unowned_composer(
+    data: &Path,
+    owner: &crate::session_layout::SessionIdentity,
+) -> Result<(), String> {
+    let _guard = WRITER.lock().map_err(|e| e.to_string())?;
+    let path = data.join("conversation/text.json");
+    let mut text: Titles = read_record(&path)?;
+    let original = text.len();
+    text.retain(|key, _| !matches_unowned_composer(key, owner));
+    if text.len() != original {
+        write_record(&path, &text)?;
+    }
+    Ok(())
+}
+
+fn save_composer(data: &Path, changes: Titles, importing: bool) -> Result<(), String> {
+    let mut groups = BTreeMap::<std::path::PathBuf, Titles>::new();
+    for (key, value) in changes {
+        if discarded_draft(&key) {
+            continue;
+        }
+        let path = match crate::session_layout::SessionIdentity::from_composer_key(&key) {
+            Some(identity) => identity
+                .ensure(data)
+                .map_err(|e| e.to_string())?
+                .join("composer.json"),
+            None => data.join("conversation/text.json"),
+        };
+        groups.entry(path).or_default().insert(key, value);
+    }
+    for (path, changes) in groups {
+        if importing {
+            load_with_legacy(&path, changes)?;
+        } else {
+            let mut stored: Titles = read_record(&path)?;
+            stored.extend(changes);
+            write_record(&path, &stored)?;
+        }
+    }
+    Ok(())
+}
+
+fn load_composer(data: &Path, webview: Titles) -> Result<Titles, String> {
+    let legacy_path = data.join("conversation/text.json");
+    let legacy: Titles = read_record(&legacy_path)?;
+    let mut destinations = BTreeMap::<std::path::PathBuf, Titles>::new();
+    for (key, value) in &legacy {
+        if let Some(identity) = crate::session_layout::SessionIdentity::from_composer_key(key) {
+            destinations
+                .entry(identity.directory(data).join("composer.json"))
+                .or_default()
+                .insert(key.clone(), value.clone());
+        }
+    }
+    for (path, source) in destinations {
+        verify_existing_values(&path, &source)?;
+    }
+    let mut incoming = webview;
+    incoming.extend(legacy.clone());
+    let (owned, mut shared): (Titles, Titles) = incoming.into_iter().partition(|(key, _)| {
+        crate::session_layout::SessionIdentity::from_composer_key(key).is_some()
+    });
+    save_composer(data, owned, true)?;
+    shared.retain(|key, _| !discarded_draft(key));
+    if legacy != shared {
+        write_record(&legacy_path, &shared)?;
+    }
+    for directory in crate::session_layout::directories(data).map_err(|e| e.to_string())? {
+        let stored: Titles = read_record(&directory.join("composer.json"))?;
+        shared.extend(stored);
+    }
+    Ok(shared)
+}
+
+pub(crate) fn migrate_native_conversation_records(data: &Path) -> Result<(), String> {
+    let _guard = WRITER.lock().map_err(|e| e.to_string())?;
+    if data
+        .join("conversation/text.json")
+        .try_exists()
+        .map_err(|e| e.to_string())?
+    {
+        load_composer(data, Titles::new())?;
+    }
+    if data
+        .join("configuration/session-titles.json")
+        .try_exists()
+        .map_err(|e| e.to_string())?
+    {
+        load_titles(data, Titles::new())?;
+    }
+    Ok(())
 }
 
 fn load_with_legacy(path: &Path, legacy: Titles) -> Result<Titles, String> {
@@ -83,10 +213,100 @@ fn load_with_legacy(path: &Path, legacy: Titles) -> Result<Titles, String> {
     Ok(current)
 }
 
+fn verify_existing_values(path: &Path, source: &Titles) -> Result<(), String> {
+    let published: Titles = read_record(path)?;
+    if source
+        .iter()
+        .any(|(key, value)| published.get(key).is_some_and(|stored| stored != value))
+    {
+        return Err(format!(
+            "会话副本内容冲突，已保留源文件 · {}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn storage_titles_load(app: tauri::AppHandle, legacy: Titles) -> Result<Titles, String> {
     let _guard = WRITER.lock().map_err(|e| e.to_string())?;
-    load_with_legacy(&titles_path(&app)?, legacy)
+    load_titles(&data_dir(&app)?, legacy)
+}
+
+type Owners = Vec<(crate::session_layout::SessionIdentity, std::path::PathBuf)>;
+
+fn title_owners(data: &Path) -> Result<Owners, String> {
+    let mut owners = Vec::new();
+    for dir in crate::session_layout::directories(data).map_err(|e| e.to_string())? {
+        let path = dir.join("identity.json");
+        let file = fs::File::open(path).map_err(|e| e.to_string())?;
+        let identity: crate::session_layout::SessionIdentity =
+            serde_json::from_reader(file).map_err(|e| e.to_string())?;
+        if identity.directory(data) != dir {
+            return Err("会话索引与目录不一致".into());
+        }
+        if identity.session_id.is_some() {
+            owners.push((identity, dir));
+        }
+    }
+    Ok(owners)
+}
+
+fn title_owner<'a>(owners: &'a Owners, key: &str) -> Option<&'a Path> {
+    let (agent, id) = if let Some(id) = key.strip_prefix("aaw-desktop/session-title/") {
+        (None, id.to_owned())
+    } else {
+        let value = key.strip_prefix("aaw-desktop/session-title.v2/")?;
+        let (agent, id): (String, String) = serde_json::from_str(
+            &percent_encoding::percent_decode_str(value)
+                .decode_utf8()
+                .ok()?,
+        )
+        .ok()?;
+        let identity = crate::session_layout::SessionIdentity::new(&agent, ".", Some(&id))?;
+        (Some(identity.agent_id), id)
+    };
+    let mut candidates = owners.iter().filter(|(owner, _)| {
+        owner.session_id.as_ref() == Some(&id)
+            && agent.as_ref().is_none_or(|a| a == &owner.agent_id)
+    });
+    let (_, dir) = candidates.next()?;
+    candidates.next().is_none().then_some(dir.as_path())
+}
+
+fn load_titles(data: &Path, mut web: Titles) -> Result<Titles, String> {
+    let shared_path = data.join("configuration/session-titles.json");
+    let old: Titles = read_record(&shared_path)?;
+    web.extend(old.clone());
+    let owners = title_owners(data)?;
+    let mut unmatched = Titles::new();
+    let mut groups = BTreeMap::<std::path::PathBuf, Titles>::new();
+    for (key, value) in web {
+        if let Some(dir) = title_owner(&owners, &key) {
+            groups
+                .entry(dir.join("titles.json"))
+                .or_default()
+                .insert(key, value);
+        } else {
+            unmatched.insert(key, value);
+        }
+    }
+    for (path, group) in groups {
+        let native = group
+            .iter()
+            .filter(|(key, _)| old.contains_key(*key))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        verify_existing_values(&path, &native)?;
+        load_with_legacy(&path, group)?;
+    }
+    if old != unmatched {
+        write_record(&shared_path, &unmatched)?
+    }
+    for (_, dir) in owners {
+        unmatched.extend(read_record::<Titles>(&dir.join("titles.json"))?);
+    }
+    Ok(unmatched)
 }
 
 #[tauri::command]
@@ -96,7 +316,11 @@ pub fn storage_title_write(
     title: Option<String>,
 ) -> Result<(), String> {
     let _guard = WRITER.lock().map_err(|e| e.to_string())?;
-    let path = titles_path(&app)?;
+    let data = data_dir(&app)?;
+    let owners = title_owners(&data)?;
+    let path = title_owner(&owners, &key)
+        .map(|dir| dir.join("titles.json"))
+        .unwrap_or_else(|| data.join("configuration/session-titles.json"));
     let mut titles: Titles = read_record(&path)?;
     titles.insert(key, title);
     write_record(&path, &titles)
@@ -146,6 +370,71 @@ pub fn storage_thresholds_write(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_titles_move_only_with_one_matching_owner() {
+        use crate::session_layout::SessionIdentity;
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path();
+        let a = SessionIdentity::new("a", "D:/one", Some("s"))
+            .unwrap()
+            .ensure(data)
+            .unwrap();
+        SessionIdentity::new("b", "D:/two", Some("s"))
+            .unwrap()
+            .ensure(data)
+            .unwrap();
+        let scoped = "aaw-desktop/session-title.v2/%5B%22a%22%2C%22s%22%5D";
+        let shared = "aaw-desktop/session-title/s";
+        let saved = Titles::from([
+            (scoped.into(), Some("first".into())),
+            (shared.into(), Some("older".into())),
+        ]);
+        assert_eq!(load_titles(data, saved.clone()).unwrap(), saved);
+        assert_eq!(
+            read_record::<Titles>(&a.join("titles.json")).unwrap().len(),
+            1
+        );
+        assert!(
+            read_record::<Titles>(&data.join("configuration/session-titles.json"))
+                .unwrap()
+                .contains_key(shared)
+        );
+    }
+
+    #[test]
+    fn session_composer_upgrade_keeps_native_deletions_and_isolates_projects() {
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path();
+        let a = "aaw-desktop/draft/v2/a/D%3A%2Fone/s";
+        let b = "aaw-desktop/draft/v2/a/D%3A%2Ftwo/s";
+        let old = "aaw-desktop/draft/D%3A%2Fone/__new__";
+        let legacy = Titles::from([
+            (a.into(), Some("first".into())),
+            (b.into(), None),
+            (old.into(), Some("discard".into())),
+        ]);
+        write_record(&data.join("conversation/text.json"), &legacy).unwrap();
+        let web = Titles::from([
+            (b.into(), Some("stale".into())),
+            (old.into(), Some("old".into())),
+        ]);
+        let migrated = load_composer(data, web.clone()).unwrap();
+        assert_eq!(migrated[a].as_deref(), Some("first"));
+        assert_eq!(migrated[b], None);
+        assert!(!migrated.contains_key(old));
+        assert_eq!(load_composer(data, web).unwrap(), migrated);
+        let files = crate::session_layout::directories(data).unwrap();
+        assert_eq!(files.len(), 2);
+        for dir in files {
+            assert_eq!(
+                read_record::<Titles>(&dir.join("composer.json"))
+                    .unwrap()
+                    .len(),
+                1
+            );
+        }
+    }
 
     #[test]
     fn migration_preserves_native_changes_and_explicit_removals() {
