@@ -20,7 +20,7 @@ export function RunMarkLegend() {
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   return <div className="workflow-run-help" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}>
-    <IconButton iconSize="compact" className="rounded text-ink-mute transition-colors hover:bg-surface-hover hover:text-ink" aria-label="状态图标说明" aria-describedby={id}>
+    <IconButton iconSize="compact" className="rounded-control text-ink-mute transition-colors hover:bg-surface-hover hover:text-ink" aria-label="状态图标说明" aria-describedby={id}>
       <CircleHelpIcon className="ui-icon-16" />
     </IconButton>
     <HintSurface id={id} open={hovered || focused} unfoldFrom="right" className="workflow-run-legend">

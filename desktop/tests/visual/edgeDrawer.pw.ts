@@ -145,6 +145,7 @@ test("the activity rail has a full-height divider and keeps icons in place on co
   await page.goto(`${fixture}&activity-rail`);
   const rail = page.getByRole("navigation", { name: "工作台导航" });
   const drawer = page.locator('[data-edge-drawer="left"]');
+  await expect(drawer).toHaveCSS("border-radius", "0px");
   const entries = rail.getByTestId("activity-rail-entries");
   const conversations = entries.getByRole("button", { name: "会话" });
   const workflows = entries.getByRole("button", { name: "工作流" });

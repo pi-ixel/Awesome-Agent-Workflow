@@ -140,7 +140,7 @@ export function AddProjectPanel({ onClose }: AddProjectPanelProps) {
         </div>
 
         {tab === "new-session" ? (
-          <div className="max-h-[320px] min-h-[168px] overflow-y-auto rounded-xl border border-line-strong bg-raised/30 p-1.5">
+          <div className="max-h-[320px] min-h-[168px] overflow-y-auto rounded-popover border border-line-strong bg-raised/30 p-1.5">
             {knownProjects.length === 0 ? (
               <div className="flex min-h-[156px] flex-col items-center justify-center gap-2 px-4 text-center">
                 <p className="text-ui-sm text-ink-mute">
@@ -174,13 +174,13 @@ export function AddProjectPanel({ onClose }: AddProjectPanelProps) {
         ) : embeddedAddProjectNode !== null ? (
           embeddedAddProjectNode
         ) : (
-          <div className="flex min-h-[168px] flex-col items-center justify-center gap-3 rounded-xl border border-line-strong bg-raised/30 px-5 py-6 text-center">
+          <div className="flex min-h-[168px] flex-col items-center justify-center gap-3 rounded-popover border border-line-strong bg-raised/30 px-5 py-6 text-center">
             <FolderGlyph className="ui-icon-20 text-ink-mute" />
             <ActionButton
               tone="primary"
               type="button"
               onClick={() => void handleAddProject()}
-              className="inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-ui-sm"
+              className="inline-flex items-center gap-1.5 rounded-pill px-4 py-1.5 text-ui-sm"
             >
               <FolderGlyph className="ui-icon-14 shrink-0" />
               <span>选择本地文件夹…</span>

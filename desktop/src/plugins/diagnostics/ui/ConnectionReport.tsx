@@ -60,7 +60,7 @@ function RuntimeDetails({ row }: { row: RuntimeRow }) {
         )}
       </div>
       <Disclosure summary="运行详情">
-        <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-base p-3 text-xs">
+        <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-control bg-base p-3 text-xs">
           {JSON.stringify(row, null, 2)}
         </pre>
       </Disclosure>
@@ -89,7 +89,7 @@ export function ConnectionReport({
     (item) => probeFeedback?.get(item.id)?.pending,
   ).length;
   return (
-    <section className="min-w-0 overflow-hidden rounded-xl border border-line bg-surface">
+    <section className="min-w-0 overflow-hidden rounded-popover border border-line bg-surface">
       <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
         <h2 className="text-sm font-semibold">
           ACP 连接{" "}
@@ -139,7 +139,7 @@ export function ConnectionReport({
                   </span>
                 </h3>
                 <span
-                  className={`rounded-md px-2 py-0.5 text-xs ${stateColor[connection.state]}`}
+                  className={`rounded-control px-2 py-0.5 text-xs ${stateColor[connection.state]}`}
                 >
                   {stateText[connection.state]}
                 </span>
@@ -158,7 +158,7 @@ export function ConnectionReport({
               />
               {alerts.length > 0 && (
                 <p
-                  className={`mb-3 break-words rounded-lg px-3 py-2 text-xs ${rows.some((r) => r.agentCrashed) ? "bg-danger-bg text-danger-ink" : "bg-warn-bg text-warn-ink"}`}
+                  className={`mb-3 break-words rounded-control px-3 py-2 text-xs ${rows.some((r) => r.agentCrashed) ? "bg-danger-bg text-danger-ink" : "bg-warn-bg text-warn-ink"}`}
                 >
                   {alerts.join(" · ")}
                 </p>
@@ -208,7 +208,7 @@ export function ConnectionReport({
                   {connection.sessions.map((session) => (
                     <li
                       key={session.id}
-                      className="rounded-lg border border-line bg-base/50 p-3"
+                      className="rounded-control border border-line bg-base/50 p-3"
                     >
                       <p className="break-all font-medium">
                         {session.project?.path ?? "未关联项目"}
@@ -258,7 +258,7 @@ export function ConnectionReport({
             <Disclosure
               layout="row"
               key={index}
-              className="mt-3 rounded-lg border border-line p-3 text-xs"
+              className="mt-3 rounded-control border border-line p-3 text-xs"
               summary={
                 <>
                   <span className="font-mono">

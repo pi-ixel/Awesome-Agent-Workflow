@@ -56,6 +56,7 @@ test("五种提示条在双主题三档字号下显示语义色、可展开详�
         { name },
       );
       const icon = surface.locator("svg").first();
+      await expect(surface).toHaveCSS("border-radius", "8px");
       expect(await color(surface, "border-top-color")).toEqual(
         await color(surface, "--color-" + border),
       );
@@ -95,6 +96,8 @@ test("项目菜单验证默认、悬停、按下、焦点、勾选、禁用和�
   const checkbox = menu.getByRole("menuitemcheckbox", { name: "区分大小写" });
   const radio = menu.getByRole("menuitemradio", { name: "预览模式" });
   await trigger.press("Enter");
+  await expect(menu).toHaveCSS("border-radius", "12px");
+  await expect(regular).toHaveCSS("border-radius", "8px");
   for (const [theme, px] of appearances) {
     await applyAppearance(page, theme, px);
     await expect(regular).toHaveCSS("font-size", `${px}px`);
@@ -169,6 +172,7 @@ test("中性与危险确认保留取消焦点、处理禁用态并归还入口�
     );
     await remove.press("Enter");
     const dialog = feedback.getByRole("alertdialog", { name: "删除归档记录" });
+    await expect(dialog).toHaveCSS("border-radius", "16px");
     const proceed = dialog.getByRole("button", { name: "删除" });
     const cancel = dialog.getByRole("button", { name: "取消" });
     await expect(cancel).toBeFocused();

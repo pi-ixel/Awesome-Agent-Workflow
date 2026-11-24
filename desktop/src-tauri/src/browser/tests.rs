@@ -922,6 +922,8 @@ fn td_026_u01_element_picker_exposes_complete_selection_mode_contract() {
         "pointermove",
         "crosshair",
         "data-aaw-picker-overlay",
+        "border-radius:var(--radius-control)",
+        "--radius-control: 8px;",
         "getBoundingClientRect",
         "MutationObserver",
         "__aawPickerState",
@@ -939,6 +941,7 @@ fn td_026_u01_element_picker_exposes_complete_selection_mode_contract() {
         );
     }
     for forbidden in [
+        "__AAW_RADIUS_DECLARATIONS__",
         ".value",
         "document.cookie",
         "localStorage",

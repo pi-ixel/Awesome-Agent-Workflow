@@ -150,7 +150,7 @@ function McpServiceRow({
     <li className="min-w-0">
       <article
         aria-label={name}
-        className={`flex min-w-0 items-center gap-2 rounded-xl border bg-surface pr-3 ${selected ? "border-ink-faint" : "border-line"}`}
+        className={`flex min-w-0 items-center gap-2 rounded-popover border bg-surface pr-3 ${selected ? "border-ink-faint" : "border-line"}`}
       >
         <NavigationRow
           layout="compound"
@@ -161,7 +161,7 @@ function McpServiceRow({
           aria-label={name}
           onClick={onSelect}
         >
-          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-skill-reference-lilac/10 text-skill-reference-lilac">
+          <span className="grid size-9 shrink-0 place-items-center rounded-control bg-skill-reference-lilac/10 text-skill-reference-lilac">
             <PlugIcon className="ui-icon-16" />
           </span>
           <span className="min-w-0">

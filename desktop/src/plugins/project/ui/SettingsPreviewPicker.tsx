@@ -20,7 +20,7 @@ export function SettingsPreviewPicker<Value extends string>({
       {choices.map((choice) => (
         <div
           key={choice.value}
-          className={`relative row-span-2 grid min-w-0 grid-rows-subgrid gap-y-3 rounded-xl border p-3 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus-ring ${
+          className={`relative row-span-2 grid min-w-0 grid-rows-subgrid gap-y-3 rounded-popover border p-3 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus-ring ${
             value === choice.value
               ? "border-info/70 bg-info/5"
               : "border-line hover:bg-hover"
@@ -43,7 +43,7 @@ export function SettingsPreviewPicker<Value extends string>({
             inert
             aria-hidden="true"
             data-settings-preview=""
-            className="grid min-w-0 overflow-hidden rounded-lg bg-base"
+            className="grid min-w-0 overflow-hidden rounded-control bg-base"
           >
             {renderPreview(choice.value)}
           </div>

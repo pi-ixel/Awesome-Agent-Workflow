@@ -301,10 +301,13 @@ for (const width of [1550, 950]) {
     const capsule = page.getByRole("button", { name: /^展开会话状态/ });
     const collapse = page.getByRole("button", { name: "收起会话状态" });
     const panel = page.locator(".session-status-panel");
+    const surface = page.getByRole("region", { name: "会话状态", exact: true });
 
+    await expect(capsule).toHaveCSS("border-radius", "12px");
     await capsule.click();
     expect(await layout()).toEqual(original);
     await expect(panel).toHaveCSS("opacity", "1");
+    await expect(surface).toHaveCSS("border-radius", "12px");
     expect(await layout()).toEqual(original);
     await input.click();
     await expect(input).toHaveValue("输入区草稿");
@@ -314,6 +317,7 @@ for (const width of [1550, 950]) {
     await collapse.click();
     expect(await layout()).toEqual(original);
     await expect(panel).toBeHidden();
+    await expect(capsule).toHaveCSS("border-radius", "12px");
     expect(await layout()).toEqual(original);
 
     await capsule.click();

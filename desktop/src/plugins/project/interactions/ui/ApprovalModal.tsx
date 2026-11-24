@@ -87,7 +87,7 @@ export function ApprovalModal({ item }: { readonly item: PendingPermission }) {
             {editPayload !== null ? (
               <EditDiffView defaultExpanded={true} payload={editPayload} />
             ) : (
-              <pre className="rounded-lg border border-line bg-base px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap wrap-anywhere text-ink">
+              <pre className="rounded-control border border-line bg-base px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap wrap-anywhere text-ink">
                 {commandText ?? (item.inputSummary || "（无输入参数）")}
               </pre>
             )}

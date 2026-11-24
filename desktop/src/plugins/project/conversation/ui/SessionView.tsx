@@ -357,7 +357,7 @@ function DraftPromptChips({
             if (prompt.run) prompt.run();
             else if (prompt.text) composer?.prefill(prompt.text);
           }}
-          className="chip-in lift press rounded-full! border border-line-strong bg-surface px-3.5 py-1.5 text-ui-sm text-ink-mute shadow-elev-1 hover:border-ink-faint hover:text-ink"
+          className="chip-in lift press rounded-pill! border border-line-strong bg-surface px-3.5 py-1.5 text-ui-sm text-ink-mute shadow-elev-1 hover:border-ink-faint hover:text-ink"
         >
           {prompt.label}
         </ActionButton>
@@ -1268,7 +1268,7 @@ export function SessionView({
                       onClick={backToBottom}
                       aria-label="回到底部"
                       data-hint="回到底部"
-                      className="absolute bottom-full left-1/2 z-30 mb-2 flex -translate-x-1/2 items-center justify-center rounded-full border border-line-strong bg-surface text-ink shadow-sm transition-colors hover:bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                      className="absolute bottom-full left-1/2 z-30 mb-2 flex -translate-x-1/2 items-center justify-center rounded-pill border border-line-strong bg-surface text-ink shadow-sm transition-colors hover:bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                     >
                       <ArrowDownIcon className="ui-icon-16" />
                     </IconButton>
@@ -1277,7 +1277,7 @@ export function SessionView({
                     <div className="px-5">
                       <div
                         role="alert"
-                        className={`mx-auto mb-2 flex w-full flex-wrap items-center gap-3 rounded-lg border border-line bg-surface px-4 py-2.5 text-sm text-danger-ink ${widthClass}`}
+                        className={`mx-auto mb-2 flex w-full flex-wrap items-center gap-3 rounded-control border border-line bg-surface px-4 py-2.5 text-sm text-danger-ink ${widthClass}`}
                       >
                         <span className="font-medium">
                           {turnError.category === "auth"
@@ -1334,7 +1334,7 @@ export function SessionView({
                           type="button"
                           aria-label="关闭错误提示"
                           onClick={clearTurnError}
-                          className="rounded text-ink-faint hover:text-ink"
+                          className="rounded-control text-ink-faint hover:text-ink"
                         >
                           <XIcon className="ui-icon-12" />
                         </IconButton>
@@ -1412,7 +1412,7 @@ export function SessionView({
                 onClick={() => {
                   preferences?.setChatWidth(nextWidth);
                 }}
-                className="absolute left-3 top-2 z-10 rounded-md border border-line bg-surface/80 text-ink-faint backdrop-blur transition-colors hover:border-ink-faint hover:text-ink-soft"
+                className="absolute left-3 top-2 z-10 rounded-control border border-line bg-surface/80 text-ink-faint backdrop-blur transition-colors hover:border-ink-faint hover:text-ink-soft"
               >
                 {chatWidth === "wide" ? (
                   <WidthWideIcon className="ui-icon-14" />

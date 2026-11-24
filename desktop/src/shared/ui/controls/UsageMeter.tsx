@@ -27,11 +27,11 @@ export function UsageMeter({
       aria-valuemax={100}
       aria-valuenow={value}
       aria-valuetext={`${display}%`}
-      className="relative isolate flex w-full items-center justify-end overflow-hidden rounded-full bg-usage-meter-track px-2 py-0.5 text-ui-sm leading-none font-normal text-usage-meter-ink"
+      className="relative isolate flex w-full items-center justify-end overflow-hidden rounded-pill bg-usage-meter-track px-2 py-0.5 text-ui-sm leading-none font-normal text-usage-meter-ink"
     >
       <span
         aria-hidden="true"
-        className={`absolute inset-y-0 left-0 -z-10 rounded-full ${fill}`}
+        className={`absolute inset-y-0 left-0 -z-10 rounded-pill ${fill}`}
         style={{ width: `${value}%` }}
       />
       <span className="inline-flex items-baseline gap-px whitespace-nowrap">

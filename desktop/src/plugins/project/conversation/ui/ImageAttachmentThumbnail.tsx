@@ -17,7 +17,7 @@ export function ImageAttachmentThumbnail({
         tone="ghost"
         aria-label={label}
         onClick={onPreview}
-        className="block size-full overflow-hidden rounded-xl! border border-line bg-raised hover:border-ink-faint"
+        className="block size-full overflow-hidden rounded-popover! border border-line bg-raised hover:border-ink-faint"
       >
         <img src={src} alt={alt} className="size-full object-cover" />
       </ActionButton>

@@ -46,7 +46,7 @@ export function StatusChipMenu({
             trigger: event.currentTarget,
           });
         }}
-        className={`flex min-h-7 items-center gap-1 rounded-lg px-1.5 py-1 text-ui-base font-normal ${
+        className={`flex min-h-7 items-center gap-1 rounded-control px-1.5 py-1 text-ui-base font-normal ${
           warning ? "text-warn-ink! hover:text-warn-ink!" : "text-ink"
         }`}
       >

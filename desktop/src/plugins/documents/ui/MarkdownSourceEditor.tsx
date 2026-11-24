@@ -118,7 +118,7 @@ const editorTheme = EditorView.theme({
     width: "max(16px, calc(var(--ui-icon-unit) * 16))",
     height: "max(16px, calc(var(--ui-icon-unit) * 16))",
     padding: "0",
-    borderRadius: "4px",
+    borderRadius: "var(--radius-control)",
     verticalAlign: "middle",
     fontSize: "0",
     color: "var(--color-ink-subtle)",

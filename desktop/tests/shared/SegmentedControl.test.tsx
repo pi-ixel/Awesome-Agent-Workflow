@@ -9,9 +9,9 @@ it("uses the shared pill treatment and emits the selected value", () => {
   const view = render(<SegmentedControl groupLabel="时间范围" value={7} options={options} onChange={onChange} />);
   const first = screen.getByRole("button", { name: "近 7 天", pressed: true });
   const second = screen.getByRole("button", { name: "近 30 天", pressed: false });
-  expect(first).toHaveClass("min-h-6", "border", "border-line-strong", "bg-surface", "rounded-full", "px-3", "text-ui-caption");
+  expect(first).toHaveClass("min-h-6", "border", "border-line-strong", "bg-surface", "rounded-pill", "px-3", "text-ui-caption");
   const group = screen.getByRole("group", { name: "时间范围" });
-  expect(group).toHaveClass("bg-base", "rounded-2xl", "ring-1", "ring-inset", "ring-line");
+  expect(group).toHaveClass("bg-base", "rounded-pill", "ring-1", "ring-inset", "ring-line");
   expect(group).not.toHaveClass("bg-hover");
   expect(second).toHaveClass("border", "border-transparent", "bg-transparent");
   fireEvent.click(second);

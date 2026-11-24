@@ -755,7 +755,7 @@ export function FileTree({
       aria-label={treeVisible ? "收起目录" : "展开目录"}
       data-hint={treeVisible ? "收起目录" : "展开目录"}
       aria-pressed={treeVisible}
-      className={`flex shrink-0 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink ${treeOnRight ? "mr-1.5" : "ml-1.5"}`}
+      className={`flex shrink-0 items-center justify-center rounded-control text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink ${treeOnRight ? "mr-1.5" : "ml-1.5"}`}
       onClick={() => commitSplit({ ...split, visible: !treeVisible })}
     >
       <TreeToggleIcon className="ui-icon-16" />
@@ -783,7 +783,7 @@ export function FileTree({
             type="button"
             aria-label="文件树设置"
             data-hint="文件树设置"
-            className={`flex shrink-0 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink ${treeOnRight ? "" : "mr-1.5"}`}
+            className={`flex shrink-0 items-center justify-center rounded-control text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink ${treeOnRight ? "" : "mr-1.5"}`}
             onClick={onOpenTreeSettings}
           >
             <SettingsIcon className="ui-icon-16" />
@@ -828,7 +828,7 @@ export function FileTree({
                       type="button"
                       aria-label="清空文件搜索"
                       data-hint="清空文件搜索"
-                      className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center justify-center rounded-sm text-ink-subtlest transition-colors hover:bg-surface-hover hover:text-ink"
+                      className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center justify-center rounded-control text-ink-subtlest transition-colors hover:bg-surface-hover hover:text-ink"
                       onClick={() => setFileSearchQuery("")}
                     >
                       <XIcon className="ui-icon-12" />
@@ -851,7 +851,7 @@ export function FileTree({
                   data-hint="更多"
                   aria-haspopup="menu"
                   aria-expanded={menu?.id === "header" && !menu.closing}
-                  className="flex items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+                  className="flex items-center justify-center rounded-control text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
                   onClick={(event) => {
                     if (menu?.id === "header" && !menu.closing) dismissMenu();
                     else openHeaderMenu(event.currentTarget);
@@ -865,7 +865,7 @@ export function FileTree({
                     aria-pressed={changedOnly}
                     aria-label={changedOnly ? "显示全部文件" : "仅显示变更文件"}
                     data-hint={changedOnly ? "显示全部文件" : "仅显示变更文件"}
-                    className={`flex items-center justify-center rounded-md transition-colors hover:bg-surface-hover hover:text-ink ${
+                    className={`flex items-center justify-center rounded-control transition-colors hover:bg-surface-hover hover:text-ink ${
  changedOnly ? "bg-selected text-ink" : "text-ink-subtle"
  }`}
                     onClick={() => setChangedOnly((current) => !current)}
@@ -877,7 +877,7 @@ export function FileTree({
                   key={root}
                   label="刷新文件树"
                   disabled={tree.refreshing}
-                  className="flex min-h-6 min-w-6 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex min-h-6 min-w-6 items-center justify-center rounded-control text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
                   onRefresh={async () => {
                     if (hasFileSearchQuery) {
                       setSearchRefreshVersion((value) => value + 1);

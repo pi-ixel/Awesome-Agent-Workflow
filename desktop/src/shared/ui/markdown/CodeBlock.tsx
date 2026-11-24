@@ -133,7 +133,7 @@ function CodeBlockWrapButton() {
       aria-pressed={wrapLongLines}
       onClick={toggleWrapLongLines}
       {...hint}
-      className={`flex shrink-0 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-raised hover:text-ink ${
+      className={`flex shrink-0 items-center justify-center rounded-control text-ink-faint transition-colors hover:bg-raised hover:text-ink ${
  wrapLongLines ? "bg-raised text-ink" : ""
  }`}
     >
@@ -158,7 +158,7 @@ function CodeBlockPreviewButton({
       disabled={disabled}
       {...hint}
       onClick={onClick}
-      className="flex shrink-0 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-raised hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+      className="flex shrink-0 items-center justify-center rounded-control text-ink-faint transition-colors hover:bg-raised hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
     >
       <Maximize2Icon />
     </IconButton>
@@ -300,7 +300,7 @@ export function CodeBlock({
     <CodeBlockContext.Provider value={contextValue}>
       <div
         ref={containerRef}
-        className="group relative my-4 w-full overflow-hidden rounded-xl border border-line bg-surface"
+        className="group relative my-4 w-full overflow-hidden rounded-popover border border-line bg-surface"
         data-language={language}
         style={{
           containIntrinsicSize: "auto 200px",

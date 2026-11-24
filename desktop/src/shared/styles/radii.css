@@ -1,0 +1,8 @@
+/* Desktop 应用内圆角按控件用途选择，独立于界面字号。 */
+@theme static {
+  --radius-flat: 0px;
+  --radius-control: 8px;
+  --radius-popover: 12px;
+  --radius-panel: 16px;
+  --radius-pill: 9999px;
+}

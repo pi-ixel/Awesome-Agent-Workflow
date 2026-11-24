@@ -68,7 +68,7 @@ export function TurnUsageBadge({ usage }: { readonly usage: TurnUsageDetails | n
         onKeyDown={(event) => {
           if (event.key === "Escape") setPosition(null);
         }}
-        className="inline-flex min-h-7 cursor-pointer items-center gap-1.5 rounded-lg px-1.5 leading-none tabular-nums transition-colors hover:bg-raised hover:text-ink-soft"
+        className="inline-flex min-h-7 cursor-pointer items-center gap-1.5 rounded-control px-1.5 leading-none tabular-nums transition-colors hover:bg-raised hover:text-ink-soft"
       >
         <DatabaseIcon className="ui-icon-15 shrink-0" />
         用量 {total === undefined ? "未知" : `${compactTokens.format(total)} tok`}

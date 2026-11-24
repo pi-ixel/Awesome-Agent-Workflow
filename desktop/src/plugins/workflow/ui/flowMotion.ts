@@ -27,10 +27,10 @@ function pillShape(card: Element, pill: Box): Keyframe {
   const r = card.getBoundingClientRect();
   return {
     transform: `translate(${pill.left - r.left}px, ${pill.top - r.top}px)`,
-    clipPath: `inset(0px ${r.width - pill.width}px ${r.height - pill.height}px 0px round ${pill.height / 2}px)`,
+    clipPath: `inset(0px ${r.width - pill.width}px ${r.height - pill.height}px 0px round min(var(--radius-pill), ${pill.height / 2}px))`,
   };
 }
-const cardShape: Keyframe = { transform: "translate(0px, 0px)", clipPath: "inset(0px 0px 0px 0px round 10px)" };
+const cardShape: Keyframe = { transform: "translate(0px, 0px)", clipPath: "inset(0px 0px 0px 0px round var(--radius-control))" };
 
 /** 胶囊 → 卡片。 */
 export function grow(card: HTMLElement, pill: Box, color: string, index: number): Promise<unknown> {

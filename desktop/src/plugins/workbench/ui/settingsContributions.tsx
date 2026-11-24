@@ -53,7 +53,7 @@ function GeneralSettings() {
           ) : (
             // 只有一项可选（English 预留未下发）：呈静态值，不渲染
             // 单选项选单——看得见却只有一个方向的选择器是伪控件
-            <span className="inline-flex min-h-8 items-center rounded-md bg-surface px-3 py-1 text-ui-base font-medium text-ink-mute">
+            <span className="inline-flex min-h-8 items-center rounded-control bg-surface px-3 py-1 text-ui-base font-medium text-ink-mute">
               {languageOptions[0]?.label ?? "中文"}
             </span>
           )}

@@ -154,7 +154,7 @@ export function FileDocumentTools({
   const allExpanded = branches.length > 0 && branches.every(isExpanded);
   const toggleAllLabel = allExpanded ? "全部折叠" : "全部展开";
   const iconButton =
-    "flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink";
+    "flex size-7 shrink-0 items-center justify-center rounded-control text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink";
   const name = `file-find-${scope.replace(/[^a-z0-9]/gi, "")}`;
   useEffect(() => documents.fileFind.register(scope), [documents, scope]);
   const openFind = useCallback(() => {
@@ -307,13 +307,13 @@ export function FileDocumentTools({
     return (
       <div key={`${heading.line}-${i}`}>
         <div
-          className={`flex items-center rounded ${active ? rowSelectedClass + " text-ink" : "text-ink-soft hover:bg-surface-hover"}`}
+          className={`flex items-center rounded-control ${active ? rowSelectedClass + " text-ink" : "text-ink-soft hover:bg-surface-hover"}`}
           style={{ paddingLeft: `${heading.depth * 10}px` }}
         >
           {hasChildren ? (
             <IconButton iconSize="compact"
               type="button"
-              className={`flex shrink-0 items-center justify-center rounded hover:bg-hover ${focusVisibleRing}`}
+              className={`flex shrink-0 items-center justify-center rounded-control hover:bg-hover ${focusVisibleRing}`}
               aria-label={`${expanded ? "折叠" : "展开"} ${heading.title}`}
               aria-expanded={expanded}
               aria-controls={branchId}

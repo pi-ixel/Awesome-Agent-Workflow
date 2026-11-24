@@ -93,7 +93,7 @@ export function SegmentedControl<T extends string | number>({
       ref={containerRef}
       role={tabs ? "tablist" : "group"}
       aria-label={groupLabel}
-      className={`relative inline-flex max-w-full flex-wrap gap-0.5 rounded-2xl p-0.5 ${
+      className={`relative inline-flex max-w-full flex-wrap gap-0.5 rounded-pill p-0.5 ${
         appearance === "quiet"
           ? "bg-transparent"
           : "bg-base ring-1 ring-inset ring-line"
@@ -107,9 +107,7 @@ export function SegmentedControl<T extends string | number>({
             height: sliding.rect.height,
             transform: `translate3d(${sliding.rect.left}px, ${sliding.rect.top}px, 0)`,
           }}
-          className={`pointer-events-none absolute top-0 left-0 ${
-            appearance === "quiet" ? "rounded-md" : "rounded-full"
-          } border ${
+          className={`pointer-events-none absolute top-0 left-0 rounded-pill border ${
             sliding.animate
               ? "transition-[transform,width,height,background-color,border-color] duration-200 ease-out motion-reduce:transition-none"
               : ""
@@ -160,9 +158,7 @@ export function SegmentedControl<T extends string | number>({
                   }
                 : undefined
             }
-            className={`relative z-10 inline-flex min-h-6 shrink-0 items-center ${
-              appearance === "quiet" ? "rounded-md" : "rounded-full"
-            } border px-3 text-ui-caption leading-none transition-colors ${focusVisibleRing} ${
+            className={`relative z-10 inline-flex min-h-6 shrink-0 items-center rounded-pill border px-3 text-ui-caption leading-none transition-colors ${focusVisibleRing} ${
               selected && option.value === warnValue
                 ? showStaticSurface
                   ? "border-warn-line bg-warn-bg/70 font-medium text-warn-ink"
@@ -181,7 +177,7 @@ export function SegmentedControl<T extends string | number>({
               <span
                 aria-hidden={true}
                 data-dot=""
-                className="ml-1 inline-block ui-icon-6 shrink-0 rounded-full bg-warn-ink"
+                className="ml-1 inline-block ui-icon-6 shrink-0 rounded-pill bg-warn-ink"
               />
             )}
           </button>

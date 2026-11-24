@@ -76,6 +76,9 @@ test("列表选择的长选项和分组随字号换行，展开时保留活动�
   const font = page.getByRole("spinbutton", { name: "界面字号" });
   await trigger.press("ArrowDown");
   await trigger.press("End");
+  await expect(trigger).toHaveCSS("border-radius", "8px");
+  await expect(list).toHaveCSS("border-radius", "12px");
+  await expect(last).toHaveCSS("border-radius", "8px");
   const id = await last.getAttribute("id");
   expect(id).toBeTruthy();
   for (const [theme, px] of [
@@ -125,6 +128,7 @@ test("定时任务编辑器实时切换外观时保留星期选择、焦点和�
   await tasks.setViewportSize({ width: 430, height: 850 });
   await tasks.goto("/tests/visual/sidebarTypographyFixture.html?task-editor");
   const dialog = tasks.getByRole("dialog", { name: "编辑定时任务" });
+  await expect(dialog).toHaveCSS("border-radius", "16px");
   const name = dialog.getByRole("textbox", { name: "任务名称" });
   const monday = dialog.getByRole("checkbox", { name: "星期一" });
   const tuesday = dialog.getByRole("checkbox", { name: "星期二" });

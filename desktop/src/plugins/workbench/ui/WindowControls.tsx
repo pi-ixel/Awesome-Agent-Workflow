@@ -36,7 +36,7 @@ export function WindowControls() {
   // 默认红 oklch(57.7% 0.245 27.325)，前景白与 ZCode destructive-foreground
   // 一致——见 index.css 的 token 注释）
   const buttonBase =
-    "flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink";
+    "flex shrink-0 items-center justify-center rounded-control text-ink transition-colors hover:bg-hover hover:text-ink";
   return (
     <div
       className="flex shrink-0 items-center gap-0.5"
@@ -73,7 +73,7 @@ export function WindowControls() {
         data-testid="window-control-close"
         aria-label="关闭窗口"
         onClick={chrome.requestClose}
-        className="flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-destructive hover:text-danger-contrast"
+        className="flex shrink-0 items-center justify-center rounded-control text-ink transition-colors hover:bg-destructive hover:text-danger-contrast"
         {...hintClose}
       >
         <XIcon className="ui-icon-16" strokeWidth={2} />

@@ -99,10 +99,10 @@ export function LoginScreen({ account }: { readonly account: AccountService }) {
 
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-4">
-      <div className="w-full max-w-sm rounded-xl border border-line-strong bg-surface p-6 shadow-elev-3">
+      <div className="w-full max-w-sm rounded-popover border border-line-strong bg-surface p-6 shadow-elev-3">
         {/* 品牌头 */}
         <div className="flex items-center gap-3">
-          <BrandMark className="ui-icon-40 rounded-lg" />
+          <BrandMark className="ui-icon-40 rounded-control" />
           <div className="min-w-0">
             <h1 className="text-ui-xl font-semibold text-ink">登录 AAW</h1>
             <p className="truncate text-ui-sm text-ink-mute">
@@ -132,7 +132,7 @@ export function LoginScreen({ account }: { readonly account: AccountService }) {
                   tone="ghost"
                   type="button"
                   onClick={cancelSsoLogin}
-                  className="shrink-0 rounded-md px-2 py-1 text-ui-sm"
+                  className="shrink-0 rounded-control px-2 py-1 text-ui-sm"
                 >
                   取消
                 </ActionButton>
@@ -141,7 +141,7 @@ export function LoginScreen({ account }: { readonly account: AccountService }) {
             {ssoError !== null && !ssoPending && (
               <p
                 role="alert"
-                className="mt-2 rounded-md border border-danger-line bg-danger-bg/40 px-2.5 py-2 text-ui-sm break-all text-danger-ink"
+                className="mt-2 rounded-control border border-danger-line bg-danger-bg/40 px-2.5 py-2 text-ui-sm break-all text-danger-ink"
               >
                 {ssoError}
               </p>

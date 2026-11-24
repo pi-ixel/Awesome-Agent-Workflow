@@ -31,7 +31,7 @@ export function UpdateButton({
         tone="ghost"
         type="button"
         aria-label="更新 Desktop"
-        className="update-button inline-flex min-h-[26px] min-w-[30px] shrink-0 items-center justify-center rounded-full! px-2.5 text-ui-caption font-medium leading-none text-foreground-inverse transition-[filter] hover:brightness-110"
+        className="update-button inline-flex min-h-[26px] min-w-[30px] shrink-0 items-center justify-center rounded-pill! px-2.5 text-ui-caption font-medium leading-none text-foreground-inverse transition-[filter] hover:brightness-110"
         onClick={() => updates.setDialog(true)}
       >
         <ArrowDownToLineIcon

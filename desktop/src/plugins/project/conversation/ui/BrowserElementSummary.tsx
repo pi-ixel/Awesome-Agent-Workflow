@@ -15,7 +15,7 @@ export function BrowserElementSummary({
       {elements.map((element) => (
         <span
           key={element.referenceId}
-          className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-brand/30 bg-brand/10 py-1 pl-2.5 pr-1 text-ui-caption text-ink"
+          className="inline-flex max-w-full items-center gap-1.5 rounded-pill border border-brand/30 bg-brand/10 py-1 pl-2.5 pr-1 text-ui-caption text-ink"
           data-hint={`${element.role} · ${element.selector}`}
         >
           <MousePointer2Icon className="ui-icon-16 shrink-0 text-brand" />
@@ -28,7 +28,7 @@ export function BrowserElementSummary({
           <IconButton
             aria-label={`删除元素引用 ${element.text || element.role}`}
             data-hint="删除元素引用"
-            className="rounded-full text-ink-mute hover:bg-brand/15 hover:text-ink"
+            className="rounded-pill text-ink-mute hover:bg-brand/15 hover:text-ink"
             onClick={() => onRemove(element.referenceId)}
           >
             <XIcon className="ui-icon-12" />

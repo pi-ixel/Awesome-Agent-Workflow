@@ -5,10 +5,11 @@
    出现 MathML + HTML 双层重复显示) */
 @import "streamdown/styles.css";
 @import "katex/dist/katex.min.css";
+@import "./radii.css";
 /* Tailwind 扫描 streamdown 产物里的类名(data-streamdown 结构使用工具类) */
 @source "../../../node_modules/streamdown/dist";
 
-/* Shared elevation for Desktop dialogs, menus, and other floating surfaces. */
+/* 浮层的共享阴影。 */
 @theme inline {
   --shadow-floating: var(--shadow-md);
 }
@@ -119,7 +120,7 @@
   }
 
   .hint-surface {
-    @apply rounded-lg border border-line-strong bg-surface text-ink shadow-floating;
+    @apply border border-line-strong bg-surface text-ink shadow-floating;
   }
 }
 
@@ -188,7 +189,7 @@ html.theme-warm {
 
 ::-webkit-scrollbar-thumb {
   background: var(--color-line-strong);
-  border-radius: 4px;
+  border-radius: var(--radius-pill);
 }
 
 ::-webkit-scrollbar-track {
@@ -224,7 +225,7 @@ html.theme-warm {
 .conversation-scroll::-webkit-scrollbar-thumb {
   min-height: 32px;
   border: 3px solid transparent;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--color-line-strong) var(--conversation-thumb-opacity), transparent);
   background-clip: padding-box;
 }

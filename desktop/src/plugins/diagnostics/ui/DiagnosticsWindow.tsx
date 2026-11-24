@@ -376,7 +376,7 @@ export function DiagnosticsWindow({
       {(isStale || stalled.length > 0 || dropped > 0 || unconfirmed > 0) && (
         <div
           role="status"
-          className="space-y-1 rounded-lg border border-warn-line px-3 py-2 text-ui-sm text-warn-ink"
+          className="space-y-1 rounded-control border border-warn-line px-3 py-2 text-ui-sm text-warn-ink"
         >
           {isStale ? (
             <p>暂未收到主窗口的采集状态。</p>
@@ -473,7 +473,7 @@ export function DiagnosticsWindow({
           </div>
           <div
             ref={list}
-            className="min-h-0 flex-1 overflow-auto rounded-xl border border-line bg-surface"
+            className="min-h-0 flex-1 overflow-auto rounded-popover border border-line bg-surface"
             aria-label="日志列表"
             onScroll={(event) => {
               const { scrollHeight, scrollTop, clientHeight } =

@@ -298,12 +298,12 @@ export function RemoteHostFormModal({
             />
           </label>
         ) : (
-          <p className="rounded-lg border border-line bg-raised/50 px-3 py-2 text-ui-xs text-ink-mute">
+          <p className="rounded-control border border-line bg-raised/50 px-3 py-2 text-ui-xs text-ink-mute">
             将通过本机 SSH Agent 自动认证（Windows OpenSSH Authentication Agent 或 Unix SSH_AUTH_SOCK）。
           </p>
         )}
 
-        <div className="rounded-lg border border-line bg-raised/30 px-3 py-2">
+        <div className="rounded-control border border-line bg-raised/30 px-3 py-2">
           <Disclosure
             defaultOpen={defaultAdvancedOpen}
             summary={
@@ -387,13 +387,13 @@ export function RemoteHostFormModal({
         {error && (
           <div
             role="alert"
-            className="rounded-lg border border-danger-ink/30 bg-danger-soft px-3 py-2 text-ui-xs text-danger-ink"
+            className="rounded-control border border-danger-ink/30 bg-danger-soft px-3 py-2 text-ui-xs text-danger-ink"
           >
             {error}
           </div>
         )}
         {status && (
-          <div className="rounded-lg border border-ok-ink/30 bg-ok-soft px-3 py-2 text-ui-xs text-ok-ink">
+          <div className="rounded-control border border-ok-ink/30 bg-ok-soft px-3 py-2 text-ui-xs text-ok-ink">
             {status}
           </div>
         )}

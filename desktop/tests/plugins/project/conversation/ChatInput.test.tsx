@@ -8,7 +8,7 @@ import {
 } from "../../../helpers/foreground.ts";
 /**
  * 输入区交互：Enter 发送 / Shift+Enter 换行 / IME 组词 / 运行中变「停止」；
- * 悬浮形态（rounded-2xl 卡片、透明输入行、下行元信息条）见「悬浮形态」组。
+ * 悬浮形态（面板圆角、透明输入行、下行元信息条）见「悬浮形态」组。
  */
 import {
   act,
@@ -276,7 +276,7 @@ describe("ChatInput 悬浮形态", () => {
     );
     const sendButton = screen.getByRole("button", { name: "发送" });
     expect(sendButton).toHaveClass(
-      "rounded-lg",
+      "rounded-control",
       "bg-brand",
       "text-foreground-inverse",
     );
@@ -300,7 +300,7 @@ describe("ChatInput 悬浮形态", () => {
       />,
     );
     expect(screen.getByRole("button", { name: "停止" })).toHaveClass(
-      "rounded-lg",
+      "rounded-control",
       "bg-raised",
     );
   });

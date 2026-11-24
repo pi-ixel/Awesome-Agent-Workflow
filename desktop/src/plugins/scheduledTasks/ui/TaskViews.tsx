@@ -97,14 +97,14 @@ export function TaskWorkspace({ scheduler, project, agents, openRun }: {
           />
           {task && (
             <>
-              <p className="whitespace-pre-wrap break-words rounded-xl border border-line bg-surface p-3 text-ui-base">{task.prompt}</p>
+              <p className="whitespace-pre-wrap break-words rounded-popover border border-line bg-surface p-3 text-ui-base">{task.prompt}</p>
               <p className="text-ui-sm text-ink-mute">{timing[task.schedule.kind]} · {task.schedule.time} · {next ? `下次运行 ${formatDate(next.at)}` : "暂无下次运行"}</p>
             </>
           )}
           <div>
             <PageHeader size="section" title="运行记录" className="mb-2" />
             {!history.length && <p className="text-ui-sm text-ink-mute">暂无运行记录</p>}
-            <ul className="divide-y divide-line rounded-xl border border-line">
+            <ul className="divide-y divide-line rounded-popover border border-line">
               {history.map((run) => {
                 const isOpen = openedRun === run.id;
                 const detailsId = `scheduled-run-details-${run.id}`;
@@ -230,7 +230,7 @@ function TaskEditor({ task, scheduler, project, agents }: {
         <header className="flex shrink-0 items-center justify-between px-6 pt-5 pb-3">
           <h2 className="text-ui-lg font-semibold">{label}</h2>
           <IconButton iconSize="dialog" type="button" aria-label="关闭" disabled={saving} onClick={close}
-            className={`flex items-center justify-center rounded-full text-ink-mute hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}>
+            className={`flex items-center justify-center rounded-pill text-ink-mute hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}>
             <XIcon className="ui-icon-16" />
           </IconButton>
         </header>
@@ -247,7 +247,7 @@ function TaskEditor({ task, scheduler, project, agents }: {
                 className={settingsTextareaClass} />
             </label>
           </div>
-          <div className="mt-4 divide-y divide-line rounded-2xl border border-line">
+          <div className="mt-4 divide-y divide-line rounded-panel border border-line">
             <SettingRow density="compact" label="重复">
               <Listbox label="重复" appearance="quiet" value={schedule.kind}
                 options={Object.entries(timing).map(([value, label]) => ({ value, label }))}
@@ -283,7 +283,7 @@ function TaskEditor({ task, scheduler, project, agents }: {
               </div>
             </SettingRow>}
           </div>
-          <div className="mt-3 rounded-2xl border border-line">
+          <div className="mt-3 rounded-panel border border-line">
             <SettingRow density="compact" label="项目">
               <Listbox label="项目" appearance="quiet" className="max-w-full py-1 text-ui-sm" value={path || null} disabled={checking} placeholder="选择项目"
                 options={Array.from(new Set([...paths, ...(task ? [task.project] : [])])).map((value) => ({ value, label: value }))}
@@ -291,19 +291,19 @@ function TaskEditor({ task, scheduler, project, agents }: {
             </SettingRow>
           </div>
           <NavigationRow layout="compound" aria-expanded={advanced} aria-controls="task-advanced" onClick={() => setAdvanced(!advanced)}
-            className={`my-3 flex min-h-8 items-center gap-1.5 rounded-lg px-1 text-ui-sm text-ink-mute hover:text-ink`}>
+            className={`my-3 flex min-h-8 items-center gap-1.5 rounded-control px-1 text-ui-sm text-ink-mute hover:text-ink`}>
             高级 <ChevronDownIcon className={`ui-icon-14 ${treeChevronClass} ${advanced ? "rotate-180" : ""}`} />
           </NavigationRow>
           <TreeBranch id="task-advanced" open={advanced}>
             <div className="flex flex-col gap-3 pb-1">
-              <div className="rounded-2xl border border-line">
+              <div className="rounded-panel border border-line">
                 <SettingRow density="compact" label="运行结果通知">
                   <Listbox label="运行结果通知" appearance="quiet" value={notifications}
                     options={[{ value: "all", label: "所有运行" }, { value: "failures", label: "仅失败" }, { value: "off", label: "关闭" }]}
                     onChange={(value) => setNotifications(value as TaskInput["notifications"])} />
                 </SettingRow>
               </div>
-              <div className="divide-y divide-line rounded-2xl border border-line">
+              <div className="divide-y divide-line rounded-panel border border-line">
                 <SettingRow density="compact" label="模型">
                   <Listbox label="模型" disabled={checking || Boolean(optionsError)} triggerLabel={checking ? "正在读取…" : undefined} appearance="quiet" className="max-w-full py-1 text-ui-sm" value={model} onChange={setModel}
                     options={[{ value: "", label: "Agent 默认值" },
@@ -324,8 +324,8 @@ function TaskEditor({ task, scheduler, project, agents }: {
         <footer className="flex shrink-0 flex-col gap-3 px-6 pt-3 pb-5">
           {error && <p role="alert" className="text-ui-sm text-danger-ink">{error}</p>}
           <div className="flex justify-end gap-2">
-            <ActionButton tone="secondary" type="button" className="min-h-9 rounded-full! px-5 text-ui-sm" onClick={close} disabled={saving}>取消</ActionButton>
-            <ActionButton tone="primary" type="submit" className="min-h-9 rounded-full! px-5 text-ui-sm" disabled={saving || checking || Boolean(optionsError) || !path}>{task ? "保存" : "创建"}</ActionButton>
+            <ActionButton tone="secondary" type="button" className="min-h-9 px-5 text-ui-sm" onClick={close} disabled={saving}>取消</ActionButton>
+            <ActionButton tone="primary" type="submit" className="min-h-9 px-5 text-ui-sm" disabled={saving || checking || Boolean(optionsError) || !path}>{task ? "保存" : "创建"}</ActionButton>
           </div>
         </footer>
       </form>

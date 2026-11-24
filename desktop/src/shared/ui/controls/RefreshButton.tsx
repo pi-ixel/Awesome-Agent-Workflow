@@ -13,7 +13,7 @@ export function RefreshButton({
   role,
   className = showLabel
     ? ""
-    : "rounded p-1 text-ink-mute transition-colors enabled:hover:bg-raised enabled:hover:text-ink",
+    : "rounded-control p-1 text-ink-mute transition-colors enabled:hover:bg-raised enabled:hover:text-ink",
   iconClassName = "ui-icon-14",
 }: {
   onRefresh: () => Promise<unknown>;

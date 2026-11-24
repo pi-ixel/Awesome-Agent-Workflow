@@ -254,7 +254,7 @@ export function ColumnResizer(props: ColumnResizerProps) {
     >
       <span
         aria-hidden={true}
-        className={`pointer-events-none absolute rounded-full bg-focus-ring opacity-0 transition-opacity motion-reduce:transition-none group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[resizing=true]:opacity-100 ${indicator}`}
+        className={`pointer-events-none absolute rounded-pill bg-focus-ring opacity-0 transition-opacity motion-reduce:transition-none group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[resizing=true]:opacity-100 ${indicator}`}
       />
     </div>
   );

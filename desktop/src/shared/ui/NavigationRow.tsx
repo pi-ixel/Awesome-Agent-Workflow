@@ -30,12 +30,11 @@ export function NavigationRow({
       : isSelected
         ? rowSelectedClass
         : "enabled:hover:bg-surface-hover";
-  const corners = layout === "launcher" ? "rounded-xl" : "rounded-md";
   return (
     <button
       {...props}
       type={type}
-      className={`flex min-w-0 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-inset ${corners} ${focusVisibleRing} ${layouts[layout]} ${surface} ${className}`}
+      className={`flex min-w-0 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-inset rounded-control ${focusVisibleRing} ${layouts[layout]} ${surface} ${className}`}
     />
   );
 }

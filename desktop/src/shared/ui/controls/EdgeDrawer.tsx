@@ -33,7 +33,7 @@ export function EdgeDrawer({
       data-edge-drawer-sliding={sliding || undefined}
       hidden={!visible}
       inert={!open}
-      className={`${visible ? "flex" : "hidden"} ${className ?? ""}`}
+      className={`${visible ? "flex" : "hidden"} rounded-flat ${className ?? ""}`}
       onTransitionEnd={(event) => {
         if (sliding && event.target === event.currentTarget && event.propertyName === "translate")
           onSlideEnd?.();

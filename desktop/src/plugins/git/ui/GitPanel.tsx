@@ -234,7 +234,7 @@ function GitReview({
           aria-expanded={isOpen}
           aria-label={`${isOpen ? "收起" : "展开"} ${change.path}`}
           data-hint={`${change.oldPath ? `${change.oldPath} → ` : ""}${change.path} · ${change.status}`}
-          className={`sticky top-0 z-10 min-h-8 w-full items-center gap-3 rounded-none! px-3 text-ui-base hover:bg-surface-hover ${isOpen ? "bg-surface-hover" : "bg-base"}`}
+          className={`sticky top-0 z-10 min-h-8 w-full items-center gap-3 rounded-flat! px-3 text-ui-base hover:bg-surface-hover ${isOpen ? "bg-surface-hover" : "bg-base"}`}
           onClick={() => {
             setExpanded(isOpen ? null : key);
           }}

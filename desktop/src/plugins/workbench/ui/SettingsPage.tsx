@@ -191,7 +191,7 @@ function SettingsContent({
           aria-label="关闭设置"
           data-hint="关闭设置"
           onClick={() => readWorkbenchUi(workbenchLayout).closeOverlay()}
-          className={`flex items-center justify-center rounded-lg hover:bg-surface-hover ${focusVisibleRing}`}
+          className={`flex items-center justify-center rounded-control hover:bg-surface-hover ${focusVisibleRing}`}
         >
           <XIcon className="ui-icon-16" strokeWidth={1.5} />
         </IconButton>
@@ -294,9 +294,9 @@ function SettingsContent({
         </div>
         <p
           role="status"
-          className="pointer-events-none absolute bottom-4 right-6 flex items-center gap-2 rounded-md bg-base/90 px-2 py-1 text-xs text-ink-mute"
+          className="pointer-events-none absolute bottom-4 right-6 flex items-center gap-2 rounded-control bg-base/90 px-2 py-1 text-xs text-ink-mute"
         >
-          <span aria-hidden="true" className="size-1 rounded-full bg-ok-ink" />
+          <span aria-hidden="true" className="size-1 rounded-pill bg-ok-ink" />
           {storage.saving
             ? "正在保存…"
             : storage.error

@@ -45,7 +45,7 @@ export function LegacyAgentDataSection({
   return (
     <section
       aria-label="旧版会话数据恢复"
-      className="space-y-3 rounded border border-line p-4"
+      className="space-y-3 rounded-control border border-line p-4"
     >
       <h3>旧版会话数据恢复</h3>
       <p className="text-sm text-ink-mute">

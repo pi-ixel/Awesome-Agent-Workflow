@@ -150,7 +150,7 @@ export function DocumentPreview({
             <p className="text-ui-caption text-ink-mute">{emptyText}</p>
           ) : raw ? (
             isWorkbench ? (
-              <div className="flex min-w-0 overflow-x-auto rounded-lg border border-line bg-base font-mono text-ui-sm leading-relaxed">
+              <div className="flex min-w-0 overflow-x-auto rounded-control border border-line bg-base font-mono text-ui-sm leading-relaxed">
                 <pre
                   aria-hidden="true"
                   className="shrink-0 select-none border-r border-line px-3 py-3 text-right text-ink-mute"

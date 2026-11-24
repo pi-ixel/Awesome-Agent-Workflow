@@ -12,7 +12,7 @@ export const TextLink = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<"
         {...props}
         ref={ref}
         type={type}
-        className={`inline min-w-0 cursor-pointer rounded-sm text-left text-info-ink underline-offset-[3px] hover:underline disabled:cursor-not-allowed disabled:text-ink-mute disabled:no-underline aria-expanded:underline ${mono ? "font-mono text-ui-xs" : ""} ${focusVisibleRing} ${className}`}
+        className={`inline min-w-0 cursor-pointer rounded-control text-left text-info-ink underline-offset-[3px] hover:underline disabled:cursor-not-allowed disabled:text-ink-mute disabled:no-underline aria-expanded:underline ${mono ? "font-mono text-ui-xs" : ""} ${focusVisibleRing} ${className}`}
       />
     );
   },
