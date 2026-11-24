@@ -34,7 +34,7 @@ pub struct McpRegistry {
 
 pub type SharedMcpRegistry = Arc<Mutex<McpRegistry>>;
 
-fn random_id(bytes: usize) -> Result<String, String> {
+pub(crate) fn random_id(bytes: usize) -> Result<String, String> {
     let mut buffer = vec![0; bytes];
     SystemRandom::new()
         .fill(&mut buffer)
@@ -580,6 +580,7 @@ async fn call_tool(
         return Err("此浏览器工具已关闭".into());
     }
     super::tool::validate_tool_arguments(name, &arguments)?;
+    let expectation = super::confirmation::parse_expectation(&arguments)?;
     let host = app.state::<BrowserHost>();
     let session_id = endpoint.session_id.as_deref().ok_or("ENDPOINT_NOT_BOUND")?;
     super::identity::resolve_session(session_id, runtime_meta)?;
@@ -635,7 +636,13 @@ async fn call_tool(
             .map_err(|_| "BROWSER_LOCK_FAILED")?
             .assert_agent_control(session_id, tab_id)?;
     }
-    match name {
+    let before = if name == "browser_open" || super::outcome::action_kind(name).is_none() {
+        None
+    } else {
+        Some(super::outcome::capture(app, &host, session_id, arguments.get("tabId").and_then(Value::as_str).unwrap_or(""), arguments.get("selector").and_then(Value::as_str), expectation.as_ref()).await?)
+    };
+    eprintln!("OUTCOME_BEFORE {name} {}", before.is_some());
+    let result = match name {
         "browser_capabilities" => {
             let definitions = permitted_definitions(app).await?;
             let names: Vec<_> = definitions["tools"]
@@ -921,7 +928,7 @@ async fn call_tool(
                     r#"(()=>{{const all={selector};if(all.length===0)return JSON.stringify({{error:'NOT_FOUND'}});if(all.length>1)return JSON.stringify({{error:'AMBIGUOUS_TARGET'}});const el=all[0];if(el.disabled||el.getAttribute('aria-disabled')==='true')return JSON.stringify({{error:'ELEMENT_DISABLED'}});const r=el.getBoundingClientRect();if(r.width===0||r.height===0)return JSON.stringify({{error:'NOT_VISIBLE'}});el.click();return JSON.stringify({{status:'completed',target:el.tagName}})}})()"#
                 ),
                 "browser_fill" => format!(
-                    r#"(()=>{{const all={selector};if(all.length!==1)return JSON.stringify({{error:all.length===0?'NOT_FOUND':'AMBIGUOUS_TARGET'}});const el=all[0];el.focus();el.value={value};el.dispatchEvent(new Event('input',{{bubbles:true}}));el.dispatchEvent(new Event('change',{{bubbles:true}}));return JSON.stringify({{status:'completed',value:el.value,sideEffect:'draft_only'}})}})()"#
+                    r#"(()=>{{const all={selector};if(all.length!==1)return JSON.stringify({{error:all.length===0?'NOT_FOUND':'AMBIGUOUS_TARGET'}});const el=all[0];if(el.disabled)return JSON.stringify({{error:'ELEMENT_DISABLED'}});if(el.readOnly)return JSON.stringify({{error:'ELEMENT_READONLY',value:el.value}});el.focus();el.value={value};el.dispatchEvent(new Event('input',{{bubbles:true}}));el.dispatchEvent(new Event('change',{{bubbles:true}}));return JSON.stringify({{status:'completed',value:el.value,sideEffect:'draft_only'}})}})()"#
                 ),
                 "browser_press" => format!(
                     r#"(()=>{{const el=document.activeElement;if(!el)return JSON.stringify({{error:'NO_FOCUS'}});el.dispatchEvent(new KeyboardEvent('keydown',{{key:{key},bubbles:true}}));return JSON.stringify({{status:'completed',key:{key}}})}})()"#
@@ -947,6 +954,13 @@ async fn call_tool(
             let result = outcome?;
             let text = result.to_string();
             if let Some(code) = result.get("error").and_then(Value::as_str) {
+                if code == "ELEMENT_READONLY" {
+                    return Ok(json!({
+                        "isError": true,
+                        "content":[{"type":"text","text":code}],
+                        "structuredContent":{"status":"failed","sideEffect":"none","error":{"code":code},"action":name,"requestId":request_id,"outcome":{"level":"unchanged","suggestedAction":"relocate","reason":"目标只读，填值未生效","timedOut":false,"unobserved":false},"facts":{"value":result.get("value"),"readonly":true}}
+                    }));
+                }
                 return Ok(json!({
                     "isError": true,
                     "content":[{"type":"text","text":code}],
@@ -1253,10 +1267,15 @@ async fn call_tool(
             )
         }
         _ => Err("TOOL_NOT_SUPPORTED".into()),
+    };
+    eprintln!("OUTCOME_BEFORE_FINALIZE {name} {}", result.is_err());
+    match before {
+        Some(before) => super::outcome::finalize_tool_result(app, &host, name, &arguments, expectation, before, session_id, result).await,
+        None => result,
     }
 }
 
-async fn evaluate(webview: &tauri::Webview, script: &str) -> Result<String, String> {
+pub(crate) async fn evaluate(webview: &tauri::Webview, script: &str) -> Result<String, String> {
     let source = serde_json::to_string(script).map_err(|error| error.to_string())?;
     let expression = format!(
         "(async()=>{{const value=await (0,eval)({source});return value===undefined?'null':JSON.stringify(value)}})()"
@@ -1313,7 +1332,7 @@ async fn wait_for_page(
             .is_some_and(|request| request.status == super::model::RequestStatus::Pending);
         if !pending {
             return Ok(
-                json!({"content":[{"type":"text","text":"CANCELLED"}],"isError":true,"structuredContent":{"status":"cancelled","sideEffect":"unknown","requestId":request_id}}),
+                json!({"content":[{"type":"text","text":"CANCELLED"}],"isError":true,"error":{"code":"CANCELLED"},"structuredContent":{"status":"cancelled","sideEffect":"unknown","requestId":request_id}}),
             );
         }
         if started.elapsed() >= budget {

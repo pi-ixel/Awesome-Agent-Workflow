@@ -106,12 +106,12 @@ describe("TD-00-U07 交叉组合覆盖", () => {
 });
 
 describe("TD-00-I03 基线文档数据层校验", () => {
-  it("真实基线目录中的十份详设与测试设计完整配对", () => {
+  it("真实基线目录中的详设与测试设计完整配对", () => {
     expect(verifyBrowserDesignBaseline("docs/内嵌浏览器/详细设计")).toEqual({
       missingDesignLinks: [],
       missingTestLinks: [],
-      designDocumentCount: 10,
-      testDesignDocumentCount: 10,
+      designDocumentCount: 11,
+      testDesignDocumentCount: 11,
     });
   });
 });
