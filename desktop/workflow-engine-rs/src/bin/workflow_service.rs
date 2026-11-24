@@ -489,8 +489,7 @@ impl Service {
                     }
                     let content = std::fs::read_to_string(knowledge_root.join(file))
                         .map_err(|_| format!("NODE_KNOWLEDGE_UNAVAILABLE:knowledge/{file}"))?;
-                    node.knowledge.push_str("\n");
-                    node.knowledge.push_str(&content);
+                    node.knowledge_docs.push(aaw_workflow_core::graph::KnowledgeDoc::from_file(file.clone(), content));
                 }
             }
             for node in definition.nodes.values_mut().filter(|n| n.kind == "python") {
