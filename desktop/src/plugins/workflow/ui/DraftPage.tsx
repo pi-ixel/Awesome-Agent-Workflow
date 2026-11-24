@@ -22,7 +22,6 @@ import { describeDiagnostic } from "../status/library.ts";
 import { errorLine } from "../status/errorText.ts";
 import { draftPrompt, NODE_PROMPT_TEMPLATE } from "../editing/draftSessions.ts";
 import { FlowStages } from "./FlowStages.tsx";
-import { flowStages } from "./flowModel.ts";
 import { SplitPane } from "./SplitPane.tsx";
 import { diffLines, withContext } from "./textDiff.ts";
 import { nodeOutcomes } from "./nodeDetail.ts";
@@ -181,35 +180,7 @@ export function DraftPage({
   const entries = useMemo(() => Object.keys(check?.catalogs ?? {}), [check]);
   const shownEntry = entries.includes(entry) ? entry : (entries[0] ?? "");
   const catalog: WorkflowCatalog | null = check?.catalogs[shownEntry] ?? null;
-  // 按流程图的实际阶段与步骤执行顺序排列节点，避免工具栏胶囊顺序与画布不一致。
-  const nodes = useMemo(() => {
-    const raw = catalog?.nodes ?? [];
-    if (!catalog?.structure || !catalog.entry || raw.length <= 1) return raw;
-    const nodeMap = new Map(raw.map((n) => [n.id, n]));
-    const ordered: WorkflowCatalogNode[] = [];
-    const seen = new Set<string>();
-    const views = flowStages(
-      { structure: catalog.structure, nodeMap, snapshot: null },
-      catalog.entry,
-      catalog.stages ?? [],
-      "",
-    );
-    for (const view of views) {
-      for (const step of view.steps) {
-        if (step.site && !seen.has(step.site)) {
-          const found = nodeMap.get(step.site);
-          if (found) {
-            ordered.push(found);
-            seen.add(step.site);
-          }
-        }
-      }
-    }
-    for (const n of raw) {
-      if (!seen.has(n.id)) ordered.push(n);
-    }
-    return ordered;
-  }, [catalog]);
+  const nodes = useMemo(() => catalog?.nodes ?? [], [catalog]);
   const activeNode: WorkflowCatalogNode | null = useMemo(() => {
     if (nodes.length === 0) return null;
     return nodes.find((n) => n.id === selectedNodeId) ?? nodes[0] ?? null;
@@ -1396,7 +1367,7 @@ export function DraftPage({
         </Callout>
       )}
 
-      {/* 画布工具栏：Tab + 一键选节点胶囊 + 起点切换 */}
+      {/* 画布工具栏：Tab + 起点切换 */}
       <div className="workflow-draft-toolbar">
         <SegmentedControl<Tab>
           tabs
@@ -1408,24 +1379,6 @@ export function DraftPage({
             { value: "changes", label: `文件改动 · ${check.changes.length}` },
           ]}
         />
-        {tab === "graph" && nodes.length > 0 && (
-          <>
-            <span className="workflow-draft-toolbar-sep" aria-hidden="true" />
-            <div className="workflow-entry-picker">
-              <span>节点</span>
-              <Listbox
-                label="选择要编辑的节点"
-                value={drawer === "node" ? (activeNode?.id ?? "") : ""}
-                placeholder={`选择节点（共 ${nodes.length} 个）`}
-                options={nodes.map((node, idx) => ({
-                  value: node.id,
-                  label: `${idx + 1}. ${node.label}`,
-                }))}
-                onChange={(id) => openNodeDrawer(id)}
-              />
-            </div>
-          </>
-        )}
         {tab === "graph" && entries.length > 1 && (
           <div className="workflow-entry-picker">
             <span>起点</span>
