@@ -1,5 +1,12 @@
 import { useWorkbenchUiValue } from "./bindings/layoutView.ts";
-import { useContext, useEffect, useState, type ReactNode } from "react";
+import {
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useWorkbenchEntries, WorkbenchContext } from "./bindings/react.ts";
 import { useLayoutMotion } from "../../../shared/ui/controls/useLayoutMotion.ts";
 import { ColumnResizer } from "../../../shared/ui/controls/ColumnResizer.tsx";
@@ -15,6 +22,54 @@ import {
 } from "./columnWidths.ts";
 
 const activityRailWidth = "2.75rem";
+const fullBrandName = "Awesome Agent WorkSpace";
+const fullWordmarkClass = "font-brand text-sm font-normal italic";
+
+function SidebarWordmark() {
+  const slot = useRef<HTMLSpanElement>(null);
+  const measurement = useRef<HTMLSpanElement>(null);
+  const [hasRoom, setHasRoom] = useState(false);
+
+  useLayoutEffect(() => {
+    const container = slot.current;
+    const text = measurement.current;
+    if (!container || !text) return;
+    const measure = () => {
+      setHasRoom(
+        text.getBoundingClientRect().width <=
+          container.getBoundingClientRect().width,
+      );
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    observer.observe(text);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <span
+      ref={slot}
+      className="relative min-w-0 flex-1 overflow-hidden whitespace-nowrap"
+    >
+      <span
+        ref={measurement}
+        aria-hidden="true"
+        className={`pointer-events-none invisible absolute w-max ${fullWordmarkClass}`}
+      >
+        {fullBrandName}
+      </span>
+      <span
+        data-testid="workbench-wordmark"
+        data-hint={hasRoom ? undefined : fullBrandName}
+        className={hasRoom ? fullWordmarkClass : "text-sm font-semibold"}
+      >
+        {hasRoom ? fullBrandName : "AAW"}
+      </span>
+    </span>
+  );
+}
 
 /**
  * 主体：项目树列（可整体隐藏）+ 内容区。
@@ -88,7 +143,7 @@ export function WorkbenchShell({ children }: { readonly children: ReactNode }) {
             style={{ paddingInlineStart: `calc(${activityRailWidth} + 0.875rem)` }}
             data-tauri-drag-region=""
           >
-            <span className="text-sm font-semibold">AAW</span>
+            <SidebarWordmark />
             <SidebarToggle collapsed={false} />
             <div className="order-1 ml-auto flex shrink-0 items-center">
               <HeaderIndicators />

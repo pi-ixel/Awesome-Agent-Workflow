@@ -1224,6 +1224,7 @@
   },
   "plugins/workbench/ui/WorkbenchShell.tsx": {
     "definitions": {
+      "图标与内容标识": ["SidebarWordmark"],
       "布局与操纵": ["WorkbenchShell"]
     },
     "targets": [

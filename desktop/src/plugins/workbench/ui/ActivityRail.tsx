@@ -98,7 +98,8 @@ export function ActivityRail({
           >
             <BrandMark
               data-testid="workbench-mark"
-              className="pointer-events-none ui-icon-24"
+              variant="rail"
+              className="pointer-events-none ui-icon-28"
             />
           </div>
           <div className="flex min-h-0 flex-col items-center gap-1 overflow-y-auto px-0.5 pt-3 pb-1.5 [scrollbar-width:none]">
