@@ -41,6 +41,54 @@ afterEach(async () => {
   for (const owner of owners.splice(0)) await owner.shutdown();
 });
 
+it("单请求连接在当前轮结束后才执行模型探测，探测关闭超时仍可继续对话", async () => {
+  const { connect, peers } = fixture();
+  const connection = await connect();
+  const peer = peers[0]!;
+  const foreground = connection.openChannel();
+  const { sessionId } = (await foreground.port.request("session/new", {
+    cwd: "/workspace",
+  })) as { sessionId: string };
+  let finishTurn!: () => void;
+  const turn = new Promise((resolve) => {
+    finishTurn = () => resolve({ stopReason: "end_turn" });
+  });
+  peer.handlers.set("session/prompt", () => turn);
+  peer.handlers.set("session/new", () => ({ sessionId: "model-probe" }));
+  peer.handlers.set("session/close", () => new Promise(() => {}));
+  const running = foreground.port.request("session/prompt", { sessionId });
+  const probe = foreground.openModelProbe!({});
+  const reading = probe.port.request("session/new", { cwd: "/workspace" });
+  try {
+    await vi.waitFor(() =>
+      expect(peer.received.at(-1)?.method).toBe("session/prompt"),
+    );
+    expect(
+      peer.received.filter(({ method }) => method === "session/new"),
+    ).toHaveLength(1);
+    finishTurn();
+    await running;
+    await expect(reading).resolves.toEqual({ sessionId: "model-probe" });
+    await expect(
+      probe.port.request(
+        "session/close",
+        { sessionId: "model-probe" },
+        {
+          timeoutMs: 25,
+        },
+      ),
+    ).rejects.toMatchObject({ method: "session/close", timeoutMs: 25 });
+    expect(connection.available).toBe(true);
+    await expect(
+      foreground.port.request("session/prompt", { sessionId }),
+    ).resolves.toEqual({ stopReason: "end_turn" });
+  } finally {
+    finishTurn();
+    probe.close();
+    foreground.close();
+  }
+});
+
 it("启动中和已返回但尚未绑定连接的传输都计入总额度", async () => {
   const { base, open, peers } = fixture();
   let finish!: () => void;

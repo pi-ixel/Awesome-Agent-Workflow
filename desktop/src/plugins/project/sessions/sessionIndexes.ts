@@ -1,5 +1,9 @@
 import { isAbsolutePath, pathKey } from "../../../shared/panelPaths.ts";
-import { sameSessionAgent, createSessionDeletions } from "./sessionDeletion.ts";
+import {
+  sameSessionAgent,
+  sessionAgentId,
+  createSessionDeletions,
+} from "./sessionDeletion.ts";
 import { createSessionGroups } from "./sessionGroups.ts";
 import type { HostStorage } from "../../host/types.ts";
 import { createSnapshotView } from "../../../shared/state/readonlySnapshot.ts";
@@ -12,7 +16,34 @@ import type { Logger } from "../../../shared/logging/logger.ts";
 export function createProjectSessionIndexes(storage: HostStorage, logger?: Logger) {
   const scope = new AbortController();
   const deletions = createSessionDeletions(storage);
-  const catalog = createSessionCatalog(scope.signal, deletions.blocked);
+  const modelProbeStorageKey = "aaw-desktop/model-probe-sessions.v1";
+  const modelProbeKey = ({
+    workspacePath,
+    agentKey,
+    sessionId,
+  }: DeleteSessionTarget) =>
+    JSON.stringify([
+      sessionAgentId(agentKey) ?? agentKey,
+      pathKey(workspacePath),
+      sessionId,
+    ]);
+  const modelProbes = new Set<string>();
+  try {
+    const saved: unknown = JSON.parse(
+      storage.getItem(modelProbeStorageKey) ?? "[]",
+    );
+    if (Array.isArray(saved))
+      for (const key of saved)
+        if (typeof key === "string") modelProbes.add(key);
+  } catch (error) {
+    logger?.warn("读取模型探测会话记录失败", { error: String(error) });
+  }
+  const isModelProbe = (target: DeleteSessionTarget) =>
+    modelProbes.has(modelProbeKey(target));
+  const catalog = createSessionCatalog(
+    scope.signal,
+    (target) => deletions.blocked(target) || isModelProbe(target),
+  );
   const deletionView = createSnapshotView(deletions.store, (state) => state);
   const activity = createSessionActivityStore(scope.signal, storage);
   const directoryStorageKey = "aaw-desktop/session-working-directories.v1";
@@ -45,6 +76,12 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
   }));
   return {
     catalog,
+    isModelProbe,
+    rememberModelProbe(target: DeleteSessionTarget) {
+      modelProbes.add(modelProbeKey(target));
+      catalog.excludeSessions([target]);
+      storage.setItem(modelProbeStorageKey, JSON.stringify([...modelProbes]));
+    },
     deletions,
     deletionView: deletionView.snapshot,
     activity,

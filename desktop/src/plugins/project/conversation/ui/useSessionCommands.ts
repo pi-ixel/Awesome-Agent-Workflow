@@ -172,6 +172,10 @@ export function useSessionCommands() {
           (service, owner) => service.conversation.switchModel(owner, id),
           undefined,
         ),
+      refreshModels: async (): Promise<void> => {
+        if (!target || !view?.isActive()) throw new Error("当前会话已切换");
+        await view.project.conversation.refreshModels(target);
+      },
       switchMode: (id: string) =>
         run(
           (service, owner) => service.conversation.switchMode(owner, id),

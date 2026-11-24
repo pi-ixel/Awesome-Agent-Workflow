@@ -109,6 +109,7 @@ it("UI does not dispatch protocol or session commands through Store actions", ()
     "clearQueue",
     "removeQueuedPrompt",
     "switchModel",
+    "refreshModels",
     "switchMode",
     "decidePermission",
     "cancelPermission",

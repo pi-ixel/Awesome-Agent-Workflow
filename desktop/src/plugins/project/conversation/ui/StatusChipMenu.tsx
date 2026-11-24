@@ -14,12 +14,14 @@ export function StatusChipMenu({
   menuLabel,
   warning = false,
   entries,
+  header,
 }: {
   readonly label: ReactNode;
   readonly title: string;
   readonly menuLabel: string;
   readonly warning?: boolean;
   readonly entries: readonly ContextMenuItemSpec[];
+  readonly header?: ReactNode;
 }) {
   const [menu, setMenu] = useState<{
     placement: MenuPlacement;
@@ -54,6 +56,7 @@ export function StatusChipMenu({
       {menu && (
         <ContextMenu
           entries={entries}
+          header={header}
           placement={menu.placement}
           label={menuLabel}
           trigger={menu.trigger}

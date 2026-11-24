@@ -91,6 +91,7 @@ export function createSessionActions(
 > & {
   drainNextQueued(): void;
   resetSteering(): void;
+  resetModelSelection(): void;
   firstPromptProgress(sessionId: string): void;
   interruptSteeringForApproval(): void;
 } {
@@ -179,28 +180,13 @@ export function createSessionActions(
     steering.discardRetry();
     steering.abort(false, get().steerEditableId !== undefined);
   };
-  const drainNextQueued = (): void => {
-    // 不能发送时保留队首，避免合并后的发送保护拒绝消息而队列已丢失它。
-    if (
-      get().directSteering ||
-      steering.active ||
-      get().isAgentRunning ||
-      get().operationsBlocked ||
-      get().isConnecting ||
-      context.activeBinding === null
-    ) {
-      set({ queuePaused: true });
-      return;
-    }
+  const dispatchQueued = (next: QueuedPrompt, keepPaused = false): void => {
     const queue = get().queuedPrompts;
-    const index = queue.findIndex((item) => !isSteerOutboxEntry(item));
-    const next = queue[index];
-    if (next === undefined) {
-      return;
-    }
+    const index = queue.indexOf(next);
+    if (index < 0) return;
     set({
       queuedPrompts: queue.filter((_, position) => position !== index),
-      queuePaused: false,
+      queuePaused: keepPaused,
     });
     if (
       !get().sendPrompt(
@@ -217,6 +203,107 @@ export function createSessionActions(
   };
 
   let modelChangeGeneration = 0;
+  const resetModelSelection = () => {
+    modelChangeGeneration += 1;
+    set({
+      pendingModelId: null,
+      refreshedModels: null,
+      isApplyingModel: false,
+      modelSelectionError: null,
+    });
+  };
+  const prepareModelForPrompt = (binding: SessionBinding, send: () => void) => {
+    const revision = ++modelChangeGeneration;
+    const generation = context.turnGeneration;
+    const ownsApplication = () =>
+      revision === modelChangeGeneration && binding === context.activeBinding;
+    const canApply = () =>
+      ownsApplication() &&
+      generation === context.turnGeneration &&
+      !get().operationsBlocked &&
+      !get().queuePaused;
+    set({ isApplyingModel: true, modelSelectionError: null });
+    void (async () => {
+      try {
+        if (binding.ensureSession) await binding.ensureSession();
+        // 用户可在确认期间改选，出队前应用最后一次选择。
+        while (canApply()) {
+          const {
+            pendingModelId: modelId,
+            currentModelId,
+            refreshedModels,
+          } = get();
+          if (modelId === null) break;
+          if (currentModelId !== modelId) {
+            if (!binding.setModel) throw new Error("当前会话不支持切换模型");
+            const fromRefresh = refreshedModels?.some(
+              (model) => model.modelId === modelId,
+            );
+            try {
+              await binding.setModel(
+                modelId,
+                fromRefresh ? { fromRefresh } : undefined,
+              );
+            } catch (error) {
+              if (canApply() && get().pendingModelId !== modelId) continue;
+              throw error;
+            }
+          }
+          if (!ownsApplication()) return;
+          set({
+            currentModelId: modelId,
+            ...(get().pendingModelId === modelId
+              ? { pendingModelId: null }
+              : {}),
+          });
+        }
+      } catch (error) {
+        if (ownsApplication()) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          logger.warn("模型切换失败", { reason: message });
+          set({ modelSelectionError: message, queuePaused: true });
+        }
+        return;
+      } finally {
+        if (ownsApplication()) set({ isApplyingModel: false });
+      }
+      if (canApply()) send();
+    })();
+  };
+  const drainNextQueued = (allowInSteerMode = false): void => {
+    const state = get();
+    const binding = context.activeBinding;
+    if (state.isApplyingModel) return;
+    if (
+      (state.directSteering && !allowInSteerMode) ||
+      steering.active ||
+      state.isAgentRunning ||
+      state.operationsBlocked ||
+      state.isConnecting ||
+      binding === null
+    ) {
+      set({ queuePaused: true });
+      return;
+    }
+    const nextOrdinaryPrompt = (entry: QueuedPrompt) =>
+      !isSteerOutboxEntry(entry) &&
+      (!get().directSteering ||
+        (typeof entry !== "string" && entry.waitsForModel));
+    const next = state.queuedPrompts.find(nextOrdinaryPrompt);
+    if (next === undefined) return;
+    if (state.pendingModelId === null) {
+      dispatchQueued(next);
+      return;
+    }
+    set({ queuePaused: false });
+    prepareModelForPrompt(binding, () => {
+      if (get().queuedPrompts.find(nextOrdinaryPrompt) === next)
+        dispatchQueued(next);
+      else drainNextQueued(allowInSteerMode);
+    });
+  };
+
   let modeChangeGeneration = 0;
   return {
     steerPrompt: (text, attachments = [], options) => {
@@ -312,6 +399,7 @@ export function createSessionActions(
       firstPrompt = undefined;
       steering.reset();
     },
+    resetModelSelection,
     switchMode: (modeId) => {
       const binding = context.activeBinding;
       if (
@@ -354,39 +442,27 @@ export function createSessionActions(
     },
     switchModel: (modelId) => {
       const binding = context.activeBinding;
-      if (binding === null || binding.setModel === undefined) {
-        pushSystemItem("warn", "当前会话不支持切换模型");
+      const {
+        availableModels,
+        refreshedModels,
+        currentModelId,
+        isApplyingModel,
+      } = get();
+      if (!binding?.setModel) {
+        set({ modelSelectionError: "当前会话不支持切换模型" });
         return;
       }
-      const change = ++modelChangeGeneration;
-      const previous = get().currentModelId;
-      const generation = context.turnGeneration;
-      set({ currentModelId: modelId, pendingModelId: modelId });
-      logger.info("切换会话模型", { modelId });
-      void binding
-        .setModel(modelId)
-        .catch((error: unknown) => {
-          if (
-            change !== modelChangeGeneration ||
-            binding !== context.activeBinding ||
-            generation !== context.turnGeneration
-          )
-            return;
-          const message =
-            error instanceof Error ? error.message : String(error);
-          logger.warn("模型切换失败，回滚", { modelId, reason: message });
-          if (get().currentModelId === modelId)
-            set({ currentModelId: previous });
-          pushSystemItem("error", `模型切换失败：${message}`);
-        })
-        .finally(() => {
-          if (
-            change === modelChangeGeneration &&
-            binding === context.activeBinding &&
-            generation === context.turnGeneration
-          )
-            set({ pendingModelId: null });
-        });
+      if (
+        !(refreshedModels ?? availableModels).some(
+          (model) => model.modelId === modelId,
+        )
+      )
+        return;
+      set({
+        pendingModelId:
+          !isApplyingModel && modelId === currentModelId ? null : modelId,
+        modelSelectionError: null,
+      });
     },
     drainNextQueued,
     sendPrompt: (text, attachments = [], options = {}) => {
@@ -396,7 +472,8 @@ export function createSessionActions(
         (trimmed.length === 0 && attachments.length === 0) ||
         get().operationsBlocked ||
         get().isAgentRunning ||
-        get().isConnecting
+        get().isConnecting ||
+        get().isApplyingModel
       ) {
         return false;
       }
@@ -417,6 +494,28 @@ export function createSessionActions(
       ) {
         set({ lastError: "当前 Agent 不支持发送这些附件" });
         return false;
+      }
+      if (
+        get().pendingModelId !== null &&
+        !steering.dispatching &&
+        !context.replaying
+      ) {
+        const keepPaused = get().queuePaused;
+        const queued = identifyQueuedPrompt({
+          text: trimmed,
+          attachments,
+          skillReferences: options.skillReferences,
+          display: options.display,
+          waitsForModel: true,
+        });
+        set({
+          queuedPrompts: [queued, ...get().queuedPrompts],
+          queuePaused: false,
+        });
+        prepareModelForPrompt(binding, () =>
+          dispatchQueued(queued, keepPaused),
+        );
+        return true;
       }
       const imageFallbackText = !trimmed && attachments.length && binding.imageOnlyPromptFallback
         ? context.replaying && context.interruptedPrompt?.imageFallbackText
@@ -708,7 +807,10 @@ export function createSessionActions(
       set({ directSteering: enabled, ...(pauseQueue ? { queuePaused: true } : {}) });
     },
     resumeQueue: () => {
-      if (get().directSteering) return;
+      if (get().directSteering) {
+        drainNextQueued(true);
+        return;
+      }
       steering.resume();
       if (steering.active) return;
       if (get().queuedPrompts.length === 0) {
@@ -789,6 +891,7 @@ export function createSessionActions(
     requestCancel: () => {
       steering.pause();
       context.cancelledByUser = true;
+      if (get().isApplyingModel) set({ queuePaused: true });
       if (firstPrompt) {
         firstPrompt.stopped = true;
         releaseHeld(firstPrompt, false);
@@ -844,7 +947,8 @@ export function createSessionActions(
       steering.reset();
       context.queueWasPaused = get().queuePaused;
       context.turnGeneration += 1;
-      set({ pendingModelId: null, pendingModeId: null });
+      resetModelSelection();
+      set({ pendingModeId: null });
       context.activeBinding = null;
       if (context.cancelledByUser) context.interruptedPrompt = null;
       set({

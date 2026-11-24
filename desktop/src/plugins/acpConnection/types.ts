@@ -74,6 +74,7 @@ export interface AcpChannelOptions {
 
 export interface AcpChannel {
   readonly port: AcpSessionConnection;
+  openModelProbe?(options: AcpChannelOptions): AcpChannel;
   close(): void;
   promote(): void;
   escalate(): Promise<unknown>;

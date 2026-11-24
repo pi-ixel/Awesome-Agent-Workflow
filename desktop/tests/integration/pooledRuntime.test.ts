@@ -17,6 +17,8 @@ import {
   openRealWorkspace,
   runBackgroundPrompt,
   backgroundPromptOptions,
+  refreshModels,
+  projectIndexes,
   closeRealRuntime,
   closeSessionRuntime,
   projectFactory,
@@ -30,6 +32,8 @@ import type { AgentsService } from "../../src/plugins/agents/service.ts";
 import { mutableWorkspace } from "../helpers/workspace.ts";
 let useWorkspaceStore: ReturnType<typeof mutableWorkspace>;
 import { createAgentTransport } from "../../src/plugins/agents/launch/agentTransport.ts";
+import { createProjectSessionIndexes } from "../../src/plugins/project/sessions/sessionIndexes.ts";
+import { webviewStorage } from "../../src/plugins/host/storage/storage.ts";
 
 vi.mock("../../src/plugins/agents/launch/agentTransport.ts", () => ({
   createAgentTransport: vi.fn(),
@@ -144,6 +148,134 @@ describe("main runtime with the ACP pool", () => {
         .filter(({ method }) => method === "session/new"),
     ).toHaveLength(before + 1);
   });
+
+  it.each([false, true])(
+    "刷新复用正在回复的 ACP 连接，临时会话关闭失败=%s",
+    async (closeFails) => {
+      const workspacePath = "/models-refresh";
+      await openRealWorkspace(workspacePath, { forceNew: true });
+      const [runtime] = [...projectFactory.sessions()];
+      const session = runtime!.session;
+      const target = {
+        workspacePath,
+        agentKey: runtime!.agentKey,
+        sessionId: session.sessionId,
+      };
+      const foreground = peers.find((peer) =>
+        peer.received.some((message) => message.method === "session/new"),
+      )!;
+      const models = [{ modelId: "fresh", name: "Fresh model" }];
+      const probeId = closeFails
+        ? "hidden-close-failure"
+        : "hidden-model-probe";
+      foreground.handlers.set("session/new", () => ({
+        sessionId: probeId,
+        models: { currentModelId: "fresh", availableModels: models },
+      }));
+      let finishClose!: () => void;
+      const close = new Promise<void>((resolve) => {
+        finishClose = resolve;
+      });
+      foreground.handlers.set("session/close", async ({ params }) => {
+        if (params?.sessionId === probeId) {
+          await close;
+          if (closeFails) throw new Error("探测会话关闭失败");
+        }
+        return {};
+      });
+      let finishTurn!: () => void;
+      const turn = new Promise((resolve) => {
+        finishTurn = () => resolve({ stopReason: "end_turn" });
+      });
+      foreground.handlers.set("session/prompt", () => turn);
+      const processCount = vi.mocked(createAgentTransport).mock.calls.length;
+      try {
+        expect(runtime!.store.getState().sendPrompt("当前回合")).toBe(true);
+        await vi.waitFor(() =>
+          expect(
+            foreground.received.some(
+              ({ method }) => method === "session/prompt",
+            ),
+          ).toBe(true),
+        );
+        const before = foreground.received.length;
+        await Promise.all([refreshModels(target), refreshModels(target)]);
+
+        expect(runtime!.session).toBe(session);
+        expect(runtime!.store.getState()).toMatchObject({
+          activeSessionId: target.sessionId,
+          isAgentRunning: true,
+          currentModelId: null,
+          refreshedModels: models,
+        });
+        await vi.waitFor(() =>
+          expect(foreground.received.slice(before)).toMatchObject([
+            {
+              method: "session/new",
+              params: { cwd: workspacePath, mcpServers: [] },
+            },
+            { method: "session/close", params: { sessionId: probeId } },
+          ]),
+        );
+        expect(vi.mocked(createAgentTransport)).toHaveBeenCalledTimes(
+          processCount,
+        );
+        expect(foreground.client.isClosed).toBe(false);
+        const hidden = { ...target, sessionId: probeId };
+        expect(projectIndexes.isModelProbe(hidden)).toBe(true);
+        const reopened = createProjectSessionIndexes(webviewStorage);
+        try {
+          reopened.catalog.selectCatalog(target.agentKey, () => {});
+          reopened.catalog.updateCatalog(target.agentKey, target, [
+            { id: hidden.sessionId, title: "探测", updatedAt: null },
+            { id: "regular", title: "普通会话", updatedAt: null },
+          ]);
+          expect(
+            reopened.catalog.store.getState().sessionsByPath[workspacePath],
+          ).toEqual([{ id: "regular", title: "普通会话", updatedAt: null }]);
+        } finally {
+          reopened.dispose();
+        }
+        finishClose();
+        // 关闭失败后仍能接收当前回复，并在原连接、原会话上继续发送。
+        foreground.update(
+          {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "原会话回复继续" },
+          },
+          target.sessionId!,
+        );
+        finishTurn();
+        await vi.waitFor(() => {
+          expect(runtime!.store.getState().isAgentRunning).toBe(false);
+          expect(runtime!.store.getState().items).toContainEqual(
+            expect.objectContaining({
+              kind: "assistant",
+              text: "原会话回复继续",
+            }),
+          );
+        });
+        expect(runtime!.store.getState().sendPrompt("下一条消息")).toBe(true);
+        await vi.waitFor(() =>
+          expect(
+            foreground.received.filter(
+              ({ method }) => method === "session/prompt",
+            ),
+          ).toMatchObject([
+            { params: { sessionId: target.sessionId } },
+            { params: { sessionId: target.sessionId } },
+          ]),
+        );
+        expect(foreground.client.isClosed).toBe(false);
+        expect(vi.mocked(createAgentTransport)).toHaveBeenCalledTimes(
+          processCount,
+        );
+      } finally {
+        finishClose();
+        finishTurn();
+      }
+    },
+  );
 
   it("queries project history without constructing a SessionRuntime", async () => {
     const create = vi.spyOn(SessionFactory.prototype, "create");

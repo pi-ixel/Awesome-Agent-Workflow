@@ -269,6 +269,7 @@ export interface ProjectConversation {
     position: "before" | "after",
   ): boolean;
   switchModel(target: SessionTarget, modelId: string): void;
+  refreshModels(target: SessionTarget): Promise<void>;
   switchMode(target: SessionTarget, modeId: string): void;
   cancel(target: SessionTarget): void;
   retry(target: SessionTarget): void;

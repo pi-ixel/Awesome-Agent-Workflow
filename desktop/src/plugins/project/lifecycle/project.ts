@@ -99,6 +99,7 @@ export type ProjectOperations = Pick<ProjectWorkspace, "registerProject"> &
     closeProject(path: string): Promise<void>;
     dispose?(options?: { force?: boolean }): Promise<void>;
     findSession(target: SessionTarget): ProjectSessionView | undefined;
+    refreshModels?(target: SessionTarget): Promise<void>;
   };
 
 export class DesktopProject {
@@ -273,6 +274,9 @@ export class DesktopProject {
         removeQueuedPromptById: this.removeQueuedPromptById.bind(this),
         moveQueuedPrompt: this.moveQueuedPrompt.bind(this),
         switchModel: this.switchModel.bind(this),
+        refreshModels: (target) =>
+          this.operations.refreshModels?.(target) ??
+          Promise.reject(new Error("当前会话无法刷新模型")),
         switchMode: this.switchMode.bind(this),
         cancel: this.cancel.bind(this),
         retry: this.retry.bind(this),

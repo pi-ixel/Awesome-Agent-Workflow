@@ -23,6 +23,17 @@ function parsePromptQueue(raw: string | null): readonly QueuedPrompt[] {
         return (
           typeof record.text === "string" &&
           Array.isArray(record.attachments) &&
+          (record.waitsForModel === undefined ||
+            record.waitsForModel === true) &&
+          (record.display === undefined ||
+            (record.display !== null &&
+              typeof record.display === "object" &&
+              "source" in record.display &&
+              typeof record.display.source === "string" &&
+              "visible" in record.display &&
+              typeof record.display.visible === "string" &&
+              "foldLabel" in record.display &&
+              typeof record.display.foldLabel === "string")) &&
           (record.text.trim().length > 0 || record.attachments.length > 0) &&
           (record.id === undefined ||
             (typeof record.id === "string" && record.id.length > 0)) &&

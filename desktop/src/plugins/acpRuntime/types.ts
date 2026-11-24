@@ -200,7 +200,10 @@ export interface AcpSessionPort {
   ): Promise<PromptResult>;
   cancel(): void;
   setMode(modeId: string, options?: SessionRequestOptions): Promise<void>;
-  setModel(modelId: string, options?: SessionRequestOptions): Promise<void>;
+  setModel(
+    modelId: string,
+    options?: SessionRequestOptions & { readonly fromRefresh?: boolean },
+  ): Promise<void>;
   setConfigOption(
     configId: string,
     value: string,
@@ -250,6 +253,7 @@ export interface AcpProtocolResources {
   abortSwitch(revision: number): Promise<void>;
   setSelection(agentKey: string, agentId: string): void;
   open(agentKey: string, options?: AcpProtocolSessionOptions): AcpSessionPort;
+  openModelProbe(source: AcpSessionPort, adapter: AgentAdapter): AcpSessionPort;
   openBackground?(
     adapter: AgentAdapter,
     toolPaths: object,

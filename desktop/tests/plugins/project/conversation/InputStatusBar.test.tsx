@@ -220,6 +220,37 @@ describe("InputStatusBar", () => {
     );
   });
 
+  it("会话运行中可从空列表刷新，并保留打开的菜单", async () => {
+    const refreshModels = vi.fn(() => {
+      useSessionStore.setState({
+        refreshedModels: [{ modelId: "fresh", name: "最新模型" }],
+      });
+      return Promise.resolve();
+    });
+    useSessionStore.setState({
+      availableModels: [],
+      currentModelId: null,
+      refreshedModels: null,
+      isAgentRunning: true,
+      isBound: true,
+      ...{ refreshModels },
+    });
+    try {
+      render(<InputStatusRight />);
+      await userEvent.click(screen.getByRole("button", { name: "模型选择" }));
+      const menu = screen.getByRole("menu", { name: "模型选择" });
+      expect(menu).toHaveTextContent("暂无可用模型");
+      await userEvent.keyboard("{ArrowDown}{Enter}");
+      expect(refreshModels).toHaveBeenCalledOnce();
+      expect(
+        within(menu).getByRole("menuitemradio", { name: "最新模型" }),
+      ).toBeVisible();
+      expect(menu).toBeVisible();
+    } finally {
+      useSessionStore.setState({ isBound: false });
+    }
+  });
+
   it("ACP 当前模型优先于旧 runtime；清单缺失时显示当前 ID", () => {
     seedRuntime();
     useSessionStore.setState({
