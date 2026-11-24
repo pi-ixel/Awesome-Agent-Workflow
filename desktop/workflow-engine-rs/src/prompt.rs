@@ -79,7 +79,18 @@ fn brief(node: &Node, action: &Action, note: &str) -> String {
         out.push('\n');
     }
     out.push_str(node.prompt.trim_end());
-    if !node.knowledge.trim().is_empty() {
+    if let Some(first) = node.knowledge_docs.first() {
+        out.push_str(&format!(
+            "\n\n【这一步关联的知识文档】以下文档未内联全文；需要查阅时请调用 read_workflow_knowledge 工具按文件名读取，如 {{\"name\":\"{}\"}}：",
+            first.name
+        ));
+        for doc in &node.knowledge_docs {
+            out.push_str(&format!("\n- {}", doc.name));
+            if !doc.summary.is_empty() {
+                out.push_str(&format!("：{}", doc.summary));
+            }
+        }
+    } else if !node.knowledge.trim().is_empty() {
         out.push_str("\n\n");
         out.push_str(node.knowledge.trim());
     }
@@ -151,13 +162,16 @@ pub fn agent_request(action: &Action) -> Result<AgentRequest, String> {
     })
 }
 
-/// `get_workflow_step` 看到的这一步（ADR 041）：工单全文，加上可按名字读取的
-/// 运行变量（动作派发时的版本，与工单一致）。
+/// `get_workflow_step` 与 `read_workflow_knowledge` 看到的这一步（ADR 041）：
+/// 工单全文、可按名字读取的运行变量，以及按文件名读取的关联知识文档。
 pub fn step_view(action: &Action) -> Result<crate::result_channel::StepView, String> {
+    let node: Node = serde_json::from_value(action.input["__node"].clone())
+        .map_err(|_| "INVALID_NODE_DEFINITION")?;
     let request = agent_request(action)?;
     Ok(crate::result_channel::StepView {
         brief: request.workflow_prompt(),
         vars: action.input["vars"].clone(),
+        knowledge: node.knowledge_docs,
     })
 }
 
@@ -221,5 +235,27 @@ mod tests {
         assert!(!rework.contains("检查方法"), "返工提示不重发工单");
         // 工具里的工单带着用户意见。
         assert!(step_view(&action(Some("边界再查一遍"))).unwrap().brief.contains("（工作流提示）边界再查一遍"));
+    }
+
+    #[test]
+    fn knowledge_docs_inject_only_index_and_are_available_in_step_view() {
+        let mut act = action(None);
+        act.input["__node"]["knowledge"] = json!("");
+        act.input["__node"]["knowledgeDocs"] = json!([
+            {
+                "name": "review-criteria.md",
+                "summary": "评审标准：重点检查边界条件与并发安全",
+                "content": "# 评审标准\n\n重点检查边界条件与并发安全。\n\n这里是一大段不应该塞进开场白的正文细节。"
+            }
+        ]);
+        let prompt = agent_request(&act).unwrap().workflow_prompt();
+        assert!(prompt.contains("【这一步关联的知识文档】"), "{prompt}");
+        assert!(prompt.contains("read_workflow_knowledge"), "{prompt}");
+        assert!(prompt.contains("- review-criteria.md：评审标准：重点检查边界条件与并发安全"), "{prompt}");
+        assert!(!prompt.contains("不应该塞进开场白的正文细节"), "知识全文不应直接拼进开场白：{prompt}");
+        let view = step_view(&act).unwrap();
+        assert_eq!(view.knowledge.len(), 1);
+        assert_eq!(view.knowledge[0].name, "review-criteria.md");
+        assert!(view.knowledge[0].content.contains("不应该塞进开场白的正文细节"));
     }
 }

@@ -41,6 +41,7 @@ export function projectOperationsFrom(
     refreshModels: coordinator.refreshModels,
     registerSessionTools: coordinator.registerSessionTools,
     openPluginSession: coordinator.openPluginSessionRuntime,
+    closePluginSession: coordinator.closePluginSessionRuntime,
     pluginSessionReady: coordinator.pluginSessionReady,
     watchTurns: coordinator.watchSessionTurns,
     watchEvents: coordinator.watchSessionEvents,

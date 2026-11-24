@@ -38,13 +38,15 @@ struct State {
     tools_listed: bool,
 }
 
-/// `get_workflow_step` 看到的这一步（ADR 041）。
+/// `get_workflow_step` 与 `read_workflow_knowledge` 看到的这一步（ADR 041）。
 #[derive(Debug, Clone)]
 pub struct StepView {
     /// 工单全文（与开场白相同，含交结果的约定）。
     pub brief: String,
     /// 动作派发时的运行变量：按名字读取。
     pub vars: Value,
+    /// 这一步关联的知识文档（按文件名读取全文）。
+    pub knowledge: Vec<crate::graph::KnowledgeDoc>,
 }
 
 /// MCP server name the result channel is mounted under.
@@ -459,6 +461,7 @@ fn serve_one(mut stream: TcpStream, secret: &str, state: &Mutex<State>) {
         }
         Some("list") => read_result(&state, None, None),
         Some("step") => read_step(&state, &msg["result"]),
+        Some("knowledge") => read_knowledge(&state, &msg["result"]),
         Some("capture_artifact") => artifact_call(&state, "capture", &msg["result"]),
         Some("read_artifact") => artifact_call(&state, "read", &msg["result"]),
         Some("get") => read_result(
@@ -578,11 +581,55 @@ fn read_step(state: &State, args: &Value) -> Value {
         },
     }
 }
+/// `read_workflow_knowledge`：不带参数返回当前步骤关联的知识目录索引；带 `name` 返回该文档全文。
+fn read_knowledge(state: &State, args: &Value) -> Value {
+    if !state.accepting {
+        return json!({"error":"当前没有活动的工作流动作"});
+    }
+    let Some(step) = &state.step else {
+        return json!({"error":"这一步的知识文档暂时不可用"});
+    };
+    let requested = args
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .map(|n| n.trim_start_matches("knowledge/"))
+        .filter(|n| !n.is_empty());
+    match requested {
+        None => {
+            if step.knowledge.is_empty() {
+                return json!({"value":"当前步骤没有关联的知识文档。"});
+            }
+            let mut lines = Vec::with_capacity(step.knowledge.len() + 1);
+            lines.push("当前步骤关联的知识文档（用 {\"name\":\"<文件名>\"} 读取全文）：".to_owned());
+            for doc in &step.knowledge {
+                if doc.summary.is_empty() {
+                    lines.push(format!("- {}", doc.name));
+                } else {
+                    lines.push(format!("- {}：{}", doc.name, doc.summary));
+                }
+            }
+            json!({"value": lines.join("\n")})
+        }
+        Some(name) => match step.knowledge.iter().find(|doc| doc.name == name) {
+            Some(doc) => json!({"value": doc.content}),
+            None => {
+                if step.knowledge.is_empty() {
+                    json!({"error": format!("当前步骤没有关联知识文档「{name}」（本步未关联任何知识文档）。")})
+                } else {
+                    let names: Vec<&str> = step.knowledge.iter().map(|d| d.name.as_str()).collect();
+                    json!({"error": format!("当前步骤没有关联知识文档「{name}」。可读取：{}", names.join("、"))})
+                }
+            }
+        },
+    }
+}
 fn tools(schema: &Value, pool_tools: &[Value]) -> Value {
     // submit_workflow_result carries the per-node schema, so it goes LAST:
     // the stable tool definitions stay in the shared prefix agents cache.
     let mut list = json!([
         {"name":"get_workflow_step","description":"查看这一步的工单（在做什么、要读什么、怎么交付）；带 read 参数时按名字读取本次运行里的内容（如设计、任务计划）的当前版本。","inputSchema":{"type":"object","properties":{"read":{"type":"string","description":"要读取的内容名，见工单里列出的名字；不填返回工单"}},"additionalProperties":false}},
+        {"name":"read_workflow_knowledge","description":"按文件名读取当前步骤关联的知识文档全文（如规范、方法论、检查清单）；不填 name 时返回当前步骤的知识目录索引。","inputSchema":{"type":"object","properties":{"name":{"type":"string","description":"要读取的知识文件名，见工单里的【这一步关联的知识文档】列表；不填返回目录索引"}},"additionalProperties":false}},
         {"name":"list_workflow_results","description":"列出本次运行已完成节点的结果和字段。","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
         {"name":"get_workflow_result","description":"按节点和执行序号读取本次运行中的原始结果。","inputSchema":{"type":"object","properties":{"siteId":{"type":"string"},"ordinal":{"type":"integer"}},"required":["siteId","ordinal"],"additionalProperties":false}},
         {"name":"capture_workflow_artifact","description":"固定本地文件或 HTTP(S) 内容为不可变引用，返回 SHA-256。","inputSchema":{"type":"object","properties":{"reference":{"type":"string"}},"required":["reference"],"additionalProperties":false}},
@@ -715,6 +762,9 @@ fn http_rpc(msg: &Value, state: &Mutex<State>) -> Option<Value> {
         }
         Some("tools/call") if msg["params"]["name"] == "get_workflow_step" => {
             tool_response(read_step(&state, &msg["params"]["arguments"]))
+        }
+        Some("tools/call") if msg["params"]["name"] == "read_workflow_knowledge" => {
+            tool_response(read_knowledge(&state, &msg["params"]["arguments"]))
         }
         Some("tools/call") if msg["params"]["name"] == "list_workflow_results" => {
             tool_response(read_result(&state, None, None))
@@ -862,6 +912,9 @@ pub fn serve_mcp(addr: &str, token: &str) -> Result<(), String> {
             Some("tools/call") if msg["params"]["name"] == "get_workflow_step" => {
                 tool_response(call_bridge(addr, token, "step", msg["params"]["arguments"].clone())?)
             }
+            Some("tools/call") if msg["params"]["name"] == "read_workflow_knowledge" => {
+                tool_response(call_bridge(addr, token, "knowledge", msg["params"]["arguments"].clone())?)
+            }
             Some("tools/call") if msg["params"]["name"] == "list_workflow_results" => {
                 tool_response(call_bridge(addr, token, "list", Value::Null)?)
             }
@@ -940,7 +993,7 @@ mod tests {
         channel.begin(json!({"type":"object"})).unwrap();
         channel
             .set_step(StepView { brief: "【这一步】代码检查
-做检查".into(), vars: json!({"design":{"reference":"d.md"},"count":1}) })
+做检查".into(), vars: json!({"design":{"reference":"d.md"},"count":1}), knowledge: Vec::new() })
             .unwrap();
         // HTTP：不带参数给工单原文。
         let brief = http_rpc(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_workflow_step","arguments":{}}}), &channel.state).unwrap();
@@ -956,6 +1009,50 @@ mod tests {
         assert!(listed.as_array().unwrap().iter().any(|t| t["name"] == "get_workflow_step"));
         channel.abort();
         assert!(call_bridge(&channel.addr, &channel.token, "step", json!({})).unwrap().get("error").is_some());
+    }
+
+    #[test]
+    fn the_knowledge_tool_lists_index_and_reads_doc_by_name() {
+        let channel = ResultChannel::new(json!({"type":"object"})).unwrap();
+        channel.begin(json!({"type":"object"})).unwrap();
+        channel
+            .set_step(StepView {
+                brief: "【这一步】生成动画".into(),
+                vars: json!({}),
+                knowledge: vec![crate::graph::KnowledgeDoc::from_file(
+                    "svg-motion.md",
+                    "# SVG 动画风格指引\n\n保持路径平滑且动效克制。\n\n## 细节\n这里是很长的正文内容。".into(),
+                )],
+            })
+            .unwrap();
+        // 工具清单中存在 read_workflow_knowledge，且仍在 submit_workflow_result 之前。
+        let listed = tools(&json!({"type":"object"}), &[]);
+        let arr = listed.as_array().unwrap();
+        assert!(arr.iter().any(|t| t["name"] == "read_workflow_knowledge"));
+        assert_eq!(arr.last().unwrap()["name"], "submit_workflow_result");
+        // HTTP：不带参数返回知识目录索引（含文件名与摘要，不含长正文）。
+        let index = http_rpc(
+            &json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_workflow_knowledge","arguments":{}}}),
+            &channel.state,
+        )
+        .unwrap();
+        let index_text = index["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(index_text.contains("svg-motion.md"), "{index_text}");
+        assert!(index_text.contains("SVG 动画风格指引：保持路径平滑且动效克制。"), "{index_text}");
+        assert!(!index_text.contains("这里是很长的正文内容"), "{index_text}");
+        // HTTP：按文件名读取全文（兼容带 knowledge/ 前缀）。
+        let doc = http_rpc(
+            &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_workflow_knowledge","arguments":{"name":"knowledge/svg-motion.md"}}}),
+            &channel.state,
+        )
+        .unwrap();
+        assert!(doc["result"]["content"][0]["text"].as_str().unwrap().contains("这里是很长的正文内容"));
+        // stdio 桥：按文件名读取与报错提示。
+        let via_bridge = call_bridge(&channel.addr, &channel.token, "knowledge", json!({"name":"svg-motion.md"})).unwrap();
+        assert!(via_bridge["value"].as_str().unwrap().contains("这里是很长的正文内容"));
+        let missing = call_bridge(&channel.addr, &channel.token, "knowledge", json!({"name":"other.md"})).unwrap();
+        let err = missing["error"].as_str().unwrap();
+        assert!(err.contains("other.md") && err.contains("svg-motion.md"), "{err}");
     }
 
     #[test]

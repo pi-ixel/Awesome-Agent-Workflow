@@ -74,6 +74,9 @@
     "ChatInput · <textarea>",
     "StopIcon · 内嵌图形"
   ],
+  "plugins/project/conversation/ui/EmbeddedSessionView.tsx": [
+    "BoundEmbeddedSession · <textarea>"
+  ],
   "plugins/project/conversation/ui/InputStatusBar.tsx": [
     "ContextRing · 内嵌图形",
     "ModelTag · role=menuitem"
@@ -165,7 +168,17 @@
     "DisposePanel · <textarea>",
     "DisposePanel · <textarea>"
   ],
-  "plugins/workflow/ui/DraftPage.tsx": ["DraftPage · <textarea>"],
+  "plugins/workflow/ui/DraftPage.tsx": [
+    "DraftPage/aiDrawerPane · <textarea>",
+    "DraftPage/mainContent · <input>",
+    "DraftPage/mainContent · <input>",
+    "DraftPage/mainContent · <textarea>",
+    "DraftPage/mainContent · <textarea>",
+    "DraftPage/nodeDrawerPane · <input>",
+    "DraftPage/nodeDrawerPane · <textarea>",
+    "DraftPage/nodeDrawerPane · <textarea>",
+    "DraftPage/nodeDrawerPane · <textarea>"
+  ],
   "plugins/workflow/ui/FlowStages.tsx": ["FlowStages · <canvas>"],
   "plugins/workflow/ui/RunManager.tsx": [
     "RunManager · <input>",

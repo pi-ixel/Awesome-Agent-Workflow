@@ -1578,6 +1578,7 @@ export function createSessionCoordinator({
       {
         cwd: options.cwd ?? (resumeId ? sessionWorkingDirectory(workspacePath, agentKey, resumeId) : undefined),
         openTools: options.tools,
+        ephemeral: options.ephemeral,
       },
     );
     if (!runtime) {
@@ -1611,20 +1612,22 @@ export function createSessionCoordinator({
       }
       const binding = completeSessionIdentity(runtime, sessionId, {
         restored: resumeId !== null,
-        publish: () =>
-          backfillSessionList(
-            runtime.store,
-            runtime.listed,
-            sessionId,
-            runtime,
-            (other) =>
-              other.agentKey === agentKey &&
-              pathKey(other.workspacePath) === pathKey(workspacePath),
-          ),
+        publish: options.ephemeral
+          ? () => {}
+          : () =>
+              backfillSessionList(
+                runtime.store,
+                runtime.listed,
+                sessionId,
+                runtime,
+                (other) =>
+                  other.agentKey === agentKey &&
+                  pathKey(other.workspacePath) === pathKey(workspacePath),
+              ),
       });
       if (binding) await binding;
       const title = options.title?.trim();
-      if (title) {
+      if (title && !options.ephemeral) {
         const save = setManualTitle(sessionId, title, agentKey);
         if (save) await save;
         runtime.store.getState().refreshSessionTitle(sessionId);
@@ -1633,12 +1636,28 @@ export function createSessionCoordinator({
         workspacePath,
         sessionId,
         restored: resumeId !== null,
+        ephemeral: options.ephemeral === true,
       });
       return { workspacePath, agentKey, sessionId };
     } catch (error) {
       await disposeRuntime(runtime).catch(() => undefined);
       throw error;
     }
+  }
+
+  async function closePluginSessionRuntime(
+    target: SessionTarget,
+  ): Promise<void> {
+    const runtime = findSessionRuntime(
+      target.workspacePath,
+      target.agentKey,
+      target.sessionId,
+    );
+    if (!runtime || runtime.disposed) return;
+    if (runtime.store.getState().isAgentRunning) {
+      runtime.store.getState().requestCancel();
+    }
+    await disposeRuntime(runtime);
   }
 
   /** 按会话 id 订阅轮次事件（会话还没打开也行；断线重连、重新打开后照常收到）。 */
@@ -1858,7 +1877,9 @@ export function createSessionCoordinator({
     isCurrent: () => boolean,
     retained?: SessionRuntime,
     backgroundAdapter?: AgentAdapter,
-    plugin?: Pick<SessionRuntimeResources, "cwd" | "openTools">,
+    plugin?: Pick<SessionRuntimeResources, "cwd" | "openTools"> & {
+      readonly ephemeral?: boolean;
+    },
   ): Promise<SessionRuntime | null> {
     const adapter = retained?.adapter ?? backgroundAdapter ?? currentAdapter();
     if (!adapter) {
@@ -1899,6 +1920,7 @@ export function createSessionCoordinator({
     const changesHost = getTurnChanges?.();
     if (
       changesHost &&
+      !plugin?.ephemeral &&
       !isRemoteProjectPath(workspacePath) &&
       !viewStore.getState().turnChanges
     ) {
@@ -3097,6 +3119,7 @@ export function createSessionCoordinator({
     registerSessionTools: (provider: SessionToolProvider) =>
       sessionTools.register(provider),
     openPluginSessionRuntime,
+    closePluginSessionRuntime,
     watchSessionTurns,
     pluginSessionReady,
     watchSessionEvents,

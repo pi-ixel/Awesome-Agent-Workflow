@@ -20,8 +20,10 @@ import { entryConditions, nodeOutcomes } from "./nodeDetail.ts";
 import { ActionButton, Badge, Listbox } from "../../../shared/ui/controls.tsx";
 import { MoreMenu } from "./MoreMenu.tsx";
 import { Callout } from "../../../shared/ui/Callout.tsx";
+import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { XIcon } from "../../../shared/ui/icons.tsx";
 import { TextLink } from "../../../shared/ui/TextLink.tsx";
-import { InlineConfirm } from "../../../shared/ui/InlineConfirm.tsx";
 
 type Tab = "graph" | "source";
 
@@ -124,9 +126,72 @@ export function WorkflowDetailView({ service, id, transfer, draft, onAiEdit, onO
           ...(detail.origin === "user" ? [{ type: "separator" as const }, { id: "delete", label: "删除", danger: true, onSelect: () => setConfirmDelete(true) }] : []),
         ]} />
       </div>
-      {confirmDelete && <InlineConfirm className="workflow-head-confirm" label="确认删除" message="删除后不能恢复，已有的运行记录保留。" confirmLabel="删除" busy={busy} getReturnFocus={() => moreButton.current} onConfirm={() => void act(async () => { await service.deleteWorkflow(detail.id); onDeleted(); })} onCancel={() => setConfirmDelete(false)} />}
       {meta?.description && <p className="workflow-detail-desc">{meta.description}</p>}
     </header>
+
+    {confirmDelete && (
+      <ModalShell
+        placement="container"
+        size="default"
+        label="确认删除工作流"
+        onDismiss={() => {
+          if (!busy) {
+            setConfirmDelete(false);
+            moreButton.current?.focus();
+          }
+        }}
+      >
+        <div className="flex flex-col gap-4 p-5">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="m-0 text-ui-base font-semibold text-ink">
+              确认删除「{meta?.name ?? detail.id}」？
+            </h3>
+            <IconButton
+              iconSize="compact"
+              aria-label="关闭"
+              disabled={busy}
+              onClick={() => {
+                setConfirmDelete(false);
+                moreButton.current?.focus();
+              }}
+            >
+              <XIcon className="ui-icon-14" />
+            </IconButton>
+          </div>
+          <p className="m-0 text-ui-sm leading-relaxed text-ink-mute">
+            删除后无法恢复，已有的运行记录会保留。
+          </p>
+          <div className="flex justify-end gap-2 pt-1">
+            <ActionButton
+              type="button"
+              tone="secondary"
+              size="compact"
+              disabled={busy}
+              onClick={() => {
+                setConfirmDelete(false);
+                moreButton.current?.focus();
+              }}
+            >
+              取消
+            </ActionButton>
+            <ActionButton
+              type="button"
+              tone="danger"
+              size="compact"
+              disabled={busy}
+              onClick={() =>
+                void act(async () => {
+                  await service.deleteWorkflow(detail.id);
+                  onDeleted();
+                })
+              }
+            >
+              {busy ? "正在删除…" : "确认删除"}
+            </ActionButton>
+          </div>
+        </div>
+      </ModalShell>
+    )}
 
     {notice !== "" && <p className="workflow-muted workflow-pad" role="status">{notice}</p>}
 

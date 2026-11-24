@@ -59,6 +59,7 @@ import { deliverToSession } from "../sessions/sessionDelivery.ts";
 import { SessionNavigationQueue } from "../sessions/sessionNavigationQueue.ts";
 import type { createProjectSessionIndexes } from "../sessions/sessionIndexes.ts";
 import type { AgentSwitchProgressListener } from "../types.ts";
+import { createEmbeddedSessionView } from "../conversation/ui/EmbeddedSessionView.tsx";
 
 interface ProjectSessionView {
   readonly disposed: boolean;
@@ -91,6 +92,7 @@ export type ProjectOperations = Pick<ProjectWorkspace, "registerProject"> &
       target: DeleteSessionTarget,
       cleanup: () => Promise<void>,
     ) => Promise<void>;
+    closePluginSession?: ProjectSessions["closePluginSession"];
   } & Partial<Pick<ProjectSessions, "runBackgroundPrompt" | "backgroundPromptOptions">> & {
     attachPreloading(): () => void;
     beginDraft(path: string): SessionDraft;
@@ -245,6 +247,8 @@ export class DesktopProject {
           this.assertOpen();
           return this.operations.openPluginSession(options);
         },
+        closePluginSession: (target) =>
+          this.operations.closePluginSession?.(target) ?? Promise.resolve(),
         pluginSessionReady: (target) => this.operations.pluginSessionReady(target),
         watchTurns: (sessionId, listener) => this.operations.watchTurns(sessionId, listener),
         watchEvents: (target, listener) => this.operations.watchEvents(target, listener),
@@ -261,6 +265,14 @@ export class DesktopProject {
         expansion: this.expansion,
         statusView: this.statusViewOwner.view,
         setStatusMode: this.statusViewOwner.setMode,
+        EmbeddedView: createEmbeddedSessionView({
+          findStore: (target) => {
+            const view = this.operations.findSession(target);
+            return view && !view.disposed ? view.store : undefined;
+          },
+          send: (target, text) => this.send(target, text),
+          cancel: (target) => this.cancel(target),
+        }),
         clear: this.clear.bind(this),
         dismissTurnError: this.dismissTurnError.bind(this),
         reportCommandFailure: this.reportCommandFailure.bind(this),

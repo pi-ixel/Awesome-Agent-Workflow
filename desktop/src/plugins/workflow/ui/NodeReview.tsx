@@ -10,6 +10,7 @@ import type { WorkflowCatalogNode } from "../types.ts";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { Disclosure } from "../../../shared/ui/Disclosure.tsx";
+import { MarkdownView } from "../../../shared/ui/MarkdownView.tsx";
 import { BotIcon, FileIcon, HandIcon, TerminalIcon, XIcon } from "../../../shared/ui/icons.tsx";
 import { iconButton } from "./buttons.ts";
 
@@ -43,11 +44,32 @@ export function NodeReview({ node, place, outcomes, sources, onOpenKnowledge, on
       </div>}
 
       <section aria-label="做什么">
-        <h4>做什么</h4>
-        {node.steps.length > 0
-          ? <ol className="workflow-review-steps">{node.steps.map((step, index) => <li key={index}><span>{index + 1}</span>{step}</li>)}</ol>
-          : <p className="workflow-muted">定义里没有写步骤。</p>}
-        {node.prompt && <Disclosure summary="完整要求" className="workflow-review-prompt"><p>{node.prompt}</p></Disclosure>}
+        <h4>{node.steps.length > 0 ? "做什么" : "节点提示词"}</h4>
+        {node.steps.length > 0 ? (
+          <>
+            <ol className="workflow-review-steps">
+              {node.steps.map((step, index) => (
+                <li key={index}>
+                  <span>{index + 1}</span>
+                  {step}
+                </li>
+              ))}
+            </ol>
+            {node.prompt && (
+              <Disclosure summary="完整要求" className="workflow-review-prompt">
+                <div className="mt-1.5 text-ui-sm text-ink">
+                  <MarkdownView text={node.prompt} />
+                </div>
+              </Disclosure>
+            )}
+          </>
+        ) : node.prompt ? (
+          <div className="text-ui-sm text-ink">
+            <MarkdownView text={node.prompt} />
+          </div>
+        ) : (
+          <p className="workflow-muted">定义里没有写说明。</p>
+        )}
       </section>
 
       {node.delivers && <section aria-label="交出什么">
@@ -64,11 +86,11 @@ export function NodeReview({ node, place, outcomes, sources, onOpenKnowledge, on
         </li>)}</ul>
       </section>}
 
-      {(node.knowledge?.length ?? 0) > 0 && <section aria-label="依据的规范">
-        <h4>依据的规范</h4>
+      {(node.knowledge?.length ?? 0) > 0 && <section aria-label="关联知识">
+        <h4>关联知识</h4>
         <ul className="workflow-review-files">{node.knowledge!.map((file) => <li key={file}>
           {onOpenKnowledge
-            ? <NavigationRow layout="compound" onClick={() => onOpenKnowledge(file)} data-hint="查看这份规范"><FileIcon className="ui-icon-12" aria-hidden="true" />{file}</NavigationRow>
+            ? <NavigationRow layout="compound" onClick={() => onOpenKnowledge(file)} data-hint="查看这份知识文档"><FileIcon className="ui-icon-12" aria-hidden="true" />{file}</NavigationRow>
             : <span><FileIcon className="ui-icon-12" aria-hidden="true" />{file}</span>}
         </li>)}</ul>
       </section>}

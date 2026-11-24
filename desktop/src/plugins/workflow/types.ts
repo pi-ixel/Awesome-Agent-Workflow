@@ -8,6 +8,7 @@
  *   与状态（`workflowUi` 服务，project 插件可选注入）。
  */
 import type { SessionActivitySource } from "./status/nodeActivity.ts";
+import type { ReactNode } from "react";
 import type { MessageDisplay } from "../../shared/messageDisplay.ts";
 import type { NodePlanEntry } from "./status/nodePlans.ts";
 import type { ReadonlySnapshot } from "../../shared/state/readonlySnapshot.ts";
@@ -459,13 +460,33 @@ export interface WorkflowDraftChange {
   readonly after?: string;
 }
 
-/** 草稿的编译结果与改动。 */
+/** 草稿的结构化修改（工作流元信息、单个节点内容或参考规范文件）。 */
+export interface WorkflowDraftPatch {
+  readonly name?: string;
+  readonly description?: string;
+  readonly node?: {
+    readonly id: string;
+    readonly label?: string;
+    readonly why?: string;
+    readonly delivers?: string;
+    readonly prompt?: string;
+    readonly knowledge?: readonly string[];
+  };
+  readonly knowledgeFile?: {
+    /** 相对于 knowledge/ 的文件名，如 svg-motion.md。 */
+    readonly name: string;
+    /** 文本内容；null 表示删除该规范文件。 */
+    readonly content: string | null;
+  };
+}
+
 export interface WorkflowDraftCheck {
   readonly draft: WorkflowDraft;
   readonly ok: boolean;
   readonly meta: WorkflowMeta | null;
   readonly diagnostics: readonly WorkflowDiagnostic[];
   readonly catalogs: Readonly<Record<string, WorkflowCatalog>>;
+  readonly files?: readonly { readonly path: string; readonly text: string }[];
   readonly changes: readonly WorkflowDraftChange[];
 }
 
@@ -478,7 +499,9 @@ export interface WorkflowDraftEditor {
   has(draftId: string): boolean;
   /** 往编辑会话里发一条消息（例如把编译报错转给 AI）；没有会话时返回 false。 */
   send(draftId: string, text: string): boolean;
-  /** 保存或放弃后结束编辑会话。 */
+  /** 在草稿页内嵌渲染这份草稿的编辑会话；未启用内置视图或会话已结束时返回 null。 */
+  renderSession?(draftId: string, options?: { readonly header?: ReactNode; readonly placeholder?: string }): ReactNode;
+  /** 保存或放弃后结束编辑会话并回收资源。 */
   end(draftId: string): Promise<void>;
 }
 
@@ -562,6 +585,7 @@ export interface WorkflowService {
   createDraft(options: { readonly base?: string; readonly from?: string }): Promise<WorkflowDraft>;
   /** 编译草稿并列出改动。 */
   checkDraft(draftId: string): Promise<WorkflowDraftCheck>;
+  patchDraft?(draftId: string, patch: WorkflowDraftPatch): Promise<WorkflowDraftCheck>;
   /** 保存草稿（编译必须通过），返回工作流 id。 */
   saveDraft(draftId: string): Promise<string>;
   discardDraft(draftId: string): Promise<void>;

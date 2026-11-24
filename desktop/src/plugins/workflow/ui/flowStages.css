@@ -35,7 +35,7 @@ html.theme-warm .wf-flow, html.theme-warm .wf-fx, html.theme-warm .wf-strip {
 .wf-canvas { position:relative; min-width:100%; width:max-content; padding:18px; }
 
 /* ---------- 阶段行 ---------- */
-.wf-stages { position:relative; z-index:2; display:grid; column-gap:30px; align-items:start; }
+.wf-stages { position:relative; z-index:2; display:grid; column-gap:30px; align-items:stretch; }
 /* 阶段块：一层的提纲，比步骤卡更「实」——抬高一档的底色、更粗的边、投影、圆形序号 */
 .wf-stage { position:relative; display:flex; align-items:flex-start; gap:12px; min-width:0; padding:13px 14px 14px; border:1px solid var(--color-line-strong); border-radius:var(--radius-popover); background:var(--wf-stage-bg); color:var(--color-ink); text-align:left; cursor:pointer; box-shadow:var(--wf-stage-lift); transition:border-color .15s ease, box-shadow .15s ease; }
 .wf-stage:hover { border-color:var(--color-ink-mute); }
@@ -50,12 +50,12 @@ html.theme-warm .wf-flow, html.theme-warm .wf-fx, html.theme-warm .wf-strip {
 .wf-stage-mark.tone-done svg { stroke-width:3; }
 .wf-stage-mark.tone-running { border-color:var(--wf-running); color:var(--wf-running); }
 .wf-stage-mark.tone-alert { border-color:var(--wf-alert); color:var(--color-warn-ink); }
-.wf-stage-body { flex:1; display:flex; flex-direction:column; min-width:0; }
+.wf-stage-body { flex:1; display:flex; flex-direction:column; min-width:0; height:100%; }
 .wf-stage-head { display:flex; align-items:baseline; gap:8px; min-width:0; }
 .wf-stage-head .wf-word { margin-left:auto; }
 .wf-stage-title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:calc(var(--text-ui-base) * 1.1); font-weight:700; letter-spacing:-.01em; line-height:1.35; }
 .wf-stage-span { margin-top:1px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--text-2xs); color:var(--color-ink-mute); }
-.wf-stage-body .wf-pills { margin-top:9px; gap:3px; }
+.wf-stage-body .wf-pills { margin-top:auto; padding-top:9px; gap:3px; }
 .wf-stage-body .wf-pill { max-width:none; }
 /* 展开后胶囊变成了下面的步骤：原位不显示，但留着位置，阶段块不变形 */
 .wf-pills.gone { visibility:hidden; }
