@@ -71,11 +71,13 @@ export function StorageView({
   reminderGroups,
   active = true,
   revision = 0,
+  hasOwnScroll = true,
 }: {
   readonly request?: (request: StorageRequest) => Promise<StorageResponse>;
   readonly reminderGroups?: readonly ReminderGroup[];
   readonly active?: boolean;
   readonly revision?: number;
+  readonly hasOwnScroll?: boolean;
 }) {
   const [rows, setRows] = useState<StorageRow[]>([]);
   const [at, setAt] = useState<number>();
@@ -247,7 +249,7 @@ export function StorageView({
   return (
     <section
       aria-label="Desktop 存储"
-      className="min-h-0 overflow-auto text-ui-sm"
+      className={`min-h-0 text-ui-sm${hasOwnScroll ? " overflow-auto" : ""}`}
     >
       <div className="mx-auto max-w-6xl space-y-4">
         <MetricStrip

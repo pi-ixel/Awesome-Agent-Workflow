@@ -312,14 +312,18 @@ it("opens diagnostics cleanup from a category and releases the preview on Escape
   fireEvent.click(category);
   expect(category).toHaveAttribute("aria-expanded", "true");
   fireEvent.click(screen.getByRole("button", { name: "全选" }));
-  fireEvent.click(screen.getByRole("button", { name: "清理" }));
+  await act(() => {
+    fireEvent.click(screen.getByRole("button", { name: "清理" }));
+    return Promise.resolve();
+  });
 
-  const confirmation = await screen.findByRole("alertdialog", { name: "确认清理" });
+  const confirmation = screen.getByRole("alertdialog", { name: "确认清理" });
   expect(confirmation).toHaveTextContent("应用数据");
   expect(confirmation).toHaveTextContent("预计释放 1.0 KiB");
   expect(confirmation).toHaveTextContent("删除所选日志文件。");
-  expect(within(confirmation).getByRole("button", { name: "取消" })).toHaveFocus();
-  fireEvent.keyDown(window, { key: "Escape" });
+  const cancel = within(confirmation).getByRole("button", { name: "取消" });
+  expect(cancel).toHaveFocus();
+  fireEvent.keyDown(cancel, { key: "Escape" });
   expect(confirmation).not.toBeInTheDocument();
   expect(request).toHaveBeenCalledWith({ action: "cancel", token: "cleanup-plan" });
   expect(request).not.toHaveBeenCalledWith({ action: "clean", token: "cleanup-plan" });

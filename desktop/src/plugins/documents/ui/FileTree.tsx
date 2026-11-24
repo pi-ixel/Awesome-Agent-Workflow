@@ -3,6 +3,7 @@ import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import type { FileEntry } from "../../host/types.ts";
 import { describeUnknownError } from "../../../shared/errors.ts";
 import { CollapsibleTreePane } from "../../../shared/ui/TreeMotion.tsx";
+import { useTreePositionMotion } from "../../../shared/ui/controls/useTreePositionMotion.ts";
 import { webviewStorage } from "../../host/service.ts";
 import type { ProjectWorkspace } from "../../project/service.ts";
 import { ColumnResizer } from "../../../shared/ui/controls/ColumnResizer.tsx";
@@ -187,8 +188,18 @@ export function FileTree({
   const [resizingTree, setResizingTree] = useState(false);
   const splitRowRef = useRef<HTMLDivElement | null>(null);
   const treeColRef = useRef<HTMLDivElement | null>(null);
+  const previewColRef = useRef<HTMLDivElement | null>(null);
+  const particleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const treeVisible = split.visible;
-  const treeOnRight = treePosition === "right";
+  const treeOnRight = useTreePositionMotion({
+    position: treePosition,
+    scope: `${ownerProject}\0${root}`,
+    enabled: treeVisible && !resizingTree,
+    rowRef: splitRowRef,
+    treeRef: treeColRef,
+    previewRef: previewColRef,
+    canvasRef: particleCanvasRef,
+  }) === "right";
   const TreeToggleIcon = treeOnRight
     ? (treeVisible ? PanelRightCloseIcon : PanelRightOpenIcon)
     : (treeVisible ? PanelLeftCloseIcon : PanelLeftOpenIcon);
@@ -798,7 +809,7 @@ export function FileTree({
       ) : null}
       <div
         ref={splitRowRef}
-        className={`@container flex min-h-0 flex-1 ${treeOnRight ? "flex-row-reverse" : "flex-row"}`}
+        className={`@container relative isolate flex min-h-0 flex-1 ${treeOnRight ? "flex-row-reverse" : "flex-row"}`}
       >
         <>
             <CollapsibleTreePane
@@ -981,6 +992,7 @@ export function FileTree({
             文件/预览内链只换预览内容；关闭路径 = 顶栏分段切换（面板级），
             预览区不放关闭钮。 */}
         <div
+          ref={previewColRef}
           aria-label="预览区"
           className="flex h-full min-w-0 flex-1 flex-col"
         >
@@ -1004,6 +1016,13 @@ export function FileTree({
             </div>
           )}
         </div>
+        <canvas
+          ref={particleCanvasRef}
+          data-tree-position-particles=""
+          className="pointer-events-none absolute inset-0 z-10 h-full w-full text-accent-ink"
+          aria-hidden="true"
+          hidden
+        />
       </div>
       {menu !== null && (
         <ContextMenu

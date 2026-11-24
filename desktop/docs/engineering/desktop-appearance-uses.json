@@ -42,7 +42,10 @@
     "FilePreview/headerInner · 内嵌图形",
     "专用渲染依赖 · highlight.js/lib/common"
   ],
-  "plugins/documents/ui/FileTree.tsx": ["FileTree · <input>"],
+  "plugins/documents/ui/FileTree.tsx": [
+    "FileTree · <canvas>",
+    "FileTree · <input>"
+  ],
   "plugins/documents/ui/MarkdownSourceEditor.tsx": [
     "专用渲染依赖 · @codemirror/lang-markdown",
     "专用渲染依赖 · @codemirror/language",
@@ -301,6 +304,9 @@
   "shared/ui/controls/FindBar.tsx": ["FindBar · <input>"],
   "shared/ui/controls/SegmentedControl.tsx": ["SegmentedControl · <button>"],
   "shared/ui/controls/UsageMeter.tsx": ["UsageMeter · 原生 role=progressbar"],
+  "shared/ui/controls/treePositionParticles.ts": [
+    "buildParticles/raster · createElement(canvas)"
+  ],
   "shared/ui/diffStyles.ts": [
     "addedEdge · 差异样式 shadow-[inset_3px_0_0_var(--color-diff-added)]",
     "addedGutter · 差异样式 bg-diff-added-gutter",
