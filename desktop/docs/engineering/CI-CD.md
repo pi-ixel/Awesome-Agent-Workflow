@@ -7,7 +7,7 @@
 - 指向 main 的 PR，以及 main 上涉及 `desktop/**` 或该工作流的更新：运行 TypeScript、ESLint、Vitest、Edge 界面回归、生产前端构建和原生 Rust 测试。
 - Actions 中可手动运行 **Desktop Windows**（首次手动运行需该工作流已合入默认分支）。
 - 手动构建与正式标签会并行运行 Windows 打包、前端检查和 Rust 检查。三项通过后，在对应 Actions 页的 Artifacts 下载 `desktop-windows-x64-<run_id>-<attempt>`，保留 14 天。`desktop-windows-x64-candidate-*` 是供验证作业读取的中间产物，保留 2 天。
-- 下载包含 `AAW-Desktop-<version>-windows-x64-setup.exe`、`AAW-Desktop-<version>-windows-x64-portable.zip` 和 `SHA256SUMS`。ZIP 解压得到 `desktop.exe`。
+- 下载包含 `AAW-Desktop-<version>-windows-x64-setup.exe`、`AAW-Desktop-<version>-windows-x64-portable.zip` 和 `SHA256SUMS`。完整解压 ZIP 后运行 `desktop.exe`，同目录下的 `workflow-engine/` 和 `ops-sidecar/` 分别提供工作流和远程项目服务。
 - 流水线不需要本机 iCode 或 AAW 配置；原生测试使用测试子进程。安装后的应用需用户自行配置 ACP agent、AAW 工具及 WebView2。
 
 ## 正式发布

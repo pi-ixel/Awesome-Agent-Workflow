@@ -243,7 +243,12 @@ jobs:
           if ($installers.Count -ne 1) { throw "Expected one NSIS installer, found $($installers.Count)" }
           $stem = "AAW-Desktop-$env:DESKTOP_VERSION-windows-x64"
           Copy-Item -LiteralPath $installers[0].FullName -Destination "$output/$stem-setup.exe"
-          Compress-Archive -LiteralPath "$release/desktop.exe" -DestinationPath "$output/$stem-portable.zip"
+          $portable = Join-Path $env:RUNNER_TEMP 'aaw-desktop-portable'
+          New-Item -ItemType Directory -Path "$portable/workflow-engine", "$portable/ops-sidecar" -Force | Out-Null
+          Copy-Item -LiteralPath "$release/desktop.exe" -Destination "$portable/desktop.exe"
+          Copy-Item -LiteralPath 'workflow-engine-rs/dist/workflow_service.exe' -Destination "$portable/workflow-engine/workflow_service.exe"
+          Copy-Item -LiteralPath 'ops-sidecar/dist/ops-sidecar.exe' -Destination "$portable/ops-sidecar/ops-sidecar.exe"
+          Compress-Archive -LiteralPath "$portable/desktop.exe", "$portable/workflow-engine", "$portable/ops-sidecar" -DestinationPath "$output/$stem-portable.zip"
           $checksums = Get-ChildItem -LiteralPath $output -File | Sort-Object Name | ForEach-Object {
             $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash  $($_.Name)"
