@@ -12,6 +12,7 @@ import { createUsageSettingsEntry } from "../../src/plugins/project/usage/settin
 import { bindProjectStorage } from "../../src/plugins/project/lifecycle/persistence.ts";
 import type { HostManagedStorage } from "../../src/plugins/host/types.ts";
 import { StorageView } from "../../src/plugins/diagnostics/ui/StorageView.tsx";
+import { createStorageSettings } from "../../src/plugins/diagnostics/ui/StorageSettings.tsx";
 import type { StorageRow } from "../../src/plugins/diagnostics/capture/storageRegistry.ts";
 import { ResourceReport } from "../../src/plugins/diagnostics/ui/ResourceReport.tsx";
 import { MarkdownAppearance } from "../../src/shared/ui/markdown/theme.ts";
@@ -116,6 +117,11 @@ const storageRows: StorageRow[] = params.has("storage-scroll")
       },
     ]
   : rows;
+const storageRequest = () => Promise.resolve(storageRows);
+const { Settings: StorageSettings } = createStorageSettings(
+  { storage: storageRequest },
+  () => {},
+);
 const usageEntry = createUsageSettingsEntry([
   { id: "chrys", displayName: "iCode" },
   { id: "codeagent", displayName: "CodeAgent" },
@@ -143,7 +149,9 @@ const fixture = {
       id: "storage",
       label: "存储",
       Icon: () => null,
-      View: () => <StorageView request={() => Promise.resolve(storageRows)} />,
+      View: params.has("storage-scroll")
+        ? StorageSettings
+        : () => <StorageView request={storageRequest} />,
     },
   ],
 };

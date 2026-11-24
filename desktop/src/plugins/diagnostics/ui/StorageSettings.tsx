@@ -182,6 +182,7 @@ export function createStorageSettings(
             request={reader.storage}
             active={active}
             revision={state.usageRevision}
+            hasOwnScroll={false}
             reminderGroups={storageGroups.map((group) => ({
               ...group,
               render: (label) => (
