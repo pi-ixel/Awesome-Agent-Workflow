@@ -155,15 +155,38 @@ function formatElapsed(seconds: number): string {
   return s === 0 ? `${m} 分` : `${m} 分 ${s} 秒`;
 }
 
-function EmbeddedWorkingIndicator() {
-  const [elapsed, setElapsed] = useState(0);
+function currentTurnStartedAt(items: readonly SessionItem[]): number | null {
+  const starts: number[] = [];
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]!;
+    if (item.kind === "tool" || item.kind === "thought") {
+      if (item.startedAt !== null) starts.push(item.startedAt);
+    } else if (item.kind === "user") {
+      if (item.createdAt) {
+        const t = Date.parse(item.createdAt);
+        if (!Number.isNaN(t)) starts.push(t);
+      }
+      break;
+    }
+  }
+  return starts.length > 0 ? Math.min(...starts) : null;
+}
+
+function EmbeddedWorkingIndicator({
+  startedAt,
+}: {
+  readonly startedAt: number | null;
+}) {
+  const [fallbackStart] = useState(() => Date.now());
+  const origin = startedAt ?? fallbackStart;
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const startedAt = Date.now();
     const id = window.setInterval(() => {
-      setElapsed(Math.max(1, Math.floor((Date.now() - startedAt) / 1000)));
+      setNow(Date.now());
     }, 1000);
     return () => window.clearInterval(id);
   }, []);
+  const elapsed = Math.max(0, Math.floor((now - origin) / 1000));
 
   return (
     <div
@@ -194,6 +217,7 @@ function BoundEmbeddedSession({
   const items = useStore(store, (s) => s.items);
   const isRunning = useStore(store, (s) => s.isAgentRunning);
   const connectionFailure = useStore(store, (s) => s.connectionFailure);
+  const turnStartedAt = isRunning ? currentTurnStartedAt(items) : null;
   const [draft, setDraft] = useState("");
   const scrollerRef = useRef<HTMLDivElement>(null);
   const stickBottomRef = useRef(true);
@@ -246,7 +270,7 @@ function BoundEmbeddedSession({
         )}
         {items.length === 0 ? (
           isRunning ? (
-            <EmbeddedWorkingIndicator />
+            <EmbeddedWorkingIndicator startedAt={turnStartedAt} />
           ) : (
             <p className="text-ui-sm text-ink-mute">
               {emptyText ?? "在这里继续向 AI 提修改要求。"}
@@ -257,7 +281,7 @@ function BoundEmbeddedSession({
             {items.map((item) => (
               <EmbeddedItemRow key={item.id} item={item} />
             ))}
-            {isRunning && <EmbeddedWorkingIndicator />}
+            {isRunning && <EmbeddedWorkingIndicator startedAt={turnStartedAt} />}
           </>
         )}
       </div>

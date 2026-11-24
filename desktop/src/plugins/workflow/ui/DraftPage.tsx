@@ -118,6 +118,7 @@ function nodeFormFrom(node: WorkflowCatalogNode): NodeDraftForm {
 export interface PendingAiStart {
   readonly draftId: string;
   readonly request: string;
+  readonly startedAt: number;
   readonly status: "starting" | "error";
   readonly error?: string;
 }
@@ -154,19 +155,19 @@ export function DraftPage({
   const [drawer, setDrawer] = useState<DrawerMode>(() =>
     editor?.has(draftId) || pendingAi ? "ai" : "none",
   );
-  const [startingElapsed, setStartingElapsed] = useState(0);
+  const [startingNow, setStartingNow] = useState(() => Date.now());
   const aiStarting = pendingAi?.status === "starting";
   useEffect(() => {
     if (!aiStarting) return;
-    const startedAt = Date.now();
     const id = window.setInterval(() => {
-      setStartingElapsed(Math.max(1, Math.floor((Date.now() - startedAt) / 1000)));
+      setStartingNow(Date.now());
     }, 1000);
-    return () => {
-      window.clearInterval(id);
-      setStartingElapsed(0);
-    };
+    return () => window.clearInterval(id);
   }, [aiStarting]);
+  const startingElapsed =
+    aiStarting && pendingAi
+      ? Math.max(0, Math.floor((startingNow - pendingAi.startedAt) / 1000))
+      : 0;
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const discardButton = useRef<HTMLButtonElement>(null);
   const [, setSessionVersion] = useState(0);

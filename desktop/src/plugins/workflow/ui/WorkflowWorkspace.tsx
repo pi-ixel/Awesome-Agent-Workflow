@@ -36,6 +36,7 @@ export function WorkflowWorkspace({ service, navigation, transfer, editor }: {
   const [pendingAi, setPendingAi] = useState<{
     readonly draftId: string;
     readonly request: string;
+    readonly startedAt: number;
     readonly status: "starting" | "error";
     readonly error?: string;
   } | null>(null);
@@ -86,7 +87,8 @@ export function WorkflowWorkspace({ service, navigation, transfer, editor }: {
       const alreadyLive = editor.has(draft.draftId) && editor.send(draft.draftId, text);
       if (!alreadyLive) {
         // 先立刻进入草稿页并展开 AI 抽屉，在会话流里展示加载态，避免弹窗长时间卡在「正在准备…」。
-        setPendingAi({ draftId: draft.draftId, request: text, status: "starting" });
+        const startedAt = Date.now();
+        setPendingAi({ draftId: draft.draftId, request: text, startedAt, status: "starting" });
         changed();
         navigation.setState({ compose: null, route: { kind: "draft", draftId: draft.draftId }, tab: "mine" });
         void editor
@@ -98,7 +100,7 @@ export function WorkflowWorkspace({ service, navigation, transfer, editor }: {
           .catch((cause) => {
             setPendingAi((curr) =>
               curr?.draftId === draft.draftId
-                ? { draftId: draft.draftId, request: text, status: "error", error: errorLine(cause) }
+                ? { draftId: draft.draftId, request: text, startedAt, status: "error", error: errorLine(cause) }
                 : curr,
             );
           });
