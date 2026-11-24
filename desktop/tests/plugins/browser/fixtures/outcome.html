@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>结果可确认性验证页</title>
+  </head>
+  <body>
+    <h1>结果可确认性验证页</h1>
+
+    <form id="search-form">
+      <input id="search-input" name="q" />
+      <button id="search-submit" type="submit">搜索</button>
+    </form>
+
+    <form id="required-form">
+      <input id="required-input" required />
+      <button id="required-submit" type="submit">提交必填</button>
+    </form>
+
+    <button id="noop">无效果按钮</button>
+    <a id="download" href="/download.txt" download="hello.txt">下载文件</a>
+    <input id="readonly" value="原始只读值" readonly />
+    <input id="disabled" value="禁用值" disabled />
+
+    <form id="login-form">
+      <input id="login-user" />
+      <input id="login-pass" type="password" />
+      <button id="login-submit" type="submit">登录</button>
+    </form>
+    <p id="login-error"></p>
+
+    <input id="upload" type="file" accept=".txt" />
+
+    <button id="spa">局部更新</button>
+    <span id="spa-count">0</span>
+    <button id="visual">视觉变化</button>
+    <div id="visual-box" style="width: 80px; height: 40px; background: #ccc"></div>
+
+    <div class="item">结果一</div>
+    <div class="item">结果二</div>
+
+    <input id="enter-input" />
+    <button id="dialog">打开对话框</button>
+    <div id="delayed" style="display: none">延迟元素</div>
+    <iframe src="https://example.com" title="跨源框架"></iframe>
+    <div style="height: 3000px"></div>
+    <p id="bottom">页面底部</p>
+
+    <script>
+      const params = new URLSearchParams(location.search);
+      if (params.get("q")) {
+        document.title = "结果页";
+        document.querySelector("h1").textContent = `搜索：${params.get("q")}`;
+      }
+      if (params.get("home")) {
+        document.title = "首页";
+        document.querySelector("h1").textContent = "登录成功首页";
+      }
+
+      document.querySelector("#search-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const value = document.querySelector("#search-input").value;
+        location.href = `outcome.html?q=${encodeURIComponent(value)}`;
+      });
+      document.querySelector("#login-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const user = document.querySelector("#login-user").value;
+        const pass = document.querySelector("#login-pass").value;
+        if (user === "admin" && pass === "admin") {
+          location.href = "outcome.html?home=1";
+        } else {
+          document.querySelector("#login-error").textContent = "用户名或密码错误";
+        }
+      });
+      let count = 0;
+      document.querySelector("#spa").addEventListener("click", () => {
+        count += 1;
+        document.querySelector("#spa-count").textContent = String(count);
+      });
+      document.querySelector("#visual").addEventListener("click", () => {
+        document.querySelector("#visual-box").style.background = "#2563eb";
+      });
+      document.querySelector("#dialog").addEventListener("click", () => {
+        setTimeout(() => alert("验证对话框"), 0);
+      });
+      setTimeout(() => {
+        document.querySelector("#delayed").style.display = "block";
+      }, 1000);
+    </script>
+  </body>
+</html>

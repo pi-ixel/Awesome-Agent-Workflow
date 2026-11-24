@@ -5,6 +5,7 @@ enum FieldKind {
     String,
     Number,
     Boolean,
+    Object,
 }
 
 struct Field {
@@ -27,6 +28,14 @@ const fn number(name: &'static str) -> Field {
         required: false,
     }
 }
+const fn object(name: &'static str, required: bool) -> Field {
+    Field {
+        name,
+        kind: FieldKind::Object,
+        required,
+    }
+}
+
 const fn boolean(name: &'static str, required: bool) -> Field {
     Field {
         name,
@@ -36,45 +45,61 @@ const fn boolean(name: &'static str, required: bool) -> Field {
 }
 
 fn fields(name: &str) -> Option<&'static [Field]> {
-    const TAB: &[Field] = &[string("tabId", true)];
+    const TAB: &[Field] = &[string("tabId", true), object("expect", false), number("timeoutMs")];
     const NONE: &[Field] = &[];
-    const OPEN: &[Field] = &[string("url", false)];
-    const NAVIGATE: &[Field] = &[string("tabId", true), string("url", true)];
-    const CLICK: &[Field] = &[string("tabId", true), string("selector", true)];
+    const OPEN: &[Field] = &[string("url", false), object("expect", false), number("timeoutMs")];
+    const NAVIGATE: &[Field] = &[string("tabId", true), string("url", true), object("expect", false), number("timeoutMs")];
+    const CLICK: &[Field] = &[string("tabId", true), string("selector", true), object("expect", false), number("timeoutMs")];
     const FILL: &[Field] = &[
         string("tabId", true),
         string("selector", true),
         string("value", true),
+        object("expect", false),
+        number("timeoutMs"),
+        object("expect", false),
     ];
-    const SCROLL: &[Field] = &[string("tabId", true), number("deltaX"), number("deltaY")];
-    const PRESS: &[Field] = &[string("tabId", true), string("key", true)];
+    const SCROLL: &[Field] = &[string("tabId", true), number("deltaX"), number("deltaY"), object("expect", false), number("timeoutMs")];
+    const PRESS: &[Field] = &[string("tabId", true), string("key", true), object("expect", false), number("timeoutMs")];
     const SUBMIT: &[Field] = &[
         string("tabId", true),
         string("selector", true),
         string("approvalId", false),
+        object("expect", false),
+        number("timeoutMs"),
+        object("expect", false),
     ];
     const VISIBILITY: &[Field] = &[boolean("visible", true)];
     const SCRIPT: &[Field] = &[
         string("tabId", true),
         string("script", true),
         string("approvalId", false),
+        object("expect", false),
+        number("timeoutMs"),
+        object("expect", false),
     ];
     const UPLOAD: &[Field] = &[
         string("tabId", true),
         string("selector", true),
         string("path", true),
         string("approvalId", false),
+        object("expect", false),
+        number("timeoutMs"),
+        object("expect", false),
     ];
     const DIALOG: &[Field] = &[
         string("tabId", true),
         string("dialogId", true),
         boolean("accept", true),
         string("promptText", false),
+        object("expect", false),
+        number("timeoutMs"),
+        object("expect", false),
     ];
     const WAIT: &[Field] = &[
         string("tabId", true),
         string("selector", false),
         number("timeoutMs"),
+        object("expect", false),
     ];
     Some(match name {
         "browser_open" => OPEN,
@@ -123,6 +148,7 @@ pub fn validate_tool_arguments(name: &str, arguments: &Value) -> Result<(), Stri
                 .as_f64()
                 .is_some_and(|number| number.is_finite() && number.abs() <= 1_000_000.0),
             FieldKind::Boolean => value.is_boolean(),
+        FieldKind::Object => value.is_object(),
         };
         if !valid {
             return Err("INVALID_ARGUMENT".into());
@@ -211,6 +237,7 @@ pub fn tool_definitions() -> Value {
                     FieldKind::String => "string",
                     FieldKind::Number => "number",
                     FieldKind::Boolean => "boolean",
+                    FieldKind::Object => "object",
                 };
                 properties.insert(field.name.into(), json!({"type":kind}));
                 if field.required {

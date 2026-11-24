@@ -1,4 +1,5 @@
 pub mod action;
+pub mod confirmation;
 pub mod data;
 pub mod diagnostics;
 pub mod dialog;
@@ -10,6 +11,7 @@ pub mod identity;
 pub mod mcp;
 pub mod model;
 pub mod native_dialog;
+pub mod outcome;
 pub mod runtime;
 pub mod restore;
 pub mod security;
@@ -23,6 +25,8 @@ pub mod bench;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod confirmation_tests;
 
 /// 站点 WebView 没有工作台样式，仅在 AAW 注入的浮层根节点上定义共享变量。
 fn with_overlay_radii(script: &str) -> String {
