@@ -139,8 +139,8 @@ function TableEdgeShadow({
       aria-hidden={true}
       className={
         side === "left"
-          ? "pointer-events-none absolute inset-y-0 left-0 z-10 w-6 rounded-l-xl shadow-[inset_12px_0_12px_-12px_color-mix(in_srgb,var(--color-overlay-shade)_15%,transparent)]"
-          : "pointer-events-none absolute inset-y-0 right-0 z-10 w-6 rounded-r-xl shadow-[inset_-12px_0_12px_-12px_color-mix(in_srgb,var(--color-overlay-shade)_15%,transparent)]"
+          ? "pointer-events-none absolute inset-y-0 left-0 z-10 w-6 rounded-l-popover shadow-[inset_12px_0_12px_-12px_color-mix(in_srgb,var(--color-overlay-shade)_15%,transparent)]"
+          : "pointer-events-none absolute inset-y-0 right-0 z-10 w-6 rounded-r-popover shadow-[inset_-12px_0_12px_-12px_color-mix(in_srgb,var(--color-overlay-shade)_15%,transparent)]"
       }
     />
   );
@@ -164,13 +164,13 @@ function TablePreviewDialog({
           type="button"
           aria-label="关闭预览"
           onClick={onClose}
-          className="flex items-center justify-center rounded text-ink-mute hover:bg-raised hover:text-ink"
+          className="flex items-center justify-center rounded-control text-ink-mute hover:bg-raised hover:text-ink"
         >
           <XIcon className="ui-icon-14" />
         </IconButton>
       </div>
       <div className="min-h-0 flex-1 p-3">
-        <div tabIndex={0} aria-label="预览表格滚动" className="h-full overflow-auto rounded-xl border border-line bg-surface focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-inset focus-visible:outline-none">
+        <div tabIndex={0} aria-label="预览表格滚动" className="h-full overflow-auto rounded-popover border border-line bg-surface focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-inset focus-visible:outline-none">
           <table
             className="w-max min-w-full border-separate border-spacing-0 text-ui-base [&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-surface"
             {...tableProps}
@@ -303,7 +303,7 @@ export function MarkdownTable({
           <Maximize2Icon className="ui-icon-14" />
         </IconButton>
       </div>
-      <div className="relative w-full overflow-hidden rounded-xl border border-line">
+      <div className="relative w-full overflow-hidden rounded-popover border border-line">
         <div
           ref={scrollViewportRef}
           role="region"

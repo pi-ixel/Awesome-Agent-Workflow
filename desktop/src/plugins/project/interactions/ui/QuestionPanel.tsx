@@ -71,7 +71,7 @@ export function QuestionPanel({
     <section
       aria-label="结构化问答"
       data-question-dock=""
-      className="w-full overflow-hidden rounded-2xl border border-line bg-surface text-ui-base text-ink"
+      className="w-full overflow-hidden rounded-panel border border-line bg-surface text-ui-base text-ink"
       onPointerDownCapture={onInteract}
       onFocusCapture={onInteract}
       onKeyDown={(event) => {
@@ -110,7 +110,7 @@ export function QuestionPanel({
           type="button"
           disabled={submitting}
           aria-label={stale ? "丢弃草稿" : "关闭整组提问"}
-          className="rounded hover:bg-hover"
+          className="rounded-control hover:bg-hover"
           onClick={onClose}
         >
           <XIcon className="ui-icon-16" />
@@ -141,7 +141,7 @@ export function QuestionPanel({
         {page > 0 && (
           <IconButton
             type="button"
-            className="rounded-full bg-ink text-ui-caption font-medium text-(color:--color-base) disabled:opacity-40 hover:bg-ink/85"
+            className="rounded-pill bg-ink text-ui-caption font-medium text-(color:--color-base) disabled:opacity-40 hover:bg-ink/85"
             disabled={submitting}
             aria-label="上一题"
             onClick={onBack}
@@ -164,7 +164,7 @@ export function QuestionPanel({
           type="button"
           disabled={!valid || stale || submitting}
           aria-label={page < count - 1 ? "下一题" : "发送"}
-          className="rounded-full bg-ink text-ui-caption font-medium text-(color:--color-base) disabled:opacity-40 hover:bg-ink/85"
+          className="rounded-pill bg-ink text-ui-caption font-medium text-(color:--color-base) disabled:opacity-40 hover:bg-ink/85"
           onClick={onSend}
         >
           {page < count - 1 ? (
@@ -222,7 +222,7 @@ export function QuestionChoices({
         >
           <span
             aria-hidden="true"
-            className="mt-0.5 flex ui-icon-20 shrink-0 items-center justify-center rounded border border-control-line bg-raised text-ui-caption text-ink-mute"
+            className="mt-0.5 flex ui-icon-20 shrink-0 items-center justify-center rounded-control border border-control-line bg-raised text-ui-caption text-ink-mute"
           >
             {selected.includes(option.value) ? "✓" : index + 1}
           </span>

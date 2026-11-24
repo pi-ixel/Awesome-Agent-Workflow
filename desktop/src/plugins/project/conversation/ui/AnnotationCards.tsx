@@ -29,7 +29,7 @@ export function AnnotationCards({
       {annotations.map((a) => (
         <div
           key={a.id}
-          className="rounded-lg border border-line bg-base p-2 text-ui-caption"
+          className="rounded-control border border-line bg-base p-2 text-ui-caption"
         >
           <div className="flex items-center gap-2">
             <TextLink
@@ -49,7 +49,7 @@ export function AnnotationCards({
                 type="button"
                 aria-label={`编辑批注 ${a.path.split(/[\\/]/).at(-1)}`}
                 data-hint="编辑评论"
-                className="flex shrink-0 items-center justify-center rounded hover:bg-hover"
+                className="flex shrink-0 items-center justify-center rounded-control hover:bg-hover"
                 onClick={() => {
                   setEditing(a.id);
                   setComment(a.comment);
@@ -63,7 +63,7 @@ export function AnnotationCards({
                 type="button"
                 aria-label={`删除批注 ${a.path.split(/[\\/]/).at(-1)}`}
                 data-hint="删除评论"
-                className="flex shrink-0 items-center justify-center rounded border border-danger-line bg-danger-bg text-danger-ink hover:brightness-95"
+                className="flex shrink-0 items-center justify-center rounded-control border border-danger-line bg-danger-bg text-danger-ink hover:brightness-95"
                 onClick={() => onRemove(a.id)}
               >
                 <TrashIcon className="ui-icon-14" />

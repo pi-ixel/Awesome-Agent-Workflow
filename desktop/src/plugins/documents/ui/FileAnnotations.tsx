@@ -459,7 +459,7 @@ export function FileAnnotations({
             aria-label={editor.open ? "文档批注" : "选区操作"}
             data-file-find-ignore
             data-annotation-overlay
-            className={`fixed z-[100] max-w-[calc(100vw-16px)] ${editor.open ? "p-2.5 text-ui-base" : "annotation-rainbow-border rounded-md p-0.5 text-ui-caption"}`}
+            className={`fixed z-[100] max-w-[calc(100vw-16px)] ${editor.open ? "p-2.5 text-ui-base" : "annotation-rainbow-border p-0.5 text-ui-caption"}`}
             style={{
               left: editor.x,
               top: editor.y,

@@ -437,7 +437,7 @@ export function OrdinaryToolCallCard({
                   revealOnHover={true}
                 />
               </div>
-              <pre className="max-h-72 overflow-auto rounded-lg border border-line bg-surface p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-ink-soft">
+              <pre className="max-h-72 overflow-auto rounded-control border border-line bg-surface p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-ink-soft">
                 {item.inputFallback != null
                   ? item.inputFallback || "Agent 未提供输入参数"
                   : formatPayload(item.rawInput)}
@@ -473,7 +473,7 @@ export function OrdinaryToolCallCard({
               />
             ) : (
               <pre
-                className={`max-h-72 overflow-auto rounded-lg border border-line bg-surface p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words ${item.status === "failed" ? "text-danger-ink" : "text-ink-soft"}`}
+                className={`max-h-72 overflow-auto rounded-control border border-line bg-surface p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words ${item.status === "failed" ? "text-danger-ink" : "text-ink-soft"}`}
               >
                 {formatPayload(item.rawOutput)}
               </pre>

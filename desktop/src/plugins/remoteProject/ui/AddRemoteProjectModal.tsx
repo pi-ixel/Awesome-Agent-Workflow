@@ -276,7 +276,7 @@ export function CreateProjectFormBody({
     <>
       <div className={embedded ? "flex flex-col gap-4" : "flex flex-col gap-4 px-5 pb-4"}>
         {/* 项目名称输入框 */}
-        <div className="flex items-center overflow-hidden rounded-lg border border-line-strong bg-surface focus-within:border-ink-faint">
+        <div className="flex items-center overflow-hidden rounded-control border border-line-strong bg-surface focus-within:border-ink-faint">
           <span
             aria-hidden={true}
             className="flex min-h-10 w-10 shrink-0 items-center justify-center border-r border-line text-ink-mute"
@@ -289,7 +289,7 @@ export function CreateProjectFormBody({
             value={projectName}
             onChange={(e) => setProjectName(e.target.value)}
             placeholder="项目名称"
-            className={`${fieldSurfaceClass} min-h-10 min-w-0 flex-1 rounded-none border-0 bg-transparent px-3 py-1.5 text-ui-sm focus:ring-0`}
+            className={`${fieldSurfaceClass} min-h-10 min-w-0 flex-1 rounded-flat border-0 bg-transparent px-3 py-1.5 text-ui-sm focus:ring-0`}
           />
         </div>
 
@@ -304,7 +304,7 @@ export function CreateProjectFormBody({
               aria-expanded={Boolean(menuState)}
               aria-label={`切换设备，当前：${deviceLabel}`}
               onClick={handleToggleMenu}
-              className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-ui-sm font-medium text-ink"
+              className="inline-flex items-center gap-1.5 rounded-control px-2.5 py-1 text-ui-sm font-medium text-ink"
             >
               {deviceId === "local" ? (
                 <FolderGlyph className="ui-icon-14 shrink-0 text-ink-mute" />
@@ -318,9 +318,9 @@ export function CreateProjectFormBody({
           </div>
 
           {selectedFolder ? (
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-line-strong bg-surface px-3.5 py-3">
+            <div className="flex items-center justify-between gap-3 rounded-popover border border-line-strong bg-surface px-3.5 py-3">
               <div className="flex min-w-0 items-center gap-2.5">
-                <span className="flex min-h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-raised/50 text-ink-mute">
+                <span className="flex min-h-8 w-8 shrink-0 items-center justify-center rounded-control border border-line bg-raised/50 text-ink-mute">
                   {deviceId === "local" ? (
                     <FolderGlyph className="ui-icon-16" />
                   ) : (
@@ -350,12 +350,12 @@ export function CreateProjectFormBody({
               </ActionButton>
             </div>
           ) : (
-            <div className="flex min-h-[120px] flex-col items-center justify-center gap-2.5 rounded-xl border border-dashed border-line-strong bg-raised/30 px-4 py-5">
+            <div className="flex min-h-[120px] flex-col items-center justify-center gap-2.5 rounded-popover border border-dashed border-line-strong bg-raised/30 px-4 py-5">
               <ActionButton
                 tone="secondary"
                 type="button"
                 onClick={() => void handlePickFolder()}
-                className="inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-ui-sm"
+                className="inline-flex items-center gap-1.5 rounded-pill px-4 py-1.5 text-ui-sm"
               >
                 <FolderGlyph className="ui-icon-14 shrink-0" />
                 <span>添加</span>

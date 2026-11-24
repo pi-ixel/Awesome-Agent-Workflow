@@ -79,7 +79,7 @@ export function McpServiceDetails({
     <div className="min-w-0">
       <header className="sticky top-0 z-10 space-y-2 border-b border-line bg-base px-5 py-3">
         <div className="flex min-w-0 items-start gap-2.5">
-          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-skill-reference-lilac/10 text-skill-reference-lilac">
+          <span className="grid size-9 shrink-0 place-items-center rounded-control bg-skill-reference-lilac/10 text-skill-reference-lilac">
             <PlugIcon className="ui-icon-18" />
           </span>
           <div className="min-w-0 flex-1">
@@ -183,7 +183,7 @@ export function McpServiceDetails({
                   工具清单由当前 Agent 上报。
                 </p>
               )}
-              <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-surface">
+              <ul className="divide-y divide-line overflow-hidden rounded-popover border border-line bg-surface">
                 {filtered?.map((tool) => {
                   const parameters = signature(tool.inputSchema);
                   return (
@@ -256,7 +256,7 @@ export function McpServiceDetails({
       )}
       {tab === "json" && (
         <section role="tabpanel" aria-label="原始 JSON" className="p-5">
-          <pre className="overflow-auto whitespace-pre-wrap break-all rounded-lg border border-line bg-surface p-3 font-mono text-ui-caption">
+          <pre className="overflow-auto whitespace-pre-wrap break-all rounded-control border border-line bg-surface p-3 font-mono text-ui-caption">
             {JSON.stringify(config, null, 2)}
           </pre>
         </section>

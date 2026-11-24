@@ -392,7 +392,7 @@ export function ArchiveManagementSection() {
                 />
               </NavigationRow>
               <TreeBranch open={open}>
-                <ul className="divide-y divide-line rounded-xl border border-line bg-selected px-4">
+                <ul className="divide-y divide-line rounded-popover border border-line bg-selected px-4">
                   {group.entries.map((row) => {
                     const target = {
                       workspacePath: row.path,

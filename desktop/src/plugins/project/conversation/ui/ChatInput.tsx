@@ -157,11 +157,12 @@ function ComposerActionHint({
     >
       {children}
       <HintSurface
+        surfaceKind="text"
         open={hovered || focused}
         className="pointer-events-none absolute bottom-full right-0 z-30 mb-0.5 flex items-center gap-2 whitespace-nowrap px-2.5 py-1 pr-1 text-ui-sm font-medium"
       >
         {label}
-        <kbd className="inline-flex h-4 items-center rounded-sm bg-tooltip-tag px-1.5 font-mono text-ui-xs font-medium text-tooltip-tag-ink">
+        <kbd className="inline-flex h-4 items-center rounded-control bg-tooltip-tag px-1.5 font-mono text-ui-xs font-medium text-tooltip-tag-ink">
           {shortcut}
         </kbd>
       </HintSurface>
@@ -1199,7 +1200,7 @@ export function ChatInput({
           <div
             role="listbox"
             aria-label="命令面板"
-            className={`mx-auto max-h-56 overflow-y-auto rounded-2xl border border-line bg-surface px-1 py-0.75 shadow-floating selection-popup ${widthClass}`}
+            className={`mx-auto max-h-56 overflow-y-auto rounded-popover border border-line bg-surface px-1 py-0.75 shadow-floating selection-popup ${widthClass}`}
           >
             {isCatalogPending && (
               <p
@@ -1233,7 +1234,7 @@ export function ChatInput({
                       event.preventDefault();
                       selectSlashItem(item);
                     }}
-                    className={`flex min-h-8 w-full items-center gap-3 rounded-xl! px-3 text-left transition-colors ${
+                    className={`flex min-h-8 w-full items-center gap-3 rounded-control! px-3 text-left transition-colors ${
                       index === slash.index
                         ? "bg-selected text-ink"
                         : "text-ink-soft hover:bg-hover"
@@ -1269,7 +1270,7 @@ export function ChatInput({
           <div
             role="listbox"
             aria-label="提及候选"
-            className={`mx-auto max-h-56 overflow-y-auto rounded-2xl border border-line bg-surface px-1 py-0.75 shadow-floating selection-popup ${widthClass}`}
+            className={`mx-auto max-h-56 overflow-y-auto rounded-popover border border-line bg-surface px-1 py-0.75 shadow-floating selection-popup ${widthClass}`}
           >
             {mentionOptions.length === 0 ? (
               <p className="px-4 py-3 text-ui-base text-ink-subtlest">
@@ -1294,7 +1295,7 @@ export function ChatInput({
                       event.preventDefault();
                       insertMention(option);
                     }}
-                    className={`flex min-h-8 w-full items-center gap-3 rounded-xl! px-3 text-left transition-colors ${
+                    className={`flex min-h-8 w-full items-center gap-3 rounded-control! px-3 text-left transition-colors ${
                       index === mention.index
                         ? "bg-selected text-ink"
                         : "text-ink-soft hover:bg-hover"
@@ -1331,7 +1332,7 @@ export function ChatInput({
           event.preventDefault();
           void addImageFiles(Array.from(event.dataTransfer.files));
         }}
-        className={`composer-card @container/composer mx-auto w-full overflow-hidden rounded-2xl bg-surface transition-[max-width] duration-150 ease-out [--composer-inline-inset:calc(var(--spacing)*4.5_+_var(--ui-icon-unit)*2)] ${widthClass}`}
+        className={`composer-card @container/composer mx-auto w-full overflow-hidden rounded-panel bg-surface transition-[max-width] duration-150 ease-out [--composer-inline-inset:calc(var(--spacing)*4.5_+_var(--ui-icon-unit)*2)] ${widthClass}`}
       >
         {header}
         {queue}
@@ -1499,7 +1500,7 @@ export function ChatInput({
                   }
                 : undefined
             }
-            className={`${composerFieldClass} max-h-40 min-h-[2.5rem] resize-none overflow-y-auto rounded leading-5 disabled:cursor-not-allowed disabled:opacity-60 ${usesSkillReferences || hasSkillReferences ? "min-w-0 flex-1" : "w-full"}`}
+            className={`${composerFieldClass} max-h-40 min-h-[2.5rem] resize-none overflow-y-auto rounded-control leading-5 disabled:cursor-not-allowed disabled:opacity-60 ${usesSkillReferences || hasSkillReferences ? "min-w-0 flex-1" : "w-full"}`}
           />
         </div>
         {/* 下行：左=AAW 审批策略；右=模型 + 上下文圆环 + 发送/停止
@@ -1560,7 +1561,7 @@ export function ChatInput({
                 aria-label={
                   !steering && turnState === "cancelling" ? "正在取消" : "停止"
                 }
-                className="flex shrink-0 items-center justify-center rounded-lg bg-raised text-ink transition-colors hover:bg-raised/80 disabled:pointer-events-none disabled:opacity-50"
+                className="flex shrink-0 items-center justify-center rounded-control bg-raised text-ink transition-colors hover:bg-raised/80 disabled:pointer-events-none disabled:opacity-50"
               >
                 <StopIcon />
               </IconButton>
@@ -1585,7 +1586,7 @@ export function ChatInput({
                   hasUnsupportedImages
                 }
                 aria-label={running && !steering ? "加入队列" : "发送"}
-                className={`flex shrink-0 items-center justify-center transition-colors disabled:pointer-events-none disabled:opacity-50 ${onSendWithMotion && !running && !sendTarget ? "rounded-full bg-conversation-send text-conversation-send-ink" : "rounded-lg bg-brand text-foreground-inverse hover:bg-brand/80"}`}
+                className={`flex shrink-0 items-center justify-center transition-colors disabled:pointer-events-none disabled:opacity-50 ${onSendWithMotion && !running && !sendTarget ? "rounded-pill bg-conversation-send text-conversation-send-ink" : "rounded-control bg-brand text-foreground-inverse hover:bg-brand/80"}`}
               >
                 <ArrowUpIcon className="ui-icon-16" />
               </IconButton>

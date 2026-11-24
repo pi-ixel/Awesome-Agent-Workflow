@@ -1,7 +1,7 @@
 /**
  * 吸顶目录条（对齐 ZCode WorkspaceFileTreeStickyFolders.tsx:54-95）：
  * sticky top-0 z-10 h-0 overflow-visible，static 行包在 overflow-hidden
- * rounded-lg 内；原行永远保留在虚拟列表里，这里只是视觉覆盖。
+ * rounded-control 内；原行永远保留在虚拟列表里，这里只是视觉覆盖。
  */
 import { FileTreeRow as FileTreeRowView, type FileTreeRowHandlers } from "./FileTreeRow.tsx";
 import {
@@ -30,7 +30,7 @@ export function FileTreeStickyFolders({
   if (items.length === 0) return null;
   return (
     <div className="pointer-events-none sticky top-0 z-10 h-0 overflow-visible px-1">
-      <div className="pointer-events-auto overflow-hidden rounded-lg">
+      <div className="pointer-events-auto overflow-hidden rounded-control">
         {items.map((item, stickyIndex) => {
           const row = item.row;
           const handleToggle = (nextRow: FileTreeRow) => {

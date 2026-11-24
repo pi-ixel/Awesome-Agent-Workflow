@@ -122,7 +122,7 @@ export function AnnotationSummary({
         ref={entry}
         onMouseEnter={() => open()}
         onMouseLeave={scheduleClose}
-        className="annotation-rainbow-border group relative inline-flex items-center rounded-full bg-ink/5 text-ui-caption text-ink hover:bg-ink/10"
+        className="annotation-rainbow-border group relative inline-flex items-center rounded-pill bg-ink/5 text-ui-caption text-ink hover:bg-ink/10"
       >
         <ActionButton
           tone="ghost"
@@ -131,7 +131,7 @@ export function AnnotationSummary({
           aria-expanded={position !== null}
           aria-controls={position ? panelId : undefined}
           aria-haspopup="dialog"
-          className="inline-flex items-center gap-1.5 rounded-full! py-1 pl-3 pr-1.5"
+          className="inline-flex items-center gap-1.5 rounded-pill! py-1 pl-3 pr-1.5"
           onClick={() => open(true)}
         >
           <MessageCircleIcon className="ui-icon-14 text-ink-mute" />
@@ -143,7 +143,7 @@ export function AnnotationSummary({
             type="button"
             aria-label="删除全部评论"
             data-hint="删除全部评论"
-            className="mr-1 flex items-center justify-center rounded-full text-ink-mute opacity-0 transition-opacity hover:bg-ink/10 hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
+            className="mr-1 flex items-center justify-center rounded-pill text-ink-mute opacity-0 transition-opacity hover:bg-ink/10 hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
             onClick={() => {
               if (onClear()) {
                 cancelClose();

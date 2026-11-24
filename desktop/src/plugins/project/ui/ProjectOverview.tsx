@@ -124,7 +124,7 @@ function ProjectOverview({
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-5">
       <section
         aria-label="项目状态"
-        className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-5"
+        className="flex flex-col gap-3 rounded-popover border border-line bg-surface p-5"
       >
         <ProjectStatusRow path={path} />
       </section>

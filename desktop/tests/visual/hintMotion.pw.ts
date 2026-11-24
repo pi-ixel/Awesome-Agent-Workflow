@@ -41,6 +41,7 @@ test("rich cards unfold from the anchor edge and disable interaction as they fad
   expect(halfway.originY).toBeCloseTo(halfway.height, 0);
   await expect(card).toHaveCSS("opacity", "1");
   await expect(card).toHaveCSS("scale", "1");
+  await expect(card).toHaveCSS("border-radius", "12px");
 
   const exit = await close.evaluate(async (button) => {
     const selector = '[data-testid="hint-motion-card"]';
@@ -204,6 +205,7 @@ test("plain text hints fade through the same surface and keep digits static", as
   });
   expect(transitions).toEqual(["opacity"]);
   const tooltip = page.getByRole("tooltip");
+  await expect(tooltip).toHaveCSS("border-radius", "8px");
   await expect(tooltip).toHaveText("配额 500 tok");
   await expect(tooltip.locator("[data-hint-digit]")).toHaveCount(0);
   await expect(trigger).toHaveAttribute("aria-describedby");

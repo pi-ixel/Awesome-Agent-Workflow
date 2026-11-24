@@ -161,12 +161,12 @@ const ensureOverlay=()=>{
 if(root)return;
 root=document.createElement('div');
 root.setAttribute('data-aaw-picker-overlay','');
-root.style.cssText='position:fixed;inset:0;z-index:2147483647;pointer-events:none;';
+root.style.cssText='position:fixed;inset:0;z-index:2147483647;pointer-events:none;__AAW_RADIUS_DECLARATIONS__';
 box=document.createElement('div');
-box.style.cssText='position:absolute;box-sizing:border-box;border:2px solid #3b82f6;background:rgba(59,130,246,.08);border-radius:2px;pointer-events:none;';
+box.style.cssText='position:absolute;box-sizing:border-box;border:2px solid #3b82f6;background:rgba(59,130,246,.08);border-radius:var(--radius-control);pointer-events:none;';
 label=document.createElement('div');
 label.setAttribute('data-aaw-picker-label','');
-label.style.cssText='position:absolute;max-width:320px;padding:3px 6px;border-radius:4px;background:#2563eb;color:white;font:11px sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;';
+label.style.cssText='position:absolute;max-width:320px;padding:3px 6px;border-radius:var(--radius-control);background:#2563eb;color:white;font:11px sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;';
 root.append(box,label);
 document.documentElement.append(root);
 state.overlayCount=1;
@@ -302,7 +302,7 @@ window.visualViewport?.addEventListener('resize',schedule);
 window.visualViewport?.addEventListener('scroll',schedule);
 window.__aawCancelPicker=cleanup;
 })()"#;
-    Ok(script
+    Ok(super::with_overlay_radii(script)
         .replace("__AAW_SESSION_JSON__", &session)
         .replace("__AAW_TAB_JSON__", &tab)
         .replace("__AAW_GENERATION__", &tab_generation.to_string()))

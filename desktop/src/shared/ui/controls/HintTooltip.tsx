@@ -135,6 +135,7 @@ export function HintTooltip() {
 
   return createPortal(
     <HintSurface
+      surfaceKind="text"
       open={tooltip !== null}
       ref={surface}
       id={id}

@@ -655,7 +655,7 @@ export function ImagePreviewDialog({
           <IconButton iconSize="large"
             type="button"
             aria-label="上一张"
-            className="absolute left-4 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-full border border-media-ink/30 bg-overlay-shade/50 text-media-ink hover:bg-media-ink/10"
+            className="absolute left-4 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-pill border border-media-ink/30 bg-overlay-shade/50 text-media-ink hover:bg-media-ink/10"
             onClick={(event) => {
               event.stopPropagation();
               navigate(-1);
@@ -666,7 +666,7 @@ export function ImagePreviewDialog({
           <IconButton iconSize="large"
             type="button"
             aria-label="下一张"
-            className="absolute right-4 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-full border border-media-ink/30 bg-overlay-shade/50 text-media-ink hover:bg-media-ink/10"
+            className="absolute right-4 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-pill border border-media-ink/30 bg-overlay-shade/50 text-media-ink hover:bg-media-ink/10"
             onClick={(event) => {
               event.stopPropagation();
               navigate(1);
@@ -694,7 +694,7 @@ export function ImagePreviewDialog({
         <img
           ref={imageRef}
           alt={activeItem.alt}
-          className="max-h-full max-w-full select-none rounded-xl bg-base object-contain cursor-grab active:cursor-grabbing"
+          className="max-h-full max-w-full select-none rounded-flat bg-base object-contain cursor-grab active:cursor-grabbing"
           draggable={false}
           onLoad={clampCurrentOffset}
           src={activeItem.src}
@@ -713,11 +713,11 @@ export function ImagePreviewDialog({
             onClose();
         }}
       >
-        <div className="flex items-center gap-1 rounded-full border border-media-ink/20 bg-overlay-shade/40 px-1 py-0.5">
+        <div className="flex items-center gap-1 rounded-pill border border-media-ink/20 bg-overlay-shade/40 px-1 py-0.5">
           <IconButton
             type="button"
             aria-label="缩小"
-            className="flex items-center justify-center rounded-full text-media-ink hover:bg-media-ink/10 disabled:cursor-default disabled:opacity-40"
+            className="flex items-center justify-center rounded-pill text-media-ink hover:bg-media-ink/10 disabled:cursor-default disabled:opacity-40"
             disabled={previewScale <= minImageScale}
             onClick={() => {
               changePreviewScale((scale) => scale - 0.5);
@@ -731,7 +731,7 @@ export function ImagePreviewDialog({
           <IconButton
             type="button"
             aria-label="放大"
-            className="flex items-center justify-center rounded-full text-media-ink hover:bg-media-ink/10 disabled:cursor-default disabled:opacity-40"
+            className="flex items-center justify-center rounded-pill text-media-ink hover:bg-media-ink/10 disabled:cursor-default disabled:opacity-40"
             disabled={previewScale >= maxImageScale}
             onClick={() => {
               changePreviewScale((scale) => scale + 0.5);
@@ -834,7 +834,7 @@ export function MarkdownImage({
     return (
       <div
         aria-label="图片不可用"
-        className={`flex min-h-32 w-full items-center justify-center rounded-xl border border-line bg-surface px-3 py-2 text-center text-sm text-ink-mute md:h-44 md:w-56 md:shrink-0 ${className ?? ""}`}
+        className={`flex min-h-32 w-full items-center justify-center rounded-popover border border-line bg-surface px-3 py-2 text-center text-sm text-ink-mute md:h-44 md:w-56 md:shrink-0 ${className ?? ""}`}
         data-markdown-local-image="error"
         role="img"
         data-hint={localAbsolute ?? resolvedSrc}
@@ -852,7 +852,7 @@ export function MarkdownImage({
     return (
       <div
         aria-label="图片不可用"
-        className={`flex min-h-32 w-full items-center justify-center rounded-xl border border-line bg-surface px-3 py-2 text-center text-sm text-ink-mute md:h-44 md:w-56 md:shrink-0 ${className ?? ""}`}
+        className={`flex min-h-32 w-full items-center justify-center rounded-popover border border-line bg-surface px-3 py-2 text-center text-sm text-ink-mute md:h-44 md:w-56 md:shrink-0 ${className ?? ""}`}
         data-markdown-image-state="error"
         role="img"
         data-hint={localAbsolute ?? resolvedSrc}
@@ -886,7 +886,7 @@ export function MarkdownImage({
         type="button"
         aria-label="打开图片预览"
         aria-busy={effectiveImageStatus === "loading"}
-        className={`group/img relative block w-fit overflow-hidden rounded-xl! ${
+        className={`group/img relative block w-fit overflow-hidden rounded-popover! ${
           effectiveImageStatus === "loading"
             ? // 加载期定成方形占位且不可点开(cursor-default),画廊父级的
               // 响应式尺寸被 ! 压过,与 ZCode 加载态一致
@@ -899,7 +899,7 @@ export function MarkdownImage({
         {effectiveImageStatus === "loading" ? (
           <span
             aria-label="加载中"
-            className="markdown-image-loading-shimmer absolute inset-0 flex size-full items-center justify-center rounded-xl text-ink-faint"
+            className="markdown-image-loading-shimmer absolute inset-0 flex size-full items-center justify-center rounded-popover text-ink-faint"
             role="status"
           >
             <ImagePlaceholderIcon failed={false} />
@@ -908,7 +908,7 @@ export function MarkdownImage({
         <img
           key={displaySrc}
           alt={imageAlt}
-          className={`h-auto max-h-90 max-w-full rounded-xl border border-line bg-base object-cover transition-opacity ${
+          className={`h-auto max-h-90 max-w-full rounded-popover border border-line bg-base object-cover transition-opacity ${
             effectiveImageStatus === "loading" ? "invisible" : "opacity-100"
           }`}
           data-markdown-image=""

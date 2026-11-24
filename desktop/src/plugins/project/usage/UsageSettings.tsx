@@ -122,7 +122,7 @@ function Trend({ days, series }: { days: Day[]; series: TrendSeries[] }) {
           <li key={index} className="flex items-center gap-2">
             <span
               aria-hidden="true"
-              className="size-2.5 rounded-sm"
+              className="size-2.5 rounded-control"
               style={{ backgroundColor: `var(${colorToken})` }}
             />
             {name}
@@ -251,7 +251,7 @@ export function UsageSettings({
   return (
     <section className="flex min-w-0 flex-col gap-5" aria-label="使用统计">
       {(error || queryError) && (
-        <div role="alert" className="rounded-lg bg-surface p-3 text-danger-ink">
+        <div role="alert" className="rounded-control bg-surface p-3 text-danger-ink">
           {error ? `统计数据保存失败：${error}` : `统计读取失败：${queryError}`}
           <TextLink
             type="button"
@@ -296,7 +296,7 @@ export function UsageSettings({
           <UsageHeatmap days={usage.activity} />
           <section
             aria-label="每日 Token 趋势图"
-            className="space-y-3 rounded-xl border border-line bg-surface p-4"
+            className="space-y-3 rounded-popover border border-line bg-surface p-4"
           >
             <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
               <h3 className="text-ui-base font-medium text-ink">
@@ -326,19 +326,19 @@ export function UsageSettings({
           </section>
           <section
             aria-label="模型用量"
-            className="space-y-3 rounded-xl border border-line bg-surface p-4"
+            className="space-y-3 rounded-popover border border-line bg-surface p-4"
           >
             <h3 className="text-ui-base font-medium text-ink">模型用量</h3>
             <div className="grid items-center gap-4 px-3 py-3 md:grid-cols-2">
               {segments.length > 0 && (
                 <div
                   aria-hidden="true"
-                  className="mx-auto grid size-48 shrink-0 place-items-center rounded-full md:size-52"
+                  className="mx-auto grid size-48 shrink-0 place-items-center rounded-pill md:size-52"
                   style={{
                     background: `conic-gradient(${segments.join(",")})`,
                   }}
                 >
-                  <div className="grid size-[65%] place-content-center rounded-full bg-surface text-center text-xs">
+                  <div className="grid size-[65%] place-content-center rounded-pill bg-surface text-center text-xs">
                     <strong className="tabular-nums">
                       {compactUsageNumber.format(rangeTotal)}
                     </strong>
@@ -361,7 +361,7 @@ export function UsageSettings({
                     >
                       <span
                         aria-hidden="true"
-                        className="size-2.5 shrink-0 rounded-sm"
+                        className="size-2.5 shrink-0 rounded-control"
                         style={{ background: `var(${seriesTokens[index % seriesTokens.length]})` }}
                       />
                       <span className="flex min-w-0 items-center gap-1.5 font-mono">
@@ -372,7 +372,7 @@ export function UsageSettings({
                             tabIndex={0}
                             aria-label="模型 ID"
                             data-hint={model.model}
-                            className="shrink-0 rounded text-ink-mute focus-visible:outline-2 focus-visible:outline-focus-ring"
+                            className="shrink-0 rounded-control text-ink-mute focus-visible:outline-2 focus-visible:outline-focus-ring"
                           >
                             <CircleHelpIcon className="ui-icon-14" />
                           </span>

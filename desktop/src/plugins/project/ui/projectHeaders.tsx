@@ -24,7 +24,7 @@ import { ActionButton } from "../../../shared/ui/controls.tsx";
 import { ArrowLeftIcon, CopyIcon, EllipsisIcon, FolderGlyph, MessageCirclePlusIcon, PencilIcon } from "../../../shared/ui/icons.tsx";
 
 const BAR_BUTTON_CLASS =
-  "flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink";
+  "flex shrink-0 items-center justify-center rounded-control text-ink transition-colors hover:bg-hover hover:text-ink";
 
 export function NewSessionHeaderAction({
   project: contextPath,

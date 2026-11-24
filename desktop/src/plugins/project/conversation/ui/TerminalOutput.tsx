@@ -71,7 +71,7 @@ export function TerminalOutput({
           ? "100%"
           : `${Math.min(lineCount, WINDOW_LINES) * LINE_HEIGHT_EM}em`,
       }}
-      className={`overflow-auto rounded bg-base/70 p-2.5 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words ${
+      className={`overflow-auto rounded-control bg-base/70 p-2.5 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words ${
         failed ? "text-danger-ink" : "text-ink-soft"
       }`}
     >

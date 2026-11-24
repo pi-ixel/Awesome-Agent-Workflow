@@ -93,7 +93,7 @@ export function SessionPerformanceBadge() {
         onFocus={open}
         onBlur={closeSoon}
         onClick={open}
-        className="inline-flex min-h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded px-1 text-ui-caption text-ink-mute tabular-nums hover:bg-raised"
+        className="inline-flex min-h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-control px-1 text-ui-caption text-ink-mute tabular-nums hover:bg-raised"
       >
         <UiIcon
           className="ui-icon-15 shrink-0"

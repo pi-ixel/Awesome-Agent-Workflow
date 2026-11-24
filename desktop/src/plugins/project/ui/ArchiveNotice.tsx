@@ -23,6 +23,7 @@ export function ArchiveNotice({ openSettings }: { readonly openSettings?: () => 
     project.sessions;
   return (
     <Callout
+      floating
       tone="neutral"
       role="status"
       label="归档提示"

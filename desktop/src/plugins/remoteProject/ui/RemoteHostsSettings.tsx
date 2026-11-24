@@ -161,7 +161,7 @@ export function RemoteHostsSettings({ service }: RemoteHostsSettingsProps) {
         {error && (
           <div
             role="alert"
-            className="mb-3 rounded-lg border border-danger-ink/30 bg-danger-soft px-3 py-2 text-ui-xs text-danger-ink"
+            className="mb-3 rounded-control border border-danger-ink/30 bg-danger-soft px-3 py-2 text-ui-xs text-danger-ink"
           >
             {error}
           </div>
@@ -170,7 +170,7 @@ export function RemoteHostsSettings({ service }: RemoteHostsSettingsProps) {
         {deleteBlocked && (
           <div
             role="alert"
-            className="mb-3 rounded-lg border border-warn-ink/30 bg-warn-soft px-3 py-2.5 text-ui-xs text-warn-ink"
+            className="mb-3 rounded-control border border-warn-ink/30 bg-warn-soft px-3 py-2.5 text-ui-xs text-warn-ink"
           >
             <div className="font-medium">
               无法删除：以下远程项目仍在使用该主机，请先关闭这些项目：
@@ -191,7 +191,7 @@ export function RemoteHostsSettings({ service }: RemoteHostsSettingsProps) {
             <span>正在加载远程主机…</span>
           </div>
         ) : connections.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-line-strong bg-raised/30 px-6 py-10 text-center">
+          <div className="flex flex-col items-center justify-center rounded-popover border border-dashed border-line-strong bg-raised/30 px-6 py-10 text-center">
             <GlobeIcon className="ui-icon-20 text-ink-ghost" />
             <div className="mt-2.5 text-ui-sm font-medium text-ink">
               暂未配置远程主机
@@ -210,7 +210,7 @@ export function RemoteHostsSettings({ service }: RemoteHostsSettingsProps) {
             </ActionButton>
           </div>
         ) : (
-          <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-surface">
+          <ul className="divide-y divide-line overflow-hidden rounded-popover border border-line bg-surface">
             {connections.map((conn) => {
               const refs = service.listProjectsForConnection(conn.id);
               const feedback = testFeedback[conn.id];

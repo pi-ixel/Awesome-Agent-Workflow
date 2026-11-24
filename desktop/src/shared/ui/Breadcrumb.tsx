@@ -112,7 +112,7 @@ export function Breadcrumb({
         {items.map((item, index) => {
           const current = explicit ? item.current === true : index === last;
           const content = <>{item.icon}<span className="truncate">{item.label}</span></>;
-          const base = `inline-flex min-w-0 items-center gap-1 rounded px-1 py-0.5 ${scroll ? "max-w-[100cqw] shrink-0" : current ? "shrink" : "max-w-[40%] shrink-[2]"}`;
+          const base = `inline-flex min-w-0 items-center gap-1 rounded-control px-1 py-0.5 ${scroll ? "max-w-[100cqw] shrink-0" : current ? "shrink" : "max-w-[40%] shrink-[2]"}`;
           const hint = item.hint ?? (scroll && typeof item.label === "string" ? item.label : undefined);
           return (
             <li key={item.key ?? index} className={`contents`}>

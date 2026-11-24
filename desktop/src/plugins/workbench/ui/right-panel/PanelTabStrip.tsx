@@ -49,11 +49,11 @@ import {
 
 /** 完整视图对话 tab（ZCode ConversationTab.tsx:17-38 类串，token 换 desktop）。 */
 const CONVERSATION_TAB_CLASS =
-  "group relative inline-flex! min-h-7 max-w-60 shrink-0 items-center justify-start gap-1.5 overflow-hidden whitespace-nowrap rounded-lg! border px-1.5 pr-2 text-ui-base font-medium cursor-default border-transparent bg-transparent text-ink-subtle hover:text-ink hover:bg-hover data-active:bg-selected data-active:text-ink";
+  "group relative inline-flex! min-h-7 max-w-60 shrink-0 items-center justify-start gap-1.5 overflow-hidden whitespace-nowrap rounded-control! border px-1.5 pr-2 text-ui-base font-medium cursor-default border-transparent bg-transparent text-ink-subtle hover:text-ink hover:bg-hover data-active:bg-selected data-active:text-ink";
 
 /** tab 触发器根类串（ZCode SidePaneTabTrigger.tsx:144-155，token 换 desktop）。 */
 const TAB_TRIGGER_CLASS =
-  `group relative inline-flex h-7 min-w-15 max-w-39 flex-[1_1_9.75rem] items-center justify-start gap-1 overflow-hidden whitespace-nowrap rounded-lg border px-1.5 pr-2 text-ui-base font-medium transition-colors cursor-default border-transparent bg-transparent text-ink-subtle hover:text-ink hover:bg-hover data-active:bg-selected data-active:text-ink focus-visible:ring-inset ${focusVisibleRing}`;
+  `group relative inline-flex h-7 min-w-15 max-w-39 flex-[1_1_9.75rem] items-center justify-start gap-1 overflow-hidden whitespace-nowrap rounded-control border px-1.5 pr-2 text-ui-base font-medium transition-colors cursor-default border-transparent bg-transparent text-ink-subtle hover:text-ink hover:bg-hover data-active:bg-selected data-active:text-ink focus-visible:ring-inset ${focusVisibleRing}`;
 
 /** tab 标题行：向 × 区域 8px 渐隐防重叠（ZCode :240-247 原文）。 */
 const TAB_CONTENT_CLASS =
@@ -61,7 +61,7 @@ const TAB_CONTENT_CLASS =
 
 /** ×关闭钮（ZCode :164-184；基色 text-ink 对齐 ghost text-foreground 100%）。 */
 const TAB_CLOSE_CLASS =
-  `absolute right-1 top-1/2 flex -translate-y-1/2 items-center justify-center rounded-md text-ink transition-opacity hover:bg-hover hover:text-ink focus-visible:ring-inset ${focusVisibleRing}`;
+  `absolute right-1 top-1/2 flex -translate-y-1/2 items-center justify-center rounded-control text-ink transition-opacity hover:bg-hover hover:text-ink focus-visible:ring-inset ${focusVisibleRing}`;
 
 const EMPTY_MASK_EDGES = { left: false, right: false } as const;
 
@@ -188,7 +188,7 @@ function PanelTabTrigger({
           </span>
           <span className="shrink-0 whitespace-nowrap">{title}</span>
           {badge && (
-            <span className="ml-0.5 shrink-0 rounded-full border border-border bg-surface px-1 py-0 text-ui-xs leading-3 text-ink-subtle">
+            <span className="ml-0.5 shrink-0 rounded-pill border border-border bg-surface px-1 py-0 text-ui-xs leading-3 text-ink-subtle">
               {badge}
             </span>
           )}

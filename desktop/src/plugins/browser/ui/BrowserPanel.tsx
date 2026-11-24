@@ -772,7 +772,7 @@ function BrowserPanelSession({
             userCanControl ? "后退" : "Agent 正在操作，点击“我来接管”后可操作"
           }
           disabled={!userCanControl || !activeTab?.navigation?.canGoBack}
-          className="rounded shrink-0 p-1 hover:bg-hover disabled:opacity-40"
+          className="rounded-control shrink-0 p-1 hover:bg-hover disabled:opacity-40"
           onClick={() => {
             if (!userCanControl || !activeTab) return;
             void host
@@ -790,7 +790,7 @@ function BrowserPanelSession({
             userCanControl ? "前进" : "Agent 正在操作，点击“我来接管”后可操作"
           }
           disabled={!userCanControl || !activeTab?.navigation?.canGoForward}
-          className="rounded shrink-0 p-1 hover:bg-hover disabled:opacity-40"
+          className="rounded-control shrink-0 p-1 hover:bg-hover disabled:opacity-40"
           onClick={() => {
             if (!userCanControl || !activeTab) return;
             void host
@@ -808,7 +808,7 @@ function BrowserPanelSession({
             userCanControl ? "刷新" : "Agent 正在操作，点击“我来接管”后可操作"
           }
           disabled={!userCanControl || !activeTab}
-          className="rounded shrink-0 p-1 hover:bg-hover disabled:opacity-40"
+          className="rounded-control shrink-0 p-1 hover:bg-hover disabled:opacity-40"
           onClick={() =>
             userCanControl &&
             activeTab &&
@@ -837,7 +837,7 @@ function BrowserPanelSession({
             placeholder={
               userCanControl ? "输入 HTTP/HTTPS 地址" : "Agent 正在操作"
             }
-            className={`${fieldSurfaceClass} min-h-7 w-full rounded-full! px-3 text-xs focus-visible:ring-inset`}
+            className={`${fieldSurfaceClass} min-h-7 w-full rounded-pill! px-3 text-xs focus-visible:ring-inset`}
           />
         </form>
         <span className="w-8 shrink-0 text-center text-2xs text-ink-muted">
@@ -855,7 +855,7 @@ function BrowserPanelSession({
                 : "拾取元素"
           }
           disabled={!userCanControl || !activeTab}
-          className={`rounded shrink-0 p-1 transition-colors hover:bg-hover hover:text-ink disabled:opacity-40 ${picking ? "bg-selected text-brand" : ""}`}
+          className={`rounded-control shrink-0 p-1 transition-colors hover:bg-hover hover:text-ink disabled:opacity-40 ${picking ? "bg-selected text-brand" : ""}`}
           onClick={() => {
             if (!userCanControl || !activeTab) return;
             if (picking) {
@@ -884,7 +884,7 @@ function BrowserPanelSession({
           aria-label="保存证据"
           data-hint="保存证据"
           disabled={!activeTab}
-          className="rounded shrink-0 p-1 transition-colors hover:bg-hover hover:text-ink disabled:opacity-40"
+          className="rounded-control shrink-0 p-1 transition-colors hover:bg-hover hover:text-ink disabled:opacity-40"
           onClick={() => void saveEvidence()}
         >
           <CameraIcon className="ui-icon-16" />
@@ -894,7 +894,7 @@ function BrowserPanelSession({
           aria-label="停止 Agent 浏览器操作"
           data-hint="停止 Agent 浏览器操作"
           disabled={!activeTab}
-          className="rounded shrink-0 p-1 text-danger-ink transition-colors hover:bg-hover disabled:opacity-40"
+          className="rounded-control shrink-0 p-1 text-danger-ink transition-colors hover:bg-hover disabled:opacity-40"
           onClick={() =>
             void host
               .cancelRequests(sessionId)
@@ -912,7 +912,7 @@ function BrowserPanelSession({
           aria-label="浏览器数据管理"
           aria-expanded={dataOpen}
           data-hint={dataOpen ? "关闭数据管理" : "浏览器数据管理"}
-          className="rounded shrink-0 p-1 transition-colors hover:bg-hover hover:text-ink"
+          className="rounded-control shrink-0 p-1 transition-colors hover:bg-hover hover:text-ink"
           onClick={() => setDataOpen((current) => !current)}
         >
           <DatabaseIcon className="ui-icon-16" />
@@ -926,7 +926,7 @@ function BrowserPanelSession({
               : "Agent 正在操作，点击“我来接管”后可新建"
           }
           disabled={!userCanControl}
-          className="rounded shrink-0 p-1 hover:bg-hover disabled:opacity-40"
+          className="rounded-control shrink-0 p-1 hover:bg-hover disabled:opacity-40"
           onClick={() => void createTab()}
         >
           <PlusIcon className="ui-icon-16" />
@@ -939,7 +939,7 @@ function BrowserPanelSession({
             .map((tab) => (
               <div
                 key={tab.tabId}
-                className={`flex min-w-24 max-w-48 items-center gap-1 rounded pr-1 text-xs ${tab.tabId === activeTabId ? "bg-selected" : "hover:bg-hover"}`}
+                className={`flex min-w-24 max-w-48 items-center gap-1 rounded-control pr-1 text-xs ${tab.tabId === activeTabId ? "bg-selected" : "hover:bg-hover"}`}
               >
                 <NavigationRow layout="compound"
                   type="button"
@@ -952,7 +952,7 @@ function BrowserPanelSession({
                 <IconButton
                   aria-label={`关闭标签 ${tab.tabId}`}
                   disabled={!userCanControl}
-                  className="rounded p-1 text-ink-mute hover:bg-hover"
+                  className="rounded-control p-1 text-ink-mute hover:bg-hover"
                   onClick={() => {
                     void host
                       .closeTab(sessionId, tab.tabId)
@@ -1025,7 +1025,7 @@ function BrowserPanelSession({
         </div>
       )}
       {evidenceUrl && (
-        <div className=" right-4 top-20 z-20 max-w-[80%] rounded-lg border border-line bg-base p-2 shadow-floating">
+        <div className=" right-4 top-20 z-20 max-w-[80%] rounded-popover border border-line bg-base p-2 shadow-floating">
           <div className="mb-2 flex justify-end gap-2">
             <ActionButton tone="ghost" size="compact"
               type="button"
@@ -1045,6 +1045,7 @@ function BrowserPanelSession({
         <HintSurface
           open
           role="dialog"
+          surfaceKind="panel"
           aria-label="浏览器数据管理"
           className="inset-x-6 top-16 z-20 max-h-[70vh] overflow-y-auto p-4"
         >
@@ -1274,7 +1275,7 @@ function BrowserPanelSession({
             {cleanupResult && (
               <section
                 aria-label="清理结果"
-                className="w-full rounded border border-line bg-surface p-3 text-xs"
+                className="w-full rounded-control border border-line bg-surface p-3 text-xs"
               >
                 <div className="flex items-center justify-between gap-3">
                   <span>清理结果（{cleanupResult.scope}）</span>
@@ -1318,7 +1319,7 @@ function BrowserPanelSession({
       {downloads.length > 0 && (
         <section
           aria-label="下载列表"
-          className=" inset-x-4 top-20 z-20 rounded-lg border border-line bg-base p-3 text-xs shadow-floating"
+          className=" inset-x-4 top-20 z-20 rounded-popover border border-line bg-base p-3 text-xs shadow-floating"
         >
           <h2 className="font-medium">下载</h2>
           <div className="mt-2 max-h-40 space-y-2 overflow-auto">
@@ -1370,6 +1371,7 @@ function BrowserPanelSession({
           open
           key={dialog.dialogId}
           role="dialog"
+          surfaceKind="panel"
           aria-label="页面对话框"
           className="inset-x-4 bottom-10 z-30 p-4"
         >

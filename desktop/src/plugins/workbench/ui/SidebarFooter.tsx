@@ -52,11 +52,11 @@ export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
         onClick={(event) => {
           toggleFooterMenu(event.currentTarget);
         }}
-        className={`grid shrink-0 place-items-center rounded-lg transition-colors hover:bg-hover focus-visible:ring-inset ${focusVisibleRing}`}
+        className={`grid shrink-0 place-items-center rounded-control transition-colors hover:bg-hover focus-visible:ring-inset ${focusVisibleRing}`}
       >
         <span
           aria-hidden="true"
-          className={`grid size-7 place-items-center overflow-hidden rounded-full ${badge ? "sidebar-account-avatar" : "bg-base text-ink"}`}
+          className={`grid size-7 place-items-center overflow-hidden rounded-pill ${badge ? "sidebar-account-avatar" : "bg-base text-ink"}`}
         >
           {!badge ? (
             <SparkleIcon className="ui-icon-16" />

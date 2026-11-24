@@ -22,7 +22,7 @@
 .startup-halo {
   position: absolute;
   inset: -42px;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background:
     radial-gradient(ellipse at 35% 35%, var(--color-brand-halo-cyan), transparent 62%),
     radial-gradient(ellipse at 65% 65%, var(--color-brand-halo-violet), transparent 65%);

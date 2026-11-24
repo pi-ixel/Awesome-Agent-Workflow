@@ -25,7 +25,7 @@ export function MetricStrip({
         : "grid-cols-2";
   return (
     <div
-      className={`@container min-w-0 ${embedded ? "" : "rounded-xl border border-line bg-surface"}`}
+      className={`@container min-w-0 ${embedded ? "" : "rounded-popover border border-line bg-surface"}`}
     >
       <dl aria-label={label} className={`grid ${columns}`}>
         {metrics.map(({ label, value, title }, index) => (

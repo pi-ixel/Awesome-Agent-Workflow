@@ -7,9 +7,17 @@ const UNFOLD_MS = 160;
 
 type HintProps = Omit<ComponentPropsWithRef<"div">, "title"> & {
   readonly open: boolean;
+  readonly surfaceKind?: "text" | "card" | "panel" | "pill";
   /** The edge of the card closest to its trigger. */
   readonly unfoldFrom?: "top" | "right" | "bottom" | "left";
 };
+
+const surfaceRadius = {
+  text: "rounded-control",
+  card: "rounded-popover",
+  panel: "rounded-panel",
+  pill: "rounded-pill",
+} as const;
 
 /** Keeps the last card and anchor alive through exit, with no interactive hit target. */
 export function HintSurface(props: HintProps) {
@@ -51,7 +59,7 @@ export function HintSurface(props: HintProps) {
     };
   }, [duration, exiting, finishExit]);
   if (!visible) return null;
-  const { className, role = "tooltip", style, onTransitionEnd, children, unfoldFrom, ...surface } = visible;
+  const { className, surfaceKind = "card", role = "tooltip", style, onTransitionEnd, children, unfoldFrom, ...surface } = visible;
   return (
     <HintOpening.Provider value={presence.opening}>
       <div
@@ -61,7 +69,7 @@ export function HintSurface(props: HintProps) {
         aria-hidden={open ? surface["aria-hidden"] : true}
         data-hint-open={open}
         data-hint-unfold-from={unfoldFrom}
-        className={`hint-surface ${className ?? ""}`}
+        className={`hint-surface ${surfaceRadius[surfaceKind]} ${className ?? ""}`}
         style={{ ...style, "--hint-fade-duration": `${duration}ms` } as CSSProperties}
         onTransitionEnd={(event) => {
           onTransitionEnd?.(event);

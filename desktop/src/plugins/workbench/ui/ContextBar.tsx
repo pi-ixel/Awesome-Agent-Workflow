@@ -16,7 +16,7 @@ import { HeaderIndicators } from "./HeaderIndicators.tsx";
 import { WindowControls } from "./WindowControls.tsx";
 
 const BAR_BUTTON_CLASS =
-  `flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink focus-visible:ring-inset ${focusVisibleRing}`;
+  `flex shrink-0 items-center justify-center rounded-control text-ink transition-colors hover:bg-hover hover:text-ink focus-visible:ring-inset ${focusVisibleRing}`;
 
 function HelpMenuButton() {
   const items = useWorkbenchEntries("helpItems");

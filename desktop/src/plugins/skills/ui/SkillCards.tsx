@@ -33,7 +33,7 @@ export function SkillGroup({
   return (
     <section aria-label={project ?? "全局技能"} className="space-y-3">
       <h2 className="flex min-w-0 items-center gap-2.5">
-        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-selected">
+        <span className="grid size-8 shrink-0 place-items-center rounded-control bg-selected">
           {project ? (
             <FolderGlyph isExpanded={false} />
           ) : (
@@ -171,7 +171,7 @@ export function SkillCard({
             data-hint="更多操作"
             aria-haspopup="menu"
             aria-expanded={!!menu && !menu.closing}
-            className="rounded-md text-ink-mute hover:bg-hover hover:text-ink"
+            className="rounded-control text-ink-mute hover:bg-hover hover:text-ink"
             disabled={actions.busy}
             onClick={(event) => {
               const anchor = event.currentTarget;

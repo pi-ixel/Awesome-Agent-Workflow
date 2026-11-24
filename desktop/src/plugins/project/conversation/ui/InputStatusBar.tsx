@@ -158,7 +158,7 @@ export function ContextRing(): React.JSX.Element {
     <IconButton
       iconSize="compact"
       ref={anchorRef}
-      className="flex shrink-0 items-center justify-center rounded-md text-ink-mute hover:bg-hover"
+      className="flex shrink-0 items-center justify-center rounded-control text-ink-mute hover:bg-hover"
       data-status="context"
       aria-label={pct === null ? "上下文用量：容量或用量未知" : "上下文用量"}
       onClick={openCard}
@@ -234,7 +234,7 @@ export function ContextRing(): React.JSX.Element {
                       >
                         <span
                           aria-hidden={true}
-                          className="size-2 shrink-0 rounded-sm border border-line"
+                          className="size-2 shrink-0 rounded-control border border-line"
                           style={{
                             backgroundColor:
                               USAGE_CHART_COLORS[
