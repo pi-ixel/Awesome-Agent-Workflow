@@ -381,7 +381,7 @@
   },
   "plugins/project/conversation/changes/DiffContent.tsx": {
     "definitions": {
-      "内容与专用绘制": ["DiffContent", "DiffContent/row"]
+      "内容与专用绘制": ["DiffContent", "DiffViewport", "DiffViewport/renderRows", "DiffViewport/row"]
     },
     "targets": []
   },

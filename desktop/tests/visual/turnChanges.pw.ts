@@ -60,6 +60,18 @@ test("双栏各自横向滚动，拒绝恢复展示中已删除的说明行", as
   expect(await sides.nth(0).evaluate((element) => element.scrollLeft)).toBe(
     previous,
   );
+  const rightOffset = await sides
+    .nth(1)
+    .evaluate((element) => element.scrollLeft);
+  expect(rightOffset).toBeGreaterThan(0);
+  await dock.getByRole("button", { name: "统一视图", exact: true }).click();
+  await dock.getByRole("button", { name: "双栏对比", exact: true }).click();
+  expect(await sides.nth(0).evaluate((element) => element.scrollLeft)).toBe(
+    previous,
+  );
+  expect(await sides.nth(1).evaluate((element) => element.scrollLeft)).toBe(
+    rightOffset,
+  );
   await expect(dock.getByText("统计范围", { exact: true })).toHaveCount(0);
   await expect(dock.getByText("本轮开始", { exact: true })).toHaveCount(0);
   await page.getByRole("combobox").selectOption("newline");
@@ -74,6 +86,93 @@ test("双栏各自横向滚动，拒绝恢复展示中已删除的说明行", as
         (await after.boundingBox())!.height,
     ),
   ).toBeLessThan(1);
+});
+
+test("大文件只挂载可见差异，切换视角保留代码行并可直接滚到文件末尾", async ({
+  page,
+}) => {
+  await page.goto("/tests/visual/turnChanges.html?large-diff");
+  const dock = page.locator("[data-turn-changes]");
+  const unified = dock.getByLabel("统一差异", { exact: true });
+  const before = dock.locator('[data-side="before"]');
+  const after = dock.locator('[data-side="after"]');
+  const topNewLine = (pane: typeof unified) =>
+    pane.evaluate((element) => {
+      const top = element.getBoundingClientRect().top;
+      return (
+        Array.from(
+          element.querySelectorAll<HTMLElement>("[data-diff-row]"),
+        ).find((row) => row.getBoundingClientRect().bottom > top + 1)?.dataset
+          .diffNewLine ?? null
+      );
+    });
+
+  await expect(unified.locator("[data-diff-row]").first()).toBeVisible();
+  expect(await unified.locator("[data-diff-row]").count()).toBeLessThan(100);
+  await unified.evaluate((element) => {
+    element.scrollTop = element.scrollHeight * 0.7;
+  });
+  await expect.poll(() => topNewLine(unified)).not.toBeNull();
+  const line = await topNewLine(unified);
+
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Performance.enable");
+  const layoutCount = async () =>
+    (await cdp.send("Performance.getMetrics")).metrics.find(
+      ({ name }) => name === "LayoutCount",
+    )!.value;
+  const layoutBefore = await layoutCount();
+  await dock.getByRole("button", { name: "双栏对比", exact: true }).click();
+  await expect.poll(() => topNewLine(after)).toBe(line);
+  expect((await layoutCount()) - layoutBefore).toBeLessThan(60);
+  await cdp.detach();
+  expect(await dock.locator("[data-diff-row]").count()).toBeLessThan(120);
+  const aligned = await before.evaluate((element) => {
+    const left = Array.from(element.querySelectorAll("[data-diff-row]"));
+    const right = Array.from(
+      element.parentElement!.querySelectorAll(
+        '[data-side="after"] [data-diff-row]',
+      ),
+    );
+    return (
+      left.length > 0 &&
+      left.length === right.length &&
+      left.every((row, index) => {
+        const peer = right[index]!;
+        return (
+          row.getAttribute("data-diff-index") ===
+            peer.getAttribute("data-diff-index") &&
+          Math.abs(
+            row.getBoundingClientRect().height -
+              peer.getBoundingClientRect().height,
+          ) < 0.5
+        );
+      })
+    );
+  });
+  expect(aligned).toBe(true);
+
+  await dock.getByRole("button", { name: "统一视图", exact: true }).click();
+  await expect.poll(() => topNewLine(unified)).toBe(line);
+  await dock.getByRole("button", { name: "双栏对比", exact: true }).click();
+  await after.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect(after.getByText(/^after-1100 /)).toBeInViewport();
+  await expect(
+    after.getByText("\\ 文件末尾无换行", { exact: true }),
+  ).toBeInViewport();
+  await expect
+    .poll(async () =>
+      Math.abs(
+        (await before.evaluate((el) => el.scrollTop)) -
+          (await after.evaluate((el) => el.scrollTop)),
+      ),
+    )
+    .toBeLessThan(1);
+  await expect(dock.getByRole("button", { name: /显示更多差异/ })).toHaveCount(
+    0,
+  );
 });
 test("还原仍校验文件版本，冲突结果使用持续提示", async ({ page }) => {
   await page.getByRole("combobox").selectOption("conflict");

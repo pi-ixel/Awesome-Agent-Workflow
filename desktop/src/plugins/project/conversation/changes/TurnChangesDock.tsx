@@ -109,7 +109,7 @@ export function TurnChangesReview({
   const [confirmPaths, setConfirmPaths] = useState<readonly string[] | null>(
     null,
   );
-  const position = useRef<DiffPosition>({ top: 0, left: 0, right: 0 });
+  const position = useRef<DiffPosition>({ left: 0, right: 0 });
   const [lastOpen, setLastOpen] = useState(view.openRevision);
   const [openError, setOpenError] = useState<string | null>(null);
   const [previousRestored, setPreviousRestored] = useState(isFullyRestored);
@@ -401,7 +401,8 @@ export function TurnChangesReview({
                     item.kind === kind,
                 );
                 setSelected(next?.path ?? null);
-                position.current = { top: 0, left: 0, right: 0 };
+                if (file?.path !== next?.path)
+                  position.current = { left: 0, right: 0 };
               }}
             />
             <div className="flex gap-1">
@@ -440,7 +441,8 @@ export function TurnChangesReview({
                   aria-pressed={file?.path === item.path}
                   onClick={() => {
                     setSelected(item.path);
-                    position.current = { top: 0, left: 0, right: 0 };
+                    if (file?.path !== item.path)
+                      position.current = { left: 0, right: 0 };
                   }}
                   className="items-start rounded-control px-2 py-2.5"
                 >
