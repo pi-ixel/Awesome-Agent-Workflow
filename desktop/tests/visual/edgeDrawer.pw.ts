@@ -95,16 +95,25 @@ test("活动栏在两种主题和三档字号下保持键盘焦点与当前入�
   await workspace.goto(`${fixture}&activity-rail&appearance`);
   const rail = workspace.getByRole("navigation", { name: "工作台导航" });
   const mark = rail.getByTestId("workbench-mark");
+  const wordmark = workspace.getByTestId("workbench-wordmark");
+  const resizer = workspace.getByRole("separator", { name: "调整左栏宽度" });
+  await expect(mark).toHaveAttribute(
+    "src",
+    /(?:^data:image\/svg\+xml,|aaw-logo-rail\.svg)/,
+  );
+  await expect
+    .poll(() => mark.evaluate((img: HTMLImageElement) => img.naturalWidth))
+    .toBeGreaterThan(0);
   const workflow = rail.getByRole("button", { name: "工作流" });
   await workflow.press("Enter");
   await expect(workflow).toHaveAttribute("aria-current", "location");
   await expect(workflow).toHaveAttribute("aria-expanded", "true");
   await expect(workspace.getByText("当前项目的工作流")).toBeVisible();
   const font = page.getByRole("spinbutton", { name: "界面字号" });
-  for (const [theme, px] of [
-    ["暖白", 12],
-    ["暗夜", 20],
-    ["暖白", 14],
+  for (const [theme, px, brand, style] of [
+    ["暖白", 12, "Awesome Agent WorkSpace", "italic"],
+    ["暗夜", 20, "AAW", "normal"],
+    ["暖白", 14, "Awesome Agent WorkSpace", "italic"],
   ] as const) {
     await page.getByRole("button", { name: theme, exact: true }).click();
     await font.fill(String(px));
@@ -129,8 +138,19 @@ test("活动栏在两种主题和三档字号下保持键盘焦点与当前入�
       .toBeCloseTo((18 * px) / 14, 1);
     expect((await workflow.boundingBox())!.width).toBe(36);
     const markBounds = (await mark.boundingBox())!;
-    expect(markBounds.width).toBeCloseTo((24 * px) / 14, 1);
+    expect(markBounds.width).toBeCloseTo((28 * px) / 14, 1);
     expect(markBounds.height).toBeCloseTo(markBounds.width, 1);
+    await expect(wordmark).toHaveText(brand);
+    await expect(wordmark).toHaveCSS("font-style", style);
+    if (px === 20) {
+      await expect(wordmark).toHaveCSS("font-weight", "600");
+      await resizer.press("End");
+      await expect(wordmark).toHaveText("Awesome Agent WorkSpace");
+      await expect(wordmark).toHaveCSS("font-style", "italic");
+      await resizer.press("Home");
+      await expect(wordmark).toHaveText("AAW");
+      await workflow.focus();
+    }
   }
   await workflow.press("Space");
   await expect(workflow).toHaveAttribute("aria-expanded", "false");
@@ -161,9 +181,9 @@ test("the activity rail has a full-height divider and keeps icons in place on co
   const listBox = (await drawer.getByText("项目和会话列表").boundingBox())!;
   const dividerBox = (await divider.boundingBox())!;
   const logoBox = (await logo.boundingBox())!;
-  const titleBox = (await drawer
-    .getByText("AAW", { exact: true })
-    .boundingBox())!;
+  const wordmark = drawer.getByTestId("workbench-wordmark");
+  await expect(wordmark).toHaveText("Awesome Agent WorkSpace");
+  const titleBox = (await wordmark.boundingBox())!;
   const headerSeam = page.getByTestId("sidebar-header-seam");
   const headerSeamBox = (await headerSeam.boundingBox())!;
   const account = rail.getByRole("button", { name: "打开账号菜单" });
@@ -222,7 +242,9 @@ test("the activity rail has a full-height divider and keeps icons in place on co
   await expect(conversations).toHaveAttribute("aria-expanded", "false");
   expect(await conversations.boundingBox()).toEqual(origin);
   expect(await logo.boundingBox()).toEqual(logoBox);
-  await expect(page.locator('img[src*="aaw-logo"]')).toHaveCount(1);
+  await expect(
+    page.locator('[data-testid="workbench-mark"], img[src*="aaw-logo"]'),
+  ).toHaveCount(1);
   await expect(divider).toHaveCSS("opacity", "0");
   await expect(headerSeam).toHaveCSS("width", "0px");
   expect(await entries.boundingBox()).toEqual(entriesBox);

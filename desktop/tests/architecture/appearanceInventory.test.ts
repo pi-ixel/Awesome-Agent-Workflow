@@ -29,6 +29,7 @@ it("共享基底、内嵌图形与品牌素材均有明确的实现入口", () =
     "plugins/project/conversation/ui/InputStatusBar.tsx#ContextRing · 内嵌图形",
     "plugins/project/conversation/ui/SessionPerformanceBadge.tsx#SessionPerformanceBadge · 内嵌图形",
     "shared/ui/BrandLoading.tsx#BrandLoading · 内嵌图形",
+    "shared/ui/BrandMark.tsx#品牌图形 · ../assets/aaw-logo-rail.svg",
     "shared/ui/BrandMark.tsx#品牌图形 · ../assets/aaw-logo.png",
     "shared/ui/Callout.tsx#ToneIcon · 内嵌图形",
     "shared/ui/UiIcon.tsx#UiIcon · <svg>",

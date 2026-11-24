@@ -453,7 +453,9 @@ describe("项目树 → 会话子节点", () => {
 
     expect(screen.getByLabelText("会话视图")).toBeInTheDocument();
     // 欢迎语改版后连接文案 caption 退役：连接中反馈 = 会话内出现启动页
-    expect(screen.getByText(/Awesome Agent/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Awesome Agent Workspace" }),
+    ).toBeInTheDocument();
     // 乐观高亮：activeSessionId 还没落，目标行已呈选中态
     expect(
       screen.getByRole("button", { name: /会话 · 旧任务/ }),

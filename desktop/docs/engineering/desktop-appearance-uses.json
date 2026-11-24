@@ -253,7 +253,10 @@
     "html.theme-warm --turn-status-shimmer-strong · rgb(10 10 10 / 1)"
   ],
   "shared/ui/BrandLoading.tsx": ["BrandLoading · 内嵌图形"],
-  "shared/ui/BrandMark.tsx": ["品牌图形 · ../assets/aaw-logo.png"],
+  "shared/ui/BrandMark.tsx": [
+    "品牌图形 · ../assets/aaw-logo-rail.svg",
+    "品牌图形 · ../assets/aaw-logo.png"
+  ],
   "shared/ui/Breadcrumb.tsx": ["Breadcrumb · <button>"],
   "shared/ui/Callout.tsx": ["ToneIcon · 内嵌图形"],
   "shared/ui/ContextMenu.tsx": [
