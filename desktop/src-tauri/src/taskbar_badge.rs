@@ -19,14 +19,22 @@ pub use native::install;
 mod native {
     use std::cell::Cell;
     use tauri::WebviewWindow;
-    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::Foundation::{COLORREF, E_FAIL, HWND, LPARAM, LRESULT, RECT, WPARAM};
+    use windows::Win32::Graphics::Gdi::{
+        ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CLIP_DEFAULT_PRECIS,
+        CreateCompatibleDC, CreateDIBSection, CreateFontW, DEFAULT_CHARSET, DIB_RGB_COLORS,
+        DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, FW_NORMAL,
+        GdiFlush, HBITMAP, HDC, HFONT, HGDIOBJ, OUT_DEFAULT_PRECIS, SelectObject, SetBkMode,
+        SetTextColor, TRANSPARENT,
+    };
     use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
+    use windows::Win32::UI::HiDpi::GetDpiForWindow;
     use windows::Win32::UI::Shell::{
         DefSubclassProc, ITaskbarList3, RemoveWindowSubclass, SetWindowSubclass, TaskbarList,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         CreateIconFromResourceEx, DestroyIcon, HICON, IsWindowVisible, LR_DEFAULTCOLOR,
-        RegisterWindowMessageW, WM_NCDESTROY,
+        RegisterWindowMessageW, WM_DPICHANGED, WM_NCDESTROY,
     };
     use windows::core::{Error, PCWSTR, w};
 
@@ -74,8 +82,8 @@ mod native {
             let _ = unsafe { RemoveWindowSubclass(hwnd, Some(window_proc), id) };
         }
         let result = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
-        if msg as usize == taskbar_button_created {
-            // 从托盘恢复或 Explorer 重启都会重新创建任务栏按钮。
+        if msg as usize == taskbar_button_created || msg == WM_DPICHANGED {
+            // 任务栏按钮重建或 DPI 变化后重新绘制徽标。
             refresh(hwnd);
         }
         result
@@ -97,7 +105,9 @@ mod native {
         if count == 0 {
             return unsafe { taskbar.SetOverlayIcon(hwnd, HICON::default(), PCWSTR::null()) };
         }
-        let icon = create_icon(count)?;
+        let dpi = unsafe { GetDpiForWindow(hwnd) }.clamp(96, 768);
+        let side = ((16 * dpi + 48) / 96) as usize;
+        let icon = create_icon(count, side)?;
         let description: Vec<u16> = format!("{count} 项未读\0").encode_utf16().collect();
         let result = unsafe { taskbar.SetOverlayIcon(hwnd, icon, PCWSTR(description.as_ptr())) };
         // Explorer 复制图标；无论成功还是失败，都释放本进程的句柄。
@@ -105,27 +115,31 @@ mod native {
         result
     }
 
-    const SIDE: usize = 16;
     const HEADER_SIZE: usize = 40;
-    const MASK_OFFSET: usize = HEADER_SIZE + SIDE * SIDE * 4;
-    const MASK_STRIDE: usize = 4;
-    const GLYPHS: [[u8; 5]; 11] = [
-        [7, 5, 5, 5, 7],
-        [2, 6, 2, 2, 7],
-        [7, 1, 7, 4, 7],
-        [7, 1, 7, 1, 7],
-        [5, 5, 7, 1, 1],
-        [7, 4, 7, 1, 7],
-        [7, 4, 7, 5, 7],
-        [7, 1, 2, 2, 2],
-        [7, 5, 7, 5, 7],
-        [7, 5, 7, 1, 7],
-        [0, 2, 7, 2, 0],
-    ];
+    const FACE_BGR: [u8; 3] = [0x2d, 0x25, 0x26];
+    const INK: u8 = 0xf2;
+    const OVERSAMPLE: usize = 4;
 
-    // Win32 的图标资源由 DWORD 对齐的 DIB、BGRA 像素和按行对齐的透明蒙版组成。
-    #[repr(align(4))]
-    struct BadgeResource([u8; MASK_OFFSET + SIDE * MASK_STRIDE]);
+    struct TextCanvas {
+        dc: HDC,
+        font: HFONT,
+        bitmap: HBITMAP,
+    }
+
+    impl Drop for TextCanvas {
+        fn drop(&mut self) {
+            unsafe {
+                // 先释放 DC，使字体和位图解除选中，再销毁这两个对象。
+                let _ = DeleteDC(self.dc);
+                if !self.font.is_invalid() {
+                    let _ = DeleteObject(HGDIOBJ(self.font.0));
+                }
+                if !self.bitmap.is_invalid() {
+                    let _ = DeleteObject(HGDIOBJ(self.bitmap.0));
+                }
+            }
+        }
+    }
 
     fn badge_label(count: u32) -> String {
         if count > 99 {
@@ -135,75 +149,165 @@ mod native {
         }
     }
 
-    fn badge_resource(count: u32) -> BadgeResource {
-        let label = badge_label(count);
-        let mut resource = BadgeResource([0; MASK_OFFSET + SIDE * MASK_STRIDE]);
-        let data = &mut resource.0;
-        data[0] = HEADER_SIZE as u8;
-        data[4] = SIDE as u8;
-        data[8] = (SIDE * 2) as u8;
-        data[12] = 1;
-        data[14] = 32;
-        data[MASK_OFFSET..].fill(0xff);
-        let mut pixel = |x: usize, y: usize, color: [u8; 4]| {
-            let row = SIDE - y - 1;
-            let start = HEADER_SIZE + (row * SIDE + x) * 4;
-            data[start..start + 4].copy_from_slice(&color);
-            data[MASK_OFFSET + row * MASK_STRIDE + x / 8] &= !(0x80 >> (x % 8));
+    fn label_coverage(label: &str, side: usize) -> windows::core::Result<Vec<f32>> {
+        // 先在更大尺寸绘制系统字体，再按目标像素取平均，保留笔画的灰度边缘。
+        let render_side = side * OVERSAMPLE;
+        let size = render_side as i32;
+        let mut canvas = TextCanvas {
+            dc: unsafe { CreateCompatibleDC(None) },
+            font: HFONT::default(),
+            bitmap: HBITMAP::default(),
         };
-
-        let radius = 6.0;
-        let span = if label.len() == 1 {
-            0.0
-        } else {
-            SIDE as f32 / 2.0 - radius
-        };
-        for y in 0..SIDE {
-            for x in 0..SIDE {
-                let dx = ((x as f32 + 0.5 - 8.0).abs() - span).max(0.0);
-                let dy = y as f32 + 0.5 - 8.0;
-                if dx * dx + dy * dy <= radius * radius {
-                    // AAW 暖白主题的未读红底，使用白字保障系统浅色和深色任务栏上的对比度。
-                    pixel(x, y, [0x29, 0x29, 0xc5, 0xff]);
-                }
-            }
+        if canvas.dc.is_invalid() {
+            return Err(Error::from_thread());
         }
-
-        let (glyph_width, glyph_height) = match label.len() {
-            1 => (6, 10),
-            2 => (5, 8),
-            _ => (3, 6),
+        let font_height =
+            size * match label.len() {
+                1 => 83,
+                2 => 68,
+                _ => 53,
+            } / 100;
+        canvas.font = unsafe {
+            CreateFontW(
+                -font_height,
+                0,
+                0,
+                0,
+                FW_NORMAL.0 as i32,
+                0,
+                0,
+                0,
+                DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS,
+                CLIP_DEFAULT_PRECIS,
+                ANTIALIASED_QUALITY,
+                0,
+                w!("Segoe UI"),
+            )
         };
-        let text_width = (glyph_width + 1) * label.len() - 1;
-        let left = (SIDE - text_width) / 2;
-        let top = (SIDE - glyph_height) / 2;
-        for (index, glyph) in label.bytes().enumerate() {
-            let rows = &GLYPHS[if glyph == b'+' {
-                10
-            } else {
-                (glyph - b'0') as usize
-            }];
-            for y in 0..glyph_height {
-                for x in 0..glyph_width {
-                    let row = rows[y * 5 / glyph_height];
-                    if row & (4 >> (x * 3 / glyph_width)) != 0 {
-                        pixel(left + index * (glyph_width + 1) + x, top + y, [0xff; 4]);
+        if canvas.font.is_invalid() {
+            return Err(Error::from_thread());
+        }
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: size,
+                biHeight: -size,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut pixels = std::ptr::null_mut();
+        canvas.bitmap = unsafe {
+            CreateDIBSection(Some(canvas.dc), &info, DIB_RGB_COLORS, &mut pixels, None, 0)?
+        };
+        let mut text: Vec<u16> = label.encode_utf16().collect();
+        let mut bounds = RECT {
+            left: 0,
+            top: 0,
+            right: size,
+            bottom: size,
+        };
+        let byte_len = render_side * render_side * 4;
+        let pixels = unsafe {
+            std::ptr::write_bytes(pixels.cast::<u8>(), 0, byte_len);
+            if SelectObject(canvas.dc, HGDIOBJ(canvas.bitmap.0)).is_invalid()
+                || SelectObject(canvas.dc, HGDIOBJ(canvas.font.0)).is_invalid()
+            {
+                return Err(Error::from_thread());
+            }
+            SetBkMode(canvas.dc, TRANSPARENT);
+            SetTextColor(canvas.dc, COLORREF(0x00ff_ffff));
+            if DrawTextW(
+                canvas.dc,
+                &mut text,
+                &mut bounds,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+            ) == 0
+                || !GdiFlush().as_bool()
+            {
+                return Err(Error::new(E_FAIL, "无法绘制任务栏数字"));
+            }
+            std::slice::from_raw_parts(pixels.cast::<u8>(), byte_len)
+        };
+
+        let mut coverage = Vec::with_capacity(side * side);
+        for y in 0..side {
+            for x in 0..side {
+                let mut shade = 0u32;
+                for sample_y in y * OVERSAMPLE..(y + 1) * OVERSAMPLE {
+                    for sample_x in x * OVERSAMPLE..(x + 1) * OVERSAMPLE {
+                        shade += u32::from(pixels[(sample_y * render_side + sample_x) * 4]);
                     }
                 }
+                coverage.push(shade as f32 / (255 * OVERSAMPLE * OVERSAMPLE) as f32);
             }
         }
-        resource
+        Ok(coverage)
     }
 
-    fn create_icon(count: u32) -> windows::core::Result<HICON> {
+    // Win32 图标资源的起始地址必须按 DWORD 对齐。
+    struct BadgeResource(Vec<u32>);
+
+    impl BadgeResource {
+        fn bytes(&self) -> &[u8] {
+            unsafe { std::slice::from_raw_parts(self.0.as_ptr().cast(), self.0.len() * 4) }
+        }
+
+        fn bytes_mut(&mut self) -> &mut [u8] {
+            unsafe { std::slice::from_raw_parts_mut(self.0.as_mut_ptr().cast(), self.0.len() * 4) }
+        }
+    }
+
+    fn badge_resource(count: u32, side: usize) -> windows::core::Result<BadgeResource> {
+        let text = label_coverage(&badge_label(count), side)?;
+        let mask_offset = HEADER_SIZE + side * side * 4;
+        let mask_stride = side.div_ceil(32) * 4;
+        let mut resource = BadgeResource(vec![0; (mask_offset + side * mask_stride) / 4]);
+        let data = resource.bytes_mut();
+        data[0..4].copy_from_slice(&(HEADER_SIZE as u32).to_le_bytes());
+        data[4..8].copy_from_slice(&(side as u32).to_le_bytes());
+        data[8..12].copy_from_slice(&((side * 2) as u32).to_le_bytes());
+        data[12] = 1;
+        data[14] = 32;
+        data[mask_offset..].fill(0xff);
+
+        let center = side as f32 / 2.0;
+        for y in 0..side {
+            let row = side - y - 1;
+            for x in 0..side {
+                let dx = x as f32 + 0.5 - center;
+                let dy = y as f32 + 0.5 - center;
+                let opacity = (center - dx.hypot(dy)).clamp(0.0, 1.0);
+                let alpha = (255.0 * opacity).round() as u8;
+                if alpha == 0 {
+                    continue;
+                }
+                let ink = text[y * side + x];
+                let [blue, green, red] = FACE_BGR.map(|value| {
+                    ((f32::from(value) + f32::from(INK - value) * ink) * opacity).round() as u8
+                });
+                let offset = HEADER_SIZE + (row * side + x) * 4;
+                data[offset..offset + 4].copy_from_slice(&[blue, green, red, alpha]);
+                data[mask_offset + row * mask_stride + x / 8] &= !(0x80 >> (x % 8));
+            }
+        }
+        Ok(resource)
+    }
+
+    fn create_icon(count: u32, side: usize) -> windows::core::Result<HICON> {
+        let resource = badge_resource(count, side)?;
         // 0x00030000 是 Win32 3.0 图标资源格式。
         unsafe {
             CreateIconFromResourceEx(
-                &badge_resource(count).0,
+                resource.bytes(),
                 true,
                 0x00030000,
-                SIDE as i32,
-                SIDE as i32,
+                side as i32,
+                side as i32,
                 LR_DEFAULTCOLOR,
             )
         }
@@ -214,16 +318,52 @@ mod native {
         use super::*;
 
         #[test]
-        fn windows_accepts_single_double_and_capped_numeric_icons() {
-            for count in [1, 9, 10, 99, 100, u32::MAX] {
-                let icon = create_icon(count).expect("Windows should accept the badge DIB");
-                unsafe { DestroyIcon(icon).unwrap() };
+        fn windows_accepts_numeric_icons_at_multiple_dpi_levels() {
+            for side in [16, 20, 24, 32] {
+                for count in [1, 4, 9, 10, 99, 100, u32::MAX] {
+                    let icon =
+                        create_icon(count, side).expect("Windows should accept the badge DIB");
+                    unsafe { DestroyIcon(icon).unwrap() };
+                }
             }
-            assert_ne!(badge_resource(1).0, badge_resource(9).0);
-            assert_ne!(badge_resource(99).0, badge_resource(100).0);
-            assert_eq!(badge_label(99), "99");
+            assert_ne!(
+                badge_resource(1, 16).unwrap().0,
+                badge_resource(9, 16).unwrap().0
+            );
+            assert_ne!(
+                badge_resource(99, 16).unwrap().0,
+                badge_resource(100, 16).unwrap().0
+            );
             assert_eq!(badge_label(100), "99+");
-            assert_eq!(badge_resource(100).0, badge_resource(u32::MAX).0);
+            assert_eq!(
+                badge_resource(100, 16).unwrap().0,
+                badge_resource(u32::MAX, 16).unwrap().0
+            );
+        }
+
+        #[test]
+        fn single_double_and_capped_counts_keep_a_round_badge_with_antialiased_text() {
+            let side = 16;
+            for count in [4, 12, 100] {
+                let badge = badge_resource(count, side).unwrap();
+                let pixels = &badge.bytes()[HEADER_SIZE..HEADER_SIZE + side * side * 4];
+                let alpha = |x, y| pixels[(y * side + x) * 4 + 3];
+                assert_eq!(alpha(0, 0), 0);
+                assert!((1..255).contains(&alpha(7, 0)));
+                assert_eq!(alpha(7, 0), alpha(0, 7));
+                assert_eq!(alpha(7, 0), alpha(7, 15));
+                assert_eq!(alpha(7, 0), alpha(15, 7));
+                assert!(
+                    pixels
+                        .chunks_exact(4)
+                        .any(|pixel| pixel[3] == 255 && pixel[2] > 200)
+                );
+                assert!(
+                    pixels
+                        .chunks_exact(4)
+                        .any(|pixel| pixel[3] == 255 && (50..195).contains(&pixel[2]))
+                );
+            }
         }
     }
 }
