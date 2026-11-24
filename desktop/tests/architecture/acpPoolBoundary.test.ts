@@ -210,4 +210,39 @@ describe("ACP 资源池边界（单池原则）", () => {
       expect(existsSync(resolve(root, prefix)), prefix).toBe(true);
     }
   });
+
+  it("模型手动刷新只借用当前会话的 ACP 连接，切模校验只在发送边界按探测结果放行", () => {
+    const coordinator = "src/plugins/project/sessions/sessionCoordinator.ts";
+    const actions = "src/plugins/project/conversation/actions.ts";
+    const probe = sourceOf(coordinator)
+      .statements.filter(ts.isFunctionDeclaration)
+      .find(({ name }) => name?.text === "createSessionCoordinator")
+      ?.body?.statements.filter(ts.isFunctionDeclaration)
+      .find(({ name }) => name?.text === "refreshModels")
+      ?.getText();
+    expect(probe).toContain(
+      "getProtocol().openModelProbe(session, runtime.adapter)",
+    );
+    expect(probe).toContain("probe.newSession(cwd)");
+    expect(probe).toContain("await probe.closeSession()");
+    expect(probe).not.toMatch(
+      /\.(initialize|openBackground|openTransport|prompt|loadSession)\(/,
+    );
+    expect(read("src/plugins/acpRuntime/sessions/AcpSessionPool.ts")).toContain(
+      "lease?.openModelProbe?.bind(lease)",
+    );
+    expect(read(actions)).toMatch(/fromRefresh = refreshedModels\?\.some/);
+    expect(read(actions)).toMatch(/await binding\.setModel\(\s*modelId,/);
+    const permitted = [
+      actions,
+      "src/plugins/project/conversation/sessionStore.ts",
+      "src/plugins/acpRuntime/protocol/session.ts",
+      "src/plugins/acpRuntime/types.ts",
+    ];
+    const offenders = [...productionFiles("src")].filter(
+      (path) =>
+        identifiersOf(path, "fromRefresh").length && !permitted.includes(path),
+    );
+    expect(offenders).toEqual([]);
+  });
 });

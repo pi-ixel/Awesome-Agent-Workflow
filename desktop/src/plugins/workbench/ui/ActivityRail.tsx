@@ -13,7 +13,7 @@ import {
 import type { WorkbenchSnapshot } from "../types.ts";
 import { readWorkbenchUi, useWorkbenchLayout } from "./bindings/layoutView.ts";
 
-const iconButton = `grid shrink-0 place-items-center rounded-lg text-ink-mute transition-colors hover:bg-hover hover:text-ink data-[active=true]:bg-(--color-selected) data-[active=true]:text-ink focus-visible:ring-inset ${focusVisibleRing}`;
+const iconButton = `grid shrink-0 place-items-center rounded-control text-ink-mute transition-colors hover:bg-hover hover:text-ink data-[active=true]:bg-(--color-selected) data-[active=true]:text-ink focus-visible:ring-inset ${focusVisibleRing}`;
 
 const noUnread = () => 0;
 const noSubscription = () => () => {};
@@ -54,7 +54,7 @@ function ActivityRailEntry({
       <span className="relative inline-flex">
         <Icon className="ui-icon-18" />
         {count > 0 && (
-          <span className="pointer-events-none absolute -top-1.5 -right-1.5 z-10 inline-flex min-w-[1.25em] items-center justify-center rounded-full bg-danger-solid px-0.5 text-ui-xs leading-tight font-semibold text-danger-solid-ink tabular-nums ring-1 ring-sidebar">
+          <span className="pointer-events-none absolute -top-1.5 -right-1.5 z-10 inline-flex min-w-[1.25em] items-center justify-center rounded-pill bg-danger-solid px-0.5 text-ui-xs leading-tight font-semibold text-danger-solid-ink tabular-nums ring-1 ring-sidebar">
             {count > 99 ? "99+" : count}
           </span>
         )}
@@ -98,7 +98,8 @@ export function ActivityRail({
           >
             <BrandMark
               data-testid="workbench-mark"
-              className="pointer-events-none ui-icon-24"
+              variant="rail"
+              className="pointer-events-none ui-icon-28"
             />
           </div>
           <div className="flex min-h-0 flex-col items-center gap-1 overflow-y-auto px-0.5 pt-3 pb-1.5 [scrollbar-width:none]">

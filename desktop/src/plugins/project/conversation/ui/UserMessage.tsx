@@ -64,7 +64,7 @@ function UserMessageBase({
           data-user-message-bubble=""
           // hover 时间戳：发送时刻（createdAt 缺省的旧数据不显示）
           data-hint={formatClock(item.createdAt) ?? undefined}
-          className="max-w-full rounded-[18px] bg-conversation-user px-4 py-3 text-ui-base leading-relaxed break-words text-ink @min-[624px]/conversation:max-w-xl"
+          className="max-w-full rounded-panel bg-conversation-user px-4 py-3 text-ui-base leading-relaxed break-words text-ink @min-[624px]/conversation:max-w-xl"
         >
           <p className="whitespace-pre-wrap break-words">
             {renderedSkills}
@@ -74,7 +74,7 @@ function UserMessageBase({
       )}
       {item.display && (
         <Disclosure summary={item.display.foldLabel} className="w-full text-ink-mute">
-          <p className="max-h-80 overflow-y-auto rounded-lg border border-line bg-surface px-3 py-2 text-ui-sm leading-relaxed whitespace-pre-wrap break-words text-ink-soft">{foldedText(item.text, item.display)}</p>
+          <p className="max-h-80 overflow-y-auto rounded-control border border-line bg-surface px-3 py-2 text-ui-sm leading-relaxed whitespace-pre-wrap break-words text-ink-soft">{foldedText(item.text, item.display)}</p>
         </Disclosure>
       )}
       {showActions && text.trim() && (
@@ -89,7 +89,7 @@ function UserMessageBase({
             }}
             aria-label="填回输入框"
             data-hint="填回输入框"
-            className="rounded text-xs text-ink-faint transition-colors hover:bg-raised hover:text-ink-soft"
+            className="rounded-control text-xs text-ink-faint transition-colors hover:bg-raised hover:text-ink-soft"
           >
             <PencilIcon className="ui-icon-14" />
           </IconButton>

@@ -110,7 +110,7 @@ export function FileTreeRow({
         // ZCode 原规格（WorkspaceFileTreeRowView :225-232）：行盒 28px
         //（h-7）、字号 text-ui-base（随 --ui-font-size 调整）。
         animateEnter ? treeRowEnterClass : "",
-        "relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded-lg border pr-2 text-left text-ui-base leading-tight text-ink outline-none transition-[background-color,border-color,box-shadow]",
+        "relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded-control border pr-2 text-left text-ui-base leading-tight text-ink outline-none transition-[background-color,border-color,box-shadow]",
         isDeleted ? "cursor-default" : "cursor-pointer",
         "pl-[calc(var(--workspace-file-tree-depth)*0.75rem+0.5rem)]",
         "border-transparent focus-visible:ring-inset",
@@ -200,7 +200,7 @@ export function FileTreeRow({
           className="ml-1 flex shrink-0 items-center"
         >
           <span
-            className={`ui-icon-6 rounded-full ${firstDescendantStatus ? getGitStatusDotClass(firstDescendantStatus) : ""}`}
+            className={`ui-icon-6 rounded-pill ${firstDescendantStatus ? getGitStatusDotClass(firstDescendantStatus) : ""}`}
           />
         </span>
       ) : null}

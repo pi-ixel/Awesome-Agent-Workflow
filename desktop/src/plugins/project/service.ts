@@ -1,3 +1,4 @@
+import type { ComponentType, ReactNode } from "react";
 import type { SessionHandoff } from "./conversation/types.ts";
 import type { AcpSessionEvent } from "../acpRuntime/events.ts";
 import type {
@@ -178,6 +179,8 @@ export interface ProjectSessions extends Pick<
    * 发消息用 conversation.send（带 display 选项），轮次进展用 watchTurns。
    */
   openPluginSession(options: PluginSessionOptions): Promise<SessionTarget>;
+  /** 释放由插件打开的临时会话（取消进行中的轮次并归还连接池租约）。 */
+  closePluginSession?(target: SessionTarget): Promise<void>;
   /**
    * 插件在这个会话里发消息前等它就绪：打开时要换的工具正排在会话当前这一轮后面
    * （会话正忙时不打断、不失败），换好才兑现；没有排队的事立即兑现。
@@ -230,11 +233,19 @@ export interface ProjectSessions extends Pick<
   runtimeDebugSnapshot(): readonly ProjectRuntimeDebugEntry[];
 }
 
+export interface EmbeddedSessionProps {
+  readonly target: SessionTarget;
+  readonly placeholder?: string;
+  readonly emptyText?: string;
+  readonly header?: ReactNode;
+}
+
 export interface ProjectConversation {
   readonly foreground: ProjectForeground;
   readonly expansion: ConversationExpansion;
   readonly statusView: ReadonlySnapshot<SessionStatusViewState>;
   readonly setStatusMode: (mode: StatusCardMode) => void;
+  readonly EmbeddedView?: ComponentType<EmbeddedSessionProps>;
   clear(target: ForegroundSessionTarget): void;
   dismissTurnError(target: ForegroundSessionTarget): void;
   reportCommandFailure(target: ForegroundSessionTarget, reason: string): void;
@@ -269,6 +280,7 @@ export interface ProjectConversation {
     position: "before" | "after",
   ): boolean;
   switchModel(target: SessionTarget, modelId: string): void;
+  refreshModels(target: SessionTarget): Promise<void>;
   switchMode(target: SessionTarget, modeId: string): void;
   cancel(target: SessionTarget): void;
   retry(target: SessionTarget): void;

@@ -39,7 +39,7 @@ function Cell({ level }: { level: number }) {
   return (
     <span
       aria-hidden="true"
-      className={`block aspect-square min-w-0 rounded-[4px] border transition-transform hover:scale-110 hover:border-line-strong ${level ? "border-line" : "border-transparent"}`}
+      className={`block aspect-square min-w-0 rounded-control border transition-transform hover:scale-110 hover:border-line-strong ${level ? "border-line" : "border-transparent"}`}
       style={{ backgroundColor: colors[level] }}
     />
   );
@@ -133,7 +133,7 @@ export function UsageHeatmap({ days }: { days: UsageDay[] }) {
   }
   return (
     <section
-      className="rounded-xl border border-line bg-surface px-3 py-3"
+      className="rounded-popover border border-line bg-surface px-3 py-3"
       aria-label="Token 活动"
     >
       <div className="mb-3 flex items-center justify-between gap-3">

@@ -27,3 +27,13 @@ pub mod bench;
 mod tests;
 #[cfg(test)]
 mod confirmation_tests;
+
+/// 站点 WebView 没有工作台样式，仅在 AAW 注入的浮层根节点上定义共享变量。
+fn with_overlay_radii(script: &str) -> String {
+    let declarations = include_str!("../../../src/shared/styles/radii.css")
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("--radius-"))
+        .collect::<String>();
+    script.replace("__AAW_RADIUS_DECLARATIONS__", &declarations)
+}

@@ -32,23 +32,23 @@ describe("编辑会话", () => {
     expect(draftPrompt("new", "").text).toContain("先简要说明");
   });
 
-  it("编辑会话是普通会话：工作目录指向草稿、带编写工具，第一条消息带显示方式，结束时停下这一轮", async () => {
-    const target = { workspacePath: "D:/project", agentKey: "key-a", sessionId: "s-1" };
+  it("编辑会话独立于业务项目：以草稿目录为作用域并带编写工具，第一条消息带显示方式，结束时释放临时会话", async () => {
+    const target = { workspacePath: "D:/drafts/d1", agentKey: "key-a", sessionId: "s-1" };
     const project = {
       sessions: {
         openPluginSession: vi.fn((options: { tools?: (agent: null) => readonly unknown[] }) => { void options; return Promise.resolve(target); }),
+        closePluginSession: vi.fn(() => Promise.resolve()),
         openSessionFromEntry: vi.fn(() => Promise.resolve()),
       },
       conversation: { send: vi.fn(() => true), cancel: vi.fn() },
     };
-    const editor = createDraftEditor({ project: project as never, currentProject: () => "D:/project" });
+    const editor = createDraftEditor({ project: project as never });
     const mcpServer = { name: "aaw-workflow-authoring", command: "workflow_service", args: ["--authoring-mcp", "D:/drafts/d1"], env: [] };
     const first = { text: "第一条", display: { source: "workflow", visible: "", foldLabel: "说明" } };
     await editor.start({ draftId: "d1", base: "mine", dir: "D:/drafts/d1", createdAt: 1, changes: 0, ok: true, mcpServer }, "编辑工作流：我的", first);
-    const options = project.sessions.openPluginSession.mock.calls[0]![0] as { workspacePath: string; cwd: string; title: string; tools: (agent: null) => readonly unknown[] };
-    expect(options).toMatchObject({ workspacePath: "D:/project", cwd: "D:/drafts/d1", title: "编辑工作流：我的" });
+    const options = project.sessions.openPluginSession.mock.calls[0]![0] as { workspacePath: string; cwd: string; title: string; ephemeral?: boolean; tools: (agent: null) => readonly unknown[] };
+    expect(options).toMatchObject({ workspacePath: "D:/drafts/d1", cwd: "D:/drafts/d1", title: "编辑工作流：我的", ephemeral: true });
     expect(options.tools(null)).toEqual([mcpServer]);
-    // 不抢前台：用户留在功能区的草稿页（ADR 038），要说话时再打开。
     expect(project.sessions.openSessionFromEntry).not.toHaveBeenCalled();
     expect(project.conversation.send).toHaveBeenCalledWith(target, "第一条", undefined, { display: first.display });
     // 重新打开或重连时，登记的提供方继续给这个会话编写工具。
@@ -66,9 +66,9 @@ describe("编辑会话", () => {
     expect(editor.has("d1")).toBe(true);
     expect(editor.send("d1", "报错")).toBe(true);
     expect(await editor.show("d1")).toBe(true);
-    expect(project.sessions.openSessionFromEntry).toHaveBeenCalledWith("D:/project", "s-1", "key-a");
+    expect(project.sessions.openSessionFromEntry).toHaveBeenCalledWith("D:/drafts/d1", "s-1", "key-a");
     await editor.end("d1");
-    expect(project.conversation.cancel).toHaveBeenCalledWith(target);
+    expect(project.sessions.closePluginSession).toHaveBeenCalledWith(target);
     expect(editor.has("d1")).toBe(false);
     expect(editor.send("d1", "x")).toBe(false);
     expect(
@@ -123,7 +123,7 @@ it("asks for the request first, then creates the draft and stays on it with the 
   fireEvent.keyDown(box, { key: "Enter" });
   await vi.waitFor(() => expect(started).toHaveLength(1));
   expect(started[0]).toContain("用户的要求：做一个先设计再实现的流程");
-  expect(await screen.findByRole("button", { name: "打开编辑会话" })).toBeInTheDocument();
+  expect(await screen.findByRole("region", { name: "AI 编辑对话" })).toBeInTheDocument();
   // 起步模板一点没改：不能保存。
   expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
 
@@ -135,9 +135,10 @@ it("asks for the request first, then creates the draft and stays on it with the 
   expect(report).toHaveTextContent("AI 会用 check_workflow 工具自己检查并修正");
   expect(within(report).queryByRole("button")).not.toBeInTheDocument();
 
-  // 改好了：看差异、保存。
+  // 改好了：切到文件改动查看差异、保存。
   fake.setDraftCheck({ ...broken, ok: true, diagnostics: [], meta: { ...workflowSummary().meta!, id: "x", name: "设计评审流程" } });
   expect(await screen.findByText(/新建：设计评审流程/, {}, { timeout: 6000 })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", { name: /文件改动/ }));
   expect(screen.getByLabelText("差异 workflow.yaml")).toHaveTextContent("+ id: x");
   fireEvent.click(screen.getByRole("button", { name: "保存" }));
   await vi.waitFor(() => expect(fake.calls).toContainEqual({ method: "saveDraft", args: "new-1" }));
@@ -164,7 +165,9 @@ it("returns to the existing draft of a workflow instead of creating another one"
   fireEvent.click(screen.getByRole("button", { name: "查看工作流 mine" }));
   expect(await screen.findByLabelText("未保存的修改")).toHaveTextContent("改了 2 个文件");
   fireEvent.click(screen.getByRole("button", { name: "继续 AI 修改" }));
-  expect(await screen.findByRole("group", { name: "继续编辑" })).toBeInTheDocument();
+  const aiToggle = await screen.findByRole("button", { name: "用 AI 修改" });
+  fireEvent.click(aiToggle);
+  expect(await screen.findByRole("region", { name: "AI 编辑对话" })).toBeInTheDocument();
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(fake.calls.map((call) => call.method)).not.toContain("createDraft");
 });

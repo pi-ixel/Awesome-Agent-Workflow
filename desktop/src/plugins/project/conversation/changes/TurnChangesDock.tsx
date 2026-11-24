@@ -109,7 +109,7 @@ export function TurnChangesReview({
   const [confirmPaths, setConfirmPaths] = useState<readonly string[] | null>(
     null,
   );
-  const position = useRef<DiffPosition>({ top: 0, left: 0, right: 0 });
+  const position = useRef<DiffPosition>({ left: 0, right: 0 });
   const [lastOpen, setLastOpen] = useState(view.openRevision);
   const [openError, setOpenError] = useState<string | null>(null);
   const [previousRestored, setPreviousRestored] = useState(isFullyRestored);
@@ -246,7 +246,7 @@ export function TurnChangesReview({
       data-turn-changes-summary
       className="flex shrink-0 flex-wrap items-center gap-3 p-4"
     >
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-base text-ink-mute">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-popover bg-base text-ink-mute">
         <FileDiffIcon className="ui-icon-18" />
       </span>
       <div className="min-w-0 flex-1 basis-36">
@@ -401,7 +401,8 @@ export function TurnChangesReview({
                     item.kind === kind,
                 );
                 setSelected(next?.path ?? null);
-                position.current = { top: 0, left: 0, right: 0 };
+                if (file?.path !== next?.path)
+                  position.current = { left: 0, right: 0 };
               }}
             />
             <div className="flex gap-1">
@@ -440,9 +441,10 @@ export function TurnChangesReview({
                   aria-pressed={file?.path === item.path}
                   onClick={() => {
                     setSelected(item.path);
-                    position.current = { top: 0, left: 0, right: 0 };
+                    if (file?.path !== item.path)
+                      position.current = { left: 0, right: 0 };
                   }}
-                  className="items-start rounded-lg px-2 py-2.5"
+                  className="items-start rounded-control px-2 py-2.5"
                 >
                   <span
                     className={`shrink-0 text-ui-caption ${item.kind === "added" ? diffAppearance.add.ink : item.kind === "deleted" ? diffAppearance.del.ink : "text-ink-mute"}`}
@@ -531,7 +533,7 @@ export function TurnChangesReview({
   return (
     <>
       <div
-        className="w-full min-w-0 overflow-hidden rounded-2xl border border-line bg-surface"
+        className="w-full min-w-0 overflow-hidden rounded-panel border border-line bg-surface"
         data-turn-changes
       >
         {summary(false)}

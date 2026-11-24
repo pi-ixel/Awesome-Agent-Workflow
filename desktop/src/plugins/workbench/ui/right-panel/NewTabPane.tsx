@@ -77,7 +77,7 @@ export function NewTabPane({ project }: { readonly project: string }) {
                 data-new-tab-item={entry.id}
                 onClick={entry.onOpen}
               >
-                <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-surface">
+                <span className="flex size-12 shrink-0 items-center justify-center rounded-popover bg-surface">
                   <entry.Icon className="ui-icon-24 text-ink-subtle" />
                 </span>
                 <span className="min-w-0 flex-1">

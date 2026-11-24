@@ -226,7 +226,7 @@ export function RemoteDirectoryPickerModal({
           </div>
         )}
 
-        <div className="min-h-[240px] flex-1 overflow-y-auto rounded-xl border border-line bg-surface p-1.5">
+        <div className="min-h-[240px] flex-1 overflow-y-auto rounded-popover border border-line bg-surface p-1.5">
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-16 text-ui-sm text-ink-mute">
               <Spinner className="ui-icon-14" />
@@ -236,7 +236,7 @@ export function RemoteDirectoryPickerModal({
             <div className="space-y-2.5 p-3">
               <div
                 role="alert"
-                className="rounded-lg border border-danger-ink/30 bg-danger-soft px-3 py-2 text-ui-xs text-danger-ink"
+                className="rounded-control border border-danger-ink/30 bg-danger-soft px-3 py-2 text-ui-xs text-danger-ink"
               >
                 {error}
               </div>

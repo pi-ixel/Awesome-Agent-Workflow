@@ -221,7 +221,7 @@ export function SessionStatusOverlay({
                 onClick={() => {
                   setMode("panel");
                 }}
-                className="session-status-mini absolute right-0 top-0 inline-flex w-max max-w-[min(20rem,calc(100cqw-2rem))] items-center gap-2 rounded-full! px-3 py-2 text-ui-sm shadow-floating"
+                className="session-status-mini absolute right-0 top-0 inline-flex w-max max-w-[min(20rem,calc(100cqw-2rem))] items-center gap-2 rounded-popover! px-3 py-2 text-ui-sm shadow-floating"
               >
                 <span
                   aria-hidden="true"

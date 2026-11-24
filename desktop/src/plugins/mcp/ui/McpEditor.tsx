@@ -88,7 +88,7 @@ function HeadersEditor({
       {headers.map((header, index) => (
         <div
           key={index}
-          className="grid gap-2 rounded-lg border border-line p-3"
+          className="grid gap-2 rounded-control border border-line p-3"
         >
           <div className="grid grid-cols-2 gap-2">
             <Field label="请求头名称">
@@ -345,7 +345,7 @@ export function McpEditor({
             {mcpTemplates.map((template) => (
               <div
                 key={template.name}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line px-3 py-2"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-line px-3 py-2"
               >
                 <div>
                   <p className="text-ui-sm font-semibold">{template.name}</p>

@@ -91,4 +91,13 @@ describe("tree motion architecture", () => {
     );
     expect(missing.map((path) => relative(src, path))).toEqual([]);
   });
+  it("routes file tree side changes through the shared motion layer", () => {
+    const tree = readFileSync(join(src, "plugins/documents/ui/FileTree.tsx"), "utf8");
+    expect(tree).toContain("shared/ui/controls/useTreePositionMotion.ts");
+    expect(tree).toContain("useTreePositionMotion({");
+    expect(tree).not.toMatch(/\bgetContext\(/);
+    const workbench = readFileSync(join(src, "plugins/documents/ui/workbench.tsx"), "utf8");
+    expect(workbench.match(/<WorkbenchFileTree\b/g)).toHaveLength(2);
+    expect(workbench).toContain("treePosition={fileTreePosition}");
+  });
 });

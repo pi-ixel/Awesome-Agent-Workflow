@@ -64,7 +64,7 @@ function LogView({
   }, [filtered.length]);
 
   return (
-    <div className="rounded-lg border border-line bg-surface">
+    <div className="rounded-control border border-line bg-surface">
       <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3">
         <span className="flex items-center gap-2 text-xs text-ink-mute">
           级别

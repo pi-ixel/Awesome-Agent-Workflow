@@ -210,13 +210,13 @@ function isContextMenuKey(event: { key: string; shiftKey: boolean }): boolean {
 }
 
 const projectRowActionClass =
-  "rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink " +
+  "rounded-control text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink " +
   focusVisibleRing;
 const sessionRowActionReveal =
   "opacity-0 group-hover/session-row:opacity-100 group-has-[:focus-visible]/session-row:opacity-100 [@media(hover:none)]:opacity-100";
-const sessionRowActionClass = `shrink-0 rounded transition-opacity hover:bg-surface-hover ${sessionRowActionReveal} ${focusVisibleRing}`;
+const sessionRowActionClass = `shrink-0 rounded-control transition-opacity hover:bg-surface-hover ${sessionRowActionReveal} ${focusVisibleRing}`;
 const sessionRowFrameClass =
-  "group/session-row relative flex min-w-0 items-center gap-1 rounded-lg pr-1 transition-colors";
+  "group/session-row relative flex min-w-0 items-center gap-1 rounded-control pr-1 transition-colors";
 const sessionRowStatusClass =
   "flex min-w-0 shrink-0 items-center justify-end gap-2 empty:hidden";
 const sessionRowStatusReveal =
@@ -323,7 +323,7 @@ function ProjectNodeRow({
           );
         }
       }}
-      className={`group group/project-row ml-2 flex h-8 min-w-0 items-center gap-1 rounded-lg pr-1 transition-colors ${
+      className={`group group/project-row ml-2 flex h-8 min-w-0 items-center gap-1 rounded-control pr-1 transition-colors ${
         isSelected ? rowSelectedClass : "hover:bg-surface-hover"
       }`}
     >
@@ -970,7 +970,7 @@ function SessionGroupNode({
             aria-expanded={expanded}
             aria-label={`${expanded ? "收起" : "展开"} ${group.title}`}
             onClick={() => setExpanded(!expanded)}
-            className={`ml-1 flex shrink-0 cursor-pointer items-center justify-center rounded text-ink-mute hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
+            className={`ml-1 flex shrink-0 cursor-pointer items-center justify-center rounded-control text-ink-mute hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
           >
             {chevron}
           </IconButton>
@@ -1532,7 +1532,7 @@ function SessionsView({ menu }: { readonly menu: SidebarMenuApi }) {
 /**
  * 树头部/分组头的小方钮（视角菜单、【+】动作位共用）。
  */
-const TREE_HEADER_BUTTON_CLASS = `flex shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-hover hover:text-ink ${focusVisibleRing}`;
+const TREE_HEADER_BUTTON_CLASS = `flex shrink-0 items-center justify-center rounded-control text-ink-subtle transition-colors hover:bg-hover hover:text-ink ${focusVisibleRing}`;
 
 /**
  * 最近会话视角的列表头：标题 + 视角切换钮。项目视角不渲染本行（切换钮

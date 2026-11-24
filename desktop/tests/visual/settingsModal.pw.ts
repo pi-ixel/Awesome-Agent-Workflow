@@ -232,8 +232,53 @@ test("勾选存储范围时保持设置弹窗和内容滚动位置", async ({ pa
 
   await help.focus();
   await page.keyboard.press("Tab");
+  await expect(
+    dialog.getByRole("spinbutton", { name: "迁移遗留数据提醒阈值（MiB）" }),
+  ).toBeFocused();
+  await page.keyboard.press("Tab");
   await expect(checkbox).toBeFocused();
   await page.keyboard.press("Space");
   await expect(checkbox).not.toBeChecked();
   expect(await layout()).toEqual(before);
 });
+
+for (const width of [1034, 710]) {
+  test(`存储明细滚轮滚动设置内容（${width}px）`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 880 });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/tests/visual/fixture.html?storage-scroll");
+    const dialog = page.getByRole("dialog", { name: "设置", exact: true });
+    await dialog.getByRole("tab", { name: "存储", exact: true }).click();
+    const logs = dialog.getByRole("button", { name: "诊断日志", exact: true });
+    await logs.click();
+    const content = dialog.locator("[class~='@container/settings']");
+    const scrollTop = () => content.evaluate((element) => element.scrollTop);
+
+    await logs.hover();
+    const beforeRow = await scrollTop();
+    await page.mouse.wheel(0, 360);
+    await expect.poll(scrollTop).toBeGreaterThan(beforeRow);
+
+    const threshold = dialog.getByRole("spinbutton", {
+      name: "诊断日志提醒阈值（MiB）",
+    });
+    await threshold.hover();
+    const beforeInput = await scrollTop();
+    const value = await threshold.inputValue();
+    await page.mouse.wheel(0, 360);
+    await expect.poll(scrollTop).toBeGreaterThan(beforeInput);
+    await expect(threshold).toHaveValue(value);
+    expect(await dialog.evaluate((element) => element.scrollTop)).toBe(0);
+
+    if (width === 710) {
+      const table = dialog.locator(".overflow-x-auto").filter({
+        hasText: "数据分类",
+      });
+      await logs.hover();
+      await page.mouse.wheel(120, 0);
+      await expect
+        .poll(() => table.evaluate((element) => element.scrollLeft))
+        .toBeGreaterThan(0);
+    }
+  });
+}

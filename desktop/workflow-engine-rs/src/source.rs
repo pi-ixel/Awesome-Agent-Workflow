@@ -946,6 +946,7 @@ pub fn compile(files: &BTreeMap<String, String>) -> Result<Compiled, Vec<Diagnos
                     prompt: src.prompt.trim_end().to_owned(),
                     knowledge: String::new(),
                     knowledge_files: src.knowledge.clone(),
+                    knowledge_docs: Vec::new(),
                     reads,
                     schema,
                     script: src.script.clone(),

@@ -9,6 +9,7 @@ import { panelService } from "../../src/plugins/host/filesystem/panelService.ts"
 import SettingsPage from "../../src/plugins/workbench/ui/SettingsPage.tsx";
 import { workbenchSettings } from "../../src/plugins/workbench/ui/settingsContributions.tsx";
 import { bindSecondaryWindowAppearance } from "../../src/plugins/workbench/appearance/windowAppearance.ts";
+import { bindWorkbenchAppearance } from "../../src/plugins/workbench/appearance/appearance.ts";
 import { useWorkbenchUiValue } from "../../src/plugins/workbench/ui/bindings/layoutView.ts";
 import "../../src/shared/styles/index.css";
 
@@ -17,7 +18,9 @@ const directory = `${project}/docs`;
 const markdown = "# 文件视图示例\n\nAlpha alpha alpha\n\n## 第一节\n\n### 小节\n\n## 第二节";
 const { Wrapper, workbench } = createGitWorkbench();
 const params = new URLSearchParams(location.search);
-if (params.has("appearance"))
+if (params.has("tree-position-motion"))
+  bindWorkbenchAppearance(document.documentElement, workbench.appearance);
+else if (params.has("appearance"))
   bindSecondaryWindowAppearance(document.documentElement);
 if (params.has("draggable-tabs")) {
   for (const file of ["第一份.md", "第二份.md", "第三份.md"])

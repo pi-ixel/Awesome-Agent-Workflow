@@ -48,10 +48,11 @@ export function ExitOverlay() {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-overlay-shade/45">
       <HintSurface
+        surfaceKind="pill"
         open
         role="status"
         aria-live="polite"
-        className="flex items-center gap-2.5 rounded-full! py-2 pl-3.5 pr-4"
+        className="flex items-center gap-2.5 py-2 pl-3.5 pr-4"
       >
         <Spinner className="ui-icon-16 shrink-0 text-ink-subtle" />
         <span className="text-sm text-ink-soft">正在退出…</span>

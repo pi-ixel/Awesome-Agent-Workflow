@@ -182,6 +182,7 @@ export function createStorageSettings(
             request={reader.storage}
             active={active}
             revision={state.usageRevision}
+            hasOwnScroll={false}
             reminderGroups={storageGroups.map((group) => ({
               ...group,
               render: (label) => (
@@ -323,7 +324,7 @@ export function createStorageSettings(
                 <IconButton iconSize="compact"
                   type="button"
                   aria-label="关闭提醒"
-                  className="grid shrink-0 place-items-center rounded text-ink-mute hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  className="grid shrink-0 place-items-center rounded-control text-ink-mute hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-focus-ring"
                   onClick={dismissNotice}
                 >
                   <XIcon aria-hidden="true" className="ui-icon-14" />
@@ -339,7 +340,7 @@ export function createStorageSettings(
 }
 
 const noticeCard =
-  "pointer-events-auto space-y-2 rounded-lg border border-line bg-raised p-3 text-ink shadow-floating";
+  "pointer-events-auto space-y-2 rounded-popover border border-line bg-raised p-3 text-ink shadow-floating";
 
 function groupBytes(
   rows: readonly StorageRow[],

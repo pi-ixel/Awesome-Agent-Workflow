@@ -65,6 +65,7 @@ export class AcpConnection implements AcpConnectionPort {
   private admissionError?: Error;
   private stopping = false;
   private creating = 0;
+  private creatingModelProbes = 0;
   private failureReason?: Error;
   private readonly failureListeners = new Set<(reason: Error) => void>();
   onUnavailable(listener: (reason: Error) => void): () => void {
@@ -182,6 +183,7 @@ export class AcpConnection implements AcpConnectionPort {
       if (c) c.notification?.(method, params);
       else if (this.creating && typeof params.sessionId === "string") {
         if (this.early.length >= 256) {
+          if (this.creatingModelProbes) return;
           failure("Early session notification buffer exceeded");
           return;
         }
@@ -225,6 +227,13 @@ export class AcpConnection implements AcpConnectionPort {
     });
   }
   openChannel(options: AcpChannelOptions = {}): AcpChannel {
+    return this.createChannel(options);
+  }
+
+  private createChannel(
+    options: AcpChannelOptions,
+    isModelProbe = false,
+  ): AcpChannel {
     if (this.stopping) throw new Error("Connection is stopping");
     if (this.failureReason) throw this.failureReason;
     if (this.admissionError) throw this.admissionError;
@@ -255,6 +264,12 @@ export class AcpConnection implements AcpConnectionPort {
     ) => {
       if (c.closed || (c.closing && method !== "session/close"))
         return Promise.reject(new Error("Session is closed"));
+      if (
+        isModelProbe &&
+        method !== "session/new" &&
+        method !== "session/close"
+      )
+        return Promise.reject(new Error("模型探测通道只允许新建和关闭临时会话"));
       if (method === "session/close") {
         c.closing = true;
         c.controller.abort();
@@ -269,6 +284,7 @@ export class AcpConnection implements AcpConnectionPort {
         if (isNew) {
           if (c.id) throw new Error("Session is already created");
           this.creating++;
+          if (isModelProbe) this.creatingModelProbes++;
         }
         const promptSession = method === "session/prompt" ? c.id : undefined;
         if (promptSession !== undefined) {
@@ -287,6 +303,7 @@ export class AcpConnection implements AcpConnectionPort {
           const result = await this.rpc.request(method, params, {
             owner: c,
             beforeDispatch: requestOptions?.beforeDispatch,
+            cancelOnTimeout: isModelProbe && isNew,
             timeoutMs:
               requestOptions?.timeoutMs === undefined
                 ? options.requestTimeoutMs
@@ -334,20 +351,25 @@ export class AcpConnection implements AcpConnectionPort {
           }
           return result;
         } catch (error) {
-          if (error instanceof AcpTimeoutError) {
+          // 临时探测的超时或关闭失败只收口自己的通道。
+          if (!isModelProbe && error instanceof AcpTimeoutError) {
             this.admissionError = new Error(
               "Remote request outcome unknown; connection admission quarantined",
             );
             this.scheduler.close(this.admissionError);
           }
-          if (method === "session/close") {
+          if (!isModelProbe && method === "session/close") {
             this.admissionError = new Error(
               "Remote session release was not confirmed",
             );
             this.scheduler.close(this.admissionError);
           }
           if (method === "session/load" || isNew) {
-            if (!(error instanceof AcpResponseError) && !c.closed) {
+            if (
+              !isModelProbe &&
+              !(error instanceof AcpResponseError) &&
+              !c.closed
+            ) {
               this.admissionError = new Error(
                 "Remote session state is unknown; connection admission quarantined",
               );
@@ -368,7 +390,10 @@ export class AcpConnection implements AcpConnectionPort {
               turn = undefined;
             }
           }
-          if (isNew && --this.creating === 0) this.early.length = 0;
+          if (isNew) {
+            if (isModelProbe) this.creatingModelProbes--;
+            if (--this.creating === 0) this.early.length = 0;
+          }
         }
       };
       if (method === "initialize") {
@@ -423,6 +448,11 @@ export class AcpConnection implements AcpConnectionPort {
     this.channels.add(c);
     return {
       port,
+      openModelProbe: (probeOptions) => {
+        if (isModelProbe || !this.initialized || c.closed || c.closing)
+          throw new Error("当前会话的 ACP 连接尚未就绪");
+        return this.createChannel({ ...probeOptions, background: true }, true);
+      },
       promote: () => {
         if (!this.channels.has(c)) throw new Error("Unknown session");
         c.background = false;

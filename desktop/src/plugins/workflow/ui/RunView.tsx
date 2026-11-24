@@ -462,7 +462,7 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
                 className="grid min-h-7 min-w-7 shrink-0 place-items-center p-1"
                 onClick={() => setSelectedOrdinal(item.ordinal)}
               >
-                <span aria-hidden="true" className={`ui-icon-8 rounded-full ${selected ? "bg-ink" : "bg-ink-mute"}`} />
+                <span aria-hidden="true" className={`ui-icon-8 rounded-pill ${selected ? "bg-ink" : "bg-ink-mute"}`} />
               </ActionButton>
             );
           })}

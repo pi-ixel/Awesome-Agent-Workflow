@@ -109,6 +109,18 @@ if (params.has("composer-selection")) {
     currentModelId: "quick",
   });
 }
+if (params.has("model-refresh")) {
+  foreground.view.session.setState({
+    agentKey: "preview",
+    isAgentRunning: true,
+    turnState: "running",
+    availableModels: Array.from({ length: 18 }, (_, index) => ({
+      modelId: `model-${index + 1}`,
+      name: `模型 ${index + 1}`,
+    })),
+    currentModelId: "model-1",
+  });
+}
 const statusView = createStore<SessionStatusViewState>(() => ({
   mode: "mini",
 }));
@@ -150,7 +162,18 @@ const binding = {
           return accepted;
         },
       } : {}),
-      switchModel: (_owner: unknown, id: string) => foreground.view.session.setState({ currentModelId: id }),
+      switchModel: (_owner: unknown, id: string) =>
+        foreground.view.session.setState({ currentModelId: id }),
+      refreshModels: () => {
+        const { availableModels } = foreground.view.session.getState();
+        foreground.view.session.setState({
+          refreshedModels: [
+            ...availableModels,
+            { modelId: "fresh", name: "最新模型" },
+          ],
+        });
+        return Promise.resolve();
+      },
       statusView,
       setStatusMode: (mode: SessionStatusViewState["mode"]) =>
         statusView.setState({ mode }),

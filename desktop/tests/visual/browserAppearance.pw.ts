@@ -23,6 +23,8 @@ test("浏览器地址、视口尺寸和页面输入使用当前主题并保留�
     .click();
   const data = settings.getByRole("dialog", { name: "浏览器数据管理" });
   const pageDialog = prompt.getByRole("dialog", { name: "页面对话框" });
+  await expect(data).toHaveCSS("border-radius", "16px");
+  await expect(pageDialog).toHaveCSS("border-radius", "16px");
   await expect(data).toHaveAttribute("data-hint-open", "true");
   await expect(pageDialog).toHaveAttribute("data-hint-open", "true");
   const width = data.getByRole("spinbutton", { name: "自由视口宽" });

@@ -42,7 +42,7 @@ export function SidebarToggle({ collapsed }: { readonly collapsed: boolean }) {
           document.querySelector<HTMLButtonElement>(`[data-sidebar-toggle="${destination}"]`)?.focus();
         });
       }}
-      className={`flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink focus-visible:ring-inset ${focusVisibleRing} ${collapsed ? "" : "order-2 ml-1"}`}
+      className={`flex shrink-0 items-center justify-center rounded-control text-ink transition-colors hover:bg-hover hover:text-ink focus-visible:ring-inset ${focusVisibleRing} ${collapsed ? "" : "order-2 ml-1"}`}
     >
       <Icon className="ui-icon-16" />
     </IconButton>

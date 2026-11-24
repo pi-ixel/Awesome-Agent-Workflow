@@ -71,11 +71,13 @@ export function StorageView({
   reminderGroups,
   active = true,
   revision = 0,
+  hasOwnScroll = true,
 }: {
   readonly request?: (request: StorageRequest) => Promise<StorageResponse>;
   readonly reminderGroups?: readonly ReminderGroup[];
   readonly active?: boolean;
   readonly revision?: number;
+  readonly hasOwnScroll?: boolean;
 }) {
   const [rows, setRows] = useState<StorageRow[]>([]);
   const [at, setAt] = useState<number>();
@@ -247,7 +249,7 @@ export function StorageView({
   return (
     <section
       aria-label="Desktop 存储"
-      className="min-h-0 overflow-auto text-ui-sm"
+      className={`min-h-0 text-ui-sm${hasOwnScroll ? " overflow-auto" : ""}`}
     >
       <div className="mx-auto max-w-6xl space-y-4">
         <MetricStrip
@@ -302,7 +304,7 @@ export function StorageView({
           <div
             key={row.id}
             role="alert"
-            className="rounded-lg border border-warn-line p-3"
+            className="rounded-control border border-warn-line p-3"
           >
             <strong>{row.label}</strong>
             <p>{row.error}</p>
@@ -329,7 +331,7 @@ export function StorageView({
           </div>
         ))}
         {result && (
-          <div role="status" className="rounded-lg border border-line p-3">
+          <div role="status" className="rounded-control border border-line p-3">
             已处理 {result.removed} 项，跳过 {result.skipped} 项，失败{" "}
             {result.failures.length} 项。
             {result.failures.map((failure, i) => (
@@ -338,7 +340,7 @@ export function StorageView({
           </div>
         )}
         {busy && <p role="status">正在处理…</p>}
-        <div className="overflow-x-auto rounded-xl border border-line bg-surface">
+        <div className="overflow-x-auto rounded-popover border border-line bg-surface">
           <div className="min-w-[630px]">
             <div className={`${columns} bg-surface py-3 text-ui-xs text-ink-mute`}>
               <span>数据分类</span>
@@ -503,7 +505,7 @@ function StorageCategoryHelp({
         {...hint}
         aria-label={`${label}说明`}
         aria-describedby={descriptionId}
-        className="inline-flex shrink-0 items-center justify-center rounded text-ink-mute hover:bg-surface-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="inline-flex shrink-0 items-center justify-center rounded-control text-ink-mute hover:bg-surface-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         <CircleHelpIcon aria-hidden="true" className="ui-icon-14" />
       </IconButton>
@@ -659,7 +661,7 @@ function StorageCategoryTable({
           return (
             <Checkbox
               key={key}
-              className="flex items-start gap-3 rounded-lg p-2 hover:bg-raised"
+              className="flex items-start gap-3 rounded-control p-2 hover:bg-raised"
               accessibleName={"选择 " + projectName(row.project) + " " + agentName(row)}
               disabled={busy || !enabled}
               checked={enabled && selected.has(key)}

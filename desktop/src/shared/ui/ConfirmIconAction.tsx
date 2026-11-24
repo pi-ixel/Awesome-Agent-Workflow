@@ -92,7 +92,7 @@ export function ConfirmIconAction({
             event.stopPropagation();
             setConfirming(true);
           }}
-          className={`rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${focusVisibleRing}`}
+          className={`rounded-control text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${focusVisibleRing}`}
         >
           {icon}
         </IconButton>

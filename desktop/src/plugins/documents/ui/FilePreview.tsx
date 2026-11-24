@@ -307,7 +307,7 @@ function PreviewBody({
         )
       ) : markdown && mode === "code" ? null : mermaid ? (
         <div className="p-4">
-          <div className="min-h-full overflow-hidden rounded-xl border border-line">
+          <div className="min-h-full overflow-hidden rounded-popover border border-line">
             <MermaidBlock code={data.content} theme={theme} />
           </div>
         </div>
@@ -693,7 +693,7 @@ export function FilePreview({
             aria-label="保存 Markdown"
             data-hint="保存（Ctrl+S）"
             disabled={!dirty || document?.saving}
-            className="flex items-center justify-center rounded-lg text-ink-subtle hover:bg-surface-hover disabled:opacity-40"
+            className="flex items-center justify-center rounded-control text-ink-subtle hover:bg-surface-hover disabled:opacity-40"
             onClick={() => {
               void documents.editor.save(path);
             }}
@@ -717,7 +717,7 @@ export function FilePreview({
           data-hint="更多"
           aria-haspopup="menu"
           aria-expanded={menu !== null && !menu.closing}
-          className="flex items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+          className="flex items-center justify-center rounded-control text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
           onClick={(event) => {
             if (menu && !menu.closing) {
               dismissMenu();

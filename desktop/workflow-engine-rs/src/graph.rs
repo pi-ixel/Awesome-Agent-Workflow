@@ -97,6 +97,88 @@ pub struct Subflow {
     #[serde(default)]
     pub outputs: BTreeMap<String, Value>,
 }
+/// 这一步关联的知识文档：运行启动时从 `knowledge/<name>` 冻结进检查点，
+/// 工单里只注入文件名与一行摘要，Agent 按需调用 `read_workflow_knowledge` 读取全文。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowledgeDoc {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub summary: String,
+    pub content: String,
+}
+
+impl KnowledgeDoc {
+    pub fn from_file(name: impl Into<String>, content: String) -> Self {
+        let summary = summarize_knowledge(&content);
+        Self { name: name.into(), summary, content }
+    }
+}
+
+/// 从 Markdown 知识文档中提取一行简短说明（用于目录索引，不塞入全文）。
+pub fn summarize_knowledge(content: &str) -> String {
+    let mut lines = content.lines().map(str::trim).peekable();
+    // 跳过可选的 YAML frontmatter，若含 description 直接优先取用。
+    if lines.peek() == Some(&"---") {
+        lines.next();
+        for line in lines.by_ref() {
+            if line == "---" {
+                break;
+            }
+            if let Some(rest) = line.strip_prefix("description:") {
+                let desc = rest.trim().trim_matches(['"', '\'']).trim();
+                if !desc.is_empty() {
+                    return truncate_summary(desc, 80);
+                }
+            }
+        }
+    }
+    let mut title = String::new();
+    let mut lead = String::new();
+    let mut in_code = false;
+    for line in lines {
+        if line.starts_with("```") {
+            in_code = !in_code;
+            continue;
+        }
+        if in_code || line.is_empty() || line == "---" {
+            continue;
+        }
+        if title.is_empty() {
+            if let Some(rest) = line.strip_prefix('#') {
+                title = rest.trim_start_matches('#').trim().to_owned();
+                continue;
+            }
+            let cleaned = line.trim_start_matches(['-', '*', '>', ' ']).trim();
+            if !cleaned.is_empty() {
+                return truncate_summary(cleaned, 80);
+            }
+        } else if !line.starts_with('#') {
+            let cleaned = line.trim_start_matches(['-', '*', '>', ' ']).trim();
+            if !cleaned.is_empty() {
+                lead = cleaned.to_owned();
+                break;
+            }
+        }
+    }
+    let combined = if !title.is_empty() && !lead.is_empty() && lead != title {
+        format!("{title}：{lead}")
+    } else if !title.is_empty() {
+        title
+    } else {
+        lead
+    };
+    truncate_summary(&combined, 80)
+}
+
+fn truncate_summary(text: &str, max_chars: usize) -> String {
+    let mut out: String = text.chars().take(max_chars).collect();
+    if text.chars().count() > max_chars {
+        out.push('…');
+    }
+    out
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Node {
@@ -121,6 +203,9 @@ pub struct Node {
     pub knowledge: String,
     #[serde(default)]
     pub knowledge_files: Vec<String>,
+    /// 启动时从 `knowledge_files` 解析冻结的知识文档（索引 + 全文，按需读取）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub knowledge_docs: Vec<KnowledgeDoc>,
     /// 这一步要读的运行变量（ADR 041）。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reads: Vec<ReadHint>,

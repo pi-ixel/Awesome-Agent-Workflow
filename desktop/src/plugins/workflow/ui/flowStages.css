@@ -35,9 +35,9 @@ html.theme-warm .wf-flow, html.theme-warm .wf-fx, html.theme-warm .wf-strip {
 .wf-canvas { position:relative; min-width:100%; width:max-content; padding:18px; }
 
 /* ---------- 阶段行 ---------- */
-.wf-stages { position:relative; z-index:2; display:grid; column-gap:30px; align-items:start; }
+.wf-stages { position:relative; z-index:2; display:grid; column-gap:30px; align-items:stretch; }
 /* 阶段块：一层的提纲，比步骤卡更「实」——抬高一档的底色、更粗的边、投影、圆形序号 */
-.wf-stage { position:relative; display:flex; align-items:flex-start; gap:12px; min-width:0; padding:13px 14px 14px; border:1px solid var(--color-line-strong); border-radius:14px; background:var(--wf-stage-bg); color:var(--color-ink); text-align:left; cursor:pointer; box-shadow:var(--wf-stage-lift); transition:border-color .15s ease, box-shadow .15s ease; }
+.wf-stage { position:relative; display:flex; align-items:flex-start; gap:12px; min-width:0; padding:13px 14px 14px; border:1px solid var(--color-line-strong); border-radius:var(--radius-popover); background:var(--wf-stage-bg); color:var(--color-ink); text-align:left; cursor:pointer; box-shadow:var(--wf-stage-lift); transition:border-color .15s ease, box-shadow .15s ease; }
 .wf-stage:hover { border-color:var(--color-ink-mute); }
 .wf-stage:focus-visible { outline:2px solid var(--color-focus-ring); outline-offset:2px; }
 /* 展开中：一圈实色描边，不用发虚的光晕 */
@@ -45,17 +45,17 @@ html.theme-warm .wf-flow, html.theme-warm .wf-fx, html.theme-warm .wf-strip {
 /* 阶段之间的连线：挂在后一个阶段前面，被推开时跟着拉长（--wf-reach），始终连着前一个阶段 */
 .wf-stage + .wf-stage::after { content:""; position:absolute; left:calc(-1 * var(--wf-reach, 30px) - 1px); top:var(--wf-link-y, 27px); width:calc(var(--wf-reach, 30px) - 4px); height:2px; background:var(--color-line-strong); transition:left var(--wf-link-ms, 0ms) cubic-bezier(.3,.7,.2,1), width var(--wf-link-ms, 0ms) cubic-bezier(.3,.7,.2,1); }
 .wf-stage + .wf-stage::before { content:""; position:absolute; left:-11px; top:calc(var(--wf-link-y, 27px) - 3px); width:8px; height:8px; border-top:2px solid var(--color-line-strong); border-right:2px solid var(--color-line-strong); transform:rotate(45deg); }
-.wf-stage-mark { flex:none; display:grid; place-items:center; width:calc(28 * var(--ui-icon-unit)); height:calc(28 * var(--ui-icon-unit)); border-radius:999px; border:2px solid var(--wf-wait); background:var(--wf-stage-no); color:var(--color-ink-soft); font-family:var(--font-mono); font-size:var(--text-ui-sm); font-weight:700; font-variant-numeric:tabular-nums; }
+.wf-stage-mark { flex:none; display:grid; place-items:center; width:calc(28 * var(--ui-icon-unit)); height:calc(28 * var(--ui-icon-unit)); border-radius:var(--radius-pill); border:2px solid var(--wf-wait); background:var(--wf-stage-no); color:var(--color-ink-soft); font-family:var(--font-mono); font-size:var(--text-ui-sm); font-weight:700; font-variant-numeric:tabular-nums; }
 .wf-stage-mark.tone-done { border-color:var(--wf-done); background:var(--wf-done); color:var(--color-surface); }
 .wf-stage-mark.tone-done svg { stroke-width:3; }
 .wf-stage-mark.tone-running { border-color:var(--wf-running); color:var(--wf-running); }
 .wf-stage-mark.tone-alert { border-color:var(--wf-alert); color:var(--color-warn-ink); }
-.wf-stage-body { flex:1; display:flex; flex-direction:column; min-width:0; }
+.wf-stage-body { flex:1; display:flex; flex-direction:column; min-width:0; height:100%; }
 .wf-stage-head { display:flex; align-items:baseline; gap:8px; min-width:0; }
 .wf-stage-head .wf-word { margin-left:auto; }
 .wf-stage-title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:calc(var(--text-ui-base) * 1.1); font-weight:700; letter-spacing:-.01em; line-height:1.35; }
 .wf-stage-span { margin-top:1px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--text-2xs); color:var(--color-ink-mute); }
-.wf-stage-body .wf-pills { margin-top:9px; gap:3px; }
+.wf-stage-body .wf-pills { margin-top:auto; padding-top:9px; gap:3px; }
 .wf-stage-body .wf-pill { max-width:none; }
 /* 展开后胶囊变成了下面的步骤：原位不显示，但留着位置，阶段块不变形 */
 .wf-pills.gone { visibility:hidden; }
@@ -67,7 +67,7 @@ html.theme-warm .wf-flow, html.theme-warm .wf-fx, html.theme-warm .wf-strip {
 
 /* ---------- 胶囊 ---------- */
 .wf-pills { display:flex; gap:4px; min-width:0; }
-.wf-pill { position:relative; flex:1 1 0; max-width:30px; min-width:5px; height:6px; border-radius:999px; background:var(--wf-wait); overflow:hidden; }
+.wf-pill { position:relative; flex:1 1 0; max-width:30px; min-width:5px; height:6px; border-radius:var(--radius-pill); background:var(--wf-wait); overflow:hidden; }
 .wf-pill.tone-done { background:var(--wf-done); }
 .wf-pill.tone-alert { background:var(--wf-alert); }
 /* 进行中的流光：胶囊和它长成的步骤卡是同一个元素，同一道光、同一个节奏（9 秒一周期，前 70% 慢慢扫过，其余时间停着） */
@@ -85,7 +85,7 @@ html.theme-warm .wf-flow, html.theme-warm .wf-fx, html.theme-warm .wf-strip {
 .wf-col > .wf-step + .wf-step::before { content:""; position:absolute; left:20px; top:-11px; width:2px; height:10px; background:var(--color-line-strong); }
 
 /* ---------- 步骤卡 ---------- */
-.wf-step { position:relative; display:flex; min-width:0; border:1px solid var(--wf-step-edge); border-radius:10px; background:color-mix(in srgb, var(--color-surface) 55%, var(--color-base)); color:var(--color-ink); transition:border-color .15s ease, box-shadow .15s ease; }
+.wf-step { position:relative; display:flex; min-width:0; border:1px solid var(--wf-step-edge); border-radius:var(--radius-control); background:color-mix(in srgb, var(--color-surface) 55%, var(--color-base)); color:var(--color-ink); transition:border-color .15s ease, box-shadow .15s ease; }
 .wf-step:hover { border-color:var(--color-line-strong); }
 .wf-step.selected { border-color:var(--color-accent-ink); box-shadow:0 0 0 3px var(--color-info-bg); }
 .wf-step.flash { animation:wf-flash 1.5s ease-out; }
@@ -109,9 +109,9 @@ button.wf-step-main:focus-visible { outline:2px solid var(--color-focus-ring); o
 .wf-step-row .wf-no { display:inline-grid; place-items:center; width:18px; }
 /* 已完成：序号位换成实心圆 + 对勾（圆跟着图标单位缩放） */
 .wf-done-mark { position:relative; height:calc(16 * var(--ui-icon-unit)); color:var(--color-surface); }
-.wf-done-mark::before { content:""; position:absolute; width:calc(16 * var(--ui-icon-unit)); height:calc(16 * var(--ui-icon-unit)); border-radius:999px; background:var(--wf-done); }
+.wf-done-mark::before { content:""; position:absolute; width:calc(16 * var(--ui-icon-unit)); height:calc(16 * var(--ui-icon-unit)); border-radius:var(--radius-pill); background:var(--wf-done); }
 .wf-done-mark svg { position:relative; stroke-width:3; }
-.wf-tag { flex:none; padding:0 7px; border:1px solid var(--color-line-strong); border-radius:999px; color:var(--color-ink-soft); font-size:var(--text-2xs); white-space:nowrap; }
+.wf-tag { flex:none; padding:0 7px; border:1px solid var(--color-line-strong); border-radius:var(--radius-pill); color:var(--color-ink-soft); font-size:var(--text-2xs); white-space:nowrap; }
 .wf-confirm { flex:none; color:var(--color-ink-mute); }
 .wf-does, .wf-meta, .wf-note { padding-left:26px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--text-2xs); color:var(--color-ink-mute); }
 .wf-note.attention { color:var(--color-warn-ink); }
@@ -123,7 +123,7 @@ button.wf-step-main:focus-visible { outline:2px solid var(--color-focus-ring); o
 .wf-session { position:absolute; right:8px; top:8px; }
 
 /* 小地图：右下角，内容放不下时淡入；点或拖跳到那里 */
-.wf-map { position:absolute; right:18px; bottom:18px; z-index:4; padding:6px; border:1px solid var(--color-line-strong); border-radius:10px; background:color-mix(in srgb, var(--color-surface) 92%, transparent); box-shadow:var(--shadow-elev-2); opacity:0; pointer-events:none; transform:translateY(4px); transition:opacity .25s ease, transform .25s ease; }
+.wf-map { position:absolute; right:18px; bottom:18px; z-index:4; padding:6px; border:1px solid var(--color-line-strong); border-radius:var(--radius-control); background:color-mix(in srgb, var(--color-surface) 92%, transparent); box-shadow:var(--shadow-elev-2); opacity:0; pointer-events:none; transform:translateY(4px); transition:opacity .25s ease, transform .25s ease; }
 .wf-map.show { opacity:1; pointer-events:auto; transform:none; }
 .wf-map canvas { display:block; cursor:pointer; touch-action:none; }
 /* 收起动画的复制品挂在这里（固定定位，不受面板滚动和裁剪影响） */
@@ -137,7 +137,7 @@ button.wf-step-main:focus-visible { outline:2px solid var(--color-focus-ring); o
 .wf-strip.tone-alert { background-color:color-mix(in srgb, var(--wf-alert) 11%, transparent); border-bottom-color:color-mix(in srgb, var(--wf-alert) 40%, var(--color-line)); animation:wf-strip-call 1.6s ease-out 1; }
 .wf-strip.tone-done { background-color:color-mix(in srgb, var(--wf-done) 6%, transparent); }
 /* 左缘一道状态色，和步骤卡的描边呼应 */
-.wf-strip::before { content:""; position:absolute; left:0; top:7px; bottom:7px; width:2px; border-radius:2px; background:var(--wf-wait); transition:background-color .35s ease; }
+.wf-strip::before { content:""; position:absolute; left:0; top:7px; bottom:7px; width:2px; border-radius:var(--radius-pill); background:var(--wf-wait); transition:background-color .35s ease; }
 .wf-strip.tone-running::before { background:var(--wf-running); }
 .wf-strip.tone-alert::before { background:var(--wf-alert); }
 .wf-strip.tone-done::before { background:var(--wf-done); }
@@ -155,7 +155,7 @@ button.wf-step-main:focus-visible { outline:2px solid var(--color-focus-ring); o
 /* 换步骤、换状态：新字从下面轻轻浮上来 */
 .wf-strip-swap { animation:wf-strip-in .28s cubic-bezier(.22,.8,.24,1); }
 @keyframes wf-strip-in { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
-.wf-strip-open { flex:none; display:inline-flex; align-items:center; gap:5px; height:26px; padding:0 8px; border:0; border-radius:6px; background:transparent; color:var(--color-ink-soft); font:inherit; cursor:pointer; }
+.wf-strip-open { flex:none; display:inline-flex; align-items:center; gap:5px; height:26px; padding:0 8px; border:0; border-radius:var(--radius-control); background:transparent; color:var(--color-ink-soft); font:inherit; cursor:pointer; }
 .wf-strip-open:hover { background:color-mix(in srgb, var(--color-ink) 7%, transparent); color:var(--color-ink); }
 .wf-strip-open:focus-visible { outline:2px solid var(--color-accent-ink); outline-offset:1px; }
 /* 窄输入框：先收起运行标题，再把「查看运行」收成图标 */

@@ -249,7 +249,7 @@ function AgentListCard({
   return (
     <div
       aria-label="会话 Agent"
-      className="min-w-0 overflow-hidden rounded-xl border border-line bg-surface px-4"
+      className="min-w-0 overflow-hidden rounded-popover border border-line bg-surface px-4"
     >
       <div className="border-b border-line px-0 py-3">
         <p className="text-ui-base font-medium text-ink">会话 Agent</p>
@@ -358,7 +358,7 @@ function AgentListCard({
                     .then(setActiveWork)
                     .catch(() => setActiveWork([]));
               }}
-              className={`flex min-h-9 min-w-0 flex-1 basis-44 flex-wrap items-center gap-2.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-raised/60`}
+              className={`flex min-h-9 min-w-0 flex-1 basis-44 flex-wrap items-center gap-2.5 rounded-control px-1.5 py-1 text-left transition-colors hover:bg-raised/60`}
             >
               <RadioDot checked={isSelected} appearance="neutral" />
               <span className="min-w-0 break-all text-ui-base text-ink">
@@ -504,7 +504,7 @@ function AgentListCard({
             {configuration ? (
               <div
                 hidden={expandedAgent !== row.key}
-                className="grid w-full grid-cols-1 items-center gap-2 rounded-lg bg-raised/40 p-3 @min-[560px]/settings:grid-cols-[auto_minmax(0,1fr)_auto]"
+                className="grid w-full grid-cols-1 items-center gap-2 rounded-control bg-raised/40 p-3 @min-[560px]/settings:grid-cols-[auto_minmax(0,1fr)_auto]"
               >
                 <label
                   htmlFor={`agent-path-${row.key}`}
@@ -599,7 +599,7 @@ function AgentListCard({
               </div>
             ) : null}
             {!row.removable && !configuration && expandedAgent === row.key ? (
-              <div className="w-full space-y-2 rounded-lg bg-raised/40 p-3">
+              <div className="w-full space-y-2 rounded-control bg-raised/40 p-3">
                 <label className="block text-xs text-ink-mute">
                   启动命令
                   <input
@@ -792,7 +792,7 @@ function ProtocolReportCard({
   return (
     <div
       aria-label="协议自检报告"
-      className="min-w-0 overflow-hidden rounded-xl border border-line bg-surface px-4"
+      className="min-w-0 overflow-hidden rounded-popover border border-line bg-surface px-4"
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-0 py-3">
         <p className="text-ui-base font-medium text-ink">协议自检报告</p>

@@ -127,8 +127,9 @@ fn control_state_script(agent_active: bool, manual_takeover: bool, generation: u
     )
 }
 
-fn agent_glass_script() -> &'static str {
-    r#"(()=>{
+fn agent_glass_script() -> String {
+    super::with_overlay_radii(
+        r#"(()=>{
 if(window.__aawAgentGlassBridge)return;
 window.__aawAgentGlassBridge=true;
 const sync=()=>{
@@ -141,6 +142,7 @@ if(current)return;
 const glass=document.createElement('div');
 glass.id='aaw-agent-glass';
 glass.setAttribute('data-aaw-agent-glass','');
+glass.style.cssText='__AAW_RADIUS_DECLARATIONS__';
 glass.style.position='fixed';
 glass.style.inset='0';
 glass.style.zIndex='2147483647';
@@ -156,7 +158,7 @@ panel.style.display='flex';
 panel.style.alignItems='center';
 panel.style.gap='16px';
 panel.style.padding='10px 12px 10px 16px';
-panel.style.borderRadius='12px';
+panel.style.borderRadius='var(--radius-popover)';
 panel.style.background='rgba(15,23,42,0.88)';
 panel.style.color='rgba(255,255,255,0.92)';
 panel.style.font='13px sans-serif';
@@ -169,7 +171,7 @@ button.type='button';
 button.textContent='我来接管';
 button.setAttribute('data-aaw-user-takeover','');
 button.style.border='1px solid rgba(147,197,253,0.65)';
-button.style.borderRadius='8px';
+button.style.borderRadius='var(--radius-control)';
 button.style.padding='7px 12px';
 button.style.background='rgba(37,99,235,0.92)';
 button.style.color='white';
@@ -183,7 +185,8 @@ root.append(glass);
 window.__aawSyncAgentGlass=sync;
 sync();
 document.addEventListener('DOMContentLoaded',sync,{once:true});
-})()"#
+})()"#,
+    )
 }
 
 fn sync_control_bridge(

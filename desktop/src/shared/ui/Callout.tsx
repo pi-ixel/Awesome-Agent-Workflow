@@ -76,6 +76,7 @@ export function Callout({
   dismissLabel = "关闭提示",
   role = "alert",
   label,
+  floating = false,
   className = "",
 }: {
   readonly tone?: CalloutTone;
@@ -93,13 +94,14 @@ export function Callout({
   /** 需要立刻提醒用 alert（默认）；常驻的说明用 status 或 note。 */
   readonly role?: "alert" | "status" | "note" | "group";
   readonly label?: string;
+  readonly floating?: boolean;
   readonly className?: string;
 }) {
   return (
     <div
       role={role}
       aria-label={label}
-      className={`flex items-start gap-2.5 rounded-lg border px-3 py-2 text-ui-sm text-ink ${toneClass[tone]} ${className}`}
+      className={`flex items-start gap-2.5 ${floating ? "rounded-popover" : "rounded-control"} border px-3 py-2 text-ui-sm text-ink ${toneClass[tone]} ${className}`}
     >
       {icon ?? <ToneIcon tone={tone} />}
       <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">
@@ -127,7 +129,7 @@ export function Callout({
           aria-label={dismissLabel}
           data-hint={dismissLabel}
           onClick={onDismiss}
-          className={`-mr-1 flex shrink-0 items-center justify-center rounded-md text-ink-mute hover:bg-raised/70 hover:text-ink ${focusVisibleRing}`}
+          className={`-mr-1 flex shrink-0 items-center justify-center rounded-control text-ink-mute hover:bg-raised/70 hover:text-ink ${focusVisibleRing}`}
         >
           <XIcon className="ui-icon-14" />
         </IconButton>

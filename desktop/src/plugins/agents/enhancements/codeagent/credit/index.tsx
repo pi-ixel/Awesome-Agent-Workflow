@@ -113,7 +113,7 @@ export function apply(ctx: Context): void {
           aria-label={tab === "credit" ? "Credit" : "Token"}
           className={
             settings
-              ? "space-y-5 rounded-xl border border-line bg-surface p-4"
+              ? "space-y-5 rounded-popover border border-line bg-surface p-4"
               : "space-y-4"
           }
         >
@@ -190,7 +190,7 @@ export function apply(ctx: Context): void {
           aria-controls={id}
           popoverTarget={id}
           data-hint="CodeAgent 额度"
-          className={`grid shrink-0 place-items-center rounded-lg text-ink-mute transition-colors hover:bg-hover hover:text-ink ${focusVisibleRing}`}
+          className={`grid shrink-0 place-items-center rounded-control text-ink-mute transition-colors hover:bg-hover hover:text-ink ${focusVisibleRing}`}
         >
           <CreditIcon className="ui-icon-18" ratio={ratio} />
         </IconButton>

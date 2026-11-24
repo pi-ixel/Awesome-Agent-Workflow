@@ -85,6 +85,7 @@ function ToastEntry({
 
   return (
     <Callout
+      floating
       role="status"
       tone={item.variant === "info" ? "neutral" : item.variant}
       title={item.message}

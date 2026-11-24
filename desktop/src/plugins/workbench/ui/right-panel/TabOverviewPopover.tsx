@@ -10,7 +10,7 @@ import type { PanelTabPresentation, WorkbenchSnapshot } from "../../types.ts";
  *
  * - 定位复用 ui/ContextMenu.tsx 的「首帧 hidden 量测 → 夹取视口 → 上下翻转」
  *   等价实现（Radix Popper 碰撞避让的 desktop 手写版）；浮层容器对齐 ZCode
- *   popover.tsx 基元：z-[60] / w-72 / rounded-xl / border-border / shadow-floating /
+ *   popover.tsx 基元：z-[60] / w-72 / rounded-popover / border-border / shadow-floating /
  *   sideOffset 4；入退场沿用既有 100ms context-menu-in-* 动效；
  * - 搜索面与评分用 panelTabModel 的纯函数（sidePaneTabSearch.ts 逐行移植）；
  * - 方向键浏览结果，Tab 可访问搜索框、结果和关闭按钮，Esc 归还焦点。
@@ -43,10 +43,10 @@ import {
 /** 触发钮统一写法（desktop 无 Button 基元的 ghost icon-md 等价，28px）；
     基色 text-ink 对齐 ZCode ghost 的 text-foreground（100%，非 60% 洗色）。 */
 export const GHOST_ICON_MD =
-  "flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink";
+  "flex shrink-0 items-center justify-center rounded-control text-ink transition-colors hover:bg-hover hover:text-ink";
 /** ghost icon-sm 等价（24px，浮窗操作栏用）。 */
 export const GHOST_ICON_SM =
-  "flex shrink-0 items-center justify-center rounded-md text-ink transition-colors hover:bg-hover hover:text-ink";
+  "flex shrink-0 items-center justify-center rounded-control text-ink transition-colors hover:bg-hover hover:text-ink";
 
 interface OverviewRow {
   tab: PanelTab;
@@ -277,7 +277,7 @@ export function TabOverviewPopover({
       return (
         <div
           key={tab.id}
-          className={`mb-0.5 flex items-center rounded-md px-2 last:mb-0 ${isActive ? "bg-selected" : "hover:bg-menu-hover"}`}
+          className={`mb-0.5 flex items-center rounded-control px-2 last:mb-0 ${isActive ? "bg-selected" : "hover:bg-menu-hover"}`}
         >
           <NavigationRow
             layout="compound"
@@ -304,7 +304,7 @@ export function TabOverviewPopover({
             <IconButton
               iconSize="compact"
               aria-label={`关闭 ${title}`}
-              className={`flex shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-subtle opacity-70 hover:bg-hover hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-inset ${focusVisibleRing}`}
+              className={`flex shrink-0 cursor-pointer items-center justify-center rounded-control text-ink-subtle opacity-70 hover:bg-hover hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-inset ${focusVisibleRing}`}
               onClick={(event) => {
                 if (event.detail === 0) {
                   const row =

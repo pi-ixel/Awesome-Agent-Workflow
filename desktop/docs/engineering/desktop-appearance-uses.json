@@ -42,7 +42,10 @@
     "FilePreview/headerInner · 内嵌图形",
     "专用渲染依赖 · highlight.js/lib/common"
   ],
-  "plugins/documents/ui/FileTree.tsx": ["FileTree · <input>"],
+  "plugins/documents/ui/FileTree.tsx": [
+    "FileTree · <canvas>",
+    "FileTree · <input>"
+  ],
   "plugins/documents/ui/MarkdownSourceEditor.tsx": [
     "专用渲染依赖 · @codemirror/lang-markdown",
     "专用渲染依赖 · @codemirror/language",
@@ -74,8 +77,12 @@
     "ChatInput · <textarea>",
     "StopIcon · 内嵌图形"
   ],
+  "plugins/project/conversation/ui/EmbeddedSessionView.tsx": [
+    "BoundEmbeddedSession · <textarea>"
+  ],
   "plugins/project/conversation/ui/InputStatusBar.tsx": [
-    "ContextRing · 内嵌图形"
+    "ContextRing · 内嵌图形",
+    "ModelTag · role=menuitem"
   ],
   "plugins/project/conversation/ui/SessionPerformanceBadge.tsx": [
     "SessionPerformanceBadge · 内嵌图形"
@@ -164,7 +171,17 @@
     "DisposePanel · <textarea>",
     "DisposePanel · <textarea>"
   ],
-  "plugins/workflow/ui/DraftPage.tsx": ["DraftPage · <textarea>"],
+  "plugins/workflow/ui/DraftPage.tsx": [
+    "DraftPage/aiDrawerPane · <textarea>",
+    "DraftPage/mainContent · <input>",
+    "DraftPage/mainContent · <input>",
+    "DraftPage/mainContent · <textarea>",
+    "DraftPage/mainContent · <textarea>",
+    "DraftPage/nodeDrawerPane · <input>",
+    "DraftPage/nodeDrawerPane · <textarea>",
+    "DraftPage/nodeDrawerPane · <textarea>",
+    "DraftPage/nodeDrawerPane · <textarea>"
+  ],
   "plugins/workflow/ui/FlowStages.tsx": ["FlowStages · <canvas>"],
   "plugins/workflow/ui/RunManager.tsx": [
     "RunManager · <input>",
@@ -239,7 +256,10 @@
     "html.theme-warm --turn-status-shimmer-strong · rgb(10 10 10 / 1)"
   ],
   "shared/ui/BrandLoading.tsx": ["BrandLoading · 内嵌图形"],
-  "shared/ui/BrandMark.tsx": ["品牌图形 · ../assets/aaw-logo.png"],
+  "shared/ui/BrandMark.tsx": [
+    "品牌图形 · ../assets/aaw-logo-rail.svg",
+    "品牌图形 · ../assets/aaw-logo.png"
+  ],
   "shared/ui/Breadcrumb.tsx": ["Breadcrumb · <button>"],
   "shared/ui/Callout.tsx": ["ToneIcon · 内嵌图形"],
   "shared/ui/ContextMenu.tsx": [
@@ -284,6 +304,9 @@
   "shared/ui/controls/FindBar.tsx": ["FindBar · <input>"],
   "shared/ui/controls/SegmentedControl.tsx": ["SegmentedControl · <button>"],
   "shared/ui/controls/UsageMeter.tsx": ["UsageMeter · 原生 role=progressbar"],
+  "shared/ui/controls/treePositionParticles.ts": [
+    "buildParticles/raster · createElement(canvas)"
+  ],
   "shared/ui/diffStyles.ts": [
     "addedEdge · 差异样式 shadow-[inset_3px_0_0_var(--color-diff-added)]",
     "addedGutter · 差异样式 bg-diff-added-gutter",

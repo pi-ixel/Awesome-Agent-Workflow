@@ -239,7 +239,7 @@ function BrowserToolRecoverySession({
                 <h2 className="text-ui-lg font-semibold text-ink">
                   重连并恢复浏览器工具？
                 </h2>
-                <p className="my-4 rounded-lg border border-danger-line bg-danger-bg p-3 text-sm leading-relaxed text-danger-ink">
+                <p className="my-4 rounded-control border border-danger-line bg-danger-bg p-3 text-sm leading-relaxed text-danger-ink">
                   重连会停止同一连接上的任务。未完成消息不会自动重发，消息队列保持暂停。
                 </p>
                 <div className="flex justify-end gap-2">

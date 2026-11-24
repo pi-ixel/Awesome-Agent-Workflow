@@ -72,17 +72,24 @@ export function WorkflowWorkspace({ service, navigation, transfer, editor }: {
     if (!editor) return;
     setAiBusy(true);
     setAiError("");
+    let createdDraftId: string | null = null;
     try {
       const base = target.kind === "edit" ? (target.preset ? await service.copyWorkflow(target.id) : target.id) : undefined;
       const draft = await service.createDraft(base ? { base } : {});
+      if (target.kind === "new" && draft.changes === 0) createdDraftId = draft.draftId;
       const title = target.kind === "edit" ? `编辑工作流：${target.name}` : "新建工作流";
       // 编辑会话还开着就把要求发进去，否则开一个新会话。
       if (!editor.has(draft.draftId) || !editor.send(draft.draftId, text)) {
         await editor.start(draft, title, draftPrompt(target.kind === "new" ? "new" : draft.changes > 0 ? "continue" : "edit", text));
       }
+      createdDraftId = null;
       changed();
       navigation.setState({ compose: null, route: { kind: "draft", draftId: draft.draftId }, tab: "mine" });
     } catch (cause) {
+      if (createdDraftId) {
+        await service.discardDraft(createdDraftId).catch(() => {});
+        changed();
+      }
       setAiError(errorLine(cause));
     } finally {
       setAiBusy(false);
@@ -123,7 +130,7 @@ export function WorkflowWorkspace({ service, navigation, transfer, editor }: {
         onDiscardDraft={discardDraft}
       />
     </div>}
-    {route.kind === "draft" && <div className="workflow-scroll">
+    {route.kind === "draft" && <div className="workflow-draft-host">
       <DraftPage
         key={route.draftId}
         service={service}

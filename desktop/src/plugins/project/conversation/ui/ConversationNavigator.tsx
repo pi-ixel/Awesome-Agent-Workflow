@@ -210,7 +210,7 @@ export function ConversationNavigator({
                 aria-describedby={
                   previewId === item.id ? "query-navigation-preview" : undefined
                 }
-                className="absolute left-0 top-0 w-full items-center rounded-sm!"
+                className="absolute left-0 top-0 w-full items-center rounded-control!"
                 style={{
                   height: row.size,
                   transform: `translateY(${row.start}px)`,
@@ -246,7 +246,7 @@ export function ConversationNavigator({
                 }}
               >
                 <span
-                  className={`block h-[calc(var(--ui-icon-unit)*2)] w-[calc(var(--ui-icon-unit)*12)] origin-left rounded-full transition-[transform,opacity] duration-150 motion-reduce:transition-none ${active || distance === 0 ? "bg-ink" : "bg-ink-faint"}`}
+                  className={`block h-[calc(var(--ui-icon-unit)*2)] w-[calc(var(--ui-icon-unit)*12)] origin-left rounded-pill transition-[transform,opacity] duration-150 motion-reduce:transition-none ${active || distance === 0 ? "bg-ink" : "bg-ink-faint"}`}
                   style={{ opacity, transform: `scaleX(${scale})` }}
                 />
               </NavigationRow>

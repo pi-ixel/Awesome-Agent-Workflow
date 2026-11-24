@@ -66,6 +66,27 @@ const base: TurnChangesRecord = {
     },
   ],
 };
+const useLargeDiff = new URLSearchParams(location.search).has("large-diff");
+const largeDiff: TurnChangesRecord = {
+  ...base,
+  files: [
+    {
+      ...base.files[0]!,
+      before:
+        Array.from(
+          { length: 1100 },
+          (_, index) => `before-${index + 1} ${"x".repeat(index % 2 ? 92 : 8)}`,
+        ).join("\n") + "\n",
+      after: Array.from(
+        { length: 1100 },
+        (_, index) => `after-${index + 1} ${"y".repeat(index % 2 ? 11 : 145)}`,
+      ).join("\n"),
+      added: 1100,
+      removed: 1100,
+    },
+    ...base.files.slice(1),
+  ],
+};
 const foreground = createProjectForeground();
 const binding = {
   project: {
@@ -86,7 +107,7 @@ function Preview() {
   const [state] = useState(() =>
     createStore<ChangesView>(() => ({
       openRevision: 1,
-      records: [base],
+      records: [useLargeDiff ? largeDiff : base],
       selected: base.id,
       phase: "idle",
       error: null,

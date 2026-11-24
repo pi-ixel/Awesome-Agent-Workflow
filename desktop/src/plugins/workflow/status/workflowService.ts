@@ -603,6 +603,13 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       return check;
     },
 
+    async patchDraft(draftId, patch) {
+      if (disposed) throw new Error("Workflow service is disposed");
+      const check = parseDraftCheck(await client.request<unknown>("draft-patch", { draftId, patch }));
+      if (check === null) throw new Error("DRAFT_NOT_FOUND");
+      return check;
+    },
+
     async saveDraft(draftId) {
       if (disposed) throw new Error("Workflow service is disposed");
       const result = await client.request<{ id?: unknown }>("draft-save", { draftId });

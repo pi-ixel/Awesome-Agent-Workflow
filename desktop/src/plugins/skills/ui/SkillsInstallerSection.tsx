@@ -74,7 +74,7 @@ function SkillsInstallerSection({
   return (
     <section
       aria-label="AAW skills 安装器"
-      className="min-w-0 overflow-hidden rounded-xl border border-line bg-surface p-4"
+      className="min-w-0 overflow-hidden rounded-popover border border-line bg-surface p-4"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-medium text-ink">AAW skills 安装器</h3>
@@ -90,7 +90,7 @@ function SkillsInstallerSection({
       </div>
       <p className="mt-2 text-xs text-ink-faint">
         安装目标：
-        <code className="rounded bg-raised px-1.5 py-0.5 text-ink-soft">
+        <code className="rounded-control bg-raised px-1.5 py-0.5 text-ink-soft">
           {destDir ?? "解析中…"}
         </code>
         {capability.description}
@@ -109,7 +109,7 @@ function SkillsInstallerSection({
           {entries.map((entry) => (
             <li
               key={entry.name}
-              className="flex items-center justify-between gap-2 rounded-md bg-surface-hover px-2.5 py-2 text-sm"
+              className="flex items-center justify-between gap-2 rounded-control bg-surface-hover px-2.5 py-2 text-sm"
             >
               <span className="min-w-0 truncate text-ink-soft">
                 {entry.name}

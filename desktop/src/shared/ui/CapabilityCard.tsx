@@ -55,7 +55,7 @@ export function CapabilityCard({
   } as CSSProperties;
   const heading = (
     <>
-      <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-skill-reference-lilac/10 text-skill-reference-lilac">
+      <span className="grid size-7 shrink-0 place-items-center rounded-control bg-skill-reference-lilac/10 text-skill-reference-lilac">
         {icon}
       </span>
       <span
@@ -69,7 +69,7 @@ export function CapabilityCard({
   return (
     <article
       aria-label={name}
-      className="group/capability-card grid h-full min-w-0 grid-rows-[auto_auto_auto] gap-1.5 rounded-xl border border-line bg-surface px-3 py-2.5 transition-colors hover:border-line-strong focus-within:border-line-strong"
+      className="group/capability-card grid h-full min-w-0 grid-rows-[auto_auto_auto] gap-1.5 rounded-popover border border-line bg-surface px-3 py-2.5 transition-colors hover:border-line-strong focus-within:border-line-strong"
     >
       <div className="flex min-w-0 items-center gap-2">
         {onDetail ? (

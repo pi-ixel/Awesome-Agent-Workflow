@@ -31,7 +31,7 @@ const ALL_PROJECTS_REFRESH_MS = 5000;
 /** 筛选行的控件统一高度与字号（搜索框、两个下拉）。 */
 const FILTER_SIZE = "min-h-8 text-ui-base";
 /** 行尾图标按钮。 */
-const ROW_ICON = "rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent";
+const ROW_ICON = "rounded-control text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent";
 
 /** 同一工作流的运行里起点不止一种时，起点名才有区分作用。 */
 function entriesVary(runs: readonly RunSummary[]): ReadonlySet<string> {
@@ -217,7 +217,7 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
     {all && everywhere === null
       ? <p className="workflow-muted">正在读取…</p>
       : shown.length === 0
-      ? <EmptyState title={source.length === 0 ? "还没有运行" : "没有符合条件的运行"} description={source.length === 0 ? "在工作流库里选一个工作流，点「运行」。" : "换个关键词，或者改一下状态筛选。"} />
+      ? <EmptyState title={source.length === 0 ? "还没有运行" : "没有符合条件的运行"} description={source.length === 0 ? "在项目会话中输入 / 选择工作流起点即可发起运行。" : "换个关键词，或者改一下状态筛选。"} />
       : <>
         {pendingIds.size > 0 && <section className="workflow-run-section" aria-label="待处理">
           <h3>待处理</h3>

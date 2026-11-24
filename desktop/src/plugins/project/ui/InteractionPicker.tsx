@@ -28,7 +28,7 @@ export function InteractionPicker({
 function InteractionPreview({ mode }: { readonly mode: "queue" | "steer" }) {
   const steer = mode === "steer";
   const bubble =
-    "ml-auto w-fit max-w-full rounded-xl rounded-tr-xs border border-line bg-surface px-2 py-1.5 text-ink";
+    "ml-auto w-fit max-w-full rounded-panel border border-line bg-surface px-2 py-1.5 text-ink";
   return (
     <div
       data-interaction-preview={mode}
@@ -51,7 +51,7 @@ function InteractionPreview({ mode }: { readonly mode: "queue" | "steer" }) {
       </div>
       <div
         data-interaction-composer=""
-        className="min-w-0 rounded-lg border border-line bg-surface p-2"
+        className="min-w-0 rounded-control border border-line bg-surface p-2"
       >
         <div className="grid min-h-10">
           <span className="interaction-preview-placeholder col-start-1 row-start-1 text-ink-mute">
@@ -66,7 +66,7 @@ function InteractionPreview({ mode }: { readonly mode: "queue" | "steer" }) {
         </div>
         <div className="flex items-center justify-end gap-1 text-right text-ink-mute">
           <span>{steer ? "发送" : "加入队列"}</span>
-          <span className="grid size-5 shrink-0 place-items-center rounded-md bg-brand text-foreground-inverse">
+          <span className="grid size-5 shrink-0 place-items-center rounded-control bg-brand text-foreground-inverse">
             <ArrowUpIcon className="ui-icon-12" />
           </span>
         </div>

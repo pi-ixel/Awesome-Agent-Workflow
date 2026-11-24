@@ -58,7 +58,7 @@ export function InlineConfirm({
         event.stopPropagation();
         dismiss();
       }}
-      className={`flex flex-wrap items-center gap-2 rounded-md px-2 py-1.5 ${tone === "danger" ? "bg-danger-bg/60" : "bg-surface"} ${className}`}
+      className={`flex flex-wrap items-center gap-2 rounded-control px-2 py-1.5 ${tone === "danger" ? "bg-danger-bg/60" : "bg-surface"} ${className}`}
     >
       <span
         className={`min-w-0 flex-[1_1_12rem] text-ui-sm ${tone === "danger" ? "text-danger-ink" : "text-ink-soft"}`}

@@ -43,7 +43,7 @@ export const focusVisibleRing =
   "focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:outline-none";
 
 /** 各级按钮的公共底样式（尺寸由调用处叠加）。 */
-const btnBase = `press rounded-md font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${focusVisibleRing}`;
+const btnBase = `press rounded-control font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${focusVisibleRing}`;
 
 /**
  * 按钮尺寸（高度 + 内边距 + 不换行）：同组按钮同高用的那一档。
@@ -130,10 +130,10 @@ export function ProgressBar({
       aria-valuemin={0}
       aria-valuemax={hasTotal ? max : undefined}
       aria-valuenow={now}
-      className={`inline-block overflow-hidden rounded-full bg-base ring-1 ring-inset ring-line-strong/60 ${className}`}
+      className={`inline-block overflow-hidden rounded-pill bg-base ring-1 ring-inset ring-line-strong/60 ${className}`}
     >
       <span
-        className={`block h-full rounded-r-full transition-[width] duration-300 motion-reduce:transition-none ${
+        className={`block h-full rounded-r-pill transition-[width] duration-300 motion-reduce:transition-none ${
           now === max
             ? "bg-gradient-to-r from-ok to-ok-ink"
             : "bg-gradient-to-r from-info to-accent-ink-strong"
@@ -156,7 +156,7 @@ export function RadioDot({
   return (
     <span
       aria-hidden={true}
-      className={`flex ui-icon-16 shrink-0 items-center justify-center rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring peer-focus-visible:outline-none ${
+      className={`flex ui-icon-16 shrink-0 items-center justify-center rounded-pill border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring peer-focus-visible:outline-none ${
         checked
           ? appearance === "neutral"
             ? "border-ink bg-surface"
@@ -165,7 +165,7 @@ export function RadioDot({
       }`}
     >
       <span
-        className={`ui-icon-8 rounded-full transition-colors ${
+        className={`ui-icon-8 rounded-pill transition-colors ${
           checked
             ? appearance === "neutral"
               ? "bg-ink"
@@ -210,7 +210,7 @@ export function Checkbox({
       />
       {appearance === "pill" ? (
         <span
-          className={`grid min-h-8 min-w-8 place-items-center rounded-full text-ui-base transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring ${
+          className={`grid min-h-8 min-w-8 place-items-center rounded-pill text-ui-base transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring ${
             checked
               ? "bg-ink text-foreground-inverse"
               : "text-ink-soft peer-enabled:hover:bg-surface-hover"
@@ -222,7 +222,7 @@ export function Checkbox({
         <>
           <span
             aria-hidden="true"
-            className={`flex ui-icon-16 shrink-0 items-center justify-center rounded border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring ${
+            className={`flex ui-icon-16 shrink-0 items-center justify-center rounded-control border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring ${
               checked ? "border-info-ink bg-info-bg" : "border-line-strong bg-base"
             }`}
           >
@@ -281,10 +281,10 @@ export function ToggleSwitch({
       />
       <span
         aria-hidden={true}
-        className={`relative h-[calc(18*var(--ui-icon-unit))] w-[calc(32*var(--ui-icon-unit))] shrink-0 rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring ${checked ? "border-ink bg-ink" : "border-transparent bg-ink/30"}`}
+        className={`relative h-[calc(18*var(--ui-icon-unit))] w-[calc(32*var(--ui-icon-unit))] shrink-0 rounded-pill border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring ${checked ? "border-ink bg-ink" : "border-transparent bg-ink/30"}`}
       >
         <span
-          className={`ui-icon-14 absolute top-1/2 -translate-y-1/2 rounded-full bg-base transition-[left] motion-reduce:transition-none ${checked ? "left-[calc(100%_-_15*var(--ui-icon-unit))]" : "left-[var(--ui-icon-unit)]"}`}
+          className={`ui-icon-14 absolute top-1/2 -translate-y-1/2 rounded-pill bg-base transition-[left] motion-reduce:transition-none ${checked ? "left-[calc(100%_-_15*var(--ui-icon-unit))]" : "left-[var(--ui-icon-unit)]"}`}
         />
       </span>
     </label>
@@ -331,7 +331,7 @@ export function Badge({
   return (
     <span
       data-hint={title}
-      className={`inline-flex min-w-0 max-w-full items-center gap-1 rounded border text-2xs [overflow-wrap:anywhere] ${badgeToneClass[tone]} ${
+      className={`inline-flex min-w-0 max-w-full items-center gap-1 rounded-control border text-2xs [overflow-wrap:anywhere] ${badgeToneClass[tone]} ${
         compact ? "px-1 py-0.5" : "px-1.5 py-0.5"
       }`}
     >
@@ -351,7 +351,7 @@ export function BadgeDot({
   return (
     <span
       aria-hidden={true}
-      className={`shrink-0 rounded-full bg-current ${pulse ? "animate-pulse motion-reduce:animate-none" : ""} ${className}`}
+      className={`shrink-0 rounded-pill bg-current ${pulse ? "animate-pulse motion-reduce:animate-none" : ""} ${className}`}
     />
   );
 }
@@ -361,7 +361,7 @@ export function BadgeDot({
  *
  * 用在列表行、卡片底部这类「只有一个点在说状态」的地方——整列都是同色
  * 徽标时颜色就不是信号了，收成一个点。列表、树、统计里手写的
- * `h-1.5 w-1.5 rounded-full bg-danger` 之类的圆点都应该换到这里。
+ * `h-1.5 w-1.5 rounded-pill bg-danger` 之类的圆点都应该换到这里。
  */
 const dotToneClass: Readonly<Record<BadgeTone, string>> = {
   neutral: "bg-line-strong",
@@ -389,7 +389,7 @@ export function StatusDot({
 }) {
   const animation =
     pulse && tone === "info" ? " animate-pulse motion-reduce:animate-none" : "";
-  const classes = `inline-block shrink-0 rounded-full ${dotToneClass[tone]} ${className}${animation}`;
+  const classes = `inline-block shrink-0 rounded-pill ${dotToneClass[tone]} ${className}${animation}`;
   if (label === undefined) {
     return <span aria-hidden={true} data-hint={hint} className={classes} />;
   }
@@ -592,7 +592,7 @@ export function Listbox({
           }
         }}
         onKeyDown={handleKeyDown}
-        className={`inline-flex min-h-7 items-center justify-between gap-2 rounded-md px-2.5 text-left text-ink transition-colors ${appearance === "quiet" ? "border border-transparent bg-transparent enabled:hover:bg-surface-hover" : "border border-line-strong bg-surface enabled:hover:border-ink-faint"} disabled:cursor-not-allowed disabled:opacity-40 ${focusVisibleRing} ${className} ${
+        className={`inline-flex min-h-7 items-center justify-between gap-2 rounded-control px-2.5 text-left text-ink transition-colors ${appearance === "quiet" ? "border border-transparent bg-transparent enabled:hover:bg-surface-hover" : "border border-line-strong bg-surface enabled:hover:border-ink-faint"} disabled:cursor-not-allowed disabled:opacity-40 ${focusVisibleRing} ${className} ${
           fullWidth ? "w-full" : "min-w-24"
         }`}
       >
@@ -606,7 +606,7 @@ export function Listbox({
           popover={typeof HTMLElement.prototype.showPopover === "function" ? "manual" : undefined}
           role="listbox"
           aria-label={label}
-          className={`absolute top-full z-40 mt-1 max-h-64 min-w-full overflow-y-auto border border-line-strong bg-surface py-1 text-ink shadow-floating selection-popup ${showSelectionMark ? "right-0 min-w-40 rounded-xl p-1" : "left-0 rounded-md"}`}
+          className={`absolute top-full z-40 mt-1 max-h-64 min-w-full overflow-y-auto rounded-popover border border-line-strong bg-surface p-1 text-ink shadow-floating selection-popup ${showSelectionMark ? "right-0 min-w-40" : "left-0"}`}
         >
           {options.map((option, index) => (
             <li key={option.value} role={option.group ? "group" : undefined} aria-label={option.group}>
@@ -625,7 +625,7 @@ export function Listbox({
                 onClick={() => {
                   commit(index);
                 }}
-                className={`flex min-h-7 w-full items-center gap-1.5 px-2.5 text-left text-ui-sm transition-colors ${showSelectionMark ? "min-h-8 rounded-lg py-1.5 tabular-nums" : "py-1"} ${
+                className={`flex min-h-7 w-full items-center gap-1.5 rounded-control px-2.5 text-left text-ui-sm transition-colors ${showSelectionMark ? "min-h-8 py-1.5 tabular-nums" : "py-1"} ${
                   index === activeIndex ? rowSelectedClass : "text-ink-soft"
                 }`}
               >
@@ -732,7 +732,7 @@ export function MultiListbox({
         aria-expanded={isOpen}
         onClick={() => setIsOpen((open) => !open)}
         onKeyDown={handleKeyDown}
-        className={`inline-flex min-w-24 items-center justify-between gap-2 rounded-md border border-line-strong bg-surface px-2.5 text-left text-ink transition-colors hover:border-ink-faint ${focusVisibleRing} ${className}`}
+        className={`inline-flex min-w-24 items-center justify-between gap-2 rounded-control border border-line-strong bg-surface px-2.5 text-left text-ink transition-colors hover:border-ink-faint ${focusVisibleRing} ${className}`}
       >
         <span className="truncate">{summary}</span>
         <ChevronDownIcon className="ui-icon-12 text-ink-faint" />
@@ -741,7 +741,7 @@ export function MultiListbox({
         <div
           ref={listRef}
           popover={typeof HTMLElement.prototype.showPopover === "function" ? "manual" : undefined}
-          className="absolute top-full right-0 z-40 mt-1 min-w-40 rounded-xl border border-line-strong bg-surface p-1 shadow-floating selection-popup"
+          className="absolute top-full right-0 z-40 mt-1 min-w-40 rounded-popover border border-line-strong bg-surface p-1 shadow-floating selection-popup"
         >
           <ul role="listbox" aria-label={label} aria-multiselectable="true" className="max-h-64 overflow-y-auto">
             {options.map((option, index) => {
@@ -754,7 +754,7 @@ export function MultiListbox({
                     aria-selected={selected}
                     onPointerEnter={() => setActiveIndex(index)}
                     onClick={() => toggle(option.value)}
-                    className={`relative flex min-h-8 w-full items-center gap-2 rounded-lg py-1.5 pr-8 pl-2 text-left text-xs whitespace-nowrap transition-colors ${
+                    className={`relative flex min-h-8 w-full items-center gap-2 rounded-control py-1.5 pr-8 pl-2 text-left text-xs whitespace-nowrap transition-colors ${
                       index === activeIndex ? rowSelectedClass : "text-ink-soft"
                     }`}
                   >
@@ -771,7 +771,7 @@ export function MultiListbox({
             <button
               type="button"
               onClick={() => onChange([])}
-              className="flex min-h-8 w-full items-center rounded-lg px-2 text-left text-xs text-ink-mute transition-colors hover:bg-(--color-selected) hover:text-ink"
+              className="flex min-h-8 w-full items-center rounded-control px-2 text-left text-xs text-ink-mute transition-colors hover:bg-(--color-selected) hover:text-ink"
             >
               清除
             </button>
@@ -792,7 +792,7 @@ export function Spinner({
     <span
       aria-hidden={true}
       role="status"
-      className={`inline-block animate-spin rounded-full border-2 border-current border-t-transparent motion-reduce:animate-none ${className}`}
+      className={`inline-block animate-spin rounded-pill border-2 border-current border-t-transparent motion-reduce:animate-none ${className}`}
     />
   );
 }

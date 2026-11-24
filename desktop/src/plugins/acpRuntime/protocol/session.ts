@@ -657,10 +657,13 @@ export class AcpSession implements AcpSessionPort {
 
   async setModel(
     modelId: string,
-    options: { timeoutMs?: number } = {},
+    {
+      fromRefresh,
+      ...options
+    }: { timeoutMs?: number; fromRefresh?: boolean } = {},
   ): Promise<void> {
     this.assertSession();
-    await this.changeConfiguration("model", modelId, options);
+    await this.changeConfiguration("model", modelId, options, fromRefresh);
   }
 
   /**
@@ -694,6 +697,7 @@ export class AcpSession implements AcpSessionPort {
     category: "model" | "mode",
     value: string,
     options: { timeoutMs?: number },
+    fromRefresh = false,
   ): Promise<void> {
     const strict = this.dialect?.requireConfigurationConfirmation === true;
     const config = this.configOptions.find(
@@ -703,7 +707,7 @@ export class AcpSession implements AcpSessionPort {
       category === "model"
         ? this.models?.availableModels.map((model) => model.modelId)
         : this.modes?.availableModes.map((mode) => mode.id);
-    if (strict && !available?.includes(value))
+    if (strict && !fromRefresh && !available?.includes(value))
       throw new Error("所选配置不在 Agent 公布的可选列表中");
     const sessionId = this.sessionId;
     let acknowledged = false;
@@ -784,6 +788,8 @@ export class AcpSession implements AcpSessionPort {
       }
       if (strict && current() !== value)
         throw new Error("Agent 当前配置与请求不一致，未确认切换成功");
+      if (!strict && category === "model" && !useLegacy && current() !== value)
+        throw new Error("Agent 当前模型与请求不一致，未确认切换成功");
     } finally {
       clearTimeout(timer);
       unsubscribe();

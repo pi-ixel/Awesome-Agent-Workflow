@@ -14,12 +14,14 @@ export function StatusChipMenu({
   menuLabel,
   warning = false,
   entries,
+  header,
 }: {
   readonly label: ReactNode;
   readonly title: string;
   readonly menuLabel: string;
   readonly warning?: boolean;
   readonly entries: readonly ContextMenuItemSpec[];
+  readonly header?: ReactNode;
 }) {
   const [menu, setMenu] = useState<{
     placement: MenuPlacement;
@@ -44,7 +46,7 @@ export function StatusChipMenu({
             trigger: event.currentTarget,
           });
         }}
-        className={`flex min-h-7 items-center gap-1 rounded-lg px-1.5 py-1 text-ui-base font-normal ${
+        className={`flex min-h-7 items-center gap-1 rounded-control px-1.5 py-1 text-ui-base font-normal ${
           warning ? "text-warn-ink! hover:text-warn-ink!" : "text-ink"
         }`}
       >
@@ -54,6 +56,7 @@ export function StatusChipMenu({
       {menu && (
         <ContextMenu
           entries={entries}
+          header={header}
           placement={menu.placement}
           label={menuLabel}
           trigger={menu.trigger}

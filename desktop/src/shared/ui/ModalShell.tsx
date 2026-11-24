@@ -16,14 +16,14 @@ const focusableSelector =
   'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
 const panelSizes = {
-  default: "max-h-[85vh] max-w-lg overflow-y-auto rounded-xl",
+  default: "max-h-[85vh] max-w-lg overflow-y-auto",
   settings:
-    "flex h-[min(800px,calc(100dvh-32px))] max-w-[960px] min-h-0 flex-col overflow-hidden rounded-3xl",
-  form: "flex max-h-[calc(100dvh-32px)] max-w-2xl min-h-0 flex-col overflow-hidden rounded-3xl",
+    "flex h-[min(800px,calc(100dvh-32px))] max-w-[960px] min-h-0 flex-col overflow-hidden",
+  form: "flex max-h-[calc(100dvh-32px)] max-w-2xl min-h-0 flex-col overflow-hidden",
   preview:
-    "flex h-[min(1000px,87dvh)] max-w-[1200px] min-h-0 flex-col overflow-hidden rounded-3xl",
+    "flex h-[min(1000px,87dvh)] max-w-[1200px] min-h-0 flex-col overflow-hidden",
   composer:
-    "flex max-h-full max-w-[560px] min-h-0 flex-col gap-2.5 overflow-y-auto rounded-[18px] px-4 py-3.5",
+    "flex max-h-full max-w-[560px] min-h-0 flex-col gap-2.5 overflow-y-auto px-4 py-3.5",
   gallery:
     "flex h-full min-h-0 flex-col items-center justify-center gap-4 overflow-hidden p-4 sm:p-8",
 } as const;
@@ -193,7 +193,7 @@ export function ModalShell({
           aria-modal={isLocal ? undefined : true}
           aria-label={label}
           aria-describedby={descriptionId}
-          className={`modal-panel w-full outline-none ${isGallery ? "text-media-ink" : "border border-dialog-line bg-surface text-ink shadow-floating"} ${panelSizes[size]}`}
+          className={`modal-panel w-full outline-none ${isGallery ? "rounded-flat text-media-ink" : "rounded-panel border border-dialog-line bg-surface text-ink shadow-floating"} ${panelSizes[size]}`}
           onKeyDown={onPanelKeyDown}
           onClick={(event) => {
             event.stopPropagation();

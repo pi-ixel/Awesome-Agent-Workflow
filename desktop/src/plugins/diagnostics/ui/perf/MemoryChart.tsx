@@ -55,7 +55,7 @@ export function MemoryChart({
       <svg
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
         role="img"
-        className="w-full rounded-lg border border-line bg-surface"
+        className="w-full rounded-control border border-line bg-surface"
         preserveAspectRatio="none"
       >
         {/* 基线（区间下界）与上界的弱参考线 */}

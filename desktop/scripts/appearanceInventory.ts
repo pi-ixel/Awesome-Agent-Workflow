@@ -27,7 +27,7 @@ const diffPaint =
   /\b(?:bg-diff-(?:added|removed)-(?:row|gutter)\b|text-diff-(?:added|removed)(?:-ink)?\b|shadow-\[inset_3px_0_0_var\(--color-diff-(?:added|removed)\)\])/g;
 const renderingPackage =
   /^(?:@(?:xterm|codemirror|lezer|streamdown)\/|(?:streamdown|mermaid|highlight\.js)(?:\/|$))/;
-const brandAsset = /(?:^|\/)aaw-logo(?:-mark(?:-light)?)?\.png$/;
+const brandAsset = /(?:^|\/)aaw-logo(?:(?:-mark(?:-light)?)?\.png|-rail\.svg)$/;
 const glyphSources = new Set([
   "shared/ui/UiIcon.tsx",
   "shared/ui/icons.tsx",

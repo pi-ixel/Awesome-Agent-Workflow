@@ -994,7 +994,8 @@ export function createSessionCoordinator({
     sessionId: string,
     agentKey = selectedAgentKey(),
   ): boolean {
-    if (indexes.deletions.blocked({ workspacePath, agentKey, sessionId }))
+    const target = { workspacePath, agentKey, sessionId };
+    if (indexes.deletions.blocked(target) || indexes.isModelProbe(target))
       return false;
     if (
       loadingSession &&
@@ -1060,6 +1061,13 @@ export function createSessionCoordinator({
       runtime,
       retainedCatalogSessions(sameProject),
       catalogStore.getState(),
+    ).filter(
+      ({ id }) =>
+        !indexes.isModelProbe({
+          workspacePath: runtime.workspacePath,
+          agentKey: runtime.agentKey,
+          sessionId: id,
+        }),
     );
     store.setSessions(entries, runtime.workspacePath);
     publishCatalog(
@@ -1123,6 +1131,15 @@ export function createSessionCoordinator({
     const draft = options.draft === true;
     const createFromDraft = options.createFromDraft === true;
     const preferredSessionId = options.sessionId ?? null;
+    if (
+      preferredSessionId &&
+      indexes.isModelProbe({
+        workspacePath,
+        agentKey: selectedAgentKey(),
+        sessionId: preferredSessionId,
+      })
+    )
+      return null;
     if (
       preferredSessionId &&
       indexes.deletions.blocked({
@@ -1561,6 +1578,7 @@ export function createSessionCoordinator({
       {
         cwd: options.cwd ?? (resumeId ? sessionWorkingDirectory(workspacePath, agentKey, resumeId) : undefined),
         openTools: options.tools,
+        ephemeral: options.ephemeral,
       },
     );
     if (!runtime) {
@@ -1594,20 +1612,22 @@ export function createSessionCoordinator({
       }
       const binding = completeSessionIdentity(runtime, sessionId, {
         restored: resumeId !== null,
-        publish: () =>
-          backfillSessionList(
-            runtime.store,
-            runtime.listed,
-            sessionId,
-            runtime,
-            (other) =>
-              other.agentKey === agentKey &&
-              pathKey(other.workspacePath) === pathKey(workspacePath),
-          ),
+        publish: options.ephemeral
+          ? () => {}
+          : () =>
+              backfillSessionList(
+                runtime.store,
+                runtime.listed,
+                sessionId,
+                runtime,
+                (other) =>
+                  other.agentKey === agentKey &&
+                  pathKey(other.workspacePath) === pathKey(workspacePath),
+              ),
       });
       if (binding) await binding;
       const title = options.title?.trim();
-      if (title) {
+      if (title && !options.ephemeral) {
         const save = setManualTitle(sessionId, title, agentKey);
         if (save) await save;
         runtime.store.getState().refreshSessionTitle(sessionId);
@@ -1616,12 +1636,28 @@ export function createSessionCoordinator({
         workspacePath,
         sessionId,
         restored: resumeId !== null,
+        ephemeral: options.ephemeral === true,
       });
       return { workspacePath, agentKey, sessionId };
     } catch (error) {
       await disposeRuntime(runtime).catch(() => undefined);
       throw error;
     }
+  }
+
+  async function closePluginSessionRuntime(
+    target: SessionTarget,
+  ): Promise<void> {
+    const runtime = findSessionRuntime(
+      target.workspacePath,
+      target.agentKey,
+      target.sessionId,
+    );
+    if (!runtime || runtime.disposed) return;
+    if (runtime.store.getState().isAgentRunning) {
+      runtime.store.getState().requestCancel();
+    }
+    await disposeRuntime(runtime);
   }
 
   /** 按会话 id 订阅轮次事件（会话还没打开也行；断线重连、重新打开后照常收到）。 */
@@ -1770,8 +1806,19 @@ export function createSessionCoordinator({
       try {
         const listed = await project.refreshHistory(
           agentKey,
-          (isCurrent) =>
-            protocol.readProjectHistory(session, historyCwd, isCurrent),
+          async (isCurrent) => {
+            const results = await protocol.readProjectHistory(
+              session,
+              historyCwd,
+              isCurrent,
+            );
+            return (
+              results?.filter(
+                ({ sessionId }) =>
+                  !indexes.isModelProbe({ workspacePath, agentKey, sessionId }),
+              ) ?? null
+            );
+          },
           valid,
         );
         if (!listed) return null;
@@ -1830,7 +1877,9 @@ export function createSessionCoordinator({
     isCurrent: () => boolean,
     retained?: SessionRuntime,
     backgroundAdapter?: AgentAdapter,
-    plugin?: Pick<SessionRuntimeResources, "cwd" | "openTools">,
+    plugin?: Pick<SessionRuntimeResources, "cwd" | "openTools"> & {
+      readonly ephemeral?: boolean;
+    },
   ): Promise<SessionRuntime | null> {
     const adapter = retained?.adapter ?? backgroundAdapter ?? currentAdapter();
     if (!adapter) {
@@ -1871,6 +1920,7 @@ export function createSessionCoordinator({
     const changesHost = getTurnChanges?.();
     if (
       changesHost &&
+      !plugin?.ephemeral &&
       !isRemoteProjectPath(workspacePath) &&
       !viewStore.getState().turnChanges
     ) {
@@ -2800,6 +2850,66 @@ export function createSessionCoordinator({
     };
   }
 
+  const pendingModelProbes = new WeakMap<AcpSessionPort, Promise<void>>();
+
+  async function refreshModels(target: SessionTarget): Promise<void> {
+    const { workspacePath, agentKey, sessionId } = target;
+    const runtime = findSessionRuntime(workspacePath, agentKey, sessionId);
+    if (
+      !runtime ||
+      retired ||
+      closing ||
+      runtime.recovering ||
+      runtime !== activeRuntime
+    )
+      throw new Error("当前会话尚未连接");
+    const session = runtime.session;
+    const handshake = session.agentInfo;
+    const cwd = runtime.cwd ?? runtime.workspacePath;
+    const existing = pendingModelProbes.get(session);
+    if (existing) return existing;
+    const known = projectFactory.open(workspacePath).history(agentKey);
+    const probe = getProtocol().openModelProbe(session, runtime.adapter);
+    const pending = probe.newSession(cwd).then(({ sessionId: id, models }) => {
+      if (
+        findSessionRuntime(workspacePath, agentKey, id) ||
+        known.some((entry) => entry.sessionId === id)
+      )
+        throw new Error("Agent 返回了已有会话标识，模型刷新未完成");
+      indexes.rememberModelProbe({ workspacePath, agentKey, sessionId: id });
+      if (pathKey(cwd) !== pathKey(workspacePath))
+        indexes.rememberModelProbe({
+          workspacePath: cwd,
+          agentKey,
+          sessionId: id,
+        });
+      if (!models) throw new Error("Agent 未返回模型列表");
+      if (
+        !retired &&
+        !closing &&
+        !runtime.disposed &&
+        !runtime.recovering &&
+        runtime === activeRuntime &&
+        runtime.session === session &&
+        session.agentInfo === handshake &&
+        runtime.store.getState().isBound
+      )
+        runtime.store.setState({ refreshedModels: models.availableModels });
+    });
+    pendingModelProbes.set(session, pending);
+    const cleanup = async () => {
+      try {
+        await probe.closeSession();
+      } catch (error) {
+        logger.warn("模型探测会话关闭失败", { reason: String(error) });
+      } finally {
+        pendingModelProbes.delete(session);
+      }
+    };
+    void pending.then(cleanup, cleanup);
+    return pending;
+  }
+
   const modelConfig = (port: AcpSessionPort) =>
     port.configOptions.find((option) => option.category === "model");
   const effortConfig = (port: AcpSessionPort) =>
@@ -2999,6 +3109,7 @@ export function createSessionCoordinator({
     openRealWorkspace,
     runBackgroundPrompt,
     backgroundPromptOptions,
+    refreshModels,
     closeProjectRuntime,
     findSessionRuntime,
     closeSessionRuntime,
@@ -3008,6 +3119,7 @@ export function createSessionCoordinator({
     registerSessionTools: (provider: SessionToolProvider) =>
       sessionTools.register(provider),
     openPluginSessionRuntime,
+    closePluginSessionRuntime,
     watchSessionTurns,
     pluginSessionReady,
     watchSessionEvents,

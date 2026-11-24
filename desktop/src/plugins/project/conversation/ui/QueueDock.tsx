@@ -25,7 +25,7 @@ export function QueueDock(): React.JSX.Element | null {
         (!item.id ||
           item.id === steerEditableId ||
           !activeSteerIds?.includes(item.id))
-      : !directSteering,
+      : !directSteering || (typeof item !== "string" && item.waitsForModel),
   );
   const hasOrdinary = queued.some((item) => !isSteerOutboxEntry(item));
   const paused = useSessionValue((state) => state.queuePaused);
@@ -109,7 +109,7 @@ export function QueueDock(): React.JSX.Element | null {
                 draggable={!!id && !steer}
                 aria-label={`调整第 ${index + 1} 条排队消息顺序`}
                 data-hint="拖动或使用上下方向键调整顺序"
-                className="shrink-0 cursor-grab rounded text-ink-faint hover:bg-surface focus-visible:outline focus-visible:outline-2"
+                className="shrink-0 cursor-grab rounded-control text-ink-faint hover:bg-surface focus-visible:outline focus-visible:outline-2"
                 onDragStart={(event) => {
                   if (!id) {
                     event.preventDefault();
@@ -154,7 +154,7 @@ export function QueueDock(): React.JSX.Element | null {
                 type="button"
                 aria-label={`编辑第 ${index + 1} 条排队消息`}
                 data-hint="编辑"
-                className="shrink-0 rounded text-ink-faint hover:bg-surface hover:text-ink focus-visible:outline focus-visible:outline-2"
+                className="shrink-0 rounded-control text-ink-faint hover:bg-surface hover:text-ink focus-visible:outline focus-visible:outline-2"
                 onClick={() => {
                   if (!id) return;
                   if (
@@ -181,7 +181,7 @@ export function QueueDock(): React.JSX.Element | null {
                 type="button"
                 aria-label={`删除第 ${index + 1} 条排队消息`}
                 data-hint="删除"
-                className="shrink-0 rounded text-ink-faint hover:bg-surface hover:text-danger-ink focus-visible:outline focus-visible:outline-2"
+                className="shrink-0 rounded-control text-ink-faint hover:bg-surface hover:text-danger-ink focus-visible:outline focus-visible:outline-2"
                 onClick={() => {
                   if (id) removeQueuedPromptById(id);
                 }}

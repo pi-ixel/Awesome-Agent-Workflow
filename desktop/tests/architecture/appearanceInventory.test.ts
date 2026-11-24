@@ -29,6 +29,7 @@ it("共享基底、内嵌图形与品牌素材均有明确的实现入口", () =
     "plugins/project/conversation/ui/InputStatusBar.tsx#ContextRing · 内嵌图形",
     "plugins/project/conversation/ui/SessionPerformanceBadge.tsx#SessionPerformanceBadge · 内嵌图形",
     "shared/ui/BrandLoading.tsx#BrandLoading · 内嵌图形",
+    "shared/ui/BrandMark.tsx#品牌图形 · ../assets/aaw-logo-rail.svg",
     "shared/ui/BrandMark.tsx#品牌图形 · ../assets/aaw-logo.png",
     "shared/ui/Callout.tsx#ToneIcon · 内嵌图形",
     "shared/ui/UiIcon.tsx#UiIcon · <svg>",
@@ -78,6 +79,7 @@ it("专用渲染库和 Canvas 由已接入公共外观设置的实现持有", ()
   );
   expect(owners).toEqual([
     "plugins/documents/ui/FilePreview.tsx",
+    "plugins/documents/ui/FileTree.tsx",
     "plugins/documents/ui/MarkdownSourceEditor.tsx",
     "plugins/documents/ui/markdownFind.ts",
     "plugins/project/usage/UsageSettings.tsx",
@@ -86,6 +88,7 @@ it("专用渲染库和 Canvas 由已接入公共外观设置的实现持有", ()
     "plugins/terminal/ui/TerminalSessionView.tsx",
     "plugins/workflow/ui/FlowStages.tsx",
     "shared/ui/MarkdownView.tsx",
+    "shared/ui/controls/treePositionParticles.ts",
     "shared/ui/markdown/MermaidBlock.tsx",
     "shared/ui/markdown/deferredCodePlugin.ts",
   ]);

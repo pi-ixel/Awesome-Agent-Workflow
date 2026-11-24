@@ -307,7 +307,7 @@ export function SkillDetail({
 
             <section className="space-y-2">
               <h4 className="text-ui-caption text-ink-mute">技能位置</h4>
-              <p className="select-text break-all rounded-lg border border-line bg-base px-3 py-2 font-mono text-ui-caption leading-relaxed text-ink-soft">
+              <p className="select-text break-all rounded-control border border-line bg-base px-3 py-2 font-mono text-ui-caption leading-relaxed text-ink-soft">
                 {skill.path}
               </p>
               {skill.isLink && !skill.disabledId && (
@@ -346,7 +346,7 @@ export function SkillDetail({
                   <div
                     role="group"
                     aria-label="技能目录文件"
-                    className="space-y-0.5 rounded-lg border border-line p-1"
+                    className="space-y-0.5 rounded-control border border-line p-1"
                   >
                     {listing.entries.map((entry) => {
                       const relative = [...folder, entry.name].join("/");

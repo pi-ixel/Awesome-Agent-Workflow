@@ -39,7 +39,7 @@ export function ImageAttachments({
                 type="button"
                 aria-label={`移除 ${item.alt}`}
                 onClick={() => onRemove(index)}
-                className="absolute -right-1 -top-1 flex items-center justify-center rounded-full border border-line bg-surface text-ink opacity-0 group-hover/image:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100"
+                className="absolute -right-1 -top-1 flex items-center justify-center rounded-pill border border-line bg-surface text-ink opacity-0 group-hover/image:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100"
               >
                 ×
               </IconButton>

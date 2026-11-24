@@ -1,5 +1,5 @@
 export const fieldSurfaceClass =
-  "min-w-0 rounded-md border border-line-strong bg-base text-ink placeholder:text-ink-ghost focus:border-ink-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring aria-invalid:border-danger-ink disabled:opacity-50";
+  "min-w-0 rounded-control border border-line-strong bg-base text-ink placeholder:text-ink-ghost focus:border-ink-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring aria-invalid:border-danger-ink disabled:opacity-50";
 
 export const settingsInputClass = `${fieldSurfaceClass} min-h-8 w-full px-2.5 text-ui-base`;
 

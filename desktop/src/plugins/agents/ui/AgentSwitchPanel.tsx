@@ -95,7 +95,7 @@ function SwitchStatusButton({
       aria-label={`Agent 切换状态：${statusText}`}
       aria-expanded={progress.expanded}
       onClick={() => controller.expand(!progress.expanded)}
-      className={`flex items-center gap-2 rounded-lg border border-line-strong bg-surface px-3 py-2 text-left transition-colors hover:bg-raised ${floating ? "w-[min(320px,calc(100vw-24px))] shadow-floating" : "w-full"}`}
+      className={`flex items-center gap-2 border border-line-strong bg-surface px-3 py-2 text-left transition-colors hover:bg-raised ${floating ? "w-[min(320px,calc(100vw-24px))] rounded-popover shadow-floating" : "w-full rounded-control"}`}
     >
       {progress.status === "running" ? (
         <Spinner className="ui-icon-12 shrink-0" />
@@ -251,7 +251,7 @@ export function AgentSwitchPanel({
               ))}
             </ol>
             {progress.startedConnections > 0 && (
-              <div className="rounded-lg bg-raised/50 px-3 py-2 text-ink-soft">
+              <div className="rounded-control bg-raised/50 px-3 py-2 text-ink-soft">
                 发起启动 {progress.startedConnections} · 开始握手{" "}
                 {progress.handshakes} · 握手完成 {progress.readyConnections} ·
                 会话连接额度 {ACP_CONNECTION_POOL_SIZE}
@@ -272,7 +272,7 @@ export function AgentSwitchPanel({
             {progress.error && (
               <div
                 role="alert"
-                className="break-words rounded-lg bg-danger-bg px-3 py-2 text-danger-ink"
+                className="break-words rounded-control bg-danger-bg px-3 py-2 text-danger-ink"
               >
                 {progress.failedStage && (
                   <p>失败步骤：{stageNames[progress.failedStage]}</p>

@@ -27,6 +27,8 @@ export type QueuedPrompt =
       readonly text: string;
       readonly attachments: readonly ContentBlock[];
       readonly skillReferences?: readonly PromptSkillReference[];
+      readonly display?: MessageDisplay;
+      readonly waitsForModel?: true;
       /** 引导请求的持久化投递状态；未知状态必须由用户确认，不能自动重发。 */
       readonly steerDelivery?: "pending" | "unknown";
       readonly steerOriginal?: true;
@@ -216,6 +218,9 @@ export interface ConversationValues {
   /** 当前模型 id（输入行模型切换器的选中态；未知为 null）。 */
   readonly currentModelId: string | null;
   readonly pendingModelId: string | null;
+  readonly refreshedModels: readonly ModelInfo[] | null;
+  readonly isApplyingModel: boolean;
+  readonly modelSelectionError: string | null;
   readonly availableModes: readonly SessionMode[];
   readonly pendingModeId: string | null;
   /** 当前审批模式。 */

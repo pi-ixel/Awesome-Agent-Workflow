@@ -4,6 +4,7 @@ import { SessionPerformanceBadge } from "./SessionPerformanceBadge.tsx";
 import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
 import { HintNumber } from "../../../../shared/ui/controls/HintNumber.tsx";
 import { UsageMeter } from "../../../../shared/ui/controls/UsageMeter.tsx";
+import { RefreshButton } from "../../../../shared/ui/controls/RefreshButton.tsx";
 import { formatTokenCount } from "../../../../shared/formatTokenCount.ts";
 import { useSessionValue, useApprovalValue, useRuntimeValue } from "../../ui/bindings/conversationView.ts";
 import { useSessionCommands } from "./useSessionCommands.ts";
@@ -157,7 +158,7 @@ export function ContextRing(): React.JSX.Element {
     <IconButton
       iconSize="compact"
       ref={anchorRef}
-      className="flex shrink-0 items-center justify-center rounded-md text-ink-mute hover:bg-hover"
+      className="flex shrink-0 items-center justify-center rounded-control text-ink-mute hover:bg-hover"
       data-status="context"
       aria-label={pct === null ? "上下文用量：容量或用量未知" : "上下文用量"}
       onClick={openCard}
@@ -233,7 +234,7 @@ export function ContextRing(): React.JSX.Element {
                       >
                         <span
                           aria-hidden={true}
-                          className="size-2 shrink-0 rounded-sm border border-line"
+                          className="size-2 shrink-0 rounded-control border border-line"
                           style={{
                             backgroundColor:
                               USAGE_CHART_COLORS[
@@ -288,59 +289,84 @@ export function ContextRing(): React.JSX.Element {
 }
 
 /**
- * 模型标识 + 切换器：优先使用 ACP models 的当前 ID 与清单名称，
- * 不依赖 Agent 私有通知。没有当前 ID 时兼容旧 runtime/modelLabel。
- * 有清单时通过 session/set_model 切换，无清单时纯展示。
+ * 模型菜单优先显示下一条消息所选模型，保留 ACP 报告的当前模型作回退。
  */
 export function ModelTag(): React.JSX.Element {
   const sessionModelLabel = useSessionValue((state) => state.modelLabel);
-  const availableModels = useSessionValue((state) => state.availableModels);
+  const sessionModels = useSessionValue((state) => state.availableModels);
+  const refreshedModels = useSessionValue((state) => state.refreshedModels);
+  const availableModels = refreshedModels ?? sessionModels;
   const currentModelId = useSessionValue((state) => state.currentModelId);
-  const { switchModel } = useSessionCommands();
+  const { switchModel, refreshModels } = useSessionCommands();
   const pendingModelId = useSessionValue((state) => state.pendingModelId);
+  const isBound = useSessionValue((state) => state.isBound);
+  const modelSelectionError = useSessionValue(
+    (state) => state.modelSelectionError,
+  );
   const runtime = useRuntimeValue((state) => state.runtime);
+  const selectedModelId = pendingModelId ?? currentModelId;
   const label =
-    (currentModelId !== null
-      ? (availableModels.find((model) => model.modelId === currentModelId)
-          ?.name ?? currentModelId)
+    (selectedModelId !== null
+      ? (availableModels.find((model) => model.modelId === selectedModelId)
+          ?.name ??
+        sessionModels.find((model) => model.modelId === selectedModelId)
+          ?.name ??
+        selectedModelId)
       : null) ??
     runtime.modelName ??
     runtime.modelProfileId ??
     sessionModelLabel;
   const effectiveCurrentId =
-    currentModelId ??
+    selectedModelId ??
     (label !== null
       ? (availableModels.find(
           (model) => model.modelId === label || model.name === label,
         )?.modelId ?? null)
       : null);
-  if (availableModels.length === 0) {
+  if (availableModels.length === 0 && !isBound) {
     return (
       <span
         className="flex min-w-0 items-center px-1.5 py-0.5 text-sm text-ink-mute"
         data-hint={hoverLines([label ?? "", runtime.modelProvider ?? ""])}
       >
         <span className="truncate">
-          {pendingModelId
-            ? "正在确认模型…"
-            : label === null
-              ? "—"
-              : shortModelLabel(label)}
+          {label === null ? "—" : shortModelLabel(label)}
         </span>
       </span>
     );
   }
   return (
     <StatusChipMenu
-      title={`当前模型：${label ?? "—"}（点击切换，仅本会话生效）`}
+      title={
+        modelSelectionError
+          ? `模型切换失败：${modelSelectionError}`
+          : `模型：${label ?? "—"}（仅本会话生效）`
+      }
       menuLabel="模型选择"
+      header={
+        isBound && (
+          <>
+            <div className="flex items-center justify-between gap-2 pb-0.5 pl-2">
+              <span className="text-ui-sm text-ink-mute">
+                {availableModels.length ? "可用模型" : "暂无可用模型"}
+              </span>
+              <RefreshButton
+                role="menuitem"
+                label="刷新模型"
+                onRefresh={refreshModels}
+              />
+            </div>
+            {modelSelectionError && (
+              <p role="status" className="px-2 pb-1 text-ui-sm text-danger-ink">
+                模型切换失败：{modelSelectionError}
+              </p>
+            )}
+          </>
+        )
+      }
       label={
         <span className="max-w-40 truncate">
-          {pendingModelId
-            ? "正在确认模型…"
-            : label === null
-              ? "—"
-              : shortModelLabel(label)}
+          {label === null ? "—" : shortModelLabel(label)}
         </span>
       }
       entries={availableModels.map((model) => ({

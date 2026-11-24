@@ -26,7 +26,7 @@ interface FallbackProps {
 function StackDetails({ error }: { readonly error: Error }) {
   return (
     <Disclosure className="w-full" summary="技术细节">
-      <pre className="mt-1 max-h-48 overflow-auto rounded bg-base p-2 text-left font-mono text-2xs whitespace-pre-wrap break-words text-ink-ghost">
+      <pre className="mt-1 max-h-48 overflow-auto rounded-control bg-base p-2 text-left font-mono text-2xs whitespace-pre-wrap break-words text-ink-ghost">
         {error.stack ?? error.message}
       </pre>
     </Disclosure>
@@ -78,7 +78,7 @@ function PanelFallback({
   return (
     <div
       role="alert"
-      className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-xs text-ink-mute"
+      className="flex flex-wrap items-center gap-2 rounded-control border border-line bg-surface px-3 py-2 text-xs text-ink-mute"
     >
       <span className="font-medium text-ink">{scope}</span>
       <span className="min-w-0 flex-1 truncate" data-hint={error.message}>

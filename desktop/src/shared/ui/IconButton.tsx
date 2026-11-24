@@ -41,8 +41,8 @@ export function IconButton({
   children,
   type = "button",
   className = appearance === "toolbar"
-    ? "flex shrink-0 items-center justify-center rounded text-ink-mute transition-colors enabled:hover:bg-raised enabled:hover:text-ink"
-    : "flex shrink-0 items-center justify-center rounded-lg text-ink-subtle transition-colors enabled:hover:bg-hover enabled:hover:text-ink",
+    ? "flex shrink-0 items-center justify-center rounded-control text-ink-mute transition-colors enabled:hover:bg-raised enabled:hover:text-ink"
+    : "flex shrink-0 items-center justify-center rounded-control text-ink-subtle transition-colors enabled:hover:bg-hover enabled:hover:text-ink",
   ...props
 }: IconButtonProps) {
   const inheritedPlacement = useContext(PlacementContext);

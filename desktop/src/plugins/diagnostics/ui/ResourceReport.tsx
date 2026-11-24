@@ -36,7 +36,7 @@ function memory(value: number | null) {
 function label(id: string) {
   return id === "desktop" ? "Desktop" : `Agent · 句柄 ${id.slice(6)}`;
 }
-const panel = "min-w-0 rounded-xl border border-line bg-surface";
+const panel = "min-w-0 rounded-popover border border-line bg-surface";
 
 function DesktopWorkingSetDetails({
   current,
@@ -393,7 +393,7 @@ export function ResourceReport({
       {resources?.error && (
         <p
           role="alert"
-          className="rounded-lg bg-danger-bg px-4 py-2 text-sm text-danger-ink"
+          className="rounded-control bg-danger-bg px-4 py-2 text-sm text-danger-ink"
         >
           采样失败：{resources.error}
         </p>

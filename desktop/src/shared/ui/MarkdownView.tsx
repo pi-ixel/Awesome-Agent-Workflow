@@ -598,7 +598,7 @@ function MarkdownCode({
   }
   const code = (
     <code
-      className={`mx-0.5 rounded-md bg-raised px-1.5 py-0.5 font-mono text-ui-sm ${className ?? ""}`}
+      className={`mx-0.5 rounded-control bg-raised px-1.5 py-0.5 font-mono text-ui-sm ${className ?? ""}`}
       {...props}
     >
       {children}

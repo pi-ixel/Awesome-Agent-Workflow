@@ -143,6 +143,11 @@ export function parseDraftCheck(value: unknown): WorkflowDraftCheck | null {
     meta: parseMeta(item.meta),
     diagnostics: list(item.diagnostics).flatMap((d) => parseDiagnostic(d) ?? []),
     catalogs,
+    files: list(item.files).flatMap((file) => {
+      const f = record(file);
+      const path = text(f?.path);
+      return path === "" ? [] : [{ path, text: text(f?.text) }];
+    }),
     changes: list(item.changes).flatMap((raw) => {
       const change = record(raw);
       const path = text(change?.path);

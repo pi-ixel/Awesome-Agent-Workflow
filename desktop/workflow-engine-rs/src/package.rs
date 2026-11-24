@@ -296,7 +296,7 @@ const DRAFT_META: &str = ".draft.json";
 
 /// 新建工作流的起点：一个能编译通过的最小工作流。
 const BLANK_MANIFEST: &str = "format: aaw-workflow/1\nid: my-workflow\nname: 我的工作流\ndescription: 在这里写这个工作流做什么\nversion: 0.1.0\nentries:\n  - id: start\n    label: 从需求开始\n    start: work\n    inputs:\n      requirement: {label: 需求, kind: text, required: true}\n";
-const BLANK_FLOW: &str = "label: 主流程\nentry: work\nsteps:\n  work:\n    agent:\n      label: 完成需求\n      prompt: 按需求完成工作，交付前自查。\n      result:\n        status: [ready]\n        evidence: string\n    next:\n      - to: $complete\n        when: work.status == \"ready\"\n      - to: $blocked\n";
+const BLANK_FLOW: &str = "label: 主流程\nentry: work\nsteps:\n  work:\n    agent:\n      label: 完成需求\n      why: 按用户需求完成目标工作并自查结果\n      delivers: 已完成并自查通过的交付结果与说明\n      prompt: 按需求完成工作，交付前自查。\n      result:\n        status: [ready]\n        evidence: string\n    next:\n      - to: $complete\n        when: work.status == \"ready\"\n        explain: 需求已完成且自查通过\n      - to: $blocked\n        explain: 无法按要求完成，需要人工介入\n";
 
 /// 草稿概况。
 #[derive(Debug, Clone, Serialize)]
@@ -332,6 +332,36 @@ pub struct DraftChange {
     pub before: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub after: Option<String>,
+}
+
+/// 可视化编辑器对草稿的结构化修改（工作流元信息、单个节点内容或参考规范文件）。
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftPatch {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub node: Option<DraftNodePatch>,
+    pub knowledge_file: Option<DraftKnowledgePatch>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftNodePatch {
+    pub id: String,
+    pub label: Option<String>,
+    pub why: Option<String>,
+    pub delivers: Option<String>,
+    pub prompt: Option<String>,
+    pub knowledge: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftKnowledgePatch {
+    /// 相对于 `knowledge/` 的文件名，例如 `svg-motion.md`。
+    pub name: String,
+    /// `Some(text)` 表示写入或新建；`None` 表示删除该文件。
+    pub content: Option<String>,
 }
 
 impl Library {
@@ -532,6 +562,144 @@ impl Library {
         Ok(id)
     }
 
+    /// 直接修改草稿中的工作流元信息（名称/说明）、参考规范文件或节点可读字段（标题/原因/交付物/提示词/关联规范）。
+    pub fn patch_draft(&self, draft_id: &str, patch: &DraftPatch) -> Result<(), String> {
+        let dir = self.draft_dir(draft_id)?;
+        if let Some(kf) = &patch.knowledge_file {
+            let trimmed = kf.name.trim().trim_start_matches("knowledge/");
+            let rel = format!("knowledge/{trimmed}");
+            if trimmed.is_empty() || !safe_relative(&rel) {
+                return Err(format!("规范文件名不合法：{trimmed}"));
+            }
+            let file_path = dir.join(&rel);
+            match &kf.content {
+                Some(content) => {
+                    if let Some(parent) = file_path.parent() {
+                        std::fs::create_dir_all(parent).map_err(|e| format!("创建规范目录失败：{e}"))?;
+                    }
+                    std::fs::write(&file_path, content).map_err(|e| format!("写入规范文件失败：{e}"))?;
+                }
+                None => {
+                    if file_path.is_file() {
+                        std::fs::remove_file(&file_path).map_err(|e| format!("删除规范文件失败：{e}"))?;
+                    }
+                }
+            }
+        }
+        if patch.name.is_some() || patch.description.is_some() {
+            let manifest_path = dir.join(MANIFEST);
+            let raw = std::fs::read_to_string(&manifest_path).map_err(|e| format!("读取 {MANIFEST} 失败：{e}"))?;
+            let mut doc: serde_yaml::Value = serde_yaml::from_str(&raw).map_err(|e| format!("解析 {MANIFEST} 失败：{e}"))?;
+            let map = doc.as_mapping_mut().ok_or_else(|| format!("{MANIFEST} 根节点不是映射"))?;
+            if let Some(name) = &patch.name {
+                map.insert(serde_yaml::Value::String("name".into()), serde_yaml::Value::String(name.trim().to_owned()));
+            }
+            if let Some(desc) = &patch.description {
+                map.insert(serde_yaml::Value::String("description".into()), serde_yaml::Value::String(desc.trim().to_owned()));
+            }
+            let next = serde_yaml::to_string(&doc).map_err(|e| format!("序列化 {MANIFEST} 失败：{e}"))?;
+            std::fs::write(&manifest_path, next).map_err(|e| format!("写入 {MANIFEST} 失败：{e}"))?;
+        }
+        if let Some(node) = &patch.node {
+            let flows_dir = dir.join("flows");
+            let (preferred_flow, step_key) = match node.id.rsplit_once('/') {
+                Some((flow, step)) => (Some(format!("{flow}.yaml")), step.to_owned()),
+                None => (None, node.id.clone()),
+            };
+            let mut candidates: Vec<PathBuf> = Vec::new();
+            if let Some(pref) = preferred_flow {
+                let p = flows_dir.join(&pref);
+                if p.is_file() {
+                    candidates.push(p);
+                }
+            }
+            if let Ok(entries) = std::fs::read_dir(&flows_dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.extension().and_then(|e| e.to_str()) == Some("yaml") && !candidates.contains(&p) {
+                        candidates.push(p);
+                    }
+                }
+            }
+            let mut updated = false;
+            for flow_path in candidates {
+                let raw = std::fs::read_to_string(&flow_path).map_err(|e| format!("读取流程文件失败：{e}"))?;
+                let mut doc: serde_yaml::Value = serde_yaml::from_str(&raw).map_err(|e| format!("解析流程文件失败：{e}"))?;
+                let Some(steps) = doc.as_mapping_mut().and_then(|m| m.get_mut("steps")).and_then(|v| v.as_mapping_mut()) else {
+                    continue;
+                };
+                let Some(step_val) = steps.get_mut(&serde_yaml::Value::String(step_key.clone())) else {
+                    continue;
+                };
+                let Some(step_map) = step_val.as_mapping_mut() else {
+                    continue;
+                };
+                let body = if step_map.contains_key("agent") {
+                    step_map.get_mut("agent").and_then(|v| v.as_mapping_mut())
+                } else if step_map.contains_key("python") {
+                    step_map.get_mut("python").and_then(|v| v.as_mapping_mut())
+                } else {
+                    Some(step_map)
+                };
+                let Some(body_map) = body else {
+                    continue;
+                };
+                if let Some(label) = &node.label {
+                    body_map.insert(serde_yaml::Value::String("label".into()), serde_yaml::Value::String(label.trim().to_owned()));
+                }
+                if let Some(why) = &node.why {
+                    let trimmed = why.trim();
+                    if trimmed.is_empty() {
+                        body_map.remove("why");
+                    } else {
+                        body_map.insert(serde_yaml::Value::String("why".into()), serde_yaml::Value::String(trimmed.to_owned()));
+                    }
+                }
+                if let Some(delivers) = &node.delivers {
+                    let trimmed = delivers.trim();
+                    if trimmed.is_empty() {
+                        body_map.remove("delivers");
+                    } else {
+                        body_map.insert(serde_yaml::Value::String("delivers".into()), serde_yaml::Value::String(trimmed.to_owned()));
+                    }
+                }
+                if let Some(prompt) = &node.prompt {
+                    body_map.insert(serde_yaml::Value::String("prompt".into()), serde_yaml::Value::String(prompt.clone()));
+                }
+                if let Some(knowledge) = &node.knowledge {
+                    let mut cleaned: Vec<serde_yaml::Value> = Vec::new();
+                    for item in knowledge {
+                        let name = item.trim().trim_start_matches("knowledge/");
+                        if name.is_empty() {
+                            continue;
+                        }
+                        let rel = format!("knowledge/{name}");
+                        if !safe_relative(&rel) {
+                            return Err(format!("规范文件名不合法：{name}"));
+                        }
+                        let val = serde_yaml::Value::String(name.to_owned());
+                        if !cleaned.contains(&val) {
+                            cleaned.push(val);
+                        }
+                    }
+                    if cleaned.is_empty() {
+                        body_map.remove("knowledge");
+                    } else {
+                        body_map.insert(serde_yaml::Value::String("knowledge".into()), serde_yaml::Value::Sequence(cleaned));
+                    }
+                }
+                let next = serde_yaml::to_string(&doc).map_err(|e| format!("序列化流程文件失败：{e}"))?;
+                std::fs::write(&flow_path, next).map_err(|e| format!("写入流程文件失败：{e}"))?;
+                updated = true;
+                break;
+            }
+            if !updated {
+                return Err(format!("找不到节点「{}」对应的定义文件", node.id));
+            }
+        }
+        Ok(())
+    }
+
     pub fn discard_draft(&self, draft_id: &str) -> Result<(), String> {
         let dir = self.draft_dir(draft_id)?;
         std::fs::remove_dir_all(dir).map_err(|e| format!("DRAFT_DISCARD_FAILED:{e}"))
@@ -621,5 +789,64 @@ mod tests {
             rename_manifest(text, "aaw-dev-copy"),
             "# 说明\nformat: aaw-workflow/1\nid: aaw-dev-copy\nname: AAW 开发（副本）\nentries: []\n"
         );
+    }
+
+    #[test]
+    fn patch_draft_manages_knowledge_files_and_node_references() {
+        let tmp = std::env::temp_dir().join(format!("aaw-pkg-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let lib = Library { presets: tmp.join("presets"), user: tmp.join("user") };
+        let draft = lib.create_draft(None, None).expect("create draft");
+
+        // 新建规范文件并同时挂载到节点
+        lib.patch_draft(
+            &draft.draft_id,
+            &DraftPatch {
+                name: None,
+                description: None,
+                knowledge_file: Some(DraftKnowledgePatch {
+                    name: "guide.md".into(),
+                    content: Some("# 规范\n\n第一条".into()),
+                }),
+                node: Some(DraftNodePatch {
+                    id: "main/work".into(),
+                    label: None,
+                    why: None,
+                    delivers: None,
+                    prompt: None,
+                    knowledge: Some(vec!["guide.md".into()]),
+                }),
+            },
+        )
+        .expect("create & attach knowledge");
+
+        let (_, compiled, files, _) = lib.check_draft(&draft.draft_id).expect("check");
+        assert!(compiled.is_ok(), "expected valid workflow after attaching knowledge");
+        assert_eq!(files.get("knowledge/guide.md").map(String::as_str), Some("# 规范\n\n第一条"));
+
+        // 卸载引用并删除文件
+        lib.patch_draft(
+            &draft.draft_id,
+            &DraftPatch {
+                name: None,
+                description: None,
+                knowledge_file: Some(DraftKnowledgePatch { name: "guide.md".into(), content: None }),
+                node: Some(DraftNodePatch {
+                    id: "main/work".into(),
+                    label: None,
+                    why: None,
+                    delivers: None,
+                    prompt: None,
+                    knowledge: Some(vec![]),
+                }),
+            },
+        )
+        .expect("detach & delete knowledge");
+
+        let (_, compiled, files, _) = lib.check_draft(&draft.draft_id).expect("check after delete");
+        assert!(compiled.is_ok(), "expected valid workflow after removing knowledge");
+        assert!(!files.contains_key("knowledge/guide.md"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

@@ -12,8 +12,9 @@ export const queuedAttachments = (
   typeof prompt === "string" ? [] : prompt.attachments;
 
 export const queuedSkillOptions = (prompt: QueuedPrompt) =>
-  typeof prompt !== "string" && prompt.skillReferences?.length
-    ? { skillReferences: prompt.skillReferences }
+  typeof prompt !== "string" &&
+  (prompt.skillReferences?.length || prompt.display)
+    ? { skillReferences: prompt.skillReferences, display: prompt.display }
     : undefined;
 
 export const identifyQueuedPrompt = (prompt: QueuedPrompt): QueuedPrompt =>

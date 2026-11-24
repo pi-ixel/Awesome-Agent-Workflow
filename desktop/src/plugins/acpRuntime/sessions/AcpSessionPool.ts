@@ -5,7 +5,7 @@ import type {
   AcpConnectionPoolPort,
 } from "../../acpConnection/types.ts";
 import type { AcpSession } from "../protocol/session.ts";
-import { bindAcpSession } from "./channelSession.ts";
+import { bindAcpSession, createAcpSession } from "./channelSession.ts";
 import type { Logger } from "../../../shared/logging/logger.ts";
 
 /** 协议会话的租约索引与连接池的物理资源独立。 */
@@ -64,6 +64,16 @@ export class AcpSessionPool {
     if (failure !== undefined) session.invalidateConnection();
     this.track(session, channel, options);
     return session;
+  }
+
+  openModelProbe(
+    source: AcpSessionPort,
+    options: ChannelSessionOptions,
+  ): AcpSessionPort {
+    const lease = this.leases.get(source);
+    const openChannel = lease?.openModelProbe?.bind(lease);
+    if (!openChannel) throw new Error("当前会话的 ACP 连接不可用");
+    return createAcpSession({ openChannel }, options, this.logger);
   }
 
   private track(

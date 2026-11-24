@@ -693,6 +693,7 @@ test("the gear focuses the shared tree placement preference and both folder view
   await position.getByRole("button", { name: "左侧" }).click();
   await page.keyboard.press("Escape");
   await expect(gear).toBeFocused();
+  await expect(page.locator("[data-tree-position-particles]")).toBeHidden();
   expect((await tree.boundingBox())!.x).toBeLessThan(
     (await preview.boundingBox())!.x,
   );
@@ -715,6 +716,101 @@ test("the gear focuses the shared tree placement preference and both folder view
   expect((await collapse.boundingBox())!.x).toBeLessThan(
     (await gear.boundingBox())!.x,
   );
+});
+
+test("在设置中切换文件树位置立即播放粒子，保留目录和预览状态", async ({ page }) => {
+  await page.setViewportSize({ width: 1500, height: 780 });
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.goto("/tests/visual/layoutMotionFixture.html?virtual-tree&tree-position-motion");
+  await page.getByRole("button", { name: "打开文件栏" }).click();
+  const tree = page.getByRole("tree", { name: "layout-motion" });
+  await tree.getByRole("treeitem", { name: "docs", exact: true }).press("ArrowRight");
+  await tree.getByRole("treeitem", { name: "发布检查", exact: true }).press("ArrowRight");
+  const row = tree.getByRole("treeitem", { name: "发布检查项-041.md", exact: true });
+  const scroll = tree.locator("..");
+  await scroll.evaluate((element) => { element.scrollTop = 28 * 40; });
+  await row.click();
+  await expect(row).toHaveAttribute("aria-selected", "true");
+  const offset = await scroll.evaluate((element) => element.scrollTop);
+  expect(offset).toBeGreaterThan(0);
+  const preview = page.getByLabel("预览区");
+  const heading = preview.getByRole("heading", { name: "文件视图示例" });
+  await expect(heading).toBeVisible();
+  const particles = page.locator("canvas[data-tree-position-particles]");
+  const layout = particles.locator("..");
+  await expect(layout).toHaveClass(/flex-row-reverse/);
+  await expect(particles).toBeHidden();
+
+  const gear = page.getByRole("button", { name: "文件树设置" });
+  await gear.click();
+  const settings = page.getByRole("dialog", { name: "设置", exact: true });
+  await settings.getByRole("button", { name: "暖白", exact: true }).click();
+  await expect(page.locator("html")).toHaveClass(/theme-warm/);
+  await settings.getByRole("button", { name: "左侧", exact: true }).click();
+  await expect(layout).not.toHaveClass(/flex-row-reverse/);
+  await expect(particles).toBeVisible();
+  await expect.poll(() => particles.evaluate((element: HTMLCanvasElement) => {
+    if (element.hidden) return false;
+    const context = element.getContext("2d")!;
+    const pixels = context.getImageData(0, 0, element.width, element.height).data;
+    return pixels.some((channel, index) => index % 4 === 3 && channel > 32);
+  })).toBe(true);
+  await expect(particles).toBeHidden();
+  await expect(settings).toBeVisible();
+  await expect(settings.getByRole("button", { name: "左侧", exact: true })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(settings).toHaveCount(0);
+  expect((await tree.boundingBox())!.x).toBeLessThan((await preview.boundingBox())!.x);
+  await expect(heading).toBeVisible();
+  await expect(row).toHaveAttribute("aria-selected", "true");
+  expect(await scroll.evaluate((element) => element.scrollTop)).toBe(offset);
+  await expect(
+    scroll.locator(".sticky").getByRole("treeitem", { name: "发布检查", exact: true }),
+  ).toHaveAttribute("aria-expanded", "true");
+  await expect(gear).toBeFocused();
+
+  await page.getByRole("button", { name: "打开目录标签" }).click();
+  const directory = page.getByRole("tree", { name: "docs", exact: true });
+  await expect(directory).toBeVisible();
+  await gear.click();
+  await settings.getByRole("button", { name: "暗夜", exact: true }).click();
+  await expect(page.locator("html")).not.toHaveClass(/theme-warm/);
+  await settings.getByRole("button", { name: "右侧", exact: true }).click();
+  await expect(particles).toBeVisible();
+  await expect(particles).toBeHidden();
+  await expect(settings).toBeVisible();
+  await expect(layout).toHaveClass(/flex-row-reverse/);
+  await page.keyboard.press("Escape");
+  expect((await directory.boundingBox())!.x).toBeGreaterThan((await preview.boundingBox())!.x);
+});
+
+test("目录收起或系统减少动态效果时直接应用文件树位置", async ({ page }) => {
+  await page.setViewportSize({ width: 1500, height: 800 });
+  await page.goto("/tests/visual/layoutMotionFixture.html");
+  await page.getByRole("button", { name: "打开文件栏" }).click();
+  const particles = page.locator("canvas[data-tree-position-particles]");
+  const layout = particles.locator("..");
+  const gear = page.getByRole("button", { name: "文件树设置" });
+  const position = page.getByRole("group", { name: "文件树位置" });
+  const canvasWasUsed = () => particles.evaluate((element) =>
+    (element as HTMLCanvasElement).width !== 300,
+  );
+  await page.getByRole("button", { name: "收起目录" }).click();
+  await gear.click();
+  await position.getByRole("button", { name: "左侧" }).click();
+  await expect(particles).toBeHidden();
+  expect(await canvasWasUsed()).toBe(false);
+  await expect(layout).not.toHaveClass(/flex-row-reverse/);
+  await page.keyboard.press("Escape");
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.getByRole("button", { name: "展开目录" }).click();
+  await gear.click();
+  await position.getByRole("button", { name: "右侧" }).click();
+  await expect(layout).toHaveClass(/flex-row-reverse/);
+  await expect(particles).toBeHidden();
+  expect(await canvasWasUsed()).toBe(false);
+  await page.keyboard.press("Escape");
 });
 
 test("file view options move between the toolbar and the More menu with header width", async ({
