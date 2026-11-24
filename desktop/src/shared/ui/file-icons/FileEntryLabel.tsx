@@ -30,7 +30,10 @@ export function FileEntryLabel({
           className="ui-icon-16 shrink-0"
         />
       )}
-      <span className={`min-w-0 flex-1 truncate ${nameClassName}`}>
+      <span
+        data-file-entry-name=""
+        className={`min-w-0 flex-1 truncate ${nameClassName}`}
+      >
         {segments.map((segment, index) => (
           <Fragment key={`${segment}-${index}`}>
             {index > 0 && <span className="mx-0.5 text-ink-subtlest">/</span>}

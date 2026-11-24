@@ -79,6 +79,7 @@ it("专用渲染库和 Canvas 由已接入公共外观设置的实现持有", ()
   );
   expect(owners).toEqual([
     "plugins/documents/ui/FilePreview.tsx",
+    "plugins/documents/ui/FileTree.tsx",
     "plugins/documents/ui/MarkdownSourceEditor.tsx",
     "plugins/documents/ui/markdownFind.ts",
     "plugins/project/usage/UsageSettings.tsx",
@@ -87,6 +88,7 @@ it("专用渲染库和 Canvas 由已接入公共外观设置的实现持有", ()
     "plugins/terminal/ui/TerminalSessionView.tsx",
     "plugins/workflow/ui/FlowStages.tsx",
     "shared/ui/MarkdownView.tsx",
+    "shared/ui/controls/treePositionParticles.ts",
     "shared/ui/markdown/MermaidBlock.tsx",
     "shared/ui/markdown/deferredCodePlugin.ts",
   ]);
