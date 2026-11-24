@@ -509,6 +509,14 @@ export function FlowStages({
                   {snapshot && (tone === "running" || tone === "alert") && <span className={`wf-word tone-${tone}`}>{view.word}</span>}
                 </span>
                 {subtitle && <small className="wf-stage-span" data-hint={subtitle}>{subtitle}</small>}
+                {view.loopBackTo && (
+                  <span
+                    className="wf-stage-loop"
+                    data-hint={`不通过时可回到阶段 ${view.loopBackTo.stageNo}「${view.loopBackTo.stageLabel}」返工`}
+                  >
+                    ↩ 回环至 {view.loopBackTo.stageNo}.{view.loopBackTo.stageLabel}
+                  </span>
+                )}
                 {pills(`g:${view.id}`, view.steps, isOpen)}
               </span>
             </NavigationRow>;

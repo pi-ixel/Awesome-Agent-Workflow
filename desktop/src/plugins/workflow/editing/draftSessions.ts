@@ -122,6 +122,7 @@ export function createDraftEditor(deps: {
       return createElement(EmbeddedView, {
         target: session.target,
         header: options?.header,
+        headerActions: options?.headerActions,
         placeholder: options?.placeholder,
       });
     },

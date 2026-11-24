@@ -42,6 +42,8 @@ export interface SessionRuntimeResources {
   scheduled?: boolean;
   /** 插件打开的会话（ADR 037）：轮次完成的提醒由打开它的插件负责。 */
   pluginOpened?: boolean;
+  /** 临时内置会话（如工作流草稿编辑）：不参与业务项目侧栏与全局未读红点计数。 */
+  ephemeral?: boolean;
 }
 
 export class RecoveryCleanupError extends Error {}
@@ -95,6 +97,7 @@ export class SessionRuntime {
   declare listOnly: SessionRuntimeResources["listOnly"];
   declare scheduled: SessionRuntimeResources["scheduled"];
   declare pluginOpened: SessionRuntimeResources["pluginOpened"];
+  declare ephemeral: SessionRuntimeResources["ephemeral"];
   private closeTask?: Promise<void>;
   constructor(resources: SessionRuntimeResources, private readonly logger = createLogger("session")) {
     Object.assign(this, resources);

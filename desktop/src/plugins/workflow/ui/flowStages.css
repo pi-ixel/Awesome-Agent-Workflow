@@ -55,6 +55,7 @@ html.theme-warm .wf-flow, html.theme-warm .wf-fx, html.theme-warm .wf-strip {
 .wf-stage-head .wf-word { margin-left:auto; }
 .wf-stage-title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:calc(var(--text-ui-base) * 1.1); font-weight:700; letter-spacing:-.01em; line-height:1.35; }
 .wf-stage-span { margin-top:1px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--text-2xs); color:var(--color-ink-mute); }
+.wf-stage-loop { align-self:flex-start; margin-top:4px; padding:1px 6px; border-radius:var(--radius-pill); background:var(--color-tint); color:var(--color-ink-soft); font-size:var(--text-2xs); line-height:1.5; white-space:nowrap; }
 .wf-stage-body .wf-pills { margin-top:auto; padding-top:9px; gap:3px; }
 .wf-stage-body .wf-pill { max-width:none; }
 /* 展开后胶囊变成了下面的步骤：原位不显示，但留着位置，阶段块不变形 */

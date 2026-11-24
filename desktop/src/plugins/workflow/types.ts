@@ -500,7 +500,14 @@ export interface WorkflowDraftEditor {
   /** 往编辑会话里发一条消息（例如把编译报错转给 AI）；没有会话时返回 false。 */
   send(draftId: string, text: string): boolean;
   /** 在草稿页内嵌渲染这份草稿的编辑会话；未启用内置视图或会话已结束时返回 null。 */
-  renderSession?(draftId: string, options?: { readonly header?: ReactNode; readonly placeholder?: string }): ReactNode;
+  renderSession?(
+    draftId: string,
+    options?: {
+      readonly header?: ReactNode;
+      readonly headerActions?: ReactNode;
+      readonly placeholder?: string;
+    },
+  ): ReactNode;
   /** 保存或放弃后结束编辑会话并回收资源。 */
   end(draftId: string): Promise<void>;
 }

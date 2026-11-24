@@ -67,6 +67,8 @@ export interface FlowStageView {
   /** 阶段块右上角那句：「已完成」「运行中」「9 步」…… */
   readonly word: string;
   readonly steps: readonly FlowStep[];
+  /** 若本阶段存在返工/回环去向指向更早的阶段，标出最近的一个回环目标阶段。 */
+  readonly loopBackTo?: { readonly stageId: string; readonly stageNo: string; readonly stageLabel: string };
 }
 
 export interface FlowContext {
@@ -368,6 +370,14 @@ export function flowStages(ctx: FlowContext, entry: string, stages: readonly Wor
       { id: "$other", label: "其他", steps: steps.filter((step) => { const id = stageOfPhase.get(step.phaseId); return !id || !declared.has(id); }) },
     ].filter((group) => group.steps.length > 0);
   const started = groups.map((group) => group.steps.some((step) => step.state !== "pending"));
+  const phaseById = new Map((flow?.phases ?? []).map((p) => [p.id, p]));
+  const groupIndexByStageId = new Map(groups.map((g, i) => [g.id, i]));
+  const groupIndexOfPhase = (phaseId: string): number | undefined => {
+    const stageId = stageOfPhase.get(phaseId);
+    if (stageId && groupIndexByStageId.has(stageId)) return groupIndexByStageId.get(stageId);
+    if (groupIndexByStageId.has("$other")) return groupIndexByStageId.get("$other");
+    return undefined;
+  };
   return groups.map((group, index) => {
     const states = group.steps.map((step) => step.state);
     const merged = mergeStates(states);
@@ -379,7 +389,22 @@ export function flowStages(ctx: FlowContext, entry: string, stages: readonly Wor
     const word = !ctx.snapshot ? `${group.steps.length} 步`
       : attention ? "要你处理"
         : STAGE_WORD[state] ?? STATE_LABEL[state];
-    return { id: group.id, no: String(index + 1), label: group.label, state, attention, word, steps: group.steps };
+    // 检查本阶段各步骤的去向，找出指向更早阶段的回环（如质检不通过返工回制作）。
+    let loopBackTo: FlowStageView["loopBackTo"];
+    for (const step of group.steps) {
+      const phase = phaseById.get(step.phaseId);
+      if (!phase) continue;
+      for (const route of phase.routes) {
+        const targetIndex = groupIndexOfPhase(route.next);
+        if (targetIndex !== undefined && targetIndex < index) {
+          const target = groups[targetIndex]!;
+          loopBackTo = { stageId: target.id, stageNo: String(targetIndex + 1), stageLabel: target.label };
+          break;
+        }
+      }
+      if (loopBackTo) break;
+    }
+    return { id: group.id, no: String(index + 1), label: group.label, state, attention, word, steps: group.steps, ...(loopBackTo ? { loopBackTo } : {}) };
   });
 }
 

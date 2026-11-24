@@ -75,6 +75,81 @@ const summaryOnlyKinds: ReadonlySet<string> = new Set([
   "fetch",
 ]);
 
+/** 识别工作流内置 MCP 工具并生成友好中文标签与简洁摘要，避免一律显示为 Other + 原始 JSON。 */
+const WORKFLOW_MCP_TOOLS: readonly {
+  readonly pattern: RegExp;
+  readonly label: string;
+  readonly runningLabel: string;
+}[] = [
+  { pattern: /read_workflow_knowledge/i, label: "读取关联知识", runningLabel: "正在读取关联知识" },
+  { pattern: /submit_workflow_result/i, label: "提交步骤结果", runningLabel: "正在提交步骤结果" },
+  { pattern: /list_workflow_results/i, label: "查看前序步骤", runningLabel: "正在查看前序步骤" },
+  { pattern: /(?:read|get)_workflow_(?:var|result)/i, label: "读取步骤数据", runningLabel: "正在读取步骤数据" },
+  { pattern: /check_workflow/i, label: "编译检查工作流", runningLabel: "正在检查工作流" },
+];
+
+function unwrapMcpOutputSummary(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{")) return text;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (parsed !== null && typeof parsed === "object" && "output" in parsed) {
+      const output = (parsed as { output?: unknown }).output;
+      if (typeof output === "string") {
+        const inner = output.trim();
+        if (inner.startsWith("[")) {
+          try {
+            const arr: unknown = JSON.parse(inner);
+            if (Array.isArray(arr)) return `共 ${arr.length} 项记录`;
+          } catch {
+            // fall through
+          }
+        }
+        if (inner.startsWith("{")) {
+          try {
+            const obj: unknown = JSON.parse(inner);
+            if (obj !== null && typeof obj === "object") {
+              const keys = Object.keys(obj);
+              if (keys.length > 0) return `返回字段：${keys.slice(0, 4).join("、")}${keys.length > 4 ? "…" : ""}`;
+            }
+          } catch {
+            // fall through
+          }
+        }
+        const firstLine = inner.split(/\r?\n/, 1)[0] ?? "";
+        return firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine;
+      }
+    }
+  } catch {
+    // 非完整 JSON，按原文显示
+  }
+  return text;
+}
+
+export function friendlyWorkflowTool(
+  item: Pick<ToolCallItem, "title" | "toolName" | "rawInput" | "resultSummary">,
+  isRunning = false,
+): { readonly label: string; readonly summary?: string } | null {
+  const probe = `${item.toolName ?? ""} ${item.title ?? ""}`;
+  const matched = WORKFLOW_MCP_TOOLS.find((entry) => entry.pattern.test(probe));
+  if (!matched) return null;
+  const input =
+    item.rawInput !== null && typeof item.rawInput === "object"
+      ? (item.rawInput as Record<string, unknown>)
+      : null;
+  let summary: string | undefined;
+  if (/read_workflow_knowledge/i.test(probe)) {
+    const name = typeof input?.name === "string" ? input.name.trim() : "";
+    summary = name || "知识目录";
+  } else if (item.resultSummary) {
+    summary = unwrapMcpOutputSummary(item.resultSummary);
+  }
+  return {
+    label: isRunning ? matched.runningLabel : matched.label,
+    summary,
+  };
+}
+
 /** 完整载荷的呈现文本：字符串按原文，其余安全 JSON 美化。
  *  导出供底部终端面板复用（纯函数，无状态）。 */
 export function formatPayload(value: unknown): string {
@@ -229,11 +304,17 @@ export function OrdinaryToolCallCard({
   const summaryRedundant = hasResult
     ? false
     : isSummaryRedundant(item.title, item.inputSummary);
-  const fallbackText = hasResult
+  const workflowTool = friendlyWorkflowTool(item, isRunning);
+  const rawFallbackText = hasResult
     ? item.resultSummary || item.title
     : summaryRedundant
       ? item.title
       : item.inputSummary;
+  const fallbackText =
+    workflowTool?.summary ??
+    (item.toolKind === "other"
+      ? unwrapMcpOutputSummary(rawFallbackText)
+      : rawFallbackText);
   const readChip = readPath.length > 0 ? splitFilePath(readPath) : null;
   const summaryOnly =
     item.toolKind !== null &&
@@ -254,6 +335,7 @@ export function OrdinaryToolCallCard({
   const runningLabel =
     item.toolKind === null ? null : (runningLabels[item.toolKind] ?? null);
   const rowKindLabel =
+    workflowTool?.label ??
     item.toolName ??
     (isRunning && runningLabel !== null ? runningLabel : staticKindLabel);
   const KindIcon =

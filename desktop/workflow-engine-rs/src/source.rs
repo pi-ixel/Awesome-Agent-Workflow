@@ -809,6 +809,8 @@ pub fn compile(files: &BTreeMap<String, String>) -> Result<Compiled, Vec<Diagnos
         }
     }
 
+    let mut referenced_knowledge = BTreeSet::new();
+
     for flow in &flows {
         let file = flow.file.as_str();
         if !flow.src.steps.contains_key(&flow.src.entry) {
@@ -839,8 +841,11 @@ pub fn compile(files: &BTreeMap<String, String>) -> Result<Compiled, Vec<Diagnos
                 report.error(file, &path, "Python 节点要写 script");
             }
             for (index, name) in src.knowledge.iter().enumerate() {
-                if !files.contains_key(&format!("knowledge/{name}")) {
-                    report.error(file, &field("knowledge").into_iter().chain([Seg::Item(index)]).collect::<Vec<_>>(), format!("找不到知识文件 knowledge/{name}"));
+                let rel = format!("knowledge/{name}");
+                if !files.contains_key(&rel) {
+                    report.error(file, &field("knowledge").into_iter().chain([Seg::Item(index)]).collect::<Vec<_>>(), format!("找不到知识文件 {rel}"));
+                } else {
+                    referenced_knowledge.insert(rel);
                 }
             }
             let schema = src.result.as_ref().map(|fields| result_schema(fields, src.strict_result, report, file, &field("result")));
@@ -1143,6 +1148,19 @@ pub fn compile(files: &BTreeMap<String, String>) -> Result<Compiled, Vec<Diagnos
         }
     }
 
+    // 孤立知识文档：放在 knowledge/ 目录里但没有任何节点挂载，运行时 Agent 无法通过 read_workflow_knowledge 读到它。
+    for path in files.keys() {
+        if let Some(name) = path.strip_prefix("knowledge/") {
+            if !name.is_empty() && !referenced_knowledge.contains(path) {
+                report.warn(
+                    path,
+                    &[],
+                    format!("知识文档「{path}」未被任何节点引用，运行时不会进入任何节点的知识索引；请把「{name}」加到需要它的节点的 knowledge 列表里，或删除多余文档"),
+                );
+            }
+        }
+    }
+
     // 起点与输入
     let mut entries = Vec::new();
     let root = flow_ids[manifest.root.as_str()];
@@ -1370,6 +1388,22 @@ steps:
         assert!(rendered.iter().any(|m| m.contains("why")), "{rendered:?}");
         assert!(rendered.iter().any(|m| m.contains("explain")), "{rendered:?}");
         assert!(rendered.iter().any(|m| m.contains("delivers")), "{rendered:?}");
+    }
+
+    #[test]
+    fn unreferenced_knowledge_file_triggers_warning() {
+        let flow = "label: 主流程\nentry: ask\nsteps:\n  ask:\n    agent:\n      label: 确认\n      why: 先把需求说清楚\n      delivers: 一份实施计划\n      prompt: 确认需求\n    next:\n      - to: $complete\n";
+        let compiled = compile(&files(&[
+            ("workflow.yaml", MANIFEST_OK),
+            ("flows/main.yaml", flow),
+            ("knowledge/orphan.md", "# 未挂载规范\n"),
+        ]))
+        .unwrap();
+        assert!(
+            compiled.warnings.iter().any(|w| w.file == "knowledge/orphan.md" && w.message.contains("未被任何节点引用")),
+            "{:?}",
+            compiled.warnings
+        );
     }
 
     #[test]

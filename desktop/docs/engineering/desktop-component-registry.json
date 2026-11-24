@@ -475,7 +475,8 @@
         "EmbeddedNoticeRow",
         "EmbeddedThoughtRow",
         "EmbeddedToolRow",
-        "EmbeddedUserRow"
+        "EmbeddedUserRow",
+        "EmbeddedWorkingIndicator"
       ]
     },
     "targets": []
