@@ -38,6 +38,7 @@ export function projectOperationsFrom(
     openSession: coordinator.openRealWorkspace,
     runBackgroundPrompt: coordinator.runBackgroundPrompt,
     backgroundPromptOptions: coordinator.backgroundPromptOptions,
+    refreshModels: coordinator.refreshModels,
     registerSessionTools: coordinator.registerSessionTools,
     openPluginSession: coordinator.openPluginSessionRuntime,
     pluginSessionReady: coordinator.pluginSessionReady,

@@ -10,6 +10,7 @@ export function RefreshButton({
   label = "刷新",
   disabled = false,
   showLabel = false,
+  role,
   className = showLabel
     ? ""
     : "rounded p-1 text-ink-mute transition-colors enabled:hover:bg-raised enabled:hover:text-ink",
@@ -21,6 +22,7 @@ export function RefreshButton({
   className?: string;
   iconClassName?: string;
   showLabel?: boolean;
+  role?: "menuitem";
 }) {
   const [phase, setPhase] = useState<"idle" | "busy" | "done" | "error">(
     "idle",
@@ -70,6 +72,7 @@ export function RefreshButton({
   const isBusy = phase === "busy";
   const buttonClass = `${className} ${isBusy ? "cursor-wait opacity-60" : ""}`;
   const buttonProps = {
+    role,
     "aria-label": label,
     "aria-busy": isBusy,
     "aria-disabled": isBusy || undefined,

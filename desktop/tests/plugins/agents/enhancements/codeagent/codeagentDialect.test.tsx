@@ -569,44 +569,99 @@ it("preserves startup/load configuration notifications preceding their method re
   }
 });
 
-it("shows model acknowledgement as pending and reports false success without leaving the wrong model selected", async () => {
+it("运行中选中新发现的模型，确认后才发下一条，失败只在选择器提示", async () => {
   const f = await fixture();
   const store = createSessionStore("codeagent-model-ui");
   const detach = attachSession(f.session, store);
   selectSessionStore(store);
   const view = render(<ModelTag />);
   try {
-    f.handlers.set("session/set_config_option", () => ({}));
-    act(() => store.getState().switchModel("b"));
-    expect(screen.getByRole("button", { name: "模型选择" })).toHaveTextContent(
-      "正在确认模型",
+    let finishFirst!: () => void;
+    const first = new Promise((resolve) => {
+      finishFirst = () => resolve({ stopReason: "end_turn" });
+    });
+    const prompts = () =>
+      f.received.filter(({ method }) => method === "session/prompt");
+    const switches = () =>
+      f.received.filter(({ method }) => method === "session/set_config_option");
+    f.handlers.set("session/prompt", () =>
+      prompts().length === 1 ? first : { stopReason: "end_turn" },
     );
+    f.handlers.set("session/set_config_option", () => ({}));
+    act(() => {
+      store.setState({
+        refreshedModels: [
+          { modelId: "a", name: "Alpha" },
+          { modelId: "c", name: "Fresh" },
+        ],
+      });
+      store.getState().sendPrompt("当前回合");
+      store.getState().switchModel("c");
+      store.getState().enqueuePrompt("下一轮");
+    });
+    await waitFor(() => expect(prompts()).toHaveLength(1));
+    expect(switches()).toHaveLength(0);
+    expect(store.getState().currentModelId).toBe("a");
+    expect(screen.getByRole("button", { name: "模型选择" })).toHaveTextContent(
+      "Fresh",
+    );
+    act(finishFirst);
+    await waitFor(() => expect(switches()).toHaveLength(1));
+    expect(switches()[0]?.params).toMatchObject({
+      sessionId: "same-session",
+      configId: "model",
+      value: "c",
+    });
+    expect(prompts()).toHaveLength(1);
+    expect(store.getState().queuedPrompts).toHaveLength(1);
+    const [model, mode] = config("c");
     act(() =>
       f.update({
         sessionUpdate: "config_option_update",
-        configOptions: config("b"),
+        configOptions: [
+          {
+            ...model,
+            options: [...model!.options, { value: "c", name: "Fresh" }],
+          },
+          mode,
+        ],
       }),
     );
-    await waitFor(() => expect(store.getState().pendingModelId).toBeNull());
-    expect(screen.getByRole("button", { name: "模型选择" })).toHaveTextContent(
-      "Beta",
-    );
-    f.handlers.set("session/set_config_option", () => ({
-      configOptions: config("b"),
-    }));
-    act(() => store.getState().switchModel("a"));
-    await waitFor(() => expect(store.getState().pendingModelId).toBeNull(), {
-      timeout: 3000,
+    await waitFor(() => expect(store.getState().isAgentRunning).toBe(false));
+    expect(prompts()).toHaveLength(2);
+    expect(store.getState().currentModelId).toBe("c");
+    expect(store.getState().pendingModelId).toBeNull();
+
+    f.handlers.set("session/set_config_option", () => {
+      throw new Error("模型暂不可用");
     });
-    expect(store.getState().currentModelId).toBe("b");
-    expect(
-      store
-        .getState()
-        .items.some(
-          (item) =>
-            item.kind === "system" && item.text.includes("模型切换失败"),
-        ),
-    ).toBe(true);
+    act(() => {
+      store.getState().setDirectSteering(true);
+      store.getState().switchModel("a");
+      store.getState().sendPrompt("保留的待发消息");
+    });
+    await waitFor(() =>
+      expect(store.getState().modelSelectionError).toContain("模型暂不可用"),
+    );
+    expect(prompts()).toHaveLength(2);
+    expect(store.getState()).toMatchObject({
+      currentModelId: "c",
+      queuePaused: true,
+      queuedPrompts: [{ text: "保留的待发消息" }],
+    });
+    expect(store.getState().items.every((item) => item.kind !== "system")).toBe(
+      true,
+    );
+    expect(f.received.some(({ method }) => method === "session/load")).toBe(
+      false,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "模型选择" }));
+    expect(screen.getByRole("status")).toHaveTextContent("模型暂不可用");
+    act(() => {
+      store.getState().switchModel("c");
+      store.getState().resumeQueue();
+    });
+    await waitFor(() => expect(prompts()).toHaveLength(3));
   } finally {
     view.unmount();
     detach();

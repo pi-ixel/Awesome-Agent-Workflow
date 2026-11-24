@@ -22,6 +22,7 @@
  *   SubTrigger 尾 ChevronRightIcon ml-auto size-4 text-foreground-subtle）。
  */
 import {
+  Fragment,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -86,6 +87,7 @@ export function ContextMenu({
   portalContainer = document.body,
   trigger,
   variant = "menu",
+  header,
 }: {
   readonly entries: readonly ContextMenuEntry[];
   readonly placement: MenuPlacement;
@@ -97,6 +99,7 @@ export function ContextMenu({
   readonly portalContainer?: HTMLElement;
   readonly trigger?: HTMLElement;
   readonly variant?: "menu" | "selection";
+  readonly header?: ReactNode;
 }) {
   const isSelection = variant === "selection";
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -271,6 +274,8 @@ export function ContextMenu({
     items[nextIndex]?.focus();
   }
 
+  const MenuItems = header ? "div" : Fragment;
+
   return createPortal(
     <div
       ref={panelRef}
@@ -286,7 +291,9 @@ export function ContextMenu({
         top: pos.y,
         visibility: measured ? "visible" : "hidden",
       }}
-      className={`z-[60] flex min-w-[min(11rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] flex-col gap-0.5 overflow-y-auto overscroll-contain rounded-lg border border-border bg-menu p-1 text-ink shadow-floating outline-none ${
+      className={`z-[60] flex min-w-[min(11rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] flex-col gap-0.5 overscroll-contain rounded-lg border border-border bg-menu p-1 text-ink shadow-floating outline-none ${
+        header ? "overflow-hidden" : "overflow-y-auto"
+      } ${
         isSelection
           ? "w-64 max-h-[min(13rem,calc(100dvh-1rem))]"
           : "max-h-[calc(100dvh-1rem)]"
@@ -300,84 +307,96 @@ export function ContextMenu({
               : "context-menu-in-bottom"
       }`}
     >
-      {entries.map((entry, index) =>
-        "type" in entry ? (
-          <div
-            key={`separator-${index}`}
-            role="separator"
-            className="-mx-1 my-1 h-px bg-border"
-          />
-        ) : (
-          <button
-            key={entry.id}
-            type="button"
-            role={
-              entry.checked !== undefined
-                ? "menuitemcheckbox"
-                : entry.radio
-                  ? "menuitemradio"
-                  : "menuitem"
-            }
-            aria-checked={
-              entry.checked ?? (entry.radio ? entry.selected : undefined)
-            }
-            aria-label={entry.description ? entry.label : undefined}
-            aria-description={entry.description}
-            tabIndex={isSelection ? -1 : undefined}
-            disabled={entry.disabled}
-            onClick={() => {
-              entry.onSelect();
-              onDismiss();
-            }}
-            className={`relative flex min-h-7 w-full shrink-0 cursor-default items-center gap-2 rounded-md text-left text-ui-base/relaxed text-ink outline-none select-none hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:text-ink disabled:pointer-events-none disabled:text-ink-subtlest [&_svg]:pointer-events-none [&_svg]:ui-icon-16 [&_svg]:shrink-0 ${
-              // radio 行对照 ZCode DropdownMenuRadioItem（dropdown-menu.tsx:149）：
-              // py-1.5 pr-8 pl-2，右侧留出指示位；普通项维持 ContextMenuItem 的 px-2 py-1
-              entry.radio || entry.checked !== undefined
-                ? "py-1.5 pr-8 pl-2"
-                : "px-2 py-1"
-            } ${
-              entry.danger
-                ? // destructive 对照 ZCode data-[variant=destructive]（context-menu.tsx:52）：
-                  // 常态实字色，实底高亮 + 白字（text-destructive-foreground 同值）
-                  "text-danger hover:bg-danger hover:text-danger-contrast focus-visible:bg-danger focus-visible:text-danger-contrast"
-                : entry.warning
-                  ? "text-warn-ink"
-                  : ""
-            } ${isSelection ? "min-h-8 items-start focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring" : ""}`}
-          >
-            {entry.icon}
-            {entry.description ? (
-              <span className="min-w-0 flex-1 break-words">
-                <span className="block">{entry.label}</span>
-                <span className="mt-0.5 block text-ui-sm leading-snug text-ink-soft">
-                  {entry.description}
-                </span>
-              </span>
-            ) : (
-              <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
-                {entry.label}
-              </span>
-            )}
-            {entry.shortcut !== undefined ? (
-              <span className="ml-auto text-ui-xs tracking-widest text-ink-subtlest">
-                {entry.shortcut}
-              </span>
-            ) : null}
-            {entry.radio || entry.checked !== undefined ? (
-              // 选中指示：绝对定位右缘的 CheckIcon（ZCode RadioItem
-              // indicator span right-2 + CheckIcon size-4 text-foreground-subtle）
-              <span
-                aria-hidden={true}
-                className="pointer-events-none absolute right-2 flex items-center justify-center"
-              >
-                {(entry.checked ?? entry.selected) ? (
-                  <CheckIcon className="ui-icon-16 text-ink-subtle" />
-                ) : null}
-              </span>
-            ) : null}
-          </button>
-        ),
+      {header && (
+        <div className="shrink-0 border-b border-border">{header}</div>
       )}
+      <MenuItems
+        {...(header
+          ? {
+              className:
+                "flex min-h-0 flex-col gap-0.5 overflow-y-auto overscroll-contain",
+            }
+          : {})}
+      >
+        {entries.map((entry, index) =>
+          "type" in entry ? (
+            <div
+              key={`separator-${index}`}
+              role="separator"
+              className="-mx-1 my-1 h-px bg-border"
+            />
+          ) : (
+            <button
+              key={entry.id}
+              type="button"
+              role={
+                entry.checked !== undefined
+                  ? "menuitemcheckbox"
+                  : entry.radio
+                    ? "menuitemradio"
+                    : "menuitem"
+              }
+              aria-checked={
+                entry.checked ?? (entry.radio ? entry.selected : undefined)
+              }
+              aria-label={entry.description ? entry.label : undefined}
+              aria-description={entry.description}
+              tabIndex={isSelection ? -1 : undefined}
+              disabled={entry.disabled}
+              onClick={() => {
+                entry.onSelect();
+                onDismiss();
+              }}
+              className={`relative flex min-h-7 w-full shrink-0 cursor-default items-center gap-2 rounded-md text-left text-ui-base/relaxed text-ink outline-none select-none hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:text-ink disabled:pointer-events-none disabled:text-ink-subtlest [&_svg]:pointer-events-none [&_svg]:ui-icon-16 [&_svg]:shrink-0 ${
+                // radio 行对照 ZCode DropdownMenuRadioItem（dropdown-menu.tsx:149）：
+                // py-1.5 pr-8 pl-2，右侧留出指示位；普通项维持 ContextMenuItem 的 px-2 py-1
+                entry.radio || entry.checked !== undefined
+                  ? "py-1.5 pr-8 pl-2"
+                  : "px-2 py-1"
+              } ${
+                entry.danger
+                  ? // destructive 对照 ZCode data-[variant=destructive]（context-menu.tsx:52）：
+                    // 常态实字色，实底高亮 + 白字（text-destructive-foreground 同值）
+                    "text-danger hover:bg-danger hover:text-danger-contrast focus-visible:bg-danger focus-visible:text-danger-contrast"
+                  : entry.warning
+                    ? "text-warn-ink"
+                    : ""
+              } ${isSelection ? "min-h-8 items-start focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring" : ""}`}
+            >
+              {entry.icon}
+              {entry.description ? (
+                <span className="min-w-0 flex-1 break-words">
+                  <span className="block">{entry.label}</span>
+                  <span className="mt-0.5 block text-ui-sm leading-snug text-ink-soft">
+                    {entry.description}
+                  </span>
+                </span>
+              ) : (
+                <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                  {entry.label}
+                </span>
+              )}
+              {entry.shortcut !== undefined ? (
+                <span className="ml-auto text-ui-xs tracking-widest text-ink-subtlest">
+                  {entry.shortcut}
+                </span>
+              ) : null}
+              {entry.radio || entry.checked !== undefined ? (
+                // 选中指示：绝对定位右缘的 CheckIcon（ZCode RadioItem
+                // indicator span right-2 + CheckIcon size-4 text-foreground-subtle）
+                <span
+                  aria-hidden={true}
+                  className="pointer-events-none absolute right-2 flex items-center justify-center"
+                >
+                  {(entry.checked ?? entry.selected) ? (
+                    <CheckIcon className="ui-icon-16 text-ink-subtle" />
+                  ) : null}
+                </span>
+              ) : null}
+            </button>
+          ),
+        )}
+      </MenuItems>
     </div>,
     portalContainer,
   );

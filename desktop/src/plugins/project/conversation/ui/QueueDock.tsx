@@ -25,7 +25,7 @@ export function QueueDock(): React.JSX.Element | null {
         (!item.id ||
           item.id === steerEditableId ||
           !activeSteerIds?.includes(item.id))
-      : !directSteering,
+      : !directSteering || (typeof item !== "string" && item.waitsForModel),
   );
   const hasOrdinary = queued.some((item) => !isSteerOutboxEntry(item));
   const paused = useSessionValue((state) => state.queuePaused);

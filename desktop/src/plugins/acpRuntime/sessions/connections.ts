@@ -296,6 +296,22 @@ export class RuntimeConnections implements AcpProtocolResources {
     return session;
   }
 
+  openModelProbe(source: AcpSessionPort, adapter: AgentAdapter): AcpSessionPort {
+    this.assertOpen();
+    const pool = this.sessions.get(source);
+    if (!source.isInitialized || !pool)
+      throw new Error("当前会话的 ACP 连接尚未就绪");
+    return pool.openModelProbe(
+      source,
+      this.sessionOptions(adapter, {
+        background: true,
+        requestTimeoutMs: 15_000,
+        onQuestion: () => Promise.resolve(null),
+        onPermissionRequest: () => Promise.resolve({ outcome: "cancelled" }),
+      }),
+    );
+  }
+
   private sessionOptions(
     adapter: AgentAdapter | undefined,
     options: AcpProtocolSessionOptions,

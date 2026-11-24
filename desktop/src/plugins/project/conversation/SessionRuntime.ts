@@ -124,7 +124,7 @@ export class SessionRuntime {
       supportsImages: supportsImagePrompt(session.agentInfo?.agentCapabilities),
       cancel: () => session.cancel(),
       listModels: () => Promise.resolve(session.models?.availableModels ?? []),
-      setModel: (id) => session.setModel(id),
+      setModel: (id, options) => session.setModel(id, options),
       setMode: (id) => session.setMode(id),
       ensureSession: async () => {
         await ensureSession();

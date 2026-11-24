@@ -33,6 +33,7 @@ export class DesktopAcpRuntime {
         setSelection: connections.setSelection.bind(connections),
         open: connections.open.bind(connections),
         openBackground: connections.openBackground.bind(connections),
+        openModelProbe: connections.openModelProbe.bind(connections),
         readProjectHistory: connections.readProjectHistory.bind(connections),
         has: connections.has.bind(connections),
         promote: connections.promote.bind(connections),

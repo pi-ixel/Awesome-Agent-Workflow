@@ -1,6 +1,73 @@
 import { expect, test } from "@playwright/test";
 import { blend, color, ratio } from "./contrast.ts";
 
+test("运行中模型可刷新，滚动列表时操作固定，换肤与字号保留焦点", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/tests/visual/uiScaleFixture.html");
+  const session = await context.newPage();
+  await session.setViewportSize({ width: 330, height: 660 });
+  await session.goto(
+    "/tests/visual/sessionStatusOverlayFixture.html?appearance&model-refresh",
+  );
+  const model = session.getByRole("button", { name: "模型选择" });
+  const menu = session.getByRole("menu", { name: "模型选择" });
+  const refresh = menu.getByRole("menuitem", { name: "刷新模型" });
+  const firstModel = menu.getByRole("menuitemradio", {
+    name: "模型 1",
+    exact: true,
+  });
+  const list = firstModel.locator("..");
+  const font = page.getByRole("spinbutton", { name: "界面字号" });
+  await model.press("Enter");
+  await menu.press("Home");
+  await expect(refresh).toBeFocused();
+  await refresh.press("Enter");
+  await expect(menu).toBeVisible();
+  await expect(
+    menu.getByRole("menuitemradio", { name: "最新模型" }),
+  ).toBeAttached();
+  await expect(firstModel).toBeChecked();
+  await list.hover();
+  await session.mouse.wheel(0, 70);
+  await expect
+    .poll(() => list.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+  expect(await menu.evaluate((element) => element.scrollTop)).toBe(0);
+  const refreshBox = (await refresh.boundingBox())!;
+  const listBox = (await list.boundingBox())!;
+  expect(listBox.y).toBeGreaterThanOrEqual(refreshBox.y + refreshBox.height);
+  for (const [theme, px] of [
+    ["暖白", 12],
+    ["暗夜", 20],
+    ["暖白", 14],
+  ] as const) {
+    await page.getByRole("button", { name: theme, exact: true }).click();
+    await font.fill(String(px));
+    await font.press("Enter");
+    await expect(refresh).toBeFocused();
+    await expect
+      .poll(() =>
+        refresh
+          .locator("svg")
+          .evaluate((svg) => parseFloat(getComputedStyle(svg).inlineSize)),
+      )
+      .toBeCloseTo((px * 16) / 14, 1);
+    const initialY = (await refresh.boundingBox())!.y;
+    await refresh.press("End");
+    await expect(
+      menu.getByRole("menuitemradio", { name: "最新模型" }),
+    ).toBeFocused();
+    expect((await refresh.boundingBox())!.y).toBeCloseTo(initialY);
+    await session.keyboard.press("Home");
+    await expect(refresh).toBeFocused();
+  }
+  await refresh.press("Escape");
+  await expect(menu).toBeHidden();
+  await expect(model).toBeFocused();
+});
+
 test("连接失败和会话归档共用提示条，窄窗换肤保留操作焦点", async ({ page, context }) => {
   await page.goto("/tests/visual/uiScaleFixture.html");
   const session = await context.newPage();

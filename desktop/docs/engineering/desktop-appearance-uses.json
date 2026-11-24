@@ -75,7 +75,8 @@
     "StopIcon · 内嵌图形"
   ],
   "plugins/project/conversation/ui/InputStatusBar.tsx": [
-    "ContextRing · 内嵌图形"
+    "ContextRing · 内嵌图形",
+    "ModelTag · role=menuitem"
   ],
   "plugins/project/conversation/ui/SessionPerformanceBadge.tsx": [
     "SessionPerformanceBadge · 内嵌图形"

@@ -130,7 +130,10 @@ export interface SessionBinding {
   /** 可选能力：列出可用模型（会话建立时的 SessionModelState）。 */
   listModels?(): Promise<readonly ModelInfo[]>;
   /** 可选能力：切换会话模型（session/set_model；成功后 runtime 更新回推）。 */
-  setModel?(modelId: string): Promise<void>;
+  setModel?(
+    modelId: string,
+    options?: { fromRefresh?: boolean },
+  ): Promise<void>;
   setMode?(modeId: string): Promise<void>;
   /**
    * 可选能力：草稿态转正。runtime 允许「已连接、未创建会话」的草稿态
@@ -1065,7 +1068,7 @@ export const createSessionStore = (
       historyReplaySessionId = null;
       set({ historyPreview: undefined });
       turnGeneration += 1;
-      set({ pendingModelId: null, pendingModeId: null });
+      set({ pendingModeId: null });
       const closed = sealedItems();
       set({
         items: [
@@ -1097,7 +1100,7 @@ export const createSessionStore = (
       updatePerformance((value) => ({ ...value, endedAt: Date.now(), outputTokens: outcome.outputTokens }));
       if (wasRunning) set({ performanceTotals: addPerformance(get().performanceTotals ?? collectPerformance([], false, 0), collectPerformance(currentTurnItems(get().items), false, Date.now())) });
       turnGeneration += 1;
-      set({ pendingModelId: null, pendingModeId: null });
+      set({ pendingModeId: null });
       stopIdleTimer();
       const additions: SystemNoticeItem[] = [];
       if (outcome.errorMessage !== undefined && !outcome.quietFailure) {
@@ -1430,12 +1433,16 @@ export const createSessionStore = (
           actions.resetSteering();
           updatePerformance((value) => ({ ...value, interrupted: true }));
           turnGeneration += 1;
-          set({ pendingModelId: null, pendingModeId: null });
+          actions.resetModelSelection();
+          set({ pendingModeId: null });
           if (get().isAgentRunning) set({ turnState: "unknown" });
         }
         activeBinding = binding;
-        set({ pendingModelId: null, pendingModeId: null });
-        set({ supportsImages: binding?.supportsImages === true, supportsSteer: binding?.supportsSteer === true, steerAgentId: binding?.steerAgentId });
+        set({
+          supportsImages: binding?.supportsImages === true,
+          supportsSteer: binding?.supportsSteer === true,
+          steerAgentId: binding?.steerAgentId,
+        });
         set({ isBound: binding !== null });
       },
 
@@ -1806,7 +1813,7 @@ export const createSessionStore = (
             if (!get().isAgentRunning) {
               turnGeneration += 1;
               eventDrivenTurnGeneration = turnGeneration;
-              set({ pendingModelId: null, pendingModeId: null });
+              set({ pendingModeId: null });
               set({
                 isAgentRunning: true,
                 turnState: "running",
@@ -1880,6 +1887,7 @@ export const createSessionStore = (
         set({ agentCrashed: reason === null ? null : { reason } });
         if (reason !== null) {
           actions.resetSteering();
+          actions.resetModelSelection();
           activeBinding = null;
           set({ isBound: false });
           if (get().isAgentRunning)
@@ -2023,7 +2031,8 @@ export const createSessionStore = (
           settleAnnotation(queuedText(prompt), true),
         );
         turnGeneration += 1;
-        set({ pendingModelId: null, pendingModeId: null });
+        actions.resetModelSelection();
+        set({ pendingModeId: null });
         stopIdleTimer();
         historyReplaySessionId = null;
         openReplayUser = null;
@@ -2064,7 +2073,8 @@ export const createSessionStore = (
             settleAnnotation(queuedText(prompt), true),
           );
         turnGeneration += 1;
-        set({ pendingModelId: null, pendingModeId: null });
+        actions.resetModelSelection();
+        set({ pendingModeId: null });
         stopIdleTimer();
         historyReplaySessionId = null;
         openReplayUser = null;
@@ -2259,7 +2269,7 @@ export function attachSession(
     supportsImages: supportsImagePrompt(acp.agentInfo?.agentCapabilities),
     cancel: () => acp.cancel(),
     listModels: () => Promise.resolve(acp.models?.availableModels ?? []),
-    setModel: (modelId) => acp.setModel(modelId),
+    setModel: (modelId, options) => acp.setModel(modelId, options),
     setMode: (modeId) => acp.setMode(modeId),
   });
   store
