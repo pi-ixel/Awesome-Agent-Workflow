@@ -63,10 +63,10 @@ const host = createBrowserHost(<T,>(command: string, args?: unknown) => {
   return Promise.resolve(replies[command] as T);
 });
 
-export function BrowserAppearanceFixture() {
+export function BrowserAppearanceFixture({ visible = true } = {}) {
   return (
     <div className="h-[32rem] min-w-0">
-      <BrowserPanel host={host} sessionId={sessionId} visible />
+      <BrowserPanel host={host} sessionId={sessionId} visible={visible} />
     </div>
   );
 }
