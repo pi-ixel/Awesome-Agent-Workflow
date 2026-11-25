@@ -321,22 +321,6 @@ export function SessionStatusOverlay({
                               </>
                             )}
                           </NavigationRow>
-                          <NavigationRow
-                            aria-label="查看 Unversioned Files"
-                            className="font-sans tabular-nums text-danger-ink"
-                            onClick={() => {
-                              if (!project) return;
-                              openGitReview?.(project, "untracked");
-                            }}
-                          >
-                            <span aria-hidden="true">▤</span>
-                            <span className="flex-1">
-                              Unversioned Files ({gitModel.untrackedCount})
-                            </span>
-                            <span className="text-ok-ink">
-                              +{gitModel.untrackedAdded}
-                            </span>
-                          </NavigationRow>
                           <p
                             className="truncate px-2 py-1 text-xs text-ink-soft"
                             data-hint={gitModel.branch}

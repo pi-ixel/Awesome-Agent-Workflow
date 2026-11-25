@@ -46,12 +46,11 @@ describe("会话悬浮摘要口径", () => {
     expect(gitStatusSummary(snapshot)).toEqual({
       added: 6,
       count: 1,
-      untrackedCount: 1,
-      untrackedAdded: 3,
       removed: 6,
       source: "unstaged",
       branch: "main",
     });
+    expect(gitStatusSummary({ ...snapshot, changes: [snapshot.changes[2]!] })).toBeNull();
     expect(
       gitStatusSummary({
         ...snapshot,
@@ -101,14 +100,12 @@ describe("会话悬浮摘要口径", () => {
     const git = {
       added: 2,
       count: 1,
-      untrackedCount: 0,
-      untrackedAdded: 0,
       removed: 1,
       branch: "main",
       source: "unstaged" as const,
     };
     expect(compactStatusSummary(task, run, git)).toBe("编写测试");
     expect(compactStatusSummary(null, run, git)).toBe("给 logo 加底座 · 运行中 · 设计");
-    expect(compactStatusSummary(null, null, git)).toBe("Changes 1 · Unversioned Files 0");
+    expect(compactStatusSummary(null, null, git)).toBe("Changes 1");
   });
 });

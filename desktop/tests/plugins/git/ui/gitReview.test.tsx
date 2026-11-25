@@ -50,7 +50,9 @@ beforeEach(() => {
   vi.spyOn(panelService, "watch").mockResolvedValue(() => {});
   vi.spyOn(panelService, "gitStatus").mockResolvedValue(snapshot);
   vi.spyOn(panelService, "gitDiff").mockImplementation((_project, change) =>
-    Promise.resolve(diff(change.path === "b.txt" ? "target B" : "target A")),
+    Promise.resolve(change.source === "untracked"
+      ? { ...diff("target B"), untrackedLines: 1 }
+      : diff("target A")),
   );
 });
 
@@ -103,9 +105,12 @@ describe("ZCode 风格 Git 审查", () => {
     expect(panelService.gitDiff).toHaveBeenCalledTimes(2);
     const file = screen.getByRole("button", { name: "定位 b.txt" });
     expect(file).toHaveClass("text-danger-ink");
+    expect(file).not.toHaveTextContent(/[+−]\d/);
+    expect(screen.getByRole("button", { name: "Unversioned Files" })).not.toHaveTextContent(/[+−]\d/);
     await userEvent.click(file);
     expect(await screen.findByText("target B")).toBeInTheDocument();
     expect(file).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("button", { name: "收起 b.txt" })).toHaveTextContent("+1");
     expect(screen.queryByLabelText("筛选文件")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("查找变更内容")).not.toBeInTheDocument();
     expect(screen.queryByText(/未暂存|已暂存/)).not.toBeInTheDocument();

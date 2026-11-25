@@ -4,11 +4,10 @@ import type { PlanEntry } from "../../../contracts/acp/protocol.ts";
 
 export function gitStatusSummary(snapshot?: GitSnapshot) {
   if (!snapshot?.repoRoot) return null;
-  const changes = snapshot.changes.filter(
-    (change) => change.source !== "branch",
+  const tracked = snapshot.changes.filter(
+    (change) => change.source !== "branch" && change.source !== "untracked",
   );
-  const untracked = changes.filter((c) => c.source === "untracked");
-  const tracked = changes.filter((c) => c.source !== "untracked");
+  if (!tracked.length) return null;
   const added = tracked.reduce(
     (total, change) => total + (change.added ?? 0),
     0,
@@ -17,7 +16,6 @@ export function gitStatusSummary(snapshot?: GitSnapshot) {
     (total, change) => total + (change.removed ?? 0),
     0,
   );
-  if (changes.length === 0) return null;
   return {
     added,
     removed,
@@ -25,10 +23,8 @@ export function gitStatusSummary(snapshot?: GitSnapshot) {
       ? { statsUnavailable: true }
       : {}),
     count: new Set(tracked.map((c) => c.path)).size,
-    untrackedCount: untracked.length,
-    untrackedAdded: untracked.reduce((n, c) => n + (c.added ?? 0), 0),
     branch: snapshot.branch,
-    source: changes.some((change) => change.source !== "staged")
+    source: tracked.some((change) => change.source !== "staged")
       ? ("unstaged" as const)
       : ("staged" as const),
   };
@@ -66,7 +62,7 @@ export function compactStatusSummary(
   if (task?.current) return task.current.content;
   if (run) return run.summary;
   if (git)
-    return `Changes ${git.count} · Unversioned Files ${git.untrackedCount}`;
+    return `Changes ${git.count}`;
   if (task?.completed) return `任务已完成 ${task.done}/${task.total}`;
   return "会话状态";
 }

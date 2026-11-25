@@ -278,34 +278,6 @@ async fn line_stats(
     parse_numstat(&output.text, source)
 }
 
-async fn untracked_lines(path: PathBuf) -> u64 {
-    async fn read(path: PathBuf) -> Result<u64, std::io::Error> {
-        let metadata = tokio::fs::symlink_metadata(&path).await?;
-        if !metadata.is_file() || metadata.len() > 1024 * 1024 {
-            return Ok(0);
-        }
-        let mut file = tokio::fs::File::open(path).await?;
-        let mut buffer = vec![0u8; 64 * 1024];
-        let (mut size, mut lines, mut last) = (0, 0, b'\n');
-        loop {
-            let count = file.read(&mut buffer).await?;
-            if count == 0 {
-                return Ok(lines + u64::from(last != b'\n'));
-            }
-            size += count;
-            if size > 1024 * 1024 || buffer[..count].contains(&0) {
-                return Ok(0);
-            }
-            lines += buffer[..count]
-                .iter()
-                .filter(|&&byte| byte == b'\n')
-                .count() as u64;
-            last = buffer[count - 1];
-        }
-    }
-    read(path).await.unwrap_or(0)
-}
-
 async fn upstream(root: &Path) -> Option<String> {
     git(
         root,
@@ -402,30 +374,6 @@ pub async fn panel_git_status(project: String) -> Result<Snapshot, String> {
             serde_json::json!({"stage":"statistics", "cwd":display_path(&root), "error":warning}),
         );
     }
-    let jobs: Vec<_> = changes
-        .iter()
-        .enumerate()
-        .filter(|(_, c)| c.source == "untracked")
-        .map(|(index, c)| (index, root.join(&c.path)))
-        .collect();
-    let mut pending = tokio::task::JoinSet::new();
-    for (index, path) in jobs {
-        pending.spawn(async move { (index, untracked_lines(path).await) });
-        if pending.len() >= 4 {
-            let (index, lines) = pending
-                .join_next()
-                .await
-                .unwrap()
-                .map_err(|e| e.to_string())?;
-            changes[index].added = lines;
-        }
-    }
-    while let Some(result) = pending.join_next().await {
-        let (index, lines) = result.map_err(|e| e.to_string())?;
-        changes[index].added = lines;
-    }
-    // 沿用 ZCode Review：无可审查文本的未跟踪文件不出现在审查列表，仍可从文件树访问。
-    changes.retain(|c| c.source != "untracked" || c.added > 0 || c.path.ends_with('/'));
     let branch = checked(&root, &["rev-parse", "--abbrev-ref", "HEAD"])
         .await
         .map(|r| r.text.trim().to_string())
@@ -501,6 +449,8 @@ pub struct Diff {
     pub notice: Option<String>,
     pub before_content: Option<String>,
     pub after_content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub untracked_lines: Option<usize>,
 }
 
 #[tauri::command]
@@ -578,6 +528,7 @@ async fn panel_git_diff_inner(project: String, change: Change) -> Result<Diff, S
             } else {
                 None
             },
+            untracked_lines: Some(lines.len()),
             before_content: Some(String::new()),
             after_content: Some(content),
         });
@@ -642,6 +593,7 @@ async fn panel_git_diff_inner(project: String, change: Change) -> Result<Diff, S
         notice,
         before_content,
         after_content,
+        ..Default::default()
     })
 }
 
@@ -945,8 +897,13 @@ mod tests {
         std::fs::write(base.join("other/hidden.txt"), "other\n").unwrap();
         std::fs::write(base.join("app/empty.txt"), "").unwrap();
         let initial = panel_git_status(project.clone()).await.unwrap();
-        assert_eq!(initial.changes.len(), 1);
-        assert_eq!(initial.changes[0].added, 1);
+        assert_eq!(initial.changes.len(), 2);
+        assert!(
+            initial
+                .changes
+                .iter()
+                .all(|change| change.source == "untracked")
+        );
         assert!(initial.upstream.is_none());
         checked(&base, &["add", "."]).await.unwrap();
         let staged = panel_git_status(project.clone()).await.unwrap();
@@ -990,17 +947,11 @@ mod tests {
                 .patch
                 .contains("rename")
         );
-        assert!(
-            !updated
-                .changes
-                .iter()
-                .any(|c| c.path.ends_with("binary.dat"))
-        );
-        let binary = Change {
-            path: "app/binary.dat".into(),
-            source: "untracked".into(),
-            ..Default::default()
-        };
+        let binary = updated
+            .changes
+            .into_iter()
+            .find(|c| c.path.ends_with("binary.dat"))
+            .unwrap();
         assert!(
             panel_git_diff(project, binary)
                 .await
@@ -1142,15 +1093,23 @@ mod tests {
             Some("")
         );
         for (name, bytes, expected) in [
-            ("tail", b"a\nb".as_slice(), 2),
-            ("empty", b"".as_slice(), 0),
-            ("binary", b"a\0b".as_slice(), 0),
+            ("tail", b"a\nb".as_slice(), Some(2)),
+            ("empty", b"".as_slice(), Some(0)),
+            ("binary", b"a\0b".as_slice(), None),
+            ("large", vec![b'x'; 1024 * 1024 + 1].as_slice(), None),
         ] {
             std::fs::write(base.join(name), bytes).unwrap();
-            assert_eq!(untracked_lines(base.join(name)).await, expected);
+            let project = display_path(&base);
+            let listed = panel_git_status(project.clone()).await.unwrap();
+            let change = listed.changes.into_iter().find(|c| c.path == name).unwrap();
+            assert_eq!(change.source, "untracked");
+            assert_eq!(change.added, 0);
+            let diff = panel_git_diff(project, change).await.unwrap();
+            assert_eq!(diff.untracked_lines, expected);
+            if expected.is_none() {
+                assert!(diff.notice.is_some());
+            }
         }
-        std::fs::write(base.join("large"), vec![b'x'; 1024 * 1024 + 1]).unwrap();
-        assert_eq!(untracked_lines(base.join("large")).await, 0);
         assert!(base.starts_with(std::env::temp_dir()));
         std::fs::remove_dir_all(base).unwrap();
     }

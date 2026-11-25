@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs, io,
     path::{Path, PathBuf},
-    sync::Mutex,
 };
 use tauri::{AppHandle, Manager};
 
@@ -153,7 +152,6 @@ pub async fn skill_library_candidates(from: PathBuf) -> std::result::Result<Vec<
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())
 }
-static OPERATIONS: Mutex<()> = Mutex::new(());
 #[tauri::command]
 pub async fn skill_library_toggle(
     app: AppHandle,
@@ -166,7 +164,6 @@ pub async fn skill_library_toggle(
     }
     let locations = Locations::resolve(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let _lock = OPERATIONS.lock().map_err(error)?;
         changes::toggle(&locations, &query, action)
     })
     .await
@@ -180,7 +177,6 @@ pub async fn skill_library_list(
 ) -> std::result::Result<Catalog, String> {
     let locations = Locations::resolve(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let _lock = OPERATIONS.lock().map_err(error)?;
         catalog::list(&locations, &query)
     })
     .await
@@ -195,7 +191,6 @@ pub async fn skill_library_change(
 ) -> std::result::Result<Vec<String>, String> {
     let locations = Locations::resolve(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let _lock = OPERATIONS.lock().map_err(error)?;
         changes::apply(&locations, &query, action)
     })
     .await
@@ -217,7 +212,6 @@ pub async fn skill_library_sizes(
         return Err("请求的技能数量超过上限".into());
     }
     let locations = Locations::resolve(&app)?;
-    // 目录遍历不占用技能列表和修改操作的锁。
     tauri::async_runtime::spawn_blocking(move || {
         files::directory_sizes(&locations, &query, &skills)
     })
@@ -239,7 +233,6 @@ pub async fn skill_library_files(
     }
     let locations = Locations::resolve(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let _lock = OPERATIONS.lock().map_err(error)?;
         files::browse(&locations, &query, &skill, request)
     })
     .await
