@@ -121,7 +121,13 @@ function MarkdownSample() {
     <MarkdownAppearance value={secondary ? mirrored : preferences}>
       {linkSample ? (
         <MarkdownView fileRoot="/project" onOpenFile={reportSampleFile} onOpenExternal={reportSampleLink}
-          text="[项目说明](./README.md) 与 [外部文档](https://example.org/guide)" />
+          replyFiles={{
+            root: "/project",
+            verify: (_root, path) => Promise.resolve(path === "/project/README.md" ? path : null),
+            open: reportSampleFile,
+            openAbsolute: reportSampleFile,
+          }}
+          text={"[项目说明](./README.md) 与 [外部文档](https://example.org/guide)，或打开 `D:\\outside\\sample.html`。"} />
       ) : <MarkdownView text={"~~~mermaid\nflowchart LR\n Draft[草稿] --> Done[完成]\n~~~"} />}
     </MarkdownAppearance>
   );

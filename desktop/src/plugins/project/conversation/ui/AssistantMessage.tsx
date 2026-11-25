@@ -31,7 +31,7 @@ function AssistantMessageBase({
   readonly usage?: TurnUsageDetails | null;
 }) {
   const item = useStreamingItem(layoutItem);
-  const { assetUrl, openPath, openExternal, verifyRelativeFile } = useContext(ConversationDocumentContext) ?? {};
+  const { assetUrl, openPath, openAbsoluteFile, openExternal, verifyRelativeFile } = useContext(ConversationDocumentContext) ?? {};
   const project = useWorkspaceValue((state) => state.activePath);
   const workspace = useProject()?.projects.workspace;
   const foreground = useConversation()?.session;
@@ -39,8 +39,9 @@ function AssistantMessageBase({
   const agentKey = useSessionValue((state) => state.agentKey);
   const workingDirectory = useSessionValue((state) => state.workingDirectory);
   const [fileError, setFileError] = useState<string | null>(null);
-  const onOpenFile = useCallback((path: string, line?: number) => {
-    if (!project || !openPath) return;
+  const onOpenFile = useCallback((path: string, line?: number, absolute = false) => {
+    const open = absolute ? openAbsoluteFile : openPath;
+    if (!project || !open) return;
     const isCurrent = () => {
       const state = foreground?.getState();
       return workspace?.getState().activePath === project &&
@@ -50,15 +51,16 @@ function AssistantMessageBase({
     };
     if (!isCurrent()) return;
     setFileError(null);
-    void openPath(project, path, line, isCurrent).catch((error: unknown) => {
+    void open(project, path, line, isCurrent).catch((error: unknown) => {
       if (isCurrent()) setFileError(describeUnknownError(error));
     });
-  }, [agentKey, foreground, openPath, project, sessionId, workingDirectory, workspace]);
+  }, [agentKey, foreground, openAbsoluteFile, openPath, project, sessionId, workingDirectory, workspace]);
   const replyFiles = useMemo(() => ({
     root: workingDirectory,
     verify: verifyRelativeFile,
     open: openPath ? onOpenFile : undefined,
-  }), [workingDirectory, verifyRelativeFile, openPath, onOpenFile]);
+    openAbsolute: openAbsoluteFile ? (path: string, line?: number) => onOpenFile(path, line, true) : undefined,
+  }), [workingDirectory, verifyRelativeFile, openPath, openAbsoluteFile, onOpenFile]);
   return (
     // group：复制按钮随卡片 hover 浮现，不再常驻制造噪音
     <div
