@@ -221,9 +221,116 @@ fn migrate_file(data: &Path, kind: SessionData, source: &Path) -> io::Result<boo
     let Some(name) = kind.filename() else {
         return Ok(false);
     };
-    let target = identity.ensure(data)?.join(name);
+    let directory = identity.ensure(data)?;
+    let target = directory.join(name);
+    if let Some((reader, Some(previous))) = open(&target)? {
+        if previous != scope && SessionIdentity::from_scope(&previous).as_ref() == Some(&identity) {
+            let use_source = match kind {
+                SessionData::Snapshot => {
+                    let previous_time = snapshot_stamp(reader)?;
+                    let (source_reader, _) =
+                        open(source)?.ok_or_else(|| io::Error::other("旧快照已变化"))?;
+                    (snapshot_stamp(source_reader)?, &scope) > (previous_time, &previous)
+                }
+                SessionData::MessageImage | SessionData::Queue => {
+                    // These are ordered histories. Keep the variant belonging to the active transcript.
+                    let _: Vec<serde::de::IgnoredAny> = serde_json::from_reader(reader)?;
+                    let (incoming, _) =
+                        open(source)?.ok_or_else(|| io::Error::other("旧会话文件已变化"))?;
+                    let _: Vec<serde::de::IgnoredAny> = serde_json::from_reader(incoming)?;
+                    let active =
+                        open(&directory.join("messages.json"))?.and_then(|(_, scope)| scope);
+                    if active.as_ref() != Some(&scope) && active.as_ref() != Some(&previous) {
+                        return Err(io::Error::other(
+                            "无法确定重复会话附件或队列对应的快照，已保留原文件",
+                        ));
+                    }
+                    active.as_ref() == Some(&scope)
+                }
+                SessionData::ImageDraft => unreachable!(),
+            };
+            publish_alias(source, &target, use_source)?;
+            return Ok(true);
+        }
+    }
     move_verified(source, &target)?;
     Ok(true)
+}
+
+fn snapshot_stamp(reader: BufReader<File>) -> io::Result<chrono::DateTime<chrono::Utc>> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Snapshot {
+        saved_at: String,
+        version: u32,
+        #[serde(rename = "items")]
+        _items: Vec<serde::de::IgnoredAny>,
+    }
+    let meta: Snapshot = serde_json::from_reader(reader)?;
+    if meta.version != 1 {
+        return Err(io::Error::other("无法识别重复快照的版本，已保留原文件"));
+    }
+    meta.saved_at
+        .parse()
+        .map_err(|_| io::Error::other("重复快照保存时间无效，已保留原文件"))
+}
+
+/// Keep the inactive version verbatim before publishing or removing either input.
+fn publish_alias(source: &Path, target: &Path, use_source: bool) -> io::Result<()> {
+    let inactive = if use_source { target } else { source };
+    let directory = target
+        .parent()
+        .ok_or_else(|| io::Error::other("缺少会话目录"))?;
+    let digest = checksum(inactive)?;
+    let archive = directory
+        .join(
+            if target.file_name() == Some(std::ffi::OsStr::new("queue.json")) {
+                "queue-versions"
+            } else {
+                "snapshot-versions"
+            },
+        )
+        .join(format!("{digest:x}.json"));
+    if !use_source {
+        return move_verified(source, &archive);
+    }
+    if !archive.try_exists()? {
+        let copy = verified_copy(inactive, &archive, &digest)?;
+        copy.persist_noclobber(
+            archive
+                .parent()
+                .unwrap()
+                .canonicalize()?
+                .join(archive.file_name().unwrap()),
+        )
+        .map_err(|e| e.error)?;
+    }
+    if checksum(&archive)? != digest {
+        return Err(io::Error::other("备用快照校验失败，已保留源文件"));
+    }
+    let latest = checksum(source)?;
+    let copy = verified_copy(source, target, &latest)?;
+    copy.persist(directory.canonicalize()?.join(target.file_name().unwrap()))
+        .map_err(|e| e.error)?;
+    move_verified(source, target)
+}
+
+fn verified_copy(
+    source: &Path,
+    target: &Path,
+    expected: &sha2::digest::Output<Sha256>,
+) -> io::Result<tempfile::NamedTempFile> {
+    let parent = target
+        .parent()
+        .ok_or_else(|| io::Error::other("缺少目标目录"))?;
+    fs::create_dir_all(parent)?;
+    let mut copy = tempfile::NamedTempFile::new_in(parent.canonicalize()?)?;
+    io::copy(&mut File::open(source)?, copy.as_file_mut())?;
+    copy.as_file().sync_all()?;
+    if checksum(copy.path())? != *expected {
+        return Err(io::Error::other("写入后的会话副本校验失败"));
+    }
+    Ok(copy)
 }
 
 pub(crate) fn move_verified(source: &Path, target: &Path) -> io::Result<()> {
@@ -232,14 +339,8 @@ pub(crate) fn move_verified(source: &Path, target: &Path) -> io::Result<()> {
         .ok_or_else(|| io::Error::other("缺少目标目录"))?;
     let original = checksum(source)?;
     if !target.try_exists()? {
-        fs::create_dir_all(parent)?;
+        let temporary = verified_copy(source, target, &original)?;
         let physical = parent.canonicalize()?;
-        let mut temporary = tempfile::NamedTempFile::new_in(&physical)?;
-        io::copy(&mut File::open(source)?, temporary.as_file_mut())?;
-        temporary.as_file().sync_all()?;
-        if checksum(temporary.path())? != original {
-            return Err(io::Error::other("写入后的会话副本校验失败"));
-        }
         temporary
             .persist_noclobber(physical.join(target.file_name().unwrap()))
             .map_err(|e| e.error)?;
@@ -749,6 +850,77 @@ mod deletion_tests {
             expected
         );
         assert!(untouched.is_file());
+    }
+
+    #[test]
+    fn migrating_snapshot_aliases_preserves_both_versions_in_either_order() {
+        for newest_first in [false, true] {
+            let tmp = tempfile::tempdir().unwrap();
+            let data = tmp.path();
+            let kind = SessionData::Snapshot;
+            let old = r#"["[\"native-opencode\",\"old path\"]","d:/repo#same"]"#;
+            let new = r#"["[\"native-opencode\",\"new path\"]","d:/repo#same"]"#;
+            let legacy = kind.legacy_directory(data);
+            let first = path(&legacy, old);
+            let second = path(&legacy, new);
+            write(
+                &first,
+                Some(old),
+                r#"{"version":1,"items":["old"],"savedAt":"2026-11-16T00:00:00Z"}"#,
+            )
+            .unwrap();
+            write(
+                &second,
+                Some(new),
+                r#"{"version":1,"items":["new"],"savedAt":"2026-11-23T00:00:00Z"}"#,
+            )
+            .unwrap();
+            let expected_old = fs::read(&first).unwrap();
+            let expected_new = fs::read(&second).unwrap();
+            let order = if newest_first {
+                [&second, &first]
+            } else {
+                [&first, &second]
+            };
+            for source in order {
+                assert!(migrate_file(data, kind, source).unwrap());
+            }
+            let folder = SessionIdentity::from_scope(old).unwrap().directory(data);
+            assert_eq!(
+                fs::read(folder.join("messages.json")).unwrap(),
+                expected_new
+            );
+            for kind in [SessionData::MessageImage, SessionData::Queue] {
+                let legacy = kind.legacy_directory(data);
+                let a = path(&legacy, old);
+                let b = path(&legacy, new);
+                write(&a, Some(old), r#"["old"]"#).unwrap();
+                write(&b, Some(new), r#"["new"]"#).unwrap();
+                let expected = fs::read(&b).unwrap();
+                let inputs = if newest_first { [&b, &a] } else { [&a, &b] };
+                for input in inputs {
+                    assert!(migrate_file(data, kind, input).unwrap());
+                }
+                assert_eq!(
+                    fs::read(folder.join(kind.filename().unwrap())).unwrap(),
+                    expected
+                );
+            }
+            let backup = folder
+                .join("snapshot-versions")
+                .join(format!("{:x}.json", Sha256::digest(&expected_old)));
+            assert_eq!(fs::read(&backup).unwrap(), expected_old);
+            // Simulate an interrupted upgrade after publication but before removing the source.
+            fs::write(&first, &expected_old).unwrap();
+            assert!(migrate_file(data, kind, &first).unwrap());
+            assert_eq!(fs::read(backup).unwrap(), expected_old);
+            assert_eq!(
+                fs::read_dir(folder.join("snapshot-versions"))
+                    .unwrap()
+                    .count(),
+                1
+            );
+        }
     }
 
     #[test]

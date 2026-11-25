@@ -1359,6 +1359,7 @@ pub(crate) fn migrate_owner(
     agent_key: &str,
     owner: &crate::session_layout::SessionIdentity,
     cwd_key: &str,
+    source_cwd_key: &str,
 ) -> Result<PathBuf, String> {
     let session_id = owner.session_id.as_deref().ok_or("缺少会话 ID")?;
     let dir = owner
@@ -1374,7 +1375,7 @@ pub(crate) fn migrate_owner(
         write_json(&reference, owner)?;
     }
     let source = storage
-        .join(cwd_key)
+        .join(source_cwd_key)
         .join(digest(format!("{agent_key}\0{session_id}").as_bytes()));
     let entries = match fs::read_dir(&source) {
         Ok(entries) => entries,
@@ -1429,9 +1430,9 @@ fn migrate_for_cwd(
     let Some(id) = owner.session_id.as_ref() else {
         return Ok(());
     };
-    let path = canonical_location(Path::new(cwd))
-        .map(|p| p.to_string_lossy().replace('\\', "/"))
-        .unwrap_or_else(|_| cwd.replace('\\', "/"));
+    let physical = canonical_location(Path::new(cwd)).unwrap_or_else(|_| PathBuf::from(cwd));
+    let legacy_workspace = digest(physical.to_string_lossy().as_bytes());
+    let path = physical.to_string_lossy().replace('\\', "/");
     let normalized = path.strip_prefix("//?/").unwrap_or(&path);
     let normalized = if cfg!(windows) {
         normalized.to_ascii_lowercase()
@@ -1439,13 +1440,15 @@ fn migrate_for_cwd(
         normalized.to_owned()
     };
     let workspace = digest(normalized.as_bytes());
-    if storage
-        .join(&workspace)
-        .join(digest(format!("{agent}\0{id}").as_bytes()))
-        .try_exists()
-        .map_err(|e| e.to_string())?
-    {
-        migrate_owner(data, storage, agent, owner, &workspace)?;
+    for source_key in std::collections::BTreeSet::from([&workspace, &legacy_workspace]) {
+        if storage
+            .join(source_key)
+            .join(digest(format!("{agent}\0{id}").as_bytes()))
+            .try_exists()
+            .map_err(|e| e.to_string())?
+        {
+            migrate_owner(data, storage, agent, owner, &workspace, source_key)?;
+        }
     }
     Ok(())
 }
@@ -1537,7 +1540,7 @@ pub(crate) fn finish_legacy_assignments(
                         .get(session.file_name().to_string_lossy().as_ref())
                         .map(Vec::as_slice)
                     {
-                        migrate_owner(data, storage, agent, owner, cwd)?;
+                        migrate_owner(data, storage, agent, owner, cwd, cwd)?;
                         continue;
                     }
                 }
@@ -1599,7 +1602,14 @@ fn execute_stored(
             Some(&request.session_id),
         )
         .ok_or("轮次快照缺少会话身份")?;
-        migrate_owner(data, storage, &request.agent_key, &owner, &cwd_key)?
+        migrate_owner(
+            data,
+            storage,
+            &request.agent_key,
+            &owner,
+            &cwd_key,
+            &cwd_key,
+        )?
     } else {
         legacy
     };
@@ -1962,6 +1972,39 @@ mod tests {
             moves: None,
             expires_at: None,
         }
+    }
+    #[test]
+    #[cfg(windows)]
+    fn mixed_case_native_workspace_hash_is_rekeyed_for_the_active_diff_reader() {
+        let temp = tempfile::tempdir().unwrap();
+        let work = temp.path().join("Mixed-Case-Repo");
+        let data = temp.path().join("data");
+        let legacy = temp.path().join("legacy");
+        fs::create_dir(&work).unwrap();
+        let id = execute(&legacy, request("begin", &work, None))
+            .unwrap()
+            .remove(0)
+            .id;
+        let physical = work.canonicalize().unwrap();
+        let original = digest(physical.to_string_lossy().as_bytes());
+        let entry = fs::read_dir(&legacy)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        assert_ne!(entry.file_name().unwrap().to_str().unwrap(), original);
+        fs::rename(entry, legacy.join(&original)).unwrap();
+        let owner = crate::session_layout::SessionIdentity::new(
+            "test",
+            work.to_str().unwrap(),
+            Some("session"),
+        )
+        .unwrap();
+        migrate_known_turns(&data, &legacy, "test", &owner).unwrap();
+        let list =
+            execute_stored(&legacy, Some(&data), request("list", &work, None), capture).unwrap();
+        assert_eq!(list[0].id, id);
     }
     #[test]
     fn migrated_history_can_undo_changes_and_keeps_workspace_coordination() {
