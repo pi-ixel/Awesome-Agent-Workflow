@@ -1,13 +1,23 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs, io,
     path::{Path, PathBuf},
 };
 
-static PROJECT_INDEX: Mutex<()> = Mutex::new(());
+fn project_index(project: &Path) -> io::Result<Arc<Mutex<()>>> {
+    static LOCKS: OnceLock<Mutex<BTreeMap<PathBuf, Weak<Mutex<()>>>>> = OnceLock::new();
+    let mut locks = LOCKS.get_or_init(Default::default).lock().map_err(|_| io::Error::other("项目索引不可用"))?;
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(project).and_then(Weak::upgrade) {
+        return Ok(lock);
+    }
+    let lock = Arc::new(Mutex::new(()));
+    locks.insert(project.to_owned(), Arc::downgrade(&lock));
+    Ok(lock)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -175,7 +185,8 @@ impl SessionIdentity {
             self.verify(&directory.join("identity.json"))?;
             return Ok(directory);
         }
-        let _guard = PROJECT_INDEX
+        let lock = project_index(&project)?;
+        let _guard = lock
             .lock()
             .map_err(|e| io::Error::other(e.to_string()))?;
         let incremental = index.try_exists()? && !marker.try_exists()?;
@@ -262,24 +273,45 @@ fn rebuild_index(data: &Path, project: &Path, owner: &SessionIdentity) -> io::Re
 }
 
 pub(crate) fn remove_indexed_directory(data: &Path, owner: &SessionIdentity) -> io::Result<()> {
-    let _guard = PROJECT_INDEX
-        .lock()
-        .map_err(|e| io::Error::other(e.to_string()))?;
     let project = owner.project_directory(data);
-    fs::File::create(project.join(".index-pending"))?.sync_all()?;
-    fs::remove_dir_all(owner.directory(data))?;
-    rebuild_index(data, &project, owner)
+    let pending = project.join(".index-pending");
+    // 原子移出 sessions，索引重建不会看到删除了一半的目录。
+    let id = owner.session_id.as_deref().ok_or_else(|| io::Error::other("缺少会话 ID"))?;
+    let staged = project.join(".deleting").join(format!("{:x}", Sha256::digest(id.as_bytes())));
+    {
+        let lock = project_index(&project)?;
+        let _guard = lock.lock().map_err(|_| io::Error::other("项目索引不可用"))?;
+        let index = project.join("sessions-index.json");
+        let ids = if pending.try_exists()? {
+            None
+        } else {
+            fs::read(&index).ok().and_then(|bytes| serde_json::from_slice::<BTreeSet<String>>(&bytes).ok())
+        };
+        let directory = owner.directory(data);
+        if directory.try_exists()? {
+            fs::create_dir_all(staged.parent().unwrap())?;
+            fs::File::create(&pending)?.sync_all()?;
+            fs::rename(directory, &staged)?;
+        }
+        if let Some(mut ids) = ids {
+            if ids.remove(id) {
+                crate::storage_preferences::write_record(&index, &ids).map_err(io::Error::other)?;
+            }
+            if pending.try_exists()? {
+                fs::remove_file(pending)?;
+            }
+        } else if project.try_exists()? {
+            rebuild_index(data, &project, owner)?;
+        }
+    }
+    if staged.try_exists()? {
+        fs::remove_dir_all(staged)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn repair_after_removal(data: &Path, owner: &SessionIdentity) -> io::Result<()> {
-    let project = owner.project_directory(data);
-    let _guard = PROJECT_INDEX
-        .lock()
-        .map_err(|e| io::Error::other(e.to_string()))?;
-    if project.join(".index-pending").try_exists()? {
-        rebuild_index(data, &project, owner)?;
-    }
-    Ok(())
+    remove_indexed_directory(data, owner)
 }
 
 fn children(path: &Path) -> io::Result<Vec<PathBuf>> {
@@ -492,5 +524,52 @@ mod tests {
             published
         );
         assert_eq!(directories(dir.path()).unwrap(), vec![published]);
+    }
+}
+
+
+#[cfg(test)]
+mod deletion_tests {
+    use super::*;
+
+    #[test]
+    fn removes_one_index_entry_without_reading_other_session_identities() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path();
+        let target = SessionIdentity::new("codeagent", "D:/repo", Some("one")).unwrap();
+        let neighbor = SessionIdentity::new("codeagent", "D:/repo", Some("two")).unwrap();
+        target.ensure(data).unwrap();
+        let neighbor_dir = neighbor.ensure(data).unwrap();
+        // 如果重新扫描项目，损坏的邻居身份会使操作失败。
+        fs::write(neighbor_dir.join("identity.json"), "{}").unwrap();
+        remove_indexed_directory(data, &target).unwrap();
+        assert!(!target.directory(data).exists());
+        assert!(neighbor_dir.exists());
+        let ids: BTreeSet<String> = serde_json::from_slice(
+            &fs::read(target.project_directory(data).join("sessions-index.json")).unwrap(),
+        ).unwrap();
+        assert_eq!(ids, BTreeSet::from(["two".to_owned()]));
+    }
+
+    #[test]
+    fn resumes_staged_deletion_and_repairs_interrupted_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path();
+        let target = SessionIdentity::new("codeagent", "D:/repo", Some("one")).unwrap();
+        let neighbor = SessionIdentity::new("codeagent", "D:/repo", Some("two")).unwrap();
+        let directory = target.ensure(data).unwrap();
+        neighbor.ensure(data).unwrap();
+        let project = target.project_directory(data);
+        let staging = project.join(".deleting");
+        fs::create_dir(&staging).unwrap();
+        let staged = staging.join(format!("{:x}", Sha256::digest(b"one")));
+        fs::write(project.join(".index-pending"), "").unwrap();
+        fs::rename(directory, &staged).unwrap();
+        repair_after_removal(data, &target).unwrap();
+        assert!(!staged.exists());
+        let ids: BTreeSet<String> = serde_json::from_slice(
+            &fs::read(project.join("sessions-index.json")).unwrap(),
+        ).unwrap();
+        assert_eq!(ids, BTreeSet::from(["two".to_owned()]));
     }
 }

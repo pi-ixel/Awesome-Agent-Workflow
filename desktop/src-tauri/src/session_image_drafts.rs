@@ -41,6 +41,9 @@ fn grouped(data: &Path, values: Images) -> Result<(BTreeMap<PathBuf, Images>, Im
             continue;
         }
         if let Some(identity) = SessionIdentity::from_composer_key(&key) {
+            if identity.deleted_marker(data).and_then(|marker| marker.try_exists()).map_err(|e| e.to_string())? {
+                continue;
+            }
             let dir = identity.ensure(data).map_err(|e| e.to_string())?;
             groups
                 .entry(dir.join(FILE))

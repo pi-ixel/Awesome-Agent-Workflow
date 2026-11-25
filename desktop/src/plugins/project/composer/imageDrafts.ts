@@ -74,7 +74,7 @@ export function createImageDraftStorage(
   storage: HostStorage,
 ): ImageDraftStorage & {
   load(migrate?: boolean): Promise<ImageDrafts>;
-  removeScopes(scopes: readonly string[]): Promise<void>;
+  removeScopes(scopes: readonly string[], removeNative?: boolean): Promise<void>;
   readonly editing: boolean;
   readonly saveFailure: { message(): string | undefined; retry(): Promise<void> };
   legacyEntries(): readonly StorageItem[];
@@ -285,7 +285,7 @@ export function createImageDraftStorage(
     return removal;
   }
   return {
-    removeScopes(scopes: readonly string[]) {
+    removeScopes(scopes: readonly string[], removeNative = true) {
       for (const scope of scopes) deletedScopes.add(scope);
       const strip = (values: ImageDrafts): ImageDrafts =>
         Object.fromEntries(
@@ -294,7 +294,7 @@ export function createImageDraftStorage(
       const removal = pendingSave
         .catch(() => {})
         .then(async () => {
-          if (nativeImageDrafts.available()) {
+          if (removeNative && nativeImageDrafts.available()) {
             const saved = await nativeImageDrafts.read("all");
             const current =
               saved === null

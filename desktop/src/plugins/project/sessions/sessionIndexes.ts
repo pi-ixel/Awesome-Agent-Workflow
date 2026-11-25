@@ -139,7 +139,7 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
         "aaw-desktop/archived-session-metadata.v1",
         JSON.stringify(metadata),
       );
-      await storage.managed?.flush?.();
+      await (storage.managed?.flushConfiguration?.() ?? storage.managed?.flush?.());
       const error = storage.managed?.configurationError?.();
       if (error) throw new Error(error);
       if (

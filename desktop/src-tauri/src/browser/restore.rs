@@ -189,22 +189,43 @@ fn recover_damaged_legacy_records(data: &std::path::Path) -> Result<(), String> 
 }
 
 pub(crate) fn forget_owner(data: &std::path::Path, owner: &SessionIdentity) -> Result<(), String> {
-    stored_transaction(data, false, |store| {
-        let before = store.records.len();
-        store.records.retain(|_, record| {
-            !(owner.session_id.as_ref() == Some(&record.scope.session_id)
-                && workspace_key(&owner.project) == workspace_key(&record.scope.workspace_id)
-                && record.scope.agent_key.as_deref().is_none_or(|key| {
-                    SessionIdentity::new(key, &owner.project, owner.session_id.as_deref()).as_ref()
-                        == Some(owner)
-                }))
-        });
-        let changed = store.records.len() != before;
-        if changed {
-            store.epoch = id();
+    let _guard = WRITER.lock().map_err(|e| e.to_string())?;
+    let path = data.join("browser-restore/snapshots.json");
+    let mut store = read_store(&path)?;
+    let before = store.records.len();
+    store.records.retain(|_, record| {
+        !(owner.session_id.as_ref() == Some(&record.scope.session_id)
+            && workspace_key(&owner.project) == workspace_key(&record.scope.workspace_id)
+            && record.scope.agent_key.as_deref().is_none_or(|key| {
+                SessionIdentity::new(key, &owner.project, owner.session_id.as_deref()).as_ref()
+                    == Some(owner)
+            }))
+    });
+    let removed: Vec<_> = store.files.values().filter(|file| &file.owner == owner).cloned().collect();
+    store.files.retain(|_, file| &file.owner != owner);
+    if store.records.len() != before || !removed.is_empty() {
+        store.epoch = id();
+        write_record(&path, &store)?;
+        for file in removed {
+            match std::fs::remove_file(file.path(data)?) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.to_string()),
+            }
         }
-        Ok(((), changed))
-    })
+    }
+    Ok(())
+}
+
+fn read_store(path: &std::path::Path) -> Result<Store, String> {
+    if std::fs::metadata(path).is_ok_and(|meta| meta.len() > LIMIT as u64) {
+        return Err("浏览器恢复快照超过存储上限".into());
+    }
+    let store: Store = read_record(path)?;
+    if store.version != 1 {
+        return Err("浏览器恢复快照版本不受支持".into());
+    }
+    Ok(store)
 }
 
 fn stored_transaction<T>(
@@ -214,13 +235,7 @@ fn stored_transaction<T>(
 ) -> Result<T, String> {
     let _lock = WRITER.lock().map_err(|e| e.to_string())?;
     let path = data.join("browser-restore/snapshots.json");
-    if std::fs::metadata(&path).is_ok_and(|meta| meta.len() > LIMIT as u64) {
-        return Err("浏览器恢复快照超过存储上限".into());
-    }
-    let mut store: Store = read_record(&path)?;
-    if store.version != 1 {
-        return Err("浏览器恢复快照版本不受支持".into());
-    }
+    let mut store = read_store(&path)?;
     let old = std::mem::take(&mut store.files);
     let legacy = store
         .records

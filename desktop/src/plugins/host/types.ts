@@ -262,6 +262,7 @@ export interface HostManagedStorage {
   configurationBytes(): number | undefined;
   configurationError(): string;
   conversationError(): string;
+  flushConfiguration?(): Promise<void>;
 }
 
 export type ExitDiagnostics = (entry?: LogEntry) => Promise<void>;

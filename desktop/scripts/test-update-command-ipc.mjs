@@ -214,7 +214,8 @@ try {
         else finish(null, message.result.result.value);
       };
       const closed = () => finish(new Error("Desktop disconnected during IPC"));
-      const timer = setTimeout(() => finish(new Error("IPC timed out")), 15000);
+      const ipcTimeout = lifecycle && process.env.AAW_ARCHIVE_DELETE_BENCH === "1" ? 180_000 : 15_000;
+      const timer = setTimeout(() => finish(new Error("IPC timed out")), ipcTimeout);
       connection.addEventListener("message", receive);
       connection.addEventListener("close", closed);
       connection.send(

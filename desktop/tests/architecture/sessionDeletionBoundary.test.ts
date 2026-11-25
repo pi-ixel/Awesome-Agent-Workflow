@@ -66,3 +66,16 @@ it("routes archives through the same session service without spawning the CodeAg
     /std::process::Command|\.spawn\(|sessions.*delete/,
   );
 });
+
+it("deletes using the selected session directory without enumerating the library", () => {
+  const project = readFileSync("src/plugins/project/lifecycle/project.ts", "utf8");
+  const cleanup = project.split("private async removeSessionData")[1]?.split("private assertOpen")[0];
+  expect(cleanup).toContain('"session_data_finish_deletion"');
+  expect(cleanup).not.toMatch(/\.list\(|listScopes|imageDrafts\.load|\.flush\(/);
+  const coordinator = readFileSync("src/plugins/project/sessions/sessionCoordinator.ts", "utf8");
+  const deletion = coordinator.split("function deleteArchivedSession")[1]?.split("function closeSessionRuntime")[0];
+  expect(deletion).toBeDefined();
+  expect(deletion).not.toContain("await openQueue");
+  const native = readFileSync("src-tauri/src/codeagent_delete.rs", "utf8");
+  expect(native).not.toContain("DELETION.lock");
+});

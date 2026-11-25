@@ -4,13 +4,10 @@ use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
     io::BufReader,
-    path::{Path, PathBuf},
-    sync::Mutex,
+    path::Path,
     time::{Duration, Instant, UNIX_EPOCH},
 };
 use tauri::Manager;
-
-static DELETION: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Deserialize, Serialize)]
 struct Plan {
@@ -212,18 +209,11 @@ fn locate(root: &Path, sid: &str, cwd: &str, exclude: Option<&str>) -> Result<Pl
         if !meta.is_dir() {
             continue;
         }
-        let _project = directory_guard(&entry.path())?;
         let transcript = entry.path().join(format!("{sid}.jsonl"));
         let sidecar = entry.path().join(sid);
         let existing = metadata(&transcript)?;
         if let Some(meta) = existing {
             let before = revision_of(&meta)?;
-            if !verify(&transcript, sid, cwd)? {
-                return Err("同一会话 ID 对应其他项目或历史格式无法核验".into());
-            }
-            if revision(&transcript)? != before {
-                return Err("会话文件身份已变化".into());
-            }
             if result.project.is_some() {
                 return Err("找到多份同一会话，无法确定删除目标".into());
             }
@@ -404,7 +394,6 @@ fn delete(home: &Path, journal: &Path, sid: &str, cwd: &str) -> Result<(), Strin
     {
         return Err("删除目标标识无效".into());
     }
-    let _guard = DELETION.lock().map_err(|e| e.to_string())?;
     let cac = home.join(".cac");
     let root = cac.join("projects");
     // 删除期间始终防止祖先目录被替换。
@@ -431,8 +420,10 @@ fn delete(home: &Path, journal: &Path, sid: &str, cwd: &str) -> Result<(), Strin
         lock_options.share_mode(0);
     }
     let _lock = lock_options
-        .open(journal_path.with_extension("lock"))
+        .open(journal.join(format!("{:x}.lock", Sha256::digest(sid.as_bytes()))))
         .map_err(|_| "其他窗口正在删除此会话，请稍后重试")?;
+    #[cfg(not(windows))]
+    _lock.try_lock().map_err(|e| e.to_string())?;
     let saved = metadata(&journal_path)?
         .map(|_| {
             serde_json::from_slice::<Plan>(&fs::read(&journal_path).map_err(|e| e.to_string())?)
@@ -445,33 +436,32 @@ fn delete(home: &Path, journal: &Path, sid: &str, cwd: &str) -> Result<(), Strin
     {
         return Err("删除记录身份不匹配".into());
     }
-    check_external(home, sid)?;
+    let is_retry = saved.as_ref().is_some_and(|plan| plan.project.is_some());
     let plan = match saved {
         Some(plan) if plan.project.is_some() => plan,
         _ => {
             let plan = locate(&root, sid, cwd, None)?;
             if plan.project.is_none() {
-                return Err("未找到可验证的 CodeAgent 历史".into());
+                return Ok(());
             }
-            save_plan(&journal_path, &plan)?;
             plan
         }
     };
-    let (Some(project), Some(expected_revision)) = (plan.project, plan.transcript_revision) else {
+    let (Some(project), Some(expected_revision)) = (&plan.project, &plan.transcript_revision) else {
         return Err("删除记录缺少文件身份".into());
     };
     if !matches!(
-        Path::new(&project).components().next(),
+        Path::new(project).components().next(),
         Some(std::path::Component::Normal(_))
-    ) || Path::new(&project).components().count() != 1
+    ) || Path::new(project).components().count() != 1
         || project == "."
         || project == ".."
         || project.contains(['/', '\\'])
     {
         return Err("删除记录中的项目目录无效".into());
     }
-    // 重新扫描其他项目，识别在首次定位之后或重试时出现的同 ID 文件。
-    if locate(&root, sid, cwd, Some(&project))?.project.is_some() {
+    // 重试复用已确认的位置，只检查其他项目是否出现同 ID 文件。
+    if is_retry && locate(&root, sid, cwd, Some(project))?.project.is_some() {
         return Err("找到多份同一会话，无法确定删除目标".into());
     }
     let project_path = root.join(project);
@@ -493,12 +483,12 @@ fn delete(home: &Path, journal: &Path, sid: &str, cwd: &str) -> Result<(), Strin
         let file = options
             .open(&transcript)
             .map_err(|e| format!("会话历史仍被占用：{e}"))?;
-        if revision_of(&file.metadata().map_err(|e| e.to_string())?)? != expected_revision
-            || revision(&transcript)? != expected_revision
+        if revision_of(&file.metadata().map_err(|e| e.to_string())?)? != *expected_revision
+            || revision(&transcript)? != *expected_revision
         {
             return Err("会话历史已被修改，请核验后再删除".into());
         }
-        if !verify(&transcript, sid, cwd)? || revision(&transcript)? != expected_revision {
+        if !verify(&transcript, sid, cwd)? || revision(&transcript)? != *expected_revision {
             return Err("会话文件身份已变化".into());
         }
         Some(file)
@@ -506,6 +496,12 @@ fn delete(home: &Path, journal: &Path, sid: &str, cwd: &str) -> Result<(), Strin
         None
     };
     check_external(home, sid)?;
+    if !is_retry {
+        if history.is_none() {
+            return Err("会话历史在删除前消失，请重试".into());
+        }
+        save_plan(&journal_path, &plan)?;
+    }
     if let Some(meta) = metadata(&sidecar)? {
         if !meta.is_dir() || Some(created(&meta)?) != plan.directory_created {
             return Err("附属目录身份已变化".into());
@@ -515,7 +511,7 @@ fn delete(home: &Path, journal: &Path, sid: &str, cwd: &str) -> Result<(), Strin
     if let Some(history) = history {
         // 删除需先关闭禁止重命名的句柄，最后在删除句柄持有期间复核版本。
         drop(history);
-        remove_file(&transcript, Some(&expected_revision))?;
+        remove_file(&transcript, Some(expected_revision))?;
     }
     if metadata(&transcript)?.is_some() || metadata(&sidecar)?.is_some() {
         return Err("会话仍有残留数据".into());
@@ -559,6 +555,7 @@ pub async fn agent_delete_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     fn fixture() -> (PathBuf, PathBuf) {
         let root = std::env::temp_dir().join(format!(
             "aaw-delete-{}",
@@ -700,7 +697,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_history_cannot_create_or_reuse_an_unverified_plan() {
+    fn missing_history_is_success_without_creating_a_plan() {
         let (home, project) = fixture();
         let root = home.join(".cac/projects");
         let journal = home.join("journal");
@@ -710,12 +707,12 @@ mod tests {
         fs::remove_dir_all(project.join("session-1")).unwrap();
 
         let delete_session = || delete(&home, &journal, "session-1", "D:/Repo");
-        assert!(delete_session().unwrap_err().contains("未找到可验证"));
+        delete_session().unwrap();
         assert!(!journal_path.exists());
 
         let empty = locate(&root, "session-1", "D:/Repo", None).unwrap();
         save_plan(&journal_path, &empty).unwrap();
-        assert!(delete_session().unwrap_err().contains("未找到可验证"));
+        delete_session().unwrap();
         fs::write(project.join("session-1.jsonl"), "{\"type\":\"system\",\"subtype\":\"init\",\"sessionId\":\"session-1\",\"cwd\":\"D:/Repo\"}\n").unwrap();
         delete_session().unwrap();
         delete_session().unwrap();

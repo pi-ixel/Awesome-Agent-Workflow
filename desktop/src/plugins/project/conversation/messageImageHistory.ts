@@ -270,11 +270,11 @@ export function createMessageImageHistory() {
       }
       return [...scopes];
     },
-    async removeSession(scope: string) {
+    async removeSession(scope: string, removeNative = true) {
       deletedScopes.add(scope);
       await writes.catch(() => {});
       memory.delete(scope);
-      if (nativeMessageImages.available())
+      if (removeNative && nativeMessageImages.available())
         await nativeMessageImages.deleteSession(scope);
       if (typeof indexedDB !== "undefined") {
         const db = await open();
