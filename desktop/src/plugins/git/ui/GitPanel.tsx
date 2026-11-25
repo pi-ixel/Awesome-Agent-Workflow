@@ -223,6 +223,11 @@ function GitReview({
     const key = changeKey(change),
       entry = entries[key],
       isOpen = expandedKey === key;
+    const lineStats = change.source !== "untracked"
+      ? change
+      : entry?.data?.untrackedLines !== undefined
+        ? { ...change, added: entry.data.untrackedLines, removed: 0 }
+        : undefined;
     const name = change.path.split("/").at(-1) ?? change.path;
     const directory = change.path.includes("/")
       ? change.path.slice(0, change.path.lastIndexOf("/"))
@@ -252,7 +257,7 @@ function GitReview({
             </span>
             <span className="ml-2 text-ink-subtlest">{directory}</span>
           </span>
-          <GitLineStats changes={[change]} />
+          {lineStats && <GitLineStats changes={[lineStats]} />}
           <ChevronDownIcon
             className={`ui-icon-16 shrink-0 text-ink-soft transition-transform ${isOpen ? "rotate-180" : ""}`}
           />
@@ -361,9 +366,11 @@ function GitReview({
                   <span>
                     ({new Set(all.map((change) => change.path)).size})
                   </span>
-                  <span className="ml-auto">
-                    <GitLineStats changes={all} />
-                  </span>
+                  {group === "changes" && (
+                    <span className="ml-auto">
+                      <GitLineStats changes={all} />
+                    </span>
+                  )}
                 </NavigationRow>
                 <TreeBranch open={isOpen}>
                   <GitFileTree
@@ -377,7 +384,7 @@ function GitReview({
                         (change) => changeKey(change) === expandedKey,
                       )?.path
                     }
-                    red={group === "untracked"}
+                    isUntracked={group === "untracked"}
                     onSelect={(path) => {
                       const change = all.find((item) => item.path === path);
                       if (!change) return;
@@ -414,14 +421,14 @@ function GitFileTree({
   changes,
   selectedPath,
   onSelect,
-  red,
+  isUntracked,
   prefix = "",
   initiallyExpanded = false,
 }: {
   changes: GitChange[];
   selectedPath?: string;
   onSelect: (path: string) => void;
-  red: boolean;
+  isUntracked: boolean;
   prefix?: string;
   /** 挂载即全量展开（悬浮卡点击波次的重挂载；逐层下传）。 */
   initiallyExpanded?: boolean;
@@ -495,7 +502,7 @@ function GitFileTree({
                   )}
                   selectedPath={selectedPath}
                   prefix={`${prefix}${name}/`}
-                  red={red}
+                  isUntracked={isUntracked}
                   onSelect={onSelect}
                   initiallyExpanded={initiallyExpanded}
                 />
@@ -511,11 +518,11 @@ function GitFileTree({
           data-hint={path}
           aria-label={`定位 ${path}`}
           aria-current={selectedPath === path ? "true" : undefined}
-          className={red || changes.some((c) => c.path === path && c.source === "conflict") ? "text-danger-ink" : undefined}
+          className={isUntracked || changes.some((c) => c.path === path && c.source === "conflict") ? "text-danger-ink" : undefined}
           onClick={() => onSelect(path)}
         >
           <FileEntryLabel name={path.slice(prefix.length)} />
-          <GitLineStats changes={changes.filter((c) => c.path === path)} />
+          {!isUntracked && <GitLineStats changes={changes.filter((c) => c.path === path)} />}
         </NavigationRow>
       ))}
     </div>

@@ -86,6 +86,7 @@ export interface GitSnapshot {
 }
 
 export interface GitDiff {
+  untrackedLines?: number;
   patch: string;
   notice: string | null;
   beforeContent?: string | null;
