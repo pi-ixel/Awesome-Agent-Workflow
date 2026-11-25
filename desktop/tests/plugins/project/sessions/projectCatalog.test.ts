@@ -92,6 +92,24 @@ it("uses the conversation or cached title when the Agent lists browser context a
   ]);
 });
 
+it("preserves activity order for tied and unknown timestamps when selecting an existing session", () => {
+  const cwd = "D:/project";
+  const time = "2026-11-25T09:00:00Z";
+  const listed = [
+    { sessionId: "one", cwd, title: "一", updatedAt: time },
+    { sessionId: "two", cwd, title: "二", updatedAt: time },
+    { sessionId: "unknown", cwd, title: "无时间" },
+  ];
+  const previous = listed.map((item) => ({ id: item.sessionId, title: item.title, updatedAt: item.updatedAt ?? null }));
+  const store = { items: [], sessionsByPath: { [cwd]: previous } };
+  const owner = { workspacePath: cwd, agentKey: "agent" };
+  for (const active of ["two", "unknown"]) {
+    expect(sessionListEntries(store, listed, active, owner, [], emptyCatalog)).toEqual(previous);
+  }
+  const changed = listed.map((item) => item.sessionId === "two" ? { ...item, updatedAt: "2026-11-25T10:00:00Z" } : item);
+  expect(sessionListEntries(store, changed, "one", owner, [], emptyCatalog).map(({ id }) => id)).toEqual(["two", "one", "unknown"]);
+});
+
 it("cleans old browser titles from entries omitted by the Agent without losing manually named sessions", () => {
   const workspacePath = "D:/project";
   const owner = { workspacePath, agentKey: "chrys" };

@@ -282,6 +282,7 @@ describe("ProjectTree session groups", () => {
     fireEvent.click(project);
     expect(project).toHaveAttribute("aria-expanded", "false");
     act(() => {
+      useWorkspaceStore.setState({ activePath: PATH });
       useSessionStore.setState({ activeSessionId: "mine" });
       useWorkbenchUiStore.setState({ viewId: "session", contextPath: PATH });
     });

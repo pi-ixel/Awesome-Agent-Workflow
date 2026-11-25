@@ -23,7 +23,7 @@ export interface CatalogOwner {
 }
 
 /**
- * 会话列表回填（左栏树可见）：当前会话置顶，其余历史会话随后；标题一律
+ * 会话列表回填（左栏树可见）：按活动时间排序，并列时沿用已有顺序。标题一律
  * 不含 UUID（首条用户消息前 24 字 / 时间兜底）。带路径回填，断开后树仍
  * 能显示该项目的历史会话子节点。恢复的历史会话优先用 session/list 的
  * 权威标题；新会话从消息流首条用户消息推导。
@@ -40,12 +40,23 @@ export function sessionListEntries(
     Object.entries(store.sessionsByPath).find(
       ([path]) => pathKey(path) === pathKey(runtime.workspacePath),
     )?.[1] ?? [];
+  const catalogSessions =
+    catalog.agentKey === runtime.agentKey
+      ? (Object.entries(catalog.sessionsByPath).find(
+          ([path]) => pathKey(path) === pathKey(runtime.workspacePath),
+        )?.[1] ?? [])
+      : [];
+  const previousEntries = new Map(
+    [...cachedSessions, ...catalogSessions].map((entry) => [entry.id, entry]),
+  );
+  const previousOrder = new Map<string, number>();
+  for (const entry of [...catalogSessions, ...cachedSessions]) {
+    if (!previousOrder.has(entry.id)) previousOrder.set(entry.id, previousOrder.size);
+  }
   const cachedTitle = (id: string): string | undefined => {
-    const entry = cachedSessions.find((cached) => cached.id === id);
+    const entry = previousEntries.get(id);
     return agentSessionTitle(entry?.nativeTitle ?? entry?.title);
   };
-  const cachedUpdatedAt = (id: string): string | null | undefined =>
-    cachedSessions.find((entry) => entry.id === id)?.updatedAt;
   const entries: SessionSummary[] = [];
   if (activeSessionId !== null) {
     const listedSelf = listed.find(
@@ -63,8 +74,9 @@ export function sessionListEntries(
       // 消息转正 / forceNew 新建）兜底 now：置顶一次是合理的。
       updatedAt:
         listedSelf?.updatedAt ??
-        cachedUpdatedAt(activeSessionId) ??
-        new Date().toISOString(),
+        (listedSelf || previousEntries.has(activeSessionId)
+          ? previousEntries.get(activeSessionId)?.updatedAt ?? null
+          : new Date().toISOString()),
     });
   }
   for (const info of listed) {
@@ -77,16 +89,10 @@ export function sessionListEntries(
         agentSessionTitle(info.title) ??
         cachedTitle(info.sessionId) ??
         sessionListTitleOf(info.updatedAt),
-      updatedAt: info.updatedAt ?? null,
+      updatedAt: info.updatedAt ?? previousEntries.get(info.sessionId)?.updatedAt ?? null,
     });
   }
   // 新连接的索引可能不完整，缺席不代表删除；保留已知会话。
-  const catalogSessions =
-    catalog.agentKey === runtime.agentKey
-      ? (Object.entries(catalog.sessionsByPath).find(
-          ([path]) => pathKey(path) === pathKey(runtime.workspacePath),
-        )?.[1] ?? [])
-      : [];
   const retain = (entry: SessionSummary) => {
     if (entries.some((item) => item.id === entry.id)) return;
     const nativeTitle = entry.nativeTitle ?? entry.title;
@@ -112,7 +118,8 @@ export function sessionListEntries(
   entries.sort((a, b) => {
     const au = a.updatedAt ?? "";
     const bu = b.updatedAt ?? "";
-    if (au === bu) return 0;
+    if (au === bu) return (previousOrder.get(a.id) ?? previousOrder.size) -
+      (previousOrder.get(b.id) ?? previousOrder.size);
     if (au === "") return 1;
     if (bu === "") return -1;
     return au < bu ? 1 : -1;

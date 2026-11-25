@@ -67,13 +67,12 @@ export function createSessionGroups() {
   let nextOwner = 0;
   let disposed = false;
 
-  function rebuild(): void {
-    const byPath: Record<string, SessionGroup[]> = {};
-    for (const paths of owners.values()) {
-      for (const [key, groups] of paths) {
-        if (groups.length === 0) continue;
-        (byPath[key] ??= []).push(...groups);
-      }
+  function rebuild(keys: Iterable<string>): void {
+    const byPath = { ...state.byPath };
+    for (const key of keys) {
+      const groups = [...owners.values()].flatMap((paths) => paths.get(key) ?? []);
+      if (groups.length === 0) delete byPath[key];
+      else byPath[key] = groups;
     }
     const previous = state;
     state = { byPath };
@@ -103,11 +102,11 @@ export function createSessionGroups() {
         if (groups.length === 0 && !paths.has(key)) return;
         if (groups.length === 0) paths.delete(key);
         else paths.set(key, groups);
-        rebuild();
+        rebuild([key]);
       },
       dispose() {
         if (!owners.delete(id) || disposed) return;
-        rebuild();
+        rebuild(paths.keys());
       },
     };
   }
@@ -118,7 +117,7 @@ export function createSessionGroups() {
     dispose() {
       if (disposed) return;
       owners.clear();
-      rebuild();
+      rebuild(Object.keys(state.byPath));
       disposed = true;
       listeners.clear();
     },
