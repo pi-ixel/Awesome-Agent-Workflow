@@ -227,11 +227,10 @@ test("项目、置顶、最近和工作流分组只有文字提示共用右边�
     pinned.getByRole("img", { name: "已完成，未查看" }),
   ).toBeVisible();
   const projectStatuses = tree.locator("[data-session-row-status]:visible");
-  await expect(projectStatuses).toHaveCount(4);
-  await expect(projectStatuses.getByRole("img")).toHaveCount(0);
-  for (const text of ["待处理", "已停止", "等你回复", "等你处理"]) {
-    await expect(projectStatuses.filter({ hasText: text })).toHaveCount(1);
-  }
+  await expect(projectStatuses).toHaveCount(3);
+  await expect(projectStatuses.filter({ hasText: "待处理" })).toHaveCount(1);
+  await expect(projectStatuses.filter({ hasText: "已停止" })).toHaveCount(1);
+  await expect(projectStatuses.getByRole("img", { name: "等你处理" })).toHaveCount(1);
   const getStatusEdges = async () =>
     tree
       .locator("[data-session-row-status]:visible")
@@ -259,13 +258,16 @@ test("项目、置顶、最近和工作流分组只有文字提示共用右边�
   await expect(row.getByText("待处理")).toBeVisible();
   await expect(session).toHaveAccessibleDescription("待处理");
 
+  // 分组展开时子会话已表达状态，收起后运行圆环与提醒点聚合回分组行。
   const group = tree.getByRole("button", { name: "发布准备，2 个会话" });
+  await group.click();
+  await page.mouse.move(1, 1);
   await expect(group.getByRole("img", { name: "运行中" })).toBeVisible();
   const groupRing = (await group.getByRole("img", { name: "运行中" }).boundingBox())!;
-  const groupHint = (await group.locator("..").getByText("等你回复").boundingBox())!;
+  const groupHint = (await group.locator("..").getByRole("img", { name: "等你回复" }).boundingBox())!;
   expect(groupHint.x - groupRing.x - groupRing.width).toBeGreaterThan(8);
   await group.hover();
-  await expect(group.locator("..").getByText("等你回复")).toBeHidden();
+  await expect(group.locator("..").getByRole("img", { name: "等你回复" })).toBeHidden();
   await expect(
     group.locator("..").getByRole("button", { name: "归档", exact: true }),
   ).toHaveCSS("opacity", "1");
@@ -275,8 +277,7 @@ test("项目、置顶、最近和工作流分组只有文字提示共用右边�
   await page.mouse.move(1, 1);
   const recent = tree.getByRole("navigation", { name: "最近活跃会话" });
   await expect(recent.getByText("待处理")).toBeVisible();
-  await expect(recent.getByText("等你处理")).toBeVisible();
-  await expect(recent.locator("[data-session-row-status]").getByRole("img")).toHaveCount(0);
+  await expect(recent.getByRole("img", { name: "等你处理" })).toBeVisible();
   await expect
     .poll(async () => {
       const edges = await getStatusEdges();
