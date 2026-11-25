@@ -1,7 +1,7 @@
 import type { Context } from "cordis";
 import { createElement } from "react";
 import { createStore, useStore } from "zustand";
-import { GlobeIcon } from "../../../shared/ui/icons.tsx";
+import { MonitorIcon } from "../../../shared/ui/icons.tsx";
 import type { RemoteProjectRecord, RemoteProjectUi } from "../service.ts";
 import { createRemoteSessionToolProvider } from "../session/sessionBridge.ts";
 import { createRemoteTerminalResolver } from "../terminal/remoteTerminal.ts";
@@ -125,7 +125,7 @@ export function apply(ctx: Context): void {
         id: "remote-hosts",
         order: 25,
         label: "远程主机",
-        Icon: GlobeIcon,
+        Icon: MonitorIcon,
         View: () => createElement(RemoteHostsSettings, { service: remoteProject }),
       }),
     "remoteProject:settings",
