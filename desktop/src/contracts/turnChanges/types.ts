@@ -40,19 +40,11 @@ export interface TurnChangesRecord {
 }
 export interface TurnChangesRequest {
   readonly action:
-    | "listJournal"
     | "readJournal"
-    | "prepareProject"
-    | "releaseProject"
-    | "begin"
     | "lock"
-    | "dispatch"
     | "list"
     | "get"
     | "check"
-    | "observe"
-    | "finish"
-    | "uncertain"
     | "restore"
     | "undo"
     | "clear";
@@ -63,14 +55,10 @@ export interface TurnChangesRequest {
   readonly id?: string;
   readonly userId?: string;
   readonly status?: TurnChangesRecord["status"];
-  readonly unknownReason?: TurnChangesRecord["unknownReason"];
   readonly paths?: readonly string[];
   readonly startedAt?: number;
   readonly toolIds?: readonly string[];
-  readonly changedPaths?: readonly string[];
   readonly undo?: boolean;
-  readonly hasOperations?: boolean;
-  readonly moves?: readonly { readonly from: string; readonly to: string }[];
   readonly expiresAt?: number;
 }
 export interface TurnChangesHost {

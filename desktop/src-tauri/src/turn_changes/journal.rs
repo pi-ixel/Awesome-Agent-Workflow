@@ -420,6 +420,4 @@ fn record_from(
 }
 
 #[cfg(test)]
-mod benchmark;
-#[cfg(test)]
 mod tests;

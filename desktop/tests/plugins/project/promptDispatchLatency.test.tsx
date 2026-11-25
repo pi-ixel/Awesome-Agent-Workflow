@@ -59,10 +59,6 @@ it.each(["Enter", "发送按钮", "JSONL"])(
     const detach = attachSession(session, store);
     const request = vi.fn<TurnChangesHost["request"]>(({ action }) => {
       if (action === "list") return new Promise(() => {});
-      if (action === "begin")
-        return new Promise((resolve) => setTimeout(() => resolve([]), 390));
-      if (action === "dispatch")
-        return new Promise((resolve) => setTimeout(() => resolve([]), 70));
       return Promise.resolve([]);
     });
     const changes = createTurnChangesSession(
@@ -105,29 +101,8 @@ it.each(["Enter", "发送按钮", "JSONL"])(
       if (entry === "Enter") fireEvent.keyDown(input, { key: "Enter" });
       else fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
-      if (entry === "JSONL") {
-        await act(() => vi.advanceTimersByTimeAsync(0));
-        expect(prompts()).toHaveLength(1);
-        expect(request.mock.calls.map(([call]) => call.action)).not.toEqual(
-          expect.arrayContaining(["begin"]),
-        );
-        expect(
-          request.mock.calls.every(([call]) =>
-            ["listJournal", "lock"].includes(call.action),
-          ),
-        ).toBe(true);
-        return;
-      }
-      await act(() => vi.advanceTimersByTimeAsync(399));
-      expect(request).toHaveBeenCalledWith(
-        expect.objectContaining({ action: "list" }),
-      );
-      expect(request).toHaveBeenCalledWith(
-        expect.objectContaining({ action: "begin" }),
-      );
-      expect(prompts()).toHaveLength(0);
-      await act(() => vi.advanceTimersByTimeAsync(101));
-
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(request.mock.calls.every(([call]) => ["list", "lock"].includes(call.action))).toBe(true);
       expect(prompts()).toHaveLength(1);
       expect(prompts()[0]?.params?.prompt).toEqual([{ type: "text", text }]);
       expect(receivedAt ?? Infinity).toBeLessThanOrEqual(submittedAt + 500);

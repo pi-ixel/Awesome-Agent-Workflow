@@ -153,11 +153,7 @@ function Preview() {
       state,
       journal: false,
       recordSubmission: () => {},
-      prepareProject: () => {},
       submitted: () => {},
-      prepare: () => Promise.resolve(),
-      beforeDispatch: () => Promise.resolve(),
-      markUnknown: () => Promise.resolve(),
       finish: () => Promise.resolve(),
       select: (id) =>
         state.setState({
