@@ -35,6 +35,7 @@ export const inject = [
 const workshopSettingsKey = "aaw-desktop.tools-workshop.v1";
 const projectsParentField = "projectsParent";
 const projectSessionsField = "projectSessions";
+const removedProjectPathsField = "removedProjectPaths";
 
 /** 预览标签的 kind：`tool-preview:<目录>`，同一个项目只开一个标签。 */
 const previewKind = "tool-preview";
@@ -86,9 +87,27 @@ export function apply(ctx: Context): void {
           return undefined;
         }
       },
-      write: (value: Readonly<Record<string, string>>) => {
+      readRemovedPaths: () => {
         try {
-          settingsScope.update({ [projectSessionsField]: value });
+          const value = settingsScope.read()?.[removedProjectPathsField];
+          return Array.isArray(value)
+            ? value.filter((path): path is string => typeof path === "string")
+            : undefined;
+        } catch {
+          return undefined;
+        }
+      },
+      write: (
+        sessions: Readonly<Record<string, string>>,
+        removedPaths: readonly string[],
+      ) => {
+        try {
+          settingsScope.update({
+            [projectSessionsField]: sessions,
+            [removedProjectPathsField]: removedPaths.length
+              ? removedPaths
+              : undefined,
+          });
         } catch {
           /* 同上：记不住只是下次退回"按最后活动时间猜" */
         }

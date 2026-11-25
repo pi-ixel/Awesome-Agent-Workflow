@@ -223,7 +223,7 @@ L3 里 `store` / `sharedStore` / `secrets` / `settings` 这四项**必须走宿�
 - 分清两种「记住」：`settingsSchema` 是用户在工具中心能改的配置（代码里经 `aawSettings` 只读）；`aawStore` 是工具自己记的状态，用户看不见，不要拿来当设置项（R4）。
 - 密钥的推荐路径：运行时让用户输入一次 → `aawSecrets.set` 存下 → 以后 `aawSecrets.get`。不要写进 html、清单或 `aawStore`（R5）。
 - `navigator.clipboard` 也能用，但它要求用户手势、在 AI 执行的动作里拿不到；优先用 `aawClipboard`。
-- `localStorage` 也能用，但它活在内存分区，AAW 重启会清空——要留存就走 `aawStore`（R6）。
+- `localStorage` 也能用，但是否保留取决于 WebView 的资料目录，不属于 AAW 工具备份或迁移的数据。需要留存或迁移时使用 `aawStore`（R6）。
 - 读剪切板只在用户点击或动作被显式调用时做，不要在页面一加载就静默读取。
 - 布局不要给容器写死固定像素宽度：用 `width:100%` + `max-width`。红线 R7 查的是 ≥800px 的写死宽度，但任何写死宽度在窄窗口（最小约 360px）都会坏；宽内容（表格、代码行）放进自身 `overflow-x: auto` 的容器里滚动，不要撑破页面。
 

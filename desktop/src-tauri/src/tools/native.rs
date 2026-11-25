@@ -405,6 +405,11 @@ impl Bus {
         }
     }
 
+    /// 新订阅从宿主当前的序号开始，只接收后续消息。
+    pub fn cursor(&self) -> u64 {
+        self.inner.lock().map(|inner| inner.seq).unwrap_or(0)
+    }
+
     /// 取出 `cursor` 之后的新消息，以及新的 cursor。
     pub fn poll(&self, cursor: u64, topic: Option<&str>) -> (u64, Vec<Value>) {
         let Ok(inner) = self.inner.lock() else { return (cursor, Vec::new()) };

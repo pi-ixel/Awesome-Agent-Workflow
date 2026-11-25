@@ -328,8 +328,7 @@ async function saveShortcut(value) {
     // 之前就是这样：看起来存了 Ctrl+A，实际按下去没反应。
     acceleratorDirty = false;
     $("accelerator").value = savedShortcut;
-    hint("");
-    status(error.message);
+    hint(error.message);
   }
 }
 query.addEventListener("input", () => {

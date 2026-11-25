@@ -89,6 +89,7 @@ pub(crate) struct ToolSession {
     pub(crate) dir: PathBuf,
     pub(crate) name: String,
     pub(crate) network: NetworkRule,
+    pub(crate) background: Option<manifest::BackgroundDecl>,
     /// 每次建窗随机生成的通道令牌。
     ///
     /// 为什么需要它：能力通道是"同源 fetch"，而**跨子域**的 `no-cors` POST 也
@@ -566,13 +567,14 @@ fn serve(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
         Some("html") | Some("htm")
     );
     let policy = if is_html {
-        // 优先用窗口会话里已经解析好的 network 规则；窗口还没建好时退回默认。
+        // 首次导航可能早于会话注册，这时读该版本的清单，仍按它的声明限制连接。
         let network = host
             .sessions
             .lock()
             .ok()
             .and_then(|map| map.values().find(|item| item.tool_id == tool_id).cloned())
             .map(|item| item.network.clone());
+        let network = network.or_else(|| manifest::read(&dir).ok().map(|manifest| manifest.network()));
         Some(protocol::policy_for(network.as_ref()))
     } else {
         None
@@ -835,7 +837,8 @@ pub(crate) fn open_page_window(
         tool_id: tool_id.to_string(),
         dir: dir.to_path_buf(),
         name: manifest.name.clone(),
-        network: network.clone(),
+        network,
+        background: manifest.background.clone(),
         token,
         carrier: carrier.to_string(),
         settings: settings_created,
@@ -923,7 +926,9 @@ pub async fn tools_open(
     if window.label() != "main" {
         return Err("只有主窗口可以打开工具。".into());
     }
-    open_tool(&app, &tool_id, dir.as_deref())
+    open_tool(&app, &tool_id, dir.as_deref())?;
+    launcher::record_tool_open(&app, &tool_id);
+    Ok(())
 }
 
 /// 把导出的源码 ZIP 写到用户选定的路径。
@@ -1193,6 +1198,7 @@ mod tests {
             dir: PathBuf::from("/tmp"),
             name: "p".into(),
             network: NetworkRule::default(),
+            background: None,
             token: "t".into(),
             carrier: "page".into(),
             settings: String::new(),

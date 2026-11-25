@@ -314,7 +314,7 @@ it("rolls the field back to the live shortcut when saving fails", async () => {
     .getElementById("shortcut-form")!
     .dispatchEvent(new Event("submit", { cancelable: true }));
   await vi.waitFor(() =>
-    expect(document.getElementById("message")!.textContent).toContain(
+    expect(document.getElementById("shortcut-hint")!.textContent).toContain(
       "仍然生效",
     ),
   );

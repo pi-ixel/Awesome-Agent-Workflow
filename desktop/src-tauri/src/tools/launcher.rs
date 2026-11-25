@@ -64,6 +64,18 @@ fn store_of(app: &AppHandle) -> Result<ToolStore, String> {
     host.store()
 }
 
+/// 用户从任一窗口成功打开个人工具时，用同一个账号分区登记最近使用。
+pub(super) fn record_tool_open(app: &AppHandle, tool_id: &str) {
+    let result = (|| {
+        let store = store_of(app)?;
+        let owner = catalog::read(&store)?.owner.unwrap_or_else(|| "guest".into());
+        LauncherStore::new(&store).touch(&owner, &format!("personal:{tool_id}"))
+    })();
+    if let Err(error) = result {
+        eprintln!("[aaw-tools] 无法记录工具最近使用：{error}");
+    }
+}
+
 /// 启动器的数据。形状与 `catalog.mjs` 的下发结构一致，页面不用改。
 fn entries_of(app: &AppHandle) -> Result<Value, String> {
     let store = store_of(app)?;
@@ -224,9 +236,7 @@ pub async fn launcher_open(window: tauri::WebviewWindow, app: AppHandle, id: Str
         if let Some(panel) = app.get_webview_window(LABEL) {
             let _ = panel.hide();
         }
-        let store = store_of(&app)?;
-        let owner = catalog::read(&store)?.owner.unwrap_or_else(|| "guest".into());
-        LauncherStore::new(&store).touch(&owner, &id).ok();
+        record_tool_open(&app, tool_id);
         return Ok(());
     }
     // 非工具条目：焦点要交回主窗，先把启动器收起来。
@@ -277,10 +287,22 @@ pub fn launcher_theme(app: AppHandle) -> Result<String, String> {
 pub fn launcher_shortcut(window: tauri::WebviewWindow, app: AppHandle, value: String) -> Result<Value, String> {
     ensure_launcher(&window)?;
     let next = normalize_shortcut(&value)?;
-    apply_shortcut(&app, &next)?;
     let store = store_of(&app)?;
-    LauncherStore::new(&store).set_shortcut(&next)?;
     let state = app.state::<LauncherState>();
+    let previous = state.shortcut();
+    apply_shortcut(&app, &next)?;
+    if let Err(error) = LauncherStore::new(&store).set_shortcut(&next) {
+        if previous != next {
+            use tauri_plugin_global_shortcut::GlobalShortcutExt;
+            let _ = app.global_shortcut().unregister(next.as_str());
+            state.ready.store(false, Ordering::Relaxed);
+            return match apply_shortcut(&app, &previous) {
+                Ok(()) => Err(format!("保存快捷键失败，仍使用原快捷键。{error}")),
+                Err(restore) => Err(format!("保存快捷键失败，原快捷键也未能恢复。{error} {restore}")),
+            };
+        }
+        return Err(error);
+    }
     *state.shortcut.lock().map_err(|error| error.to_string())? = next.clone();
     Ok(json!({ "shortcut": next, "shortcutReady": true }))
 }
@@ -367,10 +389,21 @@ pub fn apply_shortcut(app: &AppHandle, value: &str) -> Result<(), String> {
     if previous == value && state.ready() {
         return Ok(());
     }
-    let _ = app.global_shortcut().unregister(previous.as_str());
-    app.global_shortcut()
-        .register(value)
-        .map_err(|_| "这组键被其他程序占用了，原来的快捷键仍然生效。换一组，或先关掉占用它的程序。".to_string())?;
+    let shortcuts = app.global_shortcut();
+    if shortcuts.register(value).is_err() {
+        // 从录制框内按 Enter 保存时，原快捷键可能仍处于临时让出状态。
+        let restored = shortcuts.is_registered(previous.as_str())
+            || shortcuts.register(previous.as_str()).is_ok();
+        state.ready.store(restored, Ordering::Relaxed);
+        return Err(if restored {
+            "这组键被其他程序占用了，原来的快捷键仍然生效。换一组，或先关掉占用它的程序。".into()
+        } else {
+            "这组键被其他程序占用了，原来的快捷键也未能恢复。请换一组快捷键。".into()
+        });
+    }
+    if previous != value {
+        let _ = shortcuts.unregister(previous.as_str());
+    }
     state.ready.store(true, Ordering::Relaxed);
     Ok(())
 }

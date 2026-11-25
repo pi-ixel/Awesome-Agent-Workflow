@@ -244,17 +244,26 @@ pub fn script(context: &InjectContext) -> String {
   // 宿主不支持流式响应，这里用 800 ms 的短轮询。语义仍是"只发给在线工具、
   // 不保留历史"，只是最多晚 0.8 秒。
   var busTopics = new Map();
-  var busCursor = 0;
   var busPumping = false;
   var busPump = function () {{
-    if (!busPumping) return;
-    call("bus.poll", {{ cursor: busCursor }}).then(function (result) {{
-      busCursor = result.cursor;
-      (result.messages || []).forEach(function (message) {{
-        var set = busTopics.get(message.topic);
-        if (!set) return;
-        set.forEach(function (fn) {{
-          try {{ fn(message.payload); }} catch (_) {{ /* 同上 */ }}
+    var subscriptions = [];
+    var cursor = Infinity;
+    busTopics.forEach(function (callbacks, topic) {{
+      callbacks.forEach(function (subscriber, callback) {{
+        if (subscriber.cursor === null) return;
+        cursor = Math.min(cursor, subscriber.cursor);
+        subscriptions.push({{ callbacks: callbacks, topic: topic, callback: callback, subscriber: subscriber }});
+      }});
+    }});
+    if (!subscriptions.length) {{ busPumping = false; return; }}
+    call("bus.poll", {{ cursor: cursor }}).then(function (result) {{
+      subscriptions.forEach(function (entry) {{
+        var previous = entry.subscriber.cursor;
+        entry.subscriber.cursor = Math.max(previous, result.cursor);
+        (result.messages || []).forEach(function (message) {{
+          if (message.topic !== entry.topic || message.seq <= previous ||
+              entry.callbacks.get(entry.callback) !== entry.subscriber) return;
+          try {{ entry.callback(message.payload); }} catch (_) {{ /* 同上 */ }}
         }});
       }});
     }}).catch(function () {{ /* 窗口正在关闭时会失败，下一轮再说 */ }}).then(function () {{
@@ -264,13 +273,23 @@ pub fn script(context: &InjectContext) -> String {
   window.aawBus = {{
     emit: function (topic, payload) {{ return call("bus.emit", {{ topic: topic, payload: payload }}); }},
     on: function (topic, callback) {{
-      if (!busTopics.has(topic)) busTopics.set(topic, new Set());
-      busTopics.get(topic).add(callback);
-      if (!busPumping) {{ busPumping = true; setTimeout(busPump, 0); }}
-      return function () {{
-        var set = busTopics.get(topic);
-        if (set) set.delete(callback);
+      if (!busTopics.has(topic)) busTopics.set(topic, new Map());
+      var callbacks = busTopics.get(topic);
+      var subscriber = callbacks.get(callback);
+      var unsubscribe = function () {{
+        if (callbacks.get(callback) !== subscriber) return;
+        callbacks.delete(callback);
+        if (!callbacks.size) busTopics.delete(topic);
       }};
+      if (subscriber) return unsubscribe;
+      subscriber = {{ cursor: null }};
+      callbacks.set(callback, subscriber);
+      call("bus.cursor", {{}}).then(function (cursor) {{
+        if (callbacks.get(callback) !== subscriber) return;
+        subscriber.cursor = cursor;
+        if (!busPumping) {{ busPumping = true; setTimeout(busPump, 0); }}
+      }}).catch(unsubscribe);
+      return unsubscribe;
     }}
   }};
 

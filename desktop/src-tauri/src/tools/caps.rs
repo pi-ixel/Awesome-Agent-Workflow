@@ -338,7 +338,11 @@ pub(crate) fn dispatch(
             Ok(json!(true))
         })(),
         "lifecycle.keepAlive" => (|| {
-            need_session()?.keep_alive.store(true, std::sync::atomic::Ordering::Relaxed);
+            let session = need_session()?;
+            if !session.background.as_ref().is_some_and(|declaration| !declaration.reason.trim().is_empty()) {
+                return Err("工具需要在 manifest.json 的 background 中声明常驻用途。".into());
+            }
+            session.keep_alive.store(true, std::sync::atomic::Ordering::Relaxed);
             Ok(json!(true))
         })(),
         "lifecycle.schedule" => (|| {
@@ -351,7 +355,11 @@ pub(crate) fn dispatch(
             if seconds > 7 * 24 * 3600 {
                 return Err("定时唤醒最长 7 天。".into());
             }
-            need_session()?.set_schedule(seconds);
+            let session = need_session()?;
+            if !session.background.as_ref().is_some_and(|declaration| declaration.schedule && !declaration.reason.trim().is_empty()) {
+                return Err("工具需要在 manifest.json 的 background 中声明用途并设置 schedule: true。".into());
+            }
+            session.set_schedule(seconds);
             Ok(json!(true))
         })(),
 
@@ -367,6 +375,7 @@ pub(crate) fn dispatch(
             host.bus().emit(&topic, value);
             Ok(json!(true))
         })(),
+        "bus.cursor" => Ok(json!(host.bus().cursor())),
         "bus.poll" => (|| {
             let cursor = payload.get("cursor").and_then(Value::as_u64).unwrap_or(0);
             let topic = optional_text(&payload, "topic");
@@ -610,6 +619,7 @@ mod tests {
                 hosts: vec![],
                 insecure: vec![],
             },
+            background: None,
             token: "token".into(),
             carrier: "process".into(),
             settings: "{}".into(),

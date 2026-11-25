@@ -14,9 +14,9 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 /// 网络声明。语义与 `package.ts` 的 `readNetworkRule` 一致。
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct NetworkRule {
-    /// 显式 `network: false` 时这里是 false，CSP 收成 `connect-src 'none'`。
+    /// 显式 `network: false` 时只保留能访问宿主能力的同源连接。
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// 允许连接的域名白名单（`*.corp.example.com`、`host:port`）。
@@ -25,6 +25,12 @@ pub struct NetworkRule {
     /// 允许自签证书的域名。
     #[serde(default)]
     pub insecure: Vec<String>,
+}
+
+impl Default for NetworkRule {
+    fn default() -> Self {
+        Self { enabled: true, hosts: Vec::new(), insecure: Vec::new() }
+    }
 }
 
 fn default_true() -> bool {

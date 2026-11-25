@@ -314,7 +314,11 @@ export function createWorkshop(deps: {
      */
     readonly sessions?: {
       readonly read: () => Readonly<Record<string, string>> | undefined;
-      readonly write: (value: Readonly<Record<string, string>>) => void;
+      readonly readRemovedPaths?: () => readonly string[] | undefined;
+      readonly write: (
+        sessions: Readonly<Record<string, string>>,
+        removedPaths: readonly string[],
+      ) => void;
     };
   };
 }): WorkshopService {
@@ -369,6 +373,10 @@ export function createWorkshop(deps: {
     Object.entries(deps.settings?.sessions?.read() ?? {}),
   );
   const maxRememberedSessions = 200;
+  // 完全卸载后的同路径属于新项目，不能再从旧的 ACP 历史自动恢复。
+  const removedProjectPaths = new Set(
+    deps.settings?.sessions?.readRemovedPaths?.(),
+  );
 
   const store = createStore<WorkshopSnapshot>(() => ({
     brief: "",
@@ -399,7 +407,8 @@ export function createWorkshop(deps: {
   function rememberSession(dir: string, sessionId: string | null | undefined) {
     if (!sessionId) return;
     const key = pathKey(dir);
-    if (lastSessions.get(key) === sessionId) return;
+    const wasRemoved = removedProjectPaths.delete(key);
+    if (!wasRemoved && lastSessions.get(key) === sessionId) return;
     // 先删再插：Map 保留插入顺序，这里就是"最近用的排后面"，超量时从头上淘汰。
     lastSessions.delete(key);
     lastSessions.set(key, sessionId);
@@ -408,21 +417,16 @@ export function createWorkshop(deps: {
       if (oldest.done) break;
       lastSessions.delete(oldest.value);
     }
-    try {
-      deps.settings?.sessions?.write(Object.fromEntries(lastSessions));
-    } catch {
-      /* 记不住只是下次少一层确定，不影响这次操作 */
-    }
+    saveSessionRecovery();
   }
 
-  /** 项目没了，指向它的记录也该走：留着只会在别的目录上瞎猜。 */
-  function forgetSession(dir: string) {
-    const key = pathKey(dir);
-    if (!lastSessions.delete(key)) return;
+  function saveSessionRecovery() {
     try {
-      deps.settings?.sessions?.write(Object.fromEntries(lastSessions));
+      deps.settings?.sessions?.write(Object.fromEntries(lastSessions), [
+        ...removedProjectPaths,
+      ]);
     } catch {
-      /* 同上 */
+      /* 写入失败不影响当前会话。 */
     }
   }
 
@@ -1278,7 +1282,7 @@ export function createWorkshop(deps: {
         // 又从新的一条空会话开始（历史还在，只是记录找不到了）。
         const carried = lastSessions.get(pathKey(dir));
         if (carried && pathKey(result.dir) !== pathKey(dir)) {
-          forgetSession(dir);
+          lastSessions.delete(pathKey(dir));
           rememberSession(result.dir, carried);
         }
         if (current?.dir === dir)
@@ -1340,7 +1344,10 @@ export function createWorkshop(deps: {
         // 优先；存量项目没有记录时退到"这个目录里最后活动的那条"。两者都要
         // 过得去才用——打不开就老老实实新开一条，绝不能停在打不开的历史上。
         const remembered =
-          lastSessions.get(pathKey(dir)) ?? latestSessionOf(dir);
+          lastSessions.get(pathKey(dir)) ??
+          (removedProjectPaths.has(pathKey(dir))
+            ? undefined
+            : latestSessionOf(dir));
         if (remembered && (await reopenSession(dir, remembered))) return;
         const started = await project.sessions.startNewSession(dir);
         if (!started.ok) {
@@ -1409,6 +1416,7 @@ export function createWorkshop(deps: {
       const owner = origin ?? "";
       return serializeToolOp(`tool:${owner}:${id}`, async () => {
         let dirs: string[] = [];
+        let projectDirs: readonly string[] = [];
         try {
           assertOwner(origin);
           if (files) {
@@ -1418,7 +1426,7 @@ export function createWorkshop(deps: {
                 ? listToolProjectSummaries(io, { parent: customRoot })
                 : Promise.resolve([]),
             ]);
-            const projectDirs = [...defaultProjects, ...customProjects]
+            projectDirs = [...defaultProjects, ...customProjects]
               .filter((entry) => entry.id === id)
               .map((entry) => entry.dir);
             const root = await installedToolRoot(io, owner, id);
@@ -1519,10 +1527,13 @@ export function createWorkshop(deps: {
           // 干净"的磁盘：即使扫描已经跳过暂存目录，列表也该以删除后的状态为准。
           // 顺手 `await` 它——卸载提示弹出来的时候列表已经是新的，用户不用再点
           // 一下别处才看到它消失。
+          for (const dir of projectDirs) {
+            const key = pathKey(dir);
+            lastSessions.delete(key);
+            removedProjectPaths.add(key);
+          }
+          if (projectDirs.length) saveSessionRecovery();
           await refreshProjects();
-          // 目录都删了，指向它们的会话记录也该走：留着只会在下次把这个 id
-          // 当成"上次用的会话"去开一条已经不存在的历史。
-          for (const dir of dirs) forgetSession(dir);
           const parts: string[] = [];
           if (report.removedDirs.length)
             parts.push(

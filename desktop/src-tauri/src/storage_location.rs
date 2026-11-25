@@ -224,6 +224,7 @@ fn managed_paths(
         "session-deletions",
         "conversation",
         "browser-restore",
+        "guide",
         "statistics",
         "trash",
         "storage-thresholds.json",
