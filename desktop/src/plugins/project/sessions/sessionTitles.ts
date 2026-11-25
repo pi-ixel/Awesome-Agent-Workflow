@@ -127,6 +127,8 @@ export async function removeSessionTitles(
       /* 跳过无关的损坏旧版标题。 */
     }
   }
-  for (const agent of agents) await setManualTitle(sessionId, "", agent);
-  await setManualTitle(sessionId, "");
+  for (const agent of [...agents, undefined]) {
+    if (manualTitleOf(sessionId, agent) !== null)
+      await setManualTitle(sessionId, "", agent);
+  }
 }

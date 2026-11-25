@@ -2693,8 +2693,11 @@ export function createSessionCoordinator({
   function deleteArchivedSession(
     target: DeleteSessionTarget,
     cleanup: () => Promise<void>,
+    hasNativeDirectory = false,
   ): Promise<void> {
     return indexes.deletions.run(target, async () => {
+      const started = performance.now();
+      let sourceMs = 0;
       const previous =
         indexes.deletions.store.getState().entries[deletionKey(target)];
       if (previous?.phase === "done") return;
@@ -2755,7 +2758,7 @@ export function createSessionCoordinator({
         pathKey(loadingSession.workspacePath) === pathKey(target.workspacePath)
       )
         throw new Error("会话正在打开，请稍后重试");
-      let phase = previous?.phase ?? "prepared";
+      let phase: "local" | "source" = previous?.phase === "local" ? "local" : "source";
       const previousFlags = matching.map((runtime) => ({
         runtime,
         operationsBlocked: runtime.store.getState().operationsBlocked,
@@ -2771,7 +2774,6 @@ export function createSessionCoordinator({
         throw error;
       }
       try {
-        await openQueue;
         for (const runtime of [...projectFactory.sessions()].filter(
           (runtime) =>
             runtime.adapter.id === sessionAgentId(target.agentKey) &&
@@ -2785,36 +2787,40 @@ export function createSessionCoordinator({
             target.sessionId,
           );
         if (phase !== "local") {
-          phase = "source";
-          await indexes.deletions.save({ ...target, phase });
+          const sourceStarted = performance.now();
           await getAgents().deleteSession!(
             target.agentKey,
             target.workspacePath,
             target.sessionId,
           );
+          sourceMs = Math.round(performance.now() - sourceStarted);
           phase = "local";
           await indexes.deletions.save({ ...target, phase });
         }
-        await getTurnChanges?.()?.request({
-          action: "clear",
-          workspacePath: target.workspacePath,
-          cwd:
-            indexes.workingDirectory(
-              target.workspacePath,
-              target.agentKey,
-              target.sessionId,
-            ) ?? target.workspacePath,
-          agentKey: target.agentKey,
-          sessionId: target.sessionId,
-        });
-        await cleanup();
-        const browser = getBrowser();
-        if (browser.isAvailable()) {
-          await browser.forgetRestore({
-            workspaceId: target.workspacePath,
+        const localStarted = performance.now();
+        if (!hasNativeDirectory) {
+          await getTurnChanges?.()?.request({
+            action: "clear",
+            workspacePath: target.workspacePath,
+            cwd:
+              indexes.workingDirectory(
+                target.workspacePath,
+                target.agentKey,
+                target.sessionId,
+              ) ?? target.workspacePath,
+            agentKey: target.agentKey,
             sessionId: target.sessionId,
           });
+          const browser = getBrowser();
+          if (browser.isAvailable()) {
+            await browser.forgetRestore({
+              workspaceId: target.workspacePath,
+              sessionId: target.sessionId,
+            });
+          }
         }
+        await cleanup();
+        const localMs = Math.round(performance.now() - localStarted);
         const agent = sessionAgentId(target.agentKey);
         if (agent !== null)
           await deleteContextUsage({
@@ -2848,6 +2854,11 @@ export function createSessionCoordinator({
         await indexes.forgetArchived(target);
         indexes.forgetSessionMetadata(target);
         await indexes.deletions.save({ ...target, phase: "done" });
+        sessionLogger.info("归档会话删除完成", {
+          sourceMs,
+          localMs,
+          durationMs: Math.round(performance.now() - started),
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         await indexes.deletions.save({ ...target, phase, error: message });

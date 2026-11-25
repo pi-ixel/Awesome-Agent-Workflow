@@ -126,10 +126,12 @@ fn save_composer(data: &Path, changes: Titles, importing: bool) -> Result<(), St
             continue;
         }
         let path = match crate::session_layout::SessionIdentity::from_composer_key(&key) {
-            Some(identity) => identity
-                .ensure(data)
-                .map_err(|e| e.to_string())?
-                .join("composer.json"),
+            Some(identity) => {
+                if identity.deleted_marker(data).and_then(|marker| marker.try_exists()).map_err(|e| e.to_string())? {
+                    continue;
+                }
+                identity.ensure(data).map_err(|e| e.to_string())?.join("composer.json")
+            }
             None => data.join("migration/legacy/conversation/text.json"),
         };
         groups.entry(path).or_default().insert(key, value);

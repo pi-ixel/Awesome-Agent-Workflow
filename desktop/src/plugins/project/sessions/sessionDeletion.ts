@@ -86,7 +86,7 @@ export function createSessionDeletions(storage: HostStorage) {
       };
       storage.setItem(storageKey, JSON.stringify(entries));
       store.setState({ entries });
-      await storage.managed?.flush?.();
+      await (storage.managed?.flushConfiguration?.() ?? storage.managed?.flush?.());
       const error = storage.managed?.configurationError?.();
       if (error) throw new Error(error);
     },

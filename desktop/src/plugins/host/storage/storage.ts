@@ -163,6 +163,7 @@ export const desktopManagedStorage: HostManagedStorage = {
   request: (command, args) => invoke(command, args),
   load: loadNativeConfiguration,
   flush: flushNativeConfiguration,
+  async flushConfiguration() { await configuration.flush(); },
   migrated: migratedConfigurationKey,
   isManagedKey: (key) =>
     isNativeConfigurationKey(key) || isConversationTextKey(key),

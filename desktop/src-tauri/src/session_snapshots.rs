@@ -116,8 +116,14 @@ pub async fn session_data_read(
         .await
         .map_err(|e| e.to_string())?;
     }
+    let data = data_dir(&app)?;
+    if let Some(owner) = SessionIdentity::from_scope(&scope) {
+        if owner.deleted_marker(&data).and_then(|marker| marker.try_exists()).map_err(|e| e.to_string())? {
+            return Ok(None);
+        }
+    }
     let path = kind
-        .target(&data_dir(&app)?, &scope, false)
+        .target(&data, &scope, false)
         .map_err(|e| e.to_string())?;
     let Some((mut reader, Some(stored_scope))) = open(&path).map_err(|e| e.to_string())? else {
         return Ok(None);
@@ -150,8 +156,14 @@ pub async fn session_data_write(
         .map_err(|e| e.to_string())?;
     }
     let _guard = WRITER.lock().map_err(|e| e.to_string())?;
+    let data = data_dir(&app)?;
+    if let Some(owner) = SessionIdentity::from_scope(&scope) {
+        if owner.deleted_marker(&data).and_then(|marker| marker.try_exists()).map_err(|e| e.to_string())? {
+            return if migrate { Ok(()) } else { Err("会话已彻底删除".into()) };
+        }
+    }
     let path = kind
-        .target(&data_dir(&app)?, &scope, true)
+        .target(&data, &scope, true)
         .map_err(|e| e.to_string())?;
     write_data(&path, &scope, value.as_deref(), migrate)
 }
@@ -807,31 +819,50 @@ pub async fn session_data_delete(
 }
 
 #[tauri::command]
-pub fn session_data_finish_deletion(app: tauri::AppHandle, scope: String) -> Result<(), String> {
-    let _guard = WRITER.lock().map_err(|e| e.to_string())?;
+pub async fn session_data_finish_deletion(
+    app: tauri::AppHandle,
+    scope: String,
+    legacy_scopes: Vec<String>,
+) -> Result<(), String> {
     let data = data_dir(&app)?;
     let owner = SessionIdentity::from_scope(&scope)
         .filter(|o| o.session_id.is_some())
         .ok_or("缺少删除会话身份")?;
-    let marker = owner.deleted_marker(&data).map_err(|e| e.to_string())?;
-    if !marker.try_exists().map_err(|e| e.to_string())? {
-        let path = SessionData::Snapshot
-            .target(&data, &scope, false)
-            .map_err(|e| e.to_string())?;
-        let Some((mut reader, None)) = open(&path).map_err(|e| e.to_string())? else {
-            return Err("消息历史尚未确认删除".into());
-        };
-        let mut value = String::new();
-        reader
-            .read_to_string(&mut value)
-            .map_err(|e| e.to_string())?;
-        if value != PERMANENT_DELETION {
-            return Err("消息历史尚未确认删除".into());
+    tauri::async_runtime::spawn_blocking(move || {
+        {
+            let _guard = WRITER.lock().map_err(|e| e.to_string())?;
+            let marker = owner.deleted_marker(&data).map_err(|e| e.to_string())?;
+            if !marker.try_exists().map_err(|e| e.to_string())? {
+                crate::storage_preferences::write_record(&marker, &owner)?;
+            }
+            for scope in legacy_scopes {
+                let identity = SessionIdentity::from_scope(&scope).or_else(|| {
+                    let (project, id) = scope.rsplit_once('#')?;
+                    SessionIdentity::new(&owner.agent_id, project, Some(id))
+                });
+                if identity.as_ref() != Some(&owner) {
+                    return Err("旧会话记录身份不匹配".into());
+                }
+                for kind in [SessionData::Snapshot, SessionData::Queue, SessionData::MessageImage] {
+                    let path = path(&kind.legacy_directory(&data), &scope);
+                    match fs::remove_file(path) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(error.to_string()),
+                    }
+                }
+            }
         }
-        crate::storage_preferences::write_record(&marker, &owner)?;
-    }
-    crate::browser::restore::forget_owner(&data, &owner)?;
-    crate::session_recovery::clear_owned_directory(&data, &owner)
+        crate::storage_preferences::clear_unowned_composer(&data, &owner)?;
+        {
+            let _guard = IMAGE_DRAFT_WRITER.lock().map_err(|e| e.to_string())?;
+            crate::session_image_drafts::clear_unowned(&data, &owner)?;
+        }
+        crate::browser::restore::forget_owner(&data, &owner)?;
+        crate::session_recovery::clear_owned_directory(&data, &owner)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(Serialize)]
