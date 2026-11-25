@@ -12,6 +12,8 @@ import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts
 /** 分组状态：沿用侧栏已有的状态徽标（运行中 / 失败 / 已停止…）。 */
 export type SessionGroupStatus = "running" | "waiting" | "completed" | "failed" | "stopped" | "idle";
 
+export type SessionGroupAttentionTone = "neutral" | "ok" | "warn" | "danger" | "info";
+
 export interface SessionGroupMember {
   readonly sessionId: string;
   /** 由分组发布方负责打开的会话，可保留其所属 Agent。 */
@@ -22,6 +24,8 @@ export interface SessionGroupMember {
   readonly note?: string;
   /** 提醒胶囊（如「等你回复」）：显示时替换会话自身的完成 / 未读徽标。 */
   readonly attention?: string;
+  /** 提醒胶囊的语义色（默认 warn）。 */
+  readonly attentionTone?: SessionGroupAttentionTone;
   /** 这个会话在组里的工作已结束：组内收进默认折叠的「已完成」区，不占眼前位置。 */
   readonly done?: boolean;
 }
@@ -33,6 +37,8 @@ export interface SessionGroup {
   readonly status: SessionGroupStatus;
   /** 分组行的提醒胶囊：收起时也看得到组内有事等人处理。 */
   readonly attention?: string;
+  /** 分组行提醒胶囊的语义色（默认 warn）。 */
+  readonly attentionTone?: SessionGroupAttentionTone;
   readonly members: readonly SessionGroupMember[];
   /** 首次出现时是否展开（之后以用户的展开 / 收起为准）。 */
   readonly defaultExpanded?: boolean;

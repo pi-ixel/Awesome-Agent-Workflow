@@ -1,4 +1,4 @@
-import { ActionButton } from "../../../../shared/ui/controls.tsx";
+import { ActionButton, Spinner, StatusDot, type BadgeTone } from "../../../../shared/ui/controls.tsx";
 import { ContextMenu } from "../../../../shared/ui/ContextMenu.tsx";
 import { useMenuController } from "../../../../shared/ui/useMenuController.ts";
 import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
@@ -22,7 +22,7 @@ import {
 import type { StatusCardMode } from "../../types.ts";
 import { ScopedErrorBoundary } from "../../../../shared/ui/ErrorBoundary.tsx";
 import { StatusTaskProgress } from "./StatusTaskProgress.tsx";
-import { ChevronRightIcon, EllipsisIcon, Maximize2Icon, Minimize2Icon } from "../../../../shared/ui/icons.tsx";
+import { CheckIcon, ChevronRightIcon, EllipsisIcon, Maximize2Icon, Minimize2Icon } from "../../../../shared/ui/icons.tsx";
 import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import { TreeBranch, treeChevronClass } from "../../../../shared/ui/TreeMotion.tsx";
 import { useLayoutMotion } from "../../../../shared/ui/controls/useLayoutMotion.ts";
@@ -64,6 +64,12 @@ function Section({
 }
 
 const NO_ACTIVITIES: readonly ProjectActivity[] = [];
+const ACTIVITY_BADGE_TONE: Readonly<Record<"running" | "alert" | "done" | "wait", BadgeTone>> = {
+  running: "info",
+  alert: "warn",
+  done: "ok",
+  wait: "neutral",
+};
 
 /** 会话消息容器内的摘要，开关浮层不重挂消息流或输入区。 */
 export function SessionStatusOverlay({
@@ -155,16 +161,23 @@ export function SessionStatusOverlay({
     useShallow((state) => ({
       project: state?.workspacePath ?? null,
       items: state?.items ?? NO_ACTIVITIES,
+      bySession: state?.bySession,
     })),
   );
   const activeSessionId = useSessionValue((state) => (matchingSession ? state.activeSessionId : null));
+  const currentActivity = useMemo(() => {
+    if (!project || !extensionStatus.project || pathKey(project) !== pathKey(extensionStatus.project) || !activeSessionId) {
+      return null;
+    }
+    return extensionStatus.bySession?.[activeSessionId] ?? null;
+  }, [project, extensionStatus, activeSessionId]);
   const activities = useMemo(() => {
     if (!project || !extensionStatus.project || pathKey(project) !== pathKey(extensionStatus.project)) return NO_ACTIVITIES;
-    // 当前会话本身属于某项活动时，会话横幅已经在说它，状态卡不再重复。
-    const others = activeSessionId ? extensionStatus.items.filter((item) => !item.sessionIds?.includes(activeSessionId)) : extensionStatus.items;
-    return others.length === extensionStatus.items.length ? extensionStatus.items : others;
-  }, [project, extensionStatus, activeSessionId]);
-  const leadRun = activities[0] ?? null;
+    if (!currentActivity) return extensionStatus.items;
+    const others = extensionStatus.items.filter((item) => item.id !== currentActivity.id);
+    return [currentActivity, ...others];
+  }, [project, extensionStatus, currentActivity]);
+  const leadRun = currentActivity ?? activities[0] ?? null;
   const hasContent =
     enabled &&
     !!project &&
@@ -176,7 +189,7 @@ export function SessionStatusOverlay({
       git.watchError ||
       (git.loading && !git.data)
     );
-  const miniText = compactStatusSummary(task, leadRun, gitModel);
+  const miniText = currentActivity ? currentActivity.summary : compactStatusSummary(task, leadRun, gitModel);
   const compactLabel =
     gitModel || task || leadRun
       ? miniText
@@ -186,6 +199,7 @@ export function SessionStatusOverlay({
           ? "自动刷新不可用"
           : "正在读取状态…";
   const hasWarning = !!(git.error || git.watchError || leadRun?.attention);
+  const leadTone = hasWarning ? "alert" : currentActivity?.tone ?? leadRun?.tone ?? "running";
   const openGit = (): void => {
     if (!project || !gitModel) return;
     openGitReview?.(project, "changes");
@@ -223,13 +237,34 @@ export function SessionStatusOverlay({
                 }}
                 className="session-status-mini absolute right-0 top-0 inline-flex w-max max-w-[min(20rem,calc(100cqw-2rem))] items-center gap-2 rounded-popover! px-3 py-2 text-ui-sm shadow-floating"
               >
-                <span
-                  aria-hidden="true"
-                  className={hasWarning ? "text-warn-ink" : "text-info"}
-                >
-                  {hasWarning ? "!" : "◉"}
-                </span>
-                <span className="truncate">{compactLabel}</span>
+                {leadTone === "running" && (currentActivity || leadRun) ? (
+                  <Spinner className="ui-icon-14 shrink-0 text-info" />
+                ) : leadTone === "done" ? (
+                  <span aria-hidden="true" className="session-wf-done-mark">
+                    <CheckIcon className="ui-icon-10" />
+                  </span>
+                ) : (
+                  <StatusDot tone={ACTIVITY_BADGE_TONE[leadTone]} className="ui-icon-8" />
+                )}
+                {currentActivity ? (
+                  <>
+                    <span className="truncate text-ink">{currentActivity.title}</span>
+                    {currentActivity.steps && currentActivity.steps.length > 0 && (
+                      <span aria-hidden="true" className="session-wf-pills compact">
+                        {currentActivity.steps.map((stepTone, index) => (
+                          <span key={index} className={`session-wf-pill tone-${stepTone}`} />
+                        ))}
+                      </span>
+                    )}
+                    {(leadTone === "alert" || leadTone === "wait") && (
+                      <span className={`session-wf-word tone-${leadTone}`}>
+                        {currentActivity.label}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span className="truncate">{compactLabel}</span>
+                )}
                 <Maximize2Icon
                   aria-hidden="true"
                   className="ui-icon-14 shrink-0 text-ink-faint"
@@ -375,25 +410,56 @@ export function SessionStatusOverlay({
                   )}
                   {activities.length > 0 && extension && (
                     <Section title={extension.activityTitle}>
-                      {activities.map((item) => (
-                        <NavigationRow
-                          key={item.id}
-                          aria-label={item.openLabel}
-                          onClick={() => {
-                            if (project) extension.openActivity(project, item.id);
-                          }}
-                        >
-                          <span className="min-w-0 flex-1">
-                            <span className="flex items-center justify-between gap-2">
-                              <span className="truncate" data-hint={item.title}>{item.title}</span>
-                              <span className={item.attention ? "shrink-0 text-warn-ink" : "shrink-0 text-info"}>
-                                {item.label}
+                      <div className="session-wf-list">
+                        {activities.map((item) => {
+                          const itemTone = item.attention ? "alert" : item.tone ?? "running";
+                          return (
+                            <NavigationRow
+                              key={item.id}
+                              layout="compound"
+                              aria-label={item.openLabel}
+                              className={`group session-wf-step tone-${itemTone}`}
+                              onClick={() => {
+                                if (project) extension.openActivity(project, item.id);
+                              }}
+                            >
+                              <span className="session-wf-head">
+                                <span aria-hidden="true" className="session-wf-mark">
+                                  {itemTone === "running" ? (
+                                    <Spinner className="ui-icon-14 text-info" />
+                                  ) : itemTone === "done" ? (
+                                    <span className="session-wf-done-mark">
+                                      <CheckIcon className="ui-icon-10" />
+                                    </span>
+                                  ) : (
+                                    <StatusDot tone={ACTIVITY_BADGE_TONE[itemTone]} className="ui-icon-8" />
+                                  )}
+                                </span>
+                                <span className="min-w-0 flex-1 truncate font-medium text-ink">
+                                  {item.title}
+                                </span>
+                                <span className={`session-wf-word tone-${itemTone}`}>
+                                  {item.label}
+                                </span>
+                                <ChevronRightIcon
+                                  aria-hidden="true"
+                                  className="session-activity-row-arrow ui-icon-12 shrink-0 text-ink-faint group-hover:text-ink-soft"
+                                />
                               </span>
-                            </span>
-                            <span className="mt-1 block truncate text-ink-faint">{item.detail}</span>
-                          </span>
-                        </NavigationRow>
-                      ))}
+                              <span className="session-wf-detail truncate">
+                                {item.detail}
+                              </span>
+                              {item.steps && item.steps.length > 0 && (
+                                <span aria-hidden="true" className="session-wf-pills">
+                                  {item.steps.map((stepTone, index) => (
+                                    <span key={index} className={`session-wf-pill tone-${stepTone}`} />
+                                  ))}
+                                </span>
+                              )}
+                            </NavigationRow>
+                          );
+                        })}
+                      </div>
                     </Section>
                   )}
                 </div>

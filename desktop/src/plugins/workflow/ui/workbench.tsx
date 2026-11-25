@@ -29,8 +29,9 @@ import { openRunFromNotification } from "../status/notifications.ts";
 import { errorLine } from "../status/errorText.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { WorkflowIcon } from "../../../shared/ui/icons.tsx";
-import type { ProjectActivities, ProjectExtension, ProjectQuickAction, ProjectService } from "../../project/service.ts";
+import type { ProjectActivities, ProjectActivity, ProjectExtension, ProjectQuickAction, ProjectService } from "../../project/service.ts";
 import type { WorkflowDraftEditor, WorkflowEntry, WorkflowFileTransfer,
+  RunSessionLink,
   RunSessionLinks,
   WorkflowEntryCommand,
   WorkflowProjectStatus,
@@ -87,6 +88,81 @@ export function runBriefs(runs: readonly RunSessionLinks[], session?: SessionLoo
       };
     })
     .sort((a, b) => Number(b.waiting) - Number(a.waiting));
+}
+
+function ownNodeState(
+  latest: RunSessionLink["nodes"][number] | undefined,
+  active: boolean,
+): { word: string; tone: NonNullable<ProjectActivity["tone"]> } {
+  if (!latest) return { word: "未开始", tone: "wait" };
+  if (latest.status === "running") return active ? { word: "运行中", tone: "running" } : { word: "已中断", tone: "wait" };
+  if (latest.status === "failed") return { word: "失败", tone: "alert" };
+  if (latest.status === "skipped") return { word: "已跳过", tone: "done" };
+  return { word: "已完成", tone: "done" };
+}
+
+/** 这次运行里各步骤的状态色调序列（用于状态浮层的迷你流程图胶囊条）。 */
+function runStepTones(
+  run: RunSessionLinks,
+  session?: SessionLookup,
+): NonNullable<ProjectActivity["steps"]> {
+  const tones: NonNullable<ProjectActivity["tone"]>[] = [];
+  const stopping = run.active && run.stopping === true;
+  for (const link of run.links) {
+    const activity = stopping ? null : linkActivity(link, run.active, session);
+    const waiting = needsYou(activity);
+    const working = activity === "working";
+    for (let i = 0; i < link.nodes.length; i++) {
+      const node = link.nodes[i]!;
+      const isLatest = i === link.nodes.length - 1;
+      if (isLatest && activity) {
+        tones.push(stopping || activity === "interrupted" ? "wait" : waiting ? "alert" : working ? "running" : "wait");
+      } else {
+        tones.push(ownNodeState(node, run.active && !stopping).tone);
+      }
+    }
+  }
+  return tones;
+}
+
+/** 节点会话 → 右上角会话状态胶囊的活动描述（含已结束运行，方便回看与直达运行面板）。 */
+function sessionActivitiesOf(
+  runs: readonly RunSessionLinks[],
+  session?: SessionLookup,
+): Record<string, ProjectActivity> {
+  const bySession: Record<string, ProjectActivity> = {};
+  for (const run of runs) {
+    if (run.archived) continue;
+    const stopping = run.active && run.stopping === true;
+    const steps = runStepTones(run, session);
+    for (const link of run.links) {
+      if (link.sessionId in bySession) continue;
+      const latest = link.nodes[link.nodes.length - 1];
+      const activity = stopping ? null : linkActivity(link, run.active, session);
+      const waiting = needsYou(activity);
+      const working = activity === "working";
+      const own = activity ? null : ownNodeState(latest, run.active);
+      const word = stopping ? STOPPING_CHIP : activity ? ACTIVITY_WORD[activity] : own!.word;
+      const tone: NonNullable<ProjectActivity["tone"]> =
+        stopping || activity === "interrupted" ? "wait" : waiting ? "alert" : working ? "running" : own?.tone ?? "wait";
+      const stepName = latest
+        ? (latest.ordinal > 1 ? `${latest.label} · 第 ${latest.ordinal} 轮` : latest.label)
+        : (link.actorName || run.workflowName || "工作流");
+      bySession[link.sessionId] = {
+        id: run.runId,
+        title: stepName,
+        label: word,
+        attention: waiting || latest?.status === "failed",
+        tone,
+        ...(steps.length > 0 ? { steps } : {}),
+        detail: run.title || run.workflowName,
+        summary: `${stepName} · ${word}`,
+        openLabel: `查看工作流运行：${run.title}`,
+        sessionIds: [link.sessionId],
+      };
+    }
+  }
+  return bySession;
 }
 
 /**
@@ -235,21 +311,30 @@ export function createWorkflowWorkbench(
   };
   const publishStatus = () => {
     const { workspace, runs } = workflow.sessionLinks();
-    const briefs = runBriefs(runs, sessionLookup());
+    const lookup = sessionLookup();
+    const briefs = runBriefs(runs, lookup);
     const sessionsOf = new Map(runs.map((run) => [run.runId, run.links.map((link) => link.sessionId)]));
+    const stepsOf = new Map(runs.map((run) => [run.runId, runStepTones(run, lookup)]));
+    const bySession = sessionActivitiesOf(runs, lookup);
     status.setState({ workspacePath: workspace, runs: briefs }, true);
     activities.setState({
       workspacePath: workspace,
-      items: briefs.map((run) => ({
-        id: run.runId,
-        title: run.title,
-        label: run.label,
-        attention: run.waiting,
-        detail: `${run.workflowName}${run.step ? ` · ${run.step}` : ""}`,
-        summary: `${run.title} · ${run.label}${run.step ? ` · ${run.step}` : ""}`,
-        openLabel: `查看工作流运行：${run.title}`,
-        sessionIds: sessionsOf.get(run.runId) ?? [],
-      })),
+      items: briefs.map((run) => {
+        const steps = stepsOf.get(run.runId);
+        return {
+          id: run.runId,
+          title: run.title,
+          label: run.label,
+          attention: run.waiting,
+          tone: run.waiting ? "alert" : "running",
+          ...(steps && steps.length > 0 ? { steps } : {}),
+          detail: `${run.workflowName}${run.step ? ` · ${run.step}` : ""}`,
+          summary: `${run.title} · ${run.label}${run.step ? ` · ${run.step}` : ""}`,
+          openLabel: `查看工作流运行：${run.title}`,
+          sessionIds: sessionsOf.get(run.runId) ?? [],
+        };
+      }),
+      ...(Object.keys(bySession).length > 0 ? { bySession } : {}),
     }, true);
     const lead = briefs[0];
     quickAction.setState(

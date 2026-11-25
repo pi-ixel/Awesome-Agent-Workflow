@@ -782,7 +782,7 @@ export function MultiListbox({
   );
 }
 
-/** 全局旋转周期（与 Tailwind `animate-spin` 的 `1s` 一致），用于对齐所有 Spinner 的相位。 */
+/** 全局旋转周期（1 秒，与旋转动画一致），用于对齐所有 Spinner 的相位。 */
 const SPIN_PERIOD_MS = 1000;
 
 /** 旋转圆环加载指示（尺寸随字号，颜色随 currentColor；全局时钟同步旋转相位）。 */

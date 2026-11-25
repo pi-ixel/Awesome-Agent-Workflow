@@ -10,6 +10,9 @@ import type { ComponentType } from "react";
 import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
 import type { SessionTarget } from "../sessions/types.ts";
 
+/** 活动状态色调（与工作流流程图保持同一套语义色）。 */
+export type ProjectActivityTone = "running" | "alert" | "done" | "wait";
+
 /** 项目里一项需要关注的后台工作（如一次工作流运行）。 */
 export interface ProjectActivity {
   readonly id: string;
@@ -18,13 +21,17 @@ export interface ProjectActivity {
   readonly label: string;
   /** 需要用户处理（醒目显示）。 */
   readonly attention: boolean;
+  /** 语义色调（未给时按 attention / running 推断）。 */
+  readonly tone?: ProjectActivityTone;
+  /** 步骤进度胶囊色调序列（与流程图阶段块底部胶囊一致）。 */
+  readonly steps?: readonly ProjectActivityTone[];
   /** 第二行：来源与进展（如「AAW dev · 实现与测试」）。 */
   readonly detail: string;
   /** 状态胶囊里的一行概括（如「登录页 · 运行中 · 实现与测试」）。 */
   readonly summary: string;
   /** 打开它的按钮的无障碍名称。 */
   readonly openLabel: string;
-  /** 它自己的会话：在这些会话里由它的会话横幅说明，状态卡不再重复列出。 */
+  /** 它自己的会话：用于与当前会话关联。 */
   readonly sessionIds?: readonly string[];
 }
 
@@ -32,6 +39,8 @@ export interface ProjectActivities {
   /** 这些活动属于哪个项目。 */
   readonly workspacePath: string | null;
   readonly items: readonly ProjectActivity[];
+  /** 绑定到具体会话的活动（含已结束运行），供该会话右上角状态胶囊直接展示当前步骤。 */
+  readonly bySession?: Readonly<Record<string, ProjectActivity>>;
 }
 
 /** 输入框「/」菜单里的一项。 */

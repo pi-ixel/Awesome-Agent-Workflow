@@ -40,6 +40,12 @@ it("把进行中的运行交给状态浮层，快捷动作按有没有在等你�
   expect(items[0]).toMatchObject({ id: "r1", title: "登录页", openLabel: "查看工作流运行：登录页" });
   // 运行自己的会话里由会话横幅说明，状态卡据此不再重复列出。
   expect(items[0]!.sessionIds).toEqual(["s1"]);
+  expect(waiting.extension.activities.getState().bySession?.s1).toMatchObject({
+    id: "r1",
+    title: "实现与测试",
+    detail: "登录页",
+    openLabel: "查看工作流运行：登录页",
+  });
   expect(items[0]!.detail.startsWith("AAW dev")).toBe(true);
   expect(items[0]!.summary.startsWith("登录页 · ")).toBe(true);
   expect(waiting.extension.quickAction.getState()?.label).toBe(items[0]!.attention ? "回复进行中的工作流" : "查看进行中的工作流");
