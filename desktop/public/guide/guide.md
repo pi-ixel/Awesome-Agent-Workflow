@@ -252,7 +252,7 @@ L3 里 `store` / `sharedStore` / `secrets` / `settings` 这四项**必须走宿�
 | R3   | block | 清单声明的动作必须都有实现                       | 在 <script> 末尾写 window.aawActions = { … }，与界面按钮共用同一函数                                                                                                     |
 | R4   | warn  | 设置只能经 settingsSchema 声明                   | 设置写进清单，代码读只读的 window.aawSettings                                                                                                                            |
 | R5   | warn  | 不得把密钥/口令写进 html                         | 改成设置项由用户填，或运行时让用户输入                                                                                                                                   |
-| R6   | warn  | 需要留存的数据走 window.aawStore                 | await aawStore.set(k, v) / get(k)；localStorage 重启即清空                                                                                                               |
+| R6   | warn  | 需要留存的数据走 window.aawStore                 | 用 await aawStore.set(k, v) / get(k) 保存需要持久化的数据                                                                                                                |
 | R7   | warn  | 不得写死 ≥800px 的宽度                           | 用 width:100% + max-width，避免窄窗口横向溢出                                                                                                                            |
 | R8   | warn  | 联网的工具应该声明 permissions.network           | 不声明也能跑（默认允许），但用户看不到「这个工具会联网」；补上 "permissions": { "network": true }，或写 hosts 限定域名                                                   |
 | R9   | block | 不得改动或夹带平台框架与关键契约文件             | 工具包只保留 manifest.json、index.html、构建产物 app.js 或 bin/ 里的运行时，以及你自己写的源码；AGENTS.md / README.md / runtime 框架这些平台文件不该出现在包里，出现就删 |

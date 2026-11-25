@@ -74,7 +74,7 @@ export function developerPrompt(): string {
 
 下行（宿主注入给工具）：
 - window.aawSettings：只读对象，键就是 settingsSchema 里的 id。
-- window.aawStore：await aawStore.set(k, v) / get(k) / delete(k) / keys()，按工具+用户隔离、上限 5 MB、跨重启保留。要留存的数据一律走它；localStorage 在内存分区里，重启即清空。aawStore.scope("shared") 是用户级共享区，多个工具可见同一份数据。
+- window.aawStore：await aawStore.set(k, v) / get(k) / delete(k) / keys()，按工具和用户隔离、上限 5 MB、跨重启保留，并随工具库迁移。需要持久化的数据走它；临时状态放内存。localStorage 的生命周期取决于运行载体。aawStore.scope("shared") 是用户级共享区，多个工具可见同一份数据。
 - window.aawFiles：await aawFiles.open({ accept, multiple, directory, binary }) 返回文件对象或 null（binary 给 bytes: ArrayBuffer，directory 给 entries）；await aawFiles.save(name, data) 弹保存框，data 可为字符串或 ArrayBuffer；aawFiles.onDrop(list => …) 接住拖入的文件，用 await aawFiles.read(token) 取内容。
 - window.aawClipboard：await aawClipboard.readText() / writeText(text)（上限 1 MB）；await aawClipboard.readImage() 返回 { png: ArrayBuffer } 或 null；aawClipboard.writeImage(bytes) 写图片。
 - window.aawSystem：await aawSystem.info() 给平台/架构/CPU/内存/家目录等只读字段；await aawSystem.disk() 给 { total, free }。没有进程列表与环境变量全集。

@@ -96,6 +96,10 @@ it("R4/R6/R7 warn without blocking, so users keep their freedom", () => {
   );
   expect(ids(problems)).toEqual(expect.arrayContaining(["R4", "R6", "R7"]));
   expect(splitViolations(problems).blocking).toEqual([]);
+  expect(problems.find((problem) => problem.ruleId === "R6")).toMatchObject({
+    message: expect.stringContaining("取决于运行载体"),
+    hint: expect.stringContaining("window.aawStore"),
+  });
 });
 
 it("R5 flags a secret but never blocks", () => {

@@ -95,7 +95,7 @@ export const ruleGuidance: Readonly<
   R6: {
     level: "warn",
     rule: "需要留存的数据走 window.aawStore",
-    fix: "await aawStore.set(k, v) / get(k)；localStorage 重启即清空",
+    fix: "用 await aawStore.set(k, v) / get(k) 保存需要持久化的数据",
   },
   R7: {
     level: "warn",
@@ -328,7 +328,7 @@ export function runToolRules(
     break;
   }
 
-  // R6 · 工具窗口跑在内存分区里，localStorage 在 AAW 重启后会被清空。
+  // R6 · 浏览器存储的生命周期取决于运行载体，持久业务数据走宿主管理的存储。
   // 写设置项的用法归 R4 管，这里只看"拿它当业务存储"的情况，避免同一个毛病报两遍。
   const businessStore = localStore.exec(
     html.replace(new RegExp(legacySettingWrite.source, "gi"), ""),
@@ -338,7 +338,7 @@ export function runToolRules(
       violation(
         "R6",
         "warn",
-        `代码里用了 ${businessStore[0]}。工具窗口是内存分区，AAW 重启后这里的数据会被清空。`,
+        `代码里用了 ${businessStore[0]}。浏览器存储的保留时长取决于运行载体，工具库迁移也不会搬运这份数据。`,
         "需要跨重开保留的数据改用 window.aawStore（await aawStore.set(k, v) / get(k)）；只在本次运行内用的临时状态可以继续用内存变量。",
         "index.html",
       ),
