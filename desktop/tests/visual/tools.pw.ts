@@ -77,7 +77,9 @@ for (const width of [360, 740, 1100])
       await page.getByLabel("缩进空格数", { exact: false }).fill("4");
       await page.getByRole("combobox", { name: "排序方式" }).click();
       await page.getByRole("option", { name: "按名称排序" }).click();
-      await page.getByRole("switch", { name: "处理后自动复制" }).check();
+      const autoCopy = page.getByRole("switch", { name: "处理后自动复制" });
+      await autoCopy.press("Space");
+      await expect(autoCopy).toBeChecked();
       await page.getByRole("button", { name: "保存设置", exact: true }).click();
       await expect(page.getByRole("status")).toContainText("设置已保存");
       await page.getByRole("button", { name: "← 返回工具中心" }).click();

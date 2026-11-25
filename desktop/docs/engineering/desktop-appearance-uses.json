@@ -25,24 +25,14 @@
     "DiagnosticsWindow · <input>",
     "DiagnosticsWindow · <input>"
   ],
-  "plugins/diagnostics/ui/LogView.tsx": [
-    "LogView · <input>"
-  ],
-  "plugins/diagnostics/ui/ResourceReport.tsx": [
-    "Chart · <svg>"
-  ],
+  "plugins/diagnostics/ui/LogView.tsx": ["LogView · <input>"],
+  "plugins/diagnostics/ui/ResourceReport.tsx": ["Chart · <svg>"],
   "plugins/diagnostics/ui/StorageLocationSetting.tsx": [
     "StorageLocationSetting · <input>"
   ],
-  "plugins/diagnostics/ui/StorageSettings.tsx": [
-    "ThresholdInput · <input>"
-  ],
-  "plugins/diagnostics/ui/perf/MemoryChart.tsx": [
-    "MemoryChart · <svg>"
-  ],
-  "plugins/documents/ui/FileAnnotations.tsx": [
-    "FileAnnotations · <textarea>"
-  ],
+  "plugins/diagnostics/ui/StorageSettings.tsx": ["ThresholdInput · <input>"],
+  "plugins/diagnostics/ui/perf/MemoryChart.tsx": ["MemoryChart · <svg>"],
+  "plugins/documents/ui/FileAnnotations.tsx": ["FileAnnotations · <textarea>"],
   "plugins/documents/ui/FileDocumentTools.tsx": [
     "FileDocumentTools · <input>",
     "FileDocumentTools · 内嵌图形",
@@ -148,9 +138,7 @@
   "plugins/terminal/rendering/terminalTheme.ts": [
     "专用渲染依赖 · @xterm/xterm"
   ],
-  "plugins/terminal/ui/TerminalPanel.tsx": [
-    "TerminalTabChip · role=tab"
-  ],
+  "plugins/terminal/ui/TerminalPanel.tsx": ["TerminalTabChip · role=tab"],
   "plugins/terminal/ui/TerminalSessionView.tsx": [
     "专用渲染依赖 · @xterm/addon-clipboard",
     "专用渲染依赖 · @xterm/addon-fit",
@@ -192,13 +180,9 @@
     "ToolManagement · <button>",
     "ToolManagement · <button>",
     "ToolManagement · <input>",
-    "ToolManagement · <input>",
-    "ToolManagement · <input>",
-    "ToolManagement · role=switch"
+    "ToolManagement · <input>"
   ],
-  "plugins/tools/ui/ToolPath.tsx": [
-    "ToolPath · 内嵌图形"
-  ],
+  "plugins/tools/ui/ToolPath.tsx": ["ToolPath · 内嵌图形"],
   "plugins/tools/ui/ToolPreview.tsx": [
     "ToolPreview · <button>",
     "ToolPreview · <button>",
@@ -206,9 +190,7 @@
     "ToolPreview · <button>",
     "ToolPreview · <button>"
   ],
-  "plugins/tools/ui/ToolPreviewTab.tsx": [
-    "ToolPreviewTab · <button>"
-  ],
+  "plugins/tools/ui/ToolPreviewTab.tsx": ["ToolPreviewTab · <button>"],
   "plugins/tools/ui/ToolProjects.tsx": [
     "ToolProjectList · <button>",
     "ToolProjectList · <button>",
@@ -234,7 +216,6 @@
     "ToolsPanel · <button>",
     "ToolsPanel · <button>",
     "ToolsPanel · <button>",
-    "ToolsPanel · <input>",
     "ToolsPanel · <input>",
     "ToolsPanel · <input>",
     "ToolsPanel/exportTool/link · createElement(a)"
@@ -263,9 +244,7 @@
   "plugins/workbench/ui/right-panel/TabOverviewPopover.tsx": [
     "TabOverviewPopover · <input>"
   ],
-  "plugins/workflow/ui/AiComposeDialog.tsx": [
-    "AiComposeDialog · <textarea>"
-  ],
+  "plugins/workflow/ui/AiComposeDialog.tsx": ["AiComposeDialog · <textarea>"],
   "plugins/workflow/ui/DisposePanel.tsx": [
     "DisposePanel · <textarea>",
     "DisposePanel · <textarea>"
@@ -371,9 +350,7 @@
     "Disclosure · <details>",
     "Disclosure · <summary>"
   ],
-  "shared/ui/IconButton.tsx": [
-    "IconButton · <button>"
-  ],
+  "shared/ui/IconButton.tsx": ["IconButton · <button>"],
   "shared/ui/MarkdownView.tsx": [
     "buildMarkdownComponents/h1 · <h1>",
     "专用渲染依赖 · @streamdown/cjk",
@@ -419,9 +396,7 @@
     "removedGutter · 差异样式 bg-diff-removed-gutter",
     "removedInk · 差异样式 text-diff-removed-ink"
   ],
-  "shared/ui/file-icons/fileDisplay.tsx": [
-    "FileDisplayIcon · 内嵌图形"
-  ],
+  "shared/ui/file-icons/fileDisplay.tsx": ["FileDisplayIcon · 内嵌图形"],
   "shared/ui/markdown/DiagramPreviewDialog.tsx": [
     "CircleIcon · 内嵌图形",
     "isTransparentPaint · rgba(0, 0, 0, 0)"

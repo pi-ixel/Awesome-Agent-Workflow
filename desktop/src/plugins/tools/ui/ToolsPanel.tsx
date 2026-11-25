@@ -3,6 +3,7 @@ import type { ChangeEvent, MouseEvent as ReactMouseEvent } from "react";
 import { useStore } from "zustand";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import {
+  Checkbox,
   DangerButton,
   btnGhost,
   btnPrimary,
@@ -677,7 +678,7 @@ export function ToolsPanel({
     >
       <header className="tools-header border-b border-line px-4 pb-3 pt-5">
         <div className="flex flex-wrap items-center gap-3">
-          <span className="flex ui-icon-40 shrink-0 items-center justify-center rounded-xl border border-info/20 bg-info/10 text-info">
+          <span className="flex ui-icon-40 shrink-0 items-center justify-center rounded-popover border border-info/20 bg-info/10 text-info">
             <WrenchIcon className="ui-icon-20" />
           </span>
           <div className="tools-title mr-auto">
@@ -752,7 +753,7 @@ export function ToolsPanel({
         {feedback && (
           <p
             role={feedback.error ? "alert" : "status"}
-            className={`whitespace-pre-wrap break-words rounded-lg border border-line bg-surface px-3 py-2 text-ui-sm ${feedback.error ? "text-danger-ink" : "text-ink-subtle"}`}
+            className={`whitespace-pre-wrap break-words rounded-control border border-line bg-surface px-3 py-2 text-ui-sm ${feedback.error ? "text-danger-ink" : "text-ink-subtle"}`}
           >
             {feedback.text}
           </p>
@@ -868,19 +869,14 @@ export function ToolsPanel({
                           卸载
                         </DangerButton>
                       </div>
-                      <label className="tool-remove-option">
-                        <input
-                          type="checkbox"
-                          checked={removing.files}
-                          onChange={(event) =>
-                            setRemoving({
-                              id: tool.id,
-                              files: event.target.checked,
-                            })
-                          }
-                        />
-                        同时删除项目目录与工具数据
-                      </label>
+                      <Checkbox
+                        className="tool-remove-option"
+                        label="同时删除项目目录与工具数据"
+                        checked={removing.files}
+                        onChange={(files) =>
+                          setRemoving({ id: tool.id, files })
+                        }
+                      />
                     </div>
                   ) : (
                     <div className="tool-row-actions">

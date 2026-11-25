@@ -34,7 +34,7 @@
 .aaw-tools .tools-header > div:first-child > button {
   min-height: 32px;
   padding: 6px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   font-size: var(--text-xs);
   white-space: nowrap;
 }
@@ -47,7 +47,7 @@
   font-size: var(--text-md);
   line-height: 20px;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-flat);
   background: transparent;
   box-shadow: none;
   color: var(--color-ink-subtle);
@@ -65,7 +65,7 @@
   gap: 10px;
   padding: 9px 12px;
   border: 1px solid var(--color-line);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   color: var(--color-ink-subtle);
   background: var(--color-surface);
   font-size: var(--text-xs);
@@ -90,7 +90,7 @@
   align-content: start;
   padding: 16px;
   min-width: 0;
-  border-radius: 12px;
+  border-radius: var(--radius-popover);
   background: linear-gradient(
     140deg,
     var(--color-surface),
@@ -120,7 +120,7 @@
   min-width: 0;
   padding: 7px 9px 7px 8px;
   border: 1px solid var(--color-line);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--color-surface);
   transition:
     border-color 0.12s ease,
@@ -135,7 +135,7 @@
 .aaw-tools .tool-symbol.is-row {
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   font-size: var(--text-md);
 }
 .aaw-tools .tool-row-main {
@@ -179,7 +179,7 @@
 }
 .aaw-tools .tool-row-tag.is-warn {
   padding: 1px 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid
     color-mix(
       in srgb,
@@ -197,7 +197,7 @@
 .aaw-tools .tool-row-open {
   min-height: 26px;
   padding: 3px 11px;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   cursor: pointer;
   border: 1px solid color-mix(in srgb, var(--color-info) 42%, var(--color-line));
   background: color-mix(in srgb, var(--color-info) 12%, transparent);
@@ -218,7 +218,7 @@
   place-items: center;
   width: 26px;
   height: 26px;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   color: var(--color-ink-subtle);
   font-size: var(--text-sm);
   line-height: 1;
@@ -250,7 +250,7 @@
   flex: none;
   width: 36px;
   height: 36px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--color-tools-symbol-bg);
   color: var(--color-tools-symbol-ink);
   font-size: calc(var(--ui-font-size) + 2px);
@@ -284,7 +284,7 @@
   padding: 6px 7px;
   font-size: var(--text-xs);
   line-height: 18px;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
 }
 .aaw-tools textarea {
   min-width: 0;
@@ -353,7 +353,7 @@
   place-items: center;
   width: calc(var(--ui-icon-unit) * 44);
   height: calc(var(--ui-icon-unit) * 44);
-  border-radius: 13px;
+  border-radius: var(--radius-popover);
   color: var(--color-tools-icon-ink);
   background: var(--color-tools-icon-bg);
   border: 1px solid var(--color-tools-icon-border);
@@ -398,13 +398,13 @@
 .aaw-tools .management-hero button {
   min-height: 32px;
   padding: 6px 13px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   font-size: var(--text-xs);
 }
 .aaw-tools .management-feedback {
   padding: 10px 12px;
   border: 1px solid var(--color-line);
-  border-radius: 9px;
+  border-radius: var(--radius-control);
   background: var(--color-info-bg);
   color: var(--color-ink-subtle);
   font-size: var(--text-xs);
@@ -432,7 +432,7 @@
   min-width: 0;
   padding: 13px 4px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: inherit;
   text-align: left;
@@ -470,7 +470,7 @@
 }
 .aaw-tools .mg-badge {
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--color-line);
   color: var(--color-ink-subtle);
   font-size: calc(var(--ui-font-size) - 4px);
@@ -540,24 +540,18 @@
   width: 100%;
   padding: 7px 10px;
   border: 1px solid var(--color-line);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   font-size: var(--text-xs);
   color: var(--color-ink);
   background: var(--color-base);
 }
-.aaw-tools .mg-field input:focus-visible {
+.aaw-tools .mg-field input:not([type="checkbox"]):focus-visible {
   outline: 2px solid var(--color-info);
   outline-offset: 2px;
 }
 .aaw-tools .mg-field.is-toggle {
   grid-template-columns: 1fr auto;
   align-items: center;
-}
-.aaw-tools .mg-field input[type="checkbox"] {
-  width: calc(var(--ui-icon-unit) * 17);
-  height: calc(var(--ui-icon-unit) * 17);
-  min-height: calc(var(--ui-icon-unit) * 17);
-  accent-color: var(--color-info);
 }
 .aaw-tools .mg-form-footer {
   display: flex;
@@ -579,14 +573,14 @@
 }
 .aaw-tools .mg-actions button {
   padding: 5px 11px;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   font-size: var(--text-xs);
   min-height: 30px;
 }
 .aaw-tools .mg-empty {
   margin: 0;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--color-ink) 4%, transparent);
   font-size: var(--text-xs);
   line-height: 1.7;
@@ -621,7 +615,7 @@
 .aaw-tools .mg-files code {
   max-width: 100%;
   padding: 3px 7px;
-  border-radius: 5px;
+  border-radius: var(--radius-control);
   background: var(--color-surface);
   color: var(--color-ink);
   overflow-wrap: anywhere;
@@ -640,7 +634,7 @@
 .aaw-tools .mg-action {
   padding: 9px 11px;
   border: 1px solid var(--color-line);
-  border-radius: 9px;
+  border-radius: var(--radius-control);
   background: var(--color-surface);
 }
 .aaw-tools .mg-action-head {
@@ -664,7 +658,7 @@
   display: block;
   margin-top: 6px;
   padding: 5px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: var(--color-base);
   color: var(--color-ink-subtle);
   font-family: Consolas, "Cascadia Code", monospace;
@@ -786,7 +780,7 @@
 .aaw-tools .preview-actions button {
   min-height: 30px;
   padding: 5px 10px;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   font-size: var(--text-xs);
 }
 .aaw-tools .preview-actions .preview-install {
@@ -869,7 +863,7 @@
 /* ── 开发工具表单（一行输入，不占首屏）───────────────────────────────── */
 .aaw-tools .build-new {
   border: 1px solid var(--color-line);
-  border-radius: 12px;
+  border-radius: var(--radius-popover);
   background: var(--color-surface);
   padding: 12px 14px;
 }
@@ -890,7 +884,7 @@
   max-height: 40vh;
   padding: 10px 12px;
   border: 1px solid var(--color-line);
-  border-radius: 9px;
+  border-radius: var(--radius-control);
   background: var(--color-base);
   color: var(--color-ink);
   font: inherit;
@@ -911,7 +905,7 @@
 .aaw-tools .build-new-row button {
   min-height: 30px;
   padding: 5px 12px;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   font-size: var(--text-xs);
 }
 .aaw-tools .build-new-row > button[type="submit"] {
@@ -949,7 +943,7 @@
 /* ── 当前项目 ─────────────────────────────────────────────────────────── */
 .aaw-tools .build-active {
   border: 1px solid var(--color-line);
-  border-radius: 12px;
+  border-radius: var(--radius-popover);
   background: var(--color-surface);
   padding: 12px 14px;
 }
@@ -978,7 +972,7 @@
   min-width: 0;
   padding: 3px 4px 3px 8px;
   border: 1px solid var(--color-line);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--color-base);
   vertical-align: middle;
 }
@@ -1026,7 +1020,7 @@
 .aaw-tools .build-status {
   flex: 0 0 auto;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: var(--text-2xs);
   border: 1px solid var(--color-line);
   color: var(--color-ink-subtle);
@@ -1053,7 +1047,7 @@
 .aaw-tools .build-active-actions button {
   min-height: 30px;
   padding: 5px 12px;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   font-size: var(--text-xs);
 }
 
@@ -1071,7 +1065,7 @@
       var(--color-warning-ink, var(--color-info)) 40%,
       var(--color-line)
     );
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--color-base);
 }
 .aaw-tools .build-stalled > div {
@@ -1097,7 +1091,7 @@
 .aaw-tools .build-stalled-actions button {
   min-height: 30px;
   padding: 5px 12px;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   font-size: var(--text-xs);
 }
 
@@ -1112,7 +1106,7 @@
   gap: 8px;
   padding: 8px 10px;
   border: 1px solid var(--color-line);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--color-base);
 }
 .aaw-tools .build-violations li > span {
@@ -1194,7 +1188,7 @@
   min-width: 0;
   padding: 10px 12px;
   border: 1px solid var(--color-line);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--color-surface);
 }
 .aaw-tools .build-project-main {
@@ -1226,7 +1220,7 @@
   min-height: 28px;
   padding: 4px 10px;
   font-size: var(--text-xs);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
 }
 /* 展开中的行：边框加重一点，说明"这一行是当前在处理的"。 */
 .aaw-tools .build-project.is-open {
@@ -1302,7 +1296,7 @@
   margin-top: 8px;
   padding: 7px 10px;
   border: 1px solid var(--color-line);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--color-base);
   font-size: var(--text-2xs);
   line-height: 1.6;
@@ -1345,7 +1339,7 @@
 /* 状态帽是信息不是按钮：带描边的胶囊看起来像可点，扫视时要先分辨一轮。 */
 .aaw-tools .build-permission {
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--color-base);
   border: 0;
   color: var(--color-ink-subtle);
@@ -1353,7 +1347,7 @@
 }
 .aaw-tools .build-missing {
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--color-base);
   border: 0;
   font-style: normal;
@@ -1371,7 +1365,7 @@
   gap: 12px;
   padding: 16px;
   border: 1px solid var(--color-line);
-  border-radius: 12px;
+  border-radius: var(--radius-popover);
   background: linear-gradient(
     135deg,
     color-mix(in srgb, var(--color-info) 7%, var(--color-surface)),
@@ -1384,7 +1378,7 @@
   place-items: center;
   width: 38px;
   height: 38px;
-  border-radius: 11px;
+  border-radius: var(--radius-control);
   color: var(--color-info);
   background: color-mix(in srgb, var(--color-info) 15%, transparent);
 }
@@ -1415,7 +1409,7 @@
 }
 .aaw-tools .build-empty-cues span {
   padding: 3px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   border: 1px dashed var(--color-line);
   font-family: Consolas, monospace;
   font-size: calc(var(--ui-font-size) - 4px);
@@ -1428,7 +1422,7 @@
   overflow: hidden;
   padding: 28px 22px 22px;
   border: 1px solid var(--color-line);
-  border-radius: 16px;
+  border-radius: var(--radius-panel);
   text-align: center;
   background:
     radial-gradient(
@@ -1453,7 +1447,7 @@
 .aaw-tools .tools-empty-glow {
   position: absolute;
   inset: -14px;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--color-info) 18%, transparent);
   filter: blur(14px);
 }
@@ -1463,7 +1457,7 @@
   place-items: center;
   width: 54px;
   height: 54px;
-  border-radius: 16px;
+  border-radius: var(--radius-panel);
   border: 1px solid color-mix(in srgb, var(--color-info) 35%, var(--color-line));
   background: color-mix(in srgb, var(--color-info) 15%, var(--color-surface));
   color: var(--color-info);
@@ -1501,7 +1495,7 @@
   gap: 9px;
   padding: 10px;
   border: 1px solid var(--color-line);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--color-base) 55%, transparent);
 }
 .aaw-tools .tools-empty-steps li > span {
@@ -1510,7 +1504,7 @@
   place-items: center;
   width: 20px;
   height: 20px;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--color-info) 18%, transparent);
   color: var(--color-info);
   font-size: var(--text-2xs);
@@ -1572,7 +1566,7 @@
   gap: 12px;
   padding: 14px 16px;
   border: 1px dashed var(--color-line-strong);
-  border-radius: 12px;
+  border-radius: var(--radius-popover);
   color: var(--color-ink-subtle);
 }
 .aaw-tools .tools-search-empty > span {
@@ -1635,7 +1629,7 @@
   min-height: 28px;
   padding: 4px 8px;
   border: 1px solid var(--color-line);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: var(--color-base);
   color: var(--color-ink);
   font-size: var(--text-xs);
@@ -1651,7 +1645,7 @@
 /* ── 已安装卡片：能力标记与卸载确认 ──────────────────────────────────── */
 .aaw-tools .tool-badge {
   padding: 1px 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--color-line);
   font-size: var(--text-2xs);
 }

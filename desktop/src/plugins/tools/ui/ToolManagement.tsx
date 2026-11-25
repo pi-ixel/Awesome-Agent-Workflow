@@ -5,6 +5,7 @@ import {
   btnPrimary,
   btnSecondary,
   Listbox,
+  ToggleSwitch,
 } from "../../../shared/ui/controls.tsx";
 import { CopyButton } from "../../../shared/ui/CopyButton.tsx";
 import { SquareTerminalIcon } from "../../../shared/ui/icons.tsx";
@@ -292,16 +293,12 @@ export function ToolManagement({
                             )}
                           </label>
                           {field.type === "boolean" ? (
-                            <input
+                            <ToggleSwitch
                               id={`setting-${field.id}`}
-                              type="checkbox"
-                              role="switch"
+                              label={field.label}
                               checked={values[field.id] === true}
-                              onChange={(event) =>
-                                setValues({
-                                  ...values,
-                                  [field.id]: event.target.checked,
-                                })
+                              onChange={(checked) =>
+                                setValues({ ...values, [field.id]: checked })
                               }
                             />
                           ) : field.type === "select" ? (
