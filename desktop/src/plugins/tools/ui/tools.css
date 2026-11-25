@@ -181,12 +181,8 @@
   padding: 1px 6px;
   border-radius: var(--radius-pill);
   border: 1px solid
-    color-mix(
-      in srgb,
-      var(--color-warning-ink, var(--color-info)) 45%,
-      var(--color-line)
-    );
-  color: var(--color-warning-ink, var(--color-info));
+    color-mix(in srgb, var(--color-warn-ink) 45%, var(--color-line));
+  color: var(--color-warn-ink);
 }
 .aaw-tools .tool-row-actions {
   display: flex;
@@ -850,7 +846,7 @@
   text-transform: uppercase;
 }
 .aaw-tools .preview-log.is-warn {
-  color: var(--color-warning-ink, var(--color-ink));
+  color: var(--color-warn-ink);
 }
 .aaw-tools .preview-log.is-error {
   color: var(--color-danger-ink);
@@ -1030,12 +1026,8 @@
   color: var(--color-info);
 }
 .aaw-tools .build-status.is-ready {
-  border-color: color-mix(
-    in srgb,
-    var(--color-success-ink, var(--color-info)) 45%,
-    var(--color-line)
-  );
-  color: var(--color-success-ink, var(--color-info));
+  border-color: color-mix(in srgb, var(--color-ok-ink) 45%, var(--color-line));
+  color: var(--color-ok-ink);
 }
 .aaw-tools .build-active-actions {
   display: flex;
@@ -1060,11 +1052,7 @@
   margin-top: 10px;
   padding: 10px 12px;
   border: 1px solid
-    color-mix(
-      in srgb,
-      var(--color-warning-ink, var(--color-info)) 40%,
-      var(--color-line)
-    );
+    color-mix(in srgb, var(--color-warn-ink) 40%, var(--color-line));
   border-radius: var(--radius-control);
   background: var(--color-base);
 }
@@ -1355,7 +1343,7 @@
 /* "项目改了但没重装"是长句子，做成胶囊会撑坏一行；给普通文字 + 警示色。 */
 .aaw-tools .build-drift {
   font-style: normal;
-  color: var(--color-warning-ink, var(--color-info));
+  color: var(--color-warn-ink);
 }
 /* ── 空状态：不是"什么都没有"的占位符，而是唯一一次讲清价值的机会 ─────── */
 .aaw-tools .build-empty {
@@ -1652,10 +1640,10 @@
 .aaw-tools .tool-badge.is-network {
   border-color: color-mix(
     in srgb,
-    var(--color-warning-ink, var(--color-info)) 45%,
+    var(--color-warn-ink) 45%,
     var(--color-line)
   );
-  color: var(--color-warning-ink, var(--color-info));
+  color: var(--color-warn-ink);
 }
 .aaw-tools .tool-remove {
   flex: 1 1 100%;
