@@ -180,7 +180,7 @@
 .session-wf-pills.compact {
   padding-left: 0;
   margin-top: 0;
-  width: 34px;
+  width: calc(34 * var(--ui-icon-unit));
   flex: none;
 }
 .session-wf-pill {
@@ -193,8 +193,8 @@
   overflow: hidden;
 }
 .session-wf-pills.compact .session-wf-pill {
-  height: 4px;
-  min-width: 4px;
+  height: calc(4 * var(--ui-icon-unit));
+  min-width: calc(4 * var(--ui-icon-unit));
 }
 .session-wf-pill.tone-done {
   background-color: var(--color-ok);
