@@ -238,6 +238,7 @@ export interface EmbeddedSessionProps {
   readonly placeholder?: string;
   readonly emptyText?: string;
   readonly header?: ReactNode;
+  readonly headerActions?: ReactNode;
 }
 
 export interface ProjectConversation {

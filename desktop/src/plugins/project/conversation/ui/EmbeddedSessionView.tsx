@@ -32,6 +32,7 @@ import {
   WrenchIcon,
   XIcon,
 } from "../../../../shared/ui/icons.tsx";
+import { friendlyWorkflowTool } from "./OrdinaryToolCallCard.tsx";
 
 export interface EmbeddedSessionHost {
   readonly findStore: (target: SessionTarget) => SessionStore | undefined;
@@ -97,7 +98,12 @@ function EmbeddedThoughtRow({ item }: { readonly item: ThoughtItem }) {
 function EmbeddedToolRow({ item }: { readonly item: ToolCallItem }) {
   const running = item.status === "pending" || item.status === "in_progress";
   const failed = item.status === "failed";
-  const label = item.title?.trim() || item.toolName || "工具调用";
+  const friendly = friendlyWorkflowTool(item, running);
+  const label = friendly
+    ? friendly.summary
+      ? `${friendly.label} · ${friendly.summary}`
+      : friendly.label
+    : item.title?.trim() || item.toolName || "工具调用";
   return (
     <div className="flex items-center gap-1.5 rounded-control border border-line/70 bg-surface px-2.5 py-1.5 text-ui-xs text-ink-mute">
       {running ? (
@@ -142,12 +148,65 @@ function EmbeddedItemRow({ item }: { readonly item: SessionItem }) {
   }
 }
 
+function formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds} 秒`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return s === 0 ? `${m} 分` : `${m} 分 ${s} 秒`;
+}
+
+function currentTurnStartedAt(items: readonly SessionItem[]): number | null {
+  const starts: number[] = [];
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]!;
+    if (item.kind === "tool" || item.kind === "thought") {
+      if (item.startedAt !== null) starts.push(item.startedAt);
+    } else if (item.kind === "user") {
+      if (item.createdAt) {
+        const t = Date.parse(item.createdAt);
+        if (!Number.isNaN(t)) starts.push(t);
+      }
+      break;
+    }
+  }
+  return starts.length > 0 ? Math.min(...starts) : null;
+}
+
+function EmbeddedWorkingIndicator({
+  startedAt,
+}: {
+  readonly startedAt: number | null;
+}) {
+  const [fallbackStart] = useState(() => Date.now());
+  const origin = startedAt ?? fallbackStart;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const elapsed = Math.max(0, Math.floor((now - origin) / 1000));
+
+  return (
+    <div
+      className="flex items-center gap-2 py-1 text-ui-xs text-ink-mute"
+      role="status"
+      aria-live="polite"
+    >
+      <Spinner className="ui-icon-14 shrink-0" />
+      <span>{elapsed > 0 ? `工作中 ${formatElapsed(elapsed)}` : "正在思考与处理…"}</span>
+    </div>
+  );
+}
+
 function BoundEmbeddedSession({
   store,
   target,
   placeholder,
   emptyText,
   header,
+  headerActions,
   send,
   cancel,
 }: EmbeddedSessionProps & {
@@ -158,6 +217,7 @@ function BoundEmbeddedSession({
   const items = useStore(store, (s) => s.items);
   const isRunning = useStore(store, (s) => s.isAgentRunning);
   const connectionFailure = useStore(store, (s) => s.connectionFailure);
+  const turnStartedAt = isRunning ? currentTurnStartedAt(items) : null;
   const [draft, setDraft] = useState("");
   const scrollerRef = useRef<HTMLDivElement>(null);
   const stickBottomRef = useRef(true);
@@ -182,15 +242,18 @@ function BoundEmbeddedSession({
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-base"
       aria-label="AI 编辑对话"
     >
-      {header && (
+      {(header || headerActions || isRunning) && (
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-3 py-2">
-          {header}
-          {isRunning && (
-            <span className="inline-flex shrink-0 items-center gap-1.5 text-ui-xs text-ink-mute">
-              <Spinner className="ui-icon-14" />
-              <span>AI 正在编辑…</span>
-            </span>
-          )}
+          <div className="min-w-0 flex-1">{header}</div>
+          <div className="flex shrink-0 items-center gap-2">
+            {isRunning && (
+              <span className="inline-flex shrink-0 items-center gap-1.5 text-ui-xs text-ink-mute">
+                <Spinner className="ui-icon-14" />
+                <span>AI 正在编辑…</span>
+              </span>
+            )}
+            {headerActions}
+          </div>
         </div>
       )}
       <div
@@ -206,13 +269,20 @@ function BoundEmbeddedSession({
           <Callout tone="danger" title={connectionFailure} />
         )}
         {items.length === 0 ? (
-          <p className="text-ui-sm text-ink-mute">
-            {isRunning
-              ? "正在连接 AI 并分析你的需求…"
-              : (emptyText ?? "在这里继续向 AI 提修改要求。")}
-          </p>
+          isRunning ? (
+            <EmbeddedWorkingIndicator startedAt={turnStartedAt} />
+          ) : (
+            <p className="text-ui-sm text-ink-mute">
+              {emptyText ?? "在这里继续向 AI 提修改要求。"}
+            </p>
+          )
         ) : (
-          items.map((item) => <EmbeddedItemRow key={item.id} item={item} />)
+          <>
+            {items.map((item) => (
+              <EmbeddedItemRow key={item.id} item={item} />
+            ))}
+            {isRunning && <EmbeddedWorkingIndicator startedAt={turnStartedAt} />}
+          </>
         )}
       </div>
       <div className="shrink-0 border-t border-line p-2.5">

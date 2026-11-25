@@ -534,6 +534,19 @@ export function apply(ctx: Context): void {
     const unsubscribe = workflow.subscribe((event) => {
       if (event.type === "runs-changed") publish();
       else if (event.type === "library-changed") ui.loadEntries();
+      else if (event.type === "session-task-sent") {
+        // 用户当前正在看同一次工作流运行里的前序步骤会话时，自动跟随切到新推进的活跃步骤。
+        const nextSessionId = typeof event.sessionId === "string" ? event.sessionId : "";
+        const runId = typeof event.runId === "string" ? event.runId : "";
+        if (!nextSessionId || !runId) return;
+        const activeSessionId = project.conversation.foreground.session.getState().activeSessionId;
+        if (!activeSessionId || activeSessionId === nextSessionId) return;
+        const { workspace, runs } = workflow.sessionLinks();
+        const run = runs.find((item) => item.runId === runId);
+        if (workspace && run && run.links.some((link) => link.sessionId === activeSessionId)) {
+          ui.openNodeSession(nextSessionId, workspace);
+        }
+      }
     });
     // 会话状态一变（工作中、你打断了、出错……）就按同一份重发（ADR 040）。
     const unsubscribeSessions = workflow.sessionActivity?.subscribe(() => publish()) ?? (() => {});

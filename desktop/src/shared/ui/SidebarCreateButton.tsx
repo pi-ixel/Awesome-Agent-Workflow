@@ -14,7 +14,6 @@ export function SidebarCreateButton({
     <ActionButton
       tone="secondary"
       aria-label={label}
-      data-hint={label}
       onClick={onClick}
       className="inline-flex min-h-10 w-full shrink-0 cursor-pointer items-center justify-center gap-2 overflow-hidden px-2.5 text-ui-base"
     >

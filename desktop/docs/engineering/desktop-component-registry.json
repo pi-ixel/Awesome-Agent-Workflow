@@ -475,7 +475,8 @@
         "EmbeddedNoticeRow",
         "EmbeddedThoughtRow",
         "EmbeddedToolRow",
-        "EmbeddedUserRow"
+        "EmbeddedUserRow",
+        "EmbeddedWorkingIndicator"
       ]
     },
     "targets": []
@@ -992,7 +993,7 @@
     "targets": [
       "apply/overlays/\"remote-project-add-modal\"/View → plugins/remoteProject/ui/workbench.tsx#apply/RemoteProjectModalOverlay",
       "apply/renderAddProjectForm → (inline)",
-      "apply/settings/\"remote-hosts\"/Icon → shared/ui/icons.tsx#GlobeIcon",
+      "apply/settings/\"remote-hosts\"/Icon → shared/ui/icons.tsx#MonitorIcon",
       "apply/settings/\"remote-hosts\"/View → (inline)"
     ]
   },
@@ -1872,6 +1873,7 @@
         "MessageCirclePlusIcon",
         "Minimize2Icon",
         "MinusIcon",
+        "MonitorIcon",
         "MousePointer2Icon",
         "PanelLeftCloseIcon",
         "PanelLeftOpenIcon",

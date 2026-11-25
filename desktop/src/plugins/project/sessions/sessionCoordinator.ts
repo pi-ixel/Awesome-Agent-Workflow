@@ -364,13 +364,19 @@ export function createSessionCoordinator({
         pending,
         unread:
           !visible &&
+          !runtime.ephemeral &&
           (finished ||
             (status === "failed" && old?.status !== "failed") ||
             pending > 0 ||
             old?.unread === true),
       }, {
         agentId: runtime.adapter.id,
-        unreadReply: visible || runtime.scheduled ? false : answered ? true : undefined,
+        unreadReply:
+          visible || runtime.scheduled || runtime.ephemeral
+            ? false
+            : answered
+              ? true
+              : undefined,
       });
     };
     const stopState = runtime.store.subscribe((state, previous) => {
@@ -1589,6 +1595,12 @@ export function createSessionCoordinator({
             }
           }
         }
+        const title = options.title?.trim();
+        if (title && !options.ephemeral) {
+          const save = setManualTitle(resumeId, title, agentKey);
+          if (save) await save;
+          existing.store.getState().refreshSessionTitle(resumeId);
+        }
         return { workspacePath, agentKey, sessionId: resumeId };
       }
     }
@@ -1615,6 +1627,7 @@ export function createSessionCoordinator({
       if (!current()) throw new Error("会话管理当前不可用");
       runtime.listOnly = false;
       runtime.pluginOpened = true;
+      runtime.ephemeral = options.ephemeral === true;
       projectFactory.addSession(runtime);
       let sessionId: string;
       if (resumeId) {

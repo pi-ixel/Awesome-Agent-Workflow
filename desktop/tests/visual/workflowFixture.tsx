@@ -158,12 +158,17 @@ if (params.has("inspector")) {
 } else if (params.has("compose")) {
   // 左侧「工作流」功能区（ADR 038）：侧栏的「用 AI 新建」在中间的模板区打开撰写框。
   const service = fakeWorkflowService();
-  const navigation = createTemplateNavigation();
-  const editor: WorkflowDraftEditor = {
-    start: async () => {
+  const composeService = {
+    ...service.service,
+    createDraft: async (options: Parameters<typeof service.service.createDraft>[0]) => {
       const response = await fetch("/tests/visual/workflowFixture.html?sample-compose-request");
       if (!response.ok) throw new Error("工作流编辑会话启动失败，请重试");
+      return service.service.createDraft(options);
     },
+  };
+  const navigation = createTemplateNavigation();
+  const editor: WorkflowDraftEditor = {
+    start: async () => {},
     show: () => Promise.resolve(false),
     has: () => false,
     send: () => false,
@@ -174,8 +179,8 @@ if (params.has("inspector")) {
       <button type="button" onClick={() => { document.documentElement.dataset.projectTool = "opened"; }}>项目工具</button>
     </header>
     <div className="flex min-h-0 flex-1">
-      <aside className="w-48 shrink-0 border-r border-line"><WorkflowSidebar service={service.service} navigation={navigation} canCompose /></aside>
-      <div className="min-h-0 min-w-0 flex-1"><WorkflowWorkspace service={service.service} navigation={navigation} editor={editor} /></div>
+      <aside className="w-48 shrink-0 border-r border-line"><WorkflowSidebar service={composeService} navigation={navigation} canCompose /></aside>
+      <div className="min-h-0 min-w-0 flex-1"><WorkflowWorkspace service={composeService} navigation={navigation} editor={editor} /></div>
     </div>
   </div>);
 } else root.render(

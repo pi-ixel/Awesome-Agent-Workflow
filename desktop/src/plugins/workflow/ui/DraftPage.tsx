@@ -115,16 +115,26 @@ function nodeFormFrom(node: WorkflowCatalogNode): NodeDraftForm {
   };
 }
 
+export interface PendingAiStart {
+  readonly draftId: string;
+  readonly request: string;
+  readonly startedAt: number;
+  readonly status: "starting" | "error";
+  readonly error?: string;
+}
+
 export function DraftPage({
   service,
   editor,
   draftId,
+  pendingAi,
   onSaved,
   onDiscarded,
 }: {
   service: WorkflowService;
   editor?: WorkflowDraftEditor;
   draftId: string;
+  pendingAi?: PendingAiStart | null;
   onSaved: (id: string) => void;
   onDiscarded: () => void;
 }) {
@@ -141,10 +151,23 @@ export function DraftPage({
   const [selectedNodeId, setSelectedNodeId] = useState("");
   const [editingMeta, setEditingMeta] = useState(false);
   const [promptView, setPromptView] = useState<PromptViewMode>("edit");
-  // 刚从「用 AI 新建/修改」进来且会话在跑时默认展开 AI 抽屉；重开草稿手动看图时默认收起，让画布占满。
+  // 刚从「用 AI 新建/修改」进来且会话在跑或正在连接时默认展开 AI 抽屉；重开草稿手动看图时默认收起，让画布占满。
   const [drawer, setDrawer] = useState<DrawerMode>(() =>
-    editor?.has(draftId) ? "ai" : "none",
+    editor?.has(draftId) || pendingAi ? "ai" : "none",
   );
+  const [startingNow, setStartingNow] = useState(() => Date.now());
+  const aiStarting = pendingAi?.status === "starting";
+  useEffect(() => {
+    if (!aiStarting) return;
+    const id = window.setInterval(() => {
+      setStartingNow(Date.now());
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [aiStarting]);
+  const startingElapsed =
+    aiStarting && pendingAi
+      ? Math.max(0, Math.floor((startingNow - pendingAi.startedAt) / 1000))
+      : 0;
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const discardButton = useRef<HTMLButtonElement>(null);
   const [, setSessionVersion] = useState(0);
@@ -483,32 +506,36 @@ export function DraftPage({
       ? nodeOutcomes(catalog.structure, activeNode.id, undefined, labelOf)
       : [];
 
-  const assistantHeader = (
-    <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
-      <span className="inline-flex items-center gap-1.5 text-ui-sm font-medium text-ink">
-        <SparklesIcon
-          className="ui-icon-14 text-accent-ink"
-          aria-hidden={true}
-        />
-        <span>用 AI 修改工作流</span>
-      </span>
-      <IconButton
-        iconSize="compact"
-        aria-label="收起 AI 修改面板"
-        data-hint="收起"
-        onClick={() => setDrawer("none")}
-      >
-        <XIcon className="ui-icon-14" />
-      </IconButton>
-    </div>
+  const assistantTitle = (
+    <span className="inline-flex min-w-0 items-center gap-1.5 text-ui-sm font-medium text-ink">
+      <SparklesIcon
+        className="ui-icon-14 shrink-0 text-accent-ink"
+        aria-hidden={true}
+      />
+      <span className="truncate">用 AI 修改工作流</span>
+    </span>
+  );
+
+  const assistantClose = (
+    <IconButton
+      iconSize="compact"
+      aria-label="收起 AI 修改面板"
+      data-hint="收起"
+      onClick={() => setDrawer("none")}
+    >
+      <XIcon className="ui-icon-14" />
+    </IconButton>
   );
 
   const liveEmbeddedChat = hasSession
     ? (editor?.renderSession?.(draftId, {
-        header: assistantHeader,
+        header: assistantTitle,
+        headerActions: assistantClose,
         placeholder: "描述你想调整的地方（Enter 发送，Shift+Enter 换行）",
       }) ?? null)
     : null;
+
+  const isStartingAi = busy || pendingAi?.status === "starting";
 
   const aiDrawerPane = editor ? (
     <div className="workflow-draft-chat">
@@ -518,20 +545,50 @@ export function DraftPage({
           aria-label="AI 编辑对话"
         >
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-3 py-2">
-            {assistantHeader}
-            {busy && (
-              <span className="inline-flex shrink-0 items-center gap-1.5 text-ui-xs text-ink-mute">
-                <Spinner className="ui-icon-14" />
-                <span>正在启动 AI…</span>
-              </span>
-            )}
+            <div className="min-w-0 flex-1">{assistantTitle}</div>
+            <div className="flex shrink-0 items-center gap-2">
+              {isStartingAi && (
+                <span className="inline-flex shrink-0 items-center gap-1.5 text-ui-xs text-ink-mute">
+                  <Spinner className="ui-icon-14" />
+                  <span>正在连接 AI…</span>
+                </span>
+              )}
+              {assistantClose}
+            </div>
           </div>
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col justify-center gap-2 overflow-y-auto px-4 py-6 text-ui-sm text-ink-mute">
-            <p className="m-0 text-ink">想怎么调整这份工作流？</p>
-            <p className="m-0 text-ui-xs leading-relaxed text-ink-mute">
-              直接描述你的想法（例如增减步骤、修改分支条件或让 AI 重写某个节点的提示词），AI 会直接更新左侧草稿与流程图。
-            </p>
-          </div>
+          {pendingAi ? (
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">
+              <div className="ml-6 rounded-popover bg-tint px-3 py-2 text-ui-sm leading-relaxed whitespace-pre-wrap text-ink">
+                {pendingAi.request}
+              </div>
+              {pendingAi.status === "starting" ? (
+                <div
+                  className="flex items-center gap-2 px-1 py-1 text-ui-xs text-ink-mute"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <Spinner className="ui-icon-14 shrink-0" />
+                  <span>
+                    {startingElapsed > 0
+                      ? `正在准备 AI 编辑会话（${startingElapsed} 秒）…`
+                      : "正在准备 AI 编辑会话…"}
+                  </span>
+                </div>
+              ) : (
+                <Callout
+                  tone="danger"
+                  title={pendingAi.error || "连接 AI 编辑会话失败"}
+                />
+              )}
+            </div>
+          ) : (
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col justify-center gap-2 overflow-y-auto px-4 py-6 text-ui-sm text-ink-mute">
+              <p className="m-0 text-ink">想怎么调整这份工作流？</p>
+              <p className="m-0 text-ui-xs leading-relaxed text-ink-mute">
+                直接描述你的想法（例如增减步骤、修改分支条件或让 AI 重写某个节点的提示词），AI 会直接更新左侧草稿与流程图。
+              </p>
+            </div>
+          )}
           <div className="shrink-0 border-t border-line p-2.5">
             <div className="flex items-end gap-2 rounded-control border border-line bg-surface px-2.5 py-2 focus-within:border-line-strong">
               <textarea
@@ -539,7 +596,7 @@ export function DraftPage({
                 aria-label="向 AI 补充修改要求"
                 rows={2}
                 value={request}
-                readOnly={busy}
+                readOnly={isStartingAi}
                 placeholder={
                   base === null
                     ? "描述你想调整的地方（Enter 发送，Shift+Enter 换行）"
@@ -562,10 +619,10 @@ export function DraftPage({
                 className="shrink-0 rounded-control bg-brand text-foreground-inverse hover:opacity-90 disabled:opacity-40"
                 aria-label="发送"
                 data-hint="发送"
-                disabled={busy || request.trim() === ""}
+                disabled={isStartingAi || request.trim() === ""}
                 onClick={() => submitAssistantMessage(request)}
               >
-                {busy ? (
+                {isStartingAi ? (
                   <Spinner className="ui-icon-14" />
                 ) : (
                   <ArrowUpIcon className="ui-icon-14" />

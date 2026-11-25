@@ -33,6 +33,13 @@ export function WorkflowWorkspace({ service, navigation, transfer, editor }: {
   const [drafts, setDrafts] = useState<readonly WorkflowDraft[]>([]);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState("");
+  const [pendingAi, setPendingAi] = useState<{
+    readonly draftId: string;
+    readonly request: string;
+    readonly startedAt: number;
+    readonly status: "starting" | "error";
+    readonly error?: string;
+  } | null>(null);
   const go = (next: TemplateRoute) => navigation.setState({ route: next });
   const setCompose = (next: ComposeTarget | null) => {
     setAiError("");
@@ -72,30 +79,43 @@ export function WorkflowWorkspace({ service, navigation, transfer, editor }: {
     if (!editor) return;
     setAiBusy(true);
     setAiError("");
-    let createdDraftId: string | null = null;
     try {
       const base = target.kind === "edit" ? (target.preset ? await service.copyWorkflow(target.id) : target.id) : undefined;
       const draft = await service.createDraft(base ? { base } : {});
-      if (target.kind === "new" && draft.changes === 0) createdDraftId = draft.draftId;
       const title = target.kind === "edit" ? `编辑工作流：${target.name}` : "新建工作流";
-      // 编辑会话还开着就把要求发进去，否则开一个新会话。
-      if (!editor.has(draft.draftId) || !editor.send(draft.draftId, text)) {
-        await editor.start(draft, title, draftPrompt(target.kind === "new" ? "new" : draft.changes > 0 ? "continue" : "edit", text));
-      }
-      createdDraftId = null;
-      changed();
-      navigation.setState({ compose: null, route: { kind: "draft", draftId: draft.draftId }, tab: "mine" });
-    } catch (cause) {
-      if (createdDraftId) {
-        await service.discardDraft(createdDraftId).catch(() => {});
+      const promptKind = target.kind === "new" ? "new" : draft.changes > 0 ? "continue" : "edit";
+      const alreadyLive = editor.has(draft.draftId) && editor.send(draft.draftId, text);
+      if (!alreadyLive) {
+        // 先立刻进入草稿页并展开 AI 抽屉，在会话流里展示加载态，避免弹窗长时间卡在「正在准备…」。
+        const startedAt = Date.now();
+        setPendingAi({ draftId: draft.draftId, request: text, startedAt, status: "starting" });
         changed();
+        navigation.setState({ compose: null, route: { kind: "draft", draftId: draft.draftId }, tab: "mine" });
+        void editor
+          .start(draft, title, draftPrompt(promptKind, text))
+          .then(() => {
+            setPendingAi((curr) => (curr?.draftId === draft.draftId ? null : curr));
+            changed();
+          })
+          .catch((cause) => {
+            setPendingAi((curr) =>
+              curr?.draftId === draft.draftId
+                ? { draftId: draft.draftId, request: text, startedAt, status: "error", error: errorLine(cause) }
+                : curr,
+            );
+          });
+      } else {
+        changed();
+        navigation.setState({ compose: null, route: { kind: "draft", draftId: draft.draftId }, tab: "mine" });
       }
+    } catch (cause) {
       setAiError(errorLine(cause));
     } finally {
       setAiBusy(false);
     }
   };
   const discardDraft = async (draftId: string) => {
+    setPendingAi((curr) => (curr?.draftId === draftId ? null : curr));
     await editor?.end(draftId);
     await service.discardDraft(draftId);
     changed();
@@ -136,8 +156,17 @@ export function WorkflowWorkspace({ service, navigation, transfer, editor }: {
         service={service}
         editor={editor}
         draftId={route.draftId}
-        onSaved={(id) => { changed(); openWorkflow(id); }}
-        onDiscarded={() => { changed(); go({ kind: "library" }); }}
+        pendingAi={pendingAi?.draftId === route.draftId ? pendingAi : null}
+        onSaved={(id) => {
+          setPendingAi((curr) => (curr?.draftId === route.draftId ? null : curr));
+          changed();
+          openWorkflow(id);
+        }}
+        onDiscarded={() => {
+          setPendingAi((curr) => (curr?.draftId === route.draftId ? null : curr));
+          changed();
+          go({ kind: "library" });
+        }}
       />
     </div>}
     {route.kind === "workflow" && <div className="workflow-scroll">

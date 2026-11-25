@@ -297,7 +297,6 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
           : snapshot.run.status === "completed" ? "done"
             : snapshot.run.status === "failed" ? "failed" : "pending";
   const stopping = snapshot?.active === true && snapshot.run?.stopping === true;
-  const runWord = !snapshot?.run ? "" : stopping ? "正在停止" : interrupted ? "已中断" : statusLabel(snapshot.run, catalog);
   const stages = progressStages(catalog, snapshot);
   // 要你去会话里做点什么的节点（等回复、你打断了、出错、等你处理）：说法与会话一致（ADR 040）。
   const attentionRecords = snapshot?.active && !stopping
@@ -314,6 +313,11 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
     more: awaitingRecords.length - 1,
     activities: attentionRecords.map(({ activity }) => activity),
   };
+  const runWord = !snapshot?.run ? ""
+    : stopping ? "正在停止"
+    : interrupted ? "已中断"
+    : awaiting ? ACTIVITY_WORD[awaiting.activities[0]!]
+    : statusLabel(snapshot.run, catalog);
   const waitingItems = awaitingRecords.map((item) => {
     const label = byId.get(item.siteId)?.label ?? item.siteId;
     const peers = awaitingRecords.filter((other) => (byId.get(other.siteId)?.label ?? other.siteId) === label);
@@ -444,7 +448,11 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
       <div className="workflow-inspector-head">
         <b data-hint={node.label}>{node.label}</b>
         {node.kind !== "agent" && <Badge>{kindBadge(node.kind)}</Badge>}
-        <StatusWord state={state.state} waiting={needsYou(state.activity ?? null)} />
+        <StatusWord
+          state={state.state}
+          waiting={needsYou(state.activity ?? null)}
+          label={needsYou(state.activity ?? null) && state.activity ? ACTIVITY_WORD[state.activity] : undefined}
+        />
         {<IconButton iconSize="compact" type="button" className={iconButton} onClick={() => { setSelected(""); clearSelection(); }} aria-label="关闭节点详情"><XIcon className="ui-icon-14" /></IconButton>}
       </div>
       {(selectedRecords.length > 1 || (recordSession && onOpenSession)) && <div className="workflow-inspector-actions">

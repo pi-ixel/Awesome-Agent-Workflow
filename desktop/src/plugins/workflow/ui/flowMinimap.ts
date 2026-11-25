@@ -13,13 +13,19 @@ const MAP_H = 120;
 export function drawMinimap(scroller: HTMLElement | null, content: HTMLElement | null, map: HTMLCanvasElement | null): void {
   if (!scroller || !content || !map) return;
   const host = map.parentElement;
-  const overflow = scroller.scrollWidth > scroller.clientWidth + 1 || scroller.scrollHeight > scroller.clientHeight + 1;
+  const tooNarrow = scroller.clientWidth < 460 || scroller.clientHeight < 220;
+  const overflow =
+    !tooNarrow &&
+    (scroller.scrollWidth > scroller.clientWidth + 1 ||
+      scroller.scrollHeight > scroller.clientHeight + 1);
   host?.classList.toggle("show", overflow);
   if (!overflow) return;
   const cw = content.offsetWidth;
   const ch = Math.max(content.offsetHeight, scroller.scrollHeight);
   if (!cw || !ch) return;
-  const scale = Math.min(MAP_W / cw, MAP_H / ch);
+  const maxW = Math.min(MAP_W, Math.max(96, Math.round(scroller.clientWidth * 0.2)));
+  const maxH = Math.min(MAP_H, Math.max(72, Math.round(scroller.clientHeight * 0.2)));
+  const scale = Math.min(maxW / cw, maxH / ch);
   const w = Math.max(1, Math.round(cw * scale));
   const h = Math.max(1, Math.round(ch * scale));
   const ratio = window.devicePixelRatio || 1;
