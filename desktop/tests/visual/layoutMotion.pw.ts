@@ -1102,3 +1102,24 @@ test("文件树吸顶目录和原行共用外观，折叠后回到原行并保�
   await expect(original).toBeFocused();
   await expect(tree.getByRole("treeitem", { name: "发布检查项-001.md" })).toBeVisible();
 });
+
+test("右栏切换审查和文件时隐藏浏览器，返回保留原地址草稿", async ({ page }) => {
+  await page.goto("/tests/visual/layoutMotionFixture.html?panel-visibility");
+  const address = page.getByPlaceholder("输入 HTTP/HTTPS 地址");
+  await expect(address).toHaveValue("https://example.test/notes");
+  await address.fill("https://example.test/unsent");
+  const slot = page.locator("[data-side-pane-content-slot]");
+  for (const name of ["审查", "文件"]) {
+    await page.getByRole("tab", { name: new RegExp(`^${name} 关闭`) }).click();
+    await expect(address).toBeHidden();
+    const active = slot.locator(":scope > :visible");
+    await expect(active).toHaveCount(1);
+    expect(await active.boundingBox()).toEqual(await slot.boundingBox());
+    await page.keyboard.press("Tab");
+    await address.evaluate((input) => input.focus());
+    await expect(address).not.toBeFocused();
+  }
+  await page.getByRole("tab", { name: /^浏览器 关闭/ }).click();
+  await expect(address).toBeVisible();
+  await expect(address).toHaveValue("https://example.test/unsent");
+});

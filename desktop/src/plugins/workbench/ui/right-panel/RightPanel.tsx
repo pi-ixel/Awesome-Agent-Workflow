@@ -304,13 +304,14 @@ function ProjectPanel({
             panel.key?.({ project, tab: activeTab }) ??
             (panel.keepMounted ? "" : (activeTab?.id ?? ""));
           return (
-            <panel.View
-              key={`${panel.id}:${key}`}
-              project={project}
-              tab={activeTab}
-              visible={active}
-              openPath={openPath}
-            />
+            <div key={`${panel.id}:${key}`} hidden={!active} className="absolute inset-0">
+              <panel.View
+                project={project}
+                tab={activeTab}
+                visible={active}
+                openPath={openPath}
+              />
+            </div>
           );
         })}
       </div>

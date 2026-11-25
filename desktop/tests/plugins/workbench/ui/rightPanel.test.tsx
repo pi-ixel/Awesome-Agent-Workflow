@@ -50,6 +50,24 @@ beforeEach(() => {
 });
 
 describe("项目右栏", () => {
+  it("保留后台面板状态并统一隐藏未选中的控件", () => {
+    fixture.workbench.register("panels", {
+      id: "persistent",
+      keepMounted: true,
+      View: () => <input aria-label="面板草稿" />,
+    });
+    const open = () => useRightPanelStore.getState().openTab("D:/a", { id: "persistent", kind: "persistent" });
+    open();
+    render(<PanelWorkspace project="D:/a" enabled>聊天</PanelWorkspace>);
+    const draft = screen.getByRole("textbox", { name: "面板草稿" });
+    fireEvent.change(draft, { target: { value: "保留" } });
+    act(() => useRightPanelStore.getState().tool("D:/a", "files"));
+    expect(draft).not.toBeVisible();
+    expect(screen.queryByRole("textbox", { name: "面板草稿" })).toBeNull();
+    act(open);
+    expect(screen.getByRole("textbox", { name: "面板草稿" })).toBe(draft);
+    expect(draft).toHaveValue("保留");
+  });
   it("丢失指针捕获时保留最后宽度，取消下一次拖动时恢复起始宽度", () => {
     vi.stubGlobal("PointerEvent", MouseEvent);
     try {

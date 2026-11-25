@@ -1,3 +1,4 @@
+import { BrowserAppearanceFixture } from "./browserAppearanceFixture.tsx";
 import { createRoot } from "react-dom/client";
 import { createGitWorkbench } from "../helpers/gitWorkbench.tsx";
 import { WorkbenchShell } from "../../src/plugins/workbench/ui/WorkbenchShell.tsx";
@@ -18,6 +19,18 @@ const directory = `${project}/docs`;
 const markdown = "# 文件视图示例\n\nAlpha alpha alpha\n\n## 第一节\n\n### 小节\n\n## 第二节";
 const { Wrapper, workbench } = createGitWorkbench();
 const params = new URLSearchParams(location.search);
+if (params.has("panel-visibility")) {
+  workbench.register("panels", {
+    id: "browser",
+    keepMounted: true,
+    View: ({ visible }) => <BrowserAppearanceFixture visible={visible} />,
+    present: () => ({ title: "浏览器" }),
+  });
+  const panels = workbench.panels.getState();
+  panels.tool(project, "files");
+  panels.tool(project, "git");
+  panels.openTab(project, { id: "browser", kind: "browser" });
+}
 if (params.has("tree-position-motion"))
   bindWorkbenchAppearance(document.documentElement, workbench.appearance);
 else if (params.has("appearance"))
