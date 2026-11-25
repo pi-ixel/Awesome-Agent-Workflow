@@ -491,7 +491,6 @@ export function apply(ctx: Context): void {
       const next = workbench.navigation.getState().contextPath;
       if (next === boundPath) return;
       boundPath = next;
-      unbind();
       unbind = workflow.bindWorkspace(next);
     });
     return () => {
@@ -503,7 +502,7 @@ export function apply(ctx: Context): void {
   ctx.effect(() => workbench.register("sidebar", ui.sidebar));
   ctx.effect(() => {
     // 侧栏会话分组与会话区状态：运行列表刷新（含引擎事件触发的刷新）后整体重发；
-    // 切项目时清掉旧项目的分组。工作流库变化时重读斜杠命令。
+    // 切项目时继续使用各项目已确认的分组。工作流库变化时重读斜杠命令。
     // 其他项目的节点会话同样分组：打开运行时先切到那个项目。
     const publisher = project.sessions.registerSessionGroups();
     const archiveRun = (runId: string, path?: string) => {
@@ -511,21 +510,33 @@ export function apply(ctx: Context): void {
         workbench.showToast({ message: `归档失败：${errorLine(cause)}`, variant: "warn" });
       });
     };
-    let published = new Set<string>();
-    const publish = () => {
+    let published = new Map<string, { path: string; runs: ReturnType<WorkflowService["sessionLinks"]>["runs"] }>();
+    const publish = (refreshActivity = false) => {
       const { workspace, runs } = workflow.sessionLinks();
-      const next = new Set<string>();
-      if (workspace !== null) {
-        publisher.publish(workspace, runSessionGroups(runs, (runId) => ui.openRun(workspace, runId), (sessionId) => ui.openNodeSession(sessionId, workspace), (runId) => archiveRun(runId), ui.sessionLookup()));
-        next.add(workspace);
-      }
+      const next = new Map<string, { path: string; runs: typeof runs }>();
+      const publishProject = (path: string, projectRuns: typeof runs) => {
+        const key = pathKey(path);
+        next.set(key, { path, runs: projectRuns });
+        if (!refreshActivity && published.get(key)?.runs === projectRuns) return;
+        publisher.publish(path, runSessionGroups(
+          projectRuns,
+          (runId) => {
+            if (pathKey(workbench.navigation.getState().contextPath ?? "") === key)
+              ui.openRun(path, runId);
+            else
+              openRunFromNotification(workbench, ui.openRun, path, runId);
+          },
+          (sessionId) => ui.openNodeSession(sessionId, path),
+          (runId) => archiveRun(runId, path),
+          ui.sessionLookup(),
+        ));
+      };
+      if (workspace !== null) publishProject(workspace, runs);
       for (const other of workflow.otherSessionLinks()) {
         if (workspace !== null && pathKey(other.project) === pathKey(workspace)) continue;
-        const path = other.project;
-        publisher.publish(path, runSessionGroups(other.runs, (runId) => openRunFromNotification(workbench, ui.openRun, path, runId), (sessionId) => ui.openNodeSession(sessionId, path), (runId) => archiveRun(runId, path), ui.sessionLookup()));
-        next.add(path);
+        publishProject(other.project, other.runs);
       }
-      for (const path of published) if (!next.has(path)) publisher.publish(path, []);
+      for (const [key, { path }] of published) if (!next.has(key)) publisher.publish(path, []);
       published = next;
       ui.publishStatus();
     };
@@ -549,7 +560,7 @@ export function apply(ctx: Context): void {
       }
     });
     // 会话状态一变（工作中、你打断了、出错……）就按同一份重发（ADR 040）。
-    const unsubscribeSessions = workflow.sessionActivity?.subscribe(() => publish()) ?? (() => {});
+    const unsubscribeSessions = workflow.sessionActivity?.subscribe(() => publish(true)) ?? (() => {});
     return () => {
       unsubscribe();
       unsubscribeSessions();

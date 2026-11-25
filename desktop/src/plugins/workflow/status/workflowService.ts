@@ -206,6 +206,24 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
   let otherLinks: readonly { project: string; runs: readonly RunSessionLinks[] }[] = [];
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let bindingVersion = 0;
+  let listRequest = 0;
+  let linksRevision = 0;
+  let otherLinksLoaded = false;
+
+  // 切换只交换前台与后台投影，保留每个项目最近一次确认的分组。
+  const selectLinks = (path: string | null): void => {
+    const key = path === null ? null : pathKey(path);
+    if (path !== null && links.workspace !== null && pathKey(links.workspace) === key) {
+      links = { workspace: path, runs: links.runs };
+      return;
+    }
+    const selected = otherLinks.find((item) => pathKey(item.project) === key);
+    otherLinks = otherLinks.filter((item) => pathKey(item.project) !== key);
+    if (links.workspace !== null && links.runs.length > 0) {
+      otherLinks = [...otherLinks, { project: links.workspace, runs: links.runs }];
+    }
+    links = { workspace: path, runs: selected?.runs ?? [] };
+  };
   /** 各运行最近采用的版本号（推送与全量拉取都按它取新舍旧）。 */
   const versions = new Map<string, number>();
   const versionOf = (value: unknown): number => {
@@ -229,12 +247,13 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
 
   // 其他项目的会话关联（侧栏给每个项目分组）：没打开项目时也要拉，否则侧栏里的节点会话会平铺。
   // 失败只记日志、保留上一份。
-  const fetchOtherLinks = async (cwd: string | null): Promise<void> => {
-    const version = bindingVersion;
+  const fetchOtherLinks = async (cwd: string | null, request: number): Promise<void> => {
+    const revision = linksRevision;
     try {
       const raw = await client.request<unknown>("session-links-others", { exclude: cwd ?? "" });
-      if (disposed || version !== bindingVersion) return;
+      if (disposed || request !== listRequest || revision !== linksRevision) return;
       if (Array.isArray(raw) && cwd === workspace) {
+        otherLinksLoaded = true;
         otherLinks = raw.flatMap((item: unknown) => {
           if (typeof item !== "object" || item === null) return [];
           const { project, runs } = item as { project?: unknown; runs?: unknown };
@@ -248,16 +267,17 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
     }
   };
 
-  const fetchList = async (): Promise<void> => {
+  const fetchList = async (includeOther = true): Promise<void> => {
     const version = bindingVersion;
+    const request = ++listRequest;
     if (workspace === null) {
-      await fetchOtherLinks(null);
-      if (!disposed && version === bindingVersion) emit({ type: "runs-changed", runId: "" });
+      if (includeOther || !otherLinksLoaded) await fetchOtherLinks(null, request);
+      if (!disposed && version === bindingVersion && request === listRequest) emit({ type: "runs-changed", runId: "" });
       return;
     }
     const cwd = requireCwd(workspace);
     const raw = await client.request<unknown>("list", { cwd });
-    if (disposed || version !== bindingVersion || !Array.isArray(raw)) return;
+    if (disposed || version !== bindingVersion || request !== listRequest || !Array.isArray(raw)) return;
     const previous = new Map(runList.map((run) => [run.runId, run]));
     runList = raw.flatMap((item) => {
       const run = deriveRunSummary(item);
@@ -267,10 +287,11 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
     });
     // 会话关联（侧栏分组）：失败只记日志，保留上一份，不影响运行列表。
     try {
+      const revision = linksRevision;
       const rawLinks = await client.request<unknown>("session-links", { cwd });
-      if (disposed || version !== bindingVersion) return;
+      if (disposed || version !== bindingVersion || request !== listRequest) return;
       // 已归档的运行带 archived 标记：侧栏据此把它的会话一起隐去（ADR 036）。
-      if (cwd === workspace) {
+      if (cwd === workspace && revision === linksRevision && Array.isArray(rawLinks)) {
         const previous = new Map(links.runs.map((run) => [run.runId, run]));
         const versionsOf = new Map((Array.isArray(rawLinks) ? rawLinks : []).map((item) => [text((item as { runId?: unknown } | null)?.runId), versionOf(item)]));
         links = {
@@ -287,14 +308,14 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       });
     }
     if (version !== bindingVersion) return;
-    await fetchOtherLinks(cwd);
-    if (!disposed && version === bindingVersion) emit({ type: "runs-changed", runId: "" });
+    if (includeOther || !otherLinksLoaded) await fetchOtherLinks(cwd, request);
+    if (!disposed && version === bindingVersion && request === listRequest) emit({ type: "runs-changed", runId: "" });
   };
 
   const refreshList = async (): Promise<void> => {
     if (disposed) return;
     try {
-      await fetchList();
+      await fetchList(false);
     } catch (error) {
       logger.warn("运行列表刷新失败", {
         reason: error instanceof Error ? error.message : String(error),
@@ -367,6 +388,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
     const version = versionOf(event);
     if (runId === "" || version < (versions.get(runId) ?? 0)) return;
     versions.set(runId, version);
+    linksRevision++;
     const summary = deriveRunSummary(event.run);
     const [link] = deriveSessionLinks([event.links]);
     if (workspace !== null && pathKey(project) === pathKey(workspace)) {
@@ -397,6 +419,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
 
   const applyRunRemoved = (runId: string): void => {
     versions.delete(runId);
+    linksRevision++;
     runList = runList.filter((run) => run.runId !== runId);
     links = { workspace: links.workspace, runs: links.runs.filter((run) => run.runId !== runId) };
     otherLinks = otherLinks.map((item) => ({ project: item.project, runs: item.runs.filter((run) => run.runId !== runId) }));
@@ -409,6 +432,9 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
    */
   const engineExited = (): void => {
     versions.clear();
+    linksRevision++;
+    listRequest++;
+    otherLinksLoaded = false;
     runList = runList.map((run) => (run.active ? { ...run, active: false, stopping: false } : run));
     const settle = (runs: readonly RunSessionLinks[]) => runs.map((run) => (run.active ? { ...run, active: false, stopping: false } : run));
     links = { workspace: links.workspace, runs: settle(links.runs) };
@@ -522,7 +548,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
         pendingFocus = "";
         pendingPanelRequest = null;
         runList = [];
-        links = { workspace: path, runs: [] };
+        selectLinks(path);
         emit({ type: "runs-changed", runId: "" });
         void refreshList();
       } else if (path === null) {
@@ -532,11 +558,11 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       return () => {
         if (disposed || version !== bindingVersion) return;
         bindingVersion++;
+        listRequest++;
         workspace = null;
         runList = [];
-        links = { workspace: null, runs: [] };
+        selectLinks(null);
         emit({ type: "runs-changed", runId: "" });
-        void refreshList();
       };
     },
 

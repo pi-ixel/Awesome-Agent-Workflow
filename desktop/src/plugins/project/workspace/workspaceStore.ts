@@ -162,9 +162,10 @@ function withRecentEntry(
   path: string,
 ): readonly WorkspaceEntry[] {
   const lastOpenedAt = new Date().toISOString();
-  if (recent.some((entry) => entry.path === path)) {
+  const key = pathKey(path);
+  if (recent.some((entry) => pathKey(entry.path) === key)) {
     return recent.map((entry) =>
-      entry.path === path ? { ...entry, lastOpenedAt } : entry,
+      pathKey(entry.path) === key ? { ...entry, lastOpenedAt } : entry,
     );
   }
   return [{ path, lastOpenedAt }, ...recent].slice(0, RECENT_LIMIT);

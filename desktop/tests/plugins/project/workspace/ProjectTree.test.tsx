@@ -53,6 +53,58 @@ afterEach(() => {
   indexes.dispose();
 });
 
+it("打开另一个置顶项目时保持项目块和原有行实例", () => {
+  const other = "D:/dev/second-prj";
+  useWorkspaceStore.setState({
+    pinnedPaths: [PATH, other],
+    recentWorkspaces: [
+      { path: PATH, lastOpenedAt: "2026-11-25T10:00:00Z" },
+      { path: other, lastOpenedAt: "2026-11-25T09:00:00Z" },
+    ],
+  });
+  const rows = {
+    [PATH]: [{ id: "a", title: "第一页", updatedAt: null }],
+    [other]: [{ id: "b", title: "第二页", updatedAt: null }],
+  };
+  indexes.catalog.setState({ sessionsByPath: rows });
+  render(<ProjectTree />, { wrapper: fixture.Wrapper });
+  const band = screen.getByLabelText("置顶");
+  const before = Array.from(band.children);
+  act(() => {
+    useWorkspaceStore.getState().openWorkspace(other);
+    useWorkbenchUiStore.setState({ contextPath: other, viewId: "session" });
+  });
+  expect(Array.from(band.children)).toEqual(before);
+  expect(band.children[0]).toHaveTextContent("第一页");
+  expect(band.children[1]).toHaveTextContent("第二页");
+});
+
+it("路由变化时保留折叠，定位目标会话时只展开目标项目", () => {
+  const other = "D:/dev/second-prj";
+  useWorkspaceStore.setState({
+    activePath: PATH,
+    recentWorkspaces: [PATH, other].map((path) => ({ path, lastOpenedAt: "now" })),
+  });
+  indexes.catalog.setState({
+    sessionsByPath: {
+      [PATH]: [{ id: "a", title: "第一个会话", updatedAt: null }],
+      [other]: [{ id: "b", title: "第二个会话", updatedAt: null }],
+    },
+  });
+  useSessionStore.setState({ activeSessionId: "a", openingSessionId: null });
+  useWorkbenchUiStore.setState({ viewId: "session", contextPath: PATH });
+  render(<ProjectTree />, { wrapper: fixture.Wrapper });
+  const toggle = (path: string) =>
+    getByHint(document.body, path).closest("li")!.querySelector<HTMLElement>("[aria-expanded]")!;
+  fireEvent.click(toggle(PATH));
+  fireEvent.click(toggle(other));
+  act(() => useWorkbenchUiStore.setState({ contextPath: other }));
+  expect(toggle(other)).toHaveAttribute("aria-expanded", "false");
+  act(() => useSessionStore.setState({ openingSessionId: "b" }));
+  expect(toggle(other)).toHaveAttribute("aria-expanded", "true");
+  expect(toggle(PATH)).toHaveAttribute("aria-expanded", "false");
+});
+
 it("按目录 Agent 显示徽标和置顶，不混用同 ID 或旧版未归属记录", () => {
   useWorkspaceStore.setState({
     recentWorkspaces: [{ path: PATH, lastOpenedAt: "now" }],
@@ -275,7 +327,7 @@ describe("ProjectTree 冷启动空态", () => {
 });
 
 describe("ProjectTree 置顶带", () => {
-  it("置顶行带无分组头（aria-label=置顶）；按 lastOpenedAt 倒序排布", () => {
+  it("置顶行带无分组头（aria-label=置顶）；按置顶顺序排布", () => {
     const pathA = "D:/dev/aaa";
     const pathB = "D:/dev/bbb";
     useWorkspaceStore.setState({
@@ -292,7 +344,7 @@ describe("ProjectTree 置顶带", () => {
     // 置顶带内行序 = lastOpenedAt 倒序（pathB 10-21 最新在前、PATH 10-20 沉后）
     const titles = getAllByHint(band, /D:\/dev/)
       .map((el) => el.getAttribute("data-hint"));
-    expect(titles).toEqual([pathB, PATH]);
+    expect(titles).toEqual([PATH, pathB]);
     // 「项目」只剩未置顶项目
     expect(
       getByHint(screen.getByLabelText("项目"), pathA),

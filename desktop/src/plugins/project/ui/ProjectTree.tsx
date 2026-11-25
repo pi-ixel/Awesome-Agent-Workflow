@@ -1326,7 +1326,7 @@ function PinnedSessionsBand({ menu }: { readonly menu: SidebarMenuApi }) {
 
 /** 项目视角：置顶带（无分组头）+「项目」分组。置顶带对齐 ZCode
  *  SortableProjects（:24-56）的无头行带形态——仅 pinned.length>0 时渲染，
- *  按 lastOpenedAt 倒序（desktop 无 dnd 基建，拖拽排序缺口如实标注）；
+ *  按置顶顺序展示；
  *  「项目」分组头（含【+】动作位）恒在，新建面板挂树体顶部
  *  （ZCode 列表区形态：新建入口在分组标题行尾 + 顶部新建行）。
  *  会话级置顶任务带在本带之上（PinnedSessionsBand，ZCode 侧栏同序）。 */
@@ -1352,45 +1352,24 @@ function ProjectsView({
   const closeAddPanel = useProjectSidebarValue((state) => state.closeAddPanel);
   const toggleExpanded = useProjectSidebarValue((state) => state.toggleExpanded);
   const addTriggerRef = useRef<HTMLButtonElement | null>(null);
-  // 打开的会话所在的项目被用户收起过时自动展开，侧栏里才看得到当前会话；
-  // 只在打开的会话变化时展开一次，之后用户仍可以收起。
+  // 从通知等入口定位时展开目标。路由已经切换、前台会话还在旧项目时，
+  // 旧会话不能触发新项目的展开。
+  const activeWorkspace = useWorkspaceValue((state) => state.activePath);
   const activeSessionId = useSessionValue((state) => state.activeSessionId);
   const openingSessionId = useSessionValue((state) => state.openingSessionId);
-  const shownSession = conversationPage && contextPath ? `${contextPath}#${openingSessionId ?? activeSessionId ?? ""}` : "";
+  const shownSession = conversationPage && contextPath
+    ? openingSessionId ?? (pathKey(activeWorkspace ?? "") === pathKey(contextPath) ? activeSessionId : null)
+    : null;
   useEffect(() => {
     if (!shownSession || !contextPath) return;
     const key = Object.keys(expandedOverrides).find((path) => pathKey(path) === pathKey(contextPath));
     if (key !== undefined && expandedOverrides[key] === false) toggleExpanded(key, false);
-    // 只跟着打开的会话变化，不跟着用户的展开 / 收起变化。
+    // 只跟着会话定位变化，用户随后可以再次收起。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shownSession]);
+  }, [contextPath, shownSession]);
 
-  const lastOpenedByPath = new Map(
-    recentWorkspaces.map((entry) => [entry.path, entry.lastOpenedAt] as const),
-  );
-  // 置顶带按 lastOpenedAt 倒序（null 沉底）；store 的 pinnedPaths 是
-  // 置顶集合（无序语义），展示序在此派生
-  const pinned = pinnedPaths
-    .map((path) => ({
-      path,
-      lastOpenedAt: lastOpenedByPath.get(path) ?? null,
-    }))
-    .sort((a, b) => {
-      if (a.lastOpenedAt === null && b.lastOpenedAt === null) {
-        return 0;
-      }
-      if (a.lastOpenedAt === null) {
-        return 1;
-      }
-      if (b.lastOpenedAt === null) {
-        return -1;
-      }
-      return a.lastOpenedAt < b.lastOpenedAt ? 1 : -1;
-    });
-  const recentOnly = recentWorkspaces.filter(
-    (entry) => !pinnedPaths.includes(entry.path),
-  );
-  const knownProjects = [...pinned, ...recentOnly];
+  const pinnedKeys = new Set(pinnedPaths.map(pathKey));
+  const recentOnly = recentWorkspaces.filter(({ path }) => !pinnedKeys.has(pathKey(path)));
 
   function renderProject(path: string, isPinned: boolean): React.ReactNode {
     const sessions =
@@ -1409,7 +1388,7 @@ function ProjectsView({
     const isSelected =
       pathKey(contextPath ?? "") === pathKey(path) && !conversationPage;
     return (
-      <li key={`${isPinned ? "pinned" : "recent"}-${path}`}>
+      <li key={pathKey(path)}>
         <ProjectNodeRow
           path={path}
           isPinned={isPinned}
@@ -1440,9 +1419,9 @@ function ProjectsView({
           本带在项目级置顶带之上） */}
       <PinnedSessionsBand menu={menu} />
       {/* 置顶行带（ZCode SortableProjects 同款：无分组头，行带置于最顶） */}
-      {pinned.length > 0 ? (
+      {pinnedPaths.length > 0 ? (
         <ul aria-label="置顶" className="flex flex-col gap-0.5">
-          {pinned.map((entry) => renderProject(entry.path, true))}
+          {pinnedPaths.map((path) => renderProject(path, true))}
         </ul>
       ) : null}
 
@@ -1464,7 +1443,7 @@ function ProjectsView({
       </TreeSection>
 
       {/* 冷启动空态：分组头自带的【+】是唯一添加入口，树体补一行指引 */}
-      {knownProjects.length === 0 ? (
+      {pinnedPaths.length === 0 && recentOnly.length === 0 ? (
         <p className="px-2.5 py-2 text-ui-base leading-relaxed text-ink-subtlest">
           还没有项目，点分组标题行的 ＋ 添加
         </p>

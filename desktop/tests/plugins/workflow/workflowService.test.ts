@@ -99,6 +99,60 @@ describe("createWorkflowService", () => {
     h.dispose();
   });
 
+  it("keeps every project's grouping across rapid switches, failed loads and late replies", async () => {
+    const h = harness();
+    const projects = ["D:/project", "D:/other", "D:/third"];
+    const grouped = projects.map((project, index) => ({
+      project, runs: [runChanged(`run-${index}`, 1, { status: "running", active: true }).links],
+    }));
+    let late!: (value: unknown) => void;
+    const pending = new Promise((resolve) => { late = resolve; });
+    let stable = false;
+    h.respondWith((method, params) => {
+      if (method === "list") return [];
+      if (method === "session-links-others") return grouped.filter((item) => item.project !== params.exclude);
+      if (method !== "session-links") return null;
+      if (stable && params.cwd === projects[1]) return pending;
+      if (stable && params.cwd === projects[2]) throw new Error("暂时不可用");
+      return grouped.find((item) => item.project === params.cwd)?.runs ?? [];
+    });
+    h.service.bindWorkspace(projects[0]!);
+    await vi.waitFor(() => expect(h.service.otherSessionLinks()).toHaveLength(2));
+    stable = true;
+    const visible = () => {
+      const active = h.service.sessionLinks();
+      return [
+        ...h.service.otherSessionLinks().map(({ project, runs }) => [project, runs.length]),
+        [active.workspace, active.runs.length],
+      ].sort();
+    };
+    const expected = [...projects].sort().map((path) => [path, 1]);
+    const all = vi.fn(() => visible());
+    const remove = h.service.subscribe((event) => { if (event.type === "runs-changed") all(); });
+    const count = h.requests.filter(({ method }) => method === "session-links-others").length;
+    h.service.bindWorkspace(projects[1]!);
+    expect(visible()).toEqual(expected);
+    await vi.waitFor(() => expect(h.requests.some(({ method, params }) => method === "session-links" && params.cwd === projects[1])).toBe(true));
+    h.service.bindWorkspace(projects[2]!);
+    await vi.waitFor(() => expect(h.logger.warn).toHaveBeenCalled());
+    h.service.bindWorkspace(projects[0]!);
+    late([]);
+    await vi.waitFor(() => expect(all.mock.calls.length).toBeGreaterThanOrEqual(4));
+    expect(visible()).toEqual(expected);
+    for (const { value } of all.mock.results) expect(value).toEqual(expected);
+    expect(h.requests.filter(({ method }) => method === "session-links-others")).toHaveLength(count);
+    remove();
+    h.respondWith((method, params) => method === "session-links-others" ? grouped.filter((item) => item.project !== params.exclude) : []);
+    await h.service.refresh();
+    expect(h.service.sessionLinks().runs).toEqual([]);
+    expect(h.service.otherSessionLinks()).toHaveLength(2);
+    h.service.bindWorkspace("D:\\other");
+    expect(h.service.sessionLinks().runs).toHaveLength(1);
+    h.service.bindWorkspace("d:/other");
+    expect(h.service.sessionLinks().runs).toHaveLength(1);
+    h.dispose();
+  });
+
   it("applies pushed run state directly, without fetching the run list again (ADR 040)", async () => {
     const h = harness();
     h.respondWith((method) => (method === "list" || method === "session-links" ? [] : null));
