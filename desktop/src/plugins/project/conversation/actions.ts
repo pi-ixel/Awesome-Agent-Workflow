@@ -65,7 +65,7 @@ interface SessionActionContext {
   ): void;
   sealedItems(this: void): SessionItem[];
 }
-class PreparationCancelled extends Error {}
+
 /** One queue consumer for each conversation store. */
 export function createSessionActions(
   context: SessionActionContext,
@@ -466,8 +466,6 @@ export function createSessionActions(
     },
     drainNextQueued,
     sendPrompt: (text, attachments = [], options = {}) => {
-      const submittedAt = Date.now();
-      const isSessionEstablished = get().activeSessionId !== null;
       const trimmed = text.trim();
       if (
         (steering.active && !steering.dispatching) ||
@@ -580,22 +578,9 @@ export function createSessionActions(
         }
         return markDispatch ? binding.prompt(trimmed, markDispatch) : binding.prompt(trimmed);
       };
-      let changesPrepared: Promise<void> | undefined;
       const send = (beforeDispatch?: () => void) => {
-        const changes = get().turnChanges;
-        if (!changes) return dispatch(beforeDispatch);
-        const preparationStartedAt =
-          isSessionEstablished ? submittedAt : Date.now();
-        const prepared = changesPrepared ?? changes.prepare(preparationStartedAt);
-        return prepared.then(() => {
-          if (context.cancelledByUser) throw new PreparationCancelled("已取消发送");
-          if (!isCurrent()) throw new AcpClosedError("旧连接已失效");
-          return changes.beforeDispatch(preparationStartedAt).then(() => {
-            if (context.cancelledByUser) throw new PreparationCancelled("已取消发送");
-            if (!isCurrent()) throw new AcpClosedError("旧连接已失效");
-            return dispatch(beforeDispatch);
-          });
-        });
+        get().turnChanges?.recordSubmission();
+        return dispatch(beforeDispatch);
       };
       if (!context.replaying) {
         context.interruptedPrompt = {
@@ -671,11 +656,6 @@ export function createSessionActions(
       }
       set({ turnError: null });
       get().turnChanges?.submitted();
-      // 已有会话按提交边界切段，不等待连接准备或 Agent 接收。
-      if (get().activeSessionId) {
-        changesPrepared = get().turnChanges?.prepare(submittedAt);
-        void changesPrepared?.catch(() => undefined);
-      }
       logger.info("用户消息已提交", { length: trimmed.length });
       const generation = context.turnGeneration;
       if (first) first.generation = generation;
@@ -695,12 +675,6 @@ export function createSessionActions(
         }
         if (delivery || steering.active) context.cancelledByUser = true;
         steering.settleDelivery(delivery, null);
-        if (error instanceof PreparationCancelled) {
-          context.interruptedPrompt = null;
-          steering.originalFinished("cancelled");
-          endTurn({ stopReason: "cancelled" });
-          return;
-        }
         const disconnected = (!first || first.attempted) &&
           (error instanceof AcpWriteError || error instanceof AcpClosedError);
         if (disconnected) steering.suspend();
@@ -708,7 +682,6 @@ export function createSessionActions(
         const message = error instanceof Error ? error.message : String(error);
         logger.warn("本轮 prompt 失败", { reason: message });
         if (disconnected) {
-          void get().turnChanges?.markUnknown("connection");
           set({
             connectionFailure: message,
             queuePaused: true,
@@ -718,7 +691,6 @@ export function createSessionActions(
         }
         if ((!first || first.attempted) && error instanceof AcpTimeoutError) {
           // 等待失败不能证明远端已停止，保持锁定，避免重复执行。
-          void get().turnChanges?.markUnknown("timeout");
           set({ turnState: "unknown", lastError: message });
           return;
         }

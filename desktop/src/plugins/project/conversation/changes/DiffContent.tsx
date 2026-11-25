@@ -101,6 +101,14 @@ export function DiffContent({
 }) {
   const [hasContext, setHasContext] = useState(false);
   const rows = useMemo(() => {
+    if (file.fragments?.length) {
+      return file.fragments.flatMap(([before, after], index): DiffRow[] => [
+        ...(index
+          ? [{ type: "gap" as const, oldNo: null, newNo: null, text: "⋯" }]
+          : []),
+        ...buildDiffRows(before ?? "", after, hasContext ? Infinity : 3).rows,
+      ]);
+    }
     const rows = buildDiffRows(
       file.before ?? "",
       file.after ?? "",
@@ -118,7 +126,7 @@ export function DiffContent({
           ]
         : [row],
     );
-  }, [file.before, file.after, hasContext]);
+  }, [file.fragments, file.before, file.after, hasContext]);
   const layouts = useMemo(
     () => ({
       unified: rows.map((row): DisplayRow => [row]),
@@ -165,7 +173,7 @@ export function DiffContent({
         )}
       </div>
     );
-  if (file.before === null && file.after === null)
+  if (!file.fragments?.length && file.before === null && file.after === null)
     return (
       <div className="p-4 text-ui-sm text-ink-mute">
         {file.notice ?? "没有可供比较的文件内容"}

@@ -122,7 +122,25 @@ function Preview() {
             }
           : useLargeDiff
             ? largeDiff
-            : base,
+            : demo.has("journal-fragments")
+              ? {
+                  ...base,
+                  files: [
+                    {
+                      ...base.files[0]!,
+                      before: null,
+                      after: null,
+                      added: null,
+                      removed: null,
+                      canRestore: false,
+                      fragments: [
+                        ["first-old", "first-new"],
+                        ["second-old", "second-new"],
+                      ],
+                    },
+                  ],
+                }
+              : base,
       ],
       selected: base.id,
       phase: "idle",
@@ -133,11 +151,9 @@ function Preview() {
   const changes = useMemo<TurnChangesSession>(
     () => ({
       state,
-      prepareProject: () => {},
+      journal: false,
+      recordSubmission: () => {},
       submitted: () => {},
-      prepare: () => Promise.resolve(),
-      beforeDispatch: () => Promise.resolve(),
-      markUnknown: () => Promise.resolve(),
       finish: () => Promise.resolve(),
       select: (id) =>
         state.setState({

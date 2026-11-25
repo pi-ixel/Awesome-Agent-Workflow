@@ -121,7 +121,7 @@ pub(crate) fn project_slug(cwd: &str) -> String {
         .into_owned()
 }
 
-fn resolve(
+pub(crate) fn resolve(
     root: &Path,
     sid: &str,
     cwd: &str,

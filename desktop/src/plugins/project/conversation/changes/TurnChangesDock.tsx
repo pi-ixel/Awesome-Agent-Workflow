@@ -27,6 +27,7 @@ import { DiffContent, type DiffPosition } from "./DiffContent.tsx";
 
 const labels: Record<TurnFileChange["kind"], string> = {
   modified: "修改",
+  written: "写入",
   added: "新增",
   deleted: "删除",
   renamed: "重命名",
@@ -266,17 +267,20 @@ export function TurnChangesReview({
             </span>
           )}
         </div>
-        {files.some((item) => item.added !== null && item.removed !== null) && (
-          <div className="mt-0.5 flex items-center">
-            <Statistics
-              added={files.reduce((sum, item) => sum + (item.added ?? 0), 0)}
-              removed={files.reduce(
-                (sum, item) => sum + (item.removed ?? 0),
-                0,
-              )}
-            />
-          </div>
-        )}
+        {files.length > 0 &&
+          files.every(
+            (item) => item.added !== null && item.removed !== null,
+          ) && (
+            <div className="mt-0.5 flex items-center">
+              <Statistics
+                added={files.reduce((sum, item) => sum + (item.added ?? 0), 0)}
+                removed={files.reduce(
+                  (sum, item) => sum + (item.removed ?? 0),
+                  0,
+                )}
+              />
+            </div>
+          )}
       </div>
       {controls(full)}
     </div>
@@ -457,6 +461,7 @@ export function TurnChangesReview({
                       {
                         {
                           modified: "M",
+                          written: "W",
                           added: "A",
                           deleted: "D",
                           renamed: "R",

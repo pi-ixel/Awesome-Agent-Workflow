@@ -37,6 +37,7 @@ export interface AgentConfigurationContext {
 }
 
 export interface AgentAdapter {
+  readonly journalDiff?: boolean;
   readonly diagnosticPrivacy?: AcpDiagnosticPrivacy;
   readonly mcpManagement?: AgentMcpManagement;
   readonly deleteSession?: (
