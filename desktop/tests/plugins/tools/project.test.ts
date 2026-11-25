@@ -12,10 +12,39 @@ import {
   toolFromProject,
   toolOwnerSegment,
   toolProjectIdFromBrief,
+  writeToolFiles,
   type ToolProjectIO,
 } from "../../../src/plugins/tools/runtime/project.ts";
 import { parseToolPackage } from "../../../src/plugins/tools/runtime/package.ts";
 import { sampleTool } from "../../../src/plugins/tools/ui/sample.ts";
+
+it("waits for in-flight writes before reporting a staging failure", async () => {
+  const { io } = memoryIO();
+  let finishWrite = () => {};
+  const slow = new Promise<void>((resolve) => {
+    finishWrite = resolve;
+  });
+  const first = new Error("模拟写盘失败");
+  const data = new TextEncoder().encode("合成工具内容");
+  const writing = writeToolFiles(
+    {
+      ...io,
+      writeTextFile: (path) =>
+        path.endsWith("broken.txt") ? Promise.reject(first) : slow,
+    },
+    "/staging",
+    { "broken.txt": data, "in-flight.txt": data },
+  );
+  let isReported = false;
+  const tracked = writing.catch((error: unknown) => {
+    isReported = true;
+    return error;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(isReported).toBe(false);
+  finishWrite();
+  await expect(tracked).resolves.toBe(first);
+});
 
 /** 内存版宿主：把路径当字符串、文件当 Map，用来验证落盘逻辑本身。 */
 function memoryIO(initial: Record<string, string> = {}) {

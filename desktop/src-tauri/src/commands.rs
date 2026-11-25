@@ -13,7 +13,10 @@
 //!（返回形状是 `CommandResult { code, stdout, stderr }` 的超集），
 //! `src/aaw/processRunner.ts` 依赖超集字段（ok / failure / durationMs）。
 
-use std::time::Instant;
+use std::{
+    path::{Path, PathBuf},
+    time::Instant,
+};
 
 use serde::Serialize;
 
@@ -600,22 +603,44 @@ pub fn tool_drop_staging(app: tauri::AppHandle, path: String) -> Result<(), Stri
     let store = host.store()?;
     let owner = store.owner()?;
     let installed = crate::tools::location::tool_partition(&host.data_root()?, &owner, "installed")?;
-    let canonical_installed = std::fs::canonicalize(&installed)
-        .map_err(|error| format!("无法定位工具库目录 {}：{error}", installed.display()))?;
-    let canonical_tool = std::fs::canonicalize(tool_root)
-        .map_err(|error| format!("工具目录不存在 {}：{error}", tool_root.display()))?;
-    if canonical_tool.parent() != Some(canonical_installed.as_path()) {
+    drop_tool_version(&installed, tool_root, versions, &target)
+}
+
+fn drop_tool_version(installed: &Path, tool_root: &Path, versions: &Path, target: &Path) -> Result<(), String> {
+    fn canonical_dir(path: &Path) -> Result<Option<PathBuf>, String> {
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+                std::fs::canonicalize(path).map(Some).map_err(|error| format!("无法定位 {}：{error}", path.display()))
+            }
+            Ok(_) => Err(format!("不是普通目录：{}", path.display())),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(format!("无法读取 {}：{error}", path.display())),
+        }
+    }
+
+    let Some(installed) = canonical_dir(installed)? else { return Ok(()) };
+    let Some(tool_root) = canonical_dir(tool_root)? else { return Ok(()) };
+    if tool_root.parent() != Some(installed.as_path()) {
         return Err(format!("这个目录不在工具库里，已拒绝删除：{}", target.display()));
     }
-    let canonical_versions = std::fs::canonicalize(versions)
-        .map_err(|error| format!("版本目录不存在 {}：{error}", versions.display()))?;
-    let canonical_target = std::fs::canonicalize(&target)
-        .map_err(|error| format!("路径不存在 {}：{error}", target.display()))?;
-    if canonical_target.parent() != Some(canonical_versions.as_path()) || !canonical_target.is_dir() {
-        return Err(format!("只允许删除 versions 下的目录：{}", target.display()));
+    if let Some(versions) = canonical_dir(versions)? {
+        if versions.parent() != Some(tool_root.as_path())
+            || versions.file_name().and_then(|name| name.to_str()) != Some("versions")
+        {
+            return Err(format!("只允许删除工具自身的版本目录：{}", target.display()));
+        }
+        if let Some(copy) = canonical_dir(target)? {
+            if copy.parent() != Some(versions.as_path()) {
+                return Err(format!("只允许删除 versions 下的目录：{}", target.display()));
+            }
+            std::fs::remove_dir_all(&copy)
+                .map_err(|error| format!("删除失败 {}：{error}", target.display()))?;
+        }
+        // 父目录只在空时回收，保留安装前已存在的其他版本及文件。
+        let _ = std::fs::remove_dir(&versions);
     }
-    std::fs::remove_dir_all(&canonical_target)
-        .map_err(|error| format!("删除失败 {}：{error}", target.display()))
+    let _ = std::fs::remove_dir(&tool_root);
+    Ok(())
 }
 
 /// Resolve namespaced user data without knowledge of any agent implementation.
@@ -649,6 +674,34 @@ mod tests {
             "aaw-desktop-test-{}-{seq}-{label}",
             std::process::id()
         ))
+    }
+
+    #[test]
+    fn failed_install_cleans_only_empty_managed_version_parents() {
+        let home = temp_dir("failed-install");
+        let installed = home.join("installed");
+        let tool = installed.join("new-tool");
+        let versions = tool.join("versions");
+        let staged = versions.join(".staging-test");
+        std::fs::create_dir_all(&staged).unwrap();
+        drop_tool_version(&installed, &tool, &versions, &staged).unwrap();
+        assert!(!tool.exists());
+        assert!(installed.is_dir());
+
+        let old = versions.join("1.0.0");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&staged).unwrap();
+        std::fs::write(old.join("manifest.json"), "旧版本").unwrap();
+        drop_tool_version(&installed, &tool, &versions, &staged).unwrap();
+        assert!(!staged.exists());
+        assert_eq!(std::fs::read_to_string(old.join("manifest.json")).unwrap(), "旧版本");
+
+        let empty_tool = installed.join("without-staging");
+        let empty_versions = empty_tool.join("versions");
+        std::fs::create_dir_all(&empty_versions).unwrap();
+        drop_tool_version(&installed, &empty_tool, &empty_versions, &empty_versions.join(".staging-missing")).unwrap();
+        assert!(!empty_tool.exists());
+        std::fs::remove_dir_all(home).unwrap();
     }
 
     /// 睡 30s 的命令（跨平台；配合短超时验证超时杀进程语义）。

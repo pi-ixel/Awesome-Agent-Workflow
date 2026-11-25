@@ -976,7 +976,7 @@ export function runtimeFiles(tool: ToolPackage): Record<string, Uint8Array> {
  *
  * 分批并发而不是 `Promise.all` 一把梭：一个带 `node_modules` 的包动辄上千个
  * 文件，全并发会把 IPC 队列撑爆（而且宿主侧每个调用都要建目录），反而更慢。
- * 失败立即抛出——只写了一半的目录会让运行时读到"缺一半依赖"的状态。
+ * 发现失败就停止派发新写入，已发出的请求全部结束后才抛错，调用方随后清理。
  */
 export async function writeToolFiles(
   io: ToolProjectIO,
@@ -992,27 +992,36 @@ export async function writeToolFiles(
     throw new Error(
       "当前宿主不支持写入二进制文件，这个包里的图片 / wasm / 原生模块装不进来。",
     );
-  const queue = [...entries];
+  for (const [name] of entries) {
+    if (!safeSourcePath(name)) throw new Error(`工具包内含不安全路径：${name}`);
+  }
+  const queue = entries.filter(
+    ([name]) => name !== toolProjectFileNames.identity,
+  );
+  let hasFailed = false;
   const workers = Array.from(
     { length: Math.min(8, queue.length) },
     async () => {
-      for (;;) {
+      while (!hasFailed) {
         const next = queue.shift();
         if (!next) return;
         const [name, bytes] = next;
-        if (!safeSourcePath(name))
-          throw new Error(`工具包内含不安全路径：${name}`);
-        // 包里带来的身份文件一律不收：身份是"这台机器上这个目录是谁"，不该由
-        // 外来的包指定——写进去等于让任何 ZIP 都能冒充一个已经装过的工具。
-        if (name === toolProjectFileNames.identity) continue;
         const target = joinPath(dir, name);
         const text = decodeUtf8(bytes);
-        if (text !== undefined) await io.writeTextFile(target, text);
-        else await io.writeBinaryFile!(target, toBase64(bytes));
+        try {
+          if (text !== undefined) await io.writeTextFile(target, text);
+          else await io.writeBinaryFile!(target, toBase64(bytes));
+        } catch (error) {
+          hasFailed = true;
+          throw error;
+        }
       }
     },
   );
-  await Promise.all(workers);
+  // 有写入失败时也要等已发出的写请求结束，否则清理过的暂存目录会被晚到的写入重建。
+  const results = await Promise.allSettled(workers);
+  const failed = results.find((result) => result.status === "rejected");
+  if (failed) throw failed.reason;
 }
 
 /**
