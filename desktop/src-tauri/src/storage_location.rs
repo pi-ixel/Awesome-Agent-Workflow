@@ -225,6 +225,7 @@ fn managed_paths(
         "conversation",
         "browser-restore",
         "guide",
+        "launcher-settings.json",
         "statistics",
         "trash",
         "storage-thresholds.json",

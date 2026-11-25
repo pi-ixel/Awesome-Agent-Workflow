@@ -13,6 +13,7 @@
 //! 统一走 `decode()`，两种形态都认。
 
 use serde_json::{json, Map, Value};
+use std::sync::Mutex;
 
 use super::manifest::ToolManifest;
 use super::store::ToolStore;
@@ -142,7 +143,9 @@ pub fn read(store: &ToolStore) -> Result<Library, String> {
     Ok(Library { owner: Some(owner), signed_in: true, theme, entries, broken })
 }
 
-/// 启动器自己的偏好：固定项、最近项、快捷键。落点与 Electron 版一致。
+static LAUNCHER_PREFERENCES_WRITE: Mutex<()> = Mutex::new(());
+
+/// 启动器自己的偏好：固定项、最近项、快捷键。
 pub struct LauncherStore {
     path: std::path::PathBuf,
 }
@@ -159,22 +162,20 @@ impl LauncherStore {
             .unwrap_or_else(|| json!({}))
     }
 
-    fn update(&self, patch: Value) -> Result<(), String> {
-        let mut current = self.read();
-        if let (Some(target), Some(source)) = (current.as_object_mut(), patch.as_object()) {
-            for (key, value) in source {
-                target.insert(key.clone(), value.clone());
-            }
-        }
+    fn update(&self, apply: impl FnOnce(&mut Map<String, Value>)) -> Result<(), String> {
+        let _writer = LAUNCHER_PREFERENCES_WRITE.lock().map_err(|error| error.to_string())?;
+        let mut current = self.read().as_object().cloned().unwrap_or_default();
+        apply(&mut current);
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
-        // 临时名不能固定：两个并发保存（改固定项 + 改最近项）会互相截断。
-        // `unique_temp` 的理由见 store.rs / guide.rs 同名注释。
+        let contents = serde_json::to_vec(&current).map_err(|error| error.to_string())?;
         let temp = super::unique_temp(&self.path);
-        std::fs::write(&temp, serde_json::to_vec(&current).map_err(|error| error.to_string())?)
-            .map_err(|error| error.to_string())?;
-        std::fs::rename(&temp, &self.path).map_err(|error| error.to_string())
+        let result = std::fs::write(&temp, contents).and_then(|()| std::fs::rename(&temp, &self.path));
+        if result.is_err() {
+            let _ = std::fs::remove_file(&temp);
+        }
+        result.map_err(|error| error.to_string())
     }
 
     pub fn shortcut(&self) -> String {
@@ -186,7 +187,9 @@ impl LauncherStore {
     }
 
     pub fn set_shortcut(&self, value: &str) -> Result<(), String> {
-        self.update(json!({ "shortcut": value }))
+        self.update(|current| {
+            current.insert("shortcut".into(), json!(value));
+        })
     }
 
     /// `users[owner] = { pinned: [...], recent: {...} }`
@@ -198,49 +201,44 @@ impl LauncherStore {
             .unwrap_or_else(|| json!({}))
     }
 
-    fn update_user(&self, owner: &str, patch: Value) -> Result<(), String> {
-        let mut users = self
-            .read()
-            .get("users")
-            .and_then(Value::as_object)
-            .cloned()
-            .unwrap_or_default();
-        let mut merged = self.user(owner);
-        if let (Some(target), Some(source)) = (merged.as_object_mut(), patch.as_object()) {
-            for (key, value) in source {
-                target.insert(key.clone(), value.clone());
-            }
-        }
-        users.insert(owner.to_string(), merged);
-        self.update(json!({ "users": users }))
+    fn update_user(&self, owner: &str, apply: impl FnOnce(&mut Map<String, Value>)) -> Result<(), String> {
+        self.update(|current| {
+            let mut users = current.remove("users").and_then(|value| value.as_object().cloned()).unwrap_or_default();
+            let mut user = users.remove(owner).and_then(|value| value.as_object().cloned()).unwrap_or_default();
+            apply(&mut user);
+            users.insert(owner.to_string(), Value::Object(user));
+            current.insert("users".into(), Value::Object(users));
+        })
     }
 
     pub fn pinned(&self, owner: &str) -> Vec<String> {
-        self.user(owner)
-            .get("pinned")
+        Self::pinned_ids(self.user(owner).get("pinned"))
+    }
+
+    fn pinned_ids(value: Option<&Value>) -> Vec<String> {
+        value
             .and_then(Value::as_array)
             .map(|items| items.iter().filter_map(Value::as_str).map(str::to_string).collect())
             .unwrap_or_else(|| vec!["builtin:aaw".into(), "builtin:tools".into()])
     }
 
     pub fn set_pinned(&self, owner: &str, id: &str, pinned: bool) -> Result<(), String> {
-        let mut ids = self.pinned(owner);
-        ids.retain(|item| item != id);
-        if pinned {
-            ids.push(id.to_string());
-        }
-        self.update_user(owner, json!({ "pinned": ids }))
+        self.update_user(owner, |user| {
+            let mut ids = Self::pinned_ids(user.get("pinned"));
+            ids.retain(|item| item != id);
+            if pinned {
+                ids.push(id.to_string());
+            }
+            user.insert("pinned".into(), json!(ids));
+        })
     }
 
     pub fn touch(&self, owner: &str, id: &str) -> Result<(), String> {
-        let mut recent = self
-            .user(owner)
-            .get("recent")
-            .and_then(Value::as_object)
-            .cloned()
-            .unwrap_or_default();
-        recent.insert(id.to_string(), json!(now_ms()));
-        self.update_user(owner, json!({ "recent": recent }))
+        self.update_user(owner, |user| {
+            let mut recent = user.remove("recent").and_then(|value| value.as_object().cloned()).unwrap_or_default();
+            recent.insert(id.to_string(), json!(now_ms()));
+            user.insert("recent".into(), Value::Object(recent));
+        })
     }
 }
 
@@ -268,6 +266,39 @@ pub fn tone_of(id: &str) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launcher_writes_merge_concurrent_recent_pinned_and_shortcut_changes() {
+        let root = tempfile::tempdir().unwrap();
+        let tools = ToolStore::new(root.path());
+        let launcher = LauncherStore::new(&tools);
+        std::thread::scope(|scope| {
+            for index in 0..8 {
+                let launcher = &launcher;
+                scope.spawn(move || {
+                    let id = format!("personal:tool-{index}");
+                    launcher.touch("owner", &id).unwrap();
+                    launcher.set_pinned("owner", &id, true).unwrap();
+                });
+            }
+            scope.spawn(|| launcher.set_shortcut("Ctrl+Shift+F11").unwrap());
+        });
+        let recent = launcher.user("owner")["recent"].as_object().unwrap().len();
+        assert_eq!(recent, 8);
+        assert_eq!(launcher.pinned("owner").len(), 10);
+        assert_eq!(launcher.shortcut(), "Ctrl+Shift+F11");
+    }
+
+    #[test]
+    fn launcher_write_failure_removes_its_temporary_file() {
+        let root = tempfile::tempdir().unwrap();
+        let tools = ToolStore::new(root.path());
+        let launcher = LauncherStore::new(&tools);
+        std::fs::create_dir(&launcher.path).unwrap();
+        assert!(launcher.set_shortcut("Ctrl+Shift+F11").is_err());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+        assert!(launcher.path.is_dir());
+    }
 
     #[test]
     fn merged_settings_prefer_user_values_of_the_same_type() {
