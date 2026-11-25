@@ -47,7 +47,7 @@ vi.mock(
 );
 
 it.each(["Enter", "发送按钮"])(
-  "已连接会话通过%s提交，慢历史和慢基线也在 500 毫秒内写出 ACP session/prompt",
+  "已连接会话通过%s提交，历史加载未完成、基线接近预算时在 500 毫秒内写出 ACP session/prompt",
   async (entry) => {
     const acp = standardAcpPeer();
     const session = createOwnedSession(acp.client);
@@ -57,7 +57,9 @@ it.each(["Enter", "发送按钮"])(
     const store = createSessionStore("prompt-dispatch");
     const detach = attachSession(session, store);
     const request = vi.fn<TurnChangesHost["request"]>(({ action }) => {
-      if (action === "begin" || action === "list") return new Promise(() => {});
+      if (action === "list") return new Promise(() => {});
+      if (action === "begin")
+        return new Promise((resolve) => setTimeout(() => resolve([]), 390));
       if (action === "dispatch")
         return new Promise((resolve) => setTimeout(() => resolve([]), 70));
       return Promise.resolve([]);
@@ -114,7 +116,7 @@ it.each(["Enter", "发送按钮"])(
       expect(prompts()).toHaveLength(1);
       expect(prompts()[0]?.params?.prompt).toEqual([{ type: "text", text }]);
       expect(receivedAt ?? Infinity).toBeLessThanOrEqual(submittedAt + 500);
-      expect(changes.state.getState().error).toContain("本轮统计不可用");
+      expect(changes.state.getState().error).toBeNull();
     } finally {
       vi.useRealTimers();
       cleanup();

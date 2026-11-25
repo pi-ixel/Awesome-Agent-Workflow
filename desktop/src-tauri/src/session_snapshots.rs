@@ -26,6 +26,7 @@ pub enum SessionData {
 
 impl SessionData {
     fn legacy_directory(self, data: &Path) -> PathBuf {
+        let data = data.join("migration/legacy");
         match self {
             Self::Snapshot => data.join("session-snapshots"),
             Self::Queue => data.join("conversation/queue"),
@@ -158,7 +159,7 @@ pub async fn session_data_write(
 const PERMANENT_DELETION: &str = "deleted-session";
 
 pub(crate) fn legacy_images(data: &Path) -> io::Result<Option<String>> {
-    let source = path(&SessionData::ImageDraft.legacy_directory(data), "all");
+    let source = data.join("migration/legacy-image-drafts");
     let Some((mut reader, scope)) = open(&source)? else {
         return Ok(None);
     };
@@ -175,7 +176,7 @@ pub(crate) fn legacy_images(data: &Path) -> io::Result<Option<String>> {
 
 pub(crate) fn save_legacy_images(data: &Path, remaining: &str) -> io::Result<()> {
     write(
-        &path(&SessionData::ImageDraft.legacy_directory(data), "all"),
+        &data.join("migration/legacy-image-drafts"),
         Some("all"),
         remaining,
     )
@@ -354,7 +355,10 @@ pub(crate) fn move_verified(source: &Path, target: &Path) -> io::Result<()> {
 }
 
 #[tauri::command]
-pub async fn migrate_session_files(app: tauri::AppHandle) -> Result<MigrationResult, String> {
+pub async fn migrate_session_files(
+    app: tauri::AppHandle,
+    webview_index: Option<std::collections::BTreeMap<String, Option<String>>>,
+) -> Result<MigrationResult, String> {
     use tauri::Manager;
     let turns = app
         .path()
@@ -362,42 +366,125 @@ pub async fn migrate_session_files(app: tauri::AppHandle) -> Result<MigrationRes
         .map_err(|e| e.to_string())?
         .join("turn-changes");
     let data = crate::storage_location::migration_data_dir(&app)?;
-    tauri::async_runtime::spawn_blocking(move || migrate_all(&data, &turns))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        migrate_with_index(&data, &turns, webview_index.as_ref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(Serialize)]
 pub struct MigrationResult {
     moved: usize,
+    deleted_orphans: Vec<String>,
+    retained_orphans: Vec<String>,
     completed: Vec<SessionIdentity>,
     recovery: Vec<crate::session_recovery::Recovery>,
 }
 
+#[cfg(test)]
 fn migrate_all(data: &Path, turns: &Path) -> Result<MigrationResult, String> {
+    migrate_with_index(data, turns, Some(&Default::default()))
+}
+
+// 升级中断或开发版热更新可能留下两个位置。逐文件校验后再移除旧副本。
+fn relocate_directory(old: &Path, target: &Path) -> io::Result<()> {
+    if !old.try_exists()? {
+        return Ok(());
+    }
+    if !target.try_exists()? {
+        fs::create_dir_all(
+            target
+                .parent()
+                .ok_or_else(|| io::Error::other("无效的迁移目录"))?,
+        )?;
+        return fs::rename(old, target);
+    }
+    if !fs::symlink_metadata(old)?.file_type().is_dir()
+        || !fs::symlink_metadata(target)?.file_type().is_dir()
+    {
+        return Err(io::Error::other("旧目录和目标目录类型不匹配"));
+    }
+    for entry in fs::read_dir(old)? {
+        let entry = entry?;
+        let dest = target.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            relocate_directory(&entry.path(), &dest)?;
+        } else if entry.file_type()?.is_file() {
+            move_verified(&entry.path(), &dest)?;
+        } else {
+            return Err(io::Error::other("旧目录含特殊文件，已保留"));
+        }
+    }
+    fs::remove_dir(old)
+}
+
+fn migrate_with_index(
+    data: &Path,
+    turns: &Path,
+    webview: Option<&std::collections::BTreeMap<String, Option<String>>>,
+) -> Result<MigrationResult, String> {
     use crate::session_recovery::{self as recovery, Phase};
     let _guard = WRITER.lock().map_err(|e| e.to_string())?;
     let mut moved = 0;
+    let mut deleted_orphans = Vec::new();
+    let mut retained_orphans = Vec::new();
     let mut damaged = Vec::new();
     let mut legacy_agents = std::collections::BTreeSet::new();
+    for name in [
+        "scheduled-tasks.lock",
+        "storage-location.lock",
+        "notification-startup.lock",
+    ] {
+        let old = data.join(name);
+        match fs::OpenOptions::new().read(true).write(true).open(&old) {
+            Ok(file) => match file.try_lock() {
+                Ok(()) => fs::remove_file(&old).map_err(|e| e.to_string())?,
+                Err(std::fs::TryLockError::WouldBlock) => {}
+                Err(std::fs::TryLockError::Error(e)) => return Err(e.to_string()),
+            },
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    relocate_directory(&data.join("notification-instances"), &data.join("runtime/notification-instances"))
+        .map_err(|e|format!("迁移通知接收记录：{e}"))?;
+    let version_path = data.join("configuration/session-storage-version.json");
+    let version: u32 = crate::storage_preferences::read_record(&version_path)?;
+    if version > 4 {
+        return Err("此会话存储版本需要更新 Desktop".into());
+    }
+    if version < 4 {
+        for (name, folder) in [
+            ("session-deletions", "runtime"),
+            ("session-recovery", "runtime"),
+            ("turn-workspaces", "runtime"),
+            ("session-snapshots", "migration/legacy"),
+            ("conversation", "migration/legacy"),
+        ] {
+            let old = data.join(name);
+            relocate_directory(&old, &data.join(folder).join(name))
+                .map_err(|e| format!("迁移 {name}：{e}"))?;
+        }
+    }
     for record in recovery::list(data)? {
         if record.phase == Phase::Forgetting {
             recovery::update(data, &record.owner, "absent")?;
         }
     }
     let existing = recovery::list(data)?;
-    let version_path = data.join("configuration/session-storage-version.json");
-    let version: u32 = crate::storage_preferences::read_record(&version_path)?;
-    if version > 2 {
-        return Err("此会话存储版本需要更新 Desktop".into());
+    if version < 4 {
+        crate::session_layout::upgrade_directory_names(data).map_err(|e| e.to_string())?;
     }
-    if version == 2
+    if version == 4
         && existing
             .iter()
             .all(|record| record.phase != Phase::Cleaning)
     {
         return Ok(MigrationResult {
             moved,
+            deleted_orphans,
+            retained_orphans,
             completed: Vec::new(),
             recovery: existing,
         });
@@ -471,6 +558,11 @@ fn migrate_all(data: &Path, turns: &Path) -> Result<MigrationResult, String> {
     }
     crate::storage_preferences::migrate_native_conversation_records(&data)?;
     let _images = IMAGE_DRAFT_WRITER.lock().map_err(|e| e.to_string())?;
+    let old_images = path(&SessionData::ImageDraft.legacy_directory(data), "all");
+    if old_images.try_exists().map_err(|e| e.to_string())? {
+        move_verified(&old_images, &data.join("migration/legacy-image-drafts"))
+            .map_err(|e| e.to_string())?;
+    }
     crate::session_image_drafts::migrate_legacy(&data)?;
     crate::turn_changes::migrate_indexed_turns(data, turns)?;
     for owner in crate::session_layout::identities(&data).map_err(|e| e.to_string())? {
@@ -535,12 +627,113 @@ fn migrate_all(data: &Path, turns: &Path) -> Result<MigrationResult, String> {
             completed.push(owner);
         }
     }
+    let source_dir = SessionData::Snapshot.legacy_directory(data);
+    if source_dir.try_exists().map_err(|e| e.to_string())? {
+        let known = crate::session_layout::identities(data).map_err(|e| e.to_string())?;
+        let usage_path = data.join("statistics/usage.sqlite");
+        let usage = if usage_path.try_exists().map_err(|e| e.to_string())? {
+            Some(
+                rusqlite::Connection::open_with_flags(
+                    usage_path,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+                )
+                .map_err(|e| e.to_string())?,
+            )
+        } else {
+            None
+        };
+        let prefs: std::collections::BTreeMap<String, Option<String>> =
+            crate::storage_preferences::read_record(&data.join("configuration/preferences.json"))?;
+        let mut references = String::new();
+        for (key, value) in prefs.iter().chain(webview.into_iter().flatten()) {
+            if [
+                "workspace/v1",
+                "archived-sessions.v1",
+                "archived-session-metadata.v1",
+                "session-working-directories.v1",
+                "session-unread-replies.v1",
+            ]
+            .iter()
+            .any(|name| key.strip_prefix("aaw-desktop/") == Some(*name))
+            {
+                if let Some(raw) = value {
+                    let value: serde_json::Value = serde_json::from_str(raw)
+                        .map_err(|e| format!("无法校验会话索引 {key}：{e}"))?;
+                    if !value.is_object() && !value.is_array() {
+                        return Err(format!("会话索引格式错误：{key}"));
+                    }
+                    references.push_str(raw);
+                    references.push('\n');
+                }
+            }
+        }
+        for entry in fs::read_dir(&source_dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            if !entry.file_type().map_err(|e| e.to_string())?.is_file()
+                || entry.path().extension() != Some(std::ffi::OsStr::new("json"))
+            {
+                continue;
+            }
+            let Some((reader, Some(scope))) = open(&entry.path()).map_err(|e| e.to_string())?
+            else {
+                continue;
+            };
+            drop(reader);
+            let Some((project, id)) = scope.rsplit_once('#') else {
+                continue;
+            };
+            if path(&source_dir, &scope) != entry.path()
+                || !Path::new(project).is_absolute()
+                || id.is_empty()
+            {
+                continue;
+            }
+            let tracked = known.iter().any(|o| o.session_id.as_deref() == Some(id))
+                || recovery
+                    .iter()
+                    .any(|r| r.owner.session_id.as_deref() == Some(id));
+            let history=usage.as_ref().map(|db|db.query_row("SELECT EXISTS(SELECT 1 FROM usage_turn WHERE session=?1 UNION ALL SELECT 1 FROM session_context_usage WHERE session=?1)",[id],|r|r.get::<_,bool>(0))).transpose().map_err(|e| e.to_string())?.unwrap_or(false);
+            if tracked
+                || history
+                || webview.is_none()
+                || references.contains(id)
+                || !id
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_'))
+                || !Path::new(project).is_dir()
+            {
+                retained_orphans.push(scope);
+            } else {
+                fs::remove_file(entry.path()).map_err(|e| e.to_string())?;
+                deleted_orphans.push(scope);
+            }
+        }
+    }
+    for dir in [
+        source_dir,
+        data.join("migration/legacy/conversation/image-drafts"),
+        data.join("migration/legacy/conversation/message-images"),
+        data.join("migration/legacy/conversation/queue"),
+        data.join("migration/legacy/conversation"),
+        data.join("migration/legacy"),
+    ] {
+        if dir.try_exists().map_err(|e| e.to_string())?
+            && fs::read_dir(&dir)
+                .map_err(|e| e.to_string())?
+                .next()
+                .is_none()
+        {
+            fs::remove_dir(dir).map_err(|e| e.to_string())?;
+        }
+    }
     completed.sort_by(|a, b| {
         (&a.agent_id, &a.project, &a.session_id).cmp(&(&b.agent_id, &b.project, &b.session_id))
     });
-    crate::storage_preferences::write_record(&version_path, &2u32)?;
+    crate::storage_preferences::write_record(&version_path, &4u32)?;
     Ok(MigrationResult {
         moved,
+        deleted_orphans,
+        retained_orphans,
         completed,
         recovery,
     })
@@ -756,6 +949,34 @@ pub async fn session_data_remove(
 mod deletion_tests {
     use super::*;
     #[test]
+    fn orphan_cleanup_requires_readable_indexes_and_online_project() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().join("data");
+        let project = tmp.path().join("repo");
+        fs::create_dir(&project).unwrap();
+        let owner =
+            SessionIdentity::new("agent", &project.to_string_lossy(), Some("known")).unwrap();
+        let dir = owner.ensure(&data).unwrap();
+        let index = dir
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("sessions-index.json");
+        let original = fs::read(&index).unwrap();
+        fs::write(&index, "broken").unwrap();
+        let scope = format!("{}#unclaimed", project.display());
+        let source = path(&SessionData::Snapshot.legacy_directory(&data), &scope);
+        write(&source, Some(&scope), "{}").unwrap();
+        assert!(migrate_all(&data, &tmp.path().join("turns")).is_err());
+        assert!(source.exists());
+        fs::write(&index, original).unwrap();
+        let report = migrate_all(&data, &tmp.path().join("turns")).unwrap();
+        assert_eq!(report.deleted_orphans, vec![scope]);
+        assert!(!source.exists());
+    }
+
+    #[test]
     fn upgrade_preserves_source_on_journal_failure_then_resumes_partial_cleanup() {
         use crate::session_recovery::{self, Phase};
         let tmp = tempfile::tempdir().unwrap();
@@ -768,10 +989,15 @@ mod deletion_tests {
         let folder = owner.ensure(data).unwrap();
         let title = folder.join("titles.json");
         fs::write(&title, "{}").unwrap();
-        fs::write(data.join("session-recovery"), "unwritable as a directory").unwrap();
+        fs::create_dir_all(data.join("runtime")).unwrap();
+        fs::write(
+            data.join("runtime/session-recovery"),
+            "unwritable as a directory",
+        )
+        .unwrap();
         assert!(migrate_all(data, &turns).is_err());
         assert!(source.exists() && title.exists());
-        fs::remove_file(data.join("session-recovery")).unwrap();
+        fs::remove_file(data.join("runtime/session-recovery")).unwrap();
         session_recovery::save(data, &owner, Phase::Cleaning).unwrap();
         // Simulate exit after removing the in-directory identity but before finishing cleanup.
         fs::remove_file(folder.join("identity.json")).unwrap();

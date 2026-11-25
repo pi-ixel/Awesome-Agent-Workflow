@@ -23,7 +23,7 @@ pub fn claim_scheduled_tasks(app: AppHandle) -> Result<bool, String> {
     if slot.is_some() {
         return Ok(true);
     }
-    let directory = crate::storage_location::data_dir(&app)?;
+    let directory = crate::storage_location::data_dir(&app)?.join("runtime/locks");
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
     let Some(file) = try_task_lease(&directory)? else {
         return Ok(false);

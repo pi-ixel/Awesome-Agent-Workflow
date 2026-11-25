@@ -39,7 +39,7 @@ fn configuration_path(
     conversation_text: bool,
 ) -> Result<std::path::PathBuf, String> {
     if conversation_text {
-        return Ok(data_dir(app)?.join("conversation").join("text.json"));
+        return Ok(data_dir(app)?.join("migration/legacy/conversation/text.json"));
     }
     Ok(titles_path(app)?.with_file_name("preferences.json"))
 }
@@ -109,7 +109,7 @@ pub(crate) fn clear_unowned_composer(
     owner: &crate::session_layout::SessionIdentity,
 ) -> Result<(), String> {
     let _guard = WRITER.lock().map_err(|e| e.to_string())?;
-    let path = data.join("conversation/text.json");
+    let path = data.join("migration/legacy/conversation/text.json");
     let mut text: Titles = read_record(&path)?;
     let original = text.len();
     text.retain(|key, _| !matches_unowned_composer(key, owner));
@@ -130,7 +130,7 @@ fn save_composer(data: &Path, changes: Titles, importing: bool) -> Result<(), St
                 .ensure(data)
                 .map_err(|e| e.to_string())?
                 .join("composer.json"),
-            None => data.join("conversation/text.json"),
+            None => data.join("migration/legacy/conversation/text.json"),
         };
         groups.entry(path).or_default().insert(key, value);
     }
@@ -147,7 +147,7 @@ fn save_composer(data: &Path, changes: Titles, importing: bool) -> Result<(), St
 }
 
 fn load_composer(data: &Path, webview: Titles) -> Result<Titles, String> {
-    let legacy_path = data.join("conversation/text.json");
+    let legacy_path = data.join("migration/legacy/conversation/text.json");
     let legacy: Titles = read_record(&legacy_path)?;
     let mut destinations = BTreeMap::<std::path::PathBuf, Titles>::new();
     for (key, value) in &legacy {
@@ -181,7 +181,7 @@ fn load_composer(data: &Path, webview: Titles) -> Result<Titles, String> {
 pub(crate) fn migrate_native_conversation_records(data: &Path) -> Result<(), String> {
     let _guard = WRITER.lock().map_err(|e| e.to_string())?;
     if data
-        .join("conversation/text.json")
+        .join("migration/legacy/conversation/text.json")
         .try_exists()
         .map_err(|e| e.to_string())?
     {
@@ -414,7 +414,7 @@ mod tests {
             (b.into(), None),
             (old.into(), Some("discard".into())),
         ]);
-        write_record(&data.join("conversation/text.json"), &legacy).unwrap();
+        write_record(&data.join("migration/legacy/conversation/text.json"), &legacy).unwrap();
         let web = Titles::from([
             (b.into(), Some("stale".into())),
             (old.into(), Some("old".into())),

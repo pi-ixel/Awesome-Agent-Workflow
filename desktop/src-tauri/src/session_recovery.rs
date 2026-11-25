@@ -36,7 +36,7 @@ fn journal(data: &Path, owner: &SessionIdentity) -> Result<PathBuf, String> {
         return Err("缺少 ACP 会话 ID".into());
     }
     let key = Sha256::digest(serde_json::to_vec(owner).map_err(|e| e.to_string())?);
-    Ok(data.join("session-recovery").join(format!("{key:x}.json")))
+    Ok(data.join("runtime/session-recovery").join(format!("{key:x}.json")))
 }
 pub fn save(data: &Path, owner: &SessionIdentity, phase: Phase) -> Result<(), String> {
     let path = journal(data, owner)?;
@@ -70,7 +70,7 @@ pub fn save(data: &Path, owner: &SessionIdentity, phase: Phase) -> Result<(), St
     Ok(())
 }
 pub fn list(data: &Path) -> Result<Vec<Recovery>, String> {
-    let files = match fs::read_dir(data.join("session-recovery")) {
+    let files = match fs::read_dir(data.join("runtime/session-recovery")) {
         Ok(entries) => entries,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e.to_string()),

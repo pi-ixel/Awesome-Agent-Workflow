@@ -47,7 +47,7 @@ export async function seedRecovery(root, workspace, agent) {
 }
 export async function verifyRecovery({ evaluate, waitFor, workspace, absent }) {
   const root = path.dirname(workspace);
-  const journal = path.join(root, "session-recovery");
+  const journal = path.join(root, "runtime/session-recovery");
   const receipts = path.join(root, "recovery-receipts.jsonl");
   const check = async (label, read) => {
     try {
@@ -71,7 +71,9 @@ export async function verifyRecovery({ evaluate, waitFor, workspace, absent }) {
     ),
   );
   const files = (await fs.readdir(journal)).filter((p) => p.endsWith(".json"));
-  assert.ok(await evaluate(`document.body.innerText.includes("${neighbor}：迁移完成")`));
+  assert.ok(
+    await evaluate(`document.body.innerText.includes("${neighbor}：迁移完成")`),
+  );
   assert.equal(files.length, 1);
   const entry = JSON.parse(
     await fs.readFile(path.join(journal, files[0]), "utf8"),

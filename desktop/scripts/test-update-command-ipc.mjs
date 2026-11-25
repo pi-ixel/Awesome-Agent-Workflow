@@ -66,7 +66,7 @@ if (crashRecovery) {
         60000,
       );
       const journals = await fs
-        .readdir(path.join(data, "session-recovery"))
+        .readdir(path.join(data, "runtime/session-recovery"))
         .catch((e) => {
           if (e.code === "ENOENT") return [];
           throw e;
@@ -76,7 +76,7 @@ if (crashRecovery) {
         assert.equal(journals.length, 1);
         const journal = JSON.parse(
           await fs.readFile(
-            path.join(data, "session-recovery", journals[0]),
+            path.join(data, "runtime/session-recovery", journals[0]),
             "utf8",
           ),
         );
@@ -289,12 +289,17 @@ try {
     });
   } else if (promptLatency) {
     const { verifyPromptLatency } = await import("./verifyPromptLatency.mjs");
-    await verifyPromptLatency({
-      evaluate,
-      invoke,
-      waitFor,
-      workspace: fixture.removalProjects[0],
-    });
+    for (const workspace of fixture.latencyWorkspaces) {
+      console.log(`实测工作区 ${workspace}`);
+      await verifyPromptLatency({
+        receiptPath: fixture.receiptPath,
+        evaluate,
+        invoke,
+        waitFor,
+        workspace,
+      });
+      await fs.unlink(fixture.receiptPath);
+    }
   } else if (handoff) {
     await waitFor("signed fixture update", () =>
       evaluate(
@@ -718,6 +723,14 @@ async function prepareIsolatedWindow(handoff) {
   const removalProjects = ["remove-project", "keep-project"].map((name) =>
     path.join(dataDirectory, name),
   );
+  const realWorkspaces =
+    promptLatency && process.env.AAW_LATENCY_WORKSPACE
+      ? process.env.AAW_LATENCY_WORKSPACE.split(";")
+          .filter(Boolean)
+          .map((p) => path.resolve(p))
+      : [];
+  if (realWorkspaces.length)
+    removalProjects.splice(0, removalProjects.length, ...realWorkspaces);
   const agent = {
     id: "custom-native-smoke",
     name: "Native smoke ACP peer",
@@ -817,7 +830,11 @@ async function prepareIsolatedWindow(handoff) {
     await fs.mkdir(dataDirectory);
     ownsData = true;
     if (!handoff)
-      await Promise.all(removalProjects.map((path) => fs.mkdir(path)));
+      await Promise.all(
+        removalProjects
+          .filter((p) => !realWorkspaces.includes(p))
+          .map((p) => fs.mkdir(p)),
+      );
     if (lifecycle) {
       const { seedLifecycle } = await import("./verifySessionLifecycle.mjs");
       await seedLifecycle(dataDirectory, removalProjects[0]);
@@ -934,6 +951,10 @@ async function prepareIsolatedWindow(handoff) {
       origin: override.build.devUrl,
       executable,
       environment,
+      latencyWorkspaces: realWorkspaces.length
+        ? realWorkspaces
+        : removalProjects.slice(0, 1),
+      receiptPath: path.join(dataDirectory, "prompt-receipts.jsonl"),
       removalProjects,
       dispose,
       ...installedFixture,

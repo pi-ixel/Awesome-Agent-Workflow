@@ -139,7 +139,19 @@ fn route_owner(route: &str) -> Option<&str> {
 }
 
 fn forward_to_resident(root: &Path, route: &str) -> Delivery {
-    let directory = root.join("notification-instances");
+    for directory in [
+        root.join("runtime/notification-instances"),
+        root.join("notification-instances"),
+    ] {
+        let delivery = forward_to_instances(&directory, route);
+        if delivery != Delivery::Unavailable {
+            return delivery;
+        }
+    }
+    forward(&root.join("notification-relay"), route)
+}
+
+fn forward_to_instances(directory: &Path, route: &str) -> Delivery {
     if let Some(owner) = route_owner(route) {
         let delivery = forward(&directory.join(owner), route);
         if delivery != Delivery::Unavailable {
@@ -168,7 +180,7 @@ fn forward_to_resident(root: &Path, route: &str) -> Delivery {
             return delivery;
         }
     }
-    forward(&root.join("notification-relay"), route)
+    Delivery::Unavailable
 }
 
 fn random_id() -> io::Result<String> {
@@ -206,7 +218,7 @@ pub(super) fn listen(
     deliver: impl Fn(String) -> io::Result<()> + Send + 'static,
 ) -> io::Result<Registration> {
     let root = root()?;
-    let directory = root.join("notification-instances");
+    let directory = root.join("runtime/notification-instances");
     fs::create_dir_all(&directory)?;
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
     let port = listener.local_addr()?.port();

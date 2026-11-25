@@ -10,6 +10,8 @@ export interface RecoveryOwner {
 export interface MigrationReport {
   completed: RecoveryOwner[];
   moved: number;
+  deleted_orphans?: string[];
+  retained_orphans?: string[];
   recovery: {
     owner: RecoveryOwner;
     phase: "webview" | "retained";

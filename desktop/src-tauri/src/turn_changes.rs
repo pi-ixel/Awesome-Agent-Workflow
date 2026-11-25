@@ -1,4 +1,5 @@
 //! 轮次开始前捕获工作区；历史内容独立保存，不依赖 Git HEAD 或会话展示窗口。
+mod project_baseline;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -12,7 +13,9 @@ use std::{
 use tauri::Manager;
 
 const FILE_LIMIT: u64 = 256 * 1024;
+#[cfg(test)]
 const TOTAL_LIMIT: usize = 16 * 1024 * 1024;
+#[cfg(test)]
 const FILE_COUNT: usize = 20_000;
 static OPERATIONS: Mutex<BTreeMap<PathBuf, Weak<Mutex<()>>>> = Mutex::new(BTreeMap::new());
 static OWNER: OnceLock<String> = OnceLock::new();
@@ -34,6 +37,10 @@ struct Version {
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
 struct Snapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    revision: Option<(String, i64)>,
+    #[serde(skip)]
+    database: PathBuf,
     files: BTreeMap<String, Version>,
     #[serde(default)]
     directories: BTreeSet<String>,
@@ -184,6 +191,9 @@ fn read_version(path: &Path) -> Result<Option<Version>, String> {
     if meta.file_type().is_symlink() || !meta.is_file() {
         return Err("不支持链接或非普通文件".into());
     }
+    read_regular_version(path, &meta)
+}
+fn read_regular_version(path: &Path, meta: &fs::Metadata) -> Result<Option<Version>, String> {
     if meta.len() > FILE_LIMIT {
         let mut file = File::open(path).map_err(|e| e.to_string())?;
         let mut hash = Sha256::new();
@@ -238,9 +248,11 @@ fn excluded(name: &str) -> bool {
             | "coverage"
     )
 }
+#[cfg(test)]
 fn capture(root: &Path) -> Snapshot {
     capture_with_limit(root, FILE_COUNT)
 }
+#[cfg(test)]
 fn capture_with_limit(root: &Path, file_limit: usize) -> Snapshot {
     let deadline = Instant::now() + Duration::from_secs(2);
     let mut snapshot = Snapshot {
@@ -1168,7 +1180,17 @@ fn apply_snapshot(
     after: Snapshot,
     request: &Request,
     is_final: bool,
-) {
+) -> Result<(), String> {
+    if after.revision.is_some() {
+        let (a, b) =
+            project_baseline::materialize(&stored.baseline, &after).map_err(|e| e.to_string())?;
+        let previous = std::mem::replace(&mut stored.baseline, a);
+        apply_snapshot(stored, root, b, request, is_final)?;
+        if !is_final {
+            stored.baseline = previous;
+        }
+        return Ok(());
+    }
     let previous_files = &stored.record.files;
     stored.record.restored.retain(|key| {
         same(stored.baseline.files.get(key), after.files.get(key))
@@ -1286,6 +1308,7 @@ fn apply_snapshot(
             ..after
         });
     }
+    Ok(())
 }
 fn close_record(stored: &mut Stored, status: &str, reason: Option<String>) {
     stored.record.status = status.into();
@@ -1316,7 +1339,7 @@ fn finish_snapshot(
         &stored.record,
         &read_boundary(directory)?,
     ) {
-        apply_snapshot(stored, root, after, request, true);
+        apply_snapshot(stored, root, after, request, true)?;
     } else {
         discard_snapshot(stored);
     }
@@ -1327,7 +1350,7 @@ pub(crate) fn forget_references(
     data: &Path,
     owner: &crate::session_layout::SessionIdentity,
 ) -> Result<(), String> {
-    let index = data.join("turn-workspaces");
+    let index = data.join("runtime/turn-workspaces");
     let dirs = match fs::read_dir(&index) {
         Ok(dirs) => dirs,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -1367,7 +1390,7 @@ pub(crate) fn migrate_owner(
         .map_err(|e| e.to_string())?
         .join("turns")
         .join(cwd_key);
-    let index = data.join("turn-workspaces").join(cwd_key);
+    let index = data.join("runtime/turn-workspaces").join(cwd_key);
     let identity_bytes = serde_json::to_vec(owner).map_err(|e| e.to_string())?;
     let reference = index.join(format!("{}.json", digest(&identity_bytes)));
     if !reference.try_exists().map_err(|e| e.to_string())? {
@@ -1567,11 +1590,32 @@ fn execute_with_capture(
     execute_stored(storage, None, request, capture)
 }
 
+#[cfg(test)]
 fn execute_stored(
     storage: &Path,
     data: Option<&Path>,
     request: Request,
     capture: impl Fn(&Path) -> Snapshot,
+) -> Result<Vec<Record>, String> {
+    execute_project(storage, data, request, |root| Ok(capture(root)))
+}
+
+fn workspace_key(root: &Path) -> String {
+    let identity = root.to_string_lossy().replace('\\', "/");
+    let identity = identity.strip_prefix("//?/").unwrap_or(&identity);
+    let identity = if cfg!(windows) {
+        identity.to_ascii_lowercase()
+    } else {
+        identity.to_owned()
+    };
+    digest(identity.as_bytes())
+}
+
+fn execute_project(
+    storage: &Path,
+    data: Option<&Path>,
+    request: Request,
+    capture: impl Fn(&Path) -> Result<Snapshot, String>,
 ) -> Result<Vec<Record>, String> {
     ensure_time(request.expires_at)?;
     let root = fs::canonicalize(&request.cwd)
@@ -1583,16 +1627,12 @@ fn execute_stored(
             }
         })
         .map_err(|e| e.to_string())?;
-    let identity = root.to_string_lossy().replace('\\', "/");
-    let identity = identity.strip_prefix("//?/").unwrap_or(&identity);
-    let identity = if cfg!(windows) {
-        identity.to_ascii_lowercase()
-    } else {
-        identity.to_owned()
-    };
-    let cwd_key = digest(identity.as_bytes());
-    let workspace = storage.join(&cwd_key);
-    let legacy = workspace.join(digest(
+    let cwd_key = workspace_key(&root);
+    let workspace = data
+        .map(|dir| dir.join("runtime/turn-locks"))
+        .unwrap_or_else(|| storage.to_owned())
+        .join(&cwd_key);
+    let legacy = storage.join(&cwd_key).join(digest(
         format!("{}\0{}", request.agent_key, request.session_id).as_bytes(),
     ));
     let directory = if let Some(data) = data {
@@ -1657,7 +1697,7 @@ fn execute_stored(
     let boundary = read_boundary(&directory)?;
     if request.action == "list" {
         let mut list = Vec::new();
-        let mut recovery = None;
+        let mut recovery: Option<Snapshot> = None;
         let mut entries = Vec::new();
         for path in records(&directory) {
             if let Some(summary) = load_tracked_summary(&path, &boundary)? {
@@ -1688,7 +1728,10 @@ fn execute_stored(
                 };
                 close_record(&mut stored, &status, reason);
                 if was_dispatched(stored.requires_dispatch, &stored.record, &boundary) {
-                    let after = recovery.get_or_insert_with(|| capture(&root)).clone();
+                    if recovery.is_none() {
+                        recovery = Some(capture(&root)?);
+                    }
+                    let after: Snapshot = recovery.as_ref().unwrap().clone();
                     finish_snapshot(&directory, &mut stored, &root, after, &request)?;
                 } else {
                     discard_snapshot(&mut stored);
@@ -1733,7 +1776,7 @@ fn execute_stored(
             }
         }
         // 一次采样同时封存引导前的变化和建立新基线，避免两次扫描间漏算。
-        let baseline = capture(&root);
+        let baseline = capture(&root)?;
         ensure_time(request.expires_at)?;
         if requires_dispatch && read_boundary(&directory)?.sequence != boundary.sequence {
             return Err("轮次已被更新的消息取代".into());
@@ -1752,7 +1795,7 @@ fn execute_stored(
         let mut concurrent = false;
         let mut peers = all_records(&workspace);
         if let Some(data) = data {
-            let index = data.join("turn-workspaces").join(&cwd_key);
+            let index = data.join("runtime/turn-workspaces").join(&cwd_key);
             for entry in fs::read_dir(index).map_err(|e| e.to_string())? {
                 let entry = entry.map_err(|e| e.to_string())?;
                 if entry.path().extension().is_some_and(|ext| ext == "json") {
@@ -1862,7 +1905,7 @@ fn execute_stored(
             if active(&stored.record) {
                 close_record(&mut stored, "unknown", request.unknown_reason.clone());
                 save(&path, &stored)?;
-                finish_snapshot(&directory, &mut stored, &root, capture(&root), &request)?;
+                finish_snapshot(&directory, &mut stored, &root, capture(&root)?, &request)?;
                 save(&path, &stored)?;
             }
         }
@@ -1883,13 +1926,26 @@ fn execute_stored(
                 stored.record.snapshot_state = Some("pending".into());
                 save(&path, &stored)?;
             }
-            let after = capture(&root);
+            let after = capture(&root)?;
+            let database = after.database.clone();
             if request.action == "finish" {
                 finish_snapshot(&directory, &mut stored, &root, after, &request)?;
             } else {
-                apply_snapshot(&mut stored, &root, after, &request, false);
+                apply_snapshot(&mut stored, &root, after, &request, false)?;
             }
             save(&path, &stored)?;
+            if request.action == "finish" && !database.as_os_str().is_empty() {
+                if let Some(data) = data {
+                    if let Err(e) = project_baseline::prune(data, &cwd_key, &database) {
+                        crate::diagnostics::log(
+                            "warn",
+                            "turn_changes",
+                            "回收旧工作区版本失败",
+                            serde_json::json!({"error":e.to_string()}),
+                        );
+                    }
+                }
+            }
         }
         "restore" | "undo" | "check" => {
             if stored.record.locked
@@ -1933,7 +1989,30 @@ pub async fn turn_changes(app: tauri::AppHandle, request: Request) -> Result<Vec
         let queue_ms = called.elapsed().as_millis();
         let started = Instant::now();
         let action = request.action.clone();
-        let result = execute_stored(&storage, Some(&data), request, capture);
+        let db_dir = data.join("runtime/workspace-baselines");
+        let database = |root: &Path| {
+            db_dir.join(format!(
+                "{}.sqlite",
+                digest(root.to_string_lossy().as_bytes())
+            ))
+        };
+        let result = if matches!(action.as_str(), "prepareProject" | "releaseProject") {
+            let root = fs::canonicalize(&request.cwd).map_err(|e| e.to_string())?;
+            let lease = request.user_id.as_deref().ok_or("缺少项目准备标识")?;
+            if action == "releaseProject" {
+                project_baseline::release(&root, lease, &data, &database(&root))
+                    .map_err(|e| e.to_string())
+                    .map(|_| vec![])
+            } else {
+                project_baseline::lease(&root, &database(&root), lease)
+                    .map_err(|e| e.to_string())
+                    .map(|_| vec![])
+            }
+        } else {
+            execute_project(&storage, Some(&data), request, |root| {
+                project_baseline::freeze(root, &database(root)).map_err(|e| e.to_string())
+            })
+        };
         crate::diagnostics::log(
             if result.is_ok() { "debug" } else { "warn" },
             "turn_changes",

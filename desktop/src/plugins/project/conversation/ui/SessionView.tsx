@@ -442,6 +442,15 @@ export function SessionView({
   const pendingCount = useApprovalValue((state) => state.pending.length);
   const isConnecting = useSessionValue((state) => state.isConnecting);
   const isApplyingModel = useSessionValue((state) => state.isApplyingModel);
+  const turnChanges = useSessionValue((state) => state.turnChanges);
+  const projectPreparing = useRegisteredSnapshot(
+    turnChanges?.state,
+    (state) => state?.projectPreparing ?? false,
+  );
+  const projectError = useRegisteredSnapshot(
+    turnChanges?.state,
+    (state) => state?.projectError,
+  );
   const isDraftPreparing = useSessionValue((state) => state.isDraftPreparing);
   const draftError = useSessionValue((state) => state.lastError);
   const recovery = useSessionValue((state) => state.recovery);
@@ -1117,6 +1126,19 @@ export function SessionView({
           hidden
         />
         <ArchiveNotice openSettings={openArchiveSettings} />
+        {projectPreparing && (
+          <div role="status" className="px-4 py-2 text-ui-sm text-ink-mute">
+            正在准备项目…
+          </div>
+        )}
+        {projectError && (
+          <div role="alert" className="flex items-center gap-2 px-4 py-2">
+            {projectError}
+            <ActionButton tone="secondary" onClick={() => turnChanges?.prepareProject()}>
+              重试
+            </ActionButton>
+          </div>
+        )}
         {isDraftPreparing ? (
           <div
             role={draftError ? "alert" : "status"}
@@ -1372,7 +1394,7 @@ export function SessionView({
                       isAgentRunning={isAgentRunning}
                       disabled={isConnecting && !isDraftPreparing}
                       sendDisabled={
-                        isDraftPreparing || isConnecting || isApplyingModel
+                        projectPreparing || !!projectError || isDraftPreparing || isConnecting || isApplyingModel
                       }
                       onSend={sendPrompt}
                       onSendWithMotion={sendWithMorph}

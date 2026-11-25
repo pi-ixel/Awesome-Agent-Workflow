@@ -149,11 +149,26 @@ export async function verifyLifecycle({
   });
   assert.equal(await read("snapshot", session), null);
   const agentRoot = path.join(location.currentPath, "agents");
-  const [agentDirectory] = (await fs.readdir(agentRoot)).filter((dir) =>
-    dir.startsWith("codeagent-"),
+  const [agentDirectory] = (await fs.readdir(agentRoot)).filter(
+    (dir) => dir === "codeagent",
   );
   const projects = path.join(agentRoot, agentDirectory, "projects");
   const [project] = await fs.readdir(projects);
+  assert.match(project, /^remove-project~[0-9a-f]{12}$/);
+  await fs.access(
+    path.join(projects, project, "sessions", neighbor, "identity.json"),
+  );
+  for (const old of [
+    "session-snapshots",
+    "conversation",
+    "turn-workspaces",
+    "session-recovery",
+    "session-deletions",
+  ]) {
+    await assert.rejects(fs.access(path.join(location.currentPath, old)), {
+      code: "ENOENT",
+    });
+  }
   const persisted = JSON.parse(
     await fs.readFile(
       path.join(projects, project, "sessions-index.json"),

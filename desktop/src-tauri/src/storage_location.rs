@@ -75,14 +75,14 @@ impl StorageLocation {
 
 pub fn initialize(app: &AppHandle) -> Result<(), String> {
     let default = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
-    fs::create_dir_all(&default).map_err(|e| e.to_string())?;
+    fs::create_dir_all(default.join("runtime/locks")).map_err(|e| e.to_string())?;
     let control = default.join("storage-location.json");
     let lock = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .open(default.join("storage-location.lock"))
+        .open(default.join("runtime/locks/storage-location.lock"))
         .map_err(|e| e.to_string())?;
     let mut error = None;
     if lock.try_lock().is_ok() {
@@ -173,6 +173,11 @@ fn managed_paths(
         "configuration",
         "session-snapshots",
         "agents",
+        "runtime/session-recovery",
+        "runtime/session-deletions",
+        "runtime/turn-workspaces",
+        "runtime/workspace-baselines",
+        "migration",
         "turn-workspaces",
         "session-recovery",
         "session-deletions",
