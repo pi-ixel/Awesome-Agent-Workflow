@@ -53,7 +53,12 @@ function member(link: RunSessionLink, active: boolean, foldDone: boolean, openSe
     // 和画布上的步骤同名：写它最近在做的那一步，而不是内部角色名。
     title: latest?.label || link.actorName || "Agent",
     ...(note ? { note } : {}),
-    ...(waiting ? { attention: ACTIVITY_WORD[activity!] } : {}),
+    ...(waiting
+      ? {
+          attention: ACTIVITY_WORD[activity!],
+          attentionTone: activity === "failed" ? ("danger" as const) : ("warn" as const),
+        }
+      : {}),
     ...(done ? { done } : {}),
   };
 }
@@ -71,7 +76,7 @@ export function runSessionGroups(
     const stopping = run.active && run.stopping === true;
     const members = run.links.map((link) => member(link, run.active && !stopping, run.active || run.status === "waiting", openSession, session));
     const waiting = members.some((item) => item.attention !== undefined);
-    const lead = members.find((item) => item.attention !== undefined)?.attention;
+    const leadMember = members.find((item) => item.attention !== undefined);
     const confirming = !run.active && run.status === "waiting";
     const blocked = !run.active && run.status === "blocked";
     const failedStop = !run.active && run.status === "stopped" && run.failed === true;
@@ -79,7 +84,17 @@ export function runSessionGroups(
       id: run.runId,
       title: run.title || `${run.workflowName || "工作流"} · ${run.runId.slice(0, 8)}`,
       status: groupStatus(run, waiting),
-      ...(stopping ? { attention: STOPPING_CHIP } : waiting ? { attention: lead } : confirming ? { attention: AWAITING_CONFIRM_CHIP } : blocked ? { attention: BLOCKED_CHIP } : failedStop ? { attention: STOPPED_ON_ERROR_CHIP } : {}),
+      ...(stopping
+        ? { attention: STOPPING_CHIP, attentionTone: "neutral" as const }
+        : waiting && leadMember?.attention
+          ? { attention: leadMember.attention, attentionTone: leadMember.attentionTone ?? ("warn" as const) }
+          : confirming
+            ? { attention: AWAITING_CONFIRM_CHIP, attentionTone: "warn" as const }
+            : blocked
+              ? { attention: BLOCKED_CHIP, attentionTone: "warn" as const }
+              : failedStop
+                ? { attention: STOPPED_ON_ERROR_CHIP, attentionTone: "danger" as const }
+                : {}),
       members,
       defaultExpanded: run.active || confirming,
       open: () => open(run.runId),

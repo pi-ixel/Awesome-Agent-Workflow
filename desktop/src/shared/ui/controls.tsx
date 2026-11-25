@@ -782,16 +782,24 @@ export function MultiListbox({
   );
 }
 
-/** 旋转圆环加载指示（尺寸随字号，颜色随 currentColor）。 */
+/** 全局旋转周期（1 秒，与旋转动画一致），用于对齐所有 Spinner 的相位。 */
+const SPIN_PERIOD_MS = 1000;
+
+/** 旋转圆环加载指示（尺寸随字号，颜色随 currentColor；全局时钟同步旋转相位）。 */
 export function Spinner({
   className = "ui-icon-14",
 }: {
   readonly className?: string;
 }) {
+  const [phaseDelay] = useState(() => {
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    return `-${Math.round(now % SPIN_PERIOD_MS)}ms`;
+  });
   return (
     <span
       aria-hidden={true}
       role="status"
+      style={{ animationDelay: phaseDelay }}
       className={`inline-block animate-spin rounded-pill border-2 border-current border-t-transparent motion-reduce:animate-none ${className}`}
     />
   );

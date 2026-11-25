@@ -197,17 +197,20 @@ describe("ProjectTree session groups", () => {
     });
     const row = screen.getByRole("button", { name: "AAW dev · run-1，2 个会话" });
     expect(screen.getByRole("button", { name: "收起 AAW dev · run-1" })).toHaveAttribute("aria-expanded", "true");
-    expect(row).toHaveAccessibleDescription("等你回复");
     const members = screen.getByRole("list", { name: "AAW dev · run-1 的会话" });
     expect(within(members).getByText("设计")).toBeInTheDocument();
     expect(within(members).getByText("· 设计修正")).toBeInTheDocument();
-    // 提醒胶囊替换了误导人的「已完成未读」点；组内会话不再平铺。
+    // 展开态子会话已显示状态点，分组头不再重复展示。
+    expect(within(members).getByRole("img", { name: "等你回复" })).toBeInTheDocument();
+    expect(row).not.toHaveAccessibleDescription("等你回复");
+    // 提醒状态点替换了误导人的「已完成未读」点；组内会话不再平铺。
     expect(screen.queryByLabelText("已完成，未查看")).not.toBeInTheDocument();
     expect(screen.queryByText("chrys 标题 A")).not.toBeInTheDocument();
     expect(screen.getByText("我自己的会话")).toBeInTheDocument();
-    // 手动收起后，点标题打开运行页，折叠状态保持。
+    // 手动收起后，状态点聚合回分组头，点标题打开运行页且折叠状态保持。
     fireEvent.click(screen.getByRole("button", { name: "收起 AAW dev · run-1" }));
     expect(screen.getByRole("button", { name: "展开 AAW dev · run-1" })).toHaveAttribute("aria-expanded", "false");
+    expect(within(row.parentElement!).getByRole("img", { name: "等你回复" })).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: "AAW dev · run-1 的会话" })).not.toBeInTheDocument();
     fireEvent.click(row);
     expect(open).toHaveBeenCalledTimes(1);
@@ -329,6 +332,6 @@ describe("ProjectTree session groups", () => {
     render(<ProjectTree />, { wrapper: fixture.Wrapper });
     const row = screen.getByRole("button", { name: "AAW dev · old，2 个会话" });
     expect(row).toHaveAttribute("aria-expanded", "false");
-    expect(within(row.parentElement!).getByText("2 个会话")).toBeInTheDocument();
+    expect(within(row.parentElement!).queryByText("2 个会话")).not.toBeInTheDocument();
   });
 });

@@ -403,7 +403,6 @@ export function SessionView({
   const projectView = useProjectView();
   const project = projectView?.project;
   const rightPanelSliding = useRightPanelSliding();
-  const ExtensionSessionBanner = extension?.SessionBanner;
   const {
     sendPrompt,
     enqueuePrompt,
@@ -1354,14 +1353,6 @@ export function SessionView({
                     </SessionDock>
                     <ChatInput
                       queue={<QueueDock />}
-                      header={ExtensionSessionBanner && contextPath && activeSessionId ? (
-                        <ScopedErrorBoundary
-                          scope="工作流节点信息"
-                          resetKey={`${contextPath}:${activeSessionId}`}
-                        >
-                          <ExtensionSessionBanner project={contextPath} sessionId={activeSessionId} />
-                        </ScopedErrorBoundary>
-                      ) : undefined}
                       fileCandidates={fileCandidates}
                       skillCandidates={skillCandidates}
                       resolveSlashSkills={resolveSlashSkills}

@@ -65,6 +65,7 @@ import type { SessionActivityState, SessionCatalogState } from "../sessions/inde
  *   WorkspaceSidebarFooter 同位）。
  */
 import {
+  Fragment,
   useCallback,
   useEffect,
   useId,
@@ -98,6 +99,7 @@ import {
   PencilIcon,
   ArchiveIcon,
   FileTreeIcon,
+  WorkflowIcon,
   StarFilledIcon,
   StarOutlineIcon,
 } from "../../../shared/ui/icons.tsx";
@@ -887,9 +889,12 @@ function SessionRow({
           className={`${sessionRowStatusClass} ${sessionRowStatusReveal}`}
         >
           {display?.attention ? (
-            <Badge tone="ok" compact>
-              {display.attention}
-            </Badge>
+            <StatusDot
+              tone={display.attentionTone ?? "warn"}
+              label={display.attention}
+              hint={display.attention}
+              className="ui-icon-8"
+            />
           ) : (
             <SessionActivityBadge activity={activity} placement="text" />
           )}
@@ -904,14 +909,14 @@ function SessionRow({
   );
 }
 
-/** 分组行的状态：运行中转圈、失败红点、已停止灰字；其余不占位。 */
+/** 分组行的状态：运行中转圈、失败红点、已停止灰点；其余不占位。 */
 function SessionGroupStatusBadge({ status }: { readonly status: SessionGroup["status"] }) {
   if (status === "running") return <SessionRunningIndicator />;
   if (status === "failed") {
-    return <StatusDot tone="danger" label="失败" />;
+    return <StatusDot tone="danger" label="失败" hint="失败" className="ui-icon-8" />;
   }
   if (status === "stopped") {
-    return <span className="shrink-0 text-ui-sm text-ink-mute">已停止</span>;
+    return <StatusDot tone="neutral" label="已停止" hint="已停止" className="ui-icon-6" />;
   }
   return null;
 }
@@ -991,9 +996,12 @@ function SessionGroupNode({
           className={`cursor-pointer items-center gap-2 py-1 ${group.open ? "pl-0.5" : "pl-2"}`}
         >
           {!group.open && <span aria-hidden="true" className="flex shrink-0">{chevron}</span>}
-          <span className="flex min-w-0 items-center gap-2">
+          <span className="flex min-w-0 items-center gap-1.5">
+            <WorkflowIcon aria-hidden="true" className="ui-icon-14 shrink-0 text-ink-mute" />
             <SidebarItemTitle>{group.title}</SidebarItemTitle>
-            {group.status !== "stopped" && <SessionGroupStatusBadge status={group.status} />}
+            {group.status === "running" && !(expanded && shown.length > 0) && (
+              <SessionGroupStatusBadge status={group.status} />
+            )}
           </span>
         </NavigationRow>
         {group.archive ? (
@@ -1007,27 +1015,33 @@ function SessionGroupNode({
             revealClassName={sessionRowActionReveal}
           />
         ) : null}
-        {!confirmArchive && (
-          <div
-            id={statusId}
-            data-session-row-status
-            className={`${sessionRowStatusClass} ${group.archive ? sessionRowStatusReveal : ""}`}
-          >
-            {group.status === "stopped" && <SessionGroupStatusBadge status={group.status} />}
-            {group.attention ? (
-              <Badge tone="ok" compact>
-                {group.attention}
-              </Badge>
-            ) : expanded ? null : (
-              <span aria-hidden="true" className="shrink-0 text-ui-sm text-ink-mute">
-                {members.length} 个会话
-              </span>
-            )}
-          </div>
-        )}
+        {!confirmArchive && (() => {
+          const childShowsAttention = expanded && shown.some(({ member }) => member.attention !== undefined);
+          const showGroupAttention = Boolean(group.attention) && !childShowsAttention;
+          const rightStatus = showGroupAttention ? (
+            <StatusDot
+              tone={group.attentionTone ?? "warn"}
+              label={group.attention}
+              hint={group.attention}
+              className="ui-icon-8"
+            />
+          ) : group.status === "failed" || group.status === "stopped" ? (
+            <SessionGroupStatusBadge status={group.status} />
+          ) : null;
+          if (!rightStatus) return null;
+          return (
+            <div
+              id={statusId}
+              data-session-row-status
+              className={`${sessionRowStatusClass} ${group.archive ? sessionRowStatusReveal : ""}`}
+            >
+              {rightStatus}
+            </div>
+          );
+        })()}
       </div>
       <TreeBranch open={expanded}>
-        <ul className="flex flex-col gap-0.5 pl-4" aria-label={`${group.title} 的会话`}>
+        <ul className="ml-3 flex flex-col gap-0.5 border-l border-line pl-2.5" aria-label={`${group.title} 的会话`}>
           {members.length === 0 ? (
             <li className="py-0.5 pl-2.5 text-ui-sm text-ink-ghost">尚无会话</li>
           ) : (
@@ -1149,7 +1163,7 @@ function ProjectChildren({
   return (
     <ul className="flex flex-col gap-0.5 pl-2 pt-1">
       {feedback ? <li>{feedback}</li> : null}
-      {visible.map((item) =>
+      {visible.map((item, index) =>
         item.kind === "group" ? (
           <SessionGroupNode
             key={`group:${item.group.id}`}
@@ -1158,13 +1172,17 @@ function ProjectChildren({
             menu={menu}
           />
         ) : (
-          <SessionRow
-            key={item.session.id}
-            path={path}
-            session={item.session}
-            display={item.display}
-            menu={menu}
-          />
+          <Fragment key={item.session.id}>
+            {index > 0 && visible[index - 1]?.kind === "group" ? (
+              <li aria-hidden="true" className="my-1 mx-2 border-t border-line/70" />
+            ) : null}
+            <SessionRow
+              path={path}
+              session={item.session}
+              display={item.display}
+              menu={menu}
+            />
+          </Fragment>
         ),
       )}
       {hiddenCount > 0 ? (

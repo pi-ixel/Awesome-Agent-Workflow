@@ -54,3 +54,185 @@
     transition: opacity 180ms ease-out, scale 180ms ease-out, visibility 180ms;
   }
 }
+
+/* 与工作流流程图（FlowStages）同源的视觉语言：轻染色步骤卡 + 慢流光 + 步骤胶囊条 */
+.session-wf-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.session-wf-step {
+  --swf-done: var(--color-ok);
+  --swf-running: var(--color-accent-ink);
+  --swf-alert: var(--color-warn);
+  --swf-wait: var(--color-line-strong);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background-color: color-mix(in srgb, var(--color-surface) 70%, var(--color-base));
+  text-align: left;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+.session-wf-step:hover {
+  border-color: var(--color-line-strong);
+}
+.session-wf-step.tone-done {
+  background-color: color-mix(in srgb, var(--swf-done) 9%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--swf-done) 34%, var(--color-line));
+}
+.session-wf-step.tone-alert {
+  background-color: color-mix(in srgb, var(--swf-alert) 9%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--swf-alert) 38%, var(--color-line));
+}
+.session-wf-step.tone-running {
+  background-color: color-mix(in srgb, var(--swf-running) 10%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--swf-running) 40%, var(--color-line));
+  background-image: linear-gradient(
+    100deg,
+    transparent 30%,
+    color-mix(in srgb, var(--swf-running) 9%, transparent) 50%,
+    transparent 70%
+  );
+  background-size: 300% 100%;
+  background-repeat: no-repeat;
+  animation: session-wf-sheen 9s ease-in-out infinite;
+}
+.session-wf-step.tone-running:hover {
+  border-color: color-mix(in srgb, var(--swf-running) 62%, var(--color-line));
+}
+.session-wf-step.tone-alert:hover {
+  border-color: color-mix(in srgb, var(--swf-alert) 60%, var(--color-line));
+}
+.session-wf-step.tone-done:hover {
+  border-color: color-mix(in srgb, var(--swf-done) 55%, var(--color-line));
+}
+
+.session-wf-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.session-wf-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+/* 与流程图 .wf-done-mark 同款实心绿圆对勾 */
+.session-wf-done-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-ok);
+  color: var(--color-surface);
+}
+.session-wf-done-mark svg {
+  stroke-width: 3;
+}
+
+.session-wf-word {
+  flex: none;
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+  color: var(--color-ink-faint);
+}
+.session-wf-word.tone-running {
+  color: var(--color-accent-ink);
+}
+.session-wf-word.tone-alert {
+  color: var(--color-warn-ink);
+}
+.session-wf-word.tone-done {
+  color: var(--color-ok-ink);
+}
+
+.session-wf-detail {
+  padding-left: 23px;
+  font-size: var(--text-2xs);
+  color: var(--color-ink-faint);
+}
+
+/* 与流程图 .wf-pills / .wf-pill 同款步骤进度胶囊 */
+.session-wf-pills {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  padding-left: 23px;
+  margin-top: 2px;
+}
+.session-wf-pills.compact {
+  padding-left: 0;
+  margin-top: 0;
+  width: calc(34 * var(--ui-icon-unit));
+  flex: none;
+}
+.session-wf-pill {
+  flex: 1 1 0;
+  max-width: 24px;
+  min-width: 5px;
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-line-strong);
+  overflow: hidden;
+}
+.session-wf-pills.compact .session-wf-pill {
+  height: calc(4 * var(--ui-icon-unit));
+  min-width: calc(4 * var(--ui-icon-unit));
+}
+.session-wf-pill.tone-done {
+  background-color: var(--color-ok);
+}
+.session-wf-pill.tone-alert {
+  background-color: var(--color-warn);
+}
+.session-wf-pill.tone-running {
+  background-color: color-mix(in srgb, var(--color-accent-ink) 50%, transparent);
+  background-image: linear-gradient(
+    100deg,
+    transparent 30%,
+    var(--color-accent-ink) 50%,
+    transparent 70%
+  );
+  background-size: 300% 100%;
+  background-repeat: no-repeat;
+  animation: session-wf-sheen 9s ease-in-out infinite;
+}
+
+@keyframes session-wf-sheen {
+  0% { background-position: 150% 0; }
+  70%, 100% { background-position: -50% 0; }
+}
+
+.session-activity-row-arrow {
+  transition: transform 150ms ease, color 150ms ease;
+}
+.group:hover .session-activity-row-arrow {
+  transform: translateX(2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-wf-step.tone-running,
+  .session-wf-pill.tone-running {
+    animation: none;
+  }
+  .session-activity-row-arrow {
+    transition: none;
+  }
+}
