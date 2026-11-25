@@ -11,6 +11,7 @@ import {
 
 /** Standard ACP plus isolated tool/subagent, plan and configuration compatibility. */
 export const codeAgentAdapter: AgentAdapter = {
+  journalDiff: true,
   maxConcurrentRequests: 3,
   async deleteSession(host, launch, sessionId) {
     if (!host.deleteAgentSession || !launch.cwd)

@@ -1,5 +1,6 @@
 //! 轮次开始前捕获工作区；历史内容独立保存，不依赖 Git HEAD 或会话展示窗口。
 mod project_baseline;
+mod journal;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -52,6 +53,8 @@ struct Snapshot {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Change {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    fragments: Vec<(Option<String>, String)>,
     path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     old_path: Option<String>,
@@ -140,6 +143,8 @@ pub struct Request {
     unknown_reason: Option<String>,
     paths: Option<Vec<String>>,
     changed_paths: Option<Vec<String>>,
+    tool_ids: Option<Vec<String>>,
+    started_at: Option<i64>,
     undo: Option<bool>,
     has_operations: Option<bool>,
     moves: Option<Vec<Move>>,
@@ -170,6 +175,8 @@ impl From<&Stored> for Summary {
     fn from(stored: &Stored) -> Self {
         let mut record = stored.record.clone();
         for file in record.files.iter_mut().chain(&mut record.unverified) {
+            record.details_deferred |= !file.fragments.is_empty();
+            file.fragments.clear();
             record.details_deferred |= file.before.take().is_some();
             record.details_deferred |= file.after.take().is_some();
         }
@@ -504,6 +511,7 @@ fn differences(before: &Snapshot, after: &Snapshot) -> Vec<Change> {
             notices.sort();
             notices.dedup();
             Some(Change {
+                fragments:vec![],
                 path: path.clone(),
                 old_path: None,
                 kind: if old.is_none() {
@@ -1240,6 +1248,7 @@ fn apply_snapshot(
             }
             stored.record.incomplete.push(format!("{hint}：{notice}"));
             stored.record.unverified.push(Change {
+                fragments:vec![],
                 before: stored.baseline.files.get(&key).and_then(|v| v.text.clone()),
                 after: after.files.get(&key).and_then(|v| v.text.clone()),
                 path: key,
@@ -1695,7 +1704,7 @@ fn execute_project(
     #[cfg(not(windows))]
     _workspace_lock.try_lock().map_err(|e| e.to_string())?;
     let boundary = read_boundary(&directory)?;
-    if request.action == "list" {
+    if matches!(request.action.as_str(), "list" | "listJournal") {
         let mut list = Vec::new();
         let mut recovery: Option<Snapshot> = None;
         let mut entries = Vec::new();
@@ -1715,6 +1724,9 @@ fn execute_project(
                 let mut stored = load(&path)?;
                 reconcile_operation(&root, &path, &mut stored)?;
                 summary = Summary::from(&stored);
+            }
+            if request.action == "listJournal" && (active(&summary.record) || summary.record.snapshot_state.as_deref() == Some("pending")) {
+                continue;
             }
             if summary.owner != owner()
                 && (active(&summary.record)
@@ -1756,6 +1768,9 @@ fn execute_project(
         let _guard = acquire_file_lock(&fence, Some(now() + 250))?;
         fs::remove_dir_all(&directory).map_err(|e| e.to_string())?;
         return Ok(vec![]);
+    }
+    if request.action == "readJournal" {
+        return journal::record(&root, &directory, &boundary, &request);
     }
     if request.action == "begin" {
         let user_id = request.user_id.clone().ok_or("缺少轮次锚点")?;
@@ -2046,6 +2061,8 @@ mod tests {
             unknown_reason: None,
             paths: None,
             changed_paths: None,
+            tool_ids: None,
+            started_at: None,
             undo: None,
             has_operations: Some(true),
             moves: None,

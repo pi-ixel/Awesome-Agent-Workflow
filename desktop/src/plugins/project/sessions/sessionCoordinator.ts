@@ -1966,6 +1966,7 @@ export function createSessionCoordinator({
           viewStore,
           workspacePath,
           agentKey,
+          adapter.journalDiff,
         ),
       });
     }

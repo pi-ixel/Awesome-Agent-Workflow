@@ -1,8 +1,9 @@
 /** 轮次工作区快照与受保护撤销与恢复的原生契约。路径始终相对于绑定的工作目录。 */
 export interface TurnFileChange {
+  readonly fragments?: readonly (readonly [string | null, string])[];
   readonly path: string;
   readonly oldPath?: string;
-  readonly kind: "modified" | "added" | "deleted" | "renamed" | "unknown";
+  readonly kind: "written" | "modified" | "added" | "deleted" | "renamed" | "unknown";
   readonly before: string | null;
   readonly after: string | null;
   readonly added: number | null;
@@ -39,6 +40,8 @@ export interface TurnChangesRecord {
 }
 export interface TurnChangesRequest {
   readonly action:
+    | "listJournal"
+    | "readJournal"
     | "prepareProject"
     | "releaseProject"
     | "begin"
@@ -62,6 +65,8 @@ export interface TurnChangesRequest {
   readonly status?: TurnChangesRecord["status"];
   readonly unknownReason?: TurnChangesRecord["unknownReason"];
   readonly paths?: readonly string[];
+  readonly startedAt?: number;
+  readonly toolIds?: readonly string[];
   readonly changedPaths?: readonly string[];
   readonly undo?: boolean;
   readonly hasOperations?: boolean;

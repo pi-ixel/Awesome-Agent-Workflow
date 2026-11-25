@@ -1,3 +1,4 @@
+import { createLogger } from "../../../../shared/logging/logger.ts";
 import { createStore } from "zustand/vanilla";
 import type { StoreApi } from "zustand";
 import type {
@@ -20,6 +21,7 @@ export interface ChangesView {
   readonly submittedUserId?: string;
   readonly errorUserId?: string;
 }
+const logger = createLogger("turn-changes");
 const empty: ChangesView = {
   openRevision: 0,
   records: [],
@@ -137,6 +139,7 @@ export function createTurnChangesSession(
   session: StoreApi<SessionStoreState>,
   workspace: string,
   agentKey: string,
+  journal = false,
 ) {
   const state = createStore<ChangesView>(() => empty);
   let active: TurnChangesRecord | null = null;
@@ -182,6 +185,10 @@ export function createTurnChangesSession(
   let projectCwd = "";
   let releaseProject = () => {};
   const prepareProject = () => {
+    if (journal) {
+      projectCwd = owner().cwd;
+      return;
+    }
     releaseProject();
     const cwd = owner().cwd;
     projectCwd = cwd;
@@ -253,13 +260,14 @@ export function createTurnChangesSession(
     });
     loading = (async () => {
       try {
-        const records = await request("list", scope);
+        const records = await request(journal ? "listJournal" : "list", scope);
         if (id !== session.getState().activeSessionId) return;
         merge(records);
         if (loadRevision !== revision || active || preparingUser) return;
-        active =
-          [...records].reverse().find((record) => record.endedAt === null) ??
-          null;
+        active = journal
+          ? null
+          : ([...records].reverse().find((record) => record.endedAt === null) ??
+            null);
         activeOwner = active ? scope : null;
         if (active)
           start = Math.max(
@@ -300,7 +308,25 @@ export function createTurnChangesSession(
     });
     return loading;
   };
+  let recordedUser: string | undefined;
+  let boundaryWrite = Promise.resolve();
+  function recordSubmission() {
+    const scope = owner();
+    const userId = latestUser()?.id;
+    if (!journal || !scope.sessionId || !userId || recordedUser === userId)
+      return;
+    recordedUser = userId;
+    boundaryWrite = boundaryWrite
+      .then(() => request("lock", { ...scope, userId }))
+      .then(
+        () => {},
+        (error) => {
+          logger.warn("记录提交边界失败", { error: String(error) });
+        },
+      );
+  }
   const submitted = () => {
+    recordSubmission();
     const userId = latestUser()?.id;
     if (!userId || state.getState().submittedUserId === userId) return;
     revision++;
@@ -379,6 +405,7 @@ export function createTurnChangesSession(
     }
   };
   const prepare = (submittedAt = Date.now()) => {
+    if (journal) return Promise.resolve();
     if (preparing && preparingUser === latestUser()?.id) return preparing;
     const operation = prepareUser(submittedAt).finally(() => {
       if (preparing === operation) preparing = undefined;
@@ -460,7 +487,44 @@ export function createTurnChangesSession(
   const markUnknown = (
     reason: NonNullable<TurnChangesRecord["unknownReason"]>,
   ) => settle(null, reason);
-  const finish = (outcome: TurnOutcome) => settle(outcome);
+  async function readJournal(outcome: TurnOutcome) {
+    const scope = owner();
+    const user = latestUser();
+    if (!user || !scope.sessionId) return;
+    const items = session.getState().items;
+    const toolIds = items
+      .slice(items.indexOf(user) + 1)
+      .flatMap((item) => (item.kind === "tool" ? [item.toolCallId] : []));
+    if (!toolIds.length) return;
+    const isCurrent = () =>
+      !disposed &&
+      owner().sessionId === scope.sessionId &&
+      owner().cwd === scope.cwd;
+    await boundaryWrite;
+    const status = outcome.errorMessage
+      ? "failed"
+      : outcome.stopReason === "cancelled"
+        ? "cancelled"
+        : "completed";
+    for (const delay of [0, 1500]) {
+      if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+      if (!isCurrent()) return;
+      const records = await request("readJournal", {
+        ...scope,
+        userId: user.id,
+        startedAt: Date.parse(user.createdAt),
+        toolIds,
+        status,
+      });
+      if (isCurrent()) merge(records);
+    }
+  }
+  const finish = (outcome: TurnOutcome) =>
+    journal
+      ? readJournal(outcome).catch((error) =>
+          logger.warn("读取轮次变更失败", { error: String(error) }),
+        )
+      : settle(outcome);
   const stop = session.subscribe((value) => {
     if (owner().cwd !== projectCwd) prepareProject();
     if (!active) {
@@ -528,6 +592,8 @@ export function createTurnChangesSession(
   };
   return {
     state,
+    journal,
+    recordSubmission,
     submitted,
     prepare,
     beforeDispatch,

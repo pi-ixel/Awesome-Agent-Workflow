@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import type { TurnChangesHost } from "../../../src/contracts/turnChanges/types.ts";
+import { codeAgentAdapter } from "../../../src/plugins/agents/enhancements/codeagent/adapter.ts";
 import { ChatInput } from "../../../src/plugins/project/conversation/ui/ChatInput.tsx";
 import { createTurnChangesSession } from "../../../src/plugins/project/conversation/changes/service.ts";
 import {
@@ -46,7 +47,7 @@ vi.mock(
   },
 );
 
-it.each(["Enter", "发送按钮"])(
+it.each(["Enter", "发送按钮", "JSONL"])(
   "已连接会话通过%s提交，历史加载未完成、基线接近预算时在 500 毫秒内写出 ACP session/prompt",
   async (entry) => {
     const acp = standardAcpPeer();
@@ -69,6 +70,7 @@ it.each(["Enter", "发送按钮"])(
       store,
       cwd,
       "prompt-dispatch",
+      entry === "JSONL" && codeAgentAdapter.journalDiff,
     );
     let receivedAt: number | undefined;
     acp.handlers.set("session/prompt", () => {
@@ -103,6 +105,19 @@ it.each(["Enter", "发送按钮"])(
       if (entry === "Enter") fireEvent.keyDown(input, { key: "Enter" });
       else fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
+      if (entry === "JSONL") {
+        await act(() => vi.advanceTimersByTimeAsync(0));
+        expect(prompts()).toHaveLength(1);
+        expect(request.mock.calls.map(([call]) => call.action)).not.toEqual(
+          expect.arrayContaining(["begin"]),
+        );
+        expect(
+          request.mock.calls.every(([call]) =>
+            ["listJournal", "lock"].includes(call.action),
+          ),
+        ).toBe(true);
+        return;
+      }
       await act(() => vi.advanceTimersByTimeAsync(399));
       expect(request).toHaveBeenCalledWith(
         expect.objectContaining({ action: "list" }),

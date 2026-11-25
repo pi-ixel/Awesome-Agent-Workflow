@@ -583,7 +583,8 @@ export function createSessionActions(
       let changesPrepared: Promise<void> | undefined;
       const send = (beforeDispatch?: () => void) => {
         const changes = get().turnChanges;
-        if (!changes) return dispatch(beforeDispatch);
+        if (changes?.journal) changes.recordSubmission();
+        if (!changes || changes.journal) return dispatch(beforeDispatch);
         const preparationStartedAt =
           isSessionEstablished ? submittedAt : Date.now();
         const prepared = changesPrepared ?? changes.prepare(preparationStartedAt);
@@ -672,8 +673,9 @@ export function createSessionActions(
       set({ turnError: null });
       get().turnChanges?.submitted();
       // 已有会话按提交边界切段，不等待连接准备或 Agent 接收。
-      if (get().activeSessionId) {
-        changesPrepared = get().turnChanges?.prepare(submittedAt);
+      const turnChanges = get().turnChanges;
+      if (get().activeSessionId && turnChanges && !turnChanges.journal) {
+        changesPrepared = turnChanges.prepare(submittedAt);
         void changesPrepared?.catch(() => undefined);
       }
       logger.info("用户消息已提交", { length: trimmed.length });

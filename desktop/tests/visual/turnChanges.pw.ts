@@ -396,3 +396,16 @@ test("内嵌高度与字号固定，卡片宽度跟随正文，窗口变化只�
     ).toBeLessThan(1);
   }
 });
+
+test("已核验的日志片段支持双栏预览，缺少完整版本时文件只读", async ({
+  page,
+}) => {
+  await page.goto("/tests/visual/turnChanges.html?journal-fragments");
+  const dock = page.locator("[data-turn-changes]");
+  await expect(dock.getByText("first-new", { exact: true })).toBeVisible();
+  await dock.getByRole("button", { name: "双栏对比", exact: true }).click();
+  await expect(dock.getByText("second-old", { exact: true })).toBeVisible();
+  await expect(
+    dock.getByRole("button", { name: "撤销文件", exact: true }),
+  ).toBeDisabled();
+});
