@@ -132,6 +132,11 @@ pub fn run() {
                 terminal_pty::retire_page(webview.label().to_owned());
             }
         })
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry, ()>::new("aaw-tool-runtime")
+                .invoke_handler(tauri::generate_handler![tools::tool_act])
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -224,7 +229,6 @@ pub fn run() {
             tools::tool_store_set,
             tools::tool_store_delete,
             tools::tool_store_keys,
-            tools::tool_act,
             tools::launcher::launcher_entries,
             tools::launcher::launcher_open,
             tools::launcher::launcher_hide,

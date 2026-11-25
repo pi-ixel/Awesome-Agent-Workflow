@@ -2,7 +2,12 @@ fn main() {
     println!("cargo:rerun-if-env-changed=AAW_DESKTOP_UPDATE_PUBLIC_KEY");
     println!("cargo:rerun-if-env-changed=AAW_DESKTOP_UPDATE_SERVER");
     println!("cargo:rerun-if-changed=icons/icon.ico");
-    tauri_build::build();
+    // 独立插件只给工具 WebView 开放动作命令，保留桌面其他应用命令的权限边界。
+    tauri_build::try_build(tauri_build::Attributes::new().plugin(
+        "aaw-tool-runtime",
+        tauri_build::InlinedPlugin::new().commands(&["tool_act"]),
+    ))
+    .expect("生成工具运行时权限失败");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
         && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc")
     {
