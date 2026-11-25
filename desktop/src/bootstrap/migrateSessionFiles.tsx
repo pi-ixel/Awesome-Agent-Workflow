@@ -50,7 +50,20 @@ export async function migrateSessionFiles(): Promise<void> {
       try {
         report = await desktopManagedStorage.request<MigrationReport>(
           "migrate_session_files",
-          {},
+          {
+            webviewIndex: Object.fromEntries(
+              [
+                "workspace/v1",
+                "archived-sessions.v1",
+                "archived-session-metadata.v1",
+                "session-working-directories.v1",
+                "session-unread-replies.v1",
+              ].map((key) => {
+                const name = "aaw-desktop/" + key;
+                return [name, window.localStorage.getItem(name)];
+              }),
+            ),
+          },
         );
         await prepareSessionRecovery(report, clearRecoveryImages);
       } catch (error) {
@@ -62,7 +75,13 @@ export async function migrateSessionFiles(): Promise<void> {
       const cleaned = report.recovery.filter(
         (item) => item.phase === "webview",
       );
-      if (report.completed.length || report.moved > 0 || cleaned.length) {
+      if (
+        report.completed.length ||
+        report.moved > 0 ||
+        cleaned.length ||
+        report.deleted_orphans?.length ||
+        report.retained_orphans?.length
+      ) {
         await new Promise<void>((done) =>
           show(
             [
@@ -70,6 +89,12 @@ export async function migrateSessionFiles(): Promise<void> {
               ...report.completed.map(
                 ({ agentId, project, sessionId }) =>
                   `${agentId} · ${project} · ${sessionId}：迁移完成`,
+              ),
+              ...(report.deleted_orphans ?? []).map(
+                (scope) => `已删除无会话归属的旧历史 · ${scope}`,
+              ),
+              ...(report.retained_orphans ?? []).map(
+                (scope) => `归属待核对，已保留旧历史 · ${scope}`,
               ),
               ...cleaned.map(
                 ({ owner }) =>

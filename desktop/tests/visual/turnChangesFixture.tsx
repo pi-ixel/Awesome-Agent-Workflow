@@ -133,6 +133,7 @@ function Preview() {
   const changes = useMemo<TurnChangesSession>(
     () => ({
       state,
+      prepareProject: () => {},
       submitted: () => {},
       prepare: () => Promise.resolve(),
       beforeDispatch: () => Promise.resolve(),

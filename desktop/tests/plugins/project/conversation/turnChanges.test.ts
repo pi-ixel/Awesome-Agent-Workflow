@@ -219,7 +219,10 @@ describe("轮次净变更生命周期", () => {
     expect(
       requests
         .filter(
-          (request) => request.action !== "list" && request.action !== "lock",
+          (request) =>
+            request.action !== "list" &&
+            request.action !== "lock" &&
+            request.action !== "prepareProject",
         )
         .map((request) => request.action),
     ).toEqual(["begin", "finish", "begin"]);
@@ -443,18 +446,19 @@ describe("轮次净变更生命周期", () => {
       expect(changes.state.getState().records[0]?.endedAt).toBe(2),
     );
     expect(requests.map((request) => request.action)).toEqual([
+      "prepareProject",
       "list",
       "uncertain",
     ]);
     await changes.dispose();
   });
-  it("基线失败仍允许发送，并明确显示不可用", async () => {
+  it("基线失败保留原因并拒绝发送", async () => {
     const { changes, host } = setup();
     host.request = (request) =>
       request.action === "begin"
         ? Promise.reject(new Error("no space"))
         : Promise.resolve([]);
-    await expect(changes.prepare()).resolves.toBeUndefined();
+    await expect(changes.prepare()).rejects.toThrow("基线");
     expect(changes.state.getState().error).toContain("基线");
     await changes.dispose();
   });
@@ -478,7 +482,7 @@ describe("轮次净变更生命周期", () => {
     await vi.waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
     await changes.dispose();
   });
-  it("基线超过预算时照常发送，忽略迟到的结果", async () => {
+  it("基线超过预算时停止发送，忽略迟到的结果", async () => {
     vi.useFakeTimers();
     try {
       const { changes, store, host } = setup();
@@ -506,13 +510,13 @@ describe("轮次净变更生命周期", () => {
       expect(delayed).toBeDefined();
       expect(prompt).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
-      expect(prompt).toHaveBeenCalledTimes(1);
-      expect(dispatch).toHaveBeenCalledTimes(1);
-      expect(changes.state.getState().error).toContain("本轮统计不可用");
+      expect(prompt).not.toHaveBeenCalled();
+      expect(dispatch).not.toHaveBeenCalled();
+      expect(changes.state.getState().error).toContain("请重试");
       delayed?.([{ ...initial, userId: userId! }]);
       await vi.advanceTimersByTimeAsync(15_000);
       expect(changes.state.getState().records).toEqual([]);
-      expect(prompt).toHaveBeenCalledTimes(1);
+      expect(prompt).not.toHaveBeenCalled();
       await changes.dispose();
     } finally {
       vi.useRealTimers();

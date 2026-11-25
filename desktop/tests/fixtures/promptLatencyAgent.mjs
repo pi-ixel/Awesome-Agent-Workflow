@@ -1,4 +1,10 @@
-import { appendFileSync, readFileSync, existsSync } from "node:fs";
+import {
+  appendFileSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+} from "node:fs";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
@@ -35,7 +41,7 @@ for await (const line of createInterface({ input: process.stdin })) {
       const { cwd, browser } = sessions.get(params.sessionId);
       // 回执落在工作区外，避免测试本身改变本轮 Git 差异。
       appendFileSync(
-        join(cwd, "..", "prompt-receipts.jsonl"),
+        fileURLToPath(new URL("./prompt-receipts.jsonl", import.meta.url)),
         JSON.stringify({
           receivedAt,
           browser,
@@ -43,6 +49,16 @@ for await (const line of createInterface({ input: process.stdin })) {
           prompt: params.prompt,
         }) + "\n",
       );
+      const match = params.prompt
+        .find((block) => block.type === "text")
+        ?.text.match(
+          /^发送延迟测试 Enter (aaw-latency-test-[a-f0-9-]{36}\.txt)$/,
+        );
+      if (
+        match &&
+        readFileSync(join(cwd, match[1]), "utf8") === "我发送前刚改的内容"
+      )
+        writeFileSync(join(cwd, match[1]), "Agent 本轮修改");
       result = { stopReason: "end_turn" };
       break;
     }

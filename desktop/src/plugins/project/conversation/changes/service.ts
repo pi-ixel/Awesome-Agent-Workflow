@@ -9,6 +9,8 @@ import type { SessionStoreState, TurnOutcome } from "../sessionStore.ts";
 import type { SessionItem } from "../types.ts";
 
 export interface ChangesView {
+  readonly projectPreparing?: boolean;
+  readonly projectError?: string;
   readonly openRevision: number;
   readonly records: readonly TurnChangesRecord[];
   readonly selected: string | null;
@@ -169,7 +171,43 @@ export function createTurnChangesSession(
   const request = (
     action: TurnChangesRequest["action"],
     extra: Partial<TurnChangesRequest> = {},
-  ) => host.request({ action, ...owner(), workspacePath: workspace, agentKey, ...extra });
+  ) =>
+    host.request({
+      action,
+      ...owner(),
+      workspacePath: workspace,
+      agentKey,
+      ...extra,
+    });
+  let projectCwd = "";
+  let releaseProject = () => {};
+  const prepareProject = () => {
+    releaseProject();
+    const cwd = owner().cwd;
+    projectCwd = cwd;
+    const userId = crypto.randomUUID();
+    let released = false;
+    state.setState({ projectPreparing: true, projectError: undefined });
+    const preparation = request("prepareProject", { cwd, userId }).then(
+      () => {
+        if (!released) state.setState({ projectPreparing: false });
+      },
+      (error: unknown) => {
+        if (!released)
+          state.setState({
+            projectPreparing: false,
+            projectError: String(error),
+          });
+      },
+    );
+    releaseProject = () => {
+      released = true;
+      void preparation
+        .then(() => request("releaseProject", { cwd, userId }))
+        .catch(() => {});
+    };
+  };
+  prepareProject();
   const merge = (records: readonly TurnChangesRecord[]) => {
     if (disposed) return;
     const view = state.getState();
@@ -326,10 +364,12 @@ export function createTurnChangesSession(
         merge(records);
       } catch (error) {
         if (!isCurrent()) return;
+        const message = `未能准备变更基线，请重试。${String(error)}`;
         state.setState({
-          error: `未能准备变更基线，本轮统计不可用。${String(error)}`,
+          error: message,
           errorUserId: userId,
         });
+        throw new Error(message, { cause: error });
       }
     } finally {
       if (preparation === revision) {
@@ -422,6 +462,7 @@ export function createTurnChangesSession(
   ) => settle(null, reason);
   const finish = (outcome: TurnOutcome) => settle(outcome);
   const stop = session.subscribe((value) => {
+    if (owner().cwd !== projectCwd) prepareProject();
     if (!active) {
       void load();
       return;
@@ -490,6 +531,7 @@ export function createTurnChangesSession(
     submitted,
     prepare,
     beforeDispatch,
+    prepareProject,
     markUnknown,
     finish,
     select(id: string) {
@@ -540,6 +582,7 @@ export function createTurnChangesSession(
         // 已发送目标会在再次打开历史时恢复，退出不等待完整采样。
       } finally {
         disposed = true;
+        releaseProject();
       }
     },
   };

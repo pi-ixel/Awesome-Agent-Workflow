@@ -39,6 +39,8 @@ export interface TurnChangesRecord {
 }
 export interface TurnChangesRequest {
   readonly action:
+    | "prepareProject"
+    | "releaseProject"
     | "begin"
     | "lock"
     | "dispatch"

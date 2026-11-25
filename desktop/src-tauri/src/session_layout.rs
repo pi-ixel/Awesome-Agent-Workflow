@@ -17,7 +17,7 @@ pub(crate) struct SessionIdentity {
     pub session_id: Option<String>,
 }
 
-fn component(value: &str) -> String {
+fn legacy_component(value: &str) -> String {
     let prefix: String = value
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
@@ -25,6 +25,51 @@ fn component(value: &str) -> String {
         .collect();
     let hash = format!("{:x}", Sha256::digest(value.as_bytes()));
     format!("{}-{}", prefix, &hash[..32])
+}
+
+// 正常 ID 原样展示。保留 ~ 给转义名，避免和用户提供的 ID 冲突。
+fn readable(value: &str) -> String {
+    let stem = value.split('.').next().unwrap_or("").to_ascii_uppercase();
+    let reserved = matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || ["COM", "LPT"].iter().any(|prefix| {
+        stem.strip_prefix(prefix).is_some_and(|n| {
+            matches!(
+                n,
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+            )
+        })
+    });
+    if value.is_empty()
+        || value.encode_utf16().count() > 100
+        || value.ends_with(['.', ' '])
+        || value
+            .chars()
+            .any(|c| c.is_control() || r#"<>:"/\|?*~"#.contains(c))
+        || reserved
+    {
+        format!("~{}", legacy_component(value))
+    } else {
+        value.to_owned()
+    }
+}
+
+fn id_directory(parent: &Path, value: &str) -> PathBuf {
+    let regular = parent.join(readable(value));
+    #[cfg(windows)]
+    {
+        let fallback = parent.join(format!("~case-{}", legacy_component(value)));
+        if fallback.exists() {
+            return fallback;
+        }
+        if let Ok(actual) = regular.canonicalize() {
+            if actual.file_name() != regular.file_name() {
+                return fallback;
+            }
+        }
+    }
+    regular
 }
 
 impl SessionIdentity {
@@ -92,16 +137,25 @@ impl SessionIdentity {
     }
 
     fn project_directory(&self, data: &Path) -> PathBuf {
-        data.join("agents")
-            .join(component(&self.agent_id))
+        id_directory(&data.join("agents"), &self.agent_id)
             .join("projects")
-            .join(component(&self.project))
+            .join(format!(
+                "{}~{}",
+                readable(
+                    self.project
+                        .trim_end_matches('/')
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or("project")
+                ),
+                &format!("{:x}", Sha256::digest(self.project.as_bytes()))[..12]
+            ))
     }
 
     pub(crate) fn directory(&self, data: &Path) -> PathBuf {
         let project = self.project_directory(data);
         match &self.session_id {
-            Some(id) => project.join("sessions").join(component(id)),
+            Some(id) => id_directory(&project.join("sessions"), id),
             None => project.join("draft"),
         }
     }
@@ -170,7 +224,7 @@ impl SessionIdentity {
     pub(crate) fn deleted_marker(&self, data: &Path) -> io::Result<PathBuf> {
         let hash = Sha256::digest(serde_json::to_vec(self)?);
         Ok(data
-            .join("session-deletions/local")
+            .join("runtime/session-deletions/local")
             .join(format!("{hash:x}.json")))
     }
 }
@@ -244,6 +298,62 @@ fn children(path: &Path) -> io::Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
+/// 逐项目重命名。每一步都可以在进程中断后按 identity.json 继续。
+pub(crate) fn upgrade_directory_names(data: &Path) -> io::Result<()> {
+    for agent in children(&data.join("agents"))? {
+        for project in children(&agent.join("projects"))? {
+            let owner: SessionIdentity =
+                serde_json::from_reader(fs::File::open(project.join("project.json"))?)?;
+            let target = owner.project_directory(data);
+            if project != target {
+                let old = data
+                    .join("agents")
+                    .join(legacy_component(&owner.agent_id))
+                    .join("projects")
+                    .join(legacy_component(&owner.project));
+                if project != old || target.try_exists()? {
+                    return Err(io::Error::other("项目目录归属冲突"));
+                }
+                fs::create_dir_all(target.parent().unwrap())?;
+                fs::rename(&project, &target)?;
+            }
+            for dir in children(&target.join("sessions"))? {
+                // 新目录可能正在恢复一条清理日志，此时 identity 会暂时缺失。
+                let name = dir.file_name().unwrap_or_default().to_string_lossy();
+                if !name.rsplit_once('-').is_some_and(|(_, hash)| {
+                    hash.len() == 32 && hash.bytes().all(|b| b.is_ascii_hexdigit())
+                }) {
+                    continue;
+                }
+                let entry: SessionIdentity =
+                    serde_json::from_reader(fs::File::open(dir.join("identity.json"))?)?;
+                if entry.agent_id != owner.agent_id || entry.project != owner.project {
+                    return Err(io::Error::other("会话目录归属冲突"));
+                }
+                let dest = entry.directory(data);
+                if dest != dir {
+                    let id = entry
+                        .session_id
+                        .as_deref()
+                        .ok_or_else(|| io::Error::other("缺少 ACP 会话 ID"))?;
+                    if dir.file_name() != Some(std::ffi::OsStr::new(&legacy_component(id)))
+                        || dest.try_exists()?
+                    {
+                        return Err(io::Error::other("会话目录已被占用"));
+                    }
+                    fs::rename(dir, dest)?;
+                }
+            }
+        }
+        for path in [agent.join("projects"), agent] {
+            if path.try_exists()? && fs::read_dir(&path)?.next().is_none() {
+                fs::remove_dir(path)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn directories(data: &Path) -> io::Result<Vec<PathBuf>> {
     let mut result = Vec::new();
     for agent in children(&data.join("agents"))? {
@@ -263,7 +373,7 @@ pub(crate) fn directories(data: &Path) -> io::Result<Vec<PathBuf>> {
                 let ids: BTreeSet<String> = serde_json::from_reader(fs::File::open(index)?)?;
                 result.extend(
                     ids.iter()
-                        .map(|id| project.join("sessions").join(component(id))),
+                        .map(|id| id_directory(&project.join("sessions"), id)),
                 );
             } else {
                 result.extend(children(&project.join("sessions"))?);
@@ -290,6 +400,48 @@ pub(crate) fn identities(data: &Path) -> io::Result<Vec<SessionIdentity>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn case_distinct_protocol_ids_keep_independent_directories() {
+        let temp = tempfile::tempdir().unwrap();
+        let first = SessionIdentity::new("agent", "d:/workspace", Some("ses_AbC")).unwrap();
+        let second = SessionIdentity::new("agent", "d:/workspace", Some("ses_abc")).unwrap();
+        let a = first.ensure(temp.path()).unwrap();
+        let b = second.ensure(temp.path()).unwrap();
+        assert_ne!(a, b);
+        assert_eq!(first.ensure(temp.path()).unwrap(), a);
+        assert_eq!(second.ensure(temp.path()).unwrap(), b);
+    }
+
+    #[test]
+    fn upgrades_old_project_with_all_files_and_can_restart() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path();
+        let owner = SessionIdentity::new("native-opencode", "D:/Repo", Some("ses_Ab-2")).unwrap();
+        let session = owner.ensure(data).unwrap();
+        fs::write(session.join("messages.json"), "history").unwrap();
+        let project = owner.project_directory(data);
+        let old = data
+            .join("agents")
+            .join(legacy_component(&owner.agent_id))
+            .join("projects")
+            .join(legacy_component(&owner.project));
+        fs::rename(
+            &session,
+            session.parent().unwrap().join(legacy_component("ses_Ab-2")),
+        )
+        .unwrap();
+        fs::create_dir_all(old.parent().unwrap()).unwrap();
+        fs::rename(project, old).unwrap();
+        upgrade_directory_names(data).unwrap();
+        upgrade_directory_names(data).unwrap();
+        assert_eq!(identities(data).unwrap(), vec![owner]);
+        assert_eq!(session.file_name().unwrap(), "ses_Ab-2");
+        assert_eq!(
+            fs::read_to_string(session.join("messages.json")).unwrap(),
+            "history"
+        );
+    }
 
     #[test]
     fn interrupted_removal_repairs_project_index_without_removing_neighbor() {
