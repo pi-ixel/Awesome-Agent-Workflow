@@ -312,9 +312,10 @@ export function createTurnChangesSession(
         updatePhase();
       }
     },
-    async dispose() {
+    dispose() {
       stop();
       disposed = true;
+      return boundaryWrite;
     },
   };
 }
