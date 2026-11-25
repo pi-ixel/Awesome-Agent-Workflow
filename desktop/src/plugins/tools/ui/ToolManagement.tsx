@@ -17,7 +17,7 @@ import {
 } from "../../../shared/ui/inputStyles.ts";
 import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
 import type { PersonalTool, ToolSettings } from "../types.ts";
-import { readToolCarrier } from "../types.ts";
+import { readNetworkRule, readToolCarrier } from "../types.ts";
 import { resolveToolSettings } from "../runtime/settings.ts";
 import { toolProjectFiles } from "../runtime/projectArchive.ts";
 import { toolGlyph, toneOf } from "./mark.ts";
@@ -137,6 +137,8 @@ export function ToolManagement({
   feedback?: { text: string; error?: true };
 }) {
   const tool = entry.package;
+  const carrier = readToolCarrier(tool);
+  const network = readNetworkRule(tool.permissions);
   const [values, setValues] = useState<ToolSettings>(() =>
     resolveToolSettings(tool, entry.settings),
   );
@@ -528,14 +530,18 @@ export function ToolManagement({
                   </div>
                   <div>
                     <dt>运行方式</dt>
-                    <dd>{CARRIER_LABEL[readToolCarrier(tool)]}</dd>
+                    <dd>{CARRIER_LABEL[carrier]}</dd>
                   </div>
                   <div>
                     <dt>运行能力</dt>
                     <dd>
-                      {tool.permissions?.network
-                        ? "会联网（http/https）"
-                        : "仅本地，不联网"}
+                      {carrier === "L3"
+                        ? "本机进程以当前账号权限运行，可读写文件及联网"
+                        : !network.enabled
+                          ? "页面联网已关闭"
+                          : network.hosts.length
+                            ? `页面只可连接指定域名（${network.hosts.join("、")}）`
+                            : "页面可联网（HTTP/HTTPS）"}
                     </dd>
                   </div>
                   <div>

@@ -1189,7 +1189,8 @@ export function createWorkshop(deps: {
           project.conversation.foreground.session.getState().activeSessionId,
         );
         const agentKey = project.sessions.catalog.getState().agentKey ?? "";
-        if (agentKey) {
+        const sent =
+          !!agentKey &&
           project.conversation.send(
             {
               workspacePath: created.dir,
@@ -1200,6 +1201,7 @@ export function createWorkshop(deps: {
             },
             briefMessage(brief, created),
           );
+        if (sent) {
           // 需求交出去了，输入框就该空着：以前这段文字会一直留在框里，用户
           // 回到「开发工具」看到自己上次写的需求还在，分不清是"还没提交"
           // 还是"已经做完了"。只有真的发出去了才清——发不出去（没连上 Agent /
@@ -1211,7 +1213,8 @@ export function createWorkshop(deps: {
         } else {
           patch({
             note: {
-              text: `${renamed}会话已建好，但还没连上 Agent。连上后把需求发给它即可（项目里的 AGENTS.md 就是规范）。`,
+              text: `${renamed}会话已建好，但需求还没发出。可以复制下方原文，到会话里重试。`,
+              error: true,
             },
           });
         }

@@ -2246,3 +2246,59 @@ describe("工具模块的状态转换（第七轮：配置落盘失败）", () =
     await expectConsistent(app);
   });
 });
+
+it("commits install, rollback and removal in order while a different tool stays usable", async () => {
+  const app = await device();
+  const workshop = app.workshopOf();
+  const first = packageOf("1.0.0", "<p>v1</p>");
+  const next = packageOf("2.0.0", "<p>v2</p>");
+  const other = packageOf("1.0.0", "<p>unrelated</p>", {
+    id: "neighbor",
+    name: "邻居",
+  });
+  await workshop.installArchive(first, runtimeFiles(first));
+  await workshop.installArchive(other, runtimeFiles(other));
+  const release = app.blockNextWrite((path) => path.includes(".staging-"));
+  const order: string[] = [];
+  const install = workshop
+    .installArchive(next, runtimeFiles(next))
+    .then((outcome) => {
+      order.push("install");
+      return outcome;
+    });
+  const back = workshop.rollback("notes").then((outcome) => {
+    order.push("rollback");
+    return outcome;
+  });
+  const remove = workshop.purge("notes", true).then((outcome) => {
+    order.push("remove");
+    return outcome;
+  });
+
+  app.tools().open("neighbor");
+  const neighbor = app
+    .tools()
+    .state.getState()
+    .find((entry) => entry.package.id === "neighbor");
+  expect(neighbor?.lastOpened).toBeGreaterThan(0);
+  expect(await app.text(joinPath(neighbor!.dir!, "index.html"))).toBe(
+    "<p>unrelated</p>",
+  );
+
+  release();
+  const [installed, rolled, removed] = await Promise.all([
+    install,
+    back,
+    remove,
+  ]);
+  expect(order).toEqual(["install", "rollback", "remove"]);
+  expect(installed.version).toBe("2.0.0");
+  expect(rolled.text).toContain("v1.0.0");
+  expect(removed.error).toBeUndefined();
+  expect(app.tools().state.getState()).toEqual([neighbor]);
+  expect(app.savedEntries().map((entry) => entry.package.id)).toEqual([
+    "neighbor",
+  ]);
+  expect(await app.versionDirs("notes")).toEqual([]);
+  await expectConsistent(app);
+});

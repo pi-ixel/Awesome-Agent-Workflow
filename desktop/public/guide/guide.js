@@ -288,36 +288,30 @@
       }
       // 有序 / 无序列表（含缩进的子项）
       if (/^\s*(?:[-*]|\d+\.)\s+/.test(line)) {
-        var ordered = /^\s*\d+\./.test(line);
-        var items = [];
-        while (
-          index < lines.length &&
-          /^\s*(?:[-*]|\d+\.)\s+/.test(lines[index])
-        ) {
-          var raw = lines[index];
-          var depth = Math.floor((raw.length - raw.trimStart().length) / 2);
-          items.push({
-            depth: depth,
-            text: raw.replace(/^\s*(?:[-*]|\d+\.)\s+/, ""),
-          });
+        var lists = [];
+        while (index < lines.length) {
+          var item = /^(\s*)([-*]|\d+\.)\s+(.*)$/.exec(lines[index]);
+          if (!item) break;
+          var depth = Math.min(Math.floor(item[1].length / 2), lists.length);
+          var tag = /^\d/.test(item[2]) ? "ol" : "ul";
+          while (lists.length > depth + 1) {
+            html.push("</li></" + lists.pop() + ">");
+          }
+          if (lists.length > depth) {
+            html.push("</li>");
+            if (lists[depth] !== tag) {
+              html.push("</" + lists.pop() + ">");
+            }
+          }
+          if (lists.length === depth) {
+            html.push("<" + tag + ">");
+            lists.push(tag);
+          }
+          html.push("<li>" + inline(item[3]));
           index += 1;
         }
-        var tag = ordered ? "ol" : "ul";
-        var depthNow = 0;
-        items.forEach(function (item) {
-          while (item.depth > depthNow) {
-            html.push("<" + tag + ">");
-            depthNow += 1;
-          }
-          while (item.depth < depthNow) {
-            html.push("</" + tag + ">");
-            depthNow -= 1;
-          }
-          html.push("<li>" + inline(item.text) + "</li>");
-        });
-        while (depthNow > 0) {
-          html.push("</" + tag + ">");
-          depthNow -= 1;
+        while (lists.length > 0) {
+          html.push("</li></" + lists.pop() + ">");
         }
         continue;
       }

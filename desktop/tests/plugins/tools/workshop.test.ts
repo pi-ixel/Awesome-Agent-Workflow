@@ -32,6 +32,9 @@ function harness(
     settings?: {
       read: () => string | undefined;
       write: (value: string | undefined) => void;
+      sessions?: NonNullable<
+        Parameters<typeof createWorkshop>[0]["settings"]
+      >["sessions"];
     };
     toolsService?: ToolsService;
     owner?: () => string | undefined;
@@ -150,7 +153,7 @@ function harness(
     isAgentRunning: boolean;
     activeSessionId: string;
   }>(() => ({ isAgentRunning: false, activeSessionId: "s1" }));
-  const send = vi.fn();
+  const send = vi.fn(() => true);
   const startNewSession = vi.fn();
   const pickDirectory = vi.fn();
   // 前台工作区单独持有：测试要能模拟"用户切到了别的项目"。
@@ -687,6 +690,38 @@ it("empties the brief once the request has been handed to the AI", async () => {
   expect(workshop.state.getState().brief).toBe("");
 });
 
+it("keeps the request text and reports that the tool project exists when session creation fails", async () => {
+  const { workshop, startNewSession, send } = harness();
+  const brief = "  本机工具测试需求\n保留第二行  ";
+  startNewSession.mockResolvedValue({
+    ok: false,
+    reason: "本地验收 Agent 无法连接",
+  });
+  workshop.setBrief(brief);
+  await workshop.create();
+  expect(send).not.toHaveBeenCalled();
+  const state = workshop.state.getState();
+  expect(state.project).not.toBeNull();
+  expect(state.brief).toBe(brief);
+  expect(state.note?.text).toContain("项目已建好，但会话没连上");
+  expect(state.note?.error).toBe(true);
+});
+
+it("keeps the exact brief and reports when the new session rejects the prompt", async () => {
+  const { workshop, startNewSession, send } = harness();
+  const brief = "  把多行数据转为表格\n保留这一行  ";
+  startNewSession.mockResolvedValue({ ok: true });
+  send.mockReturnValueOnce(false);
+
+  workshop.setBrief(brief);
+  await workshop.create();
+
+  expect(send).toHaveBeenCalledOnce();
+  const state = workshop.state.getState();
+  expect(state.brief).toBe(brief);
+  expect(state.note?.text).toContain("会话已建好，但需求还没发出");
+  expect(state.note?.error).toBe(true);
+});
 /** 没连上 Agent 时一个字都不能丢：用户还得拿这段原文去会话里再发一次。 */
 it("keeps the brief when the request never reached the AI", async () => {
   const { workshop, startNewSession, send, catalog } = harness();
@@ -1395,4 +1430,104 @@ it("keeps the record when a directory could not be deleted", async () => {
   } finally {
     h.workshop.dispose();
   }
+});
+
+it("uses the latest directory refresh when an earlier result completes after project selection", async () => {
+  const { workshop, io } = harness();
+  const parent = "tools/projects/u1";
+  const dir = parent + "/demo";
+  const next = parent + "/next";
+  await io.writeTextFile(
+    dir + "/manifest.json",
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "demo",
+      name: "旧",
+      version: "1.0.0",
+    }),
+  );
+  await io.writeTextFile(dir + "/index.html", "<p>旧</p>");
+  await io.writeTextFile(
+    next + "/manifest.json",
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "next",
+      name: "新",
+      version: "1.0.0",
+    }),
+  );
+  await io.writeTextFile(
+    next + "/index.html",
+    '<script src="http://127.0.0.1:9/inert.js"></script>',
+  );
+  await workshop.refreshProjects();
+  await workshop.select(dir);
+  await vi.waitFor(() =>
+    expect(workshop.state.getState().projectsLoading).toBe(false),
+  );
+
+  const names = vi.spyOn(io, "listDirNames");
+  let finishScan!: (names: readonly string[]) => void;
+  const delayedScan = new Promise<readonly string[]>((resolve) => {
+    finishScan = resolve;
+  });
+  names.mockImplementationOnce(() => delayedScan);
+  const old = workshop.refreshProjects();
+  await vi.waitFor(() => expect(names).toHaveBeenCalledWith(parent));
+  await workshop.select(next);
+  await vi.waitFor(() =>
+    expect(workshop.state.getState().projectsLoading).toBe(false),
+  );
+  finishScan(["demo"]);
+  await old;
+
+  const state = workshop.state.getState();
+  expect(state.project?.dir).toBe(next);
+  expect(state.projects.map((entry) => entry.dir)).toEqual(
+    expect.arrayContaining([dir, next]),
+  );
+  expect(state.check?.blocking.map((rule) => rule.ruleId)).toContain("R2");
+  expect(state.installed).toBe(false);
+  workshop.dispose();
+});
+
+it("records a switched session by its indexed project before the workspace switches", async () => {
+  const first = "/data/tools/projects/u1/demo";
+  const second = "/data/tools/projects/u1/next";
+  const normal = "/data/ordinary";
+  const write = vi.fn();
+  const { workshop, io, workspace, session, catalog } = harness({
+    settings: {
+      read: () => "/data/tools/projects/u1",
+      write: () => undefined,
+      sessions: { read: () => ({ [first]: "a" }), write },
+    },
+  });
+  for (const [dir, id] of [
+    [first, "demo"],
+    [second, "next"],
+  ]) {
+    await io.writeTextFile(
+      dir + "/manifest.json",
+      JSON.stringify({ schemaVersion: 1, id, name: id, version: "1.0.0" }),
+    );
+    await io.writeTextFile(dir + "/index.html", "<p>工具</p>");
+  }
+  await workshop.refreshProjects();
+  await workshop.select(first);
+  catalog.setState({
+    sessionsByPath: {
+      [first]: [{ id: "a" }],
+      [second]: [{ id: "b" }],
+      [normal]: [{ id: "ordinary" }],
+    },
+  });
+  expect(workspace.getState().activePath).toBe(first);
+  session.setState({ activeSessionId: "b" });
+  expect(write).toHaveBeenLastCalledWith({ [first]: "a", [second]: "b" }, []);
+  const writes = write.mock.calls.length;
+  workspace.setState({ activePath: normal });
+  session.setState({ activeSessionId: "ordinary" });
+  expect(write).toHaveBeenCalledTimes(writes);
+  workshop.dispose();
 });

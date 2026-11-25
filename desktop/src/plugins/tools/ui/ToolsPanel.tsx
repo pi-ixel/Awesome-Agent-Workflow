@@ -445,7 +445,7 @@ export function ToolsPanel({
       // 之前写的是"拖回工具中心即可导入"——但拖拽从来没被支持过，用户会照着做然后发现没反应。
       // 只说真实存在的路径：点「导入工具」选「导入 ZIP 包」再选中这个文件。
       const skipped = extra.skipped.length
-        ? `（有 ${extra.skipped.length} 个文件超过单包上限，没打进去）`
+        ? `（有 ${extra.skipped.length} 个文件无法读取或超过单包上限，未包含在 ZIP 中）`
         : "";
       setFeedback({
         text: `已导出到 ${destination}${skipped}。要导入时点「导入工具」，选「导入 ZIP 包」再选中这个文件即可。`,
