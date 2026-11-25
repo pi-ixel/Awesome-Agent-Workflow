@@ -52,6 +52,40 @@ it("only links verified reply paths and opens the canonical file at its line", a
   expect(external).toHaveBeenCalledWith("https://example.test/");
 });
 
+it("makes inline absolute paths clickable without looking up files on render", () => {
+  const verify = vi.fn(() => Promise.resolve(null));
+  const openAbsolute = vi.fn();
+  render(
+    <MarkdownView
+      text={[
+        "打开 `D:\\outside\\with space\\demo.md:12:3`",
+        "或 `D:/reports/100%/demo.md#L5`",
+        "以及 `/home/user/note.md`。",
+        "原样保留 D:\\outside\\plain.md 和 `start demo.html`。",
+        "\n\n~~~text\nD:\\outside\\snippet.md\n~~~",
+      ].join(" ")}
+      replyFiles={{ root: "D:/repo", verify, open: vi.fn(), openAbsolute }}
+    />,
+  );
+  const [first, second] = screen.getAllByRole("button", { name: "demo.md" });
+  expect(first).toHaveAttribute("data-hint", "D:/outside/with space/demo.md");
+  expect(second).toHaveAttribute("data-hint", "D:/reports/100%/demo.md");
+  expect(verify).not.toHaveBeenCalled();
+  fireEvent.click(first!);
+  fireEvent.click(second!);
+  fireEvent.click(screen.getByRole("button", { name: "note.md" }));
+  expect(openAbsolute.mock.calls).toEqual([
+    ["D:/outside/with space/demo.md", 12],
+    ["D:/reports/100%/demo.md", 5],
+    ["/home/user/note.md", undefined],
+  ]);
+  expect(
+    screen.queryByRole("button", {
+      name: /plain\.md|snippet\.md|start demo\.html/,
+    }),
+  ).toBeNull();
+});
+
 it("leaves an existing reference as text if the file disappears before the click", async () => {
   const root = "D:/repo";
   const open = vi.fn();

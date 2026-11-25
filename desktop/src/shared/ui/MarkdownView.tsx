@@ -54,6 +54,7 @@ import {
   resolveRelativeFileReference,
   type FileReference,
 } from "../panelPaths.ts";
+import { basenameOf } from "../workspaceText.ts";
 import { FileIcon } from "./icons.tsx";
 import { CodeBlock } from "./markdown/CodeBlock.tsx";
 import { deferredCodePlugin } from "./markdown/deferredCodePlugin.ts";
@@ -488,18 +489,20 @@ interface ReplyFiles {
   readonly root?: string;
   readonly verify?: (root: string, path: string) => Promise<string | null>;
   readonly open?: (path: string, line?: number) => void;
+  readonly openAbsolute?: (path: string, line?: number) => void;
 }
 const ReplyFilesContext = createContext<ReplyFiles | undefined>(undefined);
 
-function VerifiedReplyFile({ reference, children }: {
+function VerifiedReplyFile({ reference, children, isAbsolute = false }: {
   readonly reference: FileReference;
   readonly children: ReactNode;
+  readonly isAbsolute?: boolean;
 }) {
-  const { root, verify, open } = useContext(ReplyFilesContext) ?? {};
+  const { root, verify, open, openAbsolute } = useContext(ReplyFilesContext) ?? {};
   const path = reference.path;
   const lookup = useMemo(() =>
-    root && verify && open ? { root, verify, open, path } : null,
-  [root, verify, open, path]);
+    !isAbsolute && root && verify && open ? { root, verify, open, path } : null,
+  [isAbsolute, root, verify, open, path]);
   const [available, setAvailable] = useState<typeof lookup>(null);
   const active = useRef<AbortController | null>(null);
   useEffect(() => {
@@ -511,13 +514,18 @@ function VerifiedReplyFile({ reference, children }: {
     }).catch(() => {});
     return () => controller.abort();
   }, [lookup]);
-  if (!lookup || available !== lookup) return <>{children}</>;
+  if (isAbsolute ? !openAbsolute : !lookup || available !== lookup) return <>{children}</>;
   return (
     <TextLink
       type="button"
       className="inline-flex max-w-full items-baseline gap-1 wrap-anywhere align-baseline"
       data-hint={path}
       onClick={() => {
+        if (isAbsolute) {
+          openAbsolute?.(path, reference.line);
+          return;
+        }
+        if (!lookup) return;
         const request = active.current;
         if (!request || request.signal.aborted) return;
         void lookup.verify(lookup.root, path).then((file) => {
@@ -596,15 +604,28 @@ function MarkdownCode({
       </code>
     );
   }
+  const codeClassName = `mx-0.5 rounded-control bg-raised px-1.5 py-0.5 font-mono text-ui-sm ${className ?? ""}`;
   const code = (
-    <code
-      className={`mx-0.5 rounded-control bg-raised px-1.5 py-0.5 font-mono text-ui-sm ${className ?? ""}`}
-      {...props}
-    >
+    <code className={codeClassName} {...props}>
       {children}
     </code>
   );
-  const text = !isLinkLabel && files?.root ? inspectCodeChildren(children).text : "";
+  const text = !isLinkLabel && (files?.openAbsolute || files?.root)
+    ? inspectCodeChildren(children).text
+    : "";
+  const target = text.trim();
+  const isWindowsPath = windowsDriveAbsolutePathPattern.test(target);
+  const isAbsolute = isWindowsPath || /^\/(?!\/)/.test(target);
+  if (files?.openAbsolute && isAbsolute && !/[\p{Cc}`|<>*?]/u.test(target)) {
+    const reference = resolveFileReference("", target.replaceAll("%", "%25"));
+    if (reference && (!isWindowsPath || !reference.path.slice(2).includes(":"))) {
+      return (
+        <VerifiedReplyFile key={reference.path} reference={reference} isAbsolute>
+          <code className={codeClassName}>{basenameOf(reference.path)}</code>
+        </VerifiedReplyFile>
+      );
+    }
+  }
   const inlinePath = text.length > 0 && !/[\n\r`|<>*?]/.test(text) &&
     (/^(?:\.\.?[/\\]|[^\s/\\]+[/\\])/.test(text) ||
       /^[^\s]+\.[\w-]+(?::\d+(?::\d+)?|#L\d+(?:-L?\d+)?)?$/.test(text));

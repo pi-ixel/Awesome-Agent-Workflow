@@ -77,6 +77,7 @@ export function createProjectPages({
       assetUrl: documents?.assetUrl,
       openAnnotation: documents?.openAnnotation,
       openPath: documents?.openPath,
+      openAbsoluteFile: documents?.openAbsoluteFile,
       verifyRelativeFile: documents?.verifyRelativeFile,
       openExternal,
     }), [documents]);

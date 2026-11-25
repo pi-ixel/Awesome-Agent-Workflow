@@ -25,7 +25,7 @@ import { createProjectViewNavigation } from "./bindings/workbenchNavigation.ts";
 import { createProjectSidebarState } from "./sidebarState.ts";
 import { openAnnotation } from "../conversation/ui/openAnnotation.ts";
 import type { ConversationDocumentView } from "../conversation/ui/documentView.ts";
-import { insidePath } from "../../../shared/panelPaths.ts";
+import { formatRemoteProjectPath, insidePath, parseRemoteProjectPath } from "../../../shared/panelPaths.ts";
 
 export const name = "project-workbench";
 export const inject = ["project", "workbench", "agents", "host", "diagnostics"];
@@ -171,12 +171,22 @@ export function apply(ctx: Context): void {
           lookups.set(path, request);
           return request;
         }
+        const openPath: ConversationDocumentView["openPath"] = (path, target, line, shouldOpen) =>
+          documentsUi.openPath(path, target, line, () => isCurrent() && (shouldOpen?.() ?? true));
         documentView.setState({
           openFileTree: documentsUi.openFileTree,
           view: {
             assetUrl: documents.assetUrl,
-            openPath: (path, target, line, shouldOpen) =>
-              documentsUi.openPath(path, target, line, () => isCurrent() && (shouldOpen?.() ?? true)),
+            openPath,
+            async openAbsoluteFile(project, target, line, shouldOpen) {
+              const remote = parseRemoteProjectPath(project);
+              if (remote && !target.startsWith("/")) throw new Error("此路径不属于当前远程主机");
+              const path = remote ? formatRemoteProjectPath(remote.projectId, target) : target;
+              const entry = await stat(path);
+              if (!isCurrent() || shouldOpen?.() === false) return false;
+              if (entry.directory) throw new Error("此路径指向目录，无法预览为文件");
+              return openPath(project, entry.path, line, shouldOpen);
+            },
             verifyRelativeFile: async (root, path) => {
               if (!insidePath(root, path)) return null;
               try {
