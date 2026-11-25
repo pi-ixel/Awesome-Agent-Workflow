@@ -993,7 +993,10 @@ function SessionGroupNode({
           {!group.open && <span aria-hidden="true" className="flex shrink-0">{chevron}</span>}
           <span className="flex min-w-0 items-center gap-2">
             <SidebarItemTitle>{group.title}</SidebarItemTitle>
-            {group.status !== "stopped" && <SessionGroupStatusBadge status={group.status} />}
+            {group.status !== "stopped" &&
+              !(expanded && group.status === "running" && shown.length > 0) && (
+                <SessionGroupStatusBadge status={group.status} />
+              )}
           </span>
         </NavigationRow>
         {group.archive ? (
