@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { Context } from "cordis";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createDocumentFileHost } from "../../../src/plugins/host/filesystem/documentFiles.ts";
 import { createDocuments } from "../../../src/plugins/documents/files/documents.ts";
@@ -7,6 +8,10 @@ import { createRemoteProjectStore } from "../../../src/plugins/remoteProject/sto
 import { FileTree } from "../../../src/plugins/documents/ui/FileTree.tsx";
 import { createLogger } from "../../../src/shared/logging/logger.ts";
 import type { HostStorage } from "../../../src/plugins/host/types.ts";
+import type { RemoteProjectService } from "../../../src/plugins/remoteProject/service.ts";
+import type { RemoteDocumentFileProvider } from "../../../src/plugins/host/filesystem/types.ts";
+import { apply as installRemoteProject } from "../../../src/plugins/remoteProject/index.ts";
+import { formatRemoteProjectPath } from "../../../src/shared/panelPaths.ts";
 
 function createMemoryStorage(): HostStorage {
   const map = new Map<string, string>();
@@ -22,11 +27,145 @@ function createMemoryStorage(): HostStorage {
 }
 
 describe("Remote project FileTree + FilePreview end-to-end self-test", () => {
+  it("原项目失联后可校验主机、修复绑定，重启后同一个文件树能打开且浏览不写配置", async () => {
+    const disk = createMemoryStorage();
+    const save = vi.fn((key: string, value: string) => disk.setItem(key, value));
+    const storage = { ...disk, setItem: save };
+    const path = formatRemoteProjectPath("rp_original", "/srv/app");
+    const oldWorkspace = JSON.stringify({
+      recent: [{ path }],
+      pinnedSessions: ["session-old"],
+    });
+    disk.setItem("aaw-desktop/workspace/v1", oldWorkspace);
+    const file = {
+      path: "/srv/app/kept.txt",
+      name: "kept.txt",
+      directory: false,
+      symlink: false,
+      size: 42,
+      mtime: 1,
+    };
+    const request = vi.fn((method: string, connectionId: string) => {
+      if (method === "project/fs-stat")
+        return { ...file, directory: connectionId === "ssh-good" };
+      return {
+        path: "/srv/app",
+        parentPath: "/srv",
+        entries: [file],
+        truncated: false,
+      };
+    });
+    function start() {
+      let service!: RemoteProjectService;
+      let provider!: RemoteDocumentFileProvider;
+      let reply!: (event: { payload: unknown }) => void;
+      let dispose!: () => void;
+      installRemoteProject({
+        host: {
+          storage,
+          opsSidecar: {
+            listen(event: string, handler: typeof reply) {
+              if (event === "aaw://ops-service") reply = handler;
+              return Promise.resolve(() => {});
+            },
+            invoke(
+              command: string,
+              args?: {
+                message: {
+                  id: string;
+                  method: string;
+                  params: { connectionId: string };
+                };
+              },
+            ) {
+              if (command === "ops_service_start")
+                return Promise.resolve({ generation: 1, pid: 1 });
+              if (command === "ops_service_write" && args) {
+                const { id, method, params } = args.message;
+                reply({
+                  payload: {
+                    generation: 1,
+                    message: {
+                      id,
+                      ok: true,
+                      data: request(method, params.connectionId),
+                    },
+                  },
+                });
+              }
+              return Promise.resolve();
+            },
+          },
+          registerRemoteDocumentFiles(files: RemoteDocumentFileProvider) {
+            provider = files;
+            return () => {};
+          },
+          registerRemoteGit: () => () => {},
+        },
+        diagnostics: { createLogger },
+        provide(_name: string, value: RemoteProjectService) {
+          service = value;
+        },
+        effect(activate: () => () => void) {
+          dispose = activate();
+        },
+      } as unknown as Context);
+      return { service, provider, dispose };
+    }
+
+    const first = start();
+    await expect(first.provider.directory(path)).rejects.toThrow(
+      "未找到远程项目记录",
+    );
+    expect(request).not.toHaveBeenCalled();
+    await expect(
+      first.service.repairProject(path, "ssh-wrong"),
+    ).rejects.toThrow("不是目录");
+    expect(save).not.toHaveBeenCalled();
+    await expect(
+      first.service.repairProject(path, "ssh-good"),
+    ).resolves.toMatchObject({
+      workspacePath: path,
+      projectId: "rp_original",
+      agentCwd: "remote-projects/rp_original",
+    });
+    first.dispose();
+
+    const reopened = start();
+    const documents = createDocuments(
+      createDocumentFileHost(
+        () => false,
+        undefined,
+        undefined,
+        () => reopened.provider,
+      ),
+    );
+    const { unmount } = render(<FileTree documents={documents} root={path} />);
+    try {
+      await screen.findByText("kept.txt");
+      expect(request).toHaveBeenLastCalledWith("project/fs-list", "ssh-good");
+      expect(save).toHaveBeenCalledOnce();
+      expect(disk.getItem("aaw-desktop/workspace/v1")).toBe(oldWorkspace);
+    } finally {
+      unmount();
+      documents.dispose();
+      reopened.dispose();
+    }
+  });
+
   it("远程项目接入 FileTree 与 FilePreview 后可浏览目录、预览文本，且同主机双账号同名目录内容互不串扰", async () => {
     const storage = createMemoryStorage();
     const store = createRemoteProjectStore(storage, createLogger("test"));
-    const alice = store.addProject("conn-alice", "/srv/shared-app", "shared-app");
-    const bob = store.addProject("conn-bob", "/srv/shared-app", "shared-app");
+    const alice = await store.addProject(
+      "conn-alice",
+      "/srv/shared-app",
+      "shared-app",
+    );
+    const bob = await store.addProject(
+      "conn-bob",
+      "/srv/shared-app",
+      "shared-app",
+    );
 
     const remoteProvider = createRemoteDocumentFileProvider({
       getById: store.getById,
@@ -46,7 +185,8 @@ describe("Remote project FileTree + FilePreview end-to-end self-test", () => {
             },
             {
               path: `${remotePath}/${connectionId === "conn-alice" ? "alice-only.ts" : "bob-only.ts"}`,
-              name: connectionId === "conn-alice" ? "alice-only.ts" : "bob-only.ts",
+              name:
+                connectionId === "conn-alice" ? "alice-only.ts" : "bob-only.ts",
               directory: false,
               symlink: false,
               size: 18,
@@ -119,7 +259,9 @@ describe("Remote project FileTree + FilePreview end-to-end self-test", () => {
       configurable: true,
     });
     fireEvent.contextMenu(screen.getByText("alice-only.ts"));
-    expect(screen.queryByRole("menuitem", { name: /资源管理器|访达|文件管理器/ })).toBeNull();
+    expect(
+      screen.queryByRole("menuitem", { name: /资源管理器|访达|文件管理器/ }),
+    ).toBeNull();
     fireEvent.click(screen.getByRole("menuitem", { name: "复制绝对路径" }));
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith("/srv/shared-app/alice-only.ts");
@@ -128,7 +270,9 @@ describe("Remote project FileTree + FilePreview end-to-end self-test", () => {
     // 文件树顶栏更多菜单：远程项目隐藏「在资源管理器中打开」，复制路径输出真实远端根目录
     const moreButtons = screen.getAllByRole("button", { name: "更多" });
     fireEvent.click(moreButtons[moreButtons.length - 1]!);
-    expect(screen.queryByRole("menuitem", { name: /资源管理器|访达|文件管理器/ })).toBeNull();
+    expect(
+      screen.queryByRole("menuitem", { name: /资源管理器|访达|文件管理器/ }),
+    ).toBeNull();
     fireEvent.click(screen.getByRole("menuitem", { name: "复制路径" }));
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith("/srv/shared-app");

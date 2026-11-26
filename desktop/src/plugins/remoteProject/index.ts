@@ -19,6 +19,7 @@ import { createRemoteProjectStore } from "./store/remoteProjectStore.ts";
 import { createRemoteDocumentFileProvider } from "./fs/remoteFileProvider.ts";
 import { createRemoteGitProvider } from "./git/remoteGitProvider.ts";
 import * as workbenchUi from "./ui/workbench.tsx";
+import { parseRemoteProjectPath } from "../../shared/panelPaths.ts";
 
 export const name = "remoteProject";
 export const inject = ["host", "diagnostics"];
@@ -34,6 +35,15 @@ export function apply(ctx: Context): void {
     getById: store.getById,
     listProjectsForConnection: store.listProjectsForConnection,
     addProject: store.addProject,
+    async repairProject(path, connectionId) {
+      const target = parseRemoteProjectPath(path);
+      if (!target || store.getById(target.projectId)) {
+        throw new Error("该项目无需修复，请重新打开项目");
+      }
+      const entry = await service.stat(connectionId, target.remotePath);
+      if (!entry.directory) throw new Error("原远端路径不是目录");
+      return store.addProject(connectionId, target.remotePath, undefined, path);
+    },
     removeProjectByPath: store.removeProjectByPath,
     recordRecentDir: store.recordRecentDir,
     async listConnections() {
@@ -69,15 +79,11 @@ export function apply(ctx: Context): void {
         { ...params },
       );
     },
-    async listDirectory(connectionId, path) {
-      const result = await sidecar.request<RemoteFSListResult>(
+    listDirectory(connectionId, path) {
+      return sidecar.request<RemoteFSListResult>(
         "project/fs-list",
         { connectionId, path },
       );
-      if (result.path) {
-        store.recordRecentDir(connectionId, result.path);
-      }
-      return result;
     },
     async stat(connectionId, path) {
       return sidecar.request<RemoteFSEntry>("project/fs-stat", {

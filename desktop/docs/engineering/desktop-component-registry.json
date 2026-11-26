@@ -987,11 +987,13 @@
       "提示与确认": [
         "apply/EmbeddedAddProjectForm",
         "apply/RemoteProjectModalOverlay",
+        "apply/RemoteProjectRecovery",
         "apply/renderAddProjectForm"
       ]
     },
     "targets": [
       "apply/overlays/\"remote-project-add-modal\"/View → plugins/remoteProject/ui/workbench.tsx#apply/RemoteProjectModalOverlay",
+      "apply/overlays/\"remote-project-recovery\"/View → plugins/remoteProject/ui/workbench.tsx#apply/RemoteProjectRecovery",
       "apply/renderAddProjectForm → (inline)",
       "apply/settings/\"remote-hosts\"/Icon → shared/ui/icons.tsx#MonitorIcon",
       "apply/settings/\"remote-hosts\"/View → (inline)"

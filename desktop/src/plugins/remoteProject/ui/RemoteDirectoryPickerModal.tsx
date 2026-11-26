@@ -77,6 +77,7 @@ export function RemoteDirectoryPickerModal({
         setParentDir(res.parentPath || "/");
         setEntries(res.entries);
         setReady(true);
+        void service.recordRecentDir(connection.id, res.path);
       } catch (err) {
         if (seq !== reqSeqRef.current) return;
         setError(describeUnknownError(err));
@@ -104,6 +105,7 @@ export function RemoteDirectoryPickerModal({
         setEntries(res.entries);
         setReady(true);
         setError(null);
+        void service.recordRecentDir(connection.id, res.path);
       })
       .catch((err) => {
         if (cancelled || seq !== reqSeqRef.current) return;

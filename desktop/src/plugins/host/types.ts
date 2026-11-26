@@ -237,6 +237,7 @@ export interface HostStorage {
   readonly managed?: HostManagedStorage;
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+  setConfigurationItem?(key: string, value: string): Promise<void>;
   removeItem?(key: string): void;
 }
 
