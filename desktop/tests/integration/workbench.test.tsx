@@ -321,7 +321,7 @@ describe("项目树 → 项目总览", () => {
     expect(screen.queryByLabelText("新建会话面板")).not.toBeInTheDocument();
 
     const tree = screen.getByLabelText("项目树");
-    const row = within(tree).getByRole("button", { name: "new-project", exact: true });
+    const row = within(tree).getByRole("button", { name: "new-project" });
     expect(queryByHint(tree, library)).not.toBeInTheDocument();
     const project = useWorkspaceStore.getState().selectedPath!;
     expect(projectFolderPath(project)).toBe(primary);
