@@ -39,8 +39,7 @@
   },
   "plugins/agents/ui/AgentSwitchPanel.tsx": {
     "definitions": {
-      "状态与统计": ["AgentSwitchPanel", "AgentSwitchSidebarStatus"],
-      "命令按钮": ["SwitchStatusButton"]
+      "提示与确认": ["AgentSwitchPanel"]
     },
     "targets": []
   },
@@ -62,14 +61,12 @@
         "settings/\"agents\"/View"
       ],
       "提示与确认": [
-        "overlays/\"agent-switch-progress\"/View",
-        "overlays/\"agent-switch-sidebar-status\"/View"
+        "overlays/\"agent-switch-progress\"/View"
       ]
     },
     "targets": [
       "apply/about/\"active-agent\"/Value → (inline)",
       "overlays/\"agent-switch-progress\"/View → (inline)",
-      "overlays/\"agent-switch-sidebar-status\"/View → (inline)",
       "settings/\"agents\"/Icon → shared/ui/icons.tsx#BrainIcon",
       "settings/\"agents\"/View → (inline)"
     ]

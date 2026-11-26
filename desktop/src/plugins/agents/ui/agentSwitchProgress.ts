@@ -1,10 +1,11 @@
 import { createStore } from "zustand/vanilla";
-import type { AgentsService } from "../service.ts";
+import type { AgentsService, AgentSwitchGuard } from "../service.ts";
 import type { AgentSwitchProgressEvent } from "../../project/types.ts";
 import type { ProjectSessions } from "../../project/service.ts";
 
-type Stage = Extract<AgentSwitchProgressEvent, { type: "stage" }>["stage"];
+type Stage = Extract<AgentSwitchProgressEvent, { type: "stage" }>["stage"] | "guard";
 export const stageNames: Record<Stage, string> = {
+  guard: "检查并停止进行中的工作",
   queued: "等待切换队列",
   current: "准备当前 Agent 连接",
   target: "启动目标 Agent 并建立连接",
@@ -29,7 +30,6 @@ export interface SwitchProgress {
   readonly startedAt: number;
   readonly endedAt?: number;
   readonly status: "running" | "success" | "failed";
-  readonly expanded: boolean;
   readonly replacedPrevious: boolean;
   readonly steps: readonly SwitchStep[];
   readonly startedConnections: number;
@@ -47,6 +47,7 @@ export interface SwitchProgress {
 export function createAgentSwitchProgress(
   sessions: Pick<ProjectSessions, "switchAgent">,
   agents: Pick<AgentsService, "resolve" | "selectedId">,
+  getGuard?: () => AgentSwitchGuard | undefined,
 ) {
   const store = createStore<{ current: SwitchProgress | null }>(() => ({
     current: null,
@@ -120,6 +121,7 @@ export function createAgentSwitchProgress(
   ): Promise<void> {
     const id = ++revision;
     const previous = store.getState().current;
+    const guard = getGuard?.();
     if (!isRetry) retrySuccess = onRetrySuccess;
     const now = Date.now();
     store.setState({
@@ -129,9 +131,8 @@ export function createAgentSwitchProgress(
         targetName: label(targetId),
         startedAt: now,
         status: "running",
-        expanded: true,
         replacedPrevious: previous?.status === "running",
-        steps: [{ stage: "queued", startedAt: now }],
+        steps: [{ stage: guard ? "guard" : "queued", startedAt: now }],
         startedConnections: 0,
         handshakes: 0,
         readyConnections: 0,
@@ -139,6 +140,12 @@ export function createAgentSwitchProgress(
       },
     });
     try {
+      if (guard) {
+        const work = await guard.activeWork().catch(() => []);
+        if (id !== revision) throw new Error("切换已被后续确认替代");
+        if (work.length > 0) await guard.stopAll(work);
+        if (id !== revision) throw new Error("切换已被后续确认替代");
+      }
       await sessions.switchAgent(targetId, (next) => event(id, next));
       if (id !== revision) throw new Error("切换已被后续确认替代");
       if (isRetry) retrySuccess?.();
@@ -187,10 +194,6 @@ export function createAgentSwitchProgress(
       if (current?.status === "failed")
         return start(current.targetId, retrySuccess, true);
       return Promise.resolve();
-    },
-    expand(expanded: boolean) {
-      const current = store.getState().current;
-      if (current) update(current.id, (value) => ({ ...value, expanded }));
     },
     dismiss(id: number) {
       const current = store.getState().current;

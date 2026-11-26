@@ -548,7 +548,6 @@ it("keeps plugin names and dependency relations aligned with their production ow
     expect(view.helpItems.map(({ id }) => id)).toEqual(["diagnostics"]);
     expect(view.overlays.map(({ id, scope }) => [id, scope])).toEqual([
       ["storage-monitor", "sidebar"],
-      ["agent-switch-sidebar-status", "sidebar"],
       ["agent-switch-progress", "window"],
       ["project-dialogs", "workspace"],
       ["updates-dialog", "window"],

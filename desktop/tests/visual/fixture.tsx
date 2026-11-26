@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { useState } from "react";
 import { PerformanceFixture } from "./performanceFixture.tsx";
 import { HintTooltip } from "../../src/shared/ui/controls/HintTooltip.tsx";
 import { HintMotionFixture } from "./hintMotionFixture.tsx";
@@ -27,6 +28,44 @@ import {
 } from "./protocolFixture.tsx";
 
 const params = new URLSearchParams(location.search);
+const agentSwitch = params.has("agent-switch-modal")
+  ? await (async () => {
+      const { createAgentSwitchProgress } = await import("../../src/plugins/agents/ui/agentSwitchProgress.ts");
+      const { AgentSwitchPanel } = await import("../../src/plugins/agents/ui/AgentSwitchPanel.tsx");
+      const { ActionButton } = await import("../../src/shared/ui/controls.tsx");
+      const { ConfirmationDialog } = await import("../../src/shared/ui/ConfirmationDialog.tsx");
+      const controller = createAgentSwitchProgress({
+        switchAgent: () => new Promise<void>((resolve, reject) => {
+          window.addEventListener("fixture-agent-switch-result", (event) => {
+            if (event instanceof CustomEvent && event.detail === "failed") {
+              reject(new Error("测试连接失败"));
+            } else resolve();
+          }, { once: true });
+        }),
+      }, { resolve: () => null, selectedId: "iCode" });
+      function View() {
+        const [confirm, setConfirm] = useState(false);
+        return (
+          <>
+            <ActionButton tone="secondary" onClick={() => setConfirm(true)}>切换到 OpenCode</ActionButton>
+            {confirm && <ConfirmationDialog
+              label="切换 Agent 确认"
+              title="切换到 OpenCode？"
+              confirmLabel="确认切换"
+              onCancel={() => setConfirm(false)}
+              onConfirm={() => {
+                setConfirm(false);
+                void controller.start("OpenCode").catch(() => {});
+              }}
+            >
+              <p>当前任务将停止。</p>
+            </ConfirmationDialog>}
+          </>
+        );
+      }
+      return { View, panel: <AgentSwitchPanel controller={controller} /> };
+    })()
+  : null;
 const DiagnosticsWindowFixture = params.has("diagnostics-window")
   ? (await import("./diagnosticsWindowFixture.tsx")).DiagnosticsWindowFixture
   : undefined;
@@ -128,6 +167,7 @@ const usageEntry = createUsageSettingsEntry([
 ]);
 const fixture = {
   settings: [
+    ...(agentSwitch ? [{ id: "agents", label: "Agent", Icon: () => null, View: agentSwitch.View }] : []),
     ...(sessionSettings ? [sessionSettings] : []),
     ...(params.has("settings-keyboard") ? [{
       id: "general",
@@ -233,6 +273,7 @@ createRoot(document.querySelector("#root")!).render(
     ) : (
       <WorkbenchContext.Provider value={workbench}>
         <SettingsPage />
+        {agentSwitch?.panel}
       </WorkbenchContext.Provider>
     )}
   </div>,
