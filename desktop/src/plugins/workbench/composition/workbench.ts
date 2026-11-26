@@ -1,3 +1,4 @@
+import { OpenWithDialog } from "../ui/OpenWithDialog.tsx";
 import { createElement, type ComponentType } from "react";
 import { createStore } from "zustand";
 import type {
@@ -7,6 +8,7 @@ import type {
   WindowHost,
 } from "../../host/types.ts";
 import type {
+  NavigationTarget,
   ExitParticipant,
   ExitReason,
   ExitRequest,
@@ -26,7 +28,7 @@ import { createRightPanelStore } from "../layout/rightPanelStore.ts";
 import { LEFT_WIDTH_STORAGE_KEY } from "../ui/columnWidths.ts";
 import { saveColumnWidth } from "../../../shared/ui/controls/columnWidth.ts";
 import { createSnapshotView } from "../../../shared/state/readonlySnapshot.ts";
-import { pathKey } from "../../../shared/panelPaths.ts";
+import { insidePath, pathKey, projectFolderPath, workspaceTargetPath } from "../../../shared/panelPaths.ts";
 import type { Logger } from "../../../shared/logging/logger.ts";
 
 const empty: WorkbenchSnapshot = {
@@ -48,6 +50,7 @@ const empty: WorkbenchSnapshot = {
   settings: [],
   settingsReset: [],
   pathResolvers: [],
+  pathInspectors: [],
   markdownCodeRenderers: [],
 };
 
@@ -142,6 +145,8 @@ export class DesktopWorkbench implements WorkbenchService {
       showToast: this.showToast,
       dismissToast: this.dismissToast,
       openExternal: this.openExternal,
+      inspectReference: this.inspectReference,
+      canOpen: this.canOpen,
       openPath: this.openPath,
       saveSidebarWidth: this.saveSidebarWidth,
       onViewOpened: this.onViewOpened,
@@ -168,24 +173,72 @@ export class DesktopWorkbench implements WorkbenchService {
     return this.options.shell.openExternal(url);
   };
 
+  private cancelPathChoice?: () => void;
+  readonly canOpen = (target: NavigationTarget) => this.snapshot.pathResolvers.some((entry) => entry.supports(target));
+  readonly inspectReference: WorkbenchService["inspectReference"] = async (root, path) => {
+    try {
+      const target = await this.inspectPath(path, root);
+      return this.canOpen(target) ? target : null;
+    } catch {
+      return null;
+    }
+  };
+
+  private async inspectPath(path: string, root?: string): Promise<NavigationTarget> {
+    if (/^https?:\/\//i.test(path)) return { kind: "url", path };
+    const inspector = this.snapshot.pathInspectors.at(0);
+    if (!inspector) throw new Error("文件服务不可用");
+    if (!root) return inspector.inspect(path);
+    if (!insidePath(root, path)) throw new Error("此路径超出会话工作目录");
+    const [base, target] = await Promise.all([inspector.inspect(projectFolderPath(root)), inspector.inspect(path)]);
+    if (base.kind !== "directory" || !insidePath(base.path, target.path))
+      throw new Error("此路径超出会话工作目录");
+    return target;
+  }
+
+  private choosePathResolver(choices: readonly WorkbenchContributions["pathResolvers"][]) {
+    this.cancelPathChoice?.();
+    return new Promise<WorkbenchContributions["pathResolvers"] | undefined>((resolve) => {
+      const finish = (choice?: WorkbenchContributions["pathResolvers"]) => {
+        release();
+        this.cancelPathChoice = undefined;
+        resolve(choice);
+      };
+      const release = this.register("overlays", {
+        id: "open-with", scope: "window",
+        View: () => createElement(OpenWithDialog, { choices, choose: finish }),
+      });
+      this.cancelPathChoice = () => finish();
+    });
+  }
+
   readonly openPath: WorkbenchService["openPath"] = async (
     project,
     path,
     line,
     isCurrent = () => true,
+    options,
   ) => {
-    const resolver = this.snapshot.pathResolvers[0];
-    if (!resolver) return false;
-    const active = () =>
-      !this.disposed && this.snapshot.pathResolvers[0] === resolver && isCurrent();
-    if (!active()) return false;
+    const resolvers = this.snapshot.pathResolvers;
+    const inspectors = this.snapshot.pathInspectors;
+    const active = () => !this.disposed && isCurrent() &&
+      this.snapshot.pathInspectors === inspectors && this.snapshot.pathResolvers === resolvers;
+    if (!active() || !resolvers.length) return false;
     try {
-      const tab = await resolver.resolve(path, line);
+      const address = workspaceTargetPath(project, path);
+      if (!address) throw new Error("此路径不属于当前远程主机");
+      const target = await this.inspectPath(address, options?.root);
       if (!active()) return false;
+      const choices = resolvers.filter((entry) => entry.supports(target));
+      if (!choices.length) throw new Error("没有可打开此目标的插件");
+      const resolver = choices.length === 1 ? choices[0] : await this.choosePathResolver(choices);
+      if (!resolver || !active()) return false;
       const isProjectCurrent = () =>
         pathKey(this.navigation.getState().contextPath ?? "") === pathKey(project);
       if (!isProjectCurrent())
         throw new Error("项目已切换，请在文件所属项目中重新打开");
+      const tab = resolver.resolve(target, project, line);
+      if (options?.present?.(tab)) return true;
       this.panels.getState().openTab(project, tab, () => active() && isProjectCurrent());
       return true;
     } catch (error) {
@@ -209,6 +262,7 @@ export class DesktopWorkbench implements WorkbenchService {
   }
 
   dispose(): void {
+    this.cancelPathChoice?.();
     this.disposed = true;
     this.exit.dispose();
     this.navigationGuard.dispose();
@@ -240,11 +294,13 @@ export class DesktopWorkbench implements WorkbenchService {
       throw new Error(
         `Duplicate workbench registration: ${slot}/${contribution.id}`,
       );
+    if (slot === "pathResolvers" || slot === "pathInspectors") this.cancelPathChoice?.();
     this.update({ ...this.snapshot, [slot]: [...entries, contribution] });
     let released = false;
     return () => {
       if (released || this.disposed) return;
       released = true;
+      if (slot === "pathResolvers" || slot === "pathInspectors") this.cancelPathChoice?.();
       if (slot === "docks") this.navigation.getState().closeDock(contribution.id);
       const current: readonly WorkbenchContributions[Slot][] =
         this.snapshot[slot];

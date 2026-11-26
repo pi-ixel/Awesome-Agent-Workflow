@@ -142,6 +142,7 @@ export function useBrowserRestore(
   }, [committed, enabled, isReady, isSaving, save]);
 
   return {
+    initialized: pendingTabs !== null || Boolean(error),
     enabled,
     isSaving: isSaving || (!snapshot && !error),
     error,

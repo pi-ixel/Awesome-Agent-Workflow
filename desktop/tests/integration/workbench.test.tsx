@@ -785,13 +785,100 @@ describe("会话内 AAW 面板", () => {
       expect(panel()?.tabs.map((tab) => tab.data?.path)).toEqual([first, second]);
 
       await userEvent.click(message.getByRole("button", { name: "folder" }));
-      expect(await message.findByRole("alert")).toHaveTextContent("此路径指向目录");
+      await waitFor(() => expect(panel()?.active).toBe("directory:" + pathKey(folder)));
       await userEvent.click(message.getByRole("button", { name: "missing.html" }));
       expect(await message.findByText("文件已不存在")).toHaveAttribute("role", "alert");
-      expect(panel()?.tabs.map((tab) => tab.data?.path)).toEqual([first, second]);
+      expect(panel()?.tabs.map((tab) => tab.data?.path)).toEqual([first, second, folder]);
     } finally {
       stat.mockRestore();
       preview.mockRestore();
+    }
+  });
+
+  it("项目内目录的 Markdown 链接和代码路径定位到同一个文件树，缺失路径保持原文", async () => {
+    seedSessionView();
+    const folder = PATH + "/reports.xlsx";
+    const directories = vi.spyOn(NativePanelService.prototype, "directory").mockImplementation((path) =>
+      Promise.resolve({ entries: path === PATH ? [{ path: folder, name: "reports.xlsx", directory: true, symlink: false }] : [], truncated: false }));
+    const stat = vi.spyOn(NativePanelService.prototype, "stat").mockImplementation((path) => {
+      if (path !== PATH && path !== folder) return Promise.reject(new Error("找不到目标"));
+      return Promise.resolve({ path, name: path.split("/").at(-1)!, directory: true, symlink: false });
+    });
+    try {
+      useSessionStore.setState({ workingDirectory: PATH, items: [{
+        kind: "assistant", id: "folder-message", text: `[目录](${folder}) 和 \`reports.xlsx\`，以及 [缺失](missing.txt)`, isStreaming: false, createdAt: "",
+      }] });
+      renderDesktopApp(services.workbench);
+      const message = within(document.querySelector('[data-item-id="folder-message"]') as HTMLElement);
+      for (const name of ["目录", "reports.xlsx"]) {
+        await userEvent.click(await message.findByRole("button", { name }));
+        await waitFor(() => expect(useRightPanelStore.getState().projects[pathKey(PATH)]).toMatchObject({
+          active: "files", tabs: [expect.objectContaining({ id: "files", data: { root: PATH, directory: folder } })],
+        }));
+      }
+      const row = await screen.findByRole("treeitem", { name: "reports.xlsx" });
+      expect(row).toHaveAttribute("aria-selected", "true");
+      expect(row).toHaveAttribute("aria-expanded", "true");
+      expect(message.queryByRole("button", { name: "缺失" })).toBeNull();
+    } finally { stat.mockRestore(); directories.mockRestore(); }
+  });
+
+  it("网页引用进入会话浏览器；远程路径保留主机身份，切换会话后丢弃迟到的检查", async () => {
+    seedSessionView();
+    const project = "//aaw-remote/demo/worktree";
+    const file = "//aaw-remote/demo/worktree/README.md";
+    const stat = vi.spyOn(services.documents, "stat").mockResolvedValue({
+      path: file, name: "README.md", directory: false, symlink: false,
+    });
+    try {
+      const workbench = services.workbench;
+      await expect(workbench.openPath(PATH, "https://example.test/report")).resolves.toBe(true);
+      expect(useRightPanelStore.getState().projects[pathKey(PATH)]?.active).toBe("browser");
+      expect(stat).not.toHaveBeenCalled();
+      workbench.navigation.getState().openView("session", project);
+      let current = true;
+      const pending = workbench.openPath(project, "/worktree/README.md", 8, () => current);
+      current = false;
+      await expect(pending).resolves.toBe(false);
+      expect(stat).toHaveBeenCalledWith(file);
+      expect(useRightPanelStore.getState().projects[pathKey(project)]?.active).toBeUndefined();
+      await expect(workbench.openPath(project, "//aaw-remote/other/file")).rejects.toThrow("远程主机");
+    } finally { stat.mockRestore(); }
+  });
+
+  it("信息流按插件声明选择打开方式，卸载后恢复直接打开", async () => {
+    seedSessionView();
+    const path = PATH + "/report.xlsx";
+    const hostStat = vi.spyOn(NativePanelService.prototype, "stat").mockImplementation((target) =>
+      Promise.resolve({ path: target, name: target.split("/").at(-1)!, directory: target === PATH, symlink: false }));
+    const register = (id: string) => services.workbench.register("pathResolvers", {
+      id, label: id,
+      supports: (target) => target.kind === "file" && target.path.endsWith(".xlsx"),
+      resolve: () => ({ id, kind: id }),
+    });
+    const first = register("表格预览");
+    const second = register("电子表格");
+    try {
+      useSessionStore.setState({ workingDirectory: PATH, items: [{
+        kind: "assistant", id: "spreadsheet", text: "打开 [报表](report.xlsx) 或 `report.xlsx`", isStreaming: false, createdAt: "",
+      }] });
+      renderDesktopApp(services.workbench);
+      await userEvent.click(await screen.findByRole("button", { name: "报表" }));
+      const dialog = await screen.findByRole("dialog", { name: "打开方式" });
+      expect(within(dialog).getByRole("button", { name: "表格预览" })).toBeVisible();
+      await userEvent.keyboard("{Escape}");
+      expect(screen.queryByRole("dialog", { name: "打开方式" })).toBeNull();
+      await userEvent.click(screen.getByRole("button", { name: "报表" }));
+      await userEvent.click(await screen.findByRole("button", { name: "电子表格" }));
+      const active = () => useRightPanelStore.getState().projects[pathKey(PATH)]?.active;
+      await waitFor(() => expect(active()).toBe("电子表格"));
+      act(second);
+      await userEvent.click(await screen.findByRole("button", { name: "report.xlsx" }));
+      await waitFor(() => expect(active()).toBe("表格预览"));
+      expect(screen.queryByRole("dialog", { name: "打开方式" })).toBeNull();
+      expect(hostStat).toHaveBeenCalledWith(path);
+    } finally {
+      act(first); act(second); hostStat.mockRestore();
     }
   });
 

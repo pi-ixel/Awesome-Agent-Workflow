@@ -2,6 +2,8 @@ import type { ComponentType } from "react";
 import type { ReadonlySnapshot } from "../../shared/state/readonlySnapshot.ts";
 import type { ToastInput, ToastSnapshot } from "./feedback/types.ts";
 import type {
+  NavigationTarget,
+  PanelTab,
   WorkbenchAppearance,
   WorkbenchContributions,
   WorkbenchExit,
@@ -29,12 +31,18 @@ export interface WorkbenchService extends WorkbenchExit, WorkbenchLayout {
   readonly showToast: (input: ToastInput) => void;
   readonly dismissToast: (id: number) => void;
   openExternal(this: void, url: string): Promise<void>;
+  canOpen(this: void, target: NavigationTarget): boolean;
+  inspectReference(this: void, root: string, path: string): Promise<NavigationTarget | null>;
   openPath(
     this: void,
     project: string,
     path: string,
     line?: number,
     isCurrent?: () => boolean,
+    options?: {
+      readonly root?: string;
+      readonly present?: (tab: PanelTab) => boolean;
+    },
   ): Promise<boolean>;
   saveSidebarWidth(this: void, width: number): void;
   /** Listen for explicit view activation, including reselecting the current view. */

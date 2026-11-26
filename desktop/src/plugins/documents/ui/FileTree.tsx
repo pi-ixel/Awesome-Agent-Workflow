@@ -151,6 +151,8 @@ export function FileTree({
   readGitStatus,
   watchActivity,
   latestFileTabPath,
+  revealDirectory,
+  navigate,
   openExternal,
   treePosition = "right",
   onOpenTreeSettings,
@@ -163,6 +165,8 @@ export function FileTree({
   readGitStatus?: GitService["status"];
   watchActivity?: ProjectWorkspace["subscribeWorkspaceActivity"];
   latestFileTabPath?: string;
+  navigate?: (path: string, line: number | undefined, preview: (path: string, line?: number) => void) => Promise<boolean>;
+  revealDirectory?: { readonly data?: Readonly<Record<string, unknown>> };
   openExternal?: (url: string) => Promise<void>;
   treePosition?: "left" | "right";
   onOpenTreeSettings?: () => void;
@@ -467,8 +471,7 @@ export function FileTree({
   );
 
   const revealSearchDirectory = useCallback(
-    (row: FileTreeRow) => {
-      if (row.type !== "directory") return;
+    (row: Pick<FileTreeRow, "path" | "key">) => {
       const chain = [
         ...getAncestorDirectories(root, row.path),
         { path: row.path, key: row.key },
@@ -492,6 +495,14 @@ export function FileTree({
     [loadDirectory, root, setExpandedKeys],
   );
 
+  useEffect(() => {
+    const path = revealDirectory?.data?.directory;
+    if (typeof path !== "string" || !insidePath(root, path)) return;
+    setSplit((current) => current.visible ? current : { ...current, visible: true });
+    setChangedOnly(false);
+    revealSearchDirectory({ path, key: pathKey(path) });
+  }, [revealDirectory, revealSearchDirectory, root]);
+
   const directoryAction = useCallback(
     (row: FileTreeRow) => {
       if (hasFileSearchQuery) {
@@ -501,25 +512,6 @@ export function FileTree({
       toggleDirectory(row);
     },
     [hasFileSearchQuery, revealSearchDirectory, toggleDirectory],
-  );
-
-  /** ZCode 形态：树行点击 = 选中 pill + 并列预览区换内容，不开 tab、不遮挡树。 */
-  const openPrimary = useCallback(
-    function openFilePreview(row: FileTreeRow) {
-      if (row.type === "directory") {
-        directoryAction(row);
-        return;
-      }
-      if (tree.gitStatusByPath.get(row.key) === "deleted") {
-        // deleted 虚拟行来自 Git 状态补全，真实文件已不存在，只选中不打开。
-        return;
-      }
-      if (preview && pathKey(preview.path) === pathKey(row.path)) return;
-      if (!documents.editor.guard(() => openFilePreview(row))) return;
-      setSelectedKey(row.key);
-      setPreview({ path: row.path });
-    },
-    [documents, directoryAction, tree.gitStatusByPath, preview],
   );
 
   /** 预览面包屑层级点击：清搜索、逐级展开回树态并定位该目录。 */
@@ -570,6 +562,17 @@ export function FileTree({
     },
     [documents, loadDirectory, root, setExpandedKeys, preview],
   );
+
+  const navigateFile = useCallback((path: string, line?: number) => {
+    if (!navigate) return openPreviewPath(path, line);
+    void navigate(path, line, openPreviewPath).catch((cause: unknown) =>
+      notify?.({ message: describeUnknownError(cause), variant: "danger" }));
+  }, [navigate, notify, openPreviewPath]);
+
+  const openPrimary = useCallback((row: FileTreeRow) => {
+    if (row.type === "directory") directoryAction(row);
+    else if (tree.gitStatusByPath.get(row.key) !== "deleted") navigateFile(row.path);
+  }, [directoryAction, tree.gitStatusByPath, navigateFile]);
 
   const copyPath = useCallback(async (text: string) => {
     const ok = await copyTextToClipboard(text);
@@ -1053,7 +1056,7 @@ export function FileTree({
               project={root}
               ownerProject={ownerProject}
               line={preview.line}
-              onOpen={openPreviewPath}
+              onOpen={navigateFile}
               openExternal={openExternal}
               onNavigate={navigateToDirectory}
               headerPortalTo={headerContainer}

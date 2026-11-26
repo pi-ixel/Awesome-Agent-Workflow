@@ -1170,9 +1170,10 @@
     ]
   },
   "plugins/workbench/composition/workbench.ts": {
-    "definitions": {},
+    "definitions": { "选择控件": ["DesktopWorkbench/overlays/\"open-with\"/View"] },
     "targets": [
-      "DesktopWorkbench/Window → plugins/workbench/composition/workbench.ts#DesktopWorkbench/Window"
+      "DesktopWorkbench/Window → plugins/workbench/composition/workbench.ts#DesktopWorkbench/Window",
+      "DesktopWorkbench/overlays/\"open-with\"/View → (inline)"
     ]
   },
   "plugins/workbench/index.ts": {
@@ -1191,6 +1192,10 @@
     "definitions": {
       "提示与确认": ["CloseConfirmModal", "ExitOverlay"]
     },
+    "targets": []
+  },
+  "plugins/workbench/ui/OpenWithDialog.tsx": {
+    "definitions": { "选择控件": ["OpenWithDialog"] },
     "targets": []
   },
   "plugins/workbench/ui/CloseGuard.tsx": {

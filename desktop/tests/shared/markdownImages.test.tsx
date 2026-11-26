@@ -9,7 +9,7 @@ it("only links verified reply paths and opens the canonical file at its line", a
   const verify = vi.fn((_root: string, path: string) =>
     Promise.resolve(
       path === root + "/src/main.ts" || path === root + "/README.md"
-        ? path
+        ? { path, kind: "file" as const }
         : null,
     ),
   );
@@ -64,7 +64,7 @@ it("makes inline absolute paths clickable without looking up files on render", (
         "原样保留 D:\\outside\\plain.md 和 `start demo.html`。",
         "\n\n~~~text\nD:\\outside\\snippet.md\n~~~",
       ].join(" ")}
-      replyFiles={{ root: "D:/repo", verify, open: vi.fn(), openAbsolute }}
+      replyFiles={{ root: "D:/repo", verify, open: openAbsolute }}
     />,
   );
   const [first, second] = screen.getAllByRole("button", { name: "demo.md" });
@@ -88,10 +88,15 @@ it("makes inline absolute paths clickable without looking up files on render", (
 
 it("leaves an existing reference as text if the file disappears before the click", async () => {
   const root = "D:/repo";
-  const open = vi.fn();
+  const open = vi.fn(() => Promise.reject(new Error("文件已不存在")));
   const verify = vi
-    .fn<(_root: string, path: string) => Promise<string | null>>()
-    .mockResolvedValueOnce(root + "/README.md")
+    .fn<
+      (
+        _root: string,
+        path: string,
+      ) => Promise<{ path: string; kind: "file" } | null>
+    >()
+    .mockResolvedValueOnce({ path: root + "/README.md", kind: "file" })
     .mockResolvedValue(null);
   render(
     <MarkdownView
@@ -106,7 +111,7 @@ it("leaves an existing reference as text if the file disappears before the click
     ).not.toBeInTheDocument(),
   );
   expect(screen.getByText("说明")).toBeVisible();
-  expect(open).not.toHaveBeenCalled();
+  expect(open).toHaveBeenCalledWith(root + "/README.md", undefined);
 });
 
 it("流式代码围栏成形后才挂载代码工具，已完成正文保留", () => {

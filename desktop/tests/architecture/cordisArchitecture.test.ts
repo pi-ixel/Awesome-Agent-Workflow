@@ -131,7 +131,7 @@ function* productionImports(directory: string) {
       ts.forEachChild(node, visit);
     }
     visit(source);
-    yield { path, targets: [...targets], runtimeTargets };
+    yield { path, targets: [...targets], runtimeTargets, source };
   }
 }
 
@@ -663,9 +663,8 @@ it("keeps shared ACP wire definitions independent of Desktop services and produc
 it("keeps MCP contracts independent of Desktop runtime and plugins", () => {
   for (const { path, targets } of productionImports("src/contracts/mcp")) {
     expect(
-      targets.filter(
-        (target) =>
-          /^(?:src\/(?:plugins|bootstrap)\/|@tauri-apps\/)/.test(target),
+      targets.filter((target) =>
+        /^(?:src\/(?:plugins|bootstrap)\/|@tauri-apps\/)/.test(target),
       ),
       path,
     ).toEqual([]);
@@ -748,4 +747,116 @@ it("keeps public models and shared utilities independent of plugin implementatio
         ).toBe(false);
     }
   }
+});
+
+it("引用导航由插件声明，信息流不依赖打开方式的插件实现", () => {
+  const message = read(
+    "src/plugins/project/conversation/ui/AssistantMessage.tsx",
+  );
+  const markdown = read("src/shared/ui/MarkdownView.tsx");
+  for (const source of [message, markdown]) {
+    expect(source).not.toMatch(/from ["'][^"']*\/(browser|documents|office)\//);
+    expect(source).not.toMatch(/pathResolvers|documentTab\(/);
+  }
+  const dispatch = read("src/plugins/workbench/composition/workbench.ts");
+  expect(dispatch).not.toMatch(/pathResolvers(?:\[0\]|\.at\(0\))/);
+  expect(dispatch).not.toMatch(/from ["'][^"']*\/(browser|documents|office)\//);
+});
+
+function referenceNavigationViolations(path: string, ast: ts.SourceFile) {
+  const errors: string[] = [];
+  const messageUi =
+    path.startsWith("src/plugins/project/conversation/") ||
+    path.startsWith("src/shared/ui/");
+  const dispatcher = path === "src/plugins/workbench/composition/workbench.ts";
+  const observes = [
+    "src/plugins/workbench/ui/bindings/react.ts",
+    "src/plugins/project/ui/workbenchViews.tsx",
+  ].includes(path);
+  function visit(node: ts.Node) {
+    if (ts.isTypeNode(node) || ts.isInterfaceDeclaration(node)) return;
+    if (ts.isIdentifier(node) || ts.isStringLiteralLike(node)) {
+      const name = node.text;
+      const p = node.parent;
+      if (!dispatcher && ["pathResolvers", "pathInspectors"].includes(name)) {
+        const registration =
+          ts.isCallExpression(p) &&
+          p.arguments[0] === node &&
+          ts.isPropertyAccessExpression(p.expression) &&
+          p.expression.name.text === "register";
+        const observation =
+          observes &&
+          name === "pathResolvers" &&
+          ((ts.isPropertyAccessExpression(p) &&
+            ts.isArrowFunction(p.parent) &&
+            p.parent.body === p) ||
+            (ts.isPropertyAccessExpression(p) &&
+              ts.isBinaryExpression(p.parent) &&
+              p.parent.operatorToken.kind ===
+                ts.SyntaxKind.EqualsEqualsEqualsToken) ||
+            (ts.isCallExpression(p) &&
+              p.expression.getText(ast) === "useWorkbenchEntries"));
+        if (!registration && !observation) errors.push(name);
+      }
+      if (
+        messageUi &&
+        [
+          "openExternal",
+          "documentTab",
+          "presentDocumentTab",
+          "openAbsoluteFile",
+          "openFileManager",
+          "createTab",
+          "openTab",
+        ].includes(name)
+      )
+        errors.push(name);
+    }
+    if (
+      messageUi &&
+      ts.isPropertyAccessExpression(node) &&
+      node.name.text === "open" &&
+      /(?:^|\.)(window|globalThis|panels)$/.test(node.expression.getText(ast))
+    )
+      errors.push(node.getText(ast));
+    if (
+      messageUi &&
+      (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) &&
+      node.tagName.getText(ast) === "a" &&
+      node.attributes.properties.some(
+        (a) => ts.isJsxAttribute(a) && a.name.getText(ast) === "href",
+      )
+    )
+      errors.push("a[href]");
+    ts.forEachChild(node, visit);
+  }
+  visit(ast);
+  return errors;
+}
+
+it("新增引用入口不能直接选择处理插件或绕过 openPath", () => {
+  for (const { path, source } of productionImports("src")) {
+    expect(referenceNavigationViolations(path, source), path).toEqual([]);
+  }
+});
+
+it.each([
+  [
+    "src/plugins/future/actions.ts",
+    "snapshot.pathResolvers[0].resolve(target)",
+  ],
+  [
+    "src/plugins/future/actions.ts",
+    "const {pathInspectors: inspectors} = snapshot",
+  ],
+  [
+    "src/plugins/project/conversation/ui/NewLink.tsx",
+    "const {openExternal: launch} = host",
+  ],
+  ["src/shared/ui/NewReference.tsx", "panels.open(project, tab)"],
+  ["src/shared/ui/NewReference.tsx", "window.open(url)"],
+  ["src/shared/ui/NewReference.tsx", "const link = <a href={target}>open</a>"],
+])("禁止跳转旁路 %s %s", (path, code) => {
+  const ast = ts.createSourceFile(path, code, ts.ScriptTarget.Latest, true);
+  expect(referenceNavigationViolations(path, ast)).not.toEqual([]);
 });
