@@ -34,10 +34,11 @@ export async function addProjectViaDialog(
     return null;
   }
   if (!isActive() || !(await layout.navigationGuard.confirm()) || !isActive()) return null;
-  project.projects.registerProject(path);
-  layout.navigation.getState().openView(projectOverviewPageId, path, isActive);
+  const existing = project.projects.findProjectByFolders(path, []);
+  const target = existing ?? project.projects.registerProject(path, { name: "", relatedPaths: [] });
+  layout.navigation.getState().openView(projectOverviewPageId, target, isActive);
   // 模型 a：添加即获取会话列表并保留待用连接（与启动/展开共用去重）——
   // 侧栏该项目节点展开即有会话可点
-  void project.sessions.preloadSessionList(path);
-  return path;
+  void project.sessions.preloadSessionList(target);
+  return target;
 }

@@ -27,7 +27,7 @@ import type { WorkbenchService } from "../../workbench/service.ts";
 import type { PanelViewProps } from "../../workbench/types.ts";
 import { openRunFromNotification } from "../status/notifications.ts";
 import { errorLine } from "../status/errorText.ts";
-import { pathKey } from "../../../shared/panelPaths.ts";
+import { pathKey, projectFolderPath } from "../../../shared/panelPaths.ts";
 import { WorkflowIcon } from "../../../shared/ui/icons.tsx";
 import type { ProjectActivities, ProjectActivity, ProjectExtension, ProjectQuickAction, ProjectService } from "../../project/service.ts";
 import type { WorkflowDraftEditor, WorkflowEntry, WorkflowFileTransfer,
@@ -246,7 +246,7 @@ export function createWorkflowWorkbench(
     void (async () => {
       // 完整视图会盖住中间的会话：打开会话时退回普通布局，会话才看得见。
       workbench.panels.getState().fullViewExit(path);
-      await project.sessions.openSessionFromEntry(path, sessionId);
+      await project.sessions.openSessionFromEntry(projectFolderPath(path), sessionId);
     })().catch((error: unknown) => {
       workbench.showToast({ message: error instanceof Error ? error.message : String(error), variant: "warn" });
     });
@@ -256,7 +256,8 @@ export function createWorkflowWorkbench(
   function openResultFile(projectPath: string, path: string): void {
     if (!active()) return;
     const absolute = /^(?:[A-Za-z]:[\\/]|[\\/])/.test(path);
-    const target = absolute ? path : `${projectPath.replace(/[\\/]+$/, "")}/${path.replace(/^\.[\\/]/, "")}`;
+    const root = projectFolderPath(projectPath);
+    const target = absolute ? path : `${root.replace(/[\\/]+$/, "")}/${path.replace(/^\.[\\/]/, "")}`;
     workbench.openPath(projectPath, target).then((opened) => {
       if (!opened) workbench.showToast({ message: `无法打开 ${path}`, variant: "warn" });
     }).catch((cause: unknown) => {
@@ -616,9 +617,10 @@ export function apply(ctx: Context): void {
           ui.sessionLookup(),
         ));
       };
-      if (workspace !== null) publishProject(workspace, runs);
+      const currentRoot = workspace === null ? null : projectFolderPath(workspace);
+      if (currentRoot !== null) publishProject(currentRoot, runs);
       for (const other of workflow.otherSessionLinks()) {
-        if (workspace !== null && pathKey(other.project) === pathKey(workspace)) continue;
+        if (currentRoot !== null && pathKey(other.project) === pathKey(currentRoot)) continue;
         publishProject(other.project, other.runs);
       }
       for (const [key, { path }] of published) if (!next.has(key)) publisher.publish(path, []);

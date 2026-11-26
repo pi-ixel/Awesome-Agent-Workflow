@@ -117,7 +117,7 @@ impl SessionIdentity {
             agent.to_owned()
         };
         let mut project = project.replace('\\', "/");
-        if !project.starts_with("//aaw-remote/")
+        if !project.starts_with("//aaw-remote/") && !project.starts_with("//aaw-project/")
             && (project.starts_with("//") || project.as_bytes().get(1) == Some(&b':'))
         {
             project = project.to_lowercase();
@@ -147,13 +147,21 @@ impl SessionIdentity {
         }
     }
 
+    pub(crate) fn primary_project(&self) -> std::borrow::Cow<'_, str> {
+        self.project
+            .strip_prefix("//aaw-project/")
+            .and_then(|reference| reference.split_once('/'))
+            .and_then(|(_, root)| percent_encoding::percent_decode_str(root).decode_utf8().ok())
+            .unwrap_or_else(|| self.project.as_str().into())
+    }
+
     fn project_directory(&self, data: &Path) -> PathBuf {
         id_directory(&data.join("agents"), &self.agent_id)
             .join("projects")
             .join(format!(
                 "{}~{}",
                 readable(
-                    self.project
+                    self.primary_project()
                         .trim_end_matches('/')
                         .rsplit('/')
                         .next()

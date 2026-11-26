@@ -152,7 +152,7 @@ export const emptyCatalog: SessionCatalogState = {
 /** Directory and per-Agent cached indexes are owned by one Project Fiber. */
 export function createSessionCatalog(
   signal: AbortSignal,
-  deleted: (target: DeleteSessionTarget) => boolean = () => false,
+  hidden: (target: DeleteSessionTarget) => boolean = () => false,
   retainedSessions: (agent: string) => { project: string; sessionId: string }[] = () => [],
 ) {
   const store = createStore<SessionCatalogState>()(() => emptyCatalog);
@@ -172,7 +172,7 @@ export function createSessionCatalog(
     return [...entries, ...missing].filter(
       (entry) =>
         !externalSessions.has(externalKey(agent, path, entry.id)) &&
-        !deleted({ agentKey: agent, workspacePath: path, sessionId: entry.id }),
+        !hidden({ agentKey: agent, workspacePath: path, sessionId: entry.id }),
     );
   };
 
@@ -181,11 +181,24 @@ export function createSessionCatalog(
     for (const session of sessions) {
       if (session.sessionId) externalSessions.add(externalKey(session.agentKey, session.workspacePath, session.sessionId));
     }
-    const filter = (state: SessionCatalogState): SessionCatalogState => ({
-      ...state,
-      sessionsByPath: Object.fromEntries(Object.entries(state.sessionsByPath).map(([path, entries]) =>
-        [path, visibleEntries(state.agentKey ?? "", path, entries)])),
-    });
+    refreshVisibility();
+  }
+
+  function refreshVisibility(): void {
+    if (signal.aborted) return;
+    const filter = (state: SessionCatalogState): SessionCatalogState => {
+      let changed = false;
+      const sessionsByPath = Object.fromEntries(
+        Object.entries(state.sessionsByPath).map(([path, entries]) => {
+          const visible = visibleEntries(state.agentKey ?? "", path, entries);
+          if (visible.length === entries.length && visible.every((entry, i) => entry === entries[i]))
+            return [path, entries];
+          changed = true;
+          return [path, visible];
+        }),
+      );
+      return changed ? { ...state, sessionsByPath } : state;
+    };
     for (const [agent, state] of catalogCache) catalogCache.set(agent, filter(state));
     store.setState(filter(store.getState()));
   }
@@ -302,6 +315,7 @@ export function createSessionCatalog(
     updateCatalog,
     resetCatalog,
     excludeSessions,
+    refreshVisibility,
     isExternal: (target: DeleteSessionTarget) =>
       [...externalSessions].some((key) => {
         const [agent, path, id] = JSON.parse(key) as [string, string, string];

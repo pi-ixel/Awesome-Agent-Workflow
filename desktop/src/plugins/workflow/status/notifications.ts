@@ -1,3 +1,4 @@
+import { projectFolderPath } from "../../../shared/panelPaths.ts";
 import { nodeActivity } from "./nodeActivity.ts";
 import type { HostNotifications, HostStorage, DesktopWindowHost } from "../../host/types.ts";
 import type { WorkbenchService } from "../../workbench/service.ts";
@@ -71,7 +72,7 @@ export function attachWorkflowNotifications(deps: NotificationDeps): () => Promi
     const sessionId = typeof extra.sessionId === "string" ? extra.sessionId : "";
     void (async () => {
       // 点击可能来自通知中心里的旧通知，也可能是外部打开的链接：先由引擎确认运行属于该项目。
-      const snapshot = deriveCanvasSnapshot(await deps.client.request("snapshot", { cwd: project, runId }));
+      const snapshot = deriveCanvasSnapshot(await deps.client.request("snapshot", { cwd: projectFolderPath(project), runId }));
       if (disposed || !snapshot.run) return;
       await deps.window.showAndFocus();
       if (disposed) return;
@@ -94,7 +95,7 @@ export function attachWorkflowNotifications(deps: NotificationDeps): () => Promi
       await ready;
       if (disposed || await deps.window.isFocused()) return;
       if (!await deps.notifications.ensurePermission() || disposed || await deps.window.isFocused()) return;
-      const raw = await deps.client.request("snapshot", { cwd: project, runId });
+      const raw = await deps.client.request("snapshot", { cwd: projectFolderPath(project), runId });
       if (disposed || pending.get(tokenKey) !== token) return;
       const snapshot = deriveCanvasSnapshot(raw);
       if (!snapshot.run) return;
@@ -146,7 +147,7 @@ export function attachWorkflowNotifications(deps: NotificationDeps): () => Promi
     }
     if (event.type === "run-error") { if (event.cancelled !== true) notify(project, runId, { kind: "failed" }); return; }
     if (event.type === "run-settled") {
-      void deps.client.request("snapshot", { cwd: project, runId }).then((raw) => {
+      void deps.client.request("snapshot", { cwd: projectFolderPath(project), runId }).then((raw) => {
         if (disposed) return;
         const status = deriveCanvasSnapshot(raw).run?.status;
         if (status === "waiting") notify(project, runId, { kind: "confirm" });

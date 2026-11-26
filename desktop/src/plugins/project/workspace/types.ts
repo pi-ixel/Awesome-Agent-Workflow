@@ -15,7 +15,7 @@ export interface WorkspaceEntry {
   readonly lastOpenedAt: string;
 }
 
-/** 以主目录为项目身份，关联目录不独立注册到项目树。 */
+/** 项目目录配置，按逻辑项目归档。 */
 export interface ProjectFolders {
   readonly name: string;
   readonly relatedPaths: readonly string[];
@@ -45,7 +45,7 @@ export interface WorkspaceSnapshot {
 }
 
 export interface WorkspaceStoreState extends WorkspaceSnapshot {
-  registerProject: (path: string, folders?: ProjectFolders) => void;
+  registerProject: (path: string, folders?: ProjectFolders) => string;
   updateProjectFolders: (path: string, folders: ProjectFolders) => void;
   selectWorkspace: (path: string) => void;
   clearSelection: () => void;

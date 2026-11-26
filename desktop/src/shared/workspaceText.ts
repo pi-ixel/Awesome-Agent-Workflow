@@ -1,4 +1,4 @@
-import { parseRemoteProjectPath } from "./panelPaths.ts";
+import { parseRemoteProjectPath, projectFolderPath } from "./panelPaths.ts";
 
 /**
  * 项目页展示用的纯文本工具（UI 层不承载数据变换，只做展示格式化）。
@@ -12,9 +12,10 @@ export function basenameOf(path: string): string {
     const seg = remote.remotePath.split("/").filter(Boolean).at(-1);
     return seg ?? remote.remotePath;
   }
-  const normalized = path.replace(/[\\/]+$/, "");
+  const primary = projectFolderPath(path);
+  const normalized = primary.replace(/[\\/]+$/, "");
   if (normalized === "") {
-    return path;
+    return primary;
   }
   const slash = normalized.lastIndexOf("/");
   const backslash = normalized.lastIndexOf("\\");
@@ -28,13 +29,13 @@ export function formatWorkspacePathLabel(path: string): string {
   if (remote) {
     return `SSH · ${remote.remotePath}`;
   }
-  return path;
+  return projectFolderPath(path);
 }
 
 /** 可复制到剪贴板的项目/文件路径：远程项目还原为真实远端路径，本地项目原样返回。 */
 export function formatCopyablePath(path: string): string {
   const remote = parseRemoteProjectPath(path);
-  return remote ? remote.remotePath : path;
+  return remote ? remote.remotePath : projectFolderPath(path);
 }
 
 /** ISO 时间 → 中文相对时间（刚刚 / N 分钟前 / N 小时前 / 日期）。 */

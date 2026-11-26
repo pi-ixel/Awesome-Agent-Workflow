@@ -25,7 +25,7 @@ import { createProjectViewNavigation } from "./bindings/workbenchNavigation.ts";
 import { createProjectSidebarState } from "./sidebarState.ts";
 import { openAnnotation } from "../conversation/ui/openAnnotation.ts";
 import type { ConversationDocumentView } from "../conversation/ui/documentView.ts";
-import { formatRemoteProjectPath, insidePath, parseRemoteProjectPath } from "../../../shared/panelPaths.ts";
+import { formatRemoteProjectPath, insidePath, parseRemoteProjectPath, projectFolderPath } from "../../../shared/panelPaths.ts";
 
 export const name = "project-workbench";
 export const inject = ["project", "workbench", "agents", "host", "diagnostics"];
@@ -196,7 +196,7 @@ export function apply(ctx: Context): void {
             verifyRelativeFile: async (root, path) => {
               if (!insidePath(root, path)) return null;
               try {
-                const [directory, entry] = await Promise.all([stat(root), stat(path)]);
+                const [directory, entry] = await Promise.all([stat(projectFolderPath(root)), stat(path)]);
                 return isCurrent() && directory.directory && !entry.directory &&
                   insidePath(directory.path, entry.path) ? entry.path : null;
               } catch {
@@ -207,7 +207,7 @@ export function apply(ctx: Context): void {
             ownsFindShortcut: (event) => documents.fileFind.owner(event) !== null,
             fileCandidates: {
               isActive: () => documents.isActive(),
-              listWorkspaceFiles: (path) => documents.listWorkspaceFiles(path),
+              listWorkspaceFiles: (path) => documents.listWorkspaceFiles(projectFolderPath(path)),
             },
           },
         });

@@ -1,3 +1,4 @@
+import { projectFolderPath } from "../../shared/panelPaths.ts";
 /**
  * workflow 插件入口（ADR 024 §4）。
  *
@@ -146,7 +147,7 @@ export function apply(ctx: Context): void {
         const loaded = links.workspace !== null && pathKey(links.workspace) === pathKey(workspacePath);
         const known = links.runs.some((run) => run.status !== "completed" && run.links.some((link) => link.sessionId === sessionId));
         if (loaded && !known) return [];
-        const raw = await client.request("session-tools", { cwd: workspacePath, sessionId }).catch(() => null);
+        const raw = await client.request("session-tools", { cwd: projectFolderPath(workspacePath), sessionId }).catch(() => null);
         const offer = asResultChannelOffer(raw);
         return offer ? [resultChannelServer(offer, agentSupportsHttpMcp(agent))] : [];
       }),

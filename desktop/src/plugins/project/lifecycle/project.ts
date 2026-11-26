@@ -426,9 +426,9 @@ export class DesktopProject {
 
   registerProject(
     ...args: Parameters<ProjectWorkspace["registerProject"]>
-  ): void {
+  ): string {
     this.assertOpen();
-    this.operations.registerProject(...args);
+    return this.operations.registerProject(...args);
   }
 
   beginDraft(path: string) {

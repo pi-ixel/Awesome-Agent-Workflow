@@ -86,7 +86,7 @@ describe("useWorkspaceStore", () => {
   it("主目录配置与项目列表一并保存，关联目录不进入最近项目", () => {
     const related = "D:/dev/library";
     const state = useWorkspaceStore.getState();
-    state.registerProject(DEMO_PATH, {
+    const project = state.registerProject(DEMO_PATH, {
       name: "Demo",
       relatedPaths: [related, "d:/DEV/library/", DEMO_PATH],
     });
@@ -95,14 +95,37 @@ describe("useWorkspaceStore", () => {
     useWorkspaceStore.setState({ recentWorkspaces: [], projectFolders: {} });
     state.hydrateFromStorage();
     expect(
-      useWorkspaceStore.getState().projectFolders?.["d:/dev/demo"],
+      useWorkspaceStore.getState().projectFolders?.[project],
     ).toEqual({ name: "Demo", relatedPaths: [related] });
     expect(
       useWorkspaceStore.getState().recentWorkspaces.map((entry) => entry.path),
-    ).toContain(DEMO_PATH);
+    ).toContain(project);
     expect(
       useWorkspaceStore.getState().recentWorkspaces.map((entry) => entry.path),
     ).not.toContain(related);
+  });
+
+  it("同一个主目录可以注册不同项目，创建和编辑都拒绝重复目录组合", () => {
+    const state = useWorkspaceStore.getState();
+    const related = ["D:/dev/library", "D:/dev/docs"];
+    const single = state.registerProject(DEMO_PATH, { name: "单目录", relatedPaths: [] });
+    const group = state.registerProject(DEMO_PATH, { name: "多目录", relatedPaths: related });
+    expect(group).not.toBe(single);
+    expect(() => state.registerProject("d:/DEV/demo/", {
+      name: "重复",
+      relatedPaths: ["d:/DEV/DOCS/", "d:/DEV/LIBRARY"],
+    })).toThrow("组合已有项目");
+    expect(() => state.updateProjectFolders(group, { name: "重复", relatedPaths: [] }))
+      .toThrow("组合已有项目");
+    expect(useWorkspaceStore.getState().projectFolders?.[group]?.relatedPaths).toEqual(related);
+    state.updateProjectFolders(group, { name: "编辑后", relatedPaths: [related[0]!] });
+    expect(useWorkspaceStore.getState().projectFolders?.[group])
+      .toEqual({ name: "编辑后", relatedPaths: [related[0]] });
+    state.removeFromRecent(group);
+    expect(useWorkspaceStore.getState().recentWorkspaces.map(({ path }) => path)).toEqual([single]);
+    state.hydrateFromStorage();
+    expect(state.registerProject(DEMO_PATH, { name: "重新添加", relatedPaths: [related[0]!] }))
+      .toBe(group);
   });
 
   it("置顶切换与移除（语义自收藏迁移，数据同源）", () => {
