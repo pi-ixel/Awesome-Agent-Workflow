@@ -34,7 +34,8 @@ export function FileMarkdownPreview(
   }, [props.text]);
   return (
     <div ref={root} className="p-4">
-      <MarkdownView {...props} />
+      {/* Agent 写进 .md 的讲解图在预览里同样渲染（含带脚本的沙箱图） */}
+      <MarkdownView {...props} canUseCodeRenderers />
     </div>
   );
 }

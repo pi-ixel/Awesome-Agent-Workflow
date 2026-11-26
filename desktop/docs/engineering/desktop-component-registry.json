@@ -1137,6 +1137,22 @@
       "updateSettings/\"updates\"/View → (inline)"
     ]
   },
+  "plugins/visual/render/VisualBlock.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["FrameVisual", "InlineVisual", "VisualBlock", "VisualBody"],
+      "命令按钮": ["VisualActions"],
+      "状态与统计": ["VisualPending"]
+    },
+    "targets": []
+  },
+  "plugins/visual/ui/workbench.tsx": {
+    "definitions": {
+      "内容与专用绘制": ["apply/VisualBlockView"]
+    },
+    "targets": [
+      "apply/markdownCodeRenderers/\"visual\"/View → plugins/visual/ui/workbench.tsx#apply/VisualBlockView"
+    ]
+  },
   "plugins/workbench/composition/workbench.ts": {
     "definitions": {},
     "targets": [
@@ -1852,6 +1868,7 @@
         "CircleHelpIcon",
         "ClipboardPasteIcon",
         "ClockIcon",
+        "CodeIcon",
         "CopyIcon",
         "CornerDownRightIcon",
         "DatabaseIcon",
@@ -1949,6 +1966,12 @@
   "shared/ui/markdown/MermaidBlock.tsx": {
     "definitions": {
       "内容与专用绘制": ["MermaidBlock"]
+    },
+    "targets": []
+  },
+  "shared/ui/markdown/codeRenderers.ts": {
+    "definitions": {
+      "布局与操纵": ["MarkdownCodeRenderers"]
     },
     "targets": []
   },

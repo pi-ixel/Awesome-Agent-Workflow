@@ -12,6 +12,7 @@ import * as updates from "../plugins/updates/index.ts";
 import * as documents from "../plugins/documents/index.ts";
 import * as browser from "../plugins/browser/index.ts";
 import * as remoteProject from "../plugins/remoteProject/index.ts";
+import * as visual from "../plugins/visual/index.ts";
 
 /** Main-window composition. Each feature registers through the workbench contract. */
 export async function installDesktopWorkbench(context: Context): Promise<void> {
@@ -28,4 +29,5 @@ export async function installDesktopWorkbench(context: Context): Promise<void> {
   await documents.installWorkbench(context);
   await browser.installWorkbench(context);
   await remoteProject.installWorkbench(context);
+  await visual.installWorkbench(context);
 }
