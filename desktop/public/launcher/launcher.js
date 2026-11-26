@@ -207,15 +207,20 @@ function conflictHint(value) {
   return `${value.replace("Control", "Ctrl")} 在大多数应用里是「${action}」；设为全局唤起键后，那些地方会变成打开 AAW。想避开就再加一个 Shift 或 Alt。`;
 }
 /** 把 KeyboardEvent.code 映射成 Electron accelerator 的主键；返回空串表示不能当主键。 */
-function acceleratorKey(code) {
+function acceleratorKey(code, key) {
   if (code === "Space") return "Space";
   if (/^Key[A-Z]$/.test(code)) return code.slice(3);
   if (/^Digit\d$/.test(code)) return code.slice(5);
   if (/^F(?:[1-9]|1[0-9]|2[0-4])$/.test(code)) return code;
+  // 某些 Windows 输入设备只提供 key，例如只发送虚拟键的辅助输入设备。
+  if (code && code !== "Unidentified") return "";
+  if (key === " ") return "Space";
+  if (/^(?:[a-zA-Z0-9]|F(?:[1-9]|1[0-9]|2[0-4]))$/.test(key))
+    return key.toUpperCase();
   return "";
 }
 function shortcutFromEvent(event) {
-  const key = acceleratorKey(event.code);
+  const key = acceleratorKey(event.code, event.key);
   if (!key)
     return { error: "这个键不能作为主键，请用字母、数字、空格或 F1–F24。" };
   const modifiers = [
@@ -286,27 +291,23 @@ function settings(visible) {
   if (visible) {
     if (!acceleratorDirty) $("accelerator").value = savedShortcut;
     hint("");
-    // 不自动聚焦：打开设置页不等于开始录制。用户点一下录制框才让出全局热键，
-    // 这样"设置页开着"和"正在录"是两件事——后者才需要热键让位。
+    // 点击录制框后才开始录制，设置页打开时仍可用快捷键收起启动器。
   } else {
-    releaseGlobalShortcut(false);
+    setShortcutCapture(false);
     query.focus();
   }
 }
 /**
- * 录制期间把全局热键让出来。
- *
- * 不让的话，用户按下的第一下往往就是当前生效的那组键（最常见就是 Alt+Space）：
- * 全局热键抢先一步把窗口关掉，用户看到的是界面消失，而不是录进输入框。
+ * 录制期间由宿主把当前全局快捷键回送到录制框。
  *
  * 让出的范围只跟录制框的焦点走，不是整个设置页——用户点开设置页只是想看看，
  * 或者把光标挪到别处时，仍然要能按快捷键把这个面板唤出/收回。窗口被隐藏时
  * 主进程会兜底恢复，渲染进程没发出去也不会把热键永久弄丢。
  */
-function releaseGlobalShortcut(active) {
+function setShortcutCapture(active) {
   try {
     const result = window.launcher.capture?.(active);
-    // 通知失败不该冒成未处理的 rejection：热键由主进程在 hide 时兜底恢复。
+    // 宿主失焦时会退出录制，IPC 报错不应影响页面的按键处理。
     if (result?.catch) result.catch(() => {});
   } catch {
     /* 旧版 preload 没有这个方法，录制仍然可用 */
@@ -352,11 +353,8 @@ $("shortcut").addEventListener("click", () => settings(true));
 $("accelerator").addEventListener("input", () => {
   acceleratorDirty = true;
 });
-// 让位只覆盖"正在录制"这一小段时间：选中录制框时全局热键失效，否则用户按下的
-// 第一下就会被自己正在生效的快捷键收走，录不进去；点到别处（保存按钮、空白处）
-// 立刻还回去，这样设置页开着也能用快捷键把面板唤出或收回。
-$("accelerator").addEventListener("focus", () => releaseGlobalShortcut(true));
-$("accelerator").addEventListener("blur", () => releaseGlobalShortcut(false));
+$("accelerator").addEventListener("focus", () => setShortcutCapture(true));
+$("accelerator").addEventListener("blur", () => setShortcutCapture(false));
 // 快捷键用"按下组合键"捕获，而不是让用户默写字符串——之前拼错只能等保存后看报错。
 $("accelerator").addEventListener("keydown", (event) => {
   if (!settingsOpen) return;
@@ -445,10 +443,10 @@ document.addEventListener("keydown", (event) => {
 });
 window.addEventListener("resize", render);
 window.launcher.onRefresh(() => void refresh());
-// Alt+Space 是 Windows 的系统菜单键，页面的 keydown 收不到那一下 Space；
-// 主进程接住之后把组合键回送过来，用户才能把快捷键改回默认那一组。
+// 宿主将已注册的快捷键回送给录制框，包含 Windows 的 Alt+Space 系统菜单键。
 window.launcher.onShortcutPressed?.((value) => {
-  if (!settingsOpen || typeof value !== "string") return;
+  if (document.activeElement !== $("accelerator") || typeof value !== "string")
+    return;
   $("accelerator").value = value;
   acceleratorDirty = true;
   hint("");

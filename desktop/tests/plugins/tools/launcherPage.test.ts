@@ -181,7 +181,7 @@ it("keeps the settings page and the accelerator draft across a hide/show cycle",
   expect(accelerator.value).toBe("Ctrl+Alt+K");
 });
 
-it("only yields the global shortcut while the capture field is selected", async () => {
+it("only enters shortcut capture while the recording field is focused", async () => {
   const { launcher } = boot();
   await vi.waitFor(() => expect(launcher.entries).toHaveBeenCalled());
   const accelerator = document.getElementById(
@@ -193,19 +193,19 @@ it("only yields the global shortcut while the capture field is selected", async 
   expect(document.activeElement).not.toBe(accelerator);
   expect(launcher.capture).not.toHaveBeenCalledWith(true);
 
-  // 点一下录制框才算选中：这一刻热键必须让开，否则第一下按下去就被自己的快捷键关掉窗口。
+  // 录制时由宿主把当前快捷键送回输入框。
   accelerator.focus();
   await vi.waitFor(() =>
     expect(launcher.capture).toHaveBeenLastCalledWith(true),
   );
 
-  // 焦点离开（保存按钮、空白处）：设置页还开着，热键要立刻回来。
+  // 输入框失焦后，快捷键恢复唤起和收起小窗的用途。
   accelerator.blur();
   await vi.waitFor(() =>
     expect(launcher.capture).toHaveBeenLastCalledWith(false),
   );
 
-  // 离开设置页也必须还回来，否则用户的全局热键就永久丢了。
+  // 离开设置页时也要退出录制。
   document.getElementById("settings-close")!.click();
   expect(launcher.capture).toHaveBeenLastCalledWith(false);
 });
@@ -239,6 +239,9 @@ it("captures the accelerator from real key presses and refuses one without a mod
 
   press({ key: " ", code: "Space", ctrlKey: true });
   expect(accelerator.value).toBe("Control+Space");
+
+  press({ key: "F11", ctrlKey: true, shiftKey: true });
+  expect(accelerator.value).toBe("Control+Shift+F11");
 
   // 本地校验不过就不发 IPC。
   accelerator.value = "随便写的";
@@ -420,7 +423,7 @@ it("does not scold the user for pressing a modifier alone before the main key", 
   expect(accelerator.value).toBe("Alt+Space");
 });
 
-it("accepts the Alt+Space the main process catches, since Windows swallows it", async () => {
+it("records the Alt+Space forwarded by the host only while the field is focused", async () => {
   const { launcher, pressShortcut } = boot();
   await vi.waitFor(() => expect(launcher.entries).toHaveBeenCalled());
   document.getElementById("settings-open")!.click();
@@ -428,6 +431,11 @@ it("accepts the Alt+Space the main process catches, since Windows swallows it", 
     "accelerator",
   ) as HTMLInputElement;
 
+  accelerator.value = "Ctrl+Alt+K";
+  pressShortcut("Alt+Space");
+  expect(accelerator.value).toBe("Ctrl+Alt+K");
+
+  accelerator.focus();
   pressShortcut("Alt+Space");
   expect(accelerator.value).toBe("Alt+Space");
 

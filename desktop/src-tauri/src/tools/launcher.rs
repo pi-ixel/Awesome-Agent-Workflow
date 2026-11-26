@@ -34,8 +34,7 @@ use super::ToolsHost;
 /// 启动器窗口的 label。固定一个，复用同一个窗口。
 const LABEL: &str = "launcher";
 
-/// 是否正在录快捷键。录制期间要让出全局热键，否则用户按下的第一下就是当前
-/// 生效的那组，窗口被自己关掉、根本录不进去。
+/// 录制期间，已注册的全局快捷键会回送给录制框。
 pub struct LauncherState {
     capturing: AtomicBool,
     shortcut: Mutex<String>,
@@ -183,6 +182,10 @@ pub fn show(app: &AppHandle, toggle: bool) -> Result<(), String> {
             let handle = app.clone();
             window.on_window_event(move |event| {
                 if matches!(event, tauri::WindowEvent::Focused(false)) {
+                    handle
+                        .state::<LauncherState>()
+                        .capturing
+                        .store(false, Ordering::Relaxed);
                     if let Some(window) = handle.get_webview_window(LABEL) {
                         let _ = window.hide();
                     }
@@ -307,19 +310,12 @@ pub fn launcher_shortcut(window: tauri::WebviewWindow, app: AppHandle, value: St
     Ok(json!({ "shortcut": next, "shortcutReady": true }))
 }
 
-/// 录制期间让出全局热键。`active=false` 时恢复。
+/// 录制期间仍注册当前热键，避免 Windows 将 Alt+Space 作为系统菜单键处理。
 #[tauri::command]
 pub fn launcher_capture(window: tauri::WebviewWindow, app: AppHandle, active: bool) -> Result<(), String> {
     ensure_launcher(&window)?;
     let state = app.state::<LauncherState>();
     state.capturing.store(active, Ordering::Relaxed);
-    use tauri_plugin_global_shortcut::GlobalShortcutExt;
-    let current = state.shortcut();
-    if active {
-        let _ = app.global_shortcut().unregister(current.as_str());
-    } else {
-        let _ = app.global_shortcut().register(current.as_str());
-    }
     Ok(())
 }
 
@@ -391,7 +387,7 @@ pub fn apply_shortcut(app: &AppHandle, value: &str) -> Result<(), String> {
     }
     let shortcuts = app.global_shortcut();
     if shortcuts.register(value).is_err() {
-        // 从录制框内按 Enter 保存时，原快捷键可能仍处于临时让出状态。
+        // 新键注册失败后，确认原键仍可用。
         let restored = shortcuts.is_registered(previous.as_str())
             || shortcuts.register(previous.as_str()).is_ok();
         state.ready.store(restored, Ordering::Relaxed);
@@ -448,13 +444,16 @@ pub fn on_hotkey(app: &AppHandle) {
     // 录制中：把这一下回送给页面，不 toggle（toggle 会把窗口关掉）。
     if state.capturing.load(Ordering::Relaxed) {
         let value = state.shortcut();
-        if let Some(window) = app.get_webview_window(LABEL) {
+        if let Some(window) = app
+            .get_webview_window(LABEL)
+            .filter(|window| window.is_focused().unwrap_or(false))
+        {
             let _ = window.eval(format!(
                 "window.__launcherShortcut && window.__launcherShortcut({})",
                 serde_json::to_string(&value).unwrap_or_else(|_| "\"\"".into())
             ));
+            return;
         }
-        return;
     }
     if let Err(error) = show(app, true) {
         eprintln!("[aaw-tools] 显示启动器失败：{error}");
