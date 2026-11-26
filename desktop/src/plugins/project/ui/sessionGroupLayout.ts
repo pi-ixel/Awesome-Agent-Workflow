@@ -102,6 +102,7 @@ export function prioritizeStarredSessions(
   starred.sort((left, right) => updated(right.session) - updated(left.session));
   return {
     visible: [...starred, ...ordinary.slice(0, limit)],
+    ordinaryCount: ordinary.length,
     hiddenCount: Math.max(0, ordinary.length - limit),
   };
 }

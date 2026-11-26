@@ -3,7 +3,6 @@ import { fieldSurfaceClass } from "../../../shared/ui/inputStyles.ts";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { ConfirmIconAction } from "../../../shared/ui/ConfirmIconAction.tsx";
 import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
-import { TextLink } from "../../../shared/ui/TextLink.tsx";
 import { TreeBranch, treeChevronClass } from "../../../shared/ui/TreeMotion.tsx";
 import { useSessionValue } from "./bindings/conversationView.ts";
 import { useWorkspaceCommands, useWorkspaceValue } from "./bindings/workspaceView.ts";
@@ -1096,6 +1095,7 @@ function ProjectChildren({
   const limit = useProjectSidebarValue(
     (state) => state.sessionListLimits[path] ?? SESSION_LIST_PAGE_SIZE,
   );
+  const collapseSessionList = useProjectSidebarValue((state) => state.collapseSessionList);
   const expandSessionList = useProjectSidebarValue(
     (state) => state.expandSessionList,
   );
@@ -1154,7 +1154,7 @@ function ProjectChildren({
   }
   // 分页呈现：默认最近 SESSION_LIST_PAGE_SIZE 条，「加载更多」逐页纳新；
   // 只裁显示不裁数据——store 仍持有全量列表，连接回填不受影响
-  const { visible, hiddenCount } = prioritizeStarredSessions(
+  const { visible, hiddenCount, ordinaryCount } = prioritizeStarredSessions(
     items,
     (id) => starredSessions.includes(sessionPinKey(path, id, owner)),
     limit,
@@ -1185,17 +1185,26 @@ function ProjectChildren({
           </Fragment>
         ),
       )}
-      {hiddenCount > 0 ? (
+      {ordinaryCount > SESSION_LIST_PAGE_SIZE ? (
         <li>
-          <TextLink
-            aria-label={`加载更多会话（还有 ${hiddenCount} 条）`}
+          <NavigationRow
+            layout="tree"
             onClick={() => {
-              expandSessionList(path);
+              if (hiddenCount > 0) expandSessionList(path);
+              else collapseSessionList(path);
             }}
-            className="ml-8.5 text-ui-base"
+            className="text-ink-subtle hover:text-ink"
           >
-            加载更多 · 还有 {hiddenCount} 条
-          </TextLink>
+            {hiddenCount > 0 ? (
+              <CornerDownRightIcon className="ui-icon-14 ml-3 shrink-0" />
+            ) : (
+              <ChevronRightIcon className="ui-icon-14 ml-3 shrink-0 -rotate-90" />
+            )}
+            <span>{hiddenCount > 0 ? "展开其余会话" : `收起至最近 ${SESSION_LIST_PAGE_SIZE} 条`}</span>{" "}
+            <span className="ml-auto mr-2 text-ui-xs tabular-nums">
+              {hiddenCount > 0 ? `+${hiddenCount}` : `共 ${visible.length}`}
+            </span>
+          </NavigationRow>
         </li>
       ) : null}
       <li></li>
