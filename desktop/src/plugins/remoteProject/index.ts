@@ -19,7 +19,6 @@ import { createRemoteProjectStore } from "./store/remoteProjectStore.ts";
 import { createRemoteDocumentFileProvider } from "./fs/remoteFileProvider.ts";
 import { createRemoteGitProvider } from "./git/remoteGitProvider.ts";
 import * as workbenchUi from "./ui/workbench.tsx";
-import { parseRemoteProjectPath } from "../../shared/panelPaths.ts";
 
 export const name = "remoteProject";
 export const inject = ["host", "diagnostics"];
@@ -36,14 +35,16 @@ export function apply(ctx: Context): void {
     listProjectsForConnection: store.listProjectsForConnection,
     addProject: store.addProject,
     saveProjectGroup: store.saveProjectGroup,
-    async repairProject(path, connectionId) {
-      const target = parseRemoteProjectPath(path);
-      if (!target || store.getById(target.projectId)) {
-        throw new Error("该项目无需修复，请重新打开项目");
-      }
-      const entry = await service.stat(connectionId, target.remotePath);
-      if (!entry.directory) throw new Error("原远端路径不是目录");
-      return store.addProject(connectionId, target.remotePath, undefined, path);
+    repairProject(path, connectionId, relatedPaths = []) {
+      return store.repairProjectGroup(
+        path,
+        connectionId,
+        relatedPaths,
+        async (root) => {
+          const entry = await service.stat(connectionId, root);
+          if (!entry.directory) throw new Error(`原远端路径不是目录：${root}`);
+        },
+      );
     },
     removeProjectByPath: store.removeProjectByPath,
     recordRecentDir: store.recordRecentDir,

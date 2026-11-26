@@ -4,6 +4,7 @@ import { createStore, useStore } from "zustand";
 import { ActionButton } from "../../../shared/ui/controls.tsx";
 import {
   pathKey,
+  insidePath,
   isRemoteProjectPath,
   normalizePath,
   projectFolderPath,
@@ -51,21 +52,22 @@ export function apply(ctx: Context): void {
       !current()
     )
       return false;
-    const local = deviceId === "local";
-    const existing = local ? undefined : findRemoteFolder(deviceId, primary);
-    const relatedPaths = local ? related : related.map((root) => findRemoteFolder(deviceId, root)?.workspacePath);
-    if (existing && relatedPaths.every((path): path is string => path !== undefined) &&
-        project.projects.findProjectByFolders(existing.workspacePath, relatedPaths)) {
-      throw new Error("这个主目录和关联目录的组合已有项目");
+    let path: string | undefined;
+    if (deviceId === "local") {
+      path = project.projects.registerProject(primary, { name, relatedPaths: related });
+    } else {
+      const existing = findRemoteFolder(deviceId, primary);
+      await remoteProject.saveProjectGroup(
+        deviceId, primary, existing?.name ?? name, related, undefined,
+        async ({ record, relatedPaths }, configuration, publishBinding) => {
+          if (!current()) throw new Error("项目工作区已关闭");
+          path = await project.projects.saveProjectFolders(
+            record.workspacePath, { name, relatedPaths }, { configuration, publishBinding },
+          );
+        },
+      );
     }
-    const remote = local ? undefined : await remoteProject.saveProjectGroup(
-      deviceId, primary, existing?.name ?? name, related,
-    );
-    if (!current()) return false;
-    const path = project.projects.registerProject(remote?.record.workspacePath ?? primary, {
-      name,
-      relatedPaths: remote?.relatedPaths ?? related,
-    });
+    if (!path || !current()) return false;
     workbench.navigation.getState().openView("project-overview", path, current);
     void project.sessions.preloadSessionList(path);
     return true;
@@ -111,23 +113,19 @@ export function apply(ctx: Context): void {
       },
       onSave: async (_, name, _primary, related) => {
         if (!project.isActive()) return false;
-        const candidates = related.map((root) => findRemoteFolder(deviceId, root)?.workspacePath);
-        if (record && candidates.every((entry): entry is string => entry !== undefined) &&
-            project.projects.findProjectByFolders(path, candidates, path)) {
-          throw new Error("这个主目录和关联目录的组合已有项目");
+        if (record) {
+          await remoteProject.saveProjectGroup(
+            deviceId, record.remoteRoot, record.name, related, record.workspacePath,
+            async ({ relatedPaths }, configuration, publishBinding) => {
+              if (!project.isActive()) throw new Error("项目工作区已关闭");
+              await project.projects.saveProjectFolders(path, { name, relatedPaths }, {
+                edit: true, configuration, publishBinding,
+              });
+            },
+          );
+          return project.isActive();
         }
-        const stored = record
-          ? await remoteProject.saveProjectGroup(
-              deviceId,
-              record.remoteRoot,
-              record.name,
-              related,
-              record.workspacePath,
-            )
-          : undefined;
-        if (!project.isActive()) return false;
-        const relatedPaths = stored?.relatedPaths ?? related;
-        project.projects.updateProjectFolders(path, { name, relatedPaths });
+        project.projects.updateProjectFolders(path, { name, relatedPaths: related });
         return true;
       },
     });
@@ -145,6 +143,20 @@ export function apply(ctx: Context): void {
     },
   };
   ctx.provide("remoteProjectUi", ui);
+
+  ctx.effect(
+    () => workbench.register("pathScopes", {
+      id: "remote-project-folders",
+      associatedRoot(projectPath, target) {
+        const primary = remoteProject.getByPath(projectPath);
+        if (!primary) return undefined;
+        const folders = project.projects.workspace.getState().projectFolders?.[pathKey(projectPath)];
+        return folders?.relatedPaths.find((root) => insidePath(root, target) &&
+          remoteProject.getByPath(root)?.connectionId === primary.connectionId);
+      },
+    }),
+    "remoteProject:path-scope",
+  );
 
   ctx.effect(
     () =>
@@ -193,10 +205,13 @@ export function apply(ctx: Context): void {
 
   function RemoteProjectModalOverlay() {
     const { open, repairPath } = useStore(modal);
+    const repairRelatedPaths = useStore(project.projects.workspace, (state) =>
+      repairPath ? state.projectFolders?.[pathKey(repairPath)]?.relatedPaths : undefined);
     if (!open) return null;
     const onSave = repairPath
       ? async (deviceId: string) => {
-          await remoteProject.repairProject(repairPath, deviceId);
+          await remoteProject.repairProject(repairPath, deviceId, repairRelatedPaths);
+          void project.sessions.preloadSessionList(repairPath, true);
           workbench.showToast({
             message: "连接已修复，可刷新文件树",
             variant: "ok",
@@ -207,6 +222,7 @@ export function apply(ctx: Context): void {
     return createElement(AddRemoteProjectModal, {
       service: remoteProject,
       repairPath,
+      repairRelatedPaths,
       onClose: () => modal.setState({ open: false, repairPath: undefined }),
       onSave,
       onPickLocalDirectory,
@@ -216,14 +232,15 @@ export function apply(ctx: Context): void {
 
   function RemoteProjectRecovery() {
     const path = useStore(workbench.navigation, (state) => state.contextPath);
-    const projectId = path
-      ? parseRemoteProjectPath(path)?.projectId
-      : undefined;
+    const related = useStore(project.projects.workspace, (state) =>
+      path ? state.projectFolders?.[pathKey(path)]?.relatedPaths : undefined);
     const isMissing = useStore(
       remoteProject.projects,
       (state) =>
-        !!projectId &&
-        !state.records.some((record) => record.projectId === projectId),
+        !!path && isRemoteProjectPath(path) && [path, ...(related ?? [])].some((folder) => {
+          const id = parseRemoteProjectPath(folder)?.projectId;
+          return id !== undefined && !state.records.some((record) => record.projectId === id);
+        }),
     );
     if (!path || !isMissing) return null;
     return (

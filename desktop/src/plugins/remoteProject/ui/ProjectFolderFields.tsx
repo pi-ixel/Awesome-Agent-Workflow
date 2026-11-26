@@ -27,7 +27,7 @@ export function ProjectFolderFields({
   readonly hideName?: boolean;
   readonly disabled: boolean;
   readonly onNameChange: (name: string) => void;
-  readonly onFoldersChange: (folders: readonly string[]) => void;
+  readonly onFoldersChange?: (folders: readonly string[]) => void;
   readonly onPick?: () => void;
 }) {
   return (
@@ -84,7 +84,7 @@ export function ProjectFolderFields({
                   <span className="shrink-0 rounded-pill bg-raised px-2 py-1 text-ui-caption text-ink-mute">
                     主要
                   </span>
-                ) : !isEditing ? (
+                ) : !isEditing && onFoldersChange ? (
                   <ActionButton
                     type="button"
                     tone="secondary"
@@ -101,7 +101,7 @@ export function ProjectFolderFields({
                     设为主要
                   </ActionButton>
                 ) : null}
-                {(!isEditing || index > 0) && (
+                {onFoldersChange && (!isEditing || index > 0) && (
                   <IconButton
                     type="button"
                     iconSize="compact"

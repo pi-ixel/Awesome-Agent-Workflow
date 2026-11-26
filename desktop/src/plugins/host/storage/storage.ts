@@ -56,6 +56,7 @@ function createNativeRecords(
   let pending = new Map<string, string | null>();
   const inFlight = new Map<string, string | null>();
   let writer: Promise<void> | undefined;
+  let confirmed: Promise<void> | undefined;
   let loading: Promise<void> | undefined;
   const status = createStore(() => ({ error: "", saving: false }));
 
@@ -83,7 +84,9 @@ function createNativeRecords(
   }
 
   function flush(): void | Promise<void> {
-    if (!isTauri() || (!pending.size && !writer)) return;
+    if (!isTauri()) return;
+    if (confirmed) return confirmed.catch(() => {}).then(() => flush());
+    if (!pending.size && !writer) return;
     writer ??= (async () => {
       status.setState({ saving: true });
       await load();
@@ -113,19 +116,43 @@ function createNativeRecords(
     return writer;
   }
 
+  function writeConfirmed(changes: Readonly<Record<string, string>>): Promise<void> {
+    const previous = confirmed ?? writer;
+    const task = Promise.resolve(previous).catch(() => {}).then(async () => {
+      await load();
+      if (!persisted) throw new Error(status.getState().error || "配置存储未就绪");
+      const replaced = new Map<string, string | null>();
+      for (const key of Object.keys(changes)) {
+        if (pending.has(key)) {
+          replaced.set(key, pending.get(key) ?? null);
+          pending.delete(key);
+        }
+      }
+      try {
+        await invoke("storage_configuration_write", { changes, conversationText });
+      } catch (error) {
+        pending = new Map([...replaced, ...pending]);
+        throw error;
+      }
+      Object.assign(persisted, changes);
+      for (const key of Object.keys(changes)) {
+        if (!pending.has(key)) inFlight.delete(key);
+      }
+      if (!pending.size) status.setState({ error: "" });
+    }).finally(() => {
+      if (confirmed !== task) return;
+      confirmed = undefined;
+      void flush();
+    });
+    confirmed = task;
+    return task;
+  }
+
   return {
     load,
     flush,
     status,
-    async writeConfirmed(key: string, value: string) {
-      await load();
-      if (!persisted) throw new Error(status.getState().error || "配置存储未就绪");
-      await invoke("storage_configuration_write", {
-        changes: { [key]: value },
-        conversationText,
-      });
-      persisted[key] = value;
-    },
+    writeConfirmed,
     getItem(key: string) {
       if (inFlight.has(key)) return inFlight.get(key) ?? null;
       return persisted ? (persisted[key] ?? null) : localStorage.getItem(key);
@@ -200,6 +227,27 @@ function change(key: string, value: string | null): void {
   else localStorage.setItem(key, value);
 }
 
+async function setConfigurationItems(changes: Readonly<Record<string, string>>): Promise<void> {
+  const keys = Object.keys(changes);
+  if (keys.some((key) => !isNativeConfigurationKey(key)))
+    throw new Error("未登记的配置键");
+  if (isTauri()) return configuration.writeConfirmed(changes);
+  const previous = new Map<string, string | null>();
+  try {
+    for (const key of keys) {
+      const old = localStorage.getItem(key);
+      localStorage.setItem(key, changes[key]!);
+      previous.set(key, old);
+    }
+  } catch (error) {
+    for (const [key, value] of [...previous].reverse()) {
+      if (value === null) localStorage.removeItem(key);
+      else localStorage.setItem(key, value);
+    }
+    throw error;
+  }
+}
+
 export const webviewStorage: HostStorage = {
   managed: desktopManagedStorage,
   getItem(key) {
@@ -212,9 +260,8 @@ export const webviewStorage: HostStorage = {
       localStorage.setItem(key, value);
       return;
     }
-    if (!isNativeConfigurationKey(key)) throw new Error("未登记的配置键");
-    if (isTauri()) await configuration.writeConfirmed(key, value);
-    else localStorage.setItem(key, value);
+    await setConfigurationItems({ [key]: value });
   },
+  setConfigurationItems,
   removeItem: (key) => change(key, null),
 };

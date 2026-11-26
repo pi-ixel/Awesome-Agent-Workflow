@@ -51,6 +51,7 @@ const empty: WorkbenchSnapshot = {
   settingsReset: [],
   pathResolvers: [],
   pathInspectors: [],
+  pathScopes: [],
   markdownCodeRenderers: [],
 };
 
@@ -221,13 +222,24 @@ export class DesktopWorkbench implements WorkbenchService {
   ) => {
     const resolvers = this.snapshot.pathResolvers;
     const inspectors = this.snapshot.pathInspectors;
+    const scopes = this.snapshot.pathScopes;
     const active = () => !this.disposed && isCurrent() &&
-      this.snapshot.pathInspectors === inspectors && this.snapshot.pathResolvers === resolvers;
+      this.snapshot.pathInspectors === inspectors && this.snapshot.pathResolvers === resolvers &&
+      this.snapshot.pathScopes === scopes;
     if (!active() || !resolvers.length) return false;
     try {
       const address = workspaceTargetPath(project, path);
-      if (!address) throw new Error("此路径不属于当前远程主机");
-      const target = await this.inspectPath(address, options?.root);
+      let associatedRoot: string | undefined;
+      if (!address) {
+        for (const scope of scopes) {
+          associatedRoot = scope.associatedRoot(project, path);
+          if (associatedRoot) break;
+        }
+        if (!associatedRoot) throw new Error("此路径不属于当前远程主机");
+      }
+      if (associatedRoot && options?.root && !insidePath(associatedRoot, options.root))
+        throw new Error("此路径超出会话工作目录");
+      const target = await this.inspectPath(address ?? path, options?.root ?? associatedRoot);
       if (!active()) return false;
       const choices = resolvers.filter((entry) => entry.supports(target));
       if (!choices.length) throw new Error("没有可打开此目标的插件");
@@ -294,13 +306,13 @@ export class DesktopWorkbench implements WorkbenchService {
       throw new Error(
         `Duplicate workbench registration: ${slot}/${contribution.id}`,
       );
-    if (slot === "pathResolvers" || slot === "pathInspectors") this.cancelPathChoice?.();
+    if (slot === "pathResolvers" || slot === "pathInspectors" || slot === "pathScopes") this.cancelPathChoice?.();
     this.update({ ...this.snapshot, [slot]: [...entries, contribution] });
     let released = false;
     return () => {
       if (released || this.disposed) return;
       released = true;
-      if (slot === "pathResolvers" || slot === "pathInspectors") this.cancelPathChoice?.();
+      if (slot === "pathResolvers" || slot === "pathInspectors" || slot === "pathScopes") this.cancelPathChoice?.();
       if (slot === "docks") this.navigation.getState().closeDock(contribution.id);
       const current: readonly WorkbenchContributions[Slot][] =
         this.snapshot[slot];

@@ -29,6 +29,37 @@ function createMemoryStorage(): HostStorage {
 }
 
 describe("remoteProjectStore & remote path isolation", () => {
+  it("按原 ID 修复整个目录组，校验或确认写盘失败时不发布部分记录", async () => {
+    const disk = createMemoryStorage();
+    const confirm = vi.fn((key: string, value: string) => Promise.resolve(disk.setItem(key, value)));
+    const storage = { ...disk, setConfigurationItem: confirm };
+    const store = createRemoteProjectStore(storage, createLogger("test"));
+    const primary = formatRemoteProjectPath("rp_main", "/srv/app");
+    const child = formatRemoteProjectPath("rp_library", "/srv/library");
+    const check = vi.fn((root: string) => root === "/srv/library"
+      ? Promise.reject(new Error("关联目录不可访问")) : Promise.resolve());
+    await expect(store.repairProjectGroup(primary, "ssh", [child], check)).rejects.toThrow("关联目录不可访问");
+    expect(confirm).not.toHaveBeenCalled();
+    expect(store.snapshot.getState().records).toEqual([]);
+    const accessible = () => Promise.resolve();
+    confirm.mockRejectedValueOnce(new Error("写盘失败"));
+    await expect(store.repairProjectGroup(primary, "ssh", [child], accessible)).rejects.toThrow("写盘失败");
+    expect(store.snapshot.getState().records).toEqual([]);
+    await store.repairProjectGroup(primary, "ssh", [child], accessible);
+    store.dispose();
+
+    const reopened = createRemoteProjectStore(storage, createLogger("test"));
+    const mainRecord = reopened.getByPath(primary);
+    expect(mainRecord).toMatchObject({ projectId: "rp_main", agentCwd: "remote-projects/rp_main" });
+    expect(reopened.getByPath(child)).toMatchObject({ projectId: "rp_library", connectionId: "ssh", associationOnly: true });
+    await reopened.removeProjectByPath(child);
+    await expect(reopened.repairProjectGroup(primary, "another-ssh", [child], accessible)).rejects.toThrow("已绑定的 SSH 连接");
+    await reopened.repairProjectGroup(primary, "ssh", [child], accessible);
+    expect(reopened.getByPath(primary)).toBe(mainRecord);
+    expect(reopened.getByPath(child)?.workspacePath).toBe(child);
+    reopened.dispose();
+  });
+
   it("同主机不同 SSH 账号添加同名目录时，projectId、路径键与文档页签完全隔离", async () => {
     const storage = createMemoryStorage();
     const store = createRemoteProjectStore(storage, createLogger("test"));

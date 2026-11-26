@@ -12,6 +12,10 @@ import type { RemoteProjectService } from "../../../src/plugins/remoteProject/se
 import type { RemoteDocumentFileProvider } from "../../../src/plugins/host/filesystem/types.ts";
 import { apply as installRemoteProject } from "../../../src/plugins/remoteProject/index.ts";
 import { formatRemoteProjectPath } from "../../../src/shared/panelPaths.ts";
+import { createWorkspaceStore } from "../../../src/plugins/project/workspace/workspaceStore.ts";
+import { DesktopWorkbench } from "../../../src/plugins/workbench/composition/workbench.ts";
+import { registerDocumentPaths } from "../../../src/plugins/documents/ui/workbench.tsx";
+import { apply as installRemoteWorkbench } from "../../../src/plugins/remoteProject/ui/workbench.tsx";
 
 function createMemoryStorage(): HostStorage {
   const map = new Map<string, string>();
@@ -27,6 +31,62 @@ function createMemoryStorage(): HostStorage {
 }
 
 describe("Remote project FileTree + FilePreview end-to-end self-test", () => {
+  it("工作台能打开同连接关联目录的文件，只缺关联绑定时提示修复", async () => {
+    const storage = createMemoryStorage();
+    const records = createRemoteProjectStore(storage, createLogger("test"));
+    const group = await records.saveProjectGroup("ssh", "/srv/app", "项目组", ["/srv/library"]);
+    const child = group.relatedPaths[0]!;
+    const other = await records.addProject("other-ssh", "/srv/library");
+    const unrelated = await records.addProject("ssh", "/srv/unrelated");
+    const workspace = createWorkspaceStore(storage, () => true);
+    const owner = workspace.store.getState().registerProject(group.record.workspacePath, {
+      name: "项目组", relatedPaths: [child, other.workspacePath],
+    });
+    const workbench = new DesktopWorkbench({} as never, {} as never, storage, {
+      Window: () => null, exitGate: {} as never,
+    });
+    const stat = vi.fn((path: string) => Promise.resolve({
+      path, name: path.split("/").at(-1)!, directory: path === child, symlink: false,
+    }));
+    const disposers = [registerDocumentPaths(workbench, { stat })];
+    const empty = () => () => {};
+    installRemoteWorkbench({
+      remoteProject: { projects: records.snapshot, getByPath: records.getByPath },
+      workbench: workbench.service,
+      project: {
+        projects: { workspace: workspace.view, registerProjectClose: empty },
+        sessions: { registerSessionTools: empty },
+      },
+      host: { commands: {}, registerRemoteTerminalResolver: empty },
+      provide() {},
+      effect(activate: () => () => void) { disposers.push(activate()); },
+    } as unknown as Context);
+    let unmount = () => {};
+    try {
+      workbench.navigation.getState().openView("project-overview", owner);
+      const childFile = `${child}/readme.txt`;
+      const present = vi.fn(() => true);
+      await expect(workbench.openPath(owner, childFile, undefined, undefined, { present })).resolves.toBe(true);
+      expect(stat.mock.calls).toEqual([[child], [childFile]]);
+      expect(present).toHaveBeenCalledOnce();
+      await expect(workbench.openPath(owner, `${other.workspacePath}/readme.txt`)).rejects.toThrow("当前远程主机");
+      await expect(workbench.openPath(owner, `${unrelated.workspacePath}/readme.txt`)).rejects.toThrow("当前远程主机");
+      expect(stat).toHaveBeenCalledTimes(2);
+
+      const Recovery = workbench.getSnapshot().overlays.find(({ id }) => id === "remote-project-recovery")!.View;
+      ({ unmount } = render(<Recovery />));
+      expect(screen.queryByRole("button", { name: "修复连接" })).toBeNull();
+      await records.removeProjectByPath(child);
+      expect(await screen.findByRole("button", { name: "修复连接" })).toBeInTheDocument();
+    } finally {
+      unmount();
+      disposers.reverse().forEach((dispose) => dispose());
+      workbench.dispose();
+      workspace.dispose();
+      records.dispose();
+    }
+  });
+
   it("原项目失联后可校验主机、修复绑定，重启后同一个文件树能打开且浏览不写配置", async () => {
     const disk = createMemoryStorage();
     const save = vi.fn((key: string, value: string) => disk.setItem(key, value));

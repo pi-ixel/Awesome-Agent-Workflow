@@ -21,6 +21,12 @@ export interface ProjectFolders {
   readonly relatedPaths: readonly string[];
 }
 
+export interface ProjectFolderSave {
+  readonly edit?: boolean;
+  readonly configuration: Readonly<Record<string, string>>;
+  publishBinding(): void;
+}
+
 /** 一次「打开项目」连接失败的用户可见错误（含修复指引）。 */
 export interface ConnectError {
   readonly path: string;
