@@ -395,6 +395,11 @@ describe("文件树仓库根集成", () => {
         .querySelector("[data-file-manager-header]")
         ?.querySelector("input"),
     ).toBeNull();
+    const search = screen.getByRole("searchbox", { name: "搜索文件" });
+    fireEvent.change(search, { target: { value: "experiments" } });
+    expect(search).toHaveValue("experiments");
+    fireEvent.click(screen.getByRole("button", { name: "清空文件搜索" }));
+    expect(search).toHaveValue("");
     const junk = getAllByHint(document.body,
       "programAwesome-Agent-Workflowout_r1_experiments.json",
     )[0]!;

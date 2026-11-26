@@ -1,4 +1,4 @@
-import { fieldSurfaceClass } from "../../../shared/ui/inputStyles.ts";
+import { PageFilterSearch } from "../../../shared/ui/PageFilterControls.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { ActionButton } from "../../../shared/ui/controls.tsx";
 import type { FileEntry } from "../../host/types.ts";
@@ -46,7 +46,6 @@ import {
   PanelLeftOpenIcon,
   PanelRightCloseIcon,
   PanelRightOpenIcon,
-  SearchIcon,
   SettingsIcon,
   XIcon,
 } from "../../../shared/ui/icons.tsx";
@@ -834,16 +833,13 @@ export function FileTree({
             {/* 搜索在目录模组内（ZCode 图1/2：树列宽，不横跨预览列） */}
             <div className="flex shrink-0 items-center px-2 pb-1.5 pt-2">
               <div className="relative min-w-0 flex-1">
-                <SearchIcon className="pointer-events-none absolute left-2 top-1/2 ui-icon-14 -translate-y-1/2 text-ink-subtlest" />
-                <input
-                  type="text"
+                <PageFilterSearch
+                  label="搜索文件"
+                  placeholder="搜索文件…"
                   value={fileSearchQuery}
-                  placeholder="搜索文件..."
-                  aria-label="搜索文件"
-                  className={`${fieldSurfaceClass} min-h-6 w-full py-0.5 pl-[calc(14px_+_14*var(--ui-icon-unit))] pr-7 text-ui-xs`}
-                  onChange={(event) =>
-                    setFileSearchQuery(event.currentTarget.value)
-                  }
+                  onChange={setFileSearchQuery}
+                  className="w-full [&_input]:pr-7 [&_input::-webkit-search-cancel-button]:hidden"
+                  compact
                 />
                 {fileSearchQuery.length > 0 ? (
                   <IconButton
