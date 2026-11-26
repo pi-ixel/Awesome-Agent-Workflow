@@ -19,6 +19,7 @@ flowchart TB
     browser["browser<br/>内嵌浏览器"]
     remoteProject["remoteProject<br/>远程项目（SSH）"]
     scheduledTasks["scheduledTasks<br/>定时任务"]
+    visual["visual<br/>讲解图"]
   end
   rust["Rust / Tauri<br/>非插件"]
 
@@ -111,6 +112,7 @@ flowchart TB
   updates -. "UI 注册" .-> workbench
   browser -. "UI 注册" .-> workbench
   remoteProject -. "UI 注册" .-> workbench
+  visual -. "UI 注册" .-> workbench
   agents -. "设置页读取项目上下文并请求切换 Agent" .-> project
   project -. "注册标题区与新建会话入口" .-> workbench
   documents -. "登记文件路径解析" .-> workbench
@@ -135,5 +137,5 @@ flowchart TB
   classDef external fill:#eeeeee,stroke:#666666,color:#222222
   class host,configuration,diagnostics,workbench base
   class agents,acpConnection,acpRuntime runtime
-  class project,documents,git,terminal,workflow,skills,mcp,account,updates,browser,remoteProject,scheduledTasks product
+  class project,documents,git,terminal,workflow,skills,mcp,account,updates,browser,remoteProject,scheduledTasks,visual product
   class rust external

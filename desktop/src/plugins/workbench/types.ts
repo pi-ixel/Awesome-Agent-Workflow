@@ -3,6 +3,7 @@ import type { ComponentType, ReactNode } from "react";
 import type { ContextMenuEntry } from "../../shared/ui/ContextMenu.tsx";
 import type { Language } from "../../shared/i18n.ts";
 import type { ReadonlySnapshot } from "../../shared/state/readonlySnapshot.ts";
+import type { MarkdownCodeRenderer } from "../../shared/ui/markdown/codeRenderers.ts";
 
 export interface WorkbenchAppearancePreferences {
   readonly theme: "dark" | "warm";
@@ -233,6 +234,8 @@ export interface WorkbenchContributions {
     id: string;
     resolve(path: string, line?: number): Promise<PanelTab>;
   };
+  /** 按语言接管 Markdown 围栏代码块的渲染（如 ```visual 讲解图）。 */
+  markdownCodeRenderers: MarkdownCodeRenderer;
 }
 
 export type WorkbenchSlot = keyof WorkbenchContributions;

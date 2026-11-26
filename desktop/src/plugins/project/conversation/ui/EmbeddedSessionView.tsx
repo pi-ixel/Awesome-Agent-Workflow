@@ -71,7 +71,7 @@ function EmbeddedAssistantRow({
   if (!item.text.trim()) return null;
   return (
     <div className="min-w-0 text-ui-sm text-ink">
-      <MarkdownView text={item.text} streaming={item.isStreaming} />
+      <MarkdownView text={item.text} streaming={item.isStreaming} canUseCodeRenderers />
     </div>
   );
 }

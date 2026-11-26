@@ -14,7 +14,7 @@ AAW Desktop 是 AI Agent Workspace：通过 ACP（Agent Client Protocol）承载
 
 | 目录                  | 是什么                                                           | 技术栈              |
 | --------------------- | ---------------------------------------------------------------- | ------------------- |
-| `src/plugins/`        | Cordis 插件（18 个），全部业务能力所在                           | TypeScript          |
+| `src/plugins/`        | Cordis 插件（19 个），全部业务能力所在                           | TypeScript          |
 | `src/contracts/`      | 协议契约与报文校验（含标准 ACP 协议 `acp/`）                     | TypeScript          |
 | `src/shared/`         | 跨插件共享代码与主题样式（token 源在 `styles/index.css`）        | TypeScript + CSS    |
 | `src/bootstrap/`      | 启动装配层                                                       | TypeScript          |
@@ -30,7 +30,7 @@ Rust 测试分别位于 `src-tauri/` 与 `workflow-engine-rs/` 各自 crate 内�
 
 ### Cordis 插件
 
-前端能力全部以插件组织在 `src/plugins/`（18 个）：account、acpConnection、acpRuntime、agents、browser、configuration、diagnostics、documents、git、host、mcp、project、scheduledTasks、skills、terminal、updates、workbench、workflow。每个插件声明服务、依赖与资源所有权；`workbench` 提供根界面、布局与导航，`host` 承载进程、文件等原生能力入口。
+前端能力全部以插件组织在 `src/plugins/`（19 个）：account、acpConnection、acpRuntime、agents、browser、configuration、diagnostics、documents、git、host、mcp、project、scheduledTasks、skills、terminal、updates、visual、workbench、workflow。每个插件声明服务、依赖与资源所有权；`workbench` 提供根界面、布局与导航，`host` 承载进程、文件等原生能力入口。
 
 装配主链：`project → acpRuntime → acpConnection → host`。依赖图以 `docs/architecture/cordis-plugin-dependencies.mmd` 为源，`tests/architecture/cordisArchitecture.test.ts` 核对图源、文档表格与实际装配三者一致——改插件依赖必须同步 `.mmd` 与依赖文档，否则测试失败。
 

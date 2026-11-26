@@ -48,6 +48,7 @@ const empty: WorkbenchSnapshot = {
   settings: [],
   settingsReset: [],
   pathResolvers: [],
+  markdownCodeRenderers: [],
 };
 
 export class DesktopWorkbench implements WorkbenchService {

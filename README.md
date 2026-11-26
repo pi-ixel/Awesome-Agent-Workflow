@@ -72,6 +72,7 @@ flowchart TD
 | `code-check` | 调用配套 CLI 检查代码，修复低风险问题并升级高影响决策 |
 | `open-code-review` | 调用 alibaba/open-code-review 对 Git 变更做语义级 AI 评审：确定性选文件与匹配规则，产出按严重度分级的行级意见（委托模式无需额外配置 LLM） |
 | `mermaid-diagram` | 选择并编写最小必要 Mermaid 图，通过内置编译器离线检查 `.mmd` 或 Markdown 中的图 |
+| `visual-explain` | 在 AAW Desktop 会话回答中用 ```visual 代码块画统一风格的讲解图（结构、数据流、对比、分步、可调参数演示） |
 | `effective-document-writing` | 控制主线、术语和信息密度，清除黑话、空话、重复内容及对话过程痕迹 |
 
 ## 五大质量链条
@@ -133,6 +134,7 @@ Awesome-Agent-Workflow/
     ├── module-deep-research/    # 独立深度研究
     ├── code-check/              # 独立 CodeCheck 检查
     ├── mermaid-diagram/         # 独立 Mermaid 绘图与编译验证
+    ├── visual-explain/          # Desktop 会话讲解图（```visual）写法
     ├── effective-document-writing/  # 独立正式文档写作指导
     ├── repo-init/               # 仓库初始化
     ├── sr-design/               # 系统需求设计 + MCP 问答服务

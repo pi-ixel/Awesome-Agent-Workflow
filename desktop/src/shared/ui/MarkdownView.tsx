@@ -57,6 +57,11 @@ import {
 import { basenameOf } from "../workspaceText.ts";
 import { FileIcon } from "./icons.tsx";
 import { CodeBlock } from "./markdown/CodeBlock.tsx";
+import {
+  findMarkdownCodeRenderer,
+  MarkdownCodeRenderers,
+  type MarkdownCodeRenderer,
+} from "./markdown/codeRenderers.ts";
 import { deferredCodePlugin } from "./markdown/deferredCodePlugin.ts";
 import {
   MarkdownImage,
@@ -691,7 +696,19 @@ function buildMarkdownComponents(options: {
   return {
     pre: function MarkdownPre({ children }) {
       const isIncomplete = useIsCodeFenceIncomplete();
+      const renderers = useContext(MarkdownCodeRenderers);
       const { language, text } = inspectCodeChildren(children);
+      const renderer = findMarkdownCodeRenderer(renderers, language);
+      if (renderer !== undefined) {
+        return (
+          <renderer.View
+            code={text.replace(/\n+$/, "")}
+            language={language}
+            isComplete={!(streaming && isIncomplete)}
+            isStreaming={streaming}
+          />
+        );
+      }
       if (streaming && isIncomplete) {
         return (
           <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-ui-sm">
@@ -942,6 +959,8 @@ class MarkdownRenderBoundary extends Component<
   }
 }
 
+const noCodeRenderers: readonly MarkdownCodeRenderer[] = [];
+
 function MarkdownViewBase({
   text,
   fileRoot,
@@ -952,6 +971,7 @@ function MarkdownViewBase({
   assetUrl,
   renderLocalImage,
   streaming = false,
+  canUseCodeRenderers = false,
 }: {
   readonly text: string;
   readonly fileRoot?: string;
@@ -963,8 +983,14 @@ function MarkdownViewBase({
   readonly renderLocalImage?: (src: string, alt: string) => ReactNode;
   /** 流式输出中:streaming 解析模式 + remend 补全未闭合 markdown。 */
   readonly streaming?: boolean;
+  /**
+   * 启用工作台登记的代码块渲染器（如 ```visual 讲解图）：Agent 回答与
+   * 文件预览打开；更新说明、工作流提示词等保持普通代码块。
+   */
+  readonly canUseCodeRenderers?: boolean;
 }) {
   const { theme } = useContext(MarkdownAppearance);
+  const registeredRenderers = useContext(MarkdownCodeRenderers);
   const logger = useLogger("markdown");
   // 保持组件类型稳定，正文或外层布局更新不能把已加载图片重新挂载。
   const components = useMemo(
@@ -992,6 +1018,7 @@ function MarkdownViewBase({
       data-markdown-theme={theme}
     >
       <MarkdownRenderBoundary fallbackText={normalized} resetKey={normalized}>
+        <MarkdownCodeRenderers.Provider value={canUseCodeRenderers ? registeredRenderers : noCodeRenderers}>
         <ReplyFilesContext.Provider value={streaming ? undefined : replyFiles}>
         <Streamdown
           animated={false}
@@ -1009,6 +1036,7 @@ function MarkdownViewBase({
           {normalized}
         </Streamdown>
         </ReplyFilesContext.Provider>
+        </MarkdownCodeRenderers.Provider>
       </MarkdownRenderBoundary>
     </div>
   );

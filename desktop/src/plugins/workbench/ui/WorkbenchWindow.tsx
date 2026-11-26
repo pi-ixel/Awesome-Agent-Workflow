@@ -11,11 +11,13 @@ import {
 } from "./bindings/react.ts";
 import { AppErrorBoundary } from "../../../shared/ui/ErrorBoundary.tsx";
 import { MarkdownAppearance } from "../../../shared/ui/markdown/theme.ts";
+import { MarkdownCodeRenderers } from "../../../shared/ui/markdown/codeRenderers.ts";
 import { Feedback } from "../../../shared/ui/feedback.ts";
 import { ToastHost } from "./ToastHost.tsx";
 
 function WindowContent({ workbench }: { readonly workbench: WorkbenchService }) {
   const overlays = useWorkbenchEntries("overlays");
+  const codeRenderers = useWorkbenchEntries("markdownCodeRenderers");
   const {
     preferences,
   } = useWorkbenchAppearance();
@@ -25,6 +27,7 @@ function WindowContent({ workbench }: { readonly workbench: WorkbenchService }) 
     <AppErrorBoundary>
       <Feedback.Provider value={workbench.showToast}>
         <MarkdownAppearance value={preferences}>
+         <MarkdownCodeRenderers.Provider value={codeRenderers}>
           {/* 高度用 h-full 而非 h-screen：根元素已由 index.css 锁成视口高，
             100vh 与 WebView 实际可视高之间的零头会让外壳溢出成可滚动的文档
             （触摸板 / 滚轮即把整页带走），这一层不能再按 vh 计量。 */}
@@ -44,6 +47,7 @@ function WindowContent({ workbench }: { readonly workbench: WorkbenchService }) 
             {overlays.map(({ id, scope, View }) => scope === "window" && <View key={id} />)}
             <CloseGuard />
           </div>
+         </MarkdownCodeRenderers.Provider>
         </MarkdownAppearance>
       </Feedback.Provider>
     </AppErrorBoundary>

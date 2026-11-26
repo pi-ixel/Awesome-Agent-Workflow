@@ -26,6 +26,7 @@ const plugins = [
   "browser",
   "remoteProject",
   "scheduledTasks",
+  "visual",
 ] as const;
 const uiOwners = [
   "diagnostics",
@@ -40,6 +41,7 @@ const uiOwners = [
   "updates",
   "browser",
   "remoteProject",
+  "visual",
 ] as const;
 const root = resolve(import.meta.dirname, "../..");
 const read = (path: string) => readFileSync(resolve(root, path), "utf8");
@@ -472,7 +474,7 @@ it("keeps plugin names and dependency relations aligned with their production ow
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => /^(?:\w+ --> \w+|\w+ -\. ".+" \.-> \w+)$/.test(line));
-  expect(new Set(edges).size).toBe(99);
+  expect(new Set(edges).size).toBe(100);
   expect(edges.sort()).toEqual([...required, ...weak].sort());
 
   const runtime = createTestDesktopRuntime(

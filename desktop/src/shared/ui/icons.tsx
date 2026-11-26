@@ -283,6 +283,16 @@ export function SlidersHorizontalIcon(props: IconProps) {
   );
 }
 
+/** 源码：lucide code 几何。 */
+export function CodeIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="m16 18 6-6-6-6" />
+      <path d="m8 6-6 6 6 6" />
+    </Svg>
+  );
+}
+
 /** 终端（设置 · 工具路径分区标）。 */
 export function TerminalIcon(props: IconProps) {
   return (

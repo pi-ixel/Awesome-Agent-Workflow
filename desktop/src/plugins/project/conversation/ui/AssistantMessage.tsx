@@ -73,6 +73,7 @@ function AssistantMessageBase({
         <MarkdownView
           text={item.text}
           streaming={item.isStreaming}
+          canUseCodeRenderers
           fileRoot={project ?? undefined}
           replyFiles={replyFiles}
           onOpenExternal={openExternal}

@@ -1,6 +1,6 @@
 # Desktop 完整插件依赖图
 
-目标架构包含 19 个插件。Rust 为原生宿主，iCode 和 CodeAgent 作为 agents 插件内的适配器。
+目标架构包含 20 个插件。Rust 为原生宿主，iCode 和 CodeAgent 作为 agents 插件内的适配器。
 
 - 箭头指向被依赖或被注册的服务，不表示启动顺序或事件流向。
 - 实线表示必需服务依赖。虚线标签区分启动注入、可选业务接入、UI 注册、界面调用、界面订阅、安装退出调用、关闭参与者注册和导航检查注册。
@@ -32,6 +32,7 @@ flowchart TB
     browser["browser<br/>内嵌浏览器"]
     remoteProject["remoteProject<br/>远程项目（SSH）"]
     scheduledTasks["scheduledTasks<br/>定时任务"]
+    visual["visual<br/>讲解图"]
   end
   rust["Rust / Tauri<br/>非插件"]
 
@@ -124,6 +125,7 @@ flowchart TB
   updates -. "UI 注册" .-> workbench
   browser -. "UI 注册" .-> workbench
   remoteProject -. "UI 注册" .-> workbench
+  visual -. "UI 注册" .-> workbench
   agents -. "设置页读取项目上下文并请求切换 Agent" .-> project
   project -. "注册标题区与新建会话入口" .-> workbench
   documents -. "登记文件路径解析" .-> workbench
@@ -148,7 +150,7 @@ flowchart TB
   classDef external fill:#eeeeee,stroke:#666666,color:#222222
   class host,configuration,diagnostics,workbench base
   class agents,acpConnection,acpRuntime runtime
-  class project,documents,git,terminal,workflow,skills,mcp,account,updates,browser,remoteProject,scheduledTasks product
+  class project,documents,git,terminal,workflow,skills,mcp,account,updates,browser,remoteProject,scheduledTasks,visual product
   class rust external
 ```
 
@@ -174,6 +176,7 @@ flowchart TB
 | updates        | host、configuration、diagnostics                                                                                                                                                                                               | —                                                                                              | workbench（设置、顶栏指示、窗口弹层）                                   | workbench（安装前请求退出）                                                            |
 | scheduledTasks | host、project、agents、account、workbench                                                                                                                                                                                      | —                                                                                              | —                                                                       | —                                                                                      |
 | browser        | host                                                                                                                                                                                                                           | —                                                                                              | workbench（浏览器面板、设置、元素引用与恢复交互）                       | —                                                                                      |
+| visual         | — | — | workbench（Markdown 代码块渲染器：```visual 讲解图） | — |
 
 配置注册、诊断记录等能力已包含在对应必需依赖中，不重复计边。待后续明确的其他关闭参与者不凭空补入本图。
 

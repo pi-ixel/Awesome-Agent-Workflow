@@ -22,6 +22,7 @@ import * as updatesPlugin from "../plugins/updates/index.ts";
 import * as browserPlugin from "../plugins/browser/index.ts";
 import * as remoteProjectPlugin from "../plugins/remoteProject/index.ts";
 import * as scheduledTasksPlugin from "../plugins/scheduledTasks/index.ts";
+import * as visualPlugin from "../plugins/visual/index.ts";
 import { desktopPanelLayouts } from "./panelLayouts.ts";
 
 export type DesktopSessionOperations = NonNullable<
@@ -93,6 +94,7 @@ export function createDesktopRuntime(
       await context.plugin(updatesPlugin);
       await context.plugin(browserPlugin);
       await context.plugin(remoteProjectPlugin);
+      await context.plugin(visualPlugin);
       await contribute?.(context);
       await context.plugin(scheduledTasksPlugin);
       context.project.sessions.resumePendingDeletions?.();
