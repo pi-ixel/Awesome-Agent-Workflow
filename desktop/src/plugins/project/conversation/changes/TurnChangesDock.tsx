@@ -1,7 +1,10 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
 import { ConversationDocumentContext } from "../ui/documentView.ts";
-import { resolveFileReference } from "../../../../shared/panelPaths.ts";
+import {
+  pathName,
+  resolveFileReference,
+} from "../../../../shared/panelPaths.ts";
 import type { TurnChangesSession } from "./service.ts";
 import { visibleTurnChanges } from "./service.ts";
 import { useSessionValue } from "../../ui/bindings/conversationView.ts";
@@ -16,6 +19,7 @@ import {
   Maximize2Icon,
   Minimize2Icon,
   XIcon,
+  FolderGlyph,
   ChevronRightIcon,
   WrapTextIcon,
 } from "../../../../shared/ui/icons.tsx";
@@ -65,6 +69,58 @@ function TurnChangesSlot({
   readonly userId?: string;
 }) {
   const view = useRegisteredSnapshot(changes.state, (value) => value!);
+  const groups = useRegisteredSnapshot(
+    changes.projectGroups,
+    (value) => value?.projects,
+  );
+  if (groups && groups.length > 1) {
+    const completed = groups.flatMap((group) => {
+      const record = visibleTurnChanges(group.view.records);
+      return record ? [{ group, record }] : [];
+    });
+    const last = completed.reduce<(typeof completed)[number] | undefined>(
+      (latest, value) =>
+        !latest || value.record.startedAt > latest.record.startedAt
+          ? value
+          : latest,
+      undefined,
+    );
+    const current =
+      last && (!userId || userId === last.record.userId)
+        ? completed.filter(({ record }) => record.userId === last.record.userId)
+        : [];
+    const errors = groups.filter(
+      ({ view }) => view.error && view.errorUserId === userId,
+    );
+    if (!current.length && !errors.length) return null;
+    return (
+      <section className="space-y-2" aria-label="本轮改动">
+        {current.map(({ group, record }) => (
+          <div key={group.path} className="space-y-1">
+            <div className="flex items-center gap-1.5 text-ui-sm text-ink-mute">
+              <FolderGlyph isExpanded className="ui-icon-14 shrink-0" />{" "}
+              {pathName(group.path)}
+            </div>
+            <TurnChangesReview
+              key={record.id}
+              changes={group.changes}
+              recordId={record.id}
+              root={group.path}
+              isReadOnly={!group.tracked}
+            />
+          </div>
+        ))}
+        {errors.map(({ path, view }) => (
+          <Callout
+            key={path}
+            tone="danger"
+            role="alert"
+            title={`${pathName(path)} · ${view.error}`}
+          />
+        ))}
+      </section>
+    );
+  }
   const record = visibleTurnChanges(view.records);
   if (record && (!userId || record.userId === userId))
     return (
@@ -82,9 +138,13 @@ function TurnChangesSlot({
 export function TurnChangesReview({
   changes,
   recordId,
+  root,
+  isReadOnly = false,
 }: {
   readonly changes: TurnChangesSession;
   readonly recordId?: string;
+  readonly root?: string;
+  readonly isReadOnly?: boolean;
 }) {
   const workspace = useWorkspaceValue((value) => value.activePath);
   const workingDirectory = useSessionValue((value) => value.workingDirectory);
@@ -95,7 +155,7 @@ export function TurnChangesReview({
     : visibleTurnChanges(view.records);
   // 兼容早期记录：未知采集项不能混入净变更列表或文件总数。
   const files = record?.files.filter((item) => item.kind !== "unknown") ?? [];
-  const isLocked = !!record?.locked;
+  const isLocked = isReadOnly || !!record?.locked;
   const isFullyRestored =
     files.length > 0 &&
     files.every((item) => record?.restored.includes(item.path));
@@ -350,7 +410,7 @@ export function TurnChangesReview({
                     size="compact"
                     onClick={() => {
                       const reference = resolveFileReference(
-                        workingDirectory ?? workspace,
+                        root ?? workingDirectory ?? workspace,
                         file.path,
                       );
                       if (reference) {

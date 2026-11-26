@@ -15,6 +15,7 @@ function resetStore(): void {
   window.localStorage.clear();
   useWorkspaceStore.setState({
     recentWorkspaces: [],
+    projectFolders: {},
     pinnedPaths: [],
     pinnedSessions: [],
     selectedPath: null,
@@ -80,6 +81,28 @@ describe("useWorkspaceStore", () => {
     expect(useWorkspaceStore.getState().recentWorkspaces[0]?.path).toBe(
       "D:/dev/ws-11",
     );
+  });
+
+  it("主目录配置与项目列表一并保存，关联目录不进入最近项目", () => {
+    const related = "D:/dev/library";
+    const state = useWorkspaceStore.getState();
+    state.registerProject(DEMO_PATH, {
+      name: "Demo",
+      relatedPaths: [related, "d:/DEV/library/", DEMO_PATH],
+    });
+    for (let index = 0; index < 10; index++)
+      state.selectWorkspace("D:/recent/" + index);
+    useWorkspaceStore.setState({ recentWorkspaces: [], projectFolders: {} });
+    state.hydrateFromStorage();
+    expect(
+      useWorkspaceStore.getState().projectFolders?.["d:/dev/demo"],
+    ).toEqual({ name: "Demo", relatedPaths: [related] });
+    expect(
+      useWorkspaceStore.getState().recentWorkspaces.map((entry) => entry.path),
+    ).toContain(DEMO_PATH);
+    expect(
+      useWorkspaceStore.getState().recentWorkspaces.map((entry) => entry.path),
+    ).not.toContain(related);
   });
 
   it("置顶切换与移除（语义自收藏迁移，数据同源）", () => {
@@ -194,11 +217,6 @@ describe("useWorkspaceStore", () => {
     useWorkspaceStore.getState().closeWorkspace();
     expect(useWorkspaceStore.getState().activePath).toBeNull();
   });
-
-
-
-
-
 
   it("持久化往返：recent / favorites（置顶集合，JSON 键不变）/ toolPaths 写入并可恢复", () => {
     const store = useWorkspaceStore.getState();

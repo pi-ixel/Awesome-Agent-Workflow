@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createStore } from "zustand";
 import { createSnapshotView } from "../../../src/shared/state/readonlySnapshot.ts";
-import { AddRemoteProjectModal } from "../../../src/plugins/remoteProject/ui/AddRemoteProjectModal.tsx";
+import {
+  AddRemoteProjectModal,
+  type AddRemoteProjectModalProps,
+} from "../../../src/plugins/remoteProject/ui/AddRemoteProjectModal.tsx";
 import { RemoteHostsSettings } from "../../../src/plugins/remoteProject/ui/RemoteHostsSettings.tsx";
 import type {
   RemoteConnectionDTO,
@@ -65,6 +68,7 @@ function createMockService(
         createdAt: "2026-01-01T00:00:00Z",
         lastOpenedAt: "2026-01-01T00:00:00Z",
       }),
+    saveProjectGroup: vi.fn(),
     repairProject: vi.fn(),
     removeProjectByPath: vi.fn(),
     recordRecentDir: vi.fn(),
@@ -121,76 +125,97 @@ function createMockService(
 }
 
 describe("AddRemoteProjectModal", () => {
-  it("修复时要求显式选择主机，失败保留原目录，成功后才关闭", async () => {
-    const path = formatRemoteProjectPath("rp_original", "/srv/repo");
-    const onAdded = vi.fn();
-    const onClose = vi.fn();
-    const repairProject = vi
-      .fn<RemoteProjectService["repairProject"]>()
-      .mockRejectedValueOnce(new Error("配置未写入"))
-      .mockResolvedValueOnce({
-        projectId: "rp_original",
-        connectionId: "conn-bob",
-        remoteRoot: "/srv/repo",
-        workspacePath: path,
-        agentCwd: "remote-projects/rp_original",
-        name: "repo",
-        createdAt: "",
-        lastOpenedAt: "",
-      });
-    render(
-      <AddRemoteProjectModal
-        service={createMockService({ repairProject })}
-        onClose={onClose}
-        onAdded={onAdded}
-        repairPath={path}
-      />,
-    );
-    expect(screen.getByText("/srv/repo")).toBeVisible();
-    const confirm = screen.getByRole("button", { name: "修复连接" });
-    expect(confirm).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: /切换设备/ }));
-    fireEvent.click(
-      await screen.findByRole("menuitemradio", { name: /Dev Bob/ }),
-    );
-    fireEvent.click(confirm);
-    expect(await screen.findByRole("alert")).toHaveTextContent("配置未写入");
-    expect(repairProject).toHaveBeenCalledWith(path, "conn-bob");
-    expect(onAdded).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
-    expect(screen.getByText("/srv/repo")).toBeVisible();
-    fireEvent.click(confirm);
-    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
-    expect(onAdded).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workspacePath: path,
-        projectId: "rp_original",
-      }),
-    );
+  it("热更新沿用旧入口的回调时禁止保存并提供重新加载入口", async () => {
+    const onLocalAdded = vi.fn();
+    const staleProps = {
+      service: createMockService(),
+      onClose: vi.fn(),
+      onPickLocalDirectory: vi.fn().mockResolvedValue("D:/work/demo-app"),
+      onAdded: vi.fn(),
+      onLocalAdded,
+    } as unknown as AddRemoteProjectModalProps;
+    render(<AddRemoteProjectModal {...staleProps} />);
+    fireEvent.click(screen.getByRole("button", { name: "添加文件夹" }));
+    await screen.findByText("D:/work/demo-app");
+    const create = screen.getByRole("button", { name: "创建项目" });
+    expect(create).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "重新加载" }),
+    ).toBeInTheDocument();
+    fireEvent.click(create);
+    expect(onLocalAdded).not.toHaveBeenCalled();
+    expect(screen.queryByText(/onSave is not a function/)).toBeNull();
   });
 
-  it("支持默认在此电脑选择本地目录并创建本地项目", async () => {
+  it("修复时显式选择主机，保存失败保留原路径，成功后关闭", async () => {
+    const onSave = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("写入失败"))
+      .mockResolvedValueOnce(true);
+    const onClose = vi.fn();
+    render(
+      <AddRemoteProjectModal
+        service={createMockService()}
+        onClose={onClose}
+        onSave={onSave}
+        repairPath={formatRemoteProjectPath("rp_original", "/srv/repo")}
+        onPickLocalDirectory={vi.fn()}
+      />,
+    );
+    const repair = screen.getByRole("button", { name: "修复连接" });
+    expect(repair).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "添加文件夹" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /切换设备/ }));
+    expect(screen.queryByRole("menuitemradio", { name: "此电脑" })).toBeNull();
+    fireEvent.click(
+      await screen.findByRole("menuitemradio", { name: /Dev Alice/ }),
+    );
+    fireEvent.click(repair);
+    expect(onSave).toHaveBeenCalledWith("conn-alice", "repo", "/srv/repo", []);
+    expect(await screen.findByText("写入失败")).toBeInTheDocument();
+    expect(screen.getByText("/srv/repo")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(repair);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("选择多个本地目录后可以设定主目录再一次创建项目", async () => {
     const service = createMockService();
-    const onPickLocalDirectory = vi.fn().mockResolvedValue("D:/work/demo-app");
-    const onLocalAdded = vi.fn();
+    const onPickLocalDirectory = vi
+      .fn()
+      .mockResolvedValueOnce("D:/work/demo-app")
+      .mockResolvedValueOnce("D:/work/library")
+      .mockResolvedValueOnce("d:/WORK/LIBRARY/");
+    const onSave = vi.fn().mockResolvedValue(true);
     const onClose = vi.fn();
 
     render(
       <AddRemoteProjectModal
         service={service}
         onClose={onClose}
-        onAdded={vi.fn()}
+        onSave={onSave}
         onPickLocalDirectory={onPickLocalDirectory}
-        onLocalAdded={onLocalAdded}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加文件夹" }));
     await screen.findByText("D:/work/demo-app");
 
+    fireEvent.click(screen.getByRole("button", { name: "添加文件夹" }));
+    await screen.findByText("D:/work/library");
+    fireEvent.click(screen.getByRole("button", { name: "添加文件夹" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "添加文件夹" })).toBeEnabled(),
+    );
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    fireEvent.click(
+      screen.getByRole("button", { name: "设 library 为主要目录" }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
-    expect(onLocalAdded).toHaveBeenCalledWith("D:/work/demo-app");
-    expect(onClose).toHaveBeenCalled();
+    expect(onSave).toHaveBeenCalledWith("local", "library", "D:/work/library", [
+      "D:/work/demo-app",
+    ]);
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
   it("可通过设备胶囊菜单添加远程主机并自动切换至该主机", async () => {
@@ -216,9 +241,8 @@ describe("AddRemoteProjectModal", () => {
       <AddRemoteProjectModal
         service={service}
         onClose={vi.fn()}
-        onAdded={vi.fn()}
+        onSave={vi.fn()}
         onPickLocalDirectory={vi.fn().mockResolvedValue(null)}
-        onLocalAdded={vi.fn()}
       />,
     );
 
@@ -255,7 +279,7 @@ describe("AddRemoteProjectModal", () => {
   });
 
   it("切换远程主机后点击「添加」打开专用远端目录选择器，选定目录后可创建远程项目", async () => {
-    const onAdded = vi.fn();
+    const onSave = vi.fn().mockResolvedValue(true);
     const onClose = vi.fn();
     const service = createMockService();
 
@@ -263,9 +287,8 @@ describe("AddRemoteProjectModal", () => {
       <AddRemoteProjectModal
         service={service}
         onClose={onClose}
-        onAdded={onAdded}
+        onSave={onSave}
         onPickLocalDirectory={vi.fn().mockResolvedValue(null)}
-        onLocalAdded={vi.fn()}
       />,
     );
 
@@ -277,7 +300,7 @@ describe("AddRemoteProjectModal", () => {
     fireEvent.click(aliceItem);
 
     // 点击「添加」打开专用远端目录选择器
-    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加文件夹" }));
     const repoBtn = await screen.findByRole("button", { name: "repo" });
     fireEvent.click(repoBtn);
     await waitFor(() => {
@@ -292,16 +315,40 @@ describe("AddRemoteProjectModal", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
 
-    await waitFor(() =>
-      expect(onAdded).toHaveBeenCalledWith(
-        expect.objectContaining({
-          connectionId: "conn-alice",
-          remoteRoot: "/home/alice/repo",
-          name: "My Remote Repo",
-        }),
-      ),
+    expect(onSave).toHaveBeenCalledWith(
+      "conn-alice",
+      "My Remote Repo",
+      "/home/alice/repo",
+      [],
     );
-    expect(onClose).toHaveBeenCalled();
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it("编辑项目保留主目录与设备，可移除旧目录或继续添加", async () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    render(
+      <AddRemoteProjectModal
+        service={createMockService()}
+        onClose={vi.fn()}
+        onSave={onSave}
+        onPickLocalDirectory={vi.fn().mockResolvedValue("D:/work/docs")}
+        edit={{
+          deviceId: "local",
+          name: "Demo",
+          folders: ["D:/work/demo", "D:/work/library"],
+        }}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "移除 demo" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /设.*为主要目录/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /切换设备/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "移除 library" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加文件夹" }));
+    await screen.findByText("D:/work/docs");
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(onSave).toHaveBeenCalledWith("local", "Demo", "D:/work/demo", [
+      "D:/work/docs",
+    ]);
   });
 });
 

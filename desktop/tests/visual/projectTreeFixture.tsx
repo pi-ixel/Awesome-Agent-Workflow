@@ -20,7 +20,7 @@ import { ConversationTurnView } from "../../src/plugins/project/conversation/ui/
 
 export function renderProjectTree(
   root: Root,
-  { running = false, statuses = false } = {},
+  { running = false, statuses = false, folders = false } = {},
 ) {
   const values = new Map<string, string>();
   const storage = {
@@ -34,6 +34,14 @@ export function renderProjectTree(
   const workspace = createWorkspaceStore(storage, () => true);
   workspace.store.setState({
     recentWorkspaces: [{ path, lastOpenedAt: "2026-10-20T10:00:00Z" }],
+    ...(folders && {
+      projectFolders: {
+        "d:/desktop/design-workbench": {
+          name: "Design Workbench",
+          relatedPaths: ["D:/desktop/shared-library"],
+        },
+      },
+    }),
     ...(statuses
       ? {
           pinnedSessions: ["failed", "unread"].map((id) =>
@@ -187,7 +195,14 @@ export function renderProjectTree(
     project,
     sidebar: sidebar.snapshot,
     isActive: () => true,
-    navigation: { page } as unknown as ProjectViewBinding["navigation"],
+    navigation: {
+      page,
+      ...(folders && {
+        renderEditProjectForm() {
+          return <p role="status">已打开编辑项目</p>;
+        },
+      }),
+    } as unknown as ProjectViewBinding["navigation"],
   };
   root.render(
     <ProjectViewContext.Provider value={binding}>

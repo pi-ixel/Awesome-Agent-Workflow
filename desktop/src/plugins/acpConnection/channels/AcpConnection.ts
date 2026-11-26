@@ -274,6 +274,9 @@ export class AcpConnection implements AcpConnectionPort {
         c.closing = true;
         c.controller.abort();
       }
+      const isScopeReload =
+        requestOptions?.scopeReload === true &&
+        (method === "session/close" || method === "session/load");
       const execute = async () => {
         if (c.closed || (c.closing && method !== "session/close"))
           throw new Error("Session is closed");
@@ -352,13 +355,17 @@ export class AcpConnection implements AcpConnectionPort {
           return result;
         } catch (error) {
           // 临时探测的超时或关闭失败只收口自己的通道。
-          if (!isModelProbe && error instanceof AcpTimeoutError) {
+          if (
+            !isModelProbe &&
+            !isScopeReload &&
+            error instanceof AcpTimeoutError
+          ) {
             this.admissionError = new Error(
               "Remote request outcome unknown; connection admission quarantined",
             );
             this.scheduler.close(this.admissionError);
           }
-          if (!isModelProbe && method === "session/close") {
+          if (!isModelProbe && !isScopeReload && method === "session/close") {
             this.admissionError = new Error(
               "Remote session release was not confirmed",
             );
@@ -367,6 +374,7 @@ export class AcpConnection implements AcpConnectionPort {
           if (method === "session/load" || isNew) {
             if (
               !isModelProbe &&
+              !isScopeReload &&
               !(error instanceof AcpResponseError) &&
               !c.closed
             ) {
@@ -375,10 +383,15 @@ export class AcpConnection implements AcpConnectionPort {
               );
               this.scheduler.close(this.admissionError);
             }
-            if (c.id) this.routes.delete(c.id);
-            c.closed = true;
+            if (isScopeReload && !(error instanceof AcpResponseError)) {
+              // 载入结果未知，保留该会话的路由以便单独确认关闭。
+              c.closing = true;
+            } else {
+              if (c.id) this.routes.delete(c.id);
+              c.closed = true;
+              this.channels.delete(c);
+            }
             c.controller.abort();
-            this.channels.delete(c);
           }
           if (this.admissionError) this.reportUnavailable(this.admissionError);
           throw error;

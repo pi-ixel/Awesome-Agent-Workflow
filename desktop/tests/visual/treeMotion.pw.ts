@@ -364,3 +364,25 @@ test("最近会话列表在行内重命名期间切换外观，保留草稿、�
     recent.getByRole("button", { name: /^整理部署记录/ }),
   ).toBeVisible();
 });
+
+test("项目悬浮卡可以跨过侧栏边缘并点击编辑", async ({ page }) => {
+  await page.goto("/tests/visual/treeMotionFixture.html?sessions&folders");
+  const tree = page.getByRole("main", { name: "项目与会话" });
+  const row = tree.getByRole("button", {
+    name: "Design Workbench",
+    exact: true,
+  });
+  await row.hover();
+  const card = page.getByRole("group", { name: "项目详情" });
+  await expect(card.getByRole("listitem")).toHaveText([
+    "D:/desktop/design-workbench",
+    "D:/desktop/shared-library",
+  ]);
+  await expect(tree.getByText("shared-library")).toHaveCount(0);
+  const edit = card.getByRole("button", { name: "编辑项目" });
+  await edit.hover();
+  await expect(edit).toBeVisible();
+  await edit.click();
+  await expect(page.getByText("已打开编辑项目")).toBeVisible();
+  await expect(card).toHaveCount(0);
+});

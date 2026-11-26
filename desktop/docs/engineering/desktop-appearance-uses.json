@@ -105,10 +105,10 @@
     "SessionBar · <h1>",
     "SessionBar · <input>"
   ],
-  "plugins/project/usage/UsageSettings.tsx": ["Trend · <canvas>"],
-  "plugins/remoteProject/ui/AddRemoteProjectModal.tsx": [
-    "CreateProjectFormBody · <input>"
+  "plugins/remoteProject/ui/ProjectFolderFields.tsx": [
+    "ProjectFolderFields · <input>"
   ],
+  "plugins/project/usage/UsageSettings.tsx": ["Trend · <canvas>"],
   "plugins/remoteProject/ui/RemoteDirectoryPickerModal.tsx": [
     "RemoteDirectoryPickerModal · <input>"
   ],

@@ -24,10 +24,16 @@ import { createStore } from "zustand";
 import { createSnapshotView, type ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
 
 import { createLogger, type Logger } from "../../../shared/logging/logger.ts";
-import { pathKey } from "../../../shared/panelPaths.ts";
+import {
+  isAbsolutePath,
+  isRemoteProjectPath,
+  pathKey,
+  parseRemoteProjectPath,
+} from "../../../shared/panelPaths.ts";
 import type { HostStorage } from "../../host/types.ts";
 import { defaultToolPaths, emptyWorkspace } from "./types.ts";
 import type {
+  ProjectFolders,
   WorkspaceEntry,
   WorkspaceSnapshot,
   WorkspaceStoreState,
@@ -56,6 +62,7 @@ interface PersistedShape {
   readonly pinnedSessions?: readonly string[];
   readonly starredSessions?: readonly string[];
   readonly toolPaths: WorkspaceToolPaths;
+  readonly projectFolders?: WorkspaceSnapshot["projectFolders"];
 }
 
 function readPersisted(storage: HostStorage): Partial<PersistedShape> | null {
@@ -89,6 +96,7 @@ function sanitizePersisted(
     pinnedSessions?: string[];
     starredSessions?: string[];
     toolPaths?: WorkspaceToolPaths;
+    projectFolders?: WorkspaceSnapshot["projectFolders"];
   } = {};
   if (Array.isArray(record["recent"])) {
     const recent: WorkspaceEntry[] = [];
@@ -130,7 +138,56 @@ function sanitizePersisted(
       ),
     };
   }
+  const folders = record["projectFolders"];
+  if (folders && typeof folders === "object" && !Array.isArray(folders)) {
+    out.projectFolders = Object.fromEntries(
+      Object.entries(folders).flatMap(([path, entry]: [string, unknown]) =>
+        isAbsolutePath(path) &&
+        entry &&
+        typeof entry === "object" &&
+        "name" in entry &&
+        typeof entry.name === "string" &&
+        "relatedPaths" in entry &&
+        Array.isArray(entry.relatedPaths)
+          ? [
+              [
+                pathKey(path),
+                normalizeProjectFolders(path, {
+                  name: entry.name,
+                  relatedPaths: entry.relatedPaths.filter(
+                    (value): value is string => typeof value === "string",
+                  ),
+                }),
+              ],
+            ]
+          : [],
+      ),
+    );
+  }
   return Object.keys(out).length > 0 ? out : null;
+}
+
+function normalizeProjectFolders(
+  primary: string,
+  folders: ProjectFolders,
+): ProjectFolders {
+  const seen = new Set([pathKey(primary)]);
+  const remote = isRemoteProjectPath(primary);
+  return {
+    name: folders.name.trim(),
+    relatedPaths: folders.relatedPaths.filter((path) => {
+      const key = pathKey(path);
+      if (
+        !isAbsolutePath(path) ||
+        seen.has(key) ||
+        remote !== isRemoteProjectPath(path) ||
+        (remote && !parseRemoteProjectPath(path))
+      )
+        return false;
+      seen.add(key);
+      return true;
+    }),
+  };
 }
 
 function writePersisted(
@@ -146,6 +203,7 @@ function writePersisted(
       pinnedSessions: state.pinnedSessions,
       starredSessions: state.starredSessions,
       toolPaths: state.toolPaths,
+      projectFolders: state.projectFolders,
     };
     storage.setItem(STORAGE_KEY, JSON.stringify(payload));
   } catch (error) {
@@ -160,15 +218,18 @@ function writePersisted(
 function withRecentEntry(
   recent: readonly WorkspaceEntry[],
   path: string,
+  configured?: WorkspaceSnapshot["projectFolders"],
 ): readonly WorkspaceEntry[] {
-  const lastOpenedAt = new Date().toISOString();
   const key = pathKey(path);
+  const lastOpenedAt = new Date().toISOString();
   if (recent.some((entry) => pathKey(entry.path) === key)) {
     return recent.map((entry) =>
       pathKey(entry.path) === key ? { ...entry, lastOpenedAt } : entry,
     );
   }
-  return [{ path, lastOpenedAt }, ...recent].slice(0, RECENT_LIMIT);
+  return [{ path, lastOpenedAt }, ...recent].filter(
+    (entry, index) => index < RECENT_LIMIT || configured?.[pathKey(entry.path)],
+  );
 }
 
 // --------------------------------------------------------------- store 本体
@@ -183,8 +244,10 @@ export function workspaceCommands(source: ReadonlySnapshot<WorkspaceStoreState>)
     toggleSessionStarred,
     dismissConnectError,
     hydrateFromStorage,
+    updateProjectFolders,
   } = source.getState();
   return {
+    updateProjectFolders,
     selectWorkspace,
     openWorkspace,
     closeWorkspace,
@@ -210,6 +273,38 @@ export function createWorkspaceStore(
   const store = createStore<WorkspaceStoreState>()((set, get) => ({
     ...emptyWorkspace,
 
+    registerProject: (path, folders) => {
+      if (signal.aborted) return;
+      const target = path.trim();
+      if (!target) return;
+      set((state) => ({
+        selectedPath: target,
+        recentWorkspaces: withRecentEntry(
+          state.recentWorkspaces,
+          target,
+          state.projectFolders,
+        ),
+        ...(folders && {
+          projectFolders: {
+            ...state.projectFolders,
+            [pathKey(target)]: normalizeProjectFolders(target, folders),
+          },
+        }),
+      }));
+      writePersisted(storage, get(), logger);
+    },
+
+    updateProjectFolders: (path, folders) => {
+      if (signal.aborted) return;
+      set((state) => ({
+        projectFolders: {
+          ...state.projectFolders,
+          [pathKey(path)]: normalizeProjectFolders(path, folders),
+        },
+      }));
+      writePersisted(storage, get(), logger);
+    },
+
     selectWorkspace: (path) => {
       if (signal.aborted) return;
       const trimmed = path.trim();
@@ -218,7 +313,11 @@ export function createWorkspaceStore(
       }
       set((state) => ({
         selectedPath: trimmed,
-        recentWorkspaces: withRecentEntry(state.recentWorkspaces, trimmed),
+        recentWorkspaces: withRecentEntry(
+          state.recentWorkspaces,
+          trimmed,
+          state.projectFolders,
+        ),
       }));
       if (!signal.aborted) writePersisted(storage, get(), logger);
       logger.info("已选择项目", { path: trimmed });
@@ -238,7 +337,11 @@ export function createWorkspaceStore(
       set((state) => ({
         activePath: target,
         selectedPath: target,
-        recentWorkspaces: withRecentEntry(state.recentWorkspaces, target),
+        recentWorkspaces: withRecentEntry(
+          state.recentWorkspaces,
+          target,
+          state.projectFolders,
+        ),
       }));
       if (!signal.aborted) writePersisted(storage, get(), logger);
       logger.info("已打开项目（绑定 ACP session cwd）", { path: target });
@@ -319,6 +422,11 @@ export function createWorkspaceStore(
           (entry) => !matches(entry.path),
         ),
         pinnedPaths: state.pinnedPaths.filter((item) => !matches(item)),
+        projectFolders: Object.fromEntries(
+          Object.entries(state.projectFolders ?? {}).filter(
+            ([path]) => path !== key,
+          ),
+        ),
         // 项目移出列表时其会话级置顶一并清掉：置顶任务带不渲染幽灵行
         //（项目不在列表里，行点了也只能落失败回滚）
         pinnedSessions: state.pinnedSessions.filter(
@@ -352,6 +460,7 @@ export function createWorkspaceStore(
         pinnedSessions: persisted.pinnedSessions ?? state.pinnedSessions,
         starredSessions: persisted.starredSessions ?? state.starredSessions,
         toolPaths: persisted.toolPaths ?? state.toolPaths,
+        projectFolders: persisted.projectFolders ?? state.projectFolders,
       }));
     },
   }));
@@ -366,6 +475,7 @@ export function createWorkspaceStore(
     activePath: state.activePath,
     toolPaths: state.toolPaths,
     lastConnectError: state.lastConnectError,
+    projectFolders: state.projectFolders,
   }));
   return {
     store,

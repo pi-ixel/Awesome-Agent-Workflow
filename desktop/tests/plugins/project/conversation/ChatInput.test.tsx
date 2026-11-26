@@ -58,6 +58,7 @@ function setup(
     openDiagnostics?: () => void;
     documentsWorkbench?: ReturnType<typeof createTestProjectWorkbench>;
     fileCandidates?: ReadonlySnapshot<FileCandidates | undefined>;
+    fileCandidateProjects?: readonly string[];
     resolveSlashSkills?: SkillsService["resolveSlashSkills"];
     skillWorkspace?: string | null;
     extensionEntries?: readonly ProjectSlashEntry[];
@@ -88,6 +89,7 @@ function setup(
     return (
       <ChatInput
         fileCandidates={fileCandidates}
+        fileCandidateProjects={options.fileCandidateProjects}
         skillCandidates={skillCandidates}
         resolveSlashSkills={options.resolveSlashSkills}
         skillWorkspace={options.skillWorkspace}
@@ -392,6 +394,21 @@ describe("ChatInput @ 文件提及", () => {
     expect(
       screen.queryByRole("listbox", { name: "提及候选" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("同名项目的文件候选按工作目录区分并插入所选项目的路径", async () => {
+    const primary = "D:/one/demo";
+    const secondary = "D:/other/demo";
+    useWorkspaceStore.setState({ activePath: primary });
+    listWorkspaceFiles.mockResolvedValue(["README.md"]);
+    setup({ fileCandidates, fileCandidateProjects: [primary, secondary] });
+    const textarea = getTextarea();
+    await userEvent.type(textarea, "@");
+    const options = await screen.findAllByRole("option", { name: /README/ });
+    expect(screen.getByText(`demo · ${primary}`)).toBeInTheDocument();
+    expect(screen.getByText(`demo · ${secondary}`)).toBeInTheDocument();
+    await userEvent.click(options[1]!);
+    expect(textarea).toHaveValue(`@${secondary}/README.md `);
   });
 
   it("文档服务重装时重新获取候选并忽略旧实例的迟到结果", async () => {

@@ -1,3 +1,4 @@
+import type { ProjectFolders } from "./workspace/types.ts";
 import type { ComponentType, ReactNode } from "react";
 import type { SessionHandoff } from "./conversation/types.ts";
 import type { AcpSessionEvent } from "../acpRuntime/events.ts";
@@ -119,7 +120,8 @@ export interface ProjectWorkspace {
   readonly patchToolPaths: (paths: Partial<WorkspaceToolPaths>) => void;
   readonly reloadWorkspacePreferences: () => void;
   pickDirectory(): Promise<string | null>;
-  registerProject(path: string): void;
+  registerProject(path: string, folders?: ProjectFolders): void;
+  updateProjectFolders(path: string, folders: ProjectFolders): void;
   /** Check and release the addressed project's resources before removing its list entry. */
   removeProject(path: string, isCurrent?: () => boolean): Promise<boolean>;
   registerProjectClose(participant: ProjectCloseParticipant): () => void;

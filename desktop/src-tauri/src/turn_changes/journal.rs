@@ -147,6 +147,8 @@ static INDEXES: OnceLock<Mutex<BTreeMap<PathBuf, Index>>> = OnceLock::new();
 fn collect(
     main: &Path,
     root: &Path,
+    source_root: Option<&Path>,
+    excluded: &[PathBuf],
     ids: &[String],
     streams: &mut Streams,
 ) -> Result<BTreeMap<String, Vec<Edit>>, String> {
@@ -228,9 +230,22 @@ fn collect(
             let Some(raw) = block["input"]["file_path"].as_str() else {
                 continue;
             };
-            let Ok(key) = evidence_path(root, raw) else {
+            let logged_path = Path::new(raw);
+            let absolute = source_root
+                .filter(|_| !logged_path.is_absolute())
+                .map(|source| source.join(logged_path));
+            let Ok(key) = evidence_path(
+                root,
+                absolute.as_deref().and_then(Path::to_str).unwrap_or(raw),
+            ) else {
                 continue;
             };
+            if excluded
+                .iter()
+                .any(|excluded| root.join(&key).starts_with(excluded))
+            {
+                continue;
+            }
             let result = row_at(&mut reader, *result_pos)?;
             if !result["message"]["content"]
                 .as_array()
@@ -303,7 +318,8 @@ fn record_from(
     let mut bytes = [0u8; 16];
     bytes.copy_from_slice(&hash[..16]);
     let id = uuid::Uuid::from_bytes(bytes).to_string();
-    let Some(main) = resolve(logs, sid, &request.cwd, Instant::now())? else {
+    let journal_cwd = request.journal_cwd.as_deref().unwrap_or(&request.cwd);
+    let Some(main) = resolve(logs, sid, journal_cwd, Instant::now())? else {
         return Ok(vec![]);
     };
     let index = {
@@ -322,9 +338,18 @@ fn record_from(
             return Ok(vec![previous.record]);
         }
     }
+    let source_root = (journal_cwd != request.cwd).then(|| Path::new(journal_cwd));
+    let excluded: Vec<_> = request
+        .excluded_project_roots
+        .iter()
+        .filter_map(|value| fs::canonicalize(value).ok())
+        .filter(|value| value != root && value.starts_with(root))
+        .collect();
     let edits = collect(
         &main,
         root,
+        source_root,
+        &excluded,
         request.tool_ids.as_deref().unwrap_or_default(),
         &mut *index.lock().map_err(|e| e.to_string())?,
     )?;

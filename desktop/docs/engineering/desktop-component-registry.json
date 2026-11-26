@@ -838,9 +838,13 @@
   },
   "plugins/project/ui/bindings/workbenchNavigation.ts": {
     "definitions": {
-      "提示与确认": ["createProjectViewNavigation/renderAddProjectForm"]
+      "提示与确认": ["createProjectViewNavigation/renderAddProjectForm"],
+      "布局与操纵": ["createProjectViewNavigation/renderEditProjectForm"]
     },
-    "targets": ["createProjectViewNavigation/renderAddProjectForm → (inline)"]
+    "targets": [
+      "createProjectViewNavigation/renderAddProjectForm → (inline)",
+      "createProjectViewNavigation/renderEditProjectForm → (inline)"
+    ]
   },
   "plugins/project/ui/preferencesView.tsx": {
     "definitions": {
@@ -890,7 +894,8 @@
         "apply/LegacyAgentData",
         "apply/Sidebar",
         "apply/exitDetails/\"project-approvals\"/View",
-        "apply/renderAddProjectForm"
+        "apply/renderAddProjectForm",
+        "apply/renderEditProjectForm"
       ]
     },
     "targets": [
@@ -901,6 +906,7 @@
       "apply/overlays/View → withProjectView(projectOverlay.View, projectView)",
       "apply/pages/View → withProjectView(page.View, projectView)",
       "apply/renderAddProjectForm → (inline)",
+      "apply/renderEditProjectForm → (inline)",
       "apply/settings → plugins/project/usage/settingsEntry.ts#createUsageSettingsEntry",
       "apply/settings/View → withProjectView(settings.View, projectView)",
       "apply/sidebar/\"project-tree\"/Icon → shared/ui/icons.tsx#MessageCircleIcon",
@@ -922,6 +928,12 @@
       "createProjectPages/projectConversationPageId/View → plugins/project/ui/workbenchViews.tsx#createProjectPages/SessionPage",
       "createProjectPages/projectOverviewPageId/View → plugins/project/ui/workbenchViews.tsx#createProjectPages/OverviewPage"
     ]
+  },
+  "plugins/remoteProject/ui/ProjectFolderFields.tsx": {
+    "definitions": {
+      "布局与操纵": ["ProjectFolderFields"]
+    },
+    "targets": []
   },
   "plugins/project/ui/workspaces/RemoveProjectDialog.tsx": {
     "definitions": {
@@ -983,18 +995,23 @@
   },
   "plugins/remoteProject/ui/workbench.tsx": {
     "definitions": {
-      "布局与操纵": ["apply/settings/\"remote-hosts\"/View"],
+      "布局与操纵": [
+        "apply/settings/\"remote-hosts\"/View",
+        "apply/renderEditProjectForm"
+      ],
       "提示与确认": [
         "apply/EmbeddedAddProjectForm",
         "apply/RemoteProjectModalOverlay",
         "apply/RemoteProjectRecovery",
-        "apply/renderAddProjectForm"
+        "apply/renderAddProjectForm",
+        "apply/EditProjectForm"
       ]
     },
     "targets": [
       "apply/overlays/\"remote-project-add-modal\"/View → plugins/remoteProject/ui/workbench.tsx#apply/RemoteProjectModalOverlay",
       "apply/overlays/\"remote-project-recovery\"/View → plugins/remoteProject/ui/workbench.tsx#apply/RemoteProjectRecovery",
       "apply/renderAddProjectForm → (inline)",
+      "apply/renderEditProjectForm → (inline)",
       "apply/settings/\"remote-hosts\"/Icon → shared/ui/icons.tsx#MonitorIcon",
       "apply/settings/\"remote-hosts\"/View → (inline)"
     ]
@@ -1785,6 +1802,10 @@
     "definitions": {
       "提示与确认": ["HintSurface"]
     },
+    "targets": []
+  },
+  "shared/ui/ToolProjectSelector.tsx": {
+    "definitions": { "选择控件": ["ToolProjectSelector"] },
     "targets": []
   },
   "shared/ui/controls/HintTooltip.tsx": {

@@ -31,10 +31,26 @@ export interface RemoteProjectService {
   readonly projects: ReadonlySnapshot<RemoteProjectStoreSnapshot>;
   getByPath(path: string): RemoteProjectRecord | null;
   getById(projectId: string): RemoteProjectRecord | null;
-  listProjectsForConnection(connectionId: string): readonly RemoteProjectRecord[];
-  addProject(connectionId: string, remoteRoot: string, name?: string): Promise<RemoteProjectRecord>;
-  repairProject(path: string, connectionId: string): Promise<RemoteProjectRecord>;
-  removeProjectByPath(path: string): Promise<void>;
+  listProjectsForConnection(
+    connectionId: string,
+  ): readonly RemoteProjectRecord[];
+  addProject(
+    connectionId: string,
+    remoteRoot: string,
+    name?: string,
+  ): Promise<RemoteProjectRecord>;
+  saveProjectGroup(
+    connectionId: string,
+    remoteRoot: string,
+    name: string | undefined,
+    relatedRoots: readonly string[],
+    existingPath?: string,
+  ): Promise<{ record: RemoteProjectRecord; relatedPaths: readonly string[] }>;
+  repairProject(
+    path: string,
+    connectionId: string,
+  ): Promise<RemoteProjectRecord>;
+  removeProjectByPath(path: string, retainAssociation?: boolean): Promise<void>;
   recordRecentDir(connectionId: string, dirPath: string): Promise<void>;
   listConnections(): Promise<readonly RemoteConnectionDTO[]>;
   createConnection(input: RemoteConnectionInput): Promise<RemoteConnectionDTO>;

@@ -23,6 +23,7 @@ export const fakeSessionControl: {
   instances: FakeAcpSession[];
   listed: SessionInfo[];
   loadShouldFail: boolean;
+  supportsRelatedDirectories: boolean;
   replayOnLoad: AcpSessionEvent[];
   newSessionId: string;
   listShouldFail: boolean;
@@ -35,6 +36,7 @@ export const fakeSessionControl: {
   instances: [],
   listed: [],
   loadShouldFail: false,
+  supportsRelatedDirectories: false,
   replayOnLoad: [],
   newSessionId: "new-session-id",
   listShouldFail: false,
@@ -47,7 +49,14 @@ export const fakeSessionControl: {
 /** 模拟 loadSession 成功时向监听器回放历史事件的公开发射器。 */
 export class FakeAcpSession {
   sessionId: string | null = null;
-  agentInfo = { agentCapabilities: { loadSession: true } };
+  agentInfo = {
+    agentCapabilities: {
+      loadSession: true,
+      ...(fakeSessionControl.supportsRelatedDirectories
+        ? { sessionCapabilities: { close: {}, additionalDirectories: {} } }
+        : {}),
+    },
+  };
   models = null;
   modes = null;
   configOptions = [];
@@ -188,6 +197,7 @@ export function resetFakeSessionControl(): void {
   fakeSessionControl.instances = [];
   fakeSessionControl.listed = [];
   fakeSessionControl.loadShouldFail = false;
+  fakeSessionControl.supportsRelatedDirectories = false;
   fakeSessionControl.replayOnLoad = [];
   fakeSessionControl.newSessionId = "new-session-id";
   fakeSessionControl.listShouldFail = false;

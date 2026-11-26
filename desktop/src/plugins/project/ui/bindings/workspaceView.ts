@@ -1,3 +1,5 @@
+import { pathKey } from "../../../../shared/panelPaths.ts";
+import { basenameOf } from "../../../../shared/workspaceText.ts";
 import { emptyWorkspace } from "../../workspace/types.ts";
 import type { WorkspaceSnapshot } from "../../types.ts";
 import { useRegisteredSnapshot } from "../../../../shared/state/useRegisteredSnapshot.ts";
@@ -18,4 +20,11 @@ export function useWorkspaceValue<T>(
   return useRegisteredSnapshot(workspace, (state) =>
     select(state ?? emptyWorkspace),
   );
+}
+
+export function useProjectName(path: string): string {
+  const name = useWorkspaceValue(
+    (state) => state.projectFolders?.[pathKey(path)]?.name,
+  );
+  return name || basenameOf(path);
 }

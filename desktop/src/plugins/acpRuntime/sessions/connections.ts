@@ -350,8 +350,13 @@ export class RuntimeConnections implements AcpProtocolResources {
     this.sessions.get(session)?.promote(session);
   }
 
-  async release(session: AcpSessionPort): Promise<void> {
+  async release(
+    session: AcpSessionPort,
+    options?: { forReload?: boolean },
+  ): Promise<void> {
     const pool = this.sessions.get(session);
+    // 切换关联失败时保留原通道，以便同一条会话重试关闭。
+    if (pool && options?.forReload) await session.closeRemoteForReload?.();
     this.sessions.delete(session);
     this.ordinary.delete(session);
     await pool?.release(session);
@@ -380,7 +385,15 @@ export class RuntimeConnections implements AcpProtocolResources {
       await session.loadSession(
         options.sessionId,
         options.workspacePath,
-        options.mcpServers?.length ? { mcpServers: options.mcpServers } : undefined,
+        options.mcpServers?.length ||
+          options.additionalDirectories !== undefined ||
+          options.scopeReload
+          ? {
+              mcpServers: options.mcpServers,
+              additionalDirectories: options.additionalDirectories,
+              scopeReload: options.scopeReload,
+            }
+          : undefined,
       );
     } finally {
       stopReplay();

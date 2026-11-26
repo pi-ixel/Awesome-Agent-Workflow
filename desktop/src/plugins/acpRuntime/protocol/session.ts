@@ -208,17 +208,37 @@ export class AcpSession implements AcpSessionPort {
   closeSession(): Promise<void> {
     return (this.closingSession ??= this.closeSessionOnly());
   }
+
+  closeRemoteForReload(): Promise<void> {
+    return this.closeRemoteSession(8_000, true);
+  }
+
+  private async closeRemoteSession(
+    timeoutMs: number,
+    scopeReload = false,
+  ): Promise<void> {
+    if (this.sessionId === null) return;
+    try {
+      await this.connection.request(
+        ACP_METHOD.sessionClose,
+        { sessionId: this.sessionId },
+        { timeoutMs, scopeReload },
+      );
+    } catch (error) {
+      if (
+        !scopeReload ||
+        !(error instanceof AcpResponseError) ||
+        !error.sessionUnavailable
+      )
+        throw error;
+    }
+    this.sessionId = null;
+  }
+
   private async closeSessionOnly(): Promise<void> {
     this.invalidateConnection();
     try {
-      if (this.sessionId !== null) {
-        await this.connection.request(
-          ACP_METHOD.sessionClose,
-          { sessionId: this.sessionId },
-          { timeoutMs: 15000 },
-        );
-        this.sessionId = null;
-      }
+      await this.closeRemoteSession(15_000);
     } finally {
       try {
         await this.disposeResources();
@@ -321,6 +341,19 @@ export class AcpSession implements AcpSessionPort {
     return [...servers.values()];
   }
 
+  private sessionDirectories(additionalDirectories?: readonly string[]) {
+    if (additionalDirectories === undefined) return {};
+    const capabilities = asRecord(
+      this.handshake?.agentCapabilities.sessionCapabilities,
+    );
+    if (!asRecord(capabilities?.["additionalDirectories"])) {
+      if (additionalDirectories.length)
+        throw new Error("当前 Agent 不支持恢复关联项目");
+      return {};
+    }
+    return { additionalDirectories };
+  }
+
   /** 建新会话。 */
   async newSession(
     cwd: string,
@@ -328,10 +361,14 @@ export class AcpSession implements AcpSessionPort {
   ): Promise<NewSessionResult> {
     this.invalidateConfiguration();
     this.latestConfigurationSessionId = null;
-    const { mcpServers, ...requestOptions } = options;
+    const { mcpServers, additionalDirectories, ...requestOptions } = options;
     const raw = await this.connection.request(
       ACP_METHOD.sessionNew,
-      { cwd, mcpServers: this.mergeMcpServers(mcpServers) },
+      {
+        cwd,
+        mcpServers: this.mergeMcpServers(mcpServers),
+        ...this.sessionDirectories(additionalDirectories),
+      },
       requestOptions,
     );
     const result = asNewSessionResult(raw);
@@ -367,18 +404,37 @@ export class AcpSession implements AcpSessionPort {
     this.invalidateConfiguration();
     this.latestConfigurationSessionId = null;
     this.loadingConfigurationSessionId = sessionId;
-    const { mcpServers, ...requestOptions } = options;
+    const { mcpServers, additionalDirectories, ...requestOptions } = options;
+    let didDispatch = false;
     const raw = await this.connection
       .request(
         ACP_METHOD.sessionLoad,
-        { sessionId, cwd, mcpServers: this.mergeMcpServers(mcpServers) },
-        requestOptions,
+        {
+          sessionId,
+          cwd,
+          mcpServers: this.mergeMcpServers(mcpServers),
+          ...this.sessionDirectories(additionalDirectories),
+        },
+        options.scopeReload
+          ? {
+              ...requestOptions,
+              beforeDispatch: () => {
+                didDispatch = true;
+              },
+            }
+          : requestOptions,
       )
+      .catch((error: unknown) => {
+        if (didDispatch && !(error instanceof AcpResponseError))
+          this.sessionId = sessionId;
+        throw error;
+      })
       .finally(() => {
         this.loadingConfigurationSessionId = null;
       });
     const result = asLoadSessionResult(raw);
     if (result === null) {
+      if (didDispatch) this.sessionId = sessionId;
       throw new AcpHandshakeError(
         `session/load 响应形状不合法：${JSON.stringify(raw)?.slice(0, 300)}`,
       );

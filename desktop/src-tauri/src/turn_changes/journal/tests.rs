@@ -33,6 +33,40 @@ fn result(id: &str, failed: bool) -> Value {
 }
 
 #[test]
+fn one_journal_routes_files_to_the_primary_or_related_root() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = fs::canonicalize(temp.path()).unwrap();
+    let related = root.join("related");
+    fs::create_dir(&related).unwrap();
+    let main = root.join("session.jsonl");
+    prompt(&main, "p", "turn");
+    write_call(&main, "p", "primary", "main.txt");
+    append(&main, result("primary", false));
+    write_call(&main, "p", "child", "related/library.txt");
+    append(&main, result("child", false));
+    let ids = ["primary".into(), "child".into()];
+    let mut index = Streams::new();
+    let primary = collect(
+        &main,
+        &root,
+        None,
+        std::slice::from_ref(&related),
+        &ids,
+        &mut index,
+    )
+    .unwrap();
+    let secondary = collect(&main, &related, Some(&root), &[], &ids, &mut index).unwrap();
+    assert_eq!(
+        primary.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["main.txt"]
+    );
+    assert_eq!(
+        secondary.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["library.txt"]
+    );
+}
+
+#[test]
 fn later_flush_appends_only_complete_rows_and_keeps_parallel_children_on_their_prompt() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
@@ -57,6 +91,8 @@ fn later_flush_appends_only_complete_rows_and_keeps_parallel_children_on_their_p
         collect(
             &main,
             root,
+            None,
+            &[],
             &ids.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
             index,
         )
@@ -195,7 +231,11 @@ fn delegation_alone_anchors_child_changes_after_a_long_history() {
     );
     let mut streams = Streams::new();
     let ids = ["delegate".to_string()];
-    assert!(collect(&main, root, &ids, &mut streams).unwrap().is_empty());
+    assert!(
+        collect(&main, root, None, &[], &ids, &mut streams)
+            .unwrap()
+            .is_empty()
+    );
     let old_offset = streams[&main].offset;
     let subs = root.join("session/subagents");
     fs::create_dir_all(&subs).unwrap();
@@ -203,7 +243,7 @@ fn delegation_alone_anchors_child_changes_after_a_long_history() {
     prompt(&child, "child-user", "latest");
     write_call(&child, "child-user", "op", "child.txt");
     append(&child, result("op", false));
-    let changes = collect(&main, root, &ids, &mut streams).unwrap();
+    let changes = collect(&main, root, None, &[], &ids, &mut streams).unwrap();
     assert_eq!(streams[&main].offset, old_offset);
     assert_eq!(
         changes.keys().collect::<Vec<_>>(),
@@ -211,5 +251,9 @@ fn delegation_alone_anchors_child_changes_after_a_long_history() {
     );
     prompt(&main, "next", "different");
     write_call(&main, "next", "delegate", "ambiguous.txt");
-    assert!(collect(&main, root, &ids, &mut streams).unwrap().is_empty());
+    assert!(
+        collect(&main, root, None, &[], &ids, &mut streams)
+            .unwrap()
+            .is_empty()
+    );
 }

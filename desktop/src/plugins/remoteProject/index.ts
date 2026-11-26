@@ -35,6 +35,7 @@ export function apply(ctx: Context): void {
     getById: store.getById,
     listProjectsForConnection: store.listProjectsForConnection,
     addProject: store.addProject,
+    saveProjectGroup: store.saveProjectGroup,
     async repairProject(path, connectionId) {
       const target = parseRemoteProjectPath(path);
       if (!target || store.getById(target.projectId)) {
@@ -72,6 +73,7 @@ export function apply(ctx: Context): void {
         );
       }
       await sidecar.request("project/connection-delete", { id });
+      await store.removeConnectionMetadata(id);
     },
     async testConnection(params) {
       return sidecar.request<RemoteConnectionTestResult>(

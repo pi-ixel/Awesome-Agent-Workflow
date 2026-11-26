@@ -12,43 +12,45 @@ import {
   type MenuPlacement,
 } from "../../../shared/ui/ContextMenu.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
-import { fieldSurfaceClass } from "../../../shared/ui/inputStyles.ts";
+import {
+  normalizePath,
+  parseRemoteProjectPath,
+  pathKey,
+} from "../../../shared/panelPaths.ts";
+import { basenameOf } from "../../../shared/workspaceText.ts";
+import { ProjectFolderFields } from "./ProjectFolderFields.tsx";
 import {
   ChevronDownIcon,
   FolderGlyph,
   GlobeIcon,
+  MonitorIcon,
   PlusIcon,
   SettingsIcon,
   XIcon,
 } from "../../../shared/ui/icons.tsx";
 import { describeUnknownError } from "../../../shared/errors.ts";
-import { parseRemoteProjectPath } from "../../../shared/panelPaths.ts";
-import type {
-  RemoteConnectionDTO,
-  RemoteProjectRecord,
-  RemoteProjectService,
-} from "../service.ts";
+import type { RemoteConnectionDTO, RemoteProjectService } from "../service.ts";
 import { RemoteHostFormModal } from "./RemoteHostFormModal.tsx";
 import { RemoteDirectoryPickerModal } from "./RemoteDirectoryPickerModal.tsx";
-
-function basenameOfPath(input: string): string {
-  const normalized = input.replace(/[\\/]+$/, "");
-  if (!normalized) return input;
-  const parts = normalized.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] ?? normalized;
-}
 
 export interface AddRemoteProjectModalProps {
   readonly service: RemoteProjectService;
   readonly onClose: () => void;
-  readonly onAdded: (record: RemoteProjectRecord) => void;
   readonly repairPath?: string;
-  /** 可选：提供本地目录选择回调时，支持在「此电脑」与「远程主机」间切换。 */
+  readonly onSave: (
+    deviceId: string,
+    name: string,
+    primary: string,
+    related: readonly string[],
+  ) => boolean | Promise<boolean>;
   readonly onPickLocalDirectory?: () => Promise<string | null>;
-  /** 可选：确认创建本地项目后的回调。 */
-  readonly onLocalAdded?: (localPath: string) => void;
-  /** 可选：跳转「设置 → 远程主机」管理页。 */
   readonly onOpenRemoteHostSettings?: () => void;
+  readonly edit?: {
+    readonly deviceId: string;
+    readonly deviceLabel?: string;
+    readonly name: string;
+    readonly folders: readonly string[];
+  };
 }
 
 /**
@@ -58,23 +60,23 @@ export interface AddRemoteProjectModalProps {
 export function CreateProjectFormBody({
   service,
   onClose,
-  onAdded,
-  onPickLocalDirectory,
-  onLocalAdded,
-  onOpenRemoteHostSettings,
   repairPath,
   onSavingChange,
+  onSave,
+  onPickLocalDirectory,
+  edit,
+  onOpenRemoteHostSettings,
   embedded = false,
 }: AddRemoteProjectModalProps & {
   readonly embedded?: boolean;
-  readonly onSavingChange?: (saving: boolean) => void;
+  readonly onSavingChange?: (isSaving: boolean) => void;
 }) {
-  const supportsLocal =
-    !repairPath && Boolean(onPickLocalDirectory && onLocalAdded);
+  const supportsLocal = !repairPath && Boolean(onPickLocalDirectory);
+  const repairRoot = repairPath
+    ? parseRemoteProjectPath(repairPath)?.remotePath
+    : undefined;
 
-  const [projectName, setProjectName] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState(edit?.name);
   const [connections, setConnections] = useState<
     readonly RemoteConnectionDTO[]
   >([]);
@@ -83,20 +85,24 @@ export function CreateProjectFormBody({
 
   // "local" 表示此电脑；否则为远程主机 connectionId
   const [deviceId, setDeviceId] = useState<string | null>(
-    supportsLocal ? "local" : null,
+    edit?.deviceId ?? (supportsLocal ? "local" : null),
   );
   const [menuState, setMenuState] = useState<{
     readonly placement: MenuPlacement;
     readonly trigger?: HTMLElement;
   } | null>(null);
 
-  // 已选中的源文件夹（根据 deviceId 区分本地路径或远端路径）
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(
-    repairPath
-      ? (parseRemoteProjectPath(repairPath)?.remotePath ?? null)
-      : null,
+  const [folders, setFolders] = useState<readonly string[]>(
+    edit?.folders ?? (repairRoot ? [repairRoot] : []),
   );
-  const [localPickUnavailable, setLocalPickUnavailable] = useState(false);
+  const [isPicking, setIsPicking] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string>();
+  const busy = isPicking || isSaving;
+  // 热更新可能替换表单组件，仍在运行的插件注册会保留旧回调。
+  const hasSaveHandler = typeof onSave === "function";
+  const primary = folders[0];
+  const name = projectName ?? (primary ? basenameOf(primary) : "");
 
   // 二级弹窗：添加远程主机 / 远端文件夹选择器
   const [addHostOpen, setAddHostOpen] = useState(false);
@@ -119,11 +125,10 @@ export function CreateProjectFormBody({
         setConnections(list);
         setConnectionsError(null);
         setDeviceId((prev) => {
-          if (prev === "local") return "local";
+          if (edit || prev === "local") return prev;
           if (prev && list.some((c) => c.id === prev)) return prev;
           if (supportsLocal) return "local";
-          if (repairPath) return null;
-          return list[0]?.id ?? null;
+          return repairPath ? null : (list[0]?.id ?? null);
         });
       })
       .catch((err) => {
@@ -136,14 +141,13 @@ export function CreateProjectFormBody({
     return () => {
       cancelled = true;
     };
-  }, [service, supportsLocal, repairPath]);
+  }, [service, supportsLocal, edit, repairPath]);
 
   const switchDevice = (nextDeviceId: string | null) => {
     if (nextDeviceId !== deviceId) {
       setDeviceId(nextDeviceId);
-      if (!repairPath) setSelectedFolder(null);
-      setLocalPickUnavailable(false);
-      setSaveError(null);
+      if (!repairPath) setFolders([]);
+      setError(undefined);
     }
   };
 
@@ -245,50 +249,62 @@ export function CreateProjectFormBody({
     return items;
   };
 
+  const addFolder = (path: string) => {
+    const key = deviceId === "local" ? pathKey : normalizePath;
+    setFolders((items) =>
+      items.some((item) => key(item) === key(path)) ? items : [...items, path],
+    );
+  };
+
   const handlePickFolder = async () => {
+    if (busy) return;
+    setError(undefined);
     if (deviceId === "local") {
       if (!onPickLocalDirectory) return;
-      setLocalPickUnavailable(false);
-      const picked = await onPickLocalDirectory();
-      if (!picked) {
-        setLocalPickUnavailable(true);
-        return;
+      setIsPicking(true);
+      try {
+        const picked = await onPickLocalDirectory();
+        if (picked) addFolder(picked);
+        else if (folders.length === 0)
+          setError("目录选择已取消或当前环境不可用，可点击重试。");
+      } catch (error) {
+        setError(describeUnknownError(error));
+      } finally {
+        setIsPicking(false);
       }
-      setSelectedFolder(picked);
-      setProjectName((prev) => (prev.trim() ? prev : basenameOfPath(picked)));
-      return;
-    }
-    if (selectedConnection) {
+    } else if (selectedConnection) {
       setRemotePickerOpen(true);
-      return;
+    } else if (!edit) {
+      setAddHostOpen(true);
+    } else {
+      setError("远程主机不可用，无法添加文件夹");
     }
-    setAddHostOpen(true);
   };
 
   const handleConfirm = async () => {
-    if (!selectedFolder || isSaving) return;
-    if (deviceId === "local") {
-      if (!onLocalAdded) return;
-      onLocalAdded(selectedFolder);
-      onClose();
+    if (
+      !hasSaveHandler ||
+      busy ||
+      !primary ||
+      !deviceId ||
+      (deviceId !== "local" && !selectedConnection)
+    )
       return;
-    }
-    if (!selectedConnection) return;
-    setSaveError(null);
     setIsSaving(true);
     onSavingChange?.(true);
+    setError(undefined);
     try {
-      const record = repairPath
-        ? await service.repairProject(repairPath, selectedConnection.id)
-        : await service.addProject(
-            selectedConnection.id,
-            selectedFolder,
-            projectName.trim() || undefined,
-          );
-      onAdded(record);
-      onClose();
+      if (
+        await onSave(
+          deviceId,
+          name.trim() || basenameOf(primary),
+          primary,
+          folders.slice(1),
+        )
+      )
+        onClose();
     } catch (error) {
-      setSaveError(describeUnknownError(error));
+      setError(describeUnknownError(error));
     } finally {
       setIsSaving(false);
       onSavingChange?.(false);
@@ -298,9 +314,13 @@ export function CreateProjectFormBody({
   const deviceLabel =
     deviceId === "local"
       ? "此电脑"
-      : selectedConnection
-        ? selectedConnection.name
-        : "选择远程主机";
+      : (selectedConnection?.name ?? edit?.deviceLabel ?? "选择远程主机");
+  const deviceIcon =
+    deviceId === "local" ? (
+      <MonitorIcon className="ui-icon-14 shrink-0 text-ink-mute" />
+    ) : (
+      <GlobeIcon className="ui-icon-14 shrink-0 text-ink-mute" />
+    );
 
   return (
     <>
@@ -309,108 +329,60 @@ export function CreateProjectFormBody({
           embedded ? "flex flex-col gap-4" : "flex flex-col gap-4 px-5 pb-4"
         }
       >
-        {/* 项目名称输入框 */}
-        {!repairPath && (
-          <div className="flex items-center overflow-hidden rounded-control border border-line-strong bg-surface focus-within:border-ink-faint">
-            <span
-              aria-hidden={true}
-              className="flex min-h-10 w-10 shrink-0 items-center justify-center border-r border-line text-ink-mute"
-            >
-              <FolderGlyph className="ui-icon-16" />
-            </span>
-            <input
-              type="text"
-              aria-label="项目名称"
-              disabled={isSaving}
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
-              placeholder="项目名称"
-              className={`${fieldSurfaceClass} min-h-10 min-w-0 flex-1 rounded-flat border-0 bg-transparent px-3 py-1.5 text-ui-sm focus:ring-0`}
-            />
-          </div>
-        )}
-
-        {/* 源文件夹区域：统领句 + 设备切换胶囊放在区域左上角 */}
-        <div className="flex flex-col gap-2.5">
-          <div className="flex flex-wrap items-center gap-1.5 text-ui-sm text-ink-mute">
-            <span>在</span>
-            <ActionButton
-              tone="secondary"
-              type="button"
-              aria-haspopup="menu"
-              aria-expanded={Boolean(menuState)}
-              aria-label={`切换设备，当前：${deviceLabel}`}
-              onClick={handleToggleMenu}
-              disabled={isSaving}
-              className="inline-flex items-center gap-1.5 rounded-control px-2.5 py-1 text-ui-sm font-medium text-ink"
-            >
-              {deviceId === "local" ? (
-                <FolderGlyph className="ui-icon-14 shrink-0 text-ink-mute" />
-              ) : (
-                <GlobeIcon className="ui-icon-14 shrink-0 text-ink-mute" />
-              )}
-              <span>{deviceLabel}</span>
-              <ChevronDownIcon className="ui-icon-14 shrink-0 text-ink-mute" />
-            </ActionButton>
-            <span>{repairPath ? "连接原远端目录" : "上添加文件夹"}</span>
-          </div>
-
-          {selectedFolder ? (
-            <div className="flex items-center justify-between gap-3 rounded-popover border border-line-strong bg-surface px-3.5 py-3">
-              <div className="flex min-w-0 items-center gap-2.5">
-                <span className="flex min-h-8 w-8 shrink-0 items-center justify-center rounded-control border border-line bg-raised/50 text-ink-mute">
-                  {deviceId === "local" ? (
-                    <FolderGlyph className="ui-icon-16" />
-                  ) : (
-                    <GlobeIcon className="ui-icon-16" />
-                  )}
-                </span>
-                <div className="min-w-0">
-                  <div className="truncate font-mono text-ui-xs font-medium text-ink">
-                    {selectedFolder}
-                  </div>
-                  <div className="mt-0.5 truncate text-ui-caption text-ink-mute">
-                    {deviceId === "local"
-                      ? "此电脑"
-                      : selectedConnection
-                        ? `${selectedConnection.user}@${selectedConnection.host}:${selectedConnection.port || 22}`
-                        : "远程主机"}
-                  </div>
-                </div>
-              </div>
-              {!repairPath && (
-                <ActionButton
-                  tone="secondary"
-                  type="button"
-                  disabled={isSaving}
-                  onClick={() => void handlePickFolder()}
-                  className="shrink-0 px-2.5 py-1 text-ui-xs"
-                >
-                  更改
-                </ActionButton>
-              )}
-            </div>
-          ) : (
-            <div className="flex min-h-[120px] flex-col items-center justify-center gap-2.5 rounded-popover border border-dashed border-line-strong bg-raised/30 px-4 py-5">
+        <ProjectFolderFields
+          name={name}
+          folders={folders}
+          device={
+            edit ? (
+              <span className="inline-flex items-center gap-1.5">
+                {deviceIcon}
+                {deviceLabel}
+              </span>
+            ) : (
               <ActionButton
                 tone="secondary"
                 type="button"
-                onClick={() => void handlePickFolder()}
-                className="inline-flex items-center gap-1.5 rounded-pill px-4 py-1.5 text-ui-sm"
+                disabled={busy}
+                aria-haspopup="menu"
+                aria-expanded={Boolean(menuState)}
+                aria-label={`切换设备，当前：${deviceLabel}`}
+                onClick={handleToggleMenu}
+                className="inline-flex items-center gap-1.5 rounded-control px-2.5 py-1 text-ui-sm font-medium text-ink"
               >
-                <FolderGlyph className="ui-icon-14 shrink-0" />
-                <span>添加</span>
+                {deviceIcon}
+                {deviceLabel}
+                <ChevronDownIcon className="ui-icon-14 shrink-0 text-ink-mute" />
               </ActionButton>
-
-              {localPickUnavailable && (
-                <p className="text-ui-xs text-warn-ink">
-                  目录选择已取消或当前环境不可用，可点击重试。
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-
+            )
+          }
+          isEditing={Boolean(edit || repairPath)}
+          hideName={Boolean(repairPath)}
+          disabled={busy}
+          onNameChange={setProjectName}
+          onFoldersChange={setFolders}
+          onPick={repairPath ? undefined : () => void handlePickFolder()}
+        />
+        {!hasSaveHandler && (
+          <div
+            role="alert"
+            className="flex items-center gap-2 text-ui-sm text-ink-mute"
+          >
+            <span>项目表单已更新，重新加载窗口后可以保存。</span>
+            <ActionButton
+              type="button"
+              tone="secondary"
+              size="compact"
+              onClick={() => window.location.reload()}
+            >
+              重新加载
+            </ActionButton>
+          </div>
+        )}
+        {error && (
+          <p role="alert" className="text-ui-sm text-danger-ink">
+            {error}
+          </p>
+        )}
         {menuState && (
           <ContextMenu
             entries={buildMenuEntries()}
@@ -421,11 +393,6 @@ export function CreateProjectFormBody({
             trigger={menuState.trigger}
             variant="selection"
           />
-        )}
-        {saveError && (
-          <p role="alert" className="text-ui-sm text-danger-ink">
-            {saveError}
-          </p>
         )}
       </div>
 
@@ -440,8 +407,8 @@ export function CreateProjectFormBody({
         <ActionButton
           tone="ghost"
           type="button"
-          disabled={isSaving}
           onClick={onClose}
+          disabled={isSaving}
           className="px-3.5 py-1.5 text-ui-sm"
         >
           取消
@@ -450,8 +417,9 @@ export function CreateProjectFormBody({
           tone="primary"
           type="button"
           disabled={
-            isSaving ||
-            !selectedFolder ||
+            !hasSaveHandler ||
+            busy ||
+            !primary ||
             (deviceId !== "local" && !selectedConnection)
           }
           onClick={() => void handleConfirm()}
@@ -463,7 +431,9 @@ export function CreateProjectFormBody({
               : "正在保存…"
             : repairPath
               ? "修复连接"
-              : "创建项目"}
+              : edit
+                ? "保存"
+                : "创建项目"}
         </ActionButton>
       </div>
 
@@ -488,14 +458,11 @@ export function CreateProjectFormBody({
         <RemoteDirectoryPickerModal
           service={service}
           connection={selectedConnection}
-          initialPath={selectedFolder ?? undefined}
+          initialPath={primary}
           onClose={() => setRemotePickerOpen(false)}
           onSelected={(remotePath) => {
             setRemotePickerOpen(false);
-            setSelectedFolder(remotePath);
-            setProjectName((prev) =>
-              prev.trim() ? prev : basenameOfPath(remotePath),
-            );
+            addFolder(remotePath);
           }}
         />
       )}
@@ -505,14 +472,18 @@ export function CreateProjectFormBody({
 
 export function AddRemoteProjectModal(props: AddRemoteProjectModalProps) {
   const [isSaving, setIsSaving] = useState(false);
-  const label = props.repairPath ? "修复远程项目连接" : "创建项目";
+  const title = props.repairPath
+    ? "修复远程项目连接"
+    : props.edit
+      ? "编辑项目"
+      : "创建项目";
   const dismiss = () => {
     if (!isSaving) props.onClose();
   };
   return (
-    <ModalShell onDismiss={dismiss} label={label} size="default">
+    <ModalShell onDismiss={dismiss} label={title} size="default">
       <div className="flex items-center justify-between px-5 pt-4 pb-3">
-        <h2 className="text-ui-lg font-semibold text-ink">{label}</h2>
+        <h2 className="text-ui-lg font-semibold text-ink">{title}</h2>
         <IconButton aria-label="关闭" disabled={isSaving} onClick={dismiss}>
           <XIcon className="ui-icon-16" />
         </IconButton>

@@ -40,7 +40,8 @@ type Records = Record<string, string | null>;
 export function isConversationTextKey(key: string): boolean {
   return (
     key.startsWith("aaw-desktop/draft/") ||
-    key.startsWith("aaw-desktop/prompt-history/")
+    key.startsWith("aaw-desktop/prompt-history/") ||
+    key.startsWith("aaw-desktop/session-projects/")
   );
 }
 

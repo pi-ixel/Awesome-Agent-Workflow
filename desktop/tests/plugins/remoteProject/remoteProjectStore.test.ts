@@ -76,6 +76,47 @@ describe("remoteProjectStore & remote path isolation", () => {
     store.dispose();
   });
 
+  it("同组远端目录一次确认持久化，失败时不发布半个项目", async () => {
+    const storage = createMemoryStorage();
+    const confirmed = vi.fn((key: string, value: string) =>
+      Promise.resolve(storage.setItem(key, value)),
+    );
+    confirmed.mockRejectedValueOnce(new Error("写盘失败"));
+    const first = createRemoteProjectStore(
+      { ...storage, setConfigurationItem: confirmed },
+      createLogger("test"),
+    );
+    const save = () =>
+      first.saveProjectGroup("conn-1", "/srv/project", "项目", [
+        "/srv/library",
+        "/srv/library/",
+      ]);
+    await expect(save()).rejects.toThrow("写盘失败");
+    expect(first.snapshot.getState().records).toEqual([]);
+    const saved = await save();
+    expect(confirmed).toHaveBeenCalledTimes(2);
+    expect(saved.relatedPaths).toHaveLength(1);
+    first.dispose();
+
+    const restored = createRemoteProjectStore(storage, createLogger("test"));
+    expect(restored.listProjectsForConnection("conn-1")).toEqual([
+      saved.record,
+    ]);
+    const childPath = saved.relatedPaths[0]!;
+    expect(restored.getByPath(childPath)?.associationOnly).toBe(true);
+    expect(
+      (await restored.addProject("conn-1", "/srv/library")).workspacePath,
+    ).toBe(childPath);
+    await restored.removeProjectByPath(childPath, true);
+    expect(restored.getByPath(childPath)?.associationOnly).toBe(true);
+    await restored.removeConnectionMetadata("conn-1");
+    expect(restored.getByPath(childPath)).toBeNull();
+    expect(restored.getByPath(saved.record.workspacePath)).toEqual(
+      saved.record,
+    );
+    restored.dispose();
+  });
+
   it("重启后可完整恢复远程项目记录与各连接最近目录，并支持按路径移除", async () => {
     const storage = createMemoryStorage();
     const first = createRemoteProjectStore(storage, createLogger("test"));

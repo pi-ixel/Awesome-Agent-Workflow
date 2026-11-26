@@ -22,7 +22,13 @@ import { ColumnResizer } from "../../../shared/ui/controls/ColumnResizer.tsx";
  * - 拖拽逐帧预览高度；fit + PTY resize 的节流在 TerminalSessionView 内（300ms 低频预览
  *   + 松手 flush，拖拽态经 resizing prop 下传）。
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { XIcon, PlusIcon } from "../../../shared/ui/icons.tsx";
 import { useStore } from "zustand";
@@ -140,6 +146,7 @@ export function TerminalPanel({
   terminal,
   openExternal,
   project,
+  projectSelector,
   visible,
   close,
   restoreLauncherFocus,
@@ -147,6 +154,7 @@ export function TerminalPanel({
   readonly terminal: TerminalService;
   readonly openExternal?: (url: string) => Promise<void>;
   readonly project: string | null;
+  readonly projectSelector?: ReactNode;
   /** 面板可见性只驱动 hidden。 */
   readonly visible: boolean;
   readonly close: () => void;
@@ -155,6 +163,12 @@ export function TerminalPanel({
   const logger = useLogger("terminal");
   const tabs = useStore(terminal.tabs, (state) => state.tabs);
   const activeTabId = useStore(terminal.tabs, (state) => state.activeTabId);
+  const projectTabs = projectSelector
+    ? tabs.filter((tab) => tab.project === project)
+    : tabs;
+  const visibleTab =
+    projectTabs.find((tab) => tab.id === activeTabId) ??
+    (projectSelector ? projectTabs[0] : undefined);
 
   const sectionRef = useRef<HTMLElement | null>(null);
   // null = 未拖拽过，按默认 30% 呈现（ZCode defaultSize 0→展开 30%）
@@ -180,11 +194,10 @@ export function TerminalPanel({
     }
   }, [terminal, visible, project]);
 
-  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   // 工具栏显示活动页签的 **shell 名**（"PowerShell"/"pwsh"…，ZCode
   // Terminal.tsx:304-308 同位同语义）；页签标题才是项目名，二者不重复。
   const activeShellName =
-    activeTab?.kind === "shell" ? activeTab.shellName : null;
+    visibleTab?.kind === "shell" ? visibleTab.shellName : null;
 
   function closePanel(restoreFocus: boolean) {
     close();
@@ -207,11 +220,12 @@ export function TerminalPanel({
 
   /** 左右方向键 roving：激活相邻页签并把焦点移过去（环形）。 */
   function activateNeighborTab(tabId: string, delta: -1 | 1) {
-    const index = tabs.findIndex((tab) => tab.id === tabId);
-    if (index === -1 || tabs.length === 0) {
+    const index = projectTabs.findIndex((tab) => tab.id === tabId);
+    if (index === -1) {
       return;
     }
-    const next = tabs[(index + delta + tabs.length) % tabs.length];
+    const next =
+      projectTabs[(index + delta + projectTabs.length) % projectTabs.length];
     if (next === undefined) {
       return;
     }
@@ -259,61 +273,62 @@ export function TerminalPanel({
           <span className="min-w-0 shrink-0 truncate text-ui-base font-medium text-ink">
             终端
           </span>
-          {activeShellName === null ? null : (
-            // ZCode :305 shrink-0 不截断（页签条才是 min-w-0 的让位方）
-            <span className="shrink-0 text-ui-base text-ink-subtle">
-              {activeShellName}
-            </span>
-          )}
-          <div
-            ref={tabListRef}
-            role="tablist"
-            aria-label="终端页签"
-            className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          >
-            <div className="flex h-7 w-max items-center gap-1">
-              {tabs.map((tab) => (
-                <TerminalTabChip
-                  key={tab.id}
-                  tab={tab}
-                  active={tab.id === activeTabId}
-                  onActivate={() => terminal.selectTab(tab.id)}
-                  onArrow={(delta) => activateNeighborTab(tab.id, delta)}
-                  onClose={(restoreFocus) => closeTab(tab.id, restoreFocus)}
-                  refCallback={(element) => {
-                    if (element === null) {
-                      chipRefsRef.current.delete(tab.id);
-                    } else {
-                      chipRefsRef.current.set(tab.id, element);
-                    }
-                  }}
-                />
-              ))}
+            {activeShellName === null ? null : (
+              // ZCode :305 shrink-0 不截断（页签条才是 min-w-0 的让位方）
+              <span className="shrink-0 text-ui-base text-ink-subtle">
+                {activeShellName}
+              </span>
+            )}
+            <div
+              ref={tabListRef}
+              role="tablist"
+              aria-label="终端页签"
+              className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            >
+              <div className="flex h-7 w-max items-center gap-1">
+                {projectTabs.map((tab) => (
+                  <TerminalTabChip
+                    key={tab.id}
+                    tab={tab}
+                    active={tab.id === visibleTab?.id}
+                    onActivate={() => terminal.selectTab(tab.id)}
+                    onArrow={(delta) => activateNeighborTab(tab.id, delta)}
+                    onClose={(restoreFocus) => closeTab(tab.id, restoreFocus)}
+                    refCallback={(element) => {
+                      if (element === null) {
+                        chipRefsRef.current.delete(tab.id);
+                      } else {
+                        chipRefsRef.current.set(tab.id, element);
+                      }
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              {projectSelector}
+              <IconButton
+                type="button"
+                data-testid="terminal-new-shell-button"
+                aria-label="新建终端页签"
+                data-hint="新建终端页签"
+                onClick={() => terminal.openShellTab(project)}
+                className="flex shrink-0 items-center justify-center rounded-control text-ink transition-colors hover:bg-hover hover:text-ink"
+              >
+                <PlusIcon className="ui-icon-16" strokeWidth={2} />
+              </IconButton>
+              <IconButton
+                type="button"
+                data-testid="terminal-close-button"
+                aria-label="关闭终端"
+                data-hint="关闭终端"
+                onClick={(event) => closePanel(event.detail === 0)}
+                className="flex shrink-0 items-center justify-center rounded-control text-ink transition-colors hover:bg-hover hover:text-ink"
+              >
+                <XIcon className="ui-icon-16" strokeWidth={2} />
+              </IconButton>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <IconButton
-              type="button"
-              data-testid="terminal-new-shell-button"
-              aria-label="新建终端页签"
-              data-hint="新建终端页签"
-              onClick={() => terminal.openShellTab(project)}
-              className="flex shrink-0 items-center justify-center rounded-control text-ink transition-colors hover:bg-hover hover:text-ink"
-            >
-              <PlusIcon className="ui-icon-16" strokeWidth={2} />
-            </IconButton>
-            <IconButton
-              type="button"
-              data-testid="terminal-close-button"
-              aria-label="关闭终端"
-              data-hint="关闭终端"
-              onClick={(event) => closePanel(event.detail === 0)}
-              className="flex shrink-0 items-center justify-center rounded-control text-ink transition-colors hover:bg-hover hover:text-ink"
-            >
-              <XIcon className="ui-icon-16" strokeWidth={2} />
-            </IconButton>
-          </div>
-        </div>
         </IconHoverProvider>
         {/* 页签体：keep-alive，全部常驻挂载、非活动置 hidden（hidden 落
             在 TerminalSessionView 的 xterm 宿主上） */}
@@ -323,7 +338,7 @@ export function TerminalPanel({
             terminal={terminal}
             openExternal={openExternal}
             tab={tab}
-            visible={visible && tab.id === activeTabId}
+            visible={visible && tab.id === visibleTab?.id}
             project={tab.project}
             resizing={dragging}
             shouldFocusOnShow={shouldFocusSession}

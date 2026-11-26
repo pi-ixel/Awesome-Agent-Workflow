@@ -12,6 +12,7 @@ import {
   useState,
   useSyncExternalStore,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
@@ -37,17 +38,25 @@ export function GitPanel({
   reveal,
   watchActivity,
   revealRequest,
+  projectSelector,
 }: {
   project: string;
   git: GitService;
   reveal?: GitRevealCursor;
   watchActivity?: ProjectWorkspace["subscribeWorkspaceActivity"];
   revealRequest?: GitReviewReveal;
+  projectSelector?: ReactNode;
 }) {
   const [localReveal] = useState(() => createGitRevealCursor());
   const result = useProjectGit(project, git.query, watchActivity);
   return (
     <div className="flex h-full min-h-0 flex-col text-ui-base">
+      {projectSelector && (
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-3 py-1">
+          <span className="text-ui-sm font-medium text-ink">Git 审查</span>
+          {projectSelector}
+        </div>
+      )}
       {result.error && (
         <p role="alert" className="p-3 text-danger-ink">
           {result.error}

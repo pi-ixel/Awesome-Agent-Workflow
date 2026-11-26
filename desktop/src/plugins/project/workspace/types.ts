@@ -15,6 +15,12 @@ export interface WorkspaceEntry {
   readonly lastOpenedAt: string;
 }
 
+/** 以主目录为项目身份，关联目录不独立注册到项目树。 */
+export interface ProjectFolders {
+  readonly name: string;
+  readonly relatedPaths: readonly string[];
+}
+
 /** 一次「打开项目」连接失败的用户可见错误（含修复指引）。 */
 export interface ConnectError {
   readonly path: string;
@@ -35,9 +41,12 @@ export interface WorkspaceSnapshot {
   readonly toolPaths: WorkspaceToolPaths;
   /** 最近一次连接失败（按项目匹配展示；成功连接或用户关闭即清除）。 */
   readonly lastConnectError: ConnectError | null;
+  readonly projectFolders?: Readonly<Record<string, ProjectFolders>>;
 }
 
 export interface WorkspaceStoreState extends WorkspaceSnapshot {
+  registerProject: (path: string, folders?: ProjectFolders) => void;
+  updateProjectFolders: (path: string, folders: ProjectFolders) => void;
   selectWorkspace: (path: string) => void;
   clearSelection: () => void;
   openWorkspace: (path?: string) => void;

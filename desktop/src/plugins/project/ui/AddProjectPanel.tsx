@@ -8,11 +8,10 @@ import { SidebarItemTitle } from "../../../shared/ui/SidebarItemTitle.tsx";
 import { FolderGlyph, GlobeIcon, XIcon } from "../../../shared/ui/icons.tsx";
 import { isRemoteProjectPath } from "../../../shared/panelPaths.ts";
 import {
-  basenameOf,
   formatLastOpened,
   formatWorkspacePathLabel,
 } from "../../../shared/workspaceText.ts";
-import { useWorkspaceValue } from "./bindings/workspaceView.ts";
+import { useProjectName, useWorkspaceValue } from "./bindings/workspaceView.ts";
 import { useProject, useProjectNavigation } from "./bindings/projectView.tsx";
 
 type AddPanelTab = "new-session" | "add-project";
@@ -38,6 +37,7 @@ function KnownProjectRow({
 }) {
   const projectService = useProject();
   const remote = isRemoteProjectPath(path);
+  const displayName = useProjectName(path);
   return (
     <li>
       <NavigationRow
@@ -54,7 +54,7 @@ function KnownProjectRow({
           <FolderGlyph className="ui-icon-16 shrink-0 text-ink-mute" />
         )}
         <span className="flex min-w-0 flex-1 flex-col">
-          <SidebarItemTitle>{basenameOf(path)}</SidebarItemTitle>
+          <SidebarItemTitle>{displayName}</SidebarItemTitle>
           {lastOpenedAt !== null && (
             <span className="truncate text-ui-caption text-ink-mute">
               {formatLastOpened(lastOpenedAt)}

@@ -23,12 +23,14 @@ export interface SessionToolContext {
   readonly agentId: string;
   /** 新建会话时为 null。 */
   readonly sessionId: string | null;
+  readonly relatedProjects?: readonly string[];
+  readonly onRemoteScopeBound?: () => void;
   /** Agent 握手时声明的信息与能力（按它选择工具的连接方式）。 */
   readonly agent: AcpSessionPort["agentInfo"];
   readonly requestExtension?: AcpSessionPort["requestAgentExtension"];
   /** 仅在这一代 ACP 会话建立后通知，使用 Agent 返回或恢复的会话标识。 */
   readonly onEstablished?: (listener: (sessionId: string) => void) => void;
-  readonly onDispose?: (listener: () => Promise<void>) => void;
+  readonly onDispose?: (listener: (strict?: boolean) => Promise<void>) => void;
   /** 让会话附加工具复用发起会话的审批。会话建立后可用。 */
   readonly requestPermission?: (
     toolCall: Readonly<Record<string, unknown>>,
@@ -36,19 +38,28 @@ export interface SessionToolContext {
   ) => Promise<RequestPermissionOutcome>;
 }
 
-export type SessionToolProvider = (
+export type SessionToolProvider = ((
   context: SessionToolContext,
-) => readonly McpServer[] | Promise<readonly McpServer[]>;
+) => readonly McpServer[] | Promise<readonly McpServer[]>) & {
+  readonly connectionForProject?: (path: string) => string | undefined;
+};
 
 export interface SessionToolsResolution {
   readonly servers: readonly McpServer[];
-  readonly establish: (sessionId: string) => void;
+  readonly additionalDirectories?: readonly string[];
+  readonly establish: (sessionId: string) => void | Promise<void>;
   readonly dispose?: () => Promise<void>;
 }
 
 export function createSessionTools(logger: Logger) {
   const providers = new Set<SessionToolProvider>();
   return {
+    connectionForProject(path: string) {
+      for (const provider of providers) {
+        const connection = provider.connectionForProject?.(path);
+        if (connection) return connection;
+      }
+    },
     /** 登记一个提供方；返回的函数撤销登记。 */
     register(provider: SessionToolProvider): () => void {
       providers.add(provider);
@@ -63,11 +74,21 @@ export function createSessionTools(logger: Logger) {
       const tools: McpServer[] = [];
       const observers: ((sessionId: string) => void)[] = [];
       const disposals: (() => Promise<void>)[] = [];
-      const dispose = async () => {
+      const dispose = async (strict = false) => {
         observers.length = 0;
-        await Promise.allSettled(
-          disposals.splice(0).map((release) => release()),
+        const releasing = disposals.splice(0);
+        const outcomes = await Promise.allSettled(
+          releasing.map((release) => release()),
         );
+        if (strict) {
+          const failed = outcomes.flatMap((outcome, index) => {
+            if (outcome.status === "fulfilled") return [];
+            disposals.push(releasing[index]!);
+            return [outcome.reason as unknown];
+          });
+          if (failed.length)
+            throw new AggregateError(failed, "无法释放旧项目的工具绑定");
+        }
       };
       for (const provider of [...providers]) {
         const releases: typeof disposals = [];

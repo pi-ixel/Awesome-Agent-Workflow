@@ -13,7 +13,15 @@ import { FileDiffIcon } from "../../../shared/ui/icons.tsx";
 import { FileDisplayIcon } from "../../../shared/ui/file-icons/fileDisplay.tsx";
 import { resolveIconName } from "../../../shared/ui/file-icons/fileDisplayHelpers.ts";
 import { readDiffReference } from "../review/diffReference.ts";
-import { createGitReviewNavigation, type GitReviewReveal } from "./reviewNavigation.ts";
+import {
+  createGitReviewNavigation,
+  type GitReviewReveal,
+} from "./reviewNavigation.ts";
+import {
+  ToolProjectSelector,
+  useToolProject,
+  type ToolProjectSource,
+} from "../../../shared/ui/ToolProjectSelector.tsx";
 
 /** Diff tabs from existing layouts remain readable after review moved into its own panel. */
 function readDiffTab(tab: PanelTab | undefined) {
@@ -22,7 +30,10 @@ function readDiffTab(tab: PanelTab | undefined) {
 
 export function gitPanels(
   git: GitService,
-  activity?: ReadonlySnapshot<{ readonly watch?: ProjectWorkspace["subscribeWorkspaceActivity"] }>,
+  activity?: ReadonlySnapshot<{
+    readonly watch?: ProjectWorkspace["subscribeWorkspaceActivity"];
+    readonly scope?: ToolProjectSource;
+  }>,
   requests?: ReadonlySnapshot<Readonly<Record<string, GitReviewReveal>>>,
 ): readonly WorkbenchContributions["panels"][] {
   const reveal = createGitRevealCursor();
@@ -39,15 +50,34 @@ export function gitPanels(
       },
       key: ({ project }) => project,
       View: function GitReviewPanel({ project }) {
-        const watchActivity = useRegisteredSnapshot(activity, (state) => state?.watch);
-        const request = useRegisteredSnapshot(requests, (state) => state?.[pathKey(project)]);
+        const watchActivity = useRegisteredSnapshot(
+          activity,
+          (state) => state?.watch,
+        );
+        const scope = useRegisteredSnapshot(activity, (state) => state?.scope);
+        const selection = useToolProject(project, scope);
+        const target = selection.project ?? project;
+        const request = useRegisteredSnapshot(
+          requests,
+          (state) => state?.[pathKey(target)],
+        );
         return (
           <GitPanel
-            project={project}
+            project={target}
             git={git}
             reveal={reveal}
             revealRequest={request}
             watchActivity={watchActivity}
+            projectSelector={
+              selection.projects.length > 1 ? (
+                <ToolProjectSelector
+                  label="Git 项目"
+                  paths={selection.projects}
+                  value={target}
+                  onChange={selection.select}
+                />
+              ) : undefined
+            }
           />
         );
       },
@@ -98,12 +128,16 @@ export function apply(ctx: Context): void {
   ctx.effect(() => () => review.dispose(), "git:review-navigation");
   const activity = createStore<{
     watch?: ProjectWorkspace["subscribeWorkspaceActivity"];
+    scope?: ToolProjectSource;
   }>(() => ({}));
   ctx.effect(() => {
     const binding = ctx.inject(["project"], function gitWorkspaceActivity(scoped) {
       const { subscribeWorkspaceActivity } = scoped.project.projects;
       scoped.effect(() => {
-        activity.setState({ watch: subscribeWorkspaceActivity });
+        activity.setState({
+          watch: subscribeWorkspaceActivity,
+          scope: scoped.project.projects.workspace,
+        });
         return () => activity.setState({}, true);
       });
     });

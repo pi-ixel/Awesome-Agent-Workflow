@@ -137,6 +137,7 @@ function resetAll(): void {
     pinnedPaths: [],
     pinnedSessions: [],
     starredSessions: [],
+    projectFolders: {},
   });
   useWorkbenchUiStore.setState({
     viewId: "project-overview",
@@ -282,7 +283,9 @@ describe("项目树 → 项目总览", () => {
     const add = within(screen.getByText(/从左侧选择或新建一个项目目录/).closest('[role="status"]') as HTMLElement)
       .getByRole("button", { name: "添加项目" });
     await userEvent.click(add);
-    const pickButton = await screen.findByRole("button", { name: "添加" });
+    const pickButton = await screen.findByRole("button", {
+      name: "添加文件夹",
+    });
     await userEvent.click(pickButton);
     expect(await screen.findByText(/目录选择已取消或当前环境不可用/)).toBeInTheDocument();
     await userEvent.click(pickButton);
@@ -292,24 +295,59 @@ describe("项目树 → 项目总览", () => {
     expect(screen.queryByText(/目录选择已取消或当前环境不可用/)).toBeNull();
   });
 
-  it("【+】面板「新建项目」tab：目录对话框选择后进树并选中进总览", async () => {
-    vi.mocked(dialogHost.pickDirectory).mockResolvedValue("D:/dev/new-project");
+  it("创建多目录项目后只新增一条项目，悬浮可见目录并可编辑", async () => {
+    const primary = "D:/dev/new-project";
+    const library = "D:/dev/shared-library";
+    const docs = "D:/dev/docs";
+    vi.mocked(dialogHost.pickDirectory)
+      .mockResolvedValueOnce(primary)
+      .mockResolvedValueOnce(library)
+      .mockResolvedValueOnce(docs);
     renderDesktopApp(services.workbench);
     await openAddPanel("新建项目");
 
-    await userEvent.click(screen.getByRole("button", { name: "添加" }));
-    await screen.findByText("D:/dev/new-project");
+    await userEvent.click(screen.getByRole("button", { name: "添加文件夹" }));
+    await screen.findByText(primary);
+    await userEvent.click(screen.getByRole("button", { name: "添加文件夹" }));
+    await screen.findByText(library);
     await userEvent.click(screen.getByRole("button", { name: "创建项目" }));
     expect(
       await screen.findByRole("heading", { name: "new-project" }),
     ).toBeInTheDocument();
-    // 添加成功：面板关闭并选中新项目进总览
     expect(screen.queryByLabelText("新建会话面板")).not.toBeInTheDocument();
+
     const tree = screen.getByLabelText("项目树");
-    expect(getByHint(tree, "D:/dev/new-project")).toBeInTheDocument();
-    expect(useWorkspaceStore.getState().selectedPath).toBe(
-      "D:/dev/new-project",
+    const row = getByHint(tree, primary);
+    expect(queryByHint(tree, library)).not.toBeInTheDocument();
+    expect(useWorkspaceStore.getState().selectedPath).toBe(primary);
+
+    await userEvent.hover(row);
+    const card = await screen.findByRole("group", { name: "项目详情" });
+    expect(
+      within(card)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual([primary, library]);
+    await userEvent.click(
+      within(card).getByRole("button", { name: "编辑项目" }),
     );
+    const editor = screen.getByRole("dialog", { name: "编辑项目" });
+    expect(
+      within(editor).queryByRole("button", { name: "移除 new-project" }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(
+      within(editor).getByRole("button", { name: "移除 shared-library" }),
+    );
+    await userEvent.click(
+      within(editor).getByRole("button", { name: "添加文件夹" }),
+    );
+    await within(editor).findByText(docs);
+    await userEvent.click(within(editor).getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(editor).not.toBeInTheDocument());
+    expect(
+      useWorkspaceStore.getState().projectFolders?.[pathKey(primary)]
+        ?.relatedPaths,
+    ).toEqual([docs]);
   });
 
   it("置顶交互：右键菜单「置顶」后项目节点进置顶带（无分组头），「取消置顶」移回", async () => {
@@ -830,7 +868,7 @@ describe("【+】弹出面板", () => {
     renderDesktopApp(services.workbench);
     await openAddPanel("新建项目");
 
-    await userEvent.click(screen.getByRole("button", { name: "添加" }));
+    await userEvent.click(screen.getByRole("button", { name: "添加文件夹" }));
     expect(
       await screen.findByText(/目录选择已取消或当前环境不可用/),
     ).toBeInTheDocument();

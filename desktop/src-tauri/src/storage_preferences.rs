@@ -439,6 +439,26 @@ mod tests {
     }
 
     #[test]
+    fn related_projects_follow_the_existing_composer_owner() {
+        use crate::session_layout::SessionIdentity;
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path();
+        let draft = "aaw-desktop/session-projects/v3/chrys/D%3A%2Fprimary/__new__";
+        let session = "aaw-desktop/session-projects/v3/chrys/D%3A%2Fprimary/session%2F1";
+        let value = Some(r#"{"paths":["D:/second"],"pending":[]}"#.to_owned());
+        let records = Titles::from([(draft.into(), value.clone()), (session.into(), value)]);
+
+        save_composer(data, records.clone(), false).unwrap();
+        assert_eq!(load_composer(data, Titles::new()).unwrap(), records);
+        let owner = SessionIdentity::new("chrys", "D:/primary", Some("session/1")).unwrap();
+        assert_eq!(
+            read_record::<Titles>(&owner.directory(data).join("composer.json")).unwrap(),
+            Titles::from([(session.into(), records[session].clone())])
+        );
+        assert_eq!(crate::session_layout::directories(data).unwrap().len(), 2);
+    }
+
+    #[test]
     fn migration_preserves_native_changes_and_explicit_removals() {
         let root = std::env::temp_dir().join(format!("aaw-storage-test-{}", std::process::id()));
         let path = root.join("preferences.json");

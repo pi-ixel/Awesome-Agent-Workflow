@@ -8,6 +8,10 @@ import type { ProjectAnnotationEditor, ProjectWorkspace } from "../../project/se
 import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
 import { insidePath, pathKey } from "../../../shared/panelPaths.ts";
 import { FolderGlyph } from "../../../shared/ui/icons.tsx";
+import {
+  useToolProject,
+  type ToolProjectSource,
+} from "../../../shared/ui/ToolProjectSelector.tsx";
 import type { DocumentNavigation, DocumentsService } from "../service.ts";
 import { FilePreview } from "./FilePreview.tsx";
 import { FileTree } from "./FileTree.tsx";
@@ -19,6 +23,7 @@ type GitReader = ReadonlySnapshot<{ read?: GitService["status"] }>;
 type DocumentProjectView = {
   readonly annotations?: ProjectAnnotationEditor;
   readonly watchActivity?: ProjectWorkspace["subscribeWorkspaceActivity"];
+  readonly scope?: ToolProjectSource;
 };
 const noSubscription = () => () => {};
 const noView = () => undefined;
@@ -44,13 +49,26 @@ export function documentPanels(
   projectView?: ReadonlySnapshot<DocumentProjectView>,
 ): readonly WorkbenchContributions["panels"][] {
   function WorkbenchFileTree(props: ComponentProps<typeof FileTree>) {
-    const { fileTreePosition } = useSyncExternalStore(appearance.subscribe, appearance.getSnapshot);
+    const { fileTreePosition } = useSyncExternalStore(
+      appearance.subscribe,
+      appearance.getSnapshot,
+    );
+    const view = useSyncExternalStore(
+      projectView?.subscribe ?? noSubscription,
+      projectView?.getState ?? noView,
+    );
+    const selection = useToolProject(
+      props.root,
+      props.ownerProject ? undefined : view?.scope,
+    );
+    const root = selection.project ?? props.root;
     const latestFileTabPath = useStore(panels, (state) => {
-      const tabs = state.projects[pathKey(props.root)]?.tabs;
+      const tabs =
+        state.projects[pathKey(props.ownerProject ?? props.root)]?.tabs;
       if (!tabs) return undefined;
       for (let index = tabs.length - 1; index >= 0; index -= 1) {
         const entry = readDocumentTab(tabs[index], "file");
-        if (entry) return entry.path;
+        if (entry && insidePath(root, entry.path)) return entry.path;
       }
       return undefined;
     });
@@ -58,14 +76,16 @@ export function documentPanels(
       git?.subscribe ?? noSubscription,
       git?.getState ?? noView,
     );
-    const view = useSyncExternalStore(
-      projectView?.subscribe ?? noSubscription,
-      projectView?.getState ?? noView,
-    );
     return (
       <DocumentAnnotationContext.Provider value={view?.annotations}>
         <FileTree
           {...props}
+          root={root}
+          ownerProject={props.ownerProject ?? props.root}
+          projectSelection={{
+            paths: selection.projects,
+            onSelect: selection.select,
+          }}
           latestFileTabPath={latestFileTabPath}
           readGitStatus={gitStatus?.read}
           watchActivity={view?.watchActivity}
@@ -171,6 +191,7 @@ export function apply(ctx: Context): void {
         projectView.setState({
           annotations: project.drafts.annotationEditor,
           watchActivity: project.projects.subscribeWorkspaceActivity,
+          scope: project.projects.workspace,
         });
         return () => projectView.setState({}, true);
       });

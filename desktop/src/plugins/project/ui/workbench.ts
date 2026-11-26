@@ -48,6 +48,8 @@ export function apply(ctx: Context): void {
   /** 插件给项目界面的扩展（project:extension 绑定）；会话页、侧栏与总览共用。 */
   const extension = createStore<{ view?: ProjectExtension }>(() => ({}));
   let openAddRemoteProject: (() => void) | undefined;
+  let renderEditProjectForm:
+    ((path: string, onClose: () => void) => ReactNode) | undefined;
   let renderAddProjectForm: ((onClose: () => void) => ReactNode) | undefined;
   let active = true;
   const isCurrent = () => active && project.isActive();
@@ -59,6 +61,8 @@ export function apply(ctx: Context): void {
       openAddRemoteProject();
       return true;
     },
+    renderEditProjectForm: (path, onClose) =>
+      renderEditProjectForm?.(path, onClose) ?? null,
     renderAddProjectForm: (onClose) => renderAddProjectForm?.(onClose) ?? null,
   });
   const projectView = {
@@ -132,7 +136,9 @@ export function apply(ctx: Context): void {
         renderAddProjectForm = ui?.renderAddProjectForm
           ? (onClose) => ui.renderAddProjectForm?.(onClose) ?? null
           : undefined;
+        renderEditProjectForm = ui?.renderEditProjectForm?.bind(ui);
         return () => {
+          renderEditProjectForm = undefined;
           openAddRemoteProject = undefined;
           renderAddProjectForm = undefined;
         };

@@ -73,15 +73,22 @@ export class SessionFactory {
           this.assertCurrent(runtime, session);
           resolution = await this.tools(runtime, null);
         }
-        const { servers: mcpServers, establish, dispose } = resolution;
+        const {
+          servers: mcpServers,
+          additionalDirectories,
+          establish,
+          dispose,
+        } = resolution;
         try {
           this.assertCurrent(runtime, session);
           const result = await session.newSession(
             runtime.cwd ?? runtime.workspacePath,
-            mcpServers.length ? { mcpServers } : undefined,
+            mcpServers.length || additionalDirectories !== undefined
+              ? { mcpServers, additionalDirectories }
+              : undefined,
           );
           this.assertCurrent(runtime, session);
-          establish(result.sessionId);
+          await establish(result.sessionId);
           return result;
         } catch (error) {
           await dispose?.();
@@ -225,6 +232,7 @@ export class SessionFactory {
       store.sealStreamingItems();
       const {
         servers: mcpServers,
+        additionalDirectories,
         establish,
         dispose,
       } = await this.tools(runtime, sessionId);
@@ -233,10 +241,12 @@ export class SessionFactory {
         await session.loadSession(
           sessionId,
           runtime.cwd ?? workspacePath,
-          mcpServers.length ? { mcpServers } : undefined,
+          mcpServers.length || additionalDirectories !== undefined
+            ? { mcpServers, additionalDirectories }
+            : undefined,
         );
         check();
-        establish(sessionId);
+        await establish(sessionId);
       } catch (error) {
         await dispose?.();
         throw error;

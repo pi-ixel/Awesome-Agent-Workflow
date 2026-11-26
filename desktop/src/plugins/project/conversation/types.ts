@@ -19,6 +19,7 @@ import type { EditPayload } from "../../acpRuntime/types.ts";
 import type { SessionSummary } from "../sessions/indexTypes.ts";
 import type { SubagentToolPresentation } from "../../acpRuntime/types.ts";
 import type { ToolLocation } from "../../../contracts/acp/toolLocations.ts";
+import type { RelatedProjectsView } from "../sessions/relatedProjects.ts";
 
 export type QueuedPrompt =
   | string
@@ -166,6 +167,7 @@ export type TurnState =
   | "failed";
 
 export interface ConversationValues {
+  readonly relatedProjects?: RelatedProjectsView;
   readonly turnChanges?: TurnChangesSession;
   readonly supportsSteer?: boolean;
   readonly directSteering?: boolean;

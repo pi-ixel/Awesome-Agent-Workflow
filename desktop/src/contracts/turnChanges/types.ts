@@ -3,7 +3,8 @@ export interface TurnFileChange {
   readonly fragments?: readonly (readonly [string | null, string])[];
   readonly path: string;
   readonly oldPath?: string;
-  readonly kind: "written" | "modified" | "added" | "deleted" | "renamed" | "unknown";
+  readonly kind:
+    "written" | "modified" | "added" | "deleted" | "renamed" | "unknown";
   readonly before: string | null;
   readonly after: string | null;
   readonly added: number | null;
@@ -49,6 +50,8 @@ export interface TurnChangesRequest {
     | "undo"
     | "clear";
   readonly cwd: string;
+  readonly excludedProjectRoots?: readonly string[];
+  readonly journalCwd?: string;
   readonly workspacePath?: string;
   readonly agentKey: string;
   readonly sessionId: string;

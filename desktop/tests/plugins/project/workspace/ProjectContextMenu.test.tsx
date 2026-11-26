@@ -48,10 +48,11 @@ describe("ContextMenu × ProjectTree 行键控", () => {
     // jsdom 行矩形全 0：x=rect.right=0 夹取到 8px 边距，y=rect.bottom+4 同
     expect(menu.style.left).toBe("8px");
     expect(menu.style.top).toBe("8px");
-    // 条目 = 新建会话 / 置顶 / 从列表移除（分隔线隔开危险项）
+    // 条目 = 新建会话 / 编辑项目 / 置顶 / 从列表移除（分隔线隔开危险项）
     const items = within(menu).getAllByRole("menuitem");
     expect(items.map((item) => item.textContent)).toEqual([
       "新建会话",
+      "编辑项目",
       "置顶",
       "从列表移除",
     ]);

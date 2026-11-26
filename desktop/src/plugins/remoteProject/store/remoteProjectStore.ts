@@ -80,6 +80,7 @@ function readPersisted(storage: HostStorage): RemoteProjectStoreSnapshot {
           connectionId,
           remoteRoot,
           workspacePath,
+          ...(item["associationOnly"] === true && { associationOnly: true }),
           agentCwd:
             typeof rawCwd === "string" && rawCwd
               ? rawCwd
@@ -158,7 +159,11 @@ export function createRemoteProjectStore(storage: HostStorage, logger: Logger) {
   const listProjectsForConnection = (
     connectionId: string,
   ): readonly RemoteProjectRecord[] =>
-    store.getState().records.filter((r) => r.connectionId === connectionId);
+    store
+      .getState()
+      .records.filter(
+        (r) => r.connectionId === connectionId && !r.associationOnly,
+      );
 
   function recentWith(
     state: RemoteProjectStoreSnapshot,
@@ -194,12 +199,13 @@ export function createRemoteProjectStore(storage: HostStorage, logger: Logger) {
     });
   }
 
-  function addProject(
+  function saveProjectGroup(
     connectionId: string,
     remoteRoot: string,
-    name?: string,
+    name: string | undefined,
+    relatedRoots: readonly string[],
     repairPath?: string,
-  ): Promise<RemoteProjectRecord> {
+  ): Promise<{ record: RemoteProjectRecord; relatedPaths: readonly string[] }> {
     return enqueue(async () => {
       const id = connectionId.trim();
       const cleanedRoot = cleanRemoteRoot(remoteRoot);
@@ -233,28 +239,88 @@ export function createRemoteProjectStore(storage: HostStorage, logger: Logger) {
         createdAt: existing?.createdAt ?? now,
         lastOpenedAt: now,
       };
+      const records = existing
+        ? state.records.map((item) =>
+            item.projectId === projectId ? record : item,
+          )
+        : [record, ...state.records];
+      const relatedPaths: string[] = [];
+      for (const root of new Set(relatedRoots.map(cleanRemoteRoot))) {
+        if (root === cleanedRoot) continue;
+        let child = records.find(
+          (item) => item.connectionId === id && item.remoteRoot === root,
+        );
+        if (!child) {
+          const childId = generateProjectId();
+          child = {
+            ...record,
+            projectId: childId,
+            remoteRoot: root,
+            workspacePath: formatRemoteProjectPath(childId, root),
+            agentCwd: `remote-projects/${childId}`,
+            name: defaultProjectName(root),
+            createdAt: now,
+            associationOnly: true,
+          };
+          records.push(child);
+        }
+        relatedPaths.push(child.workspacePath);
+      }
       await persist({
-        records: existing
-          ? state.records.map((item) =>
-              item.projectId === projectId ? record : item,
-            )
-          : [record, ...state.records],
+        records,
         recentDirsByConnection: recentWith(state, id, cleanedRoot),
       });
-      return record;
+      return { record, relatedPaths };
     });
   }
 
-  function removeProjectByPath(path: string): Promise<void> {
+  async function addProject(
+    connectionId: string,
+    remoteRoot: string,
+    name?: string,
+    repairPath?: string,
+  ): Promise<RemoteProjectRecord> {
+    return (
+      await saveProjectGroup(connectionId, remoteRoot, name, [], repairPath)
+    ).record;
+  }
+
+  function removeProjectByPath(
+    path: string,
+    retainAssociation = false,
+  ): Promise<void> {
     const parsed = parseRemoteProjectPath(path);
     if (!parsed) return Promise.resolve();
     return enqueue(async () => {
       const state = store.getState();
-      const nextRecords = state.records.filter(
-        (record) => record.projectId !== parsed.projectId,
-      );
-      if (nextRecords.length === state.records.length) return;
+      if (
+        !state.records.some((record) => record.projectId === parsed.projectId)
+      )
+        return;
+      const nextRecords = retainAssociation
+        ? state.records.map((record): RemoteProjectRecord =>
+            record.projectId === parsed.projectId
+              ? { ...record, associationOnly: true }
+              : record,
+          )
+        : state.records.filter(
+            (record) => record.projectId !== parsed.projectId,
+          );
       await persist({ ...state, records: nextRecords });
+    });
+  }
+
+  function removeConnectionMetadata(connectionId: string): Promise<void> {
+    return enqueue(async () => {
+      const state = store.getState();
+      const { [connectionId]: directories, ...recentDirsByConnection } =
+        state.recentDirsByConnection;
+      const records = state.records.filter(
+        (record) =>
+          record.connectionId !== connectionId || !record.associationOnly,
+      );
+      if (directories || records.length !== state.records.length)
+        await persist({ records, recentDirsByConnection });
     });
   }
 
@@ -264,7 +330,9 @@ export function createRemoteProjectStore(storage: HostStorage, logger: Logger) {
     getByPath,
     listProjectsForConnection,
     addProject,
+    saveProjectGroup,
     removeProjectByPath,
+    removeConnectionMetadata,
     recordRecentDir,
     dispose: () => view.dispose(),
   };

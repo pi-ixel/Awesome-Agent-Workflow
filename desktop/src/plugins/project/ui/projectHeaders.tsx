@@ -6,12 +6,11 @@ import { projectConversationPageId, projectOverviewPageId } from "../workspace/p
 import { useState } from "react";
 import type { ProjectViewProps, WorkbenchContributions } from "../../workbench/types.ts";
 import { useSessionValue, useConversation } from "./bindings/conversationView.ts";
-import { useWorkspaceCommands, useWorkspaceService, useWorkspaceValue } from "./bindings/workspaceView.ts";
+import { useProjectName, useWorkspaceCommands, useWorkspaceService, useWorkspaceValue } from "./bindings/workspaceView.ts";
 import { useProjectNavigation, useProjectView } from "./bindings/projectView.tsx";
 import { SessionReconnect } from "../conversation/ui/ReconnectButton.tsx";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import {
-  basenameOf,
   formatCopyablePath,
   formatWorkspacePathLabel,
 } from "../../../shared/workspaceText.ts";
@@ -86,11 +85,12 @@ function BackButton({
  *  承接路径信息，完整路径通过公共悬浮提示展示。 */
 function FolderButton({ path }: { readonly path: string }) {
   const showOverview = useProjectNavigation()?.showOverview;
+  const name = useProjectName(path);
   return (
     <IconButton
       type="button"
       data-testid="workspace-path"
-      aria-label={basenameOf(path)}
+      aria-label={name}
       placement="top"
       data-hint={formatWorkspacePathLabel(path)}
       onClick={() => {
@@ -228,6 +228,7 @@ function SessionBar({ project: path }: { readonly project: string }) {
 
 /** 项目总览的标题区：返回 + 项目名 + 路径 + 关闭项目（次级）。 */
 function OverviewBar({ project: path }: { readonly project: string }) {
+  const name = useProjectName(path);
   const navigation = useProjectNavigation();
   const activePath = useWorkspaceValue((state) => state.activePath);
   const foregroundSession = useConversation()?.session;
@@ -255,7 +256,7 @@ function OverviewBar({ project: path }: { readonly project: string }) {
         title="返回（该项目有会话则回会话，否则回空态）"
       />
       <h2 className="min-w-0 truncate text-ui-base font-semibold text-ink">
-        {basenameOf(path)}
+        {name}
       </h2>
       <span
         className="min-w-0 truncate font-mono text-xs text-ink-faint"

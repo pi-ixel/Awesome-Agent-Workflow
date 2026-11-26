@@ -6,6 +6,8 @@ import type { WorkspaceStoreState } from "../../src/plugins/project/workspace/ty
 import { webviewStorage } from "../../src/plugins/host/storage/storage.ts";
 import { createWorkspaceStore, workspaceCommands } from "../../src/plugins/project/workspace/workspaceStore.ts";
 import { readTestLayout } from "./layout.ts";
+import { pathKey } from "../../src/shared/panelPaths.ts";
+import { basenameOf } from "../../src/shared/workspaceText.ts";
 
 const workspaceOwners = vi.hoisted(
   () => new WeakMap<WorkspaceView, StoreApi<WorkspaceStoreState>>(),
@@ -45,6 +47,10 @@ export function workspaceViewFixture(
     useWorkspaceCommands: () => workspaceCommands(read()),
     useWorkspaceValue<T>(select: (state: WorkspaceSnapshot) => T): T {
       return useStore(read(), select);
+    },
+    useProjectName(path: string): string {
+      const name = useStore(read(), (state) => state.projectFolders?.[pathKey(path)]?.name);
+      return name || basenameOf(path);
     },
   };
 }
