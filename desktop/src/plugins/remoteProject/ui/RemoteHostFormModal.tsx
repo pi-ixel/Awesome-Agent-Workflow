@@ -1,10 +1,18 @@
 import { useState } from "react";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
-import { ActionButton, Checkbox, Spinner } from "../../../shared/ui/controls.tsx";
+import {
+  ActionButton,
+  Checkbox,
+  Spinner,
+} from "../../../shared/ui/controls.tsx";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import { Disclosure } from "../../../shared/ui/Disclosure.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
-import { fieldSurfaceClass } from "../../../shared/ui/inputStyles.ts";
+import { settingsInputClass } from "../../../shared/ui/inputStyles.ts";
+import {
+  settingsLabelClass,
+  settingsDescriptionClass,
+} from "../../../shared/ui/settingsTypography.ts";
 import { XIcon } from "../../../shared/ui/icons.tsx";
 import { describeUnknownError } from "../../../shared/errors.ts";
 import type {
@@ -31,7 +39,9 @@ interface HostFormState {
   readonly bastionHostKey: string;
 }
 
-function initialFormState(connection?: RemoteConnectionDTO | null): HostFormState {
+function initialFormState(
+  connection?: RemoteConnectionDTO | null,
+): HostFormState {
   if (!connection) {
     return {
       name: "",
@@ -116,9 +126,12 @@ export function RemoteHostFormModal({
   onSaved,
 }: RemoteHostFormModalProps) {
   const isEdit = Boolean(connection);
-  const [form, setForm] = useState<HostFormState>(() => initialFormState(connection));
+  const [form, setForm] = useState<HostFormState>(() =>
+    initialFormState(connection),
+  );
   const defaultAdvancedOpen = Boolean(
-    connection && ((connection.port && connection.port !== 22) || connection.bastion?.host),
+    connection &&
+    ((connection.port && connection.port !== 22) || connection.bastion?.host),
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -131,7 +144,10 @@ export function RemoteHostFormModal({
     if (form.authType === "key" && !form.privateKeyPath.trim()) {
       return "私钥认证需要填写私钥文件路径。";
     }
-    if (form.useBastion && (!form.bastionHost.trim() || !form.bastionUser.trim())) {
+    if (
+      form.useBastion &&
+      (!form.bastionHost.trim() || !form.bastionUser.trim())
+    ) {
       return "启用跳板机时请填写跳板机地址和用户名。";
     }
     return null;
@@ -196,7 +212,7 @@ export function RemoteHostFormModal({
           <h2 className="text-ui-base font-semibold text-ink">
             {isEdit ? "编辑远程主机" : "添加远程主机"}
           </h2>
-          <p className="mt-0.5 text-ui-xs text-ink-mute">
+          <p className={`mt-0.5 ${settingsDescriptionClass}`}>
             配置 SSH 连接信息，保存后可用于添加多个远程项目。
           </p>
         </div>
@@ -207,44 +223,44 @@ export function RemoteHostFormModal({
 
       <div className="flex-1 space-y-3.5 overflow-y-auto px-5 py-4">
         <label className="block">
-          <span className="mb-1 block text-ui-xs text-ink-mute">主机名称（可选）</span>
+          <span className={`mb-1 ${settingsLabelClass}`}>主机名称（可选）</span>
           <input
             type="text"
             aria-label="连接名称"
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
             placeholder="例如：dev-box（留空则自动使用 user@host）"
-            className={`${fieldSurfaceClass} w-full px-3 py-1.5 text-ui-sm`}
+            className={`${settingsInputClass}`}
           />
         </label>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="block">
-            <span className="mb-1 block text-ui-xs text-ink-mute">主机地址</span>
+            <span className={`mb-1 ${settingsLabelClass}`}>主机地址</span>
             <input
               type="text"
               aria-label="主机地址"
               value={form.host}
               onChange={(e) => setForm({ ...form, host: e.target.value })}
               placeholder="10.0.0.12 或 dev.example.com"
-              className={`${fieldSurfaceClass} w-full px-3 py-1.5 text-ui-sm font-mono`}
+              className={`${settingsInputClass} font-mono`}
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-ui-xs text-ink-mute">用户名</span>
+            <span className={`mb-1 ${settingsLabelClass}`}>用户名</span>
             <input
               type="text"
               aria-label="用户名"
               value={form.user}
               onChange={(e) => setForm({ ...form, user: e.target.value })}
               placeholder="root / ubuntu"
-              className={`${fieldSurfaceClass} w-full px-3 py-1.5 text-ui-sm font-mono`}
+              className={`${settingsInputClass} font-mono`}
             />
           </label>
         </div>
 
         <div>
-          <span className="mb-1.5 block text-ui-xs text-ink-mute">认证方式</span>
+          <span className={`mb-1.5 ${settingsLabelClass}`}>认证方式</span>
           <SegmentedControl
             groupLabel="SSH 认证方式"
             value={form.authType}
@@ -259,21 +275,23 @@ export function RemoteHostFormModal({
 
         {form.authType === "key" && (
           <label className="block">
-            <span className="mb-1 block text-ui-xs text-ink-mute">私钥文件路径</span>
+            <span className={`mb-1 ${settingsLabelClass}`}>私钥文件路径</span>
             <input
               type="text"
               aria-label="私钥文件路径"
               value={form.privateKeyPath}
-              onChange={(e) => setForm({ ...form, privateKeyPath: e.target.value })}
+              onChange={(e) =>
+                setForm({ ...form, privateKeyPath: e.target.value })
+              }
               placeholder="~/.ssh/id_ed25519"
-              className={`${fieldSurfaceClass} w-full px-3 py-1.5 text-ui-sm font-mono`}
+              className={`${settingsInputClass} font-mono`}
             />
           </label>
         )}
 
         {form.authType !== "agent" ? (
           <label className="block">
-            <span className="mb-1 block text-ui-xs text-ink-mute">
+            <span className={`mb-1 ${settingsLabelClass}`}>
               {form.authType === "key"
                 ? isEdit
                   ? "私钥口令（留空保持不变）"
@@ -294,12 +312,13 @@ export function RemoteHostFormModal({
                     ? "不修改请留空"
                     : "加密保存在本机"
               }
-              className={`${fieldSurfaceClass} w-full px-3 py-1.5 text-ui-sm`}
+              className={`${settingsInputClass}`}
             />
           </label>
         ) : (
-          <p className="rounded-control border border-line bg-raised/50 px-3 py-2 text-ui-xs text-ink-mute">
-            将通过本机 SSH Agent 自动认证（Windows OpenSSH Authentication Agent 或 Unix SSH_AUTH_SOCK）。
+          <p className="rounded-control border border-line bg-raised/50 px-3 py-2 text-ui-caption text-ink-mute">
+            将通过本机 SSH Agent 自动认证（Windows OpenSSH Authentication Agent
+            或 Unix SSH_AUTH_SOCK）。
           </p>
         )}
 
@@ -307,75 +326,91 @@ export function RemoteHostFormModal({
           <Disclosure
             defaultOpen={defaultAdvancedOpen}
             summary={
-              <span className="text-ui-xs font-medium text-ink-mute">
+              <span className={settingsLabelClass}>
                 高级选项（端口、跳板机）
               </span>
             }
           >
             <div className="mt-3 space-y-3 border-t border-line/70 pt-3">
               <label className="block max-w-[160px]">
-                <span className="mb-1 block text-ui-xs text-ink-mute">SSH 端口</span>
+                <span className={`mb-1 ${settingsLabelClass}`}>SSH 端口</span>
                 <input
                   type="text"
                   aria-label="端口"
                   value={form.port}
                   onChange={(e) => setForm({ ...form, port: e.target.value })}
                   placeholder="22"
-                  className={`${fieldSurfaceClass} w-full px-3 py-1.5 text-ui-sm font-mono`}
+                  className={`${settingsInputClass} font-mono`}
                 />
               </label>
 
               <Checkbox
                 checked={form.useBastion}
-                onChange={(checked) => setForm({ ...form, useBastion: checked })}
+                onChange={(checked) =>
+                  setForm({ ...form, useBastion: checked })
+                }
                 label="通过跳板机（Bastion）连接"
               />
 
               {form.useBastion && (
                 <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                   <label className="block">
-                    <span className="mb-1 block text-ui-xs text-ink-mute">跳板机地址</span>
+                    <span className={`mb-1 ${settingsLabelClass}`}>
+                      跳板机地址
+                    </span>
                     <input
                       type="text"
                       aria-label="跳板机地址"
                       value={form.bastionHost}
-                      onChange={(e) => setForm({ ...form, bastionHost: e.target.value })}
+                      onChange={(e) =>
+                        setForm({ ...form, bastionHost: e.target.value })
+                      }
                       placeholder="bastion.example.com"
-                      className={`${fieldSurfaceClass} w-full px-2.5 py-1.5 text-ui-sm font-mono`}
+                      className={`${settingsInputClass} font-mono`}
                     />
                   </label>
                   <label className="block">
-                    <span className="mb-1 block text-ui-xs text-ink-mute">跳板机端口</span>
+                    <span className={`mb-1 ${settingsLabelClass}`}>
+                      跳板机端口
+                    </span>
                     <input
                       type="text"
                       aria-label="跳板机端口"
                       value={form.bastionPort}
-                      onChange={(e) => setForm({ ...form, bastionPort: e.target.value })}
+                      onChange={(e) =>
+                        setForm({ ...form, bastionPort: e.target.value })
+                      }
                       placeholder="22"
-                      className={`${fieldSurfaceClass} w-full px-2.5 py-1.5 text-ui-sm font-mono`}
+                      className={`${settingsInputClass} font-mono`}
                     />
                   </label>
                   <label className="block">
-                    <span className="mb-1 block text-ui-xs text-ink-mute">跳板机用户名</span>
+                    <span className={`mb-1 ${settingsLabelClass}`}>
+                      跳板机用户名
+                    </span>
                     <input
                       type="text"
                       aria-label="跳板机用户名"
                       value={form.bastionUser}
-                      onChange={(e) => setForm({ ...form, bastionUser: e.target.value })}
+                      onChange={(e) =>
+                        setForm({ ...form, bastionUser: e.target.value })
+                      }
                       placeholder="jump"
-                      className={`${fieldSurfaceClass} w-full px-2.5 py-1.5 text-ui-sm font-mono`}
+                      className={`${settingsInputClass} font-mono`}
                     />
                   </label>
                   <label className="block">
-                    <span className="mb-1 block text-ui-xs text-ink-mute">
+                    <span className={`mb-1 ${settingsLabelClass}`}>
                       {isEdit ? "跳板机密码（留空保持不变）" : "跳板机密码"}
                     </span>
                     <input
                       type="password"
                       aria-label="跳板机密码"
                       value={form.bastionPassword}
-                      onChange={(e) => setForm({ ...form, bastionPassword: e.target.value })}
-                      className={`${fieldSurfaceClass} w-full px-2.5 py-1.5 text-ui-sm`}
+                      onChange={(e) =>
+                        setForm({ ...form, bastionPassword: e.target.value })
+                      }
+                      className={`${settingsInputClass}`}
                     />
                   </label>
                 </div>
@@ -387,13 +422,13 @@ export function RemoteHostFormModal({
         {error && (
           <div
             role="alert"
-            className="rounded-control border border-danger-ink/30 bg-danger-soft px-3 py-2 text-ui-xs text-danger-ink"
+            className="rounded-control border border-danger-ink/30 bg-danger-soft px-3 py-2 text-ui-caption text-danger-ink"
           >
             {error}
           </div>
         )}
         {status && (
-          <div className="rounded-control border border-ok-ink/30 bg-ok-soft px-3 py-2 text-ui-xs text-ok-ink">
+          <div className="rounded-control border border-ok-ink/30 bg-ok-soft px-3 py-2 text-ui-caption text-ok-ink">
             {status}
           </div>
         )}
@@ -402,29 +437,29 @@ export function RemoteHostFormModal({
       <div className="flex items-center justify-between border-t border-line px-5 py-3">
         <ActionButton
           tone="secondary"
+          size="compact"
           type="button"
           disabled={busy}
           onClick={() => void handleTest()}
-          className="px-3 py-1.5 text-ui-xs"
         >
           {busy ? <Spinner className="ui-icon-12" /> : "测试连接"}
         </ActionButton>
         <div className="flex items-center gap-2">
           <ActionButton
             tone="ghost"
+            size="compact"
             type="button"
             disabled={busy}
             onClick={onClose}
-            className="px-3 py-1.5 text-ui-sm"
           >
             取消
           </ActionButton>
           <ActionButton
             tone="primary"
+            size="compact"
             type="button"
             disabled={busy}
             onClick={() => void handleSave()}
-            className="px-4 py-1.5 text-ui-sm"
           >
             {busy ? "保存中…" : isEdit ? "保存修改" : "保存主机"}
           </ActionButton>

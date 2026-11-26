@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { useStore } from "zustand";
-import { ActionButton, Badge, DangerButton, Spinner } from "../../../shared/ui/controls.tsx";
+import { ActionButton, Badge, Spinner } from "../../../shared/ui/controls.tsx";
+import {
+  settingsLabelClass,
+  settingsDescriptionClass,
+} from "../../../shared/ui/settingsTypography.ts";
 import { SettingCard } from "../../../shared/ui/SettingsPageParts.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import {
@@ -30,7 +34,9 @@ export interface RemoteHostsSettingsProps {
 
 export function RemoteHostsSettings({ service }: RemoteHostsSettingsProps) {
   useStore(service.projects);
-  const [connections, setConnections] = useState<readonly RemoteConnectionDTO[]>([]);
+  const [connections, setConnections] = useState<
+    readonly RemoteConnectionDTO[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalTarget, setModalTarget] = useState<
@@ -133,8 +139,7 @@ export function RemoteHostsSettings({ service }: RemoteHostsSettingsProps) {
       <SettingCard label="远程主机（SSH）">
         <div className="flex flex-wrap items-center justify-between gap-2 pb-3">
           <div className="space-y-0.5">
-            <div className="text-ui-sm font-medium text-ink">远程主机（SSH）</div>
-            <div className="text-ui-xs text-ink-mute">
+            <div className={settingsDescriptionClass}>
               集中管理 SSH 远程开发主机，共 {connections.length} 台已保存主机。
             </div>
           </div>
@@ -148,9 +153,9 @@ export function RemoteHostsSettings({ service }: RemoteHostsSettingsProps) {
             </IconButton>
             <ActionButton
               tone="primary"
+              size="compact"
               type="button"
               onClick={() => setModalTarget({ kind: "create" })}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-ui-xs"
             >
               <PlusIcon className="ui-icon-14 shrink-0" />
               <span>添加远程主机</span>
@@ -161,7 +166,7 @@ export function RemoteHostsSettings({ service }: RemoteHostsSettingsProps) {
         {error && (
           <div
             role="alert"
-            className="mb-3 rounded-control border border-danger-ink/30 bg-danger-soft px-3 py-2 text-ui-xs text-danger-ink"
+            className="mb-3 rounded-control border border-danger-ink/30 bg-danger-soft px-3 py-2 text-ui-caption text-danger-ink"
           >
             {error}
           </div>
@@ -170,7 +175,7 @@ export function RemoteHostsSettings({ service }: RemoteHostsSettingsProps) {
         {deleteBlocked && (
           <div
             role="alert"
-            className="mb-3 rounded-control border border-warn-ink/30 bg-warn-soft px-3 py-2.5 text-ui-xs text-warn-ink"
+            className="mb-3 rounded-control border border-warn-ink/30 bg-warn-soft px-3 py-2.5 text-ui-caption text-warn-ink"
           >
             <div className="font-medium">
               无法删除：以下远程项目仍在使用该主机，请先关闭这些项目：
@@ -186,24 +191,26 @@ export function RemoteHostsSettings({ service }: RemoteHostsSettingsProps) {
         )}
 
         {loading ? (
-          <div className="flex items-center gap-2 py-8 text-ui-sm text-ink-mute">
+          <div className="flex items-center gap-2 py-8 text-ui-base text-ink-mute">
             <Spinner className="ui-icon-14" />
             <span>正在加载远程主机…</span>
           </div>
         ) : connections.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-popover border border-dashed border-line-strong bg-raised/30 px-6 py-10 text-center">
             <GlobeIcon className="ui-icon-20 text-ink-ghost" />
-            <div className="mt-2.5 text-ui-sm font-medium text-ink">
+            <div className={`mt-2.5 ${settingsLabelClass}`}>
               暂未配置远程主机
             </div>
-            <p className="mt-1 max-w-md text-ui-xs text-ink-mute">
-              添加 SSH 主机后，即可在「添加项目」时直接选择远程设备并浏览远端目录，无需在服务器安装任何额外组件。
+            <p className="mt-1 max-w-md text-ui-caption text-ink-mute">
+              添加 SSH
+              主机后，即可在「添加项目」时直接选择远程设备并浏览远端目录，无需在服务器安装任何额外组件。
             </p>
             <ActionButton
               tone="secondary"
+              size="compact"
               type="button"
               onClick={() => setModalTarget({ kind: "create" })}
-              className="mt-4 inline-flex items-center gap-1.5 px-3.5 py-1.5 text-ui-xs"
+              className="mt-4"
             >
               <PlusIcon className="ui-icon-14 shrink-0" />
               <span>添加第一台远程主机</span>
@@ -220,7 +227,7 @@ export function RemoteHostsSettings({ service }: RemoteHostsSettingsProps) {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="truncate text-ui-sm font-medium text-ink">
+                        <span className={`truncate ${settingsLabelClass}`}>
                           {conn.name}
                         </span>
                         <Badge tone="neutral">
@@ -233,7 +240,7 @@ export function RemoteHostsSettings({ service }: RemoteHostsSettingsProps) {
                           <Badge tone="info">{refs.length} 个项目</Badge>
                         )}
                       </div>
-                      <div className="mt-0.5 truncate font-mono text-ui-xs text-ink-mute">
+                      <div className="mt-0.5 truncate font-mono text-ui-caption text-ink-mute">
                         {conn.user}@{conn.host}:{conn.port || 22}
                         {conn.bastion?.host
                           ? ` via ${conn.bastion.user}@${conn.bastion.host}:${conn.bastion.port || 22}`
@@ -241,7 +248,7 @@ export function RemoteHostsSettings({ service }: RemoteHostsSettingsProps) {
                       </div>
                       {feedback && (
                         <div
-                          className={`mt-1 text-ui-xs ${
+                          className={`mt-1 text-ui-caption ${
                             feedback.ok ? "text-ok-ink" : "text-danger-ink"
                           }`}
                         >
@@ -252,12 +259,16 @@ export function RemoteHostsSettings({ service }: RemoteHostsSettingsProps) {
                     <div className="flex shrink-0 items-center gap-1.5">
                       <ActionButton
                         tone="secondary"
+                        size="compact"
                         type="button"
                         disabled={isTesting}
                         onClick={() => void handleTest(conn)}
-                        className="px-2.5 py-1 text-ui-xs"
                       >
-                        {isTesting ? <Spinner className="ui-icon-12" /> : "测试"}
+                        {isTesting ? (
+                          <Spinner className="ui-icon-12" />
+                        ) : (
+                          "测试"
+                        )}
                       </ActionButton>
                       <IconButton
                         aria-label={`编辑 ${conn.name}`}
@@ -267,14 +278,14 @@ export function RemoteHostsSettings({ service }: RemoteHostsSettingsProps) {
                       >
                         <PencilIcon className="ui-icon-14" />
                       </IconButton>
-                      <DangerButton
+                      <IconButton
                         type="button"
+                        className="flex shrink-0 items-center justify-center rounded-control bg-danger-bg text-danger-ink transition-colors enabled:hover:bg-danger-bg/70"
                         aria-label={`删除 ${conn.name}`}
                         onClick={() => void handleDelete(conn)}
-                        className="inline-flex min-h-7 items-center justify-center px-2 py-1 text-ui-xs"
                       >
                         <TrashIcon className="ui-icon-14" />
-                      </DangerButton>
+                      </IconButton>
                     </div>
                   </div>
                 </li>
@@ -287,7 +298,9 @@ export function RemoteHostsSettings({ service }: RemoteHostsSettingsProps) {
       {modalTarget && (
         <RemoteHostFormModal
           service={service}
-          connection={modalTarget.kind === "edit" ? modalTarget.connection : null}
+          connection={
+            modalTarget.kind === "edit" ? modalTarget.connection : null
+          }
           onClose={() => setModalTarget(null)}
           onSaved={() => {
             setModalTarget(null);

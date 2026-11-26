@@ -153,3 +153,30 @@ it("复用或重命名导入不增加定义，私有组件和注册目标能够�
   expect(added.definitions).toContain("Private");
   expect(added.targets.length).toBe(before.targets.length + 1);
 }, 30000);
+
+it("设置输入完整字体规格不能被直接、别名或条件分支覆盖，技术字体仍可使用", () => {
+  scanFixture(
+    `
+    import { settingsInputClass as input } from "./shared/ui/inputStyles";
+    const small = "text-ui-xs";
+    const invalid = \`\${input} \${small}\`;
+    function Page({ready}: {ready:boolean}) {
+      return <>
+        <input className={input}/>
+        <input className={\`\${input} font-mono\`}/>
+        <input className={\`\${input} text-ui-sm\`}/>
+        <input className={invalid}/>
+        <input className={ready ? input : invalid}/>
+        <input className={\`\${input} md:text-ui-xs\`}/>
+        <input className={\`\${input} text-ui-lg\`}/>
+        <input className={\`\${input} text-ui-caption!\`}/>
+      </>;
+    }
+  `,
+    (source, checker) => {
+      expect(
+        inspectTextFields(source, checker).map((field) => field.approved),
+      ).toEqual([true, true, false, false, false, false, false, false]);
+    },
+  );
+});

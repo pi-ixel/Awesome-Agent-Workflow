@@ -13,7 +13,8 @@ import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapsh
 import { parseSessionPinKey } from "../sessions/sessionPin.ts";
 import { sessionArchiveKey } from "../sessions/sessionArchiveStore.ts";
 import { emptyCatalog } from "../sessions/catalog.ts";
-import { pathKey } from "../../../shared/panelPaths.ts";
+import { isRemoteProjectPath, pathKey, projectFolderPath } from "../../../shared/panelPaths.ts";
+import { getFileManagerOpenLabel } from "../../../shared/fileManager.ts";
 import { sessionActivityKey } from "../sessions/sessionActivityStore.ts";
 import type { SessionActivityState, SessionCatalogState } from "../sessions/indexTypes.ts";
 /**
@@ -329,6 +330,28 @@ function ProjectNodeRow({
   }
 
   function buildEntries(): ContextMenuEntry[] {
+    const directories = new Map<string, string>();
+    for (const folder of [path, ...(config?.relatedPaths ?? [])]) {
+      const actual = projectFolderPath(folder);
+      if (!directories.has(pathKey(actual))) directories.set(pathKey(actual), actual);
+    }
+    const folders = [...directories.values()];
+    const openFolder = async (folder: string) => {
+      try {
+        await navigation?.openInFileManager(folder);
+      } catch (error) {
+        feedback?.({
+          variant: "danger",
+          message: `打开目录失败：${String(error)}`,
+        });
+      }
+    };
+    const openEntry = {
+      id: "open-in-file-manager",
+      label: getFileManagerOpenLabel(),
+      icon: <FolderGlyph className="ui-icon-16" />,
+      disabled: !navigation,
+    };
     return [
       {
         id: "new-session",
@@ -345,6 +368,29 @@ function ProjectNodeRow({
         disabled: !navigation?.renderEditProjectForm,
         onSelect: editProject,
       },
+      ...(!isRemoteProjectPath(path)
+        ? [
+            folders.length === 1
+              ? {
+                  ...openEntry,
+                  onSelect: () => {
+                    void openFolder(folders[0]!);
+                  },
+                }
+              : {
+                  ...openEntry,
+                  children: folders.map((folder) => ({
+                    id: folder,
+                    label: basenameOf(folder),
+                    description: folder,
+                    icon: <FolderGlyph className="ui-icon-16" />,
+                    onSelect: () => {
+                      void openFolder(folder);
+                    },
+                  })),
+                },
+          ]
+        : []),
       { type: "separator" },
       {
         id: "pin",

@@ -56,6 +56,7 @@ export function apply(ctx: Context): void {
   const navigation = createProjectViewNavigation(workbench, project, {
     isCurrent,
     openFileTree: (path) => documentView.getState().openFileTree?.(path),
+    openInFileManager: (path) => ctx.host.files.openInFileManager(path, "open-directory"),
     openAddRemoteProject: () => {
       if (!openAddRemoteProject) return false;
       openAddRemoteProject();
