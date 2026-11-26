@@ -85,7 +85,11 @@ export function ModalShell({
   useEffect(() => {
     const id = Symbol();
     activeModals.set(id, priority);
-    const previous = opener.current;
+    // 确认框被进度弹窗替换时，确认框的按钮已卸载，使用它刚归还的焦点。
+    const focused = document.activeElement;
+    const previous = opener.current?.isConnected
+      ? opener.current
+      : focused instanceof HTMLElement ? focused : null;
     const isTop = () =>
       [...activeModals.entries()].sort((a, b) => a[1] - b[1]).at(-1)?.[0] ===
       id;

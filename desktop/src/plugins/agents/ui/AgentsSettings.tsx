@@ -291,19 +291,10 @@ function AgentListCard({
             setSwitchTarget(null);
             setRemoveAfterSwitch(null);
             setActiveWork(null);
-            void (async () => {
-              // 确认制闸（B 组用例）：确认时**重查**进行中的工作再停——
-              // 弹窗展示的清单只是提示，弹窗开着期间新起的工作也要停掉。
-              if (switchGuard) {
-                const work = await switchGuard.activeWork().catch(() => []);
-                if (work.length > 0) await switchGuard.stopAll(work);
-              }
-              // 传给 switchAgent 的回调只服务失败后的「重试」；成功路径的
-              // 删除在下面的 then 里做。
-              await (removeId
-                ? switchAgent(target, () => service.removeCustomAgent(removeId))
-                : switchAgent(target));
-            })()
+            // 该回调只用于失败后的重试，首次成功在下面处理。
+            void (removeId
+              ? switchAgent(target, () => service.removeCustomAgent(removeId))
+              : switchAgent(target))
               .then(() => {
                 if (request !== switchRequest.current) return;
                 if (removeId) service.removeCustomAgent(removeId);

@@ -1,6 +1,64 @@
 import { expect, test } from "@playwright/test";
 import { color } from "./contrast.ts";
 
+test("Agent 切换进度浮在设置上并阻塞输入，退出后保留 Agent 页签", async ({
+  page,
+}) => {
+  await page.goto("/tests/visual/fixture.html?agent-switch-modal");
+  const settings = page.getByRole("dialog", { name: "设置", exact: true });
+  const tab = settings.getByRole("tab", { name: "Agent", exact: true });
+  await tab.click();
+  const start = settings.getByRole("button", { name: "切换到 OpenCode" });
+  const confirm = page.getByRole("dialog", {
+    name: "切换 Agent 确认",
+    exact: true,
+  });
+  await start.click();
+  await confirm.getByRole("button", { name: "确认切换" }).click();
+
+  const progress = page.getByRole("dialog", { name: "Agent 切换进度" });
+  await expect(progress).toBeFocused();
+  const closeSettings = await settings
+    .getByRole("button", { name: "关闭设置" })
+    .boundingBox();
+  expect(closeSettings).not.toBeNull();
+  await page.mouse.click(
+    closeSettings!.x + closeSettings!.width / 2,
+    closeSettings!.y + closeSettings!.height / 2,
+  );
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Tab");
+  await expect(progress).toBeFocused();
+  await expect(settings).toBeVisible();
+  await expect(progress.getByRole("button", { name: "最小化" })).toHaveCount(0);
+
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new CustomEvent("fixture-agent-switch-result", { detail: "failed" }),
+    ),
+  );
+  await expect(progress.getByRole("alert")).toHaveText(/测试连接失败/);
+  await progress.getByRole("button", { name: "重试" }).click();
+  const retry = page.getByRole("dialog", { name: "重试切换 Agent 确认" });
+  await expect(retry.getByRole("button", { name: "取消" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(retry).toBeHidden();
+  await progress.getByRole("button", { name: "退出" }).click();
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+  await expect(start).toBeFocused();
+
+  await start.press("Enter");
+  await confirm.getByRole("button", { name: "确认切换" }).click();
+  await expect(progress).toBeFocused();
+  await page.evaluate(() =>
+    window.dispatchEvent(new CustomEvent("fixture-agent-switch-result")),
+  );
+  await expect(progress.getByText("切换成功", { exact: true })).toBeVisible();
+  await expect(progress).toBeHidden();
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+  await expect(start).toBeFocused();
+});
+
 test("会话设置的呈现方式卡片随双主题和三档字号更新，保留选择及键盘焦点", async ({
   page,
   context,
@@ -192,9 +250,14 @@ test("勾选存储范围时保持设置弹窗和内容滚动位置", async ({ pa
   const dialog = page.getByRole("dialog", { name: "设置", exact: true });
   await dialog.getByRole("tab", { name: "存储", exact: true }).click();
   await dialog.getByRole("button", { name: "诊断日志", exact: true }).click();
-  const legacy = dialog.getByRole("button", { name: "迁移遗留数据", exact: true });
+  const legacy = dialog.getByRole("button", {
+    name: "迁移遗留数据",
+    exact: true,
+  });
   await legacy.click();
-  const details = dialog.locator(`[id="${await legacy.getAttribute("aria-controls")}"]`);
+  const details = dialog.locator(
+    `[id="${await legacy.getAttribute("aria-controls")}"]`,
+  );
   const checkbox = details.getByRole("checkbox", {
     name: "选择 应用数据 历史记录",
     exact: true,
@@ -217,8 +280,9 @@ test("勾选存储范围时保持设置弹窗和内容滚动位置", async ({ pa
         dialogScroll: panel.scrollTop,
         contentScroll: content.scrollTop,
         headerTop: panel.querySelector("header")!.getBoundingClientRect().top,
-        statusTop: panel.querySelector('[role="status"]')!.getBoundingClientRect()
-          .top,
+        statusTop: panel
+          .querySelector('[role="status"]')!
+          .getBoundingClientRect().top,
       };
     });
   const before = await layout();

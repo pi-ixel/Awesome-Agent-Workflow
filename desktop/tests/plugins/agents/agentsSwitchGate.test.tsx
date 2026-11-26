@@ -7,6 +7,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createStore } from "zustand";
 import { AgentsSettingsSection } from "../../../src/plugins/agents/ui/AgentsSettings.tsx";
+import { AgentSwitchPanel } from "../../../src/plugins/agents/ui/AgentSwitchPanel.tsx";
+import { createAgentSwitchProgress } from "../../../src/plugins/agents/ui/agentSwitchProgress.ts";
 import type { AgentSwitchGuard } from "../../../src/plugins/agents/service.ts";
 import type { AgentsService } from "../../../src/plugins/agents/service.ts";
 import type { ProjectService } from "../../../src/plugins/project/service.ts";
@@ -63,13 +65,22 @@ function fakeGuard(work: readonly { id: string; title: string }[], log: string[]
 }
 
 function renderSection(props: { switchAgent: (id: string) => Promise<void>; switchGuard?: AgentSwitchGuard }) {
+  const agents = fakeAgents();
+  const progress = createAgentSwitchProgress(
+    { switchAgent: props.switchAgent },
+    { resolve: () => null, selectedId: "a" },
+    () => props.switchGuard,
+  );
   return render(
-    <AgentsSettingsSection
-      agents={fakeAgents()}
-      workspace={fakeWorkspace()}
-      switchAgent={props.switchAgent}
-      switchGuard={props.switchGuard}
-    />,
+    <>
+      <AgentsSettingsSection
+        agents={agents}
+        workspace={fakeWorkspace()}
+        switchAgent={progress.start}
+        switchGuard={props.switchGuard}
+      />
+      <AgentSwitchPanel controller={progress} />
+    </>,
   );
 }
 
@@ -87,19 +98,25 @@ describe("切换 Agent 的工作流确认闸", () => {
   it("B1+B2 有进行中的运行：弹窗列出运行，确认先停运行再切换", async () => {
     const log: string[] = [];
     const guard = fakeGuard([{ id: "r1", title: "发布官网" }, { id: "r2", title: "整理数据" }], log);
+    let finishStop!: () => void;
+    const stopped = new Promise<void>((resolve) => { finishStop = resolve; });
+    guard.stopAll.mockImplementationOnce(() => stopped.then(() => { log.push("stop"); }));
     const switchAgent = vi.fn(() => { log.push("switch"); return Promise.resolve(); });
     renderSection({ switchAgent, switchGuard: guard });
     fireEvent.click(await screen.findByText("Agent B"));
     expect(await screen.findByRole("dialog", { name: "切换 Agent 确认" })).toBeDefined();
     expect(await screen.findByText(/有 2 个工作流正在运行/)).toHaveTextContent("发布官网、整理数据");
     fireEvent.click(screen.getByRole("button", { name: "确认切换" }));
+    expect(await screen.findByRole("dialog", { name: "Agent 切换进度" })).toBeVisible();
+    expect(switchAgent).not.toHaveBeenCalled();
+    finishStop();
     // 确认制的次序硬约束：先停运行、后切换（同池后切换会掐断节点会话）。
     await waitFor(() => expect(log).toEqual(["stop", "switch"]));
     expect(guard.stopAll).toHaveBeenCalledWith([
       { id: "r1", title: "发布官网" },
       { id: "r2", title: "整理数据" },
     ]);
-    expect(switchAgent).toHaveBeenCalledWith("b");
+    expect(switchAgent).toHaveBeenCalledWith("b", expect.any(Function));
   });
 
   it("B3 取消切换：不停止运行，也不切换", async () => {

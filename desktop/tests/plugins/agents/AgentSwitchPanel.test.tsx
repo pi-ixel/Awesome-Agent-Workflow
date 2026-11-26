@@ -7,15 +7,11 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  AgentSwitchPanel,
-  AgentSwitchSidebarStatus,
-} from "../../../src/plugins/agents/ui/AgentSwitchPanel.tsx";
+import { AgentSwitchPanel } from "../../../src/plugins/agents/ui/AgentSwitchPanel.tsx";
+import { ModalShell } from "../../../src/shared/ui/ModalShell.tsx";
 import { createAgentSwitchProgress } from "../../../src/plugins/agents/ui/agentSwitchProgress.ts";
 import type { AgentSwitchProgressListener } from "../../../src/plugins/project/types.ts";
 import type { AgentsService } from "../../../src/plugins/agents/service.ts";
-import type { WorkbenchLayout } from "../../../src/plugins/workbench/types.ts";
-import { createStore } from "zustand/vanilla";
 
 function deferred() {
   let resolve!: () => void;
@@ -56,43 +52,43 @@ afterEach(() => {
 });
 
 describe("Agent 切换进度", () => {
-  it("设置页隐藏侧边栏时提供浮动入口", async () => {
+  it("切换阻塞设置，失败后通过退出按钮返回设置", async () => {
     const { controller, calls } = fixture();
-    const navigation = createStore(() => ({
-      sidebarCollapsed: false,
-      overlay: "settings",
-    }));
-    render(
-      <AgentSwitchPanel
-        controller={controller}
-        navigation={navigation as unknown as WorkbenchLayout["navigation"]}
-      />,
-    );
-    let switching!: Promise<void>;
-    act(() => {
-      switching = controller.start("new");
-    });
-    fireEvent.click(screen.getByRole("button", { name: "最小化" }));
-    const indicator = screen.getByRole("button", { name: /Agent 切换状态/ });
-    expect(indicator).toBeVisible();
-    expect(indicator).toHaveTextContent("Agent new");
-    fireEvent.click(indicator);
-    expect(screen.getByLabelText("Agent 切换进度详情")).toBeVisible();
-    await act(async () => {
-      calls[0]!.pending.resolve();
-      await switching;
-    });
-  });
-
-  it("显示并行连接进度、慢步骤提示，可最小化并在成功后消失", async () => {
-    vi.useFakeTimers();
-    const { controller, calls } = fixture();
+    const closeSettings = vi.fn();
     render(
       <>
-        <AgentSwitchSidebarStatus controller={controller} />
+        <ModalShell label="设置" size="settings" onDismiss={closeSettings}>
+          <button type="button">Agent</button>
+        </ModalShell>
         <AgentSwitchPanel controller={controller} />
       </>,
     );
+    let switching!: Promise<void>;
+    act(() => {
+      switching = controller.start("new").catch(() => {});
+    });
+    const progress = screen.getByRole("dialog", { name: "Agent 切换进度" });
+    expect(progress).toHaveFocus();
+    fireEvent.keyDown(progress, { key: "Escape" });
+    fireEvent.click(progress.parentElement!);
+    expect(progress).toBeVisible();
+    expect(closeSettings).not.toHaveBeenCalled();
+    expect(within(progress).queryByRole("button")).not.toBeInTheDocument();
+    await act(async () => {
+      calls[0]!.pending.reject(new Error("连接失败"));
+      await switching;
+    });
+    expect(progress).toBeVisible();
+    fireEvent.click(within(progress).getByRole("button", { name: "退出" }));
+    expect(progress).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "设置" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Agent" })).toHaveFocus();
+  });
+
+  it("显示并行连接进度、慢步骤提示，成功后等一秒关闭", async () => {
+    vi.useFakeTimers();
+    const { controller, calls } = fixture();
+    render(<AgentSwitchPanel controller={controller} />);
     let switching!: Promise<void>;
     act(() => {
       switching = controller.start("new");
@@ -107,21 +103,23 @@ describe("Agent 切换进度", () => {
     });
     expect(screen.getByText(/发起启动 4/)).toHaveTextContent("握手完成 1");
     expect(screen.getByText(/当前步骤耗时较长/)).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "最小化" }));
-    expect(
-      screen.queryByLabelText("Agent 切换进度详情"),
-    ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Agent 切换状态/ }));
-    expect(screen.getByLabelText("Agent 切换进度详情")).toBeVisible();
     await act(async () => {
       calls[0]!.pending.resolve();
       await switching;
     });
-    expect(screen.getByText(/切换成功 · 总耗时/)).toBeVisible();
+    expect(screen.getByText("切换成功")).toBeVisible();
     act(() => {
-      vi.advanceTimersByTime(3500);
+      vi.advanceTimersByTime(999);
     });
-    expect(screen.queryByLabelText("Agent 切换状态")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("dialog", { name: "Agent 切换进度" }),
+    ).toBeVisible();
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(
+      screen.queryByRole("dialog", { name: "Agent 切换进度" }),
+    ).not.toBeInTheDocument();
   });
 
   it("失败后保留原始步骤、复制时遮盖凭据，重试需要确认", async () => {
