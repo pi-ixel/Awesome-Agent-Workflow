@@ -258,6 +258,22 @@ describe("ContextMenu 子菜单", () => {
     fireEvent.keyDown(document.activeElement!, { key: "Tab" });
     expect(dismiss).toHaveBeenCalledTimes(1);
   });
+  it("父菜单更新关闭回调后，子项只调用最新的根关闭入口", () => {
+    const previous = vi.fn();
+    const latest = vi.fn();
+    const props = {
+      entries,
+      placement: { x: 0, y: 0, side: "bottom" as const },
+      label: "根菜单",
+      closing: false,
+    };
+    const view = render(<ContextMenu {...props} onDismiss={previous} />);
+    fireEvent.click(screen.getByRole("menuitem", { name: "打开目录" }));
+    view.rerender(<ContextMenu {...props} onDismiss={latest} />);
+    fireEvent.click(screen.getByRole("menuitem", { name: "主项目" }));
+    expect(previous).not.toHaveBeenCalled();
+    expect(latest).toHaveBeenCalledTimes(1);
+  });
   it("子菜单打开时，外部指针只触发一次根关闭；关闭中的父子面板均不可交互", () => {
     const dismiss = vi.fn();
     const view = render(

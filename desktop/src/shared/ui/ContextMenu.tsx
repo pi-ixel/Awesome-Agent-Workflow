@@ -65,8 +65,8 @@ export type ContextMenuEntry =
   ContextMenuItemSpec | ContextMenuSubmenuSpec | { type: "separator" };
 
 interface MenuTree {
-  panels: Set<HTMLDivElement>;
-  dismiss: () => void;
+  readonly panels: Set<HTMLDivElement>;
+  readonly dismiss: () => void;
 }
 
 export interface ContextMenuSearch {
@@ -134,9 +134,10 @@ export function ContextMenu({
   const isSearchable = search !== undefined;
   const hasHeader = Boolean(header || search);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const dismissRef = useRef(onDismiss);
   const [ownTree] = useState<MenuTree>(() => ({
     panels: new Set(),
-    dismiss: onDismiss,
+    dismiss: () => dismissRef.current(),
   }));
   const tree = parentTree ?? ownTree;
   const submenuId = useId();
@@ -148,7 +149,7 @@ export function ContextMenu({
     (entry) => !("type" in entry) && entry.id === expanded?.id,
   );
   useLayoutEffect(() => {
-    if (!parentTree) tree.dismiss = onDismiss;
+    dismissRef.current = onDismiss;
     const panel = panelRef.current;
     if (!panel) return;
     tree.panels.add(panel);
