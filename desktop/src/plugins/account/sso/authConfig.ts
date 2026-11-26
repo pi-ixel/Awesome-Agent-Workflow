@@ -18,7 +18,7 @@
  * `{uid, givenName}`（契约解析见 core/auth.ts）；空 = 本构建未对接。
  */
 export const SSO_ENDPOINT =
-  "https://dev.longriver.rnd.huawei.com/mateopenapi/rolex/matestoreauthservice/v1/users/validate";
+  "https://longriver.rnd.huawei.com/mateopenapi/rolex/matestoreauthservice/v1/users/validate";
 
 /**
  * W3 登录页地址（登录窗口加载用；不带 redirect 参数——本链路只需要
