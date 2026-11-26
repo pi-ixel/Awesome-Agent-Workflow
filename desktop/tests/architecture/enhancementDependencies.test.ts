@@ -147,7 +147,8 @@ describe("enhancement dependency boundary", () => {
       ).toEqual([]);
   });
 
-  it("keeps vendor-specific fields out of shared code outside explicit protocol and host adapters", () => {
+  // 扫描全部共享源码，CI 并行时接近默认 5 秒上限
+  it("keeps vendor-specific fields out of shared code outside explicit protocol and host adapters", { timeout: 20_000 }, () => {
     const bad: string[] = [];
     const creditHostBoundary = new Map<string, readonly string[]>([
       ["index.ts", ["readCodeAgentCredit", "readCodeAgentTokenQuota"]],
