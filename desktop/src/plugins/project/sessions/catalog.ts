@@ -189,13 +189,18 @@ export function createSessionCatalog(
     const filter = (state: SessionCatalogState): SessionCatalogState => {
       let changed = false;
       const sessionsByPath = Object.fromEntries(
-        Object.entries(state.sessionsByPath).map(([path, entries]) => {
-          const visible = visibleEntries(state.agentKey ?? "", path, entries);
-          if (visible.length === entries.length && visible.every((entry, i) => entry === entries[i]))
-            return [path, entries];
-          changed = true;
-          return [path, visible];
-        }),
+        Object.entries(state.sessionsByPath).map(
+          ([path, entries]): [string, readonly SessionSummary[]] => {
+            const visible = visibleEntries(state.agentKey ?? "", path, entries);
+            if (
+              visible.length === entries.length &&
+              visible.every((entry, index) => entry === entries[index])
+            )
+              return [path, entries];
+            changed = true;
+            return [path, visible];
+          },
+        ),
       );
       return changed ? { ...state, sessionsByPath } : state;
     };

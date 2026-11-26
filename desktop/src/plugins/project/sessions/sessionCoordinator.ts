@@ -3338,7 +3338,7 @@ export function createSessionCoordinator({
       )
         throw new Error("Agent 返回了已有会话标识，模型刷新未完成");
       indexes.rememberModelProbe({ workspacePath, agentKey, sessionId: id });
-      if (pathKey(cwd) !== pathKey(workspacePath))
+      if (pathKey(cwd) !== pathKey(projectFolderPath(workspacePath)))
         indexes.rememberModelProbe({
           workspacePath: cwd,
           agentKey,
