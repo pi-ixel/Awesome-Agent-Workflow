@@ -16,7 +16,7 @@ test("讲解图按内容分流：套件与静态 HTML/SVG 走内联，含脚本�
     .evaluateAll((nodes) =>
       nodes.map((node) => node.getAttribute("data-visual-mode")),
     );
-  // storage, virtualization, tabs, steps, svg, script, table, error, crowded
+  // storage, virtualization, tabs, steps, svg, script, table, error, crowded, fanout
   expect(modes).toEqual([
     "inline",
     "inline",
@@ -26,6 +26,7 @@ test("讲解图按内容分流：套件与静态 HTML/SVG 走内联，含脚本�
     "frame",
     "inline",
     "frame",
+    "inline",
     "inline",
   ]);
   await expect(figure(page, 0).locator("v-box .v-head").first()).toHaveText(
@@ -124,6 +125,23 @@ test("横排按内容估算是否放得下：两栏保持横排，三栏带条�
     "flex-direction",
     "row",
   );
+});
+
+test("流程型横排一对多：左侧小块与箭头对准行中线，不贴顶", async ({ page }) => {
+  await page.goto(`${fixture}?only=fanout&width=720`);
+  const row = figure(page, 0).locator("v-row").first();
+  await expect(row).toHaveCSS("flex-direction", "row");
+  const middle = (box: { y: number; height: number } | null) =>
+    box ? box.y + box.height / 2 : Number.NaN;
+  const rowMiddle = middle(await row.boundingBox());
+  const item = middle(
+    await row.locator(":scope > v-col v-item").first().boundingBox(),
+  );
+  const arrow = middle(
+    await row.locator(":scope > v-arrow > svg.v-h").boundingBox(),
+  );
+  expect(Math.abs(item - rowMiddle)).toBeLessThan(2);
+  expect(Math.abs(arrow - item)).toBeLessThan(16);
 });
 
 test("80 条讲解图消息：挂载与基线持平、滚动无长任务、离屏 iframe 被释放且高度不跳", async ({

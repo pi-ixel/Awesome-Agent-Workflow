@@ -80,6 +80,10 @@ v-row>*{flex:1 1 0;min-width:0;}
 v-row>v-arrow{flex:0 0 auto;min-width:8em;max-width:11em;}
 v-row>v-arrow:not(:has(>.v-label)){min-width:5em;}
 v-row>v-tag,v-row>v-icon{flex:0 0 auto;}
+/* 流程型横排（有箭头）：各段保持自身高度并纵向居中，箭头对准每段中线；列内容同样居中。
+   没有箭头的对比型横排仍然等高 */
+v-row:not([data-stack]):has(>v-arrow)>v-col{justify-content:center;}
+v-row:not([data-stack]):has(>v-arrow)>:is(v-item,v-box){align-self:center;}
 v-row:not(:has(>:not(v-tag))){flex-wrap:wrap;justify-content:center;gap:6px;}
 v-row[data-stack]>v-tag{align-self:center;}
 v-row[data-stack]{flex-direction:column;}
@@ -87,7 +91,7 @@ v-col{display:flex;flex-direction:column;align-items:stretch;gap:8px;}
 v-grid{display:grid;gap:8px;grid-template-columns:repeat(var(--v-cols,3),minmax(0,1fr));align-items:stretch;}
 v-row,v-col,v-grid{margin:0 0 12px;}
 v-row:last-child,v-col:last-child,v-grid:last-child{margin-bottom:0;}
-v-box v-row,v-box v-col,v-box v-grid{margin:0;}
+v-box v-row,v-box v-col,v-box v-grid,v-row>:is(v-row,v-col,v-grid){margin:0;}
 
 v-box{display:flex;flex-direction:column;gap:10px;padding:14px;min-width:0;
   border:1px solid var(--v-edge);border-radius:var(--v-radius);background:var(--v-tint);}

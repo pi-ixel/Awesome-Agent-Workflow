@@ -66,12 +66,16 @@ function scriptJson(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 
+/**
+ * 沙箱内的桥接脚本。iframe 新建时首次布局前会量到 0 高度，不汇报，
+ * 宿主保留缓存高度，滚回重建时不塌陷。
+ */
 function bridgeScript(): string {
   const key = JSON.stringify(VISUAL_MESSAGE_KEY);
   return `(function(){
 var K=${key};var root=document.documentElement;var last=-1;
 function post(m){m[K]=1;try{parent.postMessage(m,"*");}catch(e){}}
-function report(){var h=Math.ceil(root.getBoundingClientRect().height);if(h!==last){last=h;post({type:"height",height:h});}}
+function report(){var h=Math.ceil(root.getBoundingClientRect().height);if(h>0&&h!==last){last=h;post({type:"height",height:h});}}
 new ResizeObserver(report).observe(root);
 addEventListener("load",report);
 addEventListener("error",function(e){var m=String(e&&e.message||"脚本错误");if(/ResizeObserver loop/.test(m))return;post({type:"error",message:m});});
