@@ -22,6 +22,12 @@ it("保留项目展开默认值，用户覆盖与分页按项目隔离", () => {
   expect(sidebar.snapshot.getState().sessionListLimits).toEqual({
     "D:/demo": 10,
   });
+  state.expandSessionList("D:/other");
+  state.collapseSessionList("D:/demo");
+  expect(sidebar.snapshot.getState().sessionListLimits).toEqual({
+    "D:/demo": 5,
+    "D:/other": 10,
+  });
 });
 
 it("新建面板支持切换与幂等关闭，从最近会话返回项目视角", () => {

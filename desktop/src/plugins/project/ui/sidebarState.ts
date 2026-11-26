@@ -14,6 +14,7 @@ export interface ProjectSidebarState {
   readonly setTreeViewMode: (mode: TreeViewMode) => void;
   readonly toggleExpanded: (path: string, isExpandedNow?: boolean) => void;
   readonly expandSessionList: (path: string) => void;
+  readonly collapseSessionList: (path: string) => void;
   readonly toggleAddPanel: () => void;
   readonly closeAddPanel: () => void;
 }
@@ -27,6 +28,7 @@ export const emptyProjectSidebar: ProjectSidebarState = {
   setTreeViewMode: noop,
   toggleExpanded: noop,
   expandSessionList: noop,
+  collapseSessionList: noop,
   toggleAddPanel: noop,
   closeAddPanel: noop,
 };
@@ -75,6 +77,10 @@ export function createProjectSidebarState(storage: HostStorage) {
             (limits[path] ?? SESSION_LIST_PAGE_SIZE) + SESSION_LIST_PAGE_SIZE,
         },
       });
+    },
+    collapseSessionList(path) {
+      if (!active) return;
+      set({ sessionListLimits: { ...get().sessionListLimits, [path]: SESSION_LIST_PAGE_SIZE } });
     },
     toggleAddPanel() {
       if (!active) return;

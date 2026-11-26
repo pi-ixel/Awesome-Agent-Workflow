@@ -533,29 +533,29 @@ describe("ProjectTree 会话子节点分页", () => {
       screen.queryByRole("button", { name: /会话 07/ }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "加载更多会话（还有 7 条）" }),
+      screen.getByRole("button", { name: "展开其余会话 +7" }),
     ).toBeVisible();
 
     // 第一页：5 → 10
     await user.click(
-      screen.getByRole("button", { name: "加载更多会话（还有 7 条）" }),
+      screen.getByRole("button", { name: "展开其余会话 +7" }),
     );
     expect(screen.getByRole("button", { name: /会话 03/ })).toBeVisible();
     expect(
       screen.queryByRole("button", { name: /会话 02/ }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "加载更多会话（还有 2 条）" }),
+      screen.getByRole("button", { name: "展开其余会话 +2" }),
     ).toBeVisible();
 
-    // 第二页：10 → 12，全部呈现后按钮消失，「＋ 新会话」仍在末尾
+    // 第二页：10 → 12，收起后恢复第一页
     await user.click(
-      screen.getByRole("button", { name: "加载更多会话（还有 2 条）" }),
+      screen.getByRole("button", { name: "展开其余会话 +2" }),
     );
     expect(screen.getByRole("button", { name: /会话 01/ })).toBeVisible();
-    expect(
-      screen.queryByRole("button", { name: /^加载更多/ }),
-    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "收起至最近 5 条 共 12" }));
+    expect(screen.queryByRole("button", { name: /会话 07/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开其余会话 +7" })).toBeVisible();
     // 模型 a：「＋ 新会话」灰行移除，新建走行尾动作栏图标
     expect(
       screen.queryByRole("button", { name: "新会话（pager）" }),
@@ -568,7 +568,7 @@ describe("ProjectTree 会话子节点分页", () => {
     expect(screen.getByRole("button", { name: /会话 12/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /会话 08/ })).toBeVisible();
     expect(
-      screen.queryByRole("button", { name: /^加载更多/ }),
+      screen.queryByRole("button", { name: /展开其余会话|收起至最近/ }),
     ).not.toBeInTheDocument();
   });
 });
