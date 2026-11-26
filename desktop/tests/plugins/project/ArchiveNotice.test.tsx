@@ -27,8 +27,8 @@ afterEach(() => {
 });
 it("manual archive shows feedback and undo restores the exact archived session", async () => {
   const store = indexes.archive.getState();
-  store.archiveSession("D:/other", "other");
-  store.archiveWithNotice("D:/project", "one");
+  void store.archiveSession("D:/other", "other");
+  void store.archiveWithNotice("D:/project", "one");
   render(<ArchiveNotice />, { wrapper: fixture.Wrapper });
   expect(screen.getByRole("status")).toHaveTextContent("已归档的聊天");
   await userEvent.click(screen.getByRole("button", { name: "撤销" }));
@@ -45,14 +45,14 @@ it("manual archive shows feedback and undo restores the exact archived session",
   expect(screen.queryByRole("status")).toBeNull();
 });
 it("closing the notice keeps the session archived", async () => {
-  indexes.archive.getState().archiveWithNotice("D:/project", "one");
+  void indexes.archive.getState().archiveWithNotice("D:/project", "one");
   render(<ArchiveNotice />, { wrapper: fixture.Wrapper });
   await userEvent.click(screen.getByRole("button", { name: "关闭归档提示" }));
   expect(screen.queryByRole("status")).toBeNull();
   expect(indexes.archive.getState().archivedSessions.size).toBe(1);
 });
 it("view opens archive management", async () => {
-  indexes.archive.getState().archiveWithNotice("D:/project", "one");
+  void indexes.archive.getState().archiveWithNotice("D:/project", "one");
   render(<ArchiveNotice openSettings={() => fixture.workbench.navigation.getState().openSettingsTab("archive")} />, {
     wrapper: fixture.Wrapper,
   });
@@ -77,10 +77,10 @@ it("automatically closes after 15 seconds and restarts for a new notice", () => 
   vi.useFakeTimers();
   try {
     render(<ArchiveNotice />, { wrapper: fixture.Wrapper });
-    act(() => indexes.archive.getState().archiveWithNotice("D:/project", "one"));
+    void act(() => indexes.archive.getState().archiveWithNotice("D:/project", "one"));
     act(() => { vi.advanceTimersByTime(14_000); });
     expect(screen.getByRole("status")).toBeInTheDocument();
-    act(() => indexes.archive.getState().archiveWithNotice("D:/project", "two"));
+    void act(() => indexes.archive.getState().archiveWithNotice("D:/project", "two"));
     act(() => { vi.advanceTimersByTime(1_000); });
     expect(screen.getByRole("status")).toBeInTheDocument();
     act(() => { vi.advanceTimersByTime(14_000); });

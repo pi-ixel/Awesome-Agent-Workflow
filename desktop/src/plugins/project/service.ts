@@ -132,6 +132,7 @@ export interface ProjectSessions extends Pick<
   ProjectSessionIndexes,
   "catalog" | "activity"
 > {
+  workflowOwner(cwd: string, sessionIds: readonly string[]): { project: string; agentId: string } | null | undefined;
   readonly archive: ReadonlySnapshot<SessionArchiveSnapshot>;
   readonly deletions?: ReadonlySnapshot<SessionDeletionSnapshot>;
   canDeleteArchivedSession?(agentKey: string): boolean;
@@ -190,11 +191,11 @@ export interface ProjectSessions extends Pick<
    */
   pluginSessionReady(target: SessionTarget): Promise<void>;
   /**
-   * 按会话 id 订阅轮次事件（不管这一轮是谁发起的）。会话还没打开也可以先订阅：
+   * 按项目、Agent 和会话 ID 订阅轮次事件。会话还没打开也可以先订阅：
    * 之后不管被谁打开、断线重连、重新打开，开始与结束都会送到。返回的函数取消订阅。
    */
   watchTurns(
-    sessionId: string,
+    target: SessionTarget,
     listener: (event: SessionTurnEvent) => void,
   ): () => void;
   /** 订阅一个会话的原始事件（Agent 的消息、工具调用、计划等）。返回的函数取消订阅。 */
@@ -212,6 +213,7 @@ export interface ProjectSessions extends Pick<
     agentKey: string,
     sessionId: string,
     title: string,
+    workspacePath?: string,
   ): void | Promise<void>;
   renameDisplayedSession(
     path: string,

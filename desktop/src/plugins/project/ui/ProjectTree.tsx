@@ -761,7 +761,7 @@ function useSessionInlineRename(path: string, session: SessionSummary) {
   const projectService = useProject();
   const catalogOwner = useProjectCatalog((state) => state.agentKey);
   return useSessionRename(sessionPinKey(path, session.id, catalogOwner ?? undefined), session.title, (draft) =>
-    catalogOwner === null ? undefined : projectService?.sessions.renameSession(catalogOwner, session.id, draft),
+    catalogOwner === null ? undefined : projectService?.sessions.renameSession(catalogOwner, session.id, draft, path),
   );
 }
 
@@ -934,7 +934,7 @@ function SessionArchiveAction({
       onConfirm={() => {
         const owner = projectService?.sessions.catalog.getState().agentKey ?? undefined;
         if (!busySessionIds(owner, path).has(sessionId))
-          projectService?.sessions.archiveWithNotice(path, sessionId);
+          void projectService?.sessions.archiveWithNotice(path, sessionId);
       }}
     />
   );

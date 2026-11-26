@@ -80,7 +80,7 @@ export function prepareDraftPromotion(
       throw new AcpClosedError(
         "Agent 已切换，请等待当前 Agent 连接就绪后再发送",
       );
-    if (session.sessionId !== null) return;
+    if (session.sessionId !== null && runtime.store.getState().activeSessionId === session.sessionId) return;
     const created = await create();
     assertBound();
     if (!isCurrent()) throw new AcpClosedError("Agent 已切换，保留新会话草稿");

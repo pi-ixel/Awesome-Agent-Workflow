@@ -57,6 +57,15 @@ pub struct RunSnapshot {
     /// Digest only; runtime command, MCP headers and environment stay in memory.
     #[serde(default)]
     pub execution_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desktop_owner: Option<DesktopRunOwner>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopRunOwner {
+    pub project: String,
+    pub agent_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,6 +194,8 @@ impl RunSnapshot {
             .execution_hash
             .as_ref()
             .is_some_and(|s| !valid_sha256(s))
+            || self.desktop_owner.as_ref().is_some_and(|owner|
+                owner.project.trim().is_empty() || owner.agent_id.trim().is_empty())
         {
             return Err("INVALID_RUN_SNAPSHOT".into());
         }
@@ -335,6 +346,31 @@ impl Journal {
             serde_json::from_str(&text.ok_or("RUN_SNAPSHOT_NOT_FOUND")?).map_err(err)?;
         snapshot.validate()?;
         Ok(snapshot)
+    }
+
+    pub fn desktop_owner(&self, id: &str, project: &str) -> Result<Option<DesktopRunOwner>> {
+        match self.load_snapshot(id, project) {
+            Ok(snapshot) => Ok(snapshot.desktop_owner),
+            Err(error) if error == "RUN_SNAPSHOT_NOT_FOUND" => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub fn assign_desktop_owner(&mut self, id: &str, project: &str, owner: DesktopRunOwner) -> Result<()> {
+        let tx = self.db.transaction_with_behavior(TransactionBehavior::Immediate).map_err(err)?;
+        let raw: String = tx.query_row(
+            "SELECT s.snapshot FROM run_snapshots s JOIN runs r ON r.id=s.run_id WHERE r.id=?1 AND r.project=?2",
+            params![id, project], |row| row.get(0),
+        ).map_err(err)?;
+        let mut snapshot: RunSnapshot = serde_json::from_str(&raw).map_err(err)?;
+        if let Some(existing) = snapshot.desktop_owner.as_ref() {
+            return if existing == &owner { Ok(()) } else { Err("RUN_PROJECT_MISMATCH".into()) };
+        }
+        snapshot.desktop_owner = Some(owner);
+        snapshot.validate()?;
+        tx.execute("UPDATE run_snapshots SET snapshot=?2 WHERE run_id=?1",
+            params![id, serde_json::to_string(&snapshot).map_err(err)?]).map_err(err)?;
+        tx.commit().map_err(err)
     }
 
     /// Associate a real ACP session with an in-flight action. An actor keeps
@@ -504,16 +540,13 @@ impl Journal {
         tx.commit().map_err(err)
     }
 
-    /// 会话属于哪次运行的哪个角色（项目内）。
-    pub fn session_actor(&self, project: &str, session_id: &str) -> Result<Option<(String, String)>> {
-        self.db
-            .query_row(
-                "SELECT a.run_id,a.actor FROM actor_sessions a JOIN runs r ON r.id=a.run_id WHERE r.project=?1 AND a.session_id=?2",
-                params![project, session_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()
-            .map_err(err)
+    /// 同一实际目录中，多个 Agent 可能返回相同会话 ID。
+    pub fn session_actors(&self, project: &str, session_id: &str) -> Result<Vec<(String, String)>> {
+        let mut stmt = self.db.prepare(
+            "SELECT a.run_id,a.actor FROM actor_sessions a JOIN runs r ON r.id=a.run_id WHERE r.project=?1 AND a.session_id=?2",
+        ).map_err(err)?;
+        let rows = stmt.query_map(params![project, session_id], |row| Ok((row.get(0)?, row.get(1)?))).map_err(err)?;
+        rows.collect::<std::result::Result<_, _>>().map_err(err)
     }
 
     /// 工作流在会话里发出了这一步的说明，这一轮的编号是 `turn`（ADR 040）。
@@ -551,16 +584,20 @@ impl Journal {
     /// 只有工作流已经在这个会话里发过这一步的说明，之后的轮次才算这一步的。这一步
     /// 做完了、运行结束了、还没发过说明，都不记。返回新记下的事实（推给界面与通知）。
     pub fn record_session_state(&mut self, session_id: &str, state: &SessionState) -> Result<Vec<TurnFact>> {
+        self.record_scoped_session_state(None, session_id, state)
+    }
+
+    pub fn record_scoped_session_state(&mut self, run_id: Option<&str>, session_id: &str, state: &SessionState) -> Result<Vec<TurnFact>> {
         let tx = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(err)?;
         let links: Vec<(String, String, String, String)> = {
             let mut stmt = tx
-                .prepare("SELECT a.run_id,r.project,a.actor,r.checkpoint FROM actor_sessions a JOIN runs r ON r.id=a.run_id WHERE a.session_id=?1")
+                .prepare("SELECT a.run_id,r.project,a.actor,r.checkpoint FROM actor_sessions a JOIN runs r ON r.id=a.run_id WHERE a.session_id=?1 AND (?2 IS NULL OR a.run_id=?2)")
                 .map_err(err)?;
             let rows = stmt
-                .query_map(params![session_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
+                .query_map(params![session_id, run_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
                 .map_err(err)?;
             rows.collect::<std::result::Result<_, _>>().map_err(err)?
         };

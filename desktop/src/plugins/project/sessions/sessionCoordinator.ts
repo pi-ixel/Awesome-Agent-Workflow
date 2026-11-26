@@ -206,6 +206,7 @@ export function createSessionCoordinator({
   }
 
   function isProjectSession(workspace: string, agent: string, id: string): boolean {
+    if (indexes.isOwnershipUncertain(workspace, agent, id)) return false;
     if (indexes.isModelProbe({ workspacePath: workspace, agentKey: agent, sessionId: id })) return false;
     const knownOwner = indexes.ownerOf(workspace, agent, id);
     if (knownOwner) return pathKey(knownOwner) === pathKey(workspace);
@@ -218,7 +219,11 @@ export function createSessionCoordinator({
         return false;
       }
     }
-    return projectScope(workspace).length === 0;
+    if (projectScope(workspace).length !== 0) return false;
+    if (pathKey(root) !== pathKey(workspace)) return true;
+    const projects = knownWorkspacePaths(workspaceStore.getState());
+    return projects.some((path) => pathKey(path) === pathKey(workspace)) ||
+      !projects.some((path) => pathKey(projectFolderPath(path)) === pathKey(root));
   }
 
   function requestedScope(runtime: SessionRuntime): readonly string[] {
@@ -505,7 +510,7 @@ export function createSessionCoordinator({
           : related,
       establish: async (establishedId: string) => {
         if (!runtime.ephemeral)
-          await indexes.claimSessionProject(runtime.workspacePath, runtime.agentKey, establishedId);
+          await indexes.claimSessionProject(runtime.workspacePath, runtime.agentKey, establishedId, runtime.cwd);
         if (
           desired === undefined &&
           !scope?.error &&
@@ -534,7 +539,7 @@ export function createSessionCoordinator({
     string,
     Set<(event: AcpSessionEvent) => void>
   >();
-  /** 会话轮次事件的订阅方（按会话 id；会话 id 由 Agent 生成、全局唯一）。 */
+  /** 会话轮次事件的订阅方（按 Agent、项目和会话 ID）。 */
   const turnWatchers = new Map<
     string,
     Set<(event: SessionTurnEvent) => void>
@@ -692,7 +697,9 @@ export function createSessionCoordinator({
     const stopState = runtime.store.subscribe((state, previous) => {
         if (state.isAgentRunning !== previous.isAgentRunning) {
           const sessionId = runtime.session.sessionId ?? state.activeSessionId;
-          const watchers = sessionId ? turnWatchers.get(sessionId) : undefined;
+          const watchers = sessionId
+            ? turnWatchers.get(sessionActivityKey(runtime.workspacePath, sessionId, runtime.agentKey))
+            : undefined;
           const event: SessionTurnEvent = state.isAgentRunning
             ? { type: "started" }
             : {
@@ -1913,7 +1920,10 @@ export function createSessionCoordinator({
   ): Promise<SessionTarget> {
     const resumeId = options.resumeSessionId;
     if (!resumeId) return openPluginSessionNow(options);
-    const key = JSON.stringify([selectedAgentKey(), pathKey(options.workspacePath), resumeId]);
+    const agentKey = options.agentId
+      ? getAgents().selectionKey(workspaceStore.getState().toolPaths, options.agentId)
+      : selectedAgentKey();
+    const key = JSON.stringify([agentKey, pathKey(options.workspacePath), resumeId]);
     return sessionFactory.exclusive(key, () => openPluginSessionNow(options));
   }
 
@@ -1921,13 +1931,14 @@ export function createSessionCoordinator({
     options: PluginSessionOptions,
   ): Promise<SessionTarget> {
     const { workspacePath } = options;
-    const agentKey = selectedAgentKey();
+    const bound = options.agentId ? boundBackgroundAgent(workspacePath, options.agentId) : undefined;
+    const agentKey = bound?.agentKey ?? selectedAgentKey();
     const current = () =>
       !retired &&
       !closing &&
       !switchingAgent &&
       !projectClosures.has(pathKey(workspacePath)) &&
-      agentKey === selectedAgentKey();
+      (bound !== undefined || agentKey === selectedAgentKey());
     if (!current()) throw new Error("会话管理当前不可用");
     const resumeId = options.resumeSessionId ?? null;
     if (resumeId) {
@@ -1969,7 +1980,7 @@ export function createSessionCoordinator({
         }
         const title = options.title?.trim();
         if (title && !options.ephemeral) {
-          const save = setManualTitle(resumeId, title, agentKey);
+          const save = setManualTitle(resumeId, title, agentKey, workspacePath);
           if (save) await save;
           existing.store.getState().refreshSessionTitle(resumeId);
         }
@@ -1981,7 +1992,7 @@ export function createSessionCoordinator({
       agentKey,
       current,
       undefined,
-      undefined,
+      bound && agentKey !== selectedAgentKey() ? bound.adapter : undefined,
       {
         cwd: options.cwd ?? (resumeId ? sessionWorkingDirectory(workspacePath, agentKey, resumeId) : undefined),
         openTools: options.tools,
@@ -2036,7 +2047,7 @@ export function createSessionCoordinator({
       if (binding) await binding;
       const title = options.title?.trim();
       if (title && !options.ephemeral) {
-        const save = setManualTitle(sessionId, title, agentKey);
+        const save = setManualTitle(sessionId, title, agentKey, workspacePath);
         if (save) await save;
         runtime.store.getState().refreshSessionTitle(sessionId);
       }
@@ -2068,13 +2079,13 @@ export function createSessionCoordinator({
     await disposeRuntime(runtime);
   }
 
-  /** 按会话 id 订阅轮次事件（会话还没打开也行；断线重连、重新打开后照常收到）。 */
+  /** 会话还没打开也可以订阅，断线重连后照常收到。 */
   function watchSessionTurns(
-    sessionId: string,
+    target: SessionTarget,
     listener: (event: SessionTurnEvent) => void,
   ): () => void {
-    if (!sessionId) return () => {};
-    const key = sessionId;
+    if (!target.sessionId) return () => {};
+    const key = sessionActivityKey(target.workspacePath, target.sessionId, target.agentKey);
     const set = turnWatchers.get(key) ?? new Set();
     set.add(listener);
     turnWatchers.set(key, set);
@@ -2150,13 +2161,18 @@ export function createSessionCoordinator({
     agentKey: string,
     sessionId: string,
     title: string,
+    workspacePath?: string,
   ): void | Promise<void> {
-    return directory.renameCatalogEntry(agentKey, sessionId, title, () => {
+    const publish = () => directory.renameCatalogEntry(agentKey, sessionId, title, () => {
       for (const runtime of projectFactory.sessions()) {
-        if (runtime.agentKey === agentKey)
+        if (runtime.agentKey === agentKey && (!workspacePath || pathKey(runtime.workspacePath) === pathKey(workspacePath)))
           runtime.store.getState().refreshSessionTitle(sessionId);
       }
-    });
+    }, workspacePath);
+    if (!workspacePath) return publish();
+    if (!isProjectSession(workspacePath, agentKey, sessionId))
+      return Promise.reject(new Error("该会话属于其他项目"));
+    return indexes.claimSessionProject(workspacePath, agentKey, sessionId).then(publish);
   }
 
   function publishCatalog(
@@ -2237,7 +2253,7 @@ export function createSessionCoordinator({
         ).filter(({ id }) => matches(id)).map((entry) => ({
           ...entry,
           nativeTitle: entry.title,
-          title: displayTitleOf(entry.id, entry.title, agentKey),
+          title: displayTitleOf(entry.id, entry.title, agentKey, workspacePath),
         }));
         publishCatalog({ workspacePath, agentKey }, entries);
         setListStatus(workspacePath, agentKey, { state: "ready" });
@@ -2305,7 +2321,7 @@ export function createSessionCoordinator({
           annotationDrafts,
           messageImages,
           sessionLogger,
-          { playbackActive: false },
+          { playbackActive: false, workspacePath },
         ),
       approvalStore = retained?.approval ?? createApprovalStore(approvalLogger),
       statusStore = retained?.status ?? createRuntimeStatusStore(usageLogger);
@@ -3485,7 +3501,7 @@ export function createSessionCoordinator({
               pathKey(other.workspacePath) === pathKey(workspacePath),
           ),
       });
-      await setManualTitle(sessionId, request.title, agentKey);
+      await setManualTitle(sessionId, request.title, agentKey, workspacePath);
       state().refreshSessionTitle(sessionId);
       const port = runtime.session;
       for (const [isModel, config, value] of [

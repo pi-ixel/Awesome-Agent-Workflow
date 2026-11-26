@@ -567,7 +567,7 @@ it("creates a new project coordinator on the same root and closes the previous s
     const archiveKey = sessionArchiveKey("/first", "same-session", agentKey);
     expect(project.sessions.archive).not.toHaveProperty("setState");
     expect(project.sessions.archive.getState()).not.toHaveProperty("archiveWithNotice");
-    archiveWithNotice("/first", "same-session");
+    void archiveWithNotice("/first", "same-session");
     expect(project.sessions.archive.getState().notice).toMatchObject({
       sessionId: "same-session",
       agentKey,
@@ -605,8 +605,8 @@ it("creates a new project coordinator on the same root and closes the previous s
     expect(
       replacement.sessions.archive.getState().archivedSessions.has(archiveKey),
     ).toBe(true);
-    unarchiveSession("/first", "same-session", agentKey);
-    archiveWithNotice("/stale", "old-action");
+    void unarchiveSession("/first", "same-session", agentKey);
+    void archiveWithNotice("/stale", "old-action");
     expect(project.sessions.archive.getState().notice).toBeNull();
     expect(
       replacement.sessions.archive.getState().archivedSessions.has(archiveKey),

@@ -4,7 +4,7 @@ mod preflight;
 use aaw_workflow_core::{
     ProcessOutput, Stage, Workflow,
     intervention::{InterventionRequest, apply_cleanup},
-    journal::{Journal, RunInfo, RunSnapshot},
+    journal::{DesktopRunOwner, Journal, RunInfo, RunSnapshot},
     package::Library,
     python_process,
     source,
@@ -189,6 +189,7 @@ fn run_links(db: &Journal, id: &str, project: &str, workflow: &Workflow, state: 
     let summary = run_value(id, workflow, state, &info);
     Ok(json!({
         "runId": id,
+        "desktopOwner": db.desktop_owner(id, project)?,
         "version": db.run_version(id)?,
         "workflowId": summary["workflowId"],
         "workflowName": workflow.graph.definition.name,
@@ -557,7 +558,11 @@ impl Service {
         }
         let id = Uuid::new_v4().to_string();
         let owner = Uuid::new_v4().to_string();
-        let snapshot = RunSnapshot { execution_hash: Some(config.execution_hash(&id)) };
+        let desktop_owner = if input["desktopOwner"].is_null() { None } else {
+            Some(serde_json::from_value::<DesktopRunOwner>(input["desktopOwner"].clone())
+                .map_err(|_| "INVALID_DESKTOP_RUN_OWNER")?)
+        };
+        let snapshot = RunSnapshot { execution_hash: Some(config.execution_hash(&id)), desktop_owner };
         let mut journal = self.open()?;
         journal.create_with_snapshot(&id, &project, &workflow, &snapshot)?;
         journal.set_run_info(&id, &title)?;
@@ -571,7 +576,7 @@ impl Service {
     fn resume(&self, input: &Value) -> Result<Value, String> {
         let id = string(input, "runId")?.to_owned();
         let project = string(input, "cwd")?.to_owned();
-        let journal = self.open()?;
+        let mut journal = self.open()?;
         let snapshot = journal.load_snapshot(&id, &project)?;
         let config = Self::config(input)?;
         if snapshot.execution_hash.as_deref() != Some(config.execution_hash(&id).as_str()) {
@@ -579,6 +584,13 @@ impl Service {
         }
         if journal.has_lease(&id, &project)? {
             return Err("RUN_ALREADY_CLAIMED".into());
+        }
+        if let Some(value) = input.get("desktopOwner") {
+            let owner: DesktopRunOwner = serde_json::from_value(value.clone())
+                .map_err(|_| "INVALID_DESKTOP_RUN_OWNER")?;
+            journal.assign_desktop_owner(&id, &project, owner)?;
+        } else if snapshot.desktop_owner.is_some() {
+            return Err("RUN_PROJECT_MISMATCH".into());
         }
         let owner = Uuid::new_v4().to_string();
         self.launch(id.clone(), project, owner, config, true)?;
@@ -606,6 +618,7 @@ impl Service {
         // runId 随信封携带——Desktop 应答帧按它路由回来。
         let run_id_for_frames = id.clone();
         let event_sink = self.sink.clone();
+        let session_scope = self.open()?.desktop_owner(&id, &project)?.map(|_| id.clone());
         let remote: Arc<RemoteHost> = Arc::new(RemoteHost::new(
             Box::new(move |line: &str| {
                 (event_sink)(
@@ -614,7 +627,7 @@ impl Service {
             }),
             self.host_response_timeout,
             self.board.clone(),
-        ));
+        ).with_run_scope(session_scope));
         // 应答帧路由：main 按 runId 解码后调 deliver（按关联 id 从
         // 登记表精确投递到等待中的请求；运行收尾移除）。
         let deliver: HostFrameSink = {
@@ -726,15 +739,24 @@ impl Service {
         });
         Ok(())
     }
-    fn session_tools(&self, project: &str, session_id: &str) -> Result<Value, String> {
+    fn session_tools(&self, project: &str, session_id: &str, args: &Value) -> Result<Value, String> {
         let journal = self.open()?;
-        let Some((run, actor)) = journal.session_actor(project, session_id)? else {
-            return Ok(Value::Null);
-        };
-        let (_, workflow) = journal.load(&run, project)?;
-        if workflow.stage == Stage::Completed {
-            return Ok(Value::Null);
+        let logical_project = args["desktopProject"].as_str();
+        let mut match_run = None;
+        for (run, actor) in journal.session_actors(project, session_id)? {
+            if let Some(logical_project) = logical_project {
+                let matches = match journal.desktop_owner(&run, project)? {
+                    Some(owner) => owner.project == logical_project && args["agentId"].as_str() == Some(owner.agent_id.as_str()),
+                    None => args["allowLegacy"].as_bool().unwrap_or(false),
+                };
+                if !matches { continue; }
+            }
+            let (_, workflow) = journal.load(&run, project)?;
+            if workflow.stage == Stage::Completed { continue; }
+            if match_run.is_some() { return Ok(Value::Null); }
+            match_run = Some((run, actor, workflow));
         }
+        let Some((run, actor, workflow)) = match_run else { return Ok(Value::Null); };
         let exe = std::env::current_exe()
             .map_err(|_| "SERVICE_EXECUTABLE_UNAVAILABLE")?
             .to_string_lossy()
@@ -846,7 +868,7 @@ impl Service {
             })
             .collect();
         Ok(
-            json!({"version":db.run_version(id)?,"run":run_value(id,&workflow,state,&db.run_info(id)?),"catalog":Some(workflow.graph.definition.catalog()),"execution":{"phase":workflow.graph.phase,"stack":workflow.graph.stack,"calls":workflow.graph.all_calls()},"active":active,"hasLease":db.has_lease(id,project)?,"retries":retries,"nodes":nodes,"actors":actors.into_values().collect::<Vec<_>>(),"checkpoints":db.checkpoints(id,project)?,"gates":workflow.gates(),"autoConfirm":workflow.auto_confirm,"interventions":db.interventions(id,project)?,"artifacts":artifacts}),
+            json!({"version":db.run_version(id)?,"desktopOwner":db.desktop_owner(id,project)?,"run":run_value(id,&workflow,state,&db.run_info(id)?),"catalog":Some(workflow.graph.definition.catalog()),"execution":{"phase":workflow.graph.phase,"stack":workflow.graph.stack,"calls":workflow.graph.all_calls()},"active":active,"hasLease":db.has_lease(id,project)?,"retries":retries,"nodes":nodes,"actors":actors.into_values().collect::<Vec<_>>(),"checkpoints":db.checkpoints(id,project)?,"gates":workflow.gates(),"autoConfirm":workflow.auto_confirm,"interventions":db.interventions(id,project)?,"artifacts":artifacts}),
         )
     }
     fn links(&self, project: &str) -> Result<Value, String> {
@@ -948,6 +970,11 @@ impl Service {
         Ok(Value::Null)
     }
     fn dispatch(&self, method: &str, args: &Value) -> Result<Value, String> {
+        if let (Some(id), Some(cwd), Some(project)) = (args["runId"].as_str(), args["cwd"].as_str(), args["desktopProject"].as_str()) {
+            if self.open()?.desktop_owner(id, cwd)?.is_some_and(|owner| owner.project != project) {
+                return Err("RUN_PROJECT_MISMATCH".into());
+            }
+        }
         match method {
             "ping" => Ok(json!({"protocol":1,"engine":"rust"})),
             "workflows" => Ok(json!(self.library.list())),
@@ -1008,6 +1035,9 @@ impl Service {
                 for (id, w) in db.list_runs(project)? {
                     let mut run = run_value(&id, &w, activity(&self.active, &id)?, &db.run_info(&id)?);
                     run["version"] = json!(db.run_version(&id)?);
+                    run["desktopOwner"] = json!(db.desktop_owner(&id, project)?);
+                    run["sessionIds"] = json!(db.session_links(&id, project)?.into_iter().map(|link| link.session_id)
+                        .chain(db.unclaimed_entry_session(&id, project)?).collect::<Vec<_>>());
                     runs.push(run);
                 }
                 Ok(json!(runs))
@@ -1019,6 +1049,9 @@ impl Service {
                 for (id, project, w) in db.list_all_runs()? {
                     let mut run = run_value(&id, &w, activity(&self.active, &id)?, &db.run_info(&id)?);
                     run["project"] = json!(project);
+                    run["desktopOwner"] = json!(db.desktop_owner(&id, &project)?);
+                    run["sessionIds"] = json!(db.session_links(&id, &project)?.into_iter().map(|link| link.session_id)
+                        .chain(db.unclaimed_entry_session(&id, &project)?).collect::<Vec<_>>());
                     runs.push(run);
                 }
                 Ok(json!(runs))
@@ -1026,7 +1059,7 @@ impl Service {
             "snapshot" => self.snapshot(string(args, "runId")?, string(args, "cwd")?),
             // ADR 037：节点会话被（重新）打开时要装的结果工具。运行还没结束就给；
             // 停着的运行按这一步当前的动作新开或沿用结果通道。
-            "session-tools" => self.session_tools(string(args, "cwd")?, string(args, "sessionId")?),
+            "session-tools" => self.session_tools(string(args, "cwd")?, string(args, "sessionId")?, args),
             // ADR 036 运行管理：改标题、归档 / 取消归档、永久删除（只删已停下且没有占用的）。
             "run-rename" => self.open()?.rename_run(string(args, "runId")?, string(args, "cwd")?, string(args, "title")?).map(|_| Value::Null),
             "run-archive" => self
@@ -1065,11 +1098,13 @@ impl Service {
             // 记进轮次记录与推给等着的运行线程分开：记录跟着会话的登记走，运行停着也记。
             "session-state" => {
                 let session = string(args, "sessionId")?;
+                let run_id = args["runId"].as_str();
+                let board_key = run_id.map(|id| aaw_workflow_core::session_board::session_scope(id, session));
                 let state: SessionState = serde_json::from_value(args["state"].clone()).map_err(|_| "INVALID_ARGUMENT")?;
-                if !self.board.report(session, state.clone()) {
+                if !self.board.report(board_key.as_deref().unwrap_or(session), state.clone()) {
                     return Ok(json!(false));
                 }
-                aaw_workflow_core::service_host::record_session_state(&self.db, &self.sink, session, &state)?;
+                aaw_workflow_core::service_host::record_session_state(&self.db, &self.sink, run_id, session, &state)?;
                 Ok(json!(true))
             }
             "host-reset" => {

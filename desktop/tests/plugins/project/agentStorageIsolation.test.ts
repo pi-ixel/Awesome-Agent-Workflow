@@ -76,14 +76,14 @@ it("未发送草稿、正式会话草稿及输入历史按 Agent 隔离", () => 
 
 it("archives and restores identical session IDs independently", () => {
   const store = createTestProjectIndexes().archive;
-  store.getState().archiveSession("D:/work", "same", "A");
+  void store.getState().archiveSession("D:/work", "same", "A");
   expect(
     store
       .getState()
       .archivedSessions.has(sessionArchiveKey("D:/work", "same", "B")),
   ).toBe(false);
-  store.getState().archiveSession("D:/work", "same", "B");
-  store.getState().unarchiveSession("D:/work", "same", "A");
+  void store.getState().archiveSession("D:/work", "same", "B");
+  void store.getState().unarchiveSession("D:/work", "same", "A");
   expect(
     store
       .getState()

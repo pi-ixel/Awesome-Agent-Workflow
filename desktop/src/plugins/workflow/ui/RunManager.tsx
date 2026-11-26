@@ -117,7 +117,7 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
     }
   };
 
-  const row = (run: RunSummary, workflowName: string, path?: string) => {
+  const row = (run: RunSummary, workflowName: string, path?: string, unassigned = false) => {
     const active = run.status === "running";
     const archived = run.archivedAt != null;
     // 当前项目的运行不带项目参数（服务用当前项目）；别的项目的带上它所属的项目。
@@ -150,10 +150,10 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
           ordinal={ordinals[run.runId]}
           workflowName={workflowName}
           showEntry={varied.has(run.workflowId || run.name)}
-          suffix={archived ? "（已归档）" : ""}
-          onOpen={() => where === undefined ? onOpenRun(run.runId) : onOpenProjectRun?.(where, run.runId)}
+          suffix={unassigned ? "（待关联项目）" : archived ? "（已归档）" : ""}
+          onOpen={() => unassigned || where === undefined ? onOpenRun(run.runId) : onOpenProjectRun?.(where, run.runId)}
         />}
-      {!renaming && <div className="workflow-run-tools">
+      {!unassigned && !renaming && <div className="workflow-run-tools">
         <IconButton iconSize="compact" className={ROW_ICON} aria-label="改标题" {...hintTooltipProps("改标题")} disabled={busy}
           onClick={() => setEditing({ runId: run.runId, title: run.title })}><PencilIcon className="ui-icon-14" /></IconButton>
         {archived
@@ -171,7 +171,7 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
       return groupByProject((everywhere ?? []).filter((run) => visible(run) && inSection(run))).map((group) =>
         <section key={pathKey(group.project)} className="workflow-run-group" aria-label={projectName(group.project)}>
           <h4 data-hint={group.project}>{projectName(group.project)}{isHere(group.project) && <small>当前项目</small>}</h4>
-          <ul className="workflow-run-list">{group.runs.map((run) => row(run, run.name, group.project))}</ul>
+          <ul className="workflow-run-list">{group.runs.map((run) => row(run, run.name, group.project, run.unassigned))}</ul>
         </section>);
     }
     const section = shown.filter(inSection);

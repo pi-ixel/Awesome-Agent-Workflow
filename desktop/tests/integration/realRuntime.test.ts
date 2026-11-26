@@ -872,7 +872,7 @@ describe("openRealWorkspace：会话恢复装配", () => {
   it("轮次事件：不管谁发的消息，开始与结束都通知订阅方；取消订阅后不再收到", async () => {
     const target = await openPluginSessionRuntime({ workspacePath: WORKSPACE });
     const events: unknown[] = [];
-    const stop = watchSessionTurns(target.sessionId!, (event) => events.push(event));
+    const stop = watchSessionTurns(target, (event) => events.push(event));
     const runtime = findSessionRuntime(WORKSPACE, target.agentKey, target.sessionId)!;
     expect(runtime.store.getState().sendPrompt("你好")).toBe(true);
     await vi.waitFor(() => expect(events).toHaveLength(2));

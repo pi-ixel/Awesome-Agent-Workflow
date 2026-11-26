@@ -40,6 +40,8 @@ pub struct SessionRequirement {
     pub action: Action,
     /// Agent 进程的工作目录（项目目录）。
     pub cwd: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desktop_owner: Option<crate::journal::DesktopRunOwner>,
     /// Agent 启动命令（按角色指定时是该角色的 Agent）。
     pub command: Vec<String>,
     /// 按角色指定的模型（ADR 036）；宿主建新会话后设置，Agent 没有这个模型时节点失败并说明。
@@ -216,6 +218,7 @@ mod tests {
 
     fn requirement() -> SessionRequirement {
         SessionRequirement {
+            desktop_owner: None,
             action: Action {
                 site: "ask#1".into(),
                 ordinal: 1,

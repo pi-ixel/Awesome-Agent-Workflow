@@ -63,17 +63,17 @@ export interface SessionArchiveState extends SessionArchiveSnapshot {
   readonly archiveWithNotice: (
     workspacePath: string,
     sessionId: string,
-  ) => void;
+  ) => void | Promise<void>;
   readonly archiveSession: (
     workspacePath: string,
     sessionId: string,
     agentKey?: string | null,
-  ) => void;
+  ) => void | Promise<void>;
   readonly unarchiveSession: (
     workspacePath: string,
     sessionId: string,
     agentKey?: string | null,
-  ) => void;
+  ) => void | Promise<void>;
 }
 
 export interface ProjectSessionIndexes {

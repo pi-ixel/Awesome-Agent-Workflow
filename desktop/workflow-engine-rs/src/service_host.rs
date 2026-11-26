@@ -17,8 +17,8 @@ pub type EventSink = Arc<dyn Fn(Value) -> Result<(), String> + Send + Sync>;
 
 /// 把一份会话状态记进轮次记录，新记下的事实推给界面与通知（ADR 040）。轮次记录
 /// 只经这里写入（「说明发出了」除外，那是运行线程知道的事实）。
-pub fn record_session_state(database: &std::path::Path, sink: &EventSink, session_id: &str, state: &SessionState) -> Result<(), String> {
-    for fact in Journal::open(database)?.record_session_state(session_id, state)? {
+pub fn record_session_state(database: &std::path::Path, sink: &EventSink, run_id: Option<&str>, session_id: &str, state: &SessionState) -> Result<(), String> {
+    for fact in Journal::open(database)?.record_scoped_session_state(run_id, session_id, state)? {
         let event = match fact.kind {
             TurnFactKind::Started { turn } => json!({"type":"turn-started","siteId":fact.site,"ordinal":fact.ordinal,"turn":turn}),
             TurnFactKind::Ended { turn, outcome, awaiting } => json!({"type":"turn-ended","siteId":fact.site,"ordinal":fact.ordinal,"turn":turn,"outcome":outcome.as_str(),"awaiting":awaiting}),
@@ -136,8 +136,11 @@ impl Host for ServiceHost {
         Journal::open(&self.database)?.record_prompted(&self.run_id, &self.project, &self.owner, action, session_id, turn)?;
         // 这一轮的开始、甚至结束可能比「说明发出了」先报到（那时还不算这一步的，
         // 没记）：按最新那份补记一次。记录是幂等的，重复没关系。
-        if let Some(state) = self.board.as_ref().and_then(|board| board.state(session_id)) {
-            record_session_state(&self.database, &self.sink, session_id, &state)?;
+        if let Some(state) = self.board.as_ref().and_then(|board| {
+            board.state(&crate::session_board::session_scope(&self.run_id, session_id))
+                .or_else(|| board.state(session_id))
+        }) {
+            record_session_state(&self.database, &self.sink, Some(&self.run_id), session_id, &state)?;
         }
         Ok(())
     }

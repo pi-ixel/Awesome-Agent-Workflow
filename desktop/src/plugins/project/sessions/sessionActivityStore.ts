@@ -2,6 +2,8 @@ import { createStore } from "zustand";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import type { HostStorage } from "../../host/types.ts";
 import { sameSessionAgent } from "./sessionDeletion.ts";
+import type { SessionMetadata, SessionRecords } from "./sessionMetadata.ts";
+import { createLogger } from "../../../shared/logging/logger.ts";
 import type {
   SessionActivity,
   SessionActivityState,
@@ -61,9 +63,17 @@ function loadUnreadReplies(
 export function createSessionActivityStore(
   signal: AbortSignal,
   storage?: HostStorage,
+  metadata?: SessionMetadata,
+  initial?: SessionRecords["records"],
 ) {
+  const logger = createLogger("session-activity");
+  function writeUnread(project: string, agentKey: string, id: string, value: boolean) {
+    if (!metadata?.get(project, agentKey, id)) return;
+    void metadata.write(project, agentKey, id, { kind: "unread", value }).catch((error: unknown) =>
+      logger.warn("会话未读状态未保存", { error: String(error) }));
+  }
   function saveUnreadReplies(replies: SessionActivityState["unreadReplies"]) {
-    storage?.setItem(unreadStorageKey, JSON.stringify(Object.values(replies)));
+    if (!metadata) storage?.setItem(unreadStorageKey, JSON.stringify(Object.values(replies)));
     return replies;
   }
 
@@ -72,6 +82,7 @@ export function createSessionActivityStore(
     project: string,
     id: string,
     agentKey?: string,
+    persist = true,
   ) {
     const entry = Object.entries(state.unreadReplies).find(
       ([, reply]) =>
@@ -83,6 +94,7 @@ export function createSessionActivityStore(
     if (!entry) return state.unreadReplies;
     const replies = { ...state.unreadReplies };
     delete replies[entry[0]];
+    if (persist) writeUnread(project, entry[1].agentKey, id, false);
     return saveUnreadReplies(replies);
   }
 
@@ -98,7 +110,12 @@ export function createSessionActivityStore(
     }
   >()((set) => ({
     entries: {},
-    unreadReplies: loadUnreadReplies(storage),
+    unreadReplies: initial
+      ? Object.fromEntries(initial.filter((entry) => entry.metadata.unread).map((entry) => [
+          unreadReplyKey(entry.project, entry.sessionId, entry.agentId),
+          { agentId: entry.agentId, agentKey: entry.agentId, project: entry.project, sessionId: entry.sessionId },
+        ]))
+      : loadUnreadReplies(storage),
     update: (entry, reply) =>
       set((state) => {
         if (signal.aborted) return state;
@@ -120,6 +137,7 @@ export function createSessionActivityStore(
               };
             else delete replies[replyKey];
             unreadReplies = saveUnreadReplies(replies);
+            writeUnread(project, agentKey, sessionId, reply.unreadReply);
           }
         }
         if (
@@ -153,7 +171,7 @@ export function createSessionActivityStore(
       set((state) => {
         if (signal.aborted) return state;
         const key = sessionActivityKey(project, id, agentKey);
-        const unreadReplies = clearUnreadReply(state, project, id, agentKey);
+        const unreadReplies = clearUnreadReply(state, project, id, agentKey, false);
         if (!state.entries[key])
           return unreadReplies === state.unreadReplies
             ? state

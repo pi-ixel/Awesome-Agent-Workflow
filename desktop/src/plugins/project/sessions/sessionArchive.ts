@@ -93,7 +93,7 @@ function scanOnce(
   busySessionIds: (agentKey?: string) => ReadonlySet<string>,
   isActive: () => boolean,
   logger: Logger,
-): void {
+): void | Promise<void> {
   if (!settings.sessionAutoArchiveEnabled) {
     return;
   }
@@ -111,18 +111,21 @@ function scanOnce(
     return;
   }
   const store = indexes.archive.getState();
+  const writes: Promise<void>[] = [];
   for (const candidate of candidates) {
-    if (!isActive()) return;
-    store.archiveSession(
+    if (!isActive()) break;
+    const write = store.archiveSession(
       candidate.workspacePath,
       candidate.sessionId,
       catalog.agentKey ?? undefined,
     );
+    if (write) writes.push(write);
   }
-  logger.info("自动归档完成", {
-    count: candidates.length,
-    olderThanDays: days,
-  });
+  const report = () => {
+    logger.info("自动归档扫描完成", { count: candidates.length, olderThanDays: days });
+  };
+  if (writes.length) return Promise.all(writes).then(report);
+  report();
 }
 
 /** 扫描器由项目 Fiber 启动，卸载时撤销周期和设置订阅。 */
@@ -135,6 +138,16 @@ export function startSessionAutoArchiveScheduler(
   let active = true;
   let scanning = false;
   let rescanQueued = false;
+  const finish = () => {
+    scanning = false;
+    if (rescanQueued) {
+      rescanQueued = false;
+      scan();
+    }
+  };
+  const reportFailure = (error: unknown) => logger.warn("自动归档扫描失败，等待下一轮", {
+    error: error instanceof Error ? error.message : String(error),
+  });
   const scan = () => {
     if (!active) return;
     if (scanning) {
@@ -143,18 +156,15 @@ export function startSessionAutoArchiveScheduler(
     }
     scanning = true;
     try {
-      scanOnce(settings.getState(), indexes, busySessionIds, () => active, logger);
-    } catch (error) {
-      logger.warn("自动归档扫描失败，等待下一轮", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      scanning = false;
-      if (rescanQueued) {
-        rescanQueued = false;
-        scan();
+      const writes = scanOnce(settings.getState(), indexes, busySessionIds, () => active, logger);
+      if (writes) {
+        void writes.catch(reportFailure).finally(finish);
+        return;
       }
+    } catch (error) {
+      reportFailure(error);
     }
+    finish();
   };
   const unsubscribe = settings.subscribe((state, previous) => {
     if (AUTO_ARCHIVE_SETTING_KEYS.some((key) => state[key] !== previous[key])) {

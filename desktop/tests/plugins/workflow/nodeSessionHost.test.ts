@@ -90,7 +90,9 @@ function harness(registered?: ReadonlySet<string>) {
       },
     },
     sessions: sessions.port,
-    ...(registered ? { registered: { sessions: () => registered, subscribe: () => () => {} } } : {}),
+    ...(registered ? { registered: { sessions: () => [...registered].map((sessionId) => ({
+      runId: "run-1", target: { workspacePath: "D:/project", agentKey: "key", sessionId },
+    })), subscribe: () => () => {} } } : {}),
     onEvent: (event) => projected.push(event),
   });
   let serial = 0;

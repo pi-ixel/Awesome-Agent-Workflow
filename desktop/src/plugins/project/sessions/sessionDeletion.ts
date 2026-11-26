@@ -1,6 +1,6 @@
 import { createStore } from "zustand";
 import type { HostStorage } from "../../host/types.ts";
-import { pathKey } from "../../../shared/panelPaths.ts";
+import { pathKey, projectFolderPath } from "../../../shared/panelPaths.ts";
 
 export interface DeleteSessionTarget {
   readonly agentKey: string;
@@ -33,8 +33,7 @@ export function sessionAgentId(key: string): string | null {
   }
 }
 export function sameSessionAgent(left: string, right: string): boolean {
-  const id = sessionAgentId(left);
-  return left === right || (id !== null && id === sessionAgentId(right));
+  return (sessionAgentId(left) ?? left) === (sessionAgentId(right) ?? right);
 }
 const storageKey = "aaw-desktop/session-deletions.v1";
 export const deletionKey = (target: DeleteSessionTarget) =>
@@ -74,7 +73,7 @@ export function createSessionDeletions(storage: HostStorage) {
     blocked: (target: DeleteSessionTarget) =>
       Object.values(store.getState().entries).some(
         (entry) =>
-          pathKey(entry.workspacePath) === pathKey(target.workspacePath) &&
+          pathKey(projectFolderPath(entry.workspacePath)) === pathKey(projectFolderPath(target.workspacePath)) &&
           entry.sessionId === target.sessionId &&
           (entry.agentKey === target.agentKey ||
             sameSessionAgent(entry.agentKey, target.agentKey)),

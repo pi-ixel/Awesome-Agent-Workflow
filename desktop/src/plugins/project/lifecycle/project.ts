@@ -235,6 +235,7 @@ export class DesktopProject {
           this.operations.backgroundPromptOptions?.(path, agentId) ?? Promise.reject(new Error("后台会话当前不可用")),
         isConversationVisible: this.isConversationVisible.bind(this),
         openSessionFromEntry: this.openSessionFromEntry.bind(this),
+        workflowOwner: (cwd, ids) => indexes.workflowOwner(cwd, ids),
         deliverToSession: this.deliverToSession.bind(this),
         renameSession: this.renameSession.bind(this),
         renameDisplayedSession: this.renameDisplayedSession.bind(this),
@@ -248,7 +249,7 @@ export class DesktopProject {
         closePluginSession: (target) =>
           this.operations.closePluginSession?.(target) ?? Promise.resolve(),
         pluginSessionReady: (target) => this.operations.pluginSessionReady(target),
-        watchTurns: (sessionId, listener) => this.operations.watchTurns(sessionId, listener),
+        watchTurns: (target, listener) => this.operations.watchTurns(target, listener),
         watchEvents: (target, listener) => this.operations.watchEvents(target, listener),
         recoverSession: this.recoverSession.bind(this),
         stopRecovery: this.stopRecovery.bind(this),
@@ -366,7 +367,7 @@ export class DesktopProject {
     }
     for (const value of paths)
       this.composer.history.removeSession?.(value, id, agent);
-    await removeSessionTitles(id, agent);
+    if (!native) await removeSessionTitles(id, agent);
     const belongs = (key: string) => {
       const owner = parseSessionPinKey(key);
       return (
@@ -516,9 +517,11 @@ export class DesktopProject {
     this.assertOpen();
     return this.operations.focusSession(path, sessionId, agentKey);
   }
-  renameSession(agentKey: string, sessionId: string, title: string): void | Promise<void> {
+  renameSession(agentKey: string, sessionId: string, title: string, workspacePath?: string): void | Promise<void> {
     this.assertOpen();
-    return this.operations.renameSession(agentKey, sessionId, title);
+    return workspacePath
+      ? this.operations.renameSession(agentKey, sessionId, title, workspacePath)
+      : this.operations.renameSession(agentKey, sessionId, title);
   }
   renameDisplayedSession(
     path: string,

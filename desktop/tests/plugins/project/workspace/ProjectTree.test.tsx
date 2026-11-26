@@ -599,7 +599,7 @@ describe("ProjectTree 会话归档（本机覆盖层）", () => {
 
   it("归档的会话从项目树与会话视角隐藏；数据层缓存保持完整（铁律）", () => {
     seedTwoSessions();
-    indexes.archive.getState().archiveSession(PATH, "s-hide");
+    void indexes.archive.getState().archiveSession(PATH, "s-hide");
     fixture.sidebar.setState({ treeViewMode: "projects" });
     render(<ProjectTree />, { wrapper: fixture.Wrapper });
     expect(screen.getByRole("button", { name: /保留会话/ })).toBeVisible();

@@ -125,7 +125,7 @@ fn run(entry: Option<&str>) -> (Stage, Vec<Option<String>>, Option<String>, Opti
     };
     let mut journal = Journal::open(&db_path).unwrap();
     journal
-        .create_with_snapshot("r", &project_str, &workflow, &RunSnapshot { execution_hash: Some(config.execution_hash("r")) })
+        .create_with_snapshot("r", &project_str, &workflow, &RunSnapshot { desktop_owner: None, execution_hash: Some(config.execution_hash("r")) })
         .unwrap();
     if let Some(session) = entry {
         journal.set_entry_session("r", session).unwrap();

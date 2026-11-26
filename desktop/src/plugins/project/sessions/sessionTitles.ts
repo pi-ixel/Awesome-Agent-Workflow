@@ -1,12 +1,18 @@
 import { sameSessionAgent } from "./sessionDeletion.ts";
 import { managedProjectStorage } from "../lifecycle/persistence.ts";
 import { isBrowserContextTitle } from "../../../shared/browser/promptContext.ts";
+import type { SessionMetadata } from "./sessionMetadata.ts";
 
 const KEY_PREFIX = "aaw-desktop/session-title/";
 const SCOPED_PREFIX = "aaw-desktop/session-title.v2/";
 let persisted: Record<string, string | null> | undefined;
 let pending: Promise<unknown> = Promise.resolve();
 let loadFailure: string | undefined;
+let nativeMetadata: SessionMetadata | undefined;
+
+export function bindNativeSessionTitles(storage: SessionMetadata | undefined) {
+  nativeMetadata = storage;
+}
 
 /** 浏览器探测和页面上下文会附到请求里，Agent 有时会把它复述为标题。 */
 export function agentSessionTitle(title?: string | null): string | undefined {
@@ -59,7 +65,10 @@ function titleKey(sessionId: string, agentKey?: string): string {
 export function manualTitleOf(
   sessionId: string,
   agentKey?: string,
+  project?: string,
 ): string | null {
+  if (nativeMetadata && agentKey && project)
+    return nativeMetadata.get(project, agentKey, sessionId)?.title ?? null;
   try {
     const key = titleKey(sessionId, agentKey);
     const raw = managedProjectStorage()?.available() && persisted ? persisted[key] : localStorage.getItem(key);
@@ -75,9 +84,14 @@ export function setManualTitle(
   sessionId: string,
   title: string,
   agentKey?: string,
+  project?: string,
 ): void | Promise<void> {
   const key = titleKey(sessionId, agentKey);
   const value = title.trim() || null;
+  if (nativeMetadata) {
+    if (!project || !agentKey) return Promise.reject(new Error("缺少项目会话身份"));
+    return nativeMetadata.write(project, agentKey, sessionId, { kind: "title", value });
+  }
   const storage = managedProjectStorage();
   if (storage?.available()) {
     const task = pending.then(async () => {
@@ -97,8 +111,9 @@ export function displayTitleOf(
   sessionId: string,
   nativeTitle: string,
   agentKey?: string,
+  project?: string,
 ): string {
-  return manualTitleOf(sessionId, agentKey) ?? nativeTitle;
+  return manualTitleOf(sessionId, agentKey, project) ?? nativeTitle;
 }
 
 export async function removeSessionTitles(

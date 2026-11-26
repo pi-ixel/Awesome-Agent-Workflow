@@ -84,7 +84,7 @@ function candidateOf(value: unknown): ResultCandidate | null {
   };
 }
 
-export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSession, onOpenFile }: {
+export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSession: openSession, onOpenFile }: {
   service: WorkflowService;
   runId: string;
   /** 「再次运行」：回到启动表单，预选这次运行的工作流与起点。 */
@@ -118,6 +118,7 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
   const [reveal, setReveal] = useState<FlowReveal | undefined>();
   const store = useMemo(() => (runId === "" ? undefined : service.snapshot(runId)), [service, runId]);
   const snapshot = useRegisteredSnapshot(store, (value) => value ?? null);
+  const onOpenSession = snapshot?.unassigned ? undefined : openSession;
   // 节点在会话里正在干什么：和会话视图读同一份会话状态（ADR 040）。
   const session = useSessionLookup(service);
 
@@ -209,7 +210,7 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
     ? `${formatStart(timing.startedAt, now)}开始 · ${durationPhrase(timing.finished || !clock.active ? "用时" : "已运行", timing.elapsedMs)}${timing.waitedMs >= 60_000 ? `（其中等你 ${formatDuration(timing.waitedMs)}）` : ""}`
     : "";
   // 处置只在运行停着、没有别的进程占用时可做。
-  const disposable = !!record && !snapshot?.hasLease && disposeActions(snapshot, record, candidates.length).length > 0;
+  const disposable = !!record && !snapshot?.unassigned && !snapshot?.hasLease && disposeActions(snapshot, record, candidates.length).length > 0;
   const page: InspectorPage = tab === "dispose" && record ? "dispose" : "detail";
   const described = describeResult(record?.result, node?.labels, snapshot?.artifacts);
   // 发现已由流程接手（或运行已落定）：结论照写，但不再用警示色。
@@ -369,10 +370,11 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
         <span className="workflow-run-action">
           {snapshot?.run && <ActionButton type="button" tone="secondary" size="compact" onClick={() => setShowSummary(!showSummary)} aria-pressed={showSummary} data-hint="这次运行的概况、各节点做了什么和产出文件">{showSummary ? "返回流程图" : "总结"}</ActionButton>}
           {snapshot?.active && <DangerButton className={dangerSize} onClick={() => setConfirmStop(true)} disabled={confirmStop || stopping}>停止</DangerButton>}
-          {snapshot?.run && !snapshot.active && snapshot.hasLease && <ActionButton type="button" tone="primary" size="compact" onClick={() => void run(() => service.recover(runId, "Desktop：确认服务进程退出后解除占用"))}>检查并解除占用</ActionButton>}
-          {snapshot?.run && !snapshot.active && !snapshot.hasLease && snapshot.run.status === "stopped" && withoutAuthorization.length === 0 && <ActionButton type="button" tone="primary" size="compact" disabled={busy} onClick={() => void run(() => service.resume(runId))}>继续运行</ActionButton>}
+          {snapshot?.unassigned && <span className="text-ink-mute">待关联项目</span>}
+          {snapshot?.run && !snapshot.unassigned && !snapshot.active && snapshot.hasLease && <ActionButton type="button" tone="primary" size="compact" onClick={() => void run(() => service.recover(runId, "Desktop：确认服务进程退出后解除占用"))}>检查并解除占用</ActionButton>}
+          {snapshot?.run && !snapshot.unassigned && !snapshot.active && !snapshot.hasLease && snapshot.run.status === "stopped" && withoutAuthorization.length === 0 && <ActionButton type="button" tone="primary" size="compact" disabled={busy} onClick={() => void run(() => service.resume(runId))}>继续运行</ActionButton>}
           <MoreMenu entries={[
-            ...(onRunAgain && summary?.workflowId ? [{ id: "again", label: "再次运行", onSelect: onRunAgain }] : []),
+            ...(onRunAgain && summary?.workflowId && !snapshot?.unassigned ? [{ id: "again", label: "再次运行", onSelect: onRunAgain }] : []),
             ...(onOpenWorkflow && summary?.workflowId ? [{ id: "workflow", label: "查看工作流", onSelect: () => onOpenWorkflow(summary.workflowId) }] : []),
             { id: "refresh", label: "刷新", onSelect: () => void reload() },
           ]} />

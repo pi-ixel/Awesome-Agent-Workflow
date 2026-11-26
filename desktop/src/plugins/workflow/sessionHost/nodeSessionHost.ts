@@ -52,8 +52,7 @@ export interface NodeSessionPort {
   send(target: SessionTarget, message: { readonly text: string; readonly display: MessageDisplay }): boolean;
   cancel(target: SessionTarget): void;
   isRunning(target: SessionTarget): boolean;
-  /** 按会话 id 订阅轮次（会话还没打开也行）。 */
-  watchTurns(sessionId: string, listener: (event: SessionTurnEvent) => void): () => void;
+  watchTurns(target: SessionTarget, listener: (event: SessionTurnEvent) => void): () => void;
   watchEvents(target: SessionTarget, listener: (event: AcpSessionEvent) => void): () => void;
 }
 
@@ -71,12 +70,12 @@ export interface NodeHostDeps {
   readonly workflow: {
     subscribe(listener: (event: WorkflowEvent) => void): () => void;
     respondHostFrame(runId: string, frame: string): Promise<void>;
-    reportSession(sessionId: string, state: SessionStateWire): Promise<void>;
+    reportSession(sessionId: string, state: SessionStateWire, runId: string): Promise<void>;
   };
   readonly sessions: NodeSessionPort;
   /** 登记在没结束的运行上的会话（来自引擎的会话关联）：一直听、一直报。 */
   readonly registered?: {
-    sessions(): ReadonlySet<string>;
+    sessions(): readonly NodeRegistration[];
     subscribe(listener: () => void): () => void;
   };
   /** 拉起问题池 tracker 进程。 */
@@ -87,9 +86,12 @@ export interface NodeHostDeps {
 }
 
 /** 这次运行里宿主持有的一个节点会话。 */
-interface NodeSession {
+export interface NodeRegistration {
   readonly runId: string;
   readonly target: SessionTarget & { readonly sessionId: string };
+}
+
+interface NodeSession extends NodeRegistration {
   readonly persona: string;
   /** 当前这一步（事件归到哪个节点）。 */
   action: WorkflowActionWire;
@@ -108,11 +110,12 @@ export function attachNodeSessionHost(deps: NodeHostDeps): () => void {
   const states = new Map<string, SessionStateWire>();
   let seq = Date.now() * 1000;
   const nextSeq = () => ++seq;
+  const nodeKey = (runId: string, sessionId: string) => JSON.stringify([runId, sessionId]);
 
   /** 报一份完整的会话状态；报丢了下一份会对齐，失败只记日志。 */
-  const report = (sessionId: string, state: SessionStateWire): void => {
-    states.set(sessionId, state);
-    void deps.workflow.reportSession(sessionId, state).catch((error: unknown) =>
+  const report = (runId: string, sessionId: string, state: SessionStateWire): void => {
+    states.set(nodeKey(runId, sessionId), state);
+    void deps.workflow.reportSession(sessionId, state, runId).catch((error: unknown) =>
       logger.warn("会话状态报告失败", { sessionId, reason: error instanceof Error ? error.message : String(error) }),
     );
   };
@@ -132,31 +135,34 @@ export function attachNodeSessionHost(deps: NodeHostDeps): () => void {
     });
 
   /** 会话开始或结束一轮：报给引擎（ADR 040）。不管这次运行在不在执行。 */
-  const onTurn = (sessionId: string, event: SessionTurnEvent) => {
-    const previous = states.get(sessionId);
+  const onTurn = (runId: string, sessionId: string, event: SessionTurnEvent) => {
+    const key = nodeKey(runId, sessionId);
+    const previous = states.get(key);
     if (event.type === "started") {
       const turn = nextSeq();
-      report(sessionId, { seq: turn, running: turn, ended: previous?.ended ?? null });
-      sessions.get(sessionId)?.started?.(turn);
+      report(runId, sessionId, { seq: turn, running: turn, ended: previous?.ended ?? null });
+      sessions.get(key)?.started?.(turn);
       return;
     }
     // 开始的事件没赶上（这一轮一开始就结束了）：结束也说明开始过，给它补一个编号。
     const turn = previous?.running ?? nextSeq();
-    report(sessionId, { seq: nextSeq(), running: null, ended: { turn, outcome: event.outcome, error: event.error } });
+    report(runId, sessionId, { seq: nextSeq(), running: null, ended: { turn, outcome: event.outcome, error: event.error } });
   };
 
   /** 正在听的会话：登记过的，加上这个页面里接上的。 */
   const watched = new Map<string, () => void>();
-  const watch = (sessionId: string) => {
-    if (!watched.has(sessionId)) watched.set(sessionId, deps.sessions.watchTurns(sessionId, (event) => onTurn(sessionId, event)));
-  };
   const syncWatched = () => {
-    const keep = new Set([...(deps.registered?.sessions() ?? []), ...sessions.keys()]);
-    for (const sessionId of keep) watch(sessionId);
-    for (const [sessionId, stop] of [...watched]) {
-      if (keep.has(sessionId)) continue;
+    const keep = new Map((deps.registered?.sessions() ?? []).map((entry) =>
+      [nodeKey(entry.runId, entry.target.sessionId), entry]));
+    for (const [key, session] of sessions) keep.set(key, session);
+    for (const [key, { runId, target }] of keep) {
+      if (!watched.has(key)) watched.set(key, deps.sessions.watchTurns(target, (event) => onTurn(runId, target.sessionId, event)));
+    }
+    for (const [key, stop] of watched) {
+      if (keep.has(key)) continue;
       stop();
-      watched.delete(sessionId);
+      watched.delete(key);
+      states.delete(key);
     }
   };
   syncWatched();
@@ -187,7 +193,8 @@ export function attachNodeSessionHost(deps: NodeHostDeps): () => void {
     const tools = (agent: Parameters<NonNullable<Parameters<NodeSessionPort["open"]>[0]["tools"]>>[0]) =>
       [...callerTools, ...(offer ? [resultChannelServer(offer, agentSupportsHttpMcp(agent))] : [])];
     const open = (resumeSessionId: string | undefined) => deps.sessions.open({
-      workspacePath: requirement.cwd,
+      workspacePath: requirement.desktop_owner?.project ?? requirement.cwd,
+      ...(requirement.desktop_owner ? { agentId: requirement.desktop_owner.agentId, cwd: requirement.cwd } : {}),
       title: persona,
       ...(resumeSessionId ? { resumeSessionId } : {}),
       ...(requirement.model ? { model: requirement.model } : {}),
@@ -210,7 +217,8 @@ export function attachNodeSessionHost(deps: NodeHostDeps): () => void {
     }
     const sessionId = target.sessionId;
     if (!sessionId) throw new Error("ACP_SESSION_ID_MISSING");
-    sessions.get(sessionId)?.stop();
+    const key = nodeKey(runId, sessionId);
+    sessions.get(key)?.stop();
     const fixed = { ...target, sessionId };
     const session: NodeSession = {
       runId,
@@ -220,21 +228,21 @@ export function attachNodeSessionHost(deps: NodeHostDeps): () => void {
       started: null,
       stop: () => stopEvents(),
     };
-    watch(sessionId);
     const stopEvents = deps.sessions.watchEvents(fixed, (event) => emit(session, { ...event }));
-    sessions.set(sessionId, session);
+    sessions.set(key, session);
+    syncWatched();
     // 接上会话就报一份当前状态：在跑就带上这一轮（编号此刻才有），上一轮这个页面见过才有。
-    const known = states.get(sessionId);
+    const known = states.get(key);
     const running = deps.sessions.isRunning(fixed) ? known?.running ?? nextSeq() : null;
-    report(sessionId, { seq: nextSeq(), running, ended: known?.ended ?? null });
+    report(runId, sessionId, { seq: nextSeq(), running, ended: known?.ended ?? null });
     deps.onEvent?.({ type: resume ? "acp-session-restored" : "acp-session-created", runId, actor: `${requirement.action.actor}@1`, sessionId, persona });
     logger.info("工作流节点会话已打开", { sessionId, restored: resume !== undefined, site: `${requirement.action.site}#${requirement.action.ordinal}` });
     return { sessionId };
   }
 
   /** 发出这一步的任务说明，这一轮开始就返回它的编号。Agent 正忙（用户在聊）时等它这一轮结束再发。 */
-  async function promptTurn(sessionId: string, prompt: string, action: unknown): Promise<unknown> {
-    const session = sessions.get(sessionId);
+  async function promptTurn(runId: string, sessionId: string, prompt: string, action: unknown): Promise<unknown> {
+    const session = sessions.get(nodeKey(runId, sessionId));
     if (!session) throw new Error("WORKFLOW_SESSION_NOT_HOSTED");
     if (!isAction(action)) throw new Error("WORKFLOW_ACTION_INVALID");
     session.action = action;
@@ -263,7 +271,7 @@ export function attachNodeSessionHost(deps: NodeHostDeps): () => void {
 
   function nextEnd(session: NodeSession): Promise<void> {
     return new Promise((resolve) => {
-      const stop = deps.sessions.watchTurns(session.target.sessionId, (event) => {
+      const stop = deps.sessions.watchTurns(session.target, (event) => {
         if (event.type !== "ended") return;
         stop();
         resolve();
@@ -298,7 +306,7 @@ export function attachNodeSessionHost(deps: NodeHostDeps): () => void {
       case "spawn_node_session":
         return spawn(runId, frame.requirement as SpawnRequirementWire);
       case "prompt_turn":
-        return promptTurn(String(frame.session_id), frameText(frame.prompt), frame.action);
+        return promptTurn(runId, String(frame.session_id), frameText(frame.prompt), frame.action);
       case "start_question_tracker":
         await ensureTracker(runId, frame.params as TrackerStartParamsWire);
         return null;

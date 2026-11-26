@@ -91,11 +91,11 @@ pub fn list(data: &Path) -> Result<Vec<Recovery>, String> {
     }
     Ok(records)
 }
-pub fn clear_owned_directory(data: &Path, owner: &SessionIdentity) -> Result<(), String> {
+fn verified_directory(data: &Path, owner: &SessionIdentity) -> Result<Option<PathBuf>, String> {
     crate::turn_changes::forget_references(data, owner)?;
     let directory = owner.directory(data);
     if !directory.try_exists().map_err(|e| e.to_string())? {
-        return crate::session_layout::repair_after_removal(data, owner).map_err(|e| e.to_string());
+        return Ok(None);
     }
     let root = data.canonicalize().map_err(|e| e.to_string())?;
     let expected = root.join(directory.strip_prefix(data).map_err(|e| e.to_string())?);
@@ -113,7 +113,37 @@ pub fn clear_owned_directory(data: &Path, owner: &SessionIdentity) -> Result<(),
             return Err("会话身份校验失败".into());
         }
     }
+    Ok(Some(directory))
+}
+
+pub fn clear_owned_directory(data: &Path, owner: &SessionIdentity) -> Result<(), String> {
+    if verified_directory(data, owner)?.is_none() {
+        return crate::session_layout::repair_after_removal(data, owner).map_err(|e| e.to_string());
+    }
     crate::session_layout::remove_indexed_directory(data, owner).map_err(|e| e.to_string())
+}
+
+pub fn clear_damaged_content(data: &Path, owner: &SessionIdentity) -> Result<(), String> {
+    let directory = owner.directory(data);
+    let metadata = directory.join("metadata.json");
+    let titles = directory.join("titles.json");
+    let has_titles = crate::storage_preferences::read_record::<std::collections::BTreeMap<String, Option<String>>>(&titles)
+        .map_or_else(|_| titles.exists(), |entries| !entries.is_empty());
+    if !metadata.try_exists().map_err(|error| error.to_string())? && !has_titles {
+        return clear_owned_directory(data, owner);
+    }
+    let Some(directory) = verified_directory(data, owner)? else { return Ok(()) };
+    for entry in fs::read_dir(directory).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if entry.file_name().to_str().is_some_and(|name|
+            matches!(name, "identity.json" | "metadata.json" | "titles.json")) {
+            continue;
+        }
+        let kind = entry.file_type().map_err(|error| error.to_string())?;
+        if kind.is_dir() { fs::remove_dir_all(entry.path()) } else { fs::remove_file(entry.path()) }
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]

@@ -12,9 +12,23 @@ import { createSessionActivityStore, sessionActivityKey } from "./sessionActivit
 import type { DeleteSessionTarget } from "./sessionDeletion.ts";
 import { createSessionArchiveStore } from "./sessionArchiveStore.ts";
 import type { Logger } from "../../../shared/logging/logger.ts";
+import { createSessionMetadata, type SessionRecords } from "./sessionMetadata.ts";
+import { bindNativeSessionTitles } from "./sessionTitles.ts";
 
-export function createProjectSessionIndexes(storage: HostStorage, logger?: Logger) {
+function readOwnerKey(key: string): [string, string, string] | undefined {
+  try {
+    const input: unknown = JSON.parse(key);
+    if (Array.isArray(input) && input.length === 3 && input.every((value) => typeof value === "string"))
+      return input as [string, string, string];
+  } catch {
+    // 跳过不完整的浏览器旧配置键。
+  }
+}
+
+export function createProjectSessionIndexes(storage: HostStorage, logger?: Logger, initial?: SessionRecords) {
   const scope = new AbortController();
+  const metadata = initial && createSessionMetadata(storage, initial);
+  bindNativeSessionTitles(metadata);
   const deletions = createSessionDeletions(storage);
   const modelProbeStorageKey = "aaw-desktop/model-probe-sessions.v1";
   const modelProbes = new Set<string>();
@@ -47,7 +61,7 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
     modelProbes.has(modelProbeKey(target));
   const retainedSessions = (agent: string) => storage.managed?.retainedSessions?.(agent) ?? [];
   const deletionView = createSnapshotView(deletions.store, (state) => state);
-  const activity = createSessionActivityStore(scope.signal, storage);
+  const activity = createSessionActivityStore(scope.signal, storage, metadata, initial?.records);
   const directoryStorageKey = "aaw-desktop/session-working-directories.v1";
   let workingDirectories: Record<string, unknown> = {};
   try {
@@ -59,11 +73,17 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
   }
   const ownersKey = "aaw-desktop/session-project-owners.v1";
   let owners: Readonly<Record<string, string>> = {};
+  const ownershipConflicts = new Set(initial?.conflicts.map((key) => JSON.stringify(key)));
+  const isOwnershipUncertain = (project: string, agent: string, id: string) =>
+    ownershipConflicts.has(ownerKey(project, agent, id));
   try {
-    const saved: unknown = JSON.parse(storage.getItem(ownersKey) ?? "{}");
+    const saved: unknown = initial
+      ? Object.fromEntries(initial.records.map((record) =>
+          [ownerKey(record.project, record.agentId, record.sessionId), record.project]))
+      : JSON.parse(storage.getItem(ownersKey) ?? "{}");
     if (saved && typeof saved === "object" && !Array.isArray(saved)) {
       owners = Object.fromEntries(Object.entries(saved).filter(
-        (entry): entry is [string, string] => typeof entry[1] === "string" && isAbsolutePath(entry[1]),
+        (entry): entry is [string, string] => !!readOwnerKey(entry[0]) && typeof entry[1] === "string" && isAbsolutePath(entry[1]),
       ));
     }
   } catch (error) {
@@ -88,17 +108,32 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
     scope.signal,
     (target) => {
       const owner = ownerOf(target.workspacePath, target.agentKey, target.sessionId);
-      return (owner !== undefined && pathKey(owner) !== pathKey(target.workspacePath)) ||
+      return isOwnershipUncertain(target.workspacePath, target.agentKey, target.sessionId) ||
+        (owner !== undefined && pathKey(owner) !== pathKey(target.workspacePath)) ||
         deletions.blocked(target) || isModelProbe(target);
     },
     retainedSessions,
   );
   let writes = Promise.resolve();
-  function claimSessionProject(project: string, agentKey: string, sessionId: string): Promise<void> {
+  function claimSessionProject(project: string, agentKey: string, sessionId: string, cwd?: string): Promise<void> {
     const operation = writes.then(async () => {
       const owner = ownerOf(project, agentKey, sessionId);
-      if (owner && pathKey(owner) !== pathKey(project))
+      if (isOwnershipUncertain(project, agentKey, sessionId) ||
+          (owner && pathKey(owner) !== pathKey(project)))
         throw new Error("该会话属于其他项目");
+      if (metadata) {
+        await storage.managed!.flushConfiguration?.();
+        const failure = storage.managed!.configurationError?.();
+        if (failure) throw new Error(failure);
+        const value = cwd && isAbsolutePath(cwd) && pathKey(cwd) !== pathKey(projectFolderPath(project)) &&
+          metadata.get(project, agentKey, sessionId)?.metadata.cwd !== cwd
+          ? { kind: "cwd" as const, value: cwd }
+          : undefined;
+        await metadata.write(project, agentKey, sessionId, value);
+        owners = { ...owners, [ownerKey(project, agentKey, sessionId)]: project };
+        catalog.refreshVisibility();
+        return;
+      }
       const key = ownerKey(project, agentKey, sessionId);
       if (owners[key]) return;
       const next = { ...owners, [key]: project };
@@ -121,6 +156,7 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
     (path, id, agentKey) =>
       !!agentKey &&
       deletions.blocked({ workspacePath: path, sessionId: id, agentKey }),
+    metadata && initial && { backend: metadata, initial: initial.records, claim: claimSessionProject },
   );
   const groups = createSessionGroups();
   const catalogView = createSnapshotView(catalog.store, (state) => state);
@@ -134,6 +170,23 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
     catalog,
     retainedSessions,
     ownerOf,
+    isOwnershipUncertain,
+    workflowOwner(cwd: string, sessionIds: readonly string[]) {
+      const ids = new Set(sessionIds);
+      const primary = pathKey(projectFolderPath(cwd));
+      const matches = ([, root, id]: [string, string, string]) => root === primary && ids.has(id);
+      if ([...ownershipConflicts].some((key) => matches(JSON.parse(key) as [string, string, string])))
+        return null;
+      let owner: { project: string; agentId: string } | undefined;
+      for (const [key, project] of Object.entries(owners)) {
+        const identity = readOwnerKey(key);
+        if (!identity || !matches(identity)) continue;
+        const [agentId] = identity;
+        if (owner && (owner.agentId !== agentId || pathKey(owner.project) !== pathKey(project))) return null;
+        owner = { project, agentId };
+      }
+      return owner;
+    },
     claimSessionProject,
     finishSessionRecovery: storage.managed?.finishSessionRecovery,
     isModelProbe,
@@ -151,17 +204,21 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
     archiveView: archiveView.snapshot,
     groups,
     workingDirectory(project: string, agentKey: string, sessionId: string) {
+      if (metadata) return metadata.get(project, agentKey, sessionId)?.metadata.cwd ?? undefined;
       const cwd = workingDirectories[sessionActivityKey(project, sessionId, agentKey)];
       return typeof cwd === "string" && isAbsolutePath(cwd) ? cwd : undefined;
     },
     rememberWorkingDirectory(project: string, agentKey: string, sessionId: string, cwd: string) {
+      if (metadata) return; // 原生工作目录在确认会话归属时与身份一起登记。
       const key = sessionActivityKey(project, sessionId, agentKey);
       if (!isAbsolutePath(cwd) || pathKey(cwd) === pathKey(project) || workingDirectories[key] === cwd) return;
       workingDirectories[key] = cwd;
       saveWorkingDirectories();
     },
     forgetSessionMetadata({ workspacePath, agentKey, sessionId }: DeleteSessionTarget) {
+      metadata?.forget(workspacePath, agentKey, sessionId);
       activity.getState().forget(workspacePath, sessionId, agentKey);
+      if (metadata) return;
       const key = sessionActivityKey(workspacePath, sessionId, agentKey);
       if (!(key in workingDirectories)) return;
       delete workingDirectories[key];
@@ -170,7 +227,7 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
     async forgetArchived(target: DeleteSessionTarget): Promise<void> {
       const state = archive.getState();
       const archivedSessions = new Set(state.archivedSessions);
-      const metadata = { ...state.metadata };
+      const archiveMetadata = { ...state.metadata };
       for (const key of [...archivedSessions]) {
         const [path, id, encoded] = key.split("\0");
         if (path !== pathKey(target.workspacePath) || id !== target.sessionId)
@@ -185,15 +242,15 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
           if (!sameSessionAgent(owner, target.agentKey)) continue;
         }
         archivedSessions.delete(key);
-        delete metadata[key];
+        delete archiveMetadata[key];
       }
-      storage.setItem(
+      if (!metadata) storage.setItem(
         "aaw-desktop/archived-sessions.v1",
         JSON.stringify([...archivedSessions]),
       );
-      storage.setItem(
+      if (!metadata) storage.setItem(
         "aaw-desktop/archived-session-metadata.v1",
-        JSON.stringify(metadata),
+        JSON.stringify(archiveMetadata),
       );
       await (storage.managed?.flushConfiguration?.() ?? storage.managed?.flush?.());
       const error = storage.managed?.configurationError?.();
@@ -206,7 +263,7 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
       const notice = state.notice;
       archive.setState({
         archivedSessions,
-        metadata,
+        metadata: archiveMetadata,
         notice:
           notice &&
           pathKey(notice.workspacePath) === pathKey(target.workspacePath) &&

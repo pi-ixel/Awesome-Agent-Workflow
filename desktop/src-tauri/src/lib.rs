@@ -20,6 +20,7 @@ mod panel_git;
 mod panel_git_runtime;
 mod resource_monitor;
 mod session_layout;
+mod session_metadata;
 mod session_recovery;
 mod session_image_drafts;
 mod session_snapshots;
@@ -221,6 +222,8 @@ pub fn run() {
             storage_preferences::storage_update_usage,
             storage_preferences::storage_titles_load,
             storage_preferences::storage_title_write,
+            session_metadata::session_metadata_list,
+            session_metadata::session_metadata_update,
             storage_preferences::storage_configuration_load,
             storage_preferences::storage_configuration_write,
             session_snapshots::session_data_read,

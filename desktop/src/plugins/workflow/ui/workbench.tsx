@@ -239,14 +239,17 @@ export function createWorkflowWorkbench(
 
   /** 节点会话 → 中央 SessionView：走 openSessionFromEntry（所属工作区即
    * 当前面板绑定的项目路径；会话未收养时如实静默——列表里没有条目）。 */
-  function openNodeSession(sessionId: string, projectPath?: string): void {
+  function openNodeSession(sessionId: string, projectPath?: string, runId?: string): void {
     if (!active()) return;
     const path = projectPath ?? workbench.navigation.getState().contextPath;
     if (!path) return;
     void (async () => {
       // 完整视图会盖住中间的会话：打开会话时退回普通布局，会话才看得见。
       workbench.panels.getState().fullViewExit(path);
-      await project.sessions.openSessionFromEntry(projectFolderPath(path), sessionId);
+      const agentId = runId ? workflow.runAgentId?.(runId) : undefined;
+      const agentKey = agentId ? workflow.sessionAgentKey?.(agentId) : undefined;
+      if (agentKey) await project.sessions.openSessionFromEntry(path, sessionId, agentKey);
+      else await project.sessions.openSessionFromEntry(path, sessionId);
     })().catch((error: unknown) => {
       workbench.showToast({ message: error instanceof Error ? error.message : String(error), variant: "warn" });
     });
@@ -351,7 +354,7 @@ export function createWorkflowWorkbench(
   const startFromSession = (workflowId: string, entry: WorkflowEntry): NonNullable<WorkflowEntryCommand["submit"]> =>
     async ({ session, text }) => {
       if (!active()) throw new Error("工作流服务还没准备好");
-      const request = { workflowId, entry: entry.id, ...entryInputsOf(entry, text), entrySession: session.sessionId };
+      const request = { workflowId, entry: entry.id, ...entryInputsOf(entry, text), entrySession: session.sessionId, workspacePath: session.workspacePath, entryAgentKey: session.agentKey };
       const report = await workflow.preflight(request).catch((cause: unknown) => { throw new Error(errorLine(cause)); });
       const failed = report.items.find((item) => item.status === "fail");
       if (failed) throw new Error(`没能开始：${failed.label}，${errorLine(failed.message)}${failed.hint ? `。${failed.hint}` : ""}`);
@@ -407,7 +410,7 @@ export function createWorkflowWorkbench(
           if (event.type === "session-task-sent") {
             const target = typeof event.sessionId === "string" ? event.sessionId : sessionId;
             finish(() => {
-              if (target !== sessionId) openNodeSession(target, projectPath);
+              if (target !== sessionId) openNodeSession(target, projectPath, runId);
               resolve();
             });
           } else if (event.type === "run-error") {
@@ -484,7 +487,7 @@ export function createWorkflowWorkbench(
               target,
               runId,
             )}
-            onOpenSession={openNodeSession}
+            onOpenSession={(sessionId, runId) => openNodeSession(sessionId, projectPath, runId)}
             onOpenFile={(path) => openResultFile(projectPath, path)}
             onOpenWorkflow={openWorkflow}
             onRunAgain={(runId) => runAgain(projectPath, runId)}
@@ -612,15 +615,14 @@ export function apply(ctx: Context): void {
             else
               openRunFromNotification(workbench, ui.openRun, path, runId);
           },
-          (sessionId) => ui.openNodeSession(sessionId, path),
+          (sessionId, runId) => ui.openNodeSession(sessionId, path, runId),
           (runId) => archiveRun(runId, path),
           ui.sessionLookup(),
         ));
       };
-      const currentRoot = workspace === null ? null : projectFolderPath(workspace);
-      if (currentRoot !== null) publishProject(currentRoot, runs);
+      if (workspace !== null) publishProject(workspace, runs);
       for (const other of workflow.otherSessionLinks()) {
-        if (currentRoot !== null && pathKey(other.project) === pathKey(currentRoot)) continue;
+        if (workspace !== null && pathKey(other.project) === pathKey(workspace)) continue;
         publishProject(other.project, other.runs);
       }
       for (const [key, { path }] of published) if (!next.has(key)) publisher.publish(path, []);
@@ -642,7 +644,7 @@ export function apply(ctx: Context): void {
         const { workspace, runs } = workflow.sessionLinks();
         const run = runs.find((item) => item.runId === runId);
         if (workspace && run && run.links.some((link) => link.sessionId === activeSessionId)) {
-          ui.openNodeSession(nextSessionId, workspace);
+          ui.openNodeSession(nextSessionId, workspace, runId);
         }
       }
     });

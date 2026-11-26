@@ -48,7 +48,7 @@ export function ArchiveNotice({ openSettings }: { readonly openSettings?: () => 
             tone="primary"
             size="compact"
             onClick={() =>
-              unarchive(notice.workspacePath, notice.sessionId, notice.agentKey)
+              void unarchive(notice.workspacePath, notice.sessionId, notice.agentKey)
             }
           >
             撤销

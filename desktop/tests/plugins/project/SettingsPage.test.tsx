@@ -136,7 +136,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
         ],
       },
     });
-    projectService.sessions.archiveWithNotice("D:/dev/demo", "s1");
+    void projectService.sessions.archiveWithNotice("D:/dev/demo", "s1");
 
     await renderSettingsPage();
     await openTab("归档管理");

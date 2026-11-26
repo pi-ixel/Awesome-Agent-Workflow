@@ -379,7 +379,13 @@ pub async fn migrate_session_files(
         .join("turn-changes");
     let data = crate::storage_location::migration_data_dir(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        migrate_with_index(&data, &turns, webview_index.as_ref())
+        let _migration = crate::session_metadata::migration_lock(&data)?;
+        let mut report = migrate_with_index(&data, &turns, webview_index.as_ref())?;
+        let pending = crate::session_metadata::migrate_legacy(&data, webview_index.as_ref())?;
+        if pending > 0 {
+            report.retained_orphans.push(format!("{pending} 条旧会话元数据等待核对"));
+        }
+        Ok(report)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -493,7 +499,6 @@ fn migrate_with_index(
             .iter()
             .all(|record| record.phase != Phase::Cleaning)
     {
-        crate::storage_preferences::migrate_session_project_owners(data)?;
         return Ok(MigrationResult {
             moved,
             deleted_orphans,
@@ -622,7 +627,7 @@ fn migrate_with_index(
                 }
             }
         }
-        recovery::clear_owned_directory(data, &record.owner)?;
+        recovery::clear_damaged_content(data, &record.owner)?;
         #[cfg(feature = "migration-smoke")]
         migration_checkpoint(data, "during-cleanup")?;
         for (_, source) in damaged.iter().filter(|(owner, _)| owner == &record.owner) {
@@ -742,7 +747,6 @@ fn migrate_with_index(
     completed.sort_by(|a, b| {
         (&a.agent_id, &a.project, &a.session_id).cmp(&(&b.agent_id, &b.project, &b.session_id))
     });
-    crate::storage_preferences::migrate_session_project_owners(data)?;
     crate::storage_preferences::write_record(&version_path, &4u32)?;
     Ok(MigrationResult {
         moved,
@@ -831,8 +835,10 @@ pub async fn session_data_finish_deletion(
         .filter(|o| o.session_id.is_some())
         .ok_or("缺少删除会话身份")?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _source = crate::session_metadata::source_lock(&data, &owner)?;
         {
             let _guard = WRITER.lock().map_err(|e| e.to_string())?;
+            crate::session_metadata::mark_source_deleted(&data, &owner)?;
             let marker = owner.deleted_marker(&data).map_err(|e| e.to_string())?;
             if !marker.try_exists().map_err(|e| e.to_string())? {
                 crate::storage_preferences::write_record(&marker, &owner)?;

@@ -25,6 +25,8 @@ export interface OpenSessionOptions {
 export interface PluginSessionOptions {
   /** 会话挂在哪个项目下。 */
   readonly workspacePath: string;
+  /** 持久运行启动时绑定的 Agent。 */
+  readonly agentId?: string;
   /** Agent 的工作目录；缺省为项目目录。 */
   readonly cwd?: string;
   /** 恢复这个会话；缺省新建。 */

@@ -99,6 +99,7 @@ export interface ResultChannelOfferWire {
  * serde 形状；字段是信封——动作身份 + 配置，不含会话内容）。
  */
 export interface SpawnRequirementWire {
+  readonly desktop_owner?: { readonly project: string; readonly agentId: string };
   readonly action: WorkflowActionWire;
   readonly cwd: string;
   readonly command: readonly string[];

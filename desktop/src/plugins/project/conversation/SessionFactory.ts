@@ -48,17 +48,28 @@ export class SessionFactory {
     SessionRuntime,
     Promise<{ sessionId: string }>
   >();
+  private readonly registering = new WeakMap<
+    SessionRuntime,
+    { session: AcpSessionPort; sessionId: string; resolution: SessionToolsResolution }
+  >();
   ensureCreated(runtime: SessionRuntime): Promise<{ sessionId: string }> {
     const session = runtime.session;
     if (runtime.disposed || runtime.recovering)
       return Promise.reject(new AcpClosedError("会话已关闭或正在恢复"));
-    if (session.sessionId !== null)
-      return Promise.resolve({ sessionId: session.sessionId });
     const existing = this.creating.get(runtime);
     if (existing) return existing;
+    const pending = this.registering.get(runtime);
+    if (session.sessionId !== null && pending?.session !== session)
+      return Promise.resolve({ sessionId: session.sessionId });
     const task = Promise.resolve()
       .then(async () => {
         this.assertCurrent(runtime, session);
+        if (pending?.session === session) {
+          await pending.resolution.establish(pending.sessionId);
+          this.assertCurrent(runtime, session);
+          this.registering.delete(runtime);
+          return { sessionId: pending.sessionId };
+        }
         if (session.refreshForNewSession) await session.refreshForNewSession();
         this.assertCurrent(runtime, session);
         let resolution = await this.tools(runtime, null);
@@ -88,10 +99,18 @@ export class SessionFactory {
               : undefined,
           );
           this.assertCurrent(runtime, session);
+          this.registering.set(runtime, { session, sessionId: result.sessionId, resolution });
           await establish(result.sessionId);
+          this.registering.delete(runtime);
           return result;
         } catch (error) {
-          await dispose?.();
+          const sessionId = this.registering.get(runtime)?.sessionId ?? session.sessionId;
+          if (sessionId !== null && !runtime.disposed && !runtime.recovering && runtime.session === session) {
+            this.registering.set(runtime, { session, sessionId, resolution });
+          } else {
+            this.registering.delete(runtime);
+            await dispose?.();
+          }
           throw error;
         }
       })

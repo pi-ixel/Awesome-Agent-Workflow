@@ -2,6 +2,7 @@ import type { StorageCategory } from "../diagnostics/service.ts";
 import { createLegacyStorage, createProjectStorageProtection, projectStorageCategories, conversationScope, draftScope } from "./lifecycle/storage.ts";
 import { nativeImageDrafts, nativeSnapshots } from "./conversation/snapshotStorage.ts";
 import { loadSessionTitles, nativeSessionTitleBytes } from "./sessions/sessionTitles.ts";
+import { type SessionRecords } from "./sessions/sessionMetadata.ts";
 import { bindProjectStorage, managedProjectStorage } from "./lifecycle/persistence.ts";
 import type { Context } from "cordis";
 import { settingsStorageCategory } from "../diagnostics/service.ts";
@@ -46,8 +47,11 @@ export async function apply(
 ): Promise<void> {
   bindProjectStorage(ctx.host.storage);
   if (options.startBackground) await initializeUsage();
-  const titleMigration = loadSessionTitles();
-  if (titleMigration) await titleMigration;
+  const native = ctx.host.storage.managed;
+  const sessionRecords = native?.available()
+    ? await native.request<SessionRecords>("session_metadata_list", {})
+    : undefined;
+  if (!sessionRecords) await loadSessionTitles();
   const { getLayout } = options;
   const loggerFactory = ctx.diagnostics.createLogger;
   const registerStorage = (category: StorageCategory) => ctx.diagnostics.registerStorage({
@@ -78,6 +82,7 @@ export async function apply(
   const indexes = createProjectSessionIndexes(
     ctx.host.storage,
     loggerFactory("session-archive-store"),
+    sessionRecords,
   );
   const annotationDrafts = createAnnotationDraftStore(ctx.host.storage);
   const composer = createProjectComposer(ctx.host.storage);

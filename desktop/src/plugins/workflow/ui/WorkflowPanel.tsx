@@ -49,7 +49,7 @@ export function WorkflowPanel({ service, project, onOpenSession, onOpenProjectRu
   /** 打开别的项目的运行：切到那个项目再打开。 */
   onOpenProjectRun?: (project: string, runId: string, filters: RunManagerFilters) => void;
   /** 节点会话 → 中央 SessionView（project.sessions.openSessionFromEntry）。 */
-  onOpenSession?: (sessionId: string) => void;
+  onOpenSession?: (sessionId: string, runId: string) => void;
   /** 结果里的文件路径 → 工作台打开文件。 */
   onOpenFile?: (path: string) => void;
   /** 到左侧「工作流」功能区看这个工作流。 */
@@ -141,7 +141,7 @@ export function WorkflowPanel({ service, project, onOpenSession, onOpenProjectRu
       runId={route.runId}
       onRunAgain={onRunAgain ? () => onRunAgain(route.runId) : undefined}
       onOpenWorkflow={onOpenWorkflow}
-      onOpenSession={onOpenSession}
+      onOpenSession={onOpenSession ? (sessionId) => onOpenSession(sessionId, route.runId) : undefined}
       onOpenFile={onOpenFile}
     />}
   </section>;
