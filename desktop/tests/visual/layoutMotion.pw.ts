@@ -547,30 +547,41 @@ test("Markdown 源码编辑器随主题和字号原位更新，草稿、选区�
   }
 });
 
-async function widthTransition(locator: Locator, trigger: () => Promise<void>) {
-  const before = await locator.evaluate(
-    (node) => node.getBoundingClientRect().width,
+/**
+ * 点击按钮后宽度应以动画过渡，而不是一步跳到终点。点击与取样在页面内一次完成：
+ * 跨进程往返的延迟在慢机器上可能超过动画时长，逐帧取样会错过中间帧。
+ * 过渡开始后把正在运行的动画暂停在各自一半处取样，再播完量终点。
+ */
+async function widthTransition(locator: Locator, button: Locator) {
+  const target = await locator.elementHandle();
+  const control = await button.elementHandle();
+  const { before, during, after } = await locator.page().evaluate(
+    async ([node, trigger]) => {
+      const width = () => node.getBoundingClientRect().width;
+      const frame = () =>
+        new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const before = width();
+      (trigger as HTMLElement).click();
+      await frame();
+      const running = document
+        .getAnimations()
+        .filter((animation) => animation.playState === "running");
+      for (const animation of running) {
+        const timing = animation.effect!.getComputedTiming();
+        animation.pause();
+        animation.currentTime =
+          Number(timing.delay ?? 0) + Number(timing.duration ?? 0) / 2;
+      }
+      const during = width();
+      for (const animation of running) animation.finish();
+      await frame();
+      return { before, during, after: width() };
+    },
+    [target, control] as const,
   );
-  await trigger();
-  const widths = await locator.evaluate(async (node) => {
-    const values: number[] = [];
-    for (let frame = 0; frame < 18; frame++) {
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => resolve()),
-      );
-      values.push(node.getBoundingClientRect().width);
-    }
-    return values;
-  });
-  const after = widths.at(-1)!;
   expect(Math.abs(before - after)).toBeGreaterThan(50);
-  expect(
-    widths.some(
-      (width) =>
-        width > Math.min(before, after) + 10 &&
-        width < Math.max(before, after) - 10,
-    ),
-  ).toBe(true);
+  expect(during).toBeGreaterThan(Math.min(before, after) + 10);
+  expect(during).toBeLessThan(Math.max(before, after) - 10);
 }
 
 test("layout edges move continuously, with the chat draft preserved through complete view", async ({
@@ -597,27 +608,19 @@ test("layout edges move continuously, with the chat draft preserved through comp
   expect(statusFades).toBe(true);
   await expect(page.locator(".session-status-panel")).toBeVisible();
   await expect(page.locator(".session-status-panel")).toHaveCSS("opacity", "1");
-  await widthTransition(main, () => nav.click());
+  await widthTransition(main, nav);
   const reservation = page.locator(".workbench-right-reservation");
   await open.click();
   await expect(page.locator("[data-panel-slide]")).toHaveCount(0);
   const preview = page.getByLabel("预览区");
-  await widthTransition(preview, () =>
-    page.getByRole("button", { name: "收起目录" }).click(),
-  );
-  await widthTransition(preview, () =>
-    page.getByRole("button", { name: "展开目录" }).click(),
-  );
-  await widthTransition(reservation, () =>
-    page.getByRole("button", { name: "进入完整视图" }).click(),
-  );
+  await widthTransition(preview, page.getByRole("button", { name: "收起目录" }));
+  await widthTransition(preview, page.getByRole("button", { name: "展开目录" }));
+  await widthTransition(reservation, page.getByRole("button", { name: "进入完整视图" }));
   await expect(page.getByTestId("full-view-host")).toHaveAttribute(
     "data-side-pane-full-view-host",
     "floating",
   );
-  await widthTransition(reservation, () =>
-    page.getByRole("button", { name: "退出完整视图" }).click(),
-  );
+  await widthTransition(reservation, page.getByRole("button", { name: "退出完整视图" }));
   await expect(page.getByRole("textbox", { name: "草稿" })).toHaveValue(
     "保留草稿",
   );
@@ -703,10 +706,8 @@ test("the gear focuses the shared tree placement preference and both folder view
   await expect(
     preview.getByRole("heading", { name: "文件视图示例" }),
   ).toBeVisible();
-  await widthTransition(preview, () => collapse.click());
-  await widthTransition(preview, () =>
-    page.getByRole("button", { name: "展开目录" }).click(),
-  );
+  await widthTransition(preview, collapse);
+  await widthTransition(preview, page.getByRole("button", { name: "展开目录" }));
 
   await page.getByRole("button", { name: "打开目录标签" }).click();
   await expect(tree.getByRole("treeitem", { name: "README.md" })).toBeVisible();
@@ -955,7 +956,7 @@ test("outline uses a single bulk button and animates nested branches and the who
   await page.getByRole("treeitem", { name: "README.md" }).click();
   const title = page.getByRole("heading", { name: "文件视图示例" });
   const toggle = page.getByRole("button", { name: "大纲", exact: true });
-  await widthTransition(title, () => toggle.click());
+  await widthTransition(title, toggle);
   const outline = page.getByRole("navigation", { name: "文件大纲" });
   await outline.getByRole("button", { name: "全部展开" }).click();
   await expect(
@@ -1004,7 +1005,7 @@ test("outline uses a single bulk button and animates nested branches and the who
   await expect(
     outline.getByRole("button", { name: "第一节", exact: true }),
   ).toBeHidden();
-  await widthTransition(title, () => toggle.click());
+  await widthTransition(title, toggle);
   await expect(outline).toBeHidden();
 });
 
