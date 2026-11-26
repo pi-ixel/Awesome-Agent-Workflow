@@ -2,6 +2,7 @@ import type { AssistantMessageItem } from "../types.ts";
 import type { TurnUsageDetails } from "../turnUsage.ts";
 import { TurnUsageBadge } from "./TurnUsageBadge.tsx";
 import { describeUnknownError } from "../../../../shared/errors.ts";
+import { insidePath } from "../../../../shared/panelPaths.ts";
 import { useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
 import { useConversation, useSessionValue } from "../../ui/bindings/conversationView.ts";
 import { useProject } from "../../ui/bindings/projectView.tsx";
@@ -31,7 +32,7 @@ function AssistantMessageBase({
   readonly usage?: TurnUsageDetails | null;
 }) {
   const item = useStreamingItem(layoutItem);
-  const { assetUrl, openPath, openAbsoluteFile, openExternal, verifyRelativeFile } = useContext(ConversationDocumentContext) ?? {};
+  const { assetUrl, openPath, canOpenUrl, inspectReference } = useContext(ConversationDocumentContext) ?? {};
   const project = useWorkspaceValue((state) => state.activePath);
   const workspace = useProject()?.projects.workspace;
   const foreground = useConversation()?.session;
@@ -39,9 +40,8 @@ function AssistantMessageBase({
   const agentKey = useSessionValue((state) => state.agentKey);
   const workingDirectory = useSessionValue((state) => state.workingDirectory);
   const [fileError, setFileError] = useState<string | null>(null);
-  const onOpenFile = useCallback((path: string, line?: number, absolute = false) => {
-    const open = absolute ? openAbsoluteFile : openPath;
-    if (!project || !open) return;
+  const onOpenFile = useCallback(async (path: string, line?: number) => {
+    if (!project || !openPath) return;
     const isCurrent = () => {
       const state = foreground?.getState();
       return workspace?.getState().activePath === project &&
@@ -51,16 +51,20 @@ function AssistantMessageBase({
     };
     if (!isCurrent()) return;
     setFileError(null);
-    void open(project, path, line, isCurrent).catch((error: unknown) => {
+    try {
+      const root = workingDirectory && insidePath(workingDirectory, path) ? workingDirectory : undefined;
+      await openPath(project, path, line, isCurrent, { root });
+    } catch (error) {
       if (isCurrent()) setFileError(describeUnknownError(error));
-    });
-  }, [agentKey, foreground, openAbsoluteFile, openPath, project, sessionId, workingDirectory, workspace]);
+      throw error;
+    }
+  }, [agentKey, foreground, openPath, project, sessionId, workingDirectory, workspace]);
   const replyFiles = useMemo(() => ({
     root: workingDirectory,
-    verify: verifyRelativeFile,
+    canOpenUrl,
+    verify: inspectReference,
     open: openPath ? onOpenFile : undefined,
-    openAbsolute: openAbsoluteFile ? (path: string, line?: number) => onOpenFile(path, line, true) : undefined,
-  }), [workingDirectory, verifyRelativeFile, openPath, openAbsoluteFile, onOpenFile]);
+  }), [workingDirectory, canOpenUrl, inspectReference, openPath, onOpenFile]);
   return (
     // group：复制按钮随卡片 hover 浮现，不再常驻制造噪音
     <div
@@ -76,9 +80,8 @@ function AssistantMessageBase({
           canUseCodeRenderers
           fileRoot={project ?? undefined}
           replyFiles={replyFiles}
-          onOpenExternal={openExternal}
+          onOpenExternal={openPath ? onOpenFile : undefined}
           assetUrl={assetUrl}
-          onOpenFile={openPath ? onOpenFile : undefined}
         />
         <MessageAttachments blocks={item.attachments} />
         {fileError && (

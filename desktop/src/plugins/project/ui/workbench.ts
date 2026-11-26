@@ -25,7 +25,7 @@ import { createProjectViewNavigation } from "./bindings/workbenchNavigation.ts";
 import { createProjectSidebarState } from "./sidebarState.ts";
 import { openAnnotation } from "../conversation/ui/openAnnotation.ts";
 import type { ConversationDocumentView } from "../conversation/ui/documentView.ts";
-import { formatRemoteProjectPath, insidePath, parseRemoteProjectPath, projectFolderPath } from "../../../shared/panelPaths.ts";
+import { projectFolderPath } from "../../../shared/panelPaths.ts";
 
 export const name = "project-workbench";
 export const inject = ["project", "workbench", "agents", "host", "diagnostics"];
@@ -169,40 +169,10 @@ export function apply(ctx: Context): void {
           currentTarget: project.drafts.annotationEditor.current,
           isCurrent,
         };
-        const lookups = new Map<string, ReturnType<typeof documents.stat>>();
-        function stat(path: string) {
-          const pending = lookups.get(path);
-          if (pending) return pending;
-          const request = documents.stat(path).finally(() => lookups.delete(path));
-          lookups.set(path, request);
-          return request;
-        }
-        const openPath: ConversationDocumentView["openPath"] = (path, target, line, shouldOpen) =>
-          documentsUi.openPath(path, target, line, () => isCurrent() && (shouldOpen?.() ?? true));
         documentView.setState({
           openFileTree: documentsUi.openFileTree,
           view: {
             assetUrl: documents.assetUrl,
-            openPath,
-            async openAbsoluteFile(project, target, line, shouldOpen) {
-              const remote = parseRemoteProjectPath(project);
-              if (remote && !target.startsWith("/")) throw new Error("此路径不属于当前远程主机");
-              const path = remote ? formatRemoteProjectPath(remote.projectId, target) : target;
-              const entry = await stat(path);
-              if (!isCurrent() || shouldOpen?.() === false) return false;
-              if (entry.directory) throw new Error("此路径指向目录，无法预览为文件");
-              return openPath(project, entry.path, line, shouldOpen);
-            },
-            verifyRelativeFile: async (root, path) => {
-              if (!insidePath(root, path)) return null;
-              try {
-                const [directory, entry] = await Promise.all([stat(projectFolderPath(root)), stat(path)]);
-                return isCurrent() && directory.directory && !entry.directory &&
-                  insidePath(directory.path, entry.path) ? entry.path : null;
-              } catch {
-                return null;
-              }
-            },
             openAnnotation: (annotation, draft) => openAnnotation(annotationNavigation, annotation, draft),
             ownsFindShortcut: (event) => documents.fileFind.owner(event) !== null,
             fileCandidates: {
@@ -272,9 +242,7 @@ export function apply(ctx: Context): void {
     openArchiveSettings: () => {
       workbench.navigation.getState().openSettingsTab("archive", projectView.isActive);
     },
-    openExternal: (url) => projectView.isActive()
-      ? workbench.openExternal(url)
-      : Promise.resolve(),
+    workbench,
   }))
     ctx.effect(() =>
       workbench.register("pages", {

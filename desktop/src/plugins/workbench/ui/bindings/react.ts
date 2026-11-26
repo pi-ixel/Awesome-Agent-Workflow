@@ -50,13 +50,13 @@ export function useWorkbenchLanguage() {
 
 export function useWorkbenchPathOpener() {
   const workbench = useContext(WorkbenchContext);
-  const resolver = useWorkbenchEntries("pathResolvers")[0];
+  const resolvers = useWorkbenchEntries("pathResolvers");
   const openPath = useCallback<WorkbenchService["openPath"]>(
     (project, path, line, isCurrent) =>
       workbench?.openPath(project, path, line, () =>
-        workbench.getSnapshot().pathResolvers[0] === resolver && (isCurrent?.() ?? true),
+        workbench.getSnapshot().pathResolvers === resolvers && (isCurrent?.() ?? true),
       ) ?? Promise.resolve(false),
-    [workbench, resolver],
+    [workbench, resolvers],
   );
-  return resolver ? openPath : undefined;
+  return resolvers.length ? openPath : undefined;
 }

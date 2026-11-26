@@ -49,13 +49,15 @@ import type { Logger } from "../logging/logger.ts";
 import { LoggerContext, useLogger } from "../logging/react.ts";
 import { MarkdownAppearance } from "./markdown/theme.ts";
 import {
+  insidePath,
+  workspaceTargetPath,
   isAbsolutePath,
   resolveFileReference,
   resolveRelativeFileReference,
   type FileReference,
 } from "../panelPaths.ts";
 import { basenameOf } from "../workspaceText.ts";
-import { FileIcon } from "./icons.tsx";
+import { FileIcon, FolderGlyph, CornerDownRightIcon } from "./icons.tsx";
 import { CodeBlock } from "./markdown/CodeBlock.tsx";
 import {
   findMarkdownCodeRenderer,
@@ -491,10 +493,10 @@ function isExternalWebHref(href: string): boolean {
 const BlockCodeContext = createContext(false);
 const LinkLabelContext = createContext(false);
 interface ReplyFiles {
+  readonly canOpenUrl?: (url: string) => boolean;
   readonly root?: string;
-  readonly verify?: (root: string, path: string) => Promise<string | null>;
-  readonly open?: (path: string, line?: number) => void;
-  readonly openAbsolute?: (path: string, line?: number) => void;
+  readonly verify?: (root: string, path: string) => Promise<{ path: string; kind: "file" | "directory" | "url" } | null>;
+  readonly open?: (path: string, line?: number) => void | Promise<void>;
 }
 const ReplyFilesContext = createContext<ReplyFiles | undefined>(undefined);
 
@@ -503,46 +505,42 @@ function VerifiedReplyFile({ reference, children, isAbsolute = false }: {
   readonly children: ReactNode;
   readonly isAbsolute?: boolean;
 }) {
-  const { root, verify, open, openAbsolute } = useContext(ReplyFilesContext) ?? {};
-  const path = reference.path;
+  const { root, verify, open } = useContext(ReplyFilesContext) ?? {};
+  const path = isAbsolute ? workspaceTargetPath(root ?? "", reference.path) : reference.path;
+  const deferred = !!path && isAbsolute && (!root || !insidePath(root, path));
   const lookup = useMemo(() =>
-    !isAbsolute && root && verify && open ? { root, verify, open, path } : null,
-  [isAbsolute, root, verify, open, path]);
-  const [available, setAvailable] = useState<typeof lookup>(null);
+    !deferred && path && root && verify && open ? { root, verify, open, path } : null,
+  [deferred, root, verify, open, path]);
+  const [available, setAvailable] = useState<{ lookup: typeof lookup; directory: boolean } | null>(null);
   const active = useRef<AbortController | null>(null);
   useEffect(() => {
     if (!lookup) return;
     const controller = new AbortController();
     active.current = controller;
     void lookup.verify(lookup.root, lookup.path).then((file) => {
-      if (!controller.signal.aborted) setAvailable(file ? lookup : null);
+      if (!controller.signal.aborted) setAvailable(file ? { lookup, directory: file.kind === "directory" } : null);
     }).catch(() => {});
     return () => controller.abort();
   }, [lookup]);
-  if (isAbsolute ? !openAbsolute : !lookup || available !== lookup) return <>{children}</>;
+  if (!path || (deferred ? !open : !lookup || available?.lookup !== lookup)) return <>{children}</>;
   return (
     <TextLink
       type="button"
       className="inline-flex max-w-full items-baseline gap-1 wrap-anywhere align-baseline"
       data-hint={path}
       onClick={() => {
-        if (isAbsolute) {
-          openAbsolute?.(path, reference.line);
-          return;
-        }
-        if (!lookup) return;
+        if (!open) return;
         const request = active.current;
-        if (!request || request.signal.aborted) return;
-        void lookup.verify(lookup.root, path).then((file) => {
-          if (request.signal.aborted) return;
-          if (file) lookup.open(file, reference.line);
-          else setAvailable(null);
-        }).catch(() => {
-          if (!request.signal.aborted) setAvailable(null);
+        void Promise.resolve(open(path, reference.line)).catch(async () => {
+          if (!lookup || !request || request.signal.aborted) return;
+          const target = await lookup.verify(lookup.root, path).catch(() => null);
+          if (!request.signal.aborted) setAvailable(target ? { lookup, directory: target.kind === "directory" } : null);
         });
       }}
     >
-      <FileIcon className="ui-icon-16 shrink-0 self-center" />
+      {deferred ? <CornerDownRightIcon className="ui-icon-16 shrink-0 self-center" /> :
+        available?.directory ? <FolderGlyph isExpanded={false} className="ui-icon-16 shrink-0 self-center" /> :
+        <FileIcon className="ui-icon-16 shrink-0 self-center" />}
       <span className="min-w-0 self-baseline">{children}</span>
     </TextLink>
   );
@@ -615,13 +613,13 @@ function MarkdownCode({
       {children}
     </code>
   );
-  const text = !isLinkLabel && (files?.openAbsolute || files?.root)
+  const text = !isLinkLabel && (files?.open || files?.root)
     ? inspectCodeChildren(children).text
     : "";
   const target = text.trim();
   const isWindowsPath = windowsDriveAbsolutePathPattern.test(target);
   const isAbsolute = isWindowsPath || /^\/(?!\/)/.test(target);
-  if (files?.openAbsolute && isAbsolute && !/[\p{Cc}`|<>*?]/u.test(target)) {
+  if (files?.open && isAbsolute && !/[\p{Cc}`|<>*?]/u.test(target)) {
     const reference = resolveFileReference("", target.replaceAll("%", "%25"));
     if (reference && (!isWindowsPath || !reference.path.slice(2).includes(":"))) {
       return (
@@ -675,6 +673,7 @@ function buildMarkdownComponents(options: {
   fileRoot?: string;
   fileBase?: string;
   replyFileRoot?: string;
+  canOpenUrl?: ReplyFiles["canOpenUrl"];
   onOpenFile?: (path: string, line?: number) => void;
   onOpenExternal?: (url: string) => Promise<void>;
   assetUrl?: (path: string) => string | undefined;
@@ -686,6 +685,7 @@ function buildMarkdownComponents(options: {
     fileRoot,
     fileBase,
     replyFileRoot,
+    canOpenUrl,
     onOpenFile,
     onOpenExternal,
     assetUrl,
@@ -757,6 +757,9 @@ function buildMarkdownComponents(options: {
       }
       if (fileRoot !== undefined && typeof href === "string") {
         const reference = resolveLocalReference(fileRoot, href, fileBase);
+        if (reference && replyFileRoot !== undefined) {
+          return <VerifiedReplyFile key={reference.path} reference={reference} isAbsolute>{label}</VerifiedReplyFile>;
+        }
         if (reference !== null && onOpenFile !== undefined) {
           return (
             <TextLink
@@ -771,7 +774,7 @@ function buildMarkdownComponents(options: {
           );
         }
       }
-      if (onOpenExternal && typeof href === "string" && isExternalWebHref(href)) {
+      if (onOpenExternal && typeof href === "string" && isExternalWebHref(href) && (canOpenUrl?.(href) ?? true)) {
         return (
           <TextLink
             type="button"
@@ -989,6 +992,7 @@ function MarkdownViewBase({
    */
   readonly canUseCodeRenderers?: boolean;
 }) {
+  const replyFileRoot = replyFiles ? replyFiles.root ?? "" : undefined;
   const { theme } = useContext(MarkdownAppearance);
   const registeredRenderers = useContext(MarkdownCodeRenderers);
   const logger = useLogger("markdown");
@@ -998,7 +1002,8 @@ function MarkdownViewBase({
       buildMarkdownComponents({
         fileRoot,
         fileBase,
-        replyFileRoot: replyFiles?.root,
+        replyFileRoot,
+        canOpenUrl: replyFiles?.canOpenUrl,
         onOpenFile,
         onOpenExternal,
         assetUrl,
@@ -1006,7 +1011,7 @@ function MarkdownViewBase({
         logger,
         streaming,
       }),
-    [fileRoot, fileBase, replyFiles?.root, onOpenFile, onOpenExternal, assetUrl, renderLocalImage, streaming, logger],
+    [fileRoot, fileBase, replyFileRoot, replyFiles?.canOpenUrl, onOpenFile, onOpenExternal, assetUrl, renderLocalImage, streaming, logger],
   );
   const normalized = normalizeConsecutiveMarkdownImageBlocks(
     normalizeMessageSingleDollarMath(text),

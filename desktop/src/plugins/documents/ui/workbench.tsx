@@ -1,12 +1,12 @@
 import type { Context } from "cordis";
-import { useSyncExternalStore, type ComponentProps } from "react";
+import { useCallback, useEffect, useSyncExternalStore, type ComponentProps } from "react";
 import { createStore, useStore } from "zustand";
 import type { WorkbenchContributions } from "../../workbench/types.ts";
 import type { WorkbenchService } from "../../workbench/service.ts";
 import type { GitService } from "../../git/service.ts";
 import type { ProjectAnnotationEditor, ProjectWorkspace } from "../../project/service.ts";
 import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
-import { insidePath, pathKey } from "../../../shared/panelPaths.ts";
+import { insidePath, pathKey, projectFolderPath } from "../../../shared/panelPaths.ts";
 import { FolderGlyph } from "../../../shared/ui/icons.tsx";
 import {
   useToolProject,
@@ -29,21 +29,44 @@ const noSubscription = () => () => {};
 const noView = () => undefined;
 const fileTreeId = "files";
 
-export function registerDocumentPaths(workbench: WorkbenchService, documents: Pick<DocumentsService, "stat">) {
-  return workbench.register("pathResolvers", {
-    id: "documents",
-    async resolve(path, line) {
-      const entry = await documents.stat(path);
-      return documentTab(entry.path, entry.directory, line);
+export function registerDocumentPaths(workbench: WorkbenchService, documents: Pick<DocumentsService, "stat">,
+  projectRoots?: (project: string) => readonly string[] | undefined) {
+  const pending = new Map<string, ReturnType<DocumentsService["stat"]>>();
+  const releaseInspector = workbench.register("pathInspectors", {
+    id: "filesystem",
+    async inspect(path) {
+      let request = pending.get(path);
+      if (!request) {
+        request = documents.stat(path).finally(() => pending.delete(path));
+        pending.set(path, request);
+      }
+      const entry = await request;
+      return { kind: entry.directory ? "directory" : "file", path: entry.path };
     },
   });
+  const releaseResolver = workbench.register("pathResolvers", {
+    id: "documents",
+    label: "文件预览与文件树",
+    supports: (target) => target.kind === "directory" || (target.kind === "file" &&
+      !/\.(?:pdf|docx?|xlsx?|xlsm|pptx?|mp4|mp3|wav|zip|exe)$/i.test(target.path)),
+    resolve(target, project, line) {
+      if (target.kind === "directory") {
+        const root = [projectFolderPath(project), ...(projectRoots?.(project) ?? [])]
+          .filter((candidate) => insidePath(candidate, target.path))
+          .sort((a, b) => b.length - a.length)[0];
+        if (root) return { id: fileTreeId, kind: fileTreeId, data: { root, directory: target.path } };
+      }
+      return documentTab(target.path, target.kind === "directory", line);
+    },
+  });
+  return () => { releaseResolver(); releaseInspector(); };
 }
 
 export function documentPanels(
   documents: DocumentsService,
-  { panels, openExternal, appearance, navigation }: Pick<
+  { panels, openPath, appearance, navigation }: Pick<
     WorkbenchService,
-    "panels" | "openExternal" | "appearance" | "navigation"
+    "panels" | "openPath" | "appearance" | "navigation"
   >,
   git?: GitReader,
   projectView?: ReadonlySnapshot<DocumentProjectView>,
@@ -61,6 +84,13 @@ export function documentPanels(
       props.root,
       props.ownerProject ? undefined : view?.scope,
     );
+    const owner = props.ownerProject ?? props.root;
+    const openUrl = useCallback(async (url: string) => { await openPath(owner, url); }, [owner]);
+    const select = selection.select;
+    useEffect(() => {
+      const root = props.revealDirectory?.data?.root;
+      if (typeof root === "string") select(root);
+    }, [props.revealDirectory, select]);
     const root = selection.project ?? props.root;
     const watchActivity = view?.watchActivity;
     const latestFileTabPath = useStore(panels, (state) => {
@@ -90,7 +120,15 @@ export function documentPanels(
           latestFileTabPath={latestFileTabPath}
           readGitStatus={gitStatus?.read}
           watchActivity={watchActivity && ((_, listener) => watchActivity(props.ownerProject ?? props.root, listener))}
-          openExternal={openExternal}
+          navigate={(path, line, preview) => openPath(props.ownerProject ?? props.root, path, line, undefined, {
+            present(tab) {
+              const file = readDocumentTab(tab, "file");
+              if (!file || !insidePath(root, file.path)) return false;
+              preview(file.path, file.line);
+              return true;
+            },
+          })}
+          openExternal={openUrl}
           treePosition={fileTreePosition}
           onOpenTreeSettings={() =>
             navigation.getState().openFileTreeSettings(() => documents.isActive())
@@ -104,9 +142,10 @@ export function documentPanels(
       projectView?.subscribe ?? noSubscription,
       projectView?.getState ?? noView,
     );
+    const openUrl = useCallback(async (url: string) => { await openPath(props.project, url); }, [props.project]);
     return (
       <DocumentAnnotationContext.Provider value={view?.annotations}>
-        <FilePreview {...props} openExternal={openExternal} />
+        <FilePreview {...props} openExternal={openUrl} />
       </DocumentAnnotationContext.Provider>
     );
   }
@@ -120,9 +159,10 @@ export function documentPanels(
         order: -10,
       },
       key: ({ project }) => project,
-      View: ({ project, openPath }) => (
+      View: ({ project, openPath, tab }) => (
         <WorkbenchFileTree
           documents={documents}
+          revealDirectory={typeof tab?.data?.directory === "string" ? tab : undefined}
           root={project}
           onOpen={(entry) => openPath(entry.path)}
         />
@@ -217,7 +257,8 @@ export function apply(ctx: Context): void {
     return () => binding.dispose();
   }, "documents:git-status");
   ctx.effect(
-    () => registerDocumentPaths(workbench, documents),
+    () => registerDocumentPaths(workbench, documents, (project) =>
+      projectView.getState().scope?.getState().projectFolders?.[pathKey(project)]?.relatedPaths),
     "documents:workbench-paths",
   );
   ctx.effect(() => {

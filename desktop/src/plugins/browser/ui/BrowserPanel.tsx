@@ -40,6 +40,8 @@ export interface BrowserPanelProps {
   workspaceId?: string;
   agentKey?: string;
   visible: boolean;
+  requestId?: unknown;
+  takeUrl?: (id: unknown, sessionId: string) => string | undefined;
 }
 
 type CleanupScope = "site" | "cache" | "session" | "workspace" | "all";
@@ -58,7 +60,7 @@ function BrowserPanelSession({
   sessionId,
   workspaceId = sessionId,
   agentKey,
-  visible,
+  visible, requestId, takeUrl,
 }: BrowserPanelProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const [space, setSpace] = useState<BrowserSpace | null>(null);
@@ -359,6 +361,21 @@ function BrowserPanelSession({
     [bounds, host, sessionId],
   );
   const restore = useBrowserRestore(host, workspaceId, sessionId, space, createTab, agentKey);
+  useEffect(() => {
+    if (!visible || !space || !requestId || !restore.initialized) return;
+    let current = true;
+    queueMicrotask(() => {
+      if (!current) return;
+      const url = takeUrl?.(requestId, sessionId);
+      if (!url) return;
+      if (!userCanControl) {
+        setError("Agent 正在操作，接管浏览器后可重新打开链接");
+        return;
+      }
+      void createTab(url);
+    });
+    return () => { current = false; };
+  }, [visible, space, requestId, takeUrl, sessionId, createTab, userCanControl, restore.initialized]);
 
   useEffect(() => {
     let active = true;

@@ -56,6 +56,16 @@ export function parseRemoteProjectPath(
   return { projectId, remotePath };
 }
 
+/** 将当前远程主机上的绝对路径还原为文档服务的路径身份，拒绝跨主机跳转。 */
+export function workspaceTargetPath(project: string, path: string): string | null {
+  if (/^https?:\/\//i.test(path)) return path;
+  const remote = parseRemoteProjectPath(project);
+  const target = parseRemoteProjectPath(path);
+  if (target) return target.projectId === remote?.projectId ? path : null;
+  if (!remote) return path;
+  return path.startsWith("/") ? formatRemoteProjectPath(remote.projectId, path) : null;
+}
+
 /** 文件路径身份与聊天链接解析；明确绝对路径可位于项目外，相对路径不得越根。 */
 export function normalizePath(path: string): string {
   const value = path.replaceAll("\\", "/");

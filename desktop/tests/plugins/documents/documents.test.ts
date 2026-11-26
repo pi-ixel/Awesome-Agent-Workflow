@@ -48,7 +48,7 @@ it("installs document contributions and scopes project close to the addressed pr
   );
   try {
     const { project, documents, workbench } = await runtime.ready;
-    expect(workbench.getSnapshot().pathResolvers.map(({ id }) => id)).toEqual(["documents"]);
+    expect(workbench.getSnapshot().pathResolvers.map(({ id }) => id)).toContain("documents");
     expect(workbench.getSnapshot().panels.map(({ id }) => id)).toEqual(
       expect.arrayContaining(["files", "file", "directory"]),
     );
@@ -202,7 +202,7 @@ it("opens the file tree from the registered Project sidebar and retires old docu
     await act(async () => { await fiber.dispose(); });
     finish(entry);
     await expect(pending).resolves.toBe(false);
-    expect(workbench.getSnapshot().pathResolvers).toEqual([]);
+    expect(workbench.getSnapshot().pathResolvers.map(({ id }) => id)).not.toContain("documents");
     workbench.panels.getState().collapse(path);
     old.openFileTree(path);
     expect(workbench.panels.getState().projects[path.toLowerCase()]?.open).toBe(false);
@@ -555,7 +555,7 @@ it("retires document UI, queued reads, annotation navigation and confirmations o
     if (!root || !fiber) throw new Error("Documents fiber is missing");
     const path = "D:/retired/a.md";
     workbench.navigation.getState().openView("project-overview", "D:/retired");
-    const paths = workbench.getSnapshot().pathResolvers[0];
+    const paths = workbench.getSnapshot().pathResolvers.find(({ id }) => id === "documents");
     const openingPath = workbench.openPath("D:/retired", path, 12);
     expect(stat).toHaveBeenCalledWith(path);
     documents.editor.receive(path, "saved");
@@ -606,7 +606,7 @@ it("retires document UI, queued reads, annotation navigation and confirmations o
     await queued;
     await expect(confirm).resolves.toBe(false);
     expect(unload()).toBe(false);
-    expect(workbench.getSnapshot().pathResolvers).toEqual([]);
+    expect(workbench.getSnapshot().pathResolvers.map(({ id }) => id)).not.toContain("documents");
     expect(workbench.getSnapshot().panels.map(({ id }) => id)).not.toContain(
       "files",
     );
@@ -620,8 +620,8 @@ it("retires document UI, queued reads, annotation navigation and confirmations o
 
     await root.plugin(documentsPlugin);
     const replacement = root.documents;
-    expect(workbench.getSnapshot().pathResolvers[0]?.id).toBe("documents");
-    expect(workbench.getSnapshot().pathResolvers[0]).not.toBe(paths);
+    expect(workbench.getSnapshot().pathResolvers.find(({ id }) => id === "documents")?.id).toBe("documents");
+    expect(workbench.getSnapshot().pathResolvers.find(({ id }) => id === "documents")).not.toBe(paths);
     const entry = { path, name: "a.md", directory: false, symlink: false };
     finishStat(entry);
     await expect(openingPath).resolves.toBe(false);

@@ -1,5 +1,6 @@
+import type { WorkbenchService } from "../../workbench/service.ts";
 import { useApprovalValue } from "./bindings/conversationView.ts";
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
 import type {
   ProjectViewProps,
@@ -43,7 +44,7 @@ export function createProjectPages({
   watchActivity,
   openDiagnostics,
   openArchiveSettings,
-  openExternal,
+  workbench,
 }: {
   readonly skills: ReadonlySnapshot<
     Pick<Partial<SkillsService>, "candidates" | "resolveSlashSkills">
@@ -57,7 +58,7 @@ export function createProjectPages({
   readonly watchActivity: ProjectWorkspace["subscribeWorkspaceActivity"];
   readonly openDiagnostics: () => void;
   readonly openArchiveSettings: () => void;
-  readonly openExternal: (url: string) => Promise<void>;
+  readonly workbench: WorkbenchService;
 }): readonly WorkbenchContributions["pages"][] {
   function OverviewPage({ project }: ProjectViewProps) {
     const ExtensionOverview = useStore(extension, (state) => state.view?.Overview);
@@ -73,14 +74,14 @@ export function createProjectPages({
     const git = useStore(gitReview);
     const projectExtension = useStore(extension, (state) => state.view);
     const documents = useStore(documentView, (state) => state.view);
+    const resolvers = useSyncExternalStore((listener) => workbench.subscribe(listener), () => workbench.getSnapshot().pathResolvers);
     const links = useMemo(() => ({
       assetUrl: documents?.assetUrl,
       openAnnotation: documents?.openAnnotation,
-      openPath: documents?.openPath,
-      openAbsoluteFile: documents?.openAbsoluteFile,
-      verifyRelativeFile: documents?.verifyRelativeFile,
-      openExternal,
-    }), [documents]);
+      openPath: workbench.openPath,
+      canOpenUrl: (path: string) => workbench.canOpen({ kind: "url", path }),
+      inspectReference: resolvers.length ? (root: string, path: string) => workbench.inspectReference(root, path) : undefined,
+    }), [documents, resolvers]);
     return (
       <ConversationDocumentContext.Provider value={links}>
         <SessionView

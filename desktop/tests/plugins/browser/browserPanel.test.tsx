@@ -962,3 +962,19 @@ describe("TD-034 关闭活动标签清理错误隔离", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
+
+it("会话链接只在浏览器面板可见且恢复完毕后打开一次", async () => {
+  const space = spaceWithTab();
+  const createTab = vi.fn().mockResolvedValue(space.tabs[0]!);
+  const readRestore = vi.fn().mockResolvedValue({ epoch: "", revision: null, urls: [] });
+  const fake = { ...host(), createSpace: vi.fn().mockResolvedValue(space), createTab, readRestore };
+  const takeUrl = vi.fn().mockReturnValueOnce("https://example.test/report");
+  const props = { host: fake, sessionId: "session-a", requestId: "request-1", takeUrl };
+  const view = render(<BrowserPanel {...props} visible={false} />);
+  await waitFor(() => expect(readRestore).toHaveBeenCalled());
+  expect(createTab).not.toHaveBeenCalled();
+  view.rerender(<BrowserPanel {...props} visible />);
+  await waitFor(() => expect(createTab).toHaveBeenCalledWith("session-a", "https://example.test/report", expect.anything()));
+  view.rerender(<BrowserPanel {...props} visible />);
+  expect(createTab).toHaveBeenCalledTimes(1);
+});

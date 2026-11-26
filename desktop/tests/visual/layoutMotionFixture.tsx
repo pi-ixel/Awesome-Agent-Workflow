@@ -18,6 +18,7 @@ const project = "D:/layout-motion";
 const directory = `${project}/docs`;
 const markdown = "# 文件视图示例\n\nAlpha alpha alpha\n\n## 第一节\n\n### 小节\n\n## 第二节";
 const { Wrapper, workbench } = createGitWorkbench();
+workbench.navigation.getState().openView("session", project);
 const params = new URLSearchParams(location.search);
 if (params.has("panel-visibility")) {
   workbench.register("panels", {
@@ -87,6 +88,13 @@ panelService.directory = (path) => {
     ] : [{ path: `${path}/${sourceName}`, name: sourceName, directory: false, symlink: false }],
     truncated: false,
   });
+};
+panelService.stat = async (path) => {
+  if (path === project) return { path, name: "layout-motion", directory: true, symlink: false };
+  const parent = path.slice(0, path.lastIndexOf("/"));
+  const entry = (await panelService.directory(parent)).entries.find((item) => item.path === path);
+  if (!entry) throw new Error("文件已不存在");
+  return entry;
 };
 panelService.preview = (path) => {
   const content = path.endsWith(".ts")

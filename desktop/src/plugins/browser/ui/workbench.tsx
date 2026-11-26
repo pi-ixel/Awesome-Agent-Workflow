@@ -10,6 +10,34 @@ export const name = "browser-workbench";
 export const inject = ["host", "workbench", "project"];
 
 export function apply(ctx: Context): void {
+  let pending: { id: string; url: string; sessionId: string } | undefined;
+  const takeUrl = (id: unknown, sessionId: string) => {
+    if (!pending || pending.id !== id || pending.sessionId !== sessionId)
+      return;
+    const url = pending.url;
+    pending = undefined;
+    return url;
+  };
+  ctx.effect(
+    () =>
+      ctx.workbench.register("pathResolvers", {
+        id: "browser",
+        label: "内置浏览器",
+        supports: (target) => target.kind === "url",
+        resolve(target, project) {
+          const id = crypto.randomUUID();
+          pending = {
+            id,
+            url: target.path,
+            sessionId:
+              ctx.project.conversation.foreground.session.getState()
+                .activeSessionId ?? `manual:${project}`,
+          };
+          return { id: "browser", kind: "browser", data: { requestId: id } };
+        },
+      }),
+    "browser:path-resolver",
+  );
   ctx.effect(
     () =>
       ctx.workbench.register("settings", {
@@ -34,7 +62,7 @@ export function apply(ctx: Context): void {
           Icon: GlobeIcon,
           order: -20,
         },
-        View: ({ project, visible }) => {
+        View: ({ project, visible, tab }) => {
           const activeSessionId = useStore(
             ctx.project.conversation.foreground.session,
             (state) => state.activeSessionId,
@@ -92,6 +120,8 @@ export function apply(ctx: Context): void {
                   workspaceId={project}
                   agentKey={agentKey ?? undefined}
                   visible={visible}
+                  requestId={tab?.data?.requestId}
+                  takeUrl={takeUrl}
                 />
               </div>
             </div>

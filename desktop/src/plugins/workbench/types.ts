@@ -230,12 +230,25 @@ export interface WorkbenchContributions {
     layoutClass?: string;
   };
   settingsReset: { id: string; label: string; reset(): void };
+  /** 按实际目标声明打开方式。supports 只匹配元数据，不读取文件。 */
   pathResolvers: {
     id: string;
-    resolve(path: string, line?: number): Promise<PanelTab>;
+    label: string;
+    supports(target: NavigationTarget): boolean;
+    resolve(target: NavigationTarget, project: string, line?: number): PanelTab;
+  };
+  /** 本机及远程文件系统共用同一元数据入口，打开方式可登记多个。 */
+  pathInspectors: {
+    id: "filesystem";
+    inspect(path: string): Promise<NavigationTarget>;
   };
   /** 按语言接管 Markdown 围栏代码块的渲染（如 ```visual 讲解图）。 */
   markdownCodeRenderers: MarkdownCodeRenderer;
+}
+
+export interface NavigationTarget {
+  readonly kind: "file" | "directory" | "url";
+  readonly path: string;
 }
 
 export type WorkbenchSlot = keyof WorkbenchContributions;
