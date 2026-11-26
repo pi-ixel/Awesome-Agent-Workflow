@@ -60,6 +60,8 @@ it("keeps skill and MCP page filters on the shared control font scale", () => {
   expect(mcp).toMatch(/<PageFilterSearch\s+label="搜索 MCP"/);
   expect(mcp).toMatch(/<PageFilterListbox\s+label="筛选状态"/);
   expect(mcp).toMatch(/<PageFilterListbox\s+label="筛选传输方式"/);
+  const tree = readFileSync("src/plugins/documents/ui/FileTree.tsx", "utf8");
+  expect(tree).toMatch(/<PageFilterSearch\s+label="搜索文件"[^>]*?\bcompact\s*\/>/);
   const menu = readFileSync("src/shared/ui/ContextMenu.tsx", "utf8");
   expect(menu).toMatch(
     /<PageFilterSearch\b[\s\S]*?className="flex-1"\s+compact/,

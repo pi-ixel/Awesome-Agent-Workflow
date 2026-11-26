@@ -43,8 +43,7 @@
     "专用渲染依赖 · highlight.js/lib/common"
   ],
   "plugins/documents/ui/FileTree.tsx": [
-    "FileTree · <canvas>",
-    "FileTree · <input>"
+    "FileTree · <canvas>"
   ],
   "plugins/documents/ui/MarkdownSourceEditor.tsx": [
     "专用渲染依赖 · @codemirror/lang-markdown",
