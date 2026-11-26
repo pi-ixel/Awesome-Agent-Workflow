@@ -3,7 +3,7 @@
  * 一种样子：信息色文字，悬停出下划线；文件路径用 mono 换等宽字。
  */
 import { forwardRef, type ComponentPropsWithoutRef } from "react";
-import { focusVisibleRing } from "./controls.tsx";
+import { keyboardFocusClass } from "./controls.tsx";
 
 export const TextLink = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<"button"> & { readonly mono?: boolean }>(
   function TextLink({ className = "", type = "button", mono = false, ...props }, ref) {
@@ -12,7 +12,7 @@ export const TextLink = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<"
         {...props}
         ref={ref}
         type={type}
-        className={`inline min-w-0 cursor-pointer rounded-control text-left text-info-ink underline-offset-[3px] hover:underline disabled:cursor-not-allowed disabled:text-ink-mute disabled:no-underline aria-expanded:underline ${mono ? "font-mono text-ui-xs" : ""} ${focusVisibleRing} ${className}`}
+        className={`inline min-w-0 cursor-pointer rounded-control text-left text-info-ink underline-offset-[3px] hover:underline disabled:cursor-not-allowed disabled:text-ink-mute disabled:no-underline aria-expanded:underline ${mono ? "font-mono text-ui-xs" : ""} ${keyboardFocusClass} ${className}`}
       />
     );
   },

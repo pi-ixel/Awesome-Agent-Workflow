@@ -372,7 +372,7 @@ export function UsageSettings({
                             tabIndex={0}
                             aria-label="模型 ID"
                             data-hint={model.model}
-                            className="shrink-0 rounded-control text-ink-mute focus-visible:outline-2 focus-visible:outline-focus-ring"
+                            className="shrink-0 rounded-control text-ink-mute focus-visible:keyboard-focus-marker"
                           >
                             <CircleHelpIcon className="ui-icon-14" />
                           </span>

@@ -181,7 +181,7 @@ export function PanelWorkspace({
             tone="ghost"
             aria-label="关闭右栏遮罩"
             inert={!scrim}
-            className={`absolute inset-0 z-20 rounded-flat! bg-scrim! focus-visible:ring-inset active:transform-none! ${scrim ? "opacity-100" : "pointer-events-none opacity-0"} ${moving ? "motion-safe:transition-opacity duration-200 ease-out starting:opacity-0" : ""}`}
+            className={`absolute inset-0 z-20 rounded-flat! bg-scrim! active:transform-none! ${scrim ? "opacity-100" : "pointer-events-none opacity-0"} ${moving ? "motion-safe:transition-opacity duration-200 ease-out starting:opacity-0" : ""}`}
             onClick={() => {
               const restore = focusBeforeScrim.current;
               readRightPanel(workbenchLayout).collapse(project);

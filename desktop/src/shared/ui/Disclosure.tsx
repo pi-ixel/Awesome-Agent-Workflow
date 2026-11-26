@@ -4,7 +4,7 @@
  */
 import type { ReactNode } from "react";
 import { ChevronRightIcon } from "./icons.tsx";
-import { focusVisibleRing } from "./controls.tsx";
+import { keyboardFocusClass } from "./controls.tsx";
 
 export function Disclosure({
   summary,
@@ -34,7 +34,7 @@ export function Disclosure({
       }
     >
       <summary
-        className={`${layout === "row" ? "flex w-full gap-2 py-2" : "inline-flex gap-1 py-0.5 pr-1.5"} cursor-pointer list-none items-center rounded-control text-ui-sm select-none hover:bg-surface-hover hover:text-ink [&::-webkit-details-marker]:hidden ${focusVisibleRing}`}
+        className={`${layout === "row" ? "flex w-full gap-2 py-2" : "inline-flex gap-1 py-0.5 pr-1.5"} cursor-pointer list-none items-center rounded-control text-ui-sm select-none hover:bg-surface-hover hover:text-ink [&::-webkit-details-marker]:hidden ${keyboardFocusClass}`}
       >
         <ChevronRightIcon
           aria-hidden={true}

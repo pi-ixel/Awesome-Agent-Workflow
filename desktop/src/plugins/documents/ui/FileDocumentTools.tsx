@@ -8,7 +8,7 @@ import { FileAnnotations } from "./FileAnnotations.tsx";
 import { createPortal } from "react-dom";
 import { SearchIcon, ChevronRightIcon, EllipsisIcon } from "../../../shared/ui/icons.tsx";
 import { FindBar, findActionClass, findFieldClass } from "../../../shared/ui/controls/FindBar.tsx";
-import { ActionButton, focusVisibleRing, rowSelectedClass } from "../../../shared/ui/controls.tsx";
+import { ActionButton, keyboardFocusClass, rowSelectedClass } from "../../../shared/ui/controls.tsx";
 import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
 import { useMenuController } from "../../../shared/ui/useMenuController.ts";
@@ -313,7 +313,7 @@ export function FileDocumentTools({
           {hasChildren ? (
             <IconButton iconSize="compact"
               type="button"
-              className={`flex shrink-0 items-center justify-center rounded-control hover:bg-hover ${focusVisibleRing}`}
+              className={`flex shrink-0 items-center justify-center rounded-control hover:bg-hover ${keyboardFocusClass}`}
               aria-label={`${expanded ? "折叠" : "展开"} ${heading.title}`}
               aria-expanded={expanded}
               aria-controls={branchId}

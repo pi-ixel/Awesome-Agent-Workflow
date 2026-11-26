@@ -1278,7 +1278,7 @@ export function SessionView({
                       onClick={backToBottom}
                       aria-label="回到底部"
                       data-hint="回到底部"
-                      className="absolute bottom-full left-1/2 z-30 mb-2 flex -translate-x-1/2 items-center justify-center rounded-pill border border-line-strong bg-surface text-ink shadow-sm transition-colors hover:bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                      className="absolute bottom-full left-1/2 z-30 mb-2 flex -translate-x-1/2 items-center justify-center rounded-pill border border-line-strong bg-surface text-ink shadow-sm transition-colors hover:bg-raised focus-visible:keyboard-focus-marker"
                     >
                       <ArrowDownIcon className="ui-icon-16" />
                     </IconButton>

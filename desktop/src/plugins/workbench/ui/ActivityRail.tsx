@@ -4,7 +4,7 @@ import {
 } from "../../../shared/ui/IconButton.tsx";
 import { useSyncExternalStore, type ReactNode } from "react";
 import { SettingsIcon } from "../../../shared/ui/icons.tsx";
-import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
+import { keyboardFocusClass } from "../../../shared/ui/controls.tsx";
 import { BrandMark } from "../../../shared/ui/BrandMark.tsx";
 import {
   SidebarFooterRow,
@@ -13,7 +13,7 @@ import {
 import type { WorkbenchSnapshot } from "../types.ts";
 import { readWorkbenchUi, useWorkbenchLayout } from "./bindings/layoutView.ts";
 
-const iconButton = `grid shrink-0 place-items-center rounded-control text-ink-mute transition-colors hover:bg-hover hover:text-ink data-[active=true]:bg-(--color-selected) data-[active=true]:text-ink focus-visible:ring-inset ${focusVisibleRing}`;
+const iconButton = `grid shrink-0 place-items-center rounded-control text-ink-mute transition-colors hover:bg-hover hover:text-ink data-[active=true]:bg-(--color-selected) data-[active=true]:text-ink ${keyboardFocusClass}`;
 
 const noUnread = () => 0;
 const noSubscription = () => () => {};

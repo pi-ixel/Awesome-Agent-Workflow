@@ -166,7 +166,7 @@ export function AnnotationSummary({
           onMouseEnter={cancelClose}
           onMouseLeave={scheduleClose}
           onFocus={cancelClose}
-          className="fixed z-[100] w-[420px] max-w-[calc(100vw-16px)] overflow-auto focus-visible:outline focus-visible:outline-focus-ring"
+          className="fixed z-[100] w-[420px] max-w-[calc(100vw-16px)] overflow-auto focus-visible:keyboard-focus-marker"
           style={
             position
               ? {

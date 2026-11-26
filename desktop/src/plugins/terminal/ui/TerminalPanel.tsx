@@ -1,5 +1,5 @@
 import { IconButton, IconHoverProvider } from "../../../shared/ui/IconButton.tsx";
-import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
+import { keyboardFocusClass } from "../../../shared/ui/controls.tsx";
 import { ColumnResizer } from "../../../shared/ui/controls/ColumnResizer.tsx";
 /**
  * 底部终端面板（顶栏终端钮的落点，ZCode Terminal.tsx:289-356 桌面可用子集）：
@@ -108,7 +108,7 @@ function TerminalTabChip({
           onArrow(1);
         }
       }}
-      className={`group flex min-h-7 min-w-0 max-w-36 shrink-0 cursor-default select-none items-center gap-1 rounded-control pl-2 pr-1 text-ui-base font-medium transition-colors focus-visible:ring-inset ${focusVisibleRing} ${
+      className={`group flex min-h-7 min-w-0 max-w-36 shrink-0 cursor-default select-none items-center gap-1 rounded-control pl-2 pr-1 text-ui-base font-medium transition-colors ${keyboardFocusClass} ${
         active
           ? "bg-selected text-ink"
           : "text-ink-subtle hover:bg-hover hover:text-ink"
@@ -130,7 +130,7 @@ function TerminalTabChip({
           event.stopPropagation();
           onClose(event.detail === 0);
         }}
-        className={`flex shrink-0 items-center justify-center rounded-control text-ink transition-opacity hover:bg-hover hover:text-ink focus-visible:ring-inset ${focusVisibleRing} ${
+        className={`flex shrink-0 items-center justify-center rounded-control text-ink transition-opacity hover:bg-hover hover:text-ink ${keyboardFocusClass} ${
  active
  ? "opacity-100"
  : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"

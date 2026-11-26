@@ -1,7 +1,7 @@
 import { composerFieldClass } from "../../../../shared/ui/inputStyles.ts";
 import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import { NavigationRow } from "../../../../shared/ui/NavigationRow.tsx";
-import { focusVisibleRing } from "../../../../shared/ui/controls.tsx";
+import { keyboardFocusClass } from "../../../../shared/ui/controls.tsx";
 import type { PanelTab } from "../../layout/types.ts";
 import type { PanelTabPresentation, WorkbenchSnapshot } from "../../types.ts";
 /**
@@ -304,7 +304,7 @@ export function TabOverviewPopover({
             <IconButton
               iconSize="compact"
               aria-label={`关闭 ${title}`}
-              className={`flex shrink-0 cursor-pointer items-center justify-center rounded-control text-ink-subtle opacity-70 hover:bg-hover hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-inset ${focusVisibleRing}`}
+              className={`flex shrink-0 cursor-pointer items-center justify-center rounded-control text-ink-subtle opacity-70 hover:bg-hover hover:opacity-100 focus-visible:opacity-100 ${keyboardFocusClass}`}
               onClick={(event) => {
                 if (event.detail === 0) {
                   const row =
@@ -337,7 +337,7 @@ export function TabOverviewPopover({
         data-testid="tab-overview-trigger"
         aria-label="搜索标签页"
         aria-expanded={open}
-        className={`${GHOST_ICON_MD} focus-visible:ring-inset ${focusVisibleRing}`}
+        className={`${GHOST_ICON_MD} ${keyboardFocusClass}`}
         onClick={toggle}
       >
         <ChevronsDownIcon className="ui-icon-16" />

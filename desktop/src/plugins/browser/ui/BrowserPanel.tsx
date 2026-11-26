@@ -839,7 +839,7 @@ function BrowserPanelSession({
             placeholder={
               userCanControl ? "输入 HTTP/HTTPS 地址" : "Agent 正在操作"
             }
-            className={`${fieldSurfaceClass} min-h-7 w-full rounded-pill! px-3 text-xs focus-visible:ring-inset`}
+            className={`${fieldSurfaceClass} min-h-7 w-full rounded-pill! px-3 text-xs`}
           />
         </form>
         <span className="w-8 shrink-0 text-center text-2xs text-ink-muted">

@@ -24,7 +24,7 @@ import { useCaptureHealth } from "./useCaptureHealth.ts";
 
 const inputClass = `${fieldSurfaceClass} px-2 py-1.5 text-ui-sm`;
 const pressFeedback =
-  "[&_button:enabled:active]:translate-y-px [&_button:enabled:active]:brightness-90 [&_summary:active]:brightness-90 [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-offset-2 [&_button:focus-visible]:outline-focus-ring";
+  "[&_button:enabled:active]:translate-y-px [&_button:enabled:active]:brightness-90 [&_summary:active]:brightness-90 [&_button:focus-visible]:keyboard-focus-marker";
 const PROBE_FEEDBACK_TIMEOUT_MS = 15_000;
 
 function focusedSession(snapshot: DiagnosticsSnapshot | null) {
@@ -652,7 +652,7 @@ export function DiagnosticsWindow({
           ) : raw.loading ? (
             <p role="status" className="p-4 text-ui-sm text-ink-soft">正在读取原文…</p>
           ) : (
-            <pre tabIndex={0} aria-label="原文内容" className="min-h-0 flex-1 select-text overflow-auto whitespace-pre-wrap break-all p-4 text-ui-sm focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-inset focus-visible:outline-none">
+            <pre tabIndex={0} aria-label="原文内容" className="min-h-0 flex-1 select-text overflow-auto whitespace-pre-wrap break-all p-4 text-ui-sm focus-visible:keyboard-focus-marker">
               {raw.text}
             </pre>
           )}

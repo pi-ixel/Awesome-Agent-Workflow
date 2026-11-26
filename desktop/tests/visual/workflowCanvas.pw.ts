@@ -1,5 +1,4 @@
 import { expect, test } from "@playwright/test";
-import { color } from "./contrast.ts";
 
 test("工作流面包屑在窄栏切换外观后保留焦点并可键盘返回原筛选结果", async ({
   page,
@@ -107,9 +106,8 @@ test("展开任务阶段和子流程后切换外观，保留焦点并可用 Esca
     await expect(stage).toHaveAttribute("aria-expanded", "true");
     await expect(subflow).toHaveAttribute("aria-expanded", "true");
     await expect(step).toBeFocused();
-    await expect.poll(() => color(step, "outline-color")).toEqual(
-      await color(step, "--color-focus-ring"),
-    );
+    await expect(step).toHaveCSS("outline-style", "none");
+    await expect(step).toHaveCSS("box-shadow", /0px -2px 0px 0px inset/);
   }
   await step.press("Escape");
   await expect(subflow).toHaveAttribute("aria-expanded", "false");

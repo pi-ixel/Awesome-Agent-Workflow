@@ -89,7 +89,8 @@ test("会话设置的呈现方式卡片随双主题和三档字号更新，保�
     await expect(selected).toHaveAttribute("aria-pressed", "true");
     await expect(selected).toBeFocused();
     await expect(selected).toHaveCSS("font-size", `${px}px`);
-    await expect(card).not.toHaveCSS("box-shadow", "none");
+    await expect(card).toHaveCSS("box-shadow", "none");
+    await expect(selected).toHaveCSS("box-shadow", /0px -2px 0px 0px inset/);
     expect(
       await selected.evaluate((el) => el.scrollWidth <= el.clientWidth),
     ).toBe(true);

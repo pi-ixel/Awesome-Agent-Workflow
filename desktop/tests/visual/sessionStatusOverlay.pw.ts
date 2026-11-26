@@ -12,23 +12,29 @@ test("运行中模型可刷新，滚动列表时操作固定，换肤与字号�
     "/tests/visual/sessionStatusOverlayFixture.html?appearance&model-refresh",
   );
   const model = session.getByRole("button", { name: "模型选择" });
-  const menu = session.getByRole("menu", { name: "模型选择" });
-  const refresh = menu.getByRole("menuitem", { name: "刷新模型" });
-  const firstModel = menu.getByRole("menuitemradio", {
+  const menu = session.getByRole("dialog", { name: "模型选择" });
+  const search = menu.getByRole("combobox", { name: "搜索模型" });
+  const refresh = menu.getByRole("button", { name: "刷新模型" });
+  const firstModel = menu.getByRole("option", {
     name: "模型 1",
     exact: true,
   });
-  const list = firstModel.locator("..");
+  const list = menu.getByRole("listbox", { name: "模型选择" });
   const font = page.getByRole("spinbutton", { name: "界面字号" });
   await model.press("Enter");
-  await menu.press("Home");
+  await expect(search).toBeFocused();
+  await search.fill("最新");
+  await expect(menu.getByText("未找到匹配的模型")).toBeVisible();
+  await search.press("Tab");
   await expect(refresh).toBeFocused();
   await refresh.press("Enter");
   await expect(menu).toBeVisible();
   await expect(
-    menu.getByRole("menuitemradio", { name: "最新模型" }),
+    menu.getByRole("option", { name: "最新模型" }),
   ).toBeAttached();
-  await expect(firstModel).toBeChecked();
+  await expect(search).toHaveValue("最新");
+  await search.fill("");
+  await expect(firstModel).toHaveAttribute("aria-selected", "true");
   await list.hover();
   await session.mouse.wheel(0, 70);
   await expect
@@ -38,6 +44,7 @@ test("运行中模型可刷新，滚动列表时操作固定，换肤与字号�
   const refreshBox = (await refresh.boundingBox())!;
   const listBox = (await list.boundingBox())!;
   expect(listBox.y).toBeGreaterThanOrEqual(refreshBox.y + refreshBox.height);
+  await search.press("Tab");
   for (const [theme, px] of [
     ["暖白", 12],
     ["暗夜", 20],
@@ -54,18 +61,46 @@ test("运行中模型可刷新，滚动列表时操作固定，换肤与字号�
           .evaluate((svg) => parseFloat(getComputedStyle(svg).inlineSize)),
       )
       .toBeCloseTo((px * 16) / 14, 1);
-    const initialY = (await refresh.boundingBox())!.y;
-    await refresh.press("End");
-    await expect(
-      menu.getByRole("menuitemradio", { name: "最新模型" }),
-    ).toBeFocused();
-    expect((await refresh.boundingBox())!.y).toBeCloseTo(initialY);
-    await session.keyboard.press("Home");
-    await expect(refresh).toBeFocused();
   }
   await refresh.press("Escape");
   await expect(menu).toBeHidden();
   await expect(model).toBeFocused();
+});
+
+test("双主题下鼠标打开模型菜单无粗框，方向键和 Tab 有焦点标记", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/tests/visual/uiScaleFixture.html");
+  const session = await context.newPage();
+  await session.goto("/tests/visual/sessionStatusOverlayFixture.html?appearance&model-refresh");
+  const model = session.getByRole("button", { name: "模型选择" });
+  const menu = session.getByRole("dialog", { name: "模型选择" });
+  const search = menu.getByRole("combobox", { name: "搜索模型" });
+  const refresh = menu.getByRole("button", { name: "刷新模型" });
+
+  for (const theme of ["暖白", "暗夜"]) {
+    await page.getByRole("button", { name: theme, exact: true }).click();
+    await model.click();
+    await expect(search).toBeFocused();
+    await expect(search).toHaveCSS("box-shadow", "none");
+    await expect(search).toHaveCSS("outline-style", "none");
+    await expect(refresh).toHaveCSS("box-shadow", "none");
+
+    await session.keyboard.type("模型 2");
+    await search.press("ArrowDown");
+    const option = menu.getByRole("option", { name: "模型 2", exact: true });
+    await expect(option).toHaveAttribute("data-search-active", "true");
+    await expect(option).toHaveCSS("box-shadow", /0px -2px 0px 0px inset/);
+    await expect(option).toHaveCSS("outline-style", "none");
+    await search.press("Tab");
+    await expect(refresh).toBeFocused();
+    await expect(refresh).toHaveCSS("box-shadow", /0px -2px 0px 0px inset/);
+    await expect(refresh).toHaveCSS("outline-style", "none");
+    await refresh.press("Escape");
+    await expect(menu).toBeHidden();
+    await expect(model).toBeFocused();
+  }
 });
 
 test("连接失败和会话归档共用提示条，窄窗换肤保留操作焦点", async ({ page, context }) => {
@@ -137,30 +172,32 @@ test("状态卡显示菜单换肤保留活动项，Esc 和选择各自归还焦�
   await expect(capsule).toBeFocused();
 });
 
-test("信息流模型与审批菜单共用键盘选择，外观往返保留菜单焦点与消息草稿", async ({ page, context }) => {
+test("信息流模型搜索与审批菜单支持键盘选择，外观往返保留焦点与消息草稿", async ({ page, context }) => {
   await page.goto("/tests/visual/uiScaleFixture.html");
   const session = await context.newPage();
   await session.setViewportSize({ width: 330, height: 660 });
   await session.goto("/tests/visual/sessionStatusOverlayFixture.html?appearance&composer-selection");
   const composer = session.getByRole("textbox", { name: "消息输入框" });
   const model = session.getByRole("button", { name: "模型选择" });
-  const modelMenu = session.getByRole("menu", { name: "模型选择" });
-  const review = modelMenu.getByRole("menuitemradio", { name: "审核模型" });
+  const modelMenu = session.getByRole("dialog", { name: "模型选择" });
+  const search = modelMenu.getByRole("combobox", { name: "搜索模型" });
+  const review = modelMenu.getByRole("option", { name: "审核模型" });
   await composer.fill("整理发布记录");
   await model.press("Enter");
-  await expect(modelMenu).toBeFocused();
-  await modelMenu.press("End");
-  await expect(review).toBeFocused();
+  await expect(search).toBeFocused();
+  await search.press("ArrowUp");
+  await expect(review).toHaveAttribute("data-search-active", "true");
+  await expect(search).toHaveAttribute("aria-activedescendant", (await review.getAttribute("id"))!);
 
   const font = page.getByRole("spinbutton", { name: "界面字号" });
   for (const [theme, px] of [["暖白", 12], ["暗夜", 20], ["暖白", 14]] as const) {
     await page.getByRole("button", { name: theme, exact: true }).click();
     await font.fill(String(px));
     await font.press("Enter");
-    await expect(review).toBeFocused();
+    await expect(search).toBeFocused();
     await expect(review).toHaveCSS("font-size", `${px}px`);
     await expect(review).not.toHaveCSS("box-shadow", "none");
-    await expect(modelMenu.getByRole("menuitemradio", { name: "快速模型" })).toBeChecked();
+    await expect(modelMenu.getByRole("option", { name: "快速模型" })).toHaveAttribute("aria-selected", "true");
     const base = await color(modelMenu, "background-color");
     const hover = blend(await color(review, "background-color"), base);
     expect(ratio(await color(review, "color"), hover)).toBeGreaterThanOrEqual(4.5);
@@ -171,7 +208,7 @@ test("信息流模型与审批菜单共用键盘选择，外观往返保留菜�
     expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(323);
   }
 
-  await review.press("Enter");
+  await search.press("Enter");
   await expect(modelMenu).toBeHidden();
   await expect(model).toBeFocused();
   await expect(model).toHaveText("审核模型");

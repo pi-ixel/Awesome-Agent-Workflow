@@ -324,7 +324,7 @@ export function createStorageSettings(
                 <IconButton iconSize="compact"
                   type="button"
                   aria-label="关闭提醒"
-                  className="grid shrink-0 place-items-center rounded-control text-ink-mute hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  className="grid shrink-0 place-items-center rounded-control text-ink-mute hover:bg-hover hover:text-ink focus-visible:keyboard-focus-marker"
                   onClick={dismissNotice}
                 >
                   <XIcon aria-hidden="true" className="ui-icon-14" />

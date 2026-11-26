@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { focusVisibleRing } from "../controls.tsx";
+import { keyboardFocusClass } from "../controls.tsx";
 
 interface IndicatorRect {
   readonly left: number;
@@ -158,7 +158,7 @@ export function SegmentedControl<T extends string | number>({
                   }
                 : undefined
             }
-            className={`relative z-10 inline-flex min-h-6 shrink-0 items-center rounded-pill border px-3 text-ui-caption leading-none transition-colors ${focusVisibleRing} ${
+            className={`relative z-10 inline-flex min-h-6 shrink-0 items-center rounded-pill border px-3 text-ui-caption leading-none transition-colors ${keyboardFocusClass} ${
               selected && option.value === warnValue
                 ? showStaticSurface
                   ? "border-warn-line bg-warn-bg/70 font-medium text-warn-ink"

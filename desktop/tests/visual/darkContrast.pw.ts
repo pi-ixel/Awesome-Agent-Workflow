@@ -110,13 +110,12 @@ test("dark theme keeps controls, status and readable content distinct", async ({
   const disabledText = await color(disabled, "color");
   disabledText[3] *= opacity;
   expect(ratio(blend(disabledText, bg), bg)).toBeGreaterThanOrEqual(4.5);
-  await page.keyboard.press("Tab");
-  await page.keyboard.press("Tab");
-  const focused = page.locator(":focus-visible");
-  await expect(focused).toBeVisible();
+  await page.getByRole("button", { name: "本地边框按钮" }).press("Tab");
+  const focused = select;
+  await expect(focused).toBeFocused();
   const ring = await color(focused, "--color-focus-ring");
   expect(await focused.evaluate(el => getComputedStyle(el).boxShadow)).toContain(
-    `rgb(${ring.slice(0, 3).join(", ")}) 0px 0px 0px 2px`,
+    `rgb(${ring.slice(0, 3).join(", ")}) 0px -2px 0px 0px inset`,
   );
   expect(ratio(ring, bg)).toBeGreaterThanOrEqual(3);
 });

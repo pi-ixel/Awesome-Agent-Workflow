@@ -7,7 +7,7 @@
  */
 import { useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { ChevronRightIcon } from "./icons.tsx";
-import { focusVisibleRing } from "./controls.tsx";
+import { keyboardFocusClass } from "./controls.tsx";
 
 export interface BreadcrumbItem {
   readonly key?: string;
@@ -124,7 +124,7 @@ export function Breadcrumb({
                   disabled={item.disabled}
                   data-hint={hint}
                   onClick={item.onSelect}
-                  className={`${base} cursor-pointer transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-ink-subtle focus-visible:ring-inset ${focusVisibleRing}`}
+                  className={`${base} cursor-pointer transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-ink-subtle ${keyboardFocusClass}`}
                 >
                   {content}
                 </button>

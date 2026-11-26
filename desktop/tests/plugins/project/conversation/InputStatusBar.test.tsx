@@ -176,6 +176,7 @@ describe("InputStatusBar", () => {
     ).not.toBeInTheDocument();
 
     const switchModel = vi.fn();
+    const refreshModels = vi.fn(() => Promise.resolve());
     useSessionStore.setState({
       availableModels: [
         { modelId: "glm-5", name: "glm-5", description: null },
@@ -187,19 +188,31 @@ describe("InputStatusBar", () => {
       ],
       currentModelId: "glm-5",
       switchModel,
+      ...{ refreshModels },
     });
     rerender(<InputStatusRight />);
     await userEvent.click(screen.getByRole("button", { name: "模型选择" }));
-    const menu = screen.getByRole("menu", { name: "模型选择" });
+    const menu = screen.getByRole("dialog", { name: "模型选择" });
+    const filter = within(menu).getByRole("combobox", { name: "搜索模型" });
+    expect(filter).toHaveFocus();
     expect(menu).toHaveTextContent("glm-5");
     expect(menu).toHaveTextContent("deepseek-v4");
     expect(menu).not.toHaveTextContent("适合长文本推理");
-    expect(screen.getByRole("menuitemradio", { name: "glm-5" })).toBeChecked();
-    // 选中 deepseek-v4
-    await userEvent.click(
-      screen.getByRole("menuitemradio", { name: "deepseek-v4" }),
-    );
+    expect(within(menu).getByRole("option", { name: "glm-5", selected: true })).toBeVisible();
+    await userEvent.type(filter, "  DEEPSEEK  ");
+    expect(within(menu).getAllByRole("option")).toHaveLength(1);
+    expect(switchModel).not.toHaveBeenCalled();
+    expect(refreshModels).not.toHaveBeenCalled();
+    await userEvent.keyboard("{Enter}");
+    expect(switchModel).not.toHaveBeenCalled();
+    await userEvent.keyboard("{ArrowDown}{Enter}");
     expect(switchModel).toHaveBeenCalledWith("deepseek-v4");
+    expect(menu).not.toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: "模型选择" });
+    expect(trigger).toHaveFocus();
+    await userEvent.click(trigger);
+    expect(screen.getByRole("combobox", { name: "搜索模型" })).toHaveValue("");
+    expect(screen.getAllByRole("option")).toHaveLength(2);
   });
 
   it("没有 chrys 通知时，用 ACP 当前模型 ID 匹配显示名，切换后同步显示", () => {
@@ -238,13 +251,17 @@ describe("InputStatusBar", () => {
     try {
       render(<InputStatusRight />);
       await userEvent.click(screen.getByRole("button", { name: "模型选择" }));
-      const menu = screen.getByRole("menu", { name: "模型选择" });
+      const menu = screen.getByRole("dialog", { name: "模型选择" });
+      const search = within(menu).getByRole("combobox", { name: "搜索模型" });
       expect(menu).toHaveTextContent("暂无可用模型");
-      await userEvent.keyboard("{ArrowDown}{Enter}");
+      await userEvent.type(search, "最新");
+      expect(refreshModels).not.toHaveBeenCalled();
+      await userEvent.keyboard("{Tab}{Enter}");
       expect(refreshModels).toHaveBeenCalledOnce();
       expect(
-        within(menu).getByRole("menuitemradio", { name: "最新模型" }),
+        within(menu).getByRole("option", { name: "最新模型" }),
       ).toBeVisible();
+      expect(search).toHaveValue("最新");
       expect(menu).toBeVisible();
     } finally {
       useSessionStore.setState({ isBound: false });

@@ -8,7 +8,7 @@ import {
 } from "../../../shared/ui/ContextMenu.tsx";
 import { useMenuController } from "../../../shared/ui/useMenuController.ts";
 import { SettingsIcon, SparkleIcon } from "../../../shared/ui/icons.tsx";
-import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
+import { keyboardFocusClass } from "../../../shared/ui/controls.tsx";
 
 export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
   const toggleOverlay = useWorkbenchUiValue((state) => state.toggleOverlay);
@@ -52,7 +52,7 @@ export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
         onClick={(event) => {
           toggleFooterMenu(event.currentTarget);
         }}
-        className={`grid shrink-0 place-items-center rounded-control transition-colors hover:bg-hover focus-visible:ring-inset ${focusVisibleRing}`}
+        className={`grid shrink-0 place-items-center rounded-control transition-colors hover:bg-hover ${keyboardFocusClass}`}
       >
         <span
           aria-hidden="true"

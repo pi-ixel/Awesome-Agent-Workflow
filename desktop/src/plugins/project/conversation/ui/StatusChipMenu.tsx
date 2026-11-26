@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import {
   ContextMenu,
   type ContextMenuItemSpec,
+  type ContextMenuSearch,
   type MenuPlacement,
 } from "../../../../shared/ui/ContextMenu.tsx";
 import { ActionButton } from "../../../../shared/ui/controls.tsx";
@@ -15,6 +16,7 @@ export function StatusChipMenu({
   warning = false,
   entries,
   header,
+  search,
 }: {
   readonly label: ReactNode;
   readonly title: string;
@@ -22,6 +24,7 @@ export function StatusChipMenu({
   readonly warning?: boolean;
   readonly entries: readonly ContextMenuItemSpec[];
   readonly header?: ReactNode;
+  readonly search?: ContextMenuSearch;
 }) {
   const [menu, setMenu] = useState<{
     placement: MenuPlacement;
@@ -31,7 +34,7 @@ export function StatusChipMenu({
     <div className="relative shrink-0">
       <ActionButton
         tone="ghost"
-        aria-haspopup="menu"
+        aria-haspopup={search ? "dialog" : "menu"}
         aria-expanded={menu !== null}
         aria-label={menuLabel}
         data-hint={title}
@@ -57,6 +60,7 @@ export function StatusChipMenu({
         <ContextMenu
           entries={entries}
           header={header}
+          search={search}
           placement={menu.placement}
           label={menuLabel}
           trigger={menu.trigger}

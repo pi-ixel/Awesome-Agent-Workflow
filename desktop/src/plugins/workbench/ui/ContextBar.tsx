@@ -1,5 +1,5 @@
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
-import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
+import { keyboardFocusClass } from "../../../shared/ui/controls.tsx";
 import { useWorkbenchUiValue, useRightPanelValue, readRightPanel, useWorkbenchLayout } from "./bindings/layoutView.ts";
 import { emptyPanel } from "../layout/rightPanelStore.ts";
 import { useContext } from "react";
@@ -16,7 +16,7 @@ import { HeaderIndicators } from "./HeaderIndicators.tsx";
 import { WindowControls } from "./WindowControls.tsx";
 
 const BAR_BUTTON_CLASS =
-  `flex shrink-0 items-center justify-center rounded-control text-ink transition-colors hover:bg-hover hover:text-ink focus-visible:ring-inset ${focusVisibleRing}`;
+  `flex shrink-0 items-center justify-center rounded-control text-ink transition-colors hover:bg-hover hover:text-ink ${keyboardFocusClass}`;
 
 function HelpMenuButton() {
   const items = useWorkbenchEntries("helpItems");

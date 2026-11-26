@@ -55,3 +55,23 @@ it("keeps action buttons, headings, and keyboard focus neutral", () => {
   }
   expect(violations).toEqual([]);
 });
+
+it("keeps full focus rings and outlines out of Desktop controls", () => {
+  const violations: string[] = [];
+  for (const file of readdirSync("src", { recursive: true, encoding: "utf8" })) {
+    if (!/\.(?:tsx?|css)$/.test(file)) continue;
+    const content = readFileSync(join("src", file), "utf8");
+    const focusUtilities = content.matchAll(/(?:focus(?:-visible|-within)?|search-active)[^\s"'`]*:((?:ring|outline)(?:-[\w-]+)?)/g);
+    for (const [match, utility] of focusUtilities) {
+      if (utility !== "outline-none") violations.push(`${file}: ${match}`);
+    }
+    const focusRules = content.matchAll(/:focus(?:-visible|-within)?\b[^{}]*\{([^{}]*)\}/g);
+    for (const [, declarations] of focusRules) {
+      const outline = declarations?.match(/\boutline(?:-width)?\s*:\s*([^;}]+)/)?.[1]?.trim();
+      if (outline && outline !== "none" && outline !== "1px solid Highlight") {
+        violations.push(`${file}: outline: ${outline}`);
+      }
+    }
+  }
+  expect(violations).toEqual([]);
+});

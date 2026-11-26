@@ -1,5 +1,5 @@
 import type { ComponentPropsWithRef } from "react";
-import { focusVisibleRing, rowSelectedClass } from "./controls.tsx";
+import { keyboardFocusClass, rowSelectedClass } from "./controls.tsx";
 
 const layouts = {
   list: "min-h-8 w-full items-center gap-2 px-2 py-1 text-ui-sm",
@@ -34,7 +34,7 @@ export function NavigationRow({
     <button
       {...props}
       type={type}
-      className={`flex min-w-0 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-inset rounded-control ${focusVisibleRing} ${layouts[layout]} ${surface} ${className}`}
+      className={`flex min-w-0 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 rounded-control ${keyboardFocusClass} ${layouts[layout]} ${surface} ${className}`}
     />
   );
 }

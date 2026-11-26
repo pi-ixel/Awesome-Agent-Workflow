@@ -17,6 +17,7 @@ export const visualTokenSources: Readonly<Record<string, string>> = {
   "--v-raised": "--color-raised",
   "--v-base": "--color-base",
   "--v-accent": "--color-accent-ink",
+  "--v-focus": "--color-focus-ring",
   "--v-good": "--color-ok-ink",
   "--v-warn": "--color-warn-ink",
   "--v-bad": "--color-danger-ink",
@@ -150,7 +151,9 @@ v-tabs>.v-bar{display:flex;flex-wrap:wrap;gap:2px;padding:2px;margin-bottom:12px
 v-tabs>.v-bar>button{all:unset;cursor:pointer;padding:3px 12px;border-radius:6px;color:var(--v-mute);font-size:.92em;}
 v-tabs>.v-bar>button:hover{color:var(--v-ink);}
 v-tabs>.v-bar>button[aria-selected=true]{background:var(--v-surface);color:var(--v-ink);box-shadow:0 0 0 1px var(--v-line);}
-v-tabs>.v-bar>button:focus-visible,v-steps>.v-nav>button:focus-visible{outline:2px solid var(--v-accent);outline-offset:1px;}
+v-tabs>.v-bar>button:focus-visible,v-steps>.v-nav>button:focus-visible{box-shadow:inset 0 -2px var(--v-focus);}
+v-tabs>.v-bar>button[aria-selected=true]:focus-visible{box-shadow:inset 0 -2px var(--v-focus),0 0 0 1px var(--v-line);}
+@media (forced-colors:active){v-tabs>.v-bar>button:focus-visible,v-steps>.v-nav>button:focus-visible{outline:1px solid Highlight;outline-offset:-1px;}}
 v-tab,v-step{display:block;}
 v-tab[hidden],v-step[hidden]{display:none;}
 v-steps>.v-nav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;}

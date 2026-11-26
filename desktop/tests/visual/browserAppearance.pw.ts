@@ -53,7 +53,10 @@ test("浏览器地址、视口尺寸和页面输入使用当前主题并保留�
     await expect(input).toBeFocused();
     await expect(address).toBeFocused();
     await expect(width).toBeFocused();
-    await expect(width).not.toHaveCSS("box-shadow", "none");
+    for (const field of [address, input, width]) {
+      await expect(field).toHaveCSS("box-shadow", "none");
+      await expect(field).toHaveCSS("outline-style", "none");
+    }
     await expect(width).toHaveValue("1024");
     await expect(input).toHaveValue("讨论记录");
     await expect(address).toHaveValue("https://example.test/draft");
