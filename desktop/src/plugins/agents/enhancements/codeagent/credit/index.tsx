@@ -5,7 +5,7 @@ import { useShallow } from "zustand/react/shallow";
 import { IconButton } from "../../../../../shared/ui/IconButton.tsx";
 import {
   ActionButton,
-  focusVisibleRing,
+  keyboardFocusClass,
   Listbox,
 } from "../../../../../shared/ui/controls.tsx";
 import { SegmentedControl } from "../../../../../shared/ui/controls/SegmentedControl.tsx";
@@ -190,7 +190,7 @@ export function apply(ctx: Context): void {
           aria-controls={id}
           popoverTarget={id}
           data-hint="CodeAgent 额度"
-          className={`grid shrink-0 place-items-center rounded-control text-ink-mute transition-colors hover:bg-hover hover:text-ink ${focusVisibleRing}`}
+          className={`grid shrink-0 place-items-center rounded-control text-ink-mute transition-colors hover:bg-hover hover:text-ink ${keyboardFocusClass}`}
         >
           <CreditIcon className="ui-icon-18" ratio={ratio} />
         </IconButton>

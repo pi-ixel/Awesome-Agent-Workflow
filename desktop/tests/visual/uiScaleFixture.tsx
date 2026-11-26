@@ -6,7 +6,7 @@ import { MarkdownAppearance } from "../../src/shared/ui/markdown/theme.ts";
 import { observeAppearance } from "../../src/shared/ui/observeAppearance.ts";
 import { FileDisplayIcon } from "../../src/shared/ui/file-icons/fileDisplay.tsx";
 import { ICON_VARIANTS } from "../../src/shared/ui/file-icons/fileDisplayHelpers.ts";
-import { embeddedFieldClass, fieldSurfaceClass, settingsInputClass, settingsNumberInputClass, settingsTextareaClass } from "../../src/shared/ui/inputStyles.ts";
+import { composerFieldClass, fieldSurfaceClass, settingsInputClass, settingsNumberInputClass, settingsTextareaClass } from "../../src/shared/ui/inputStyles.ts";
 import { SelectionFixture } from "./selectionFixture.tsx";
 import { FileTreeRow } from "../../src/plugins/documents/ui/file-tree/FileTreeRow.tsx";
 import {
@@ -232,7 +232,7 @@ createRoot(document.querySelector("#root")!).render(
           <input aria-label="普通文本" className={settingsInputClass} defaultValue="草稿" />
           <input aria-label="数值" type="number" className={settingsNumberInputClass} defaultValue="12" />
           <textarea aria-label="多行文本" className={settingsTextareaClass} defaultValue="第一行" />
-          <input aria-label="内嵌查找" className={embeddedFieldClass} defaultValue="词条" />
+          <input aria-label="内嵌查找" className={composerFieldClass} defaultValue="词条" />
           <input aria-label="行内标题" className={`${fieldSurfaceClass} text-ui-base`} defaultValue="标题" />
           <input aria-label="只读值" className={settingsInputClass} value="可复制" readOnly />
           <input aria-label="禁用值" className={settingsInputClass} disabled />

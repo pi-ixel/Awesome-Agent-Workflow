@@ -20,7 +20,7 @@ export function SettingsPreviewPicker<Value extends string>({
       {choices.map((choice) => (
         <div
           key={choice.value}
-          className={`relative row-span-2 grid min-w-0 grid-rows-subgrid gap-y-3 rounded-popover border p-3 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus-ring ${
+          className={`relative row-span-2 grid min-w-0 grid-rows-subgrid gap-y-3 rounded-popover border p-3 ${
             value === choice.value
               ? "border-info/70 bg-info/5"
               : "border-line hover:bg-hover"
@@ -31,7 +31,7 @@ export function SettingsPreviewPicker<Value extends string>({
             type="button"
             aria-pressed={value === choice.value}
             onClick={() => onChange(choice.value)}
-            className="flex items-center justify-between gap-2 px-1 text-left text-ui-base leading-snug font-semibold text-ink focus-visible:ring-0! after:absolute after:inset-0"
+            className="flex items-center justify-between gap-2 px-1 text-left text-ui-base leading-snug font-semibold text-ink after:absolute after:inset-0"
           >
             {choice.label}
             <CheckIcon

@@ -10,7 +10,7 @@ import { UiIcon } from "./UiIcon.tsx";
 import type { ReactNode } from "react";
 import { Disclosure } from "./Disclosure.tsx";
 import { XIcon } from "./icons.tsx";
-import { focusVisibleRing } from "./controls.tsx";
+import { keyboardFocusClass } from "./controls.tsx";
 
 export type CalloutTone = "danger" | "warn" | "info" | "ok" | "neutral";
 
@@ -129,7 +129,7 @@ export function Callout({
           aria-label={dismissLabel}
           data-hint={dismissLabel}
           onClick={onDismiss}
-          className={`-mr-1 flex shrink-0 items-center justify-center rounded-control text-ink-mute hover:bg-raised/70 hover:text-ink ${focusVisibleRing}`}
+          className={`-mr-1 flex shrink-0 items-center justify-center rounded-control text-ink-mute hover:bg-raised/70 hover:text-ink ${keyboardFocusClass}`}
         >
           <XIcon className="ui-icon-14" />
         </IconButton>

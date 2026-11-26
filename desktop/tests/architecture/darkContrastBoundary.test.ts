@@ -86,7 +86,7 @@ describe("dark theme contrast boundary", () => {
       '[class~="border-line"]:not(:focus-visible) { border-color: var(--color-control-line); }',
     );
     expect(readFileSync("src/shared/ui/controls.tsx", "utf8")).toContain(
-      "focus-visible:ring-focus-ring",
+      "focus-visible:keyboard-focus-marker",
     );
   });
 });

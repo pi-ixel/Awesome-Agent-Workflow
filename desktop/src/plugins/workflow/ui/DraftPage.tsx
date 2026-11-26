@@ -590,7 +590,7 @@ export function DraftPage({
             </div>
           )}
           <div className="shrink-0 border-t border-line p-2.5">
-            <div className="flex items-end gap-2 rounded-control border border-line bg-surface px-2.5 py-2 focus-within:border-line-strong">
+            <div className="flex items-end gap-2 rounded-control border border-line bg-surface px-2.5 py-2">
               <textarea
                 className={`${composerFieldClass} max-h-28 min-h-9 flex-1 resize-none text-ui-sm leading-5 outline-none focus:outline-none`}
                 aria-label="向 AI 补充修改要求"

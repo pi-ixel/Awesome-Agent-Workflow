@@ -3,7 +3,7 @@ import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { useEffect, useId, useState, type FormEvent } from "react";
 import { useStore } from "zustand";
 import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
-import { ActionButton, Checkbox, focusVisibleRing, Listbox } from "../../../shared/ui/controls.tsx";
+import { ActionButton, Checkbox, keyboardFocusClass, Listbox } from "../../../shared/ui/controls.tsx";
 import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { PageHeader } from "../../../shared/ui/PageHeader.tsx";
 import { ClockIcon, PlusIcon, XIcon, ChevronDownIcon } from "../../../shared/ui/icons.tsx";
@@ -230,7 +230,7 @@ function TaskEditor({ task, scheduler, project, agents }: {
         <header className="flex shrink-0 items-center justify-between px-6 pt-5 pb-3">
           <h2 className="text-ui-lg font-semibold">{label}</h2>
           <IconButton iconSize="dialog" type="button" aria-label="关闭" disabled={saving} onClick={close}
-            className={`flex items-center justify-center rounded-pill text-ink-mute hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}>
+            className={`flex items-center justify-center rounded-pill text-ink-mute hover:bg-surface-hover hover:text-ink ${keyboardFocusClass}`}>
             <XIcon className="ui-icon-16" />
           </IconButton>
         </header>

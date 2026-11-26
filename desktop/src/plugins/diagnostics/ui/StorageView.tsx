@@ -505,7 +505,7 @@ function StorageCategoryHelp({
         {...hint}
         aria-label={`${label}说明`}
         aria-describedby={descriptionId}
-        className="inline-flex shrink-0 items-center justify-center rounded-control text-ink-mute hover:bg-surface-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="inline-flex shrink-0 items-center justify-center rounded-control text-ink-mute hover:bg-surface-hover hover:text-ink focus-visible:keyboard-focus-marker"
       >
         <CircleHelpIcon aria-hidden="true" className="ui-icon-14" />
       </IconButton>

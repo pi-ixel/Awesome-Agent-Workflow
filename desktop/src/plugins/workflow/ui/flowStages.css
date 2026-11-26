@@ -39,7 +39,6 @@ html.theme-warm .wf-flow, html.theme-warm .wf-fx, html.theme-warm .wf-strip {
 /* 阶段块：一层的提纲，比步骤卡更「实」——抬高一档的底色、更粗的边、投影、圆形序号 */
 .wf-stage { position:relative; display:flex; align-items:flex-start; gap:12px; min-width:0; padding:13px 14px 14px; border:1px solid var(--color-line-strong); border-radius:var(--radius-popover); background:var(--wf-stage-bg); color:var(--color-ink); text-align:left; cursor:pointer; box-shadow:var(--wf-stage-lift); transition:border-color .15s ease, box-shadow .15s ease; }
 .wf-stage:hover { border-color:var(--color-ink-mute); }
-.wf-stage:focus-visible { outline:2px solid var(--color-focus-ring); outline-offset:2px; }
 /* 展开中：一圈实色描边，不用发虚的光晕 */
 .wf-stage.open { border-color:var(--color-accent-ink); box-shadow:0 0 0 1px var(--color-accent-ink), var(--wf-stage-lift); }
 /* 阶段之间的连线：挂在后一个阶段前面，被推开时跟着拉长（--wf-reach），始终连着前一个阶段 */
@@ -101,7 +100,6 @@ html.theme-warm .wf-flow, html.theme-warm .wf-fx, html.theme-warm .wf-strip {
 .wf-step.is-flow.open { border-style:solid; border-color:var(--color-info-line); box-shadow:0 0 0 3px var(--color-info-bg); }
 .wf-step-main { flex:1; display:flex; flex-direction:column; gap:2px; min-width:0; padding:9px 12px 10px; border:0; border-radius:inherit; background:transparent; color:inherit; font:inherit; text-align:left; }
 button.wf-step-main { cursor:pointer; }
-button.wf-step-main:focus-visible { outline:2px solid var(--color-focus-ring); outline-offset:2px; }
 .wf-step.is-flow .wf-step-main { padding-right:34px; }
 .wf-step.has-session .wf-step-main { padding-right:40px; }
 .wf-step-row { display:flex; align-items:center; gap:8px; min-width:0; }
@@ -158,7 +156,6 @@ button.wf-step-main:focus-visible { outline:2px solid var(--color-focus-ring); o
 @keyframes wf-strip-in { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
 .wf-strip-open { flex:none; display:inline-flex; align-items:center; gap:5px; height:26px; padding:0 8px; border:0; border-radius:var(--radius-control); background:transparent; color:var(--color-ink-soft); font:inherit; cursor:pointer; }
 .wf-strip-open:hover { background:color-mix(in srgb, var(--color-ink) 7%, transparent); color:var(--color-ink); }
-.wf-strip-open:focus-visible { outline:2px solid var(--color-accent-ink); outline-offset:1px; }
 /* 窄输入框：先收起运行标题，再把「查看运行」收成图标 */
 @container composer (max-width: 520px) { .wf-strip-title { display:none; } }
 @container composer (max-width: 400px) { .wf-strip-open span { display:none; } .wf-strip-step { max-width:none; flex:1; } }

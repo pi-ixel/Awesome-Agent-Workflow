@@ -14,6 +14,16 @@
   --shadow-floating: var(--shadow-md);
 }
 
+@utility keyboard-focus-marker {
+  @apply inset-shadow-[0_-2px_var(--keyboard-focus-color,var(--color-focus-ring))];
+  outline: none;
+
+  @media (forced-colors: active) {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
+}
+
 [data-icon-hover-button][data-icon-button-size] {
   --icon-button-box: 28px;
   --icon-button-glyph: 16;

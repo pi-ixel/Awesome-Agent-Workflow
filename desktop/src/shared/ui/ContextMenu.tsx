@@ -22,8 +22,8 @@
  *   SubTrigger 尾 ChevronRightIcon ml-auto size-4 text-foreground-subtle）。
  */
 import {
-  Fragment,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -33,6 +33,7 @@ import {
 import { createPortal } from "react-dom";
 
 import { CheckIcon } from "./icons.tsx";
+import { PageFilterSearch } from "./PageFilterControls.tsx";
 
 export interface ContextMenuItemSpec {
   id: string;
@@ -53,6 +54,13 @@ export interface ContextMenuItemSpec {
 }
 
 export type ContextMenuEntry = ContextMenuItemSpec | { type: "separator" };
+
+export interface ContextMenuSearch {
+  readonly label: string;
+  readonly emptyLabel: string;
+  readonly noMatchesLabel: string;
+  readonly action?: ReactNode;
+}
 
 export interface MenuPlacement {
   x: number;
@@ -88,6 +96,7 @@ export function ContextMenu({
   trigger,
   variant = "menu",
   header,
+  search,
 }: {
   readonly entries: readonly ContextMenuEntry[];
   readonly placement: MenuPlacement;
@@ -100,9 +109,37 @@ export function ContextMenu({
   readonly trigger?: HTMLElement;
   readonly variant?: "menu" | "selection";
   readonly header?: ReactNode;
+  readonly search?: ContextMenuSearch;
 }) {
   const isSelection = variant === "selection";
+  const isSearchable = search !== undefined;
+  const hasHeader = Boolean(header || search);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
+  const [query, setQuery] = useState("");
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const term = query.trim().toLowerCase();
+  const visibleEntries =
+    search && term
+      ? entries.filter(
+          (entry) =>
+            !("type" in entry) && entry.label.toLowerCase().includes(term),
+        )
+      : entries;
+  const resultOptions = search
+    ? visibleEntries.flatMap((entry, index) =>
+        "type" in entry || entry.disabled ? [] : [{ entry, index }],
+      )
+    : [];
+  const highlightedIndex = resultOptions.findIndex(
+    ({ entry }) => entry.id === highlightedId,
+  );
+  const highlighted = resultOptions[highlightedIndex];
+  const highlightedDomId = highlighted
+    ? `${listId}-${highlighted.index}`
+    : undefined;
   // 首帧以 visibility:hidden 渲染于初始坐标，量得实际宽高后再定稿
   const [pos, setPos] = useState<{ x: number; y: number; side: string }>(
     () => ({
@@ -183,8 +220,24 @@ export function ContextMenu({
   }, [isSelection, placement, trigger]);
 
   useLayoutEffect(() => {
-    if (measured && !closing) panelRef.current?.focus({ preventScroll: true });
-  }, [closing, measured]);
+    if (measured && !closing) {
+      (isSearchable ? searchRef.current : panelRef.current)?.focus({
+        preventScroll: true,
+      });
+    }
+  }, [closing, isSearchable, measured]);
+
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    const option =
+      highlightedDomId && document.getElementById(highlightedDomId);
+    if (!list || !option) return;
+    const bounds = list.getBoundingClientRect();
+    const row = option.getBoundingClientRect();
+    if (row.top < bounds.top) list.scrollTop += row.top - bounds.top;
+    else if (row.bottom > bounds.bottom)
+      list.scrollTop += row.bottom - bounds.bottom;
+  }, [highlightedDomId]);
 
   useEffect(() => {
     function handlePointerDown(event: PointerEvent): void {
@@ -237,9 +290,43 @@ export function ContextMenu({
       return;
     }
     if (event.key === "Tab") {
+      if (
+        search?.action &&
+        event.target === searchRef.current &&
+        !event.shiftKey
+      )
+        return;
+      if (search && event.target !== searchRef.current && event.shiftKey) {
+        event.preventDefault();
+        searchRef.current?.focus();
+        return;
+      }
       // Tab 不选中，只关闭（ZCode Menu 的 roving 循环不外溢）
       event.preventDefault();
       onDismiss();
+      return;
+    }
+    if (search) {
+      if (event.key === "Enter" && event.target === searchRef.current) {
+        event.preventDefault();
+        if (highlighted) {
+          highlighted.entry.onSelect();
+          onDismiss();
+        }
+      } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        if (!resultOptions.length) return;
+        const delta = event.key === "ArrowDown" ? 1 : -1;
+        const next =
+          highlightedIndex < 0
+            ? delta === 1
+              ? 0
+              : resultOptions.length - 1
+            : (highlightedIndex + delta + resultOptions.length) %
+              resultOptions.length;
+        setHighlightedId(resultOptions[next]!.entry.id);
+        searchRef.current?.focus({ preventScroll: true });
+      }
       return;
     }
     if (
@@ -274,12 +361,98 @@ export function ContextMenu({
     items[nextIndex]?.focus();
   }
 
-  const MenuItems = header ? "div" : Fragment;
+  const renderedEntries = visibleEntries.map((entry, index) =>
+    "type" in entry ? (
+      <div
+        key={`separator-${index}`}
+        role="separator"
+        className="-mx-1 my-1 h-px bg-border"
+      />
+    ) : (
+      <button
+        key={entry.id}
+        type="button"
+        id={search ? `${listId}-${index}` : undefined}
+        role={
+          search
+            ? "option"
+            : entry.checked !== undefined
+              ? "menuitemcheckbox"
+              : entry.radio
+                ? "menuitemradio"
+                : "menuitem"
+        }
+        aria-checked={
+          search
+            ? undefined
+            : (entry.checked ?? (entry.radio ? entry.selected : undefined))
+        }
+        aria-selected={search ? Boolean(entry.selected) : undefined}
+        data-search-active={
+          search && entry.id === highlighted?.entry.id ? "true" : undefined
+        }
+        aria-label={entry.description ? entry.label : undefined}
+        aria-description={entry.description}
+        tabIndex={isSelection || isSearchable ? -1 : undefined}
+        disabled={entry.disabled}
+        onClick={() => {
+          entry.onSelect();
+          onDismiss();
+        }}
+        className={`relative flex min-h-7 w-full shrink-0 cursor-default items-center gap-2 rounded-control text-left text-ui-base/relaxed text-ink outline-none select-none hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:text-ink disabled:pointer-events-none disabled:text-ink-subtlest [&_svg]:pointer-events-none [&_svg]:ui-icon-16 [&_svg]:shrink-0 ${
+          // radio 行对照 ZCode DropdownMenuRadioItem（dropdown-menu.tsx:149）：
+          // py-1.5 pr-8 pl-2，右侧留出指示位；普通项维持 ContextMenuItem 的 px-2 py-1
+          entry.radio || entry.checked !== undefined
+            ? "py-1.5 pr-8 pl-2"
+            : "px-2 py-1"
+        } ${
+          entry.danger
+            ? // destructive 对照 ZCode data-[variant=destructive]（context-menu.tsx:52）：
+              // 常态实字色，实底高亮 + 白字（text-destructive-foreground 同值）
+              "text-danger hover:bg-danger hover:text-danger-contrast focus-visible:bg-danger focus-visible:text-danger-contrast"
+            : entry.warning
+              ? "text-warn-ink"
+              : ""
+        } ${isSelection ? "min-h-8 items-start focus-visible:keyboard-focus-marker" : ""} ${search ? "data-[search-active=true]:bg-menu-hover data-[search-active=true]:keyboard-focus-marker" : ""}`}
+      >
+        {entry.icon}
+        {entry.description ? (
+          <span className="min-w-0 flex-1 break-words">
+            <span className="block">{entry.label}</span>
+            <span className="mt-0.5 block text-ui-sm leading-snug text-ink-soft">
+              {entry.description}
+            </span>
+          </span>
+        ) : (
+          <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+            {entry.label}
+          </span>
+        )}
+        {entry.shortcut !== undefined ? (
+          <span className="ml-auto text-ui-xs tracking-widest text-ink-subtlest">
+            {entry.shortcut}
+          </span>
+        ) : null}
+        {entry.radio || entry.checked !== undefined ? (
+          // 选中指示：绝对定位右缘的 CheckIcon（ZCode RadioItem
+          // indicator span right-2 + CheckIcon size-4 text-foreground-subtle）
+          <span
+            aria-hidden={true}
+            className="pointer-events-none absolute right-2 flex items-center justify-center"
+          >
+            {(entry.checked ?? entry.selected) ? (
+              <CheckIcon className="ui-icon-16 text-ink-subtle" />
+            ) : null}
+          </span>
+        ) : null}
+      </button>
+    ),
+  );
 
   return createPortal(
     <div
       ref={panelRef}
-      role="menu"
+      role={search ? "dialog" : "menu"}
       aria-label={label}
       aria-hidden={closing || undefined}
       inert={closing}
@@ -292,7 +465,7 @@ export function ContextMenu({
         visibility: measured ? "visible" : "hidden",
       }}
       className={`z-[60] flex min-w-[min(11rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] flex-col gap-0.5 overscroll-contain rounded-popover border border-border bg-menu p-1 text-ink shadow-floating outline-none ${
-        header ? "overflow-hidden" : "overflow-y-auto"
+        hasHeader ? "overflow-hidden" : "overflow-y-auto"
       } ${
         isSelection
           ? "w-64 max-h-[min(13rem,calc(100dvh-1rem))]"
@@ -307,96 +480,54 @@ export function ContextMenu({
               : "context-menu-in-bottom"
       }`}
     >
-      {header && (
-        <div className="shrink-0 border-b border-border">{header}</div>
+      {hasHeader && (
+        <div className="shrink-0 border-b border-border">
+          {search && (
+            <div className="flex items-center gap-1 p-1">
+              <PageFilterSearch
+                label={search.label}
+                placeholder={`${search.label}…`}
+                value={query}
+                onChange={(value) => {
+                  setQuery(value);
+                  setHighlightedId(null);
+                  if (listRef.current) listRef.current.scrollTop = 0;
+                }}
+                className="flex-1"
+                compact
+                inputProps={{
+                  ref: searchRef,
+                  role: "combobox",
+                  "aria-autocomplete": "list",
+                  "aria-expanded": true,
+                  "aria-controls": listId,
+                  "aria-activedescendant": highlightedDomId,
+                }}
+              />
+              {search.action}
+            </div>
+          )}
+          {header}
+        </div>
       )}
-      <MenuItems
-        {...(header
-          ? {
-              className:
-                "flex min-h-0 flex-col gap-0.5 overflow-y-auto overscroll-contain",
-            }
-          : {})}
-      >
-        {entries.map((entry, index) =>
-          "type" in entry ? (
-            <div
-              key={`separator-${index}`}
-              role="separator"
-              className="-mx-1 my-1 h-px bg-border"
-            />
-          ) : (
-            <button
-              key={entry.id}
-              type="button"
-              role={
-                entry.checked !== undefined
-                  ? "menuitemcheckbox"
-                  : entry.radio
-                    ? "menuitemradio"
-                    : "menuitem"
-              }
-              aria-checked={
-                entry.checked ?? (entry.radio ? entry.selected : undefined)
-              }
-              aria-label={entry.description ? entry.label : undefined}
-              aria-description={entry.description}
-              tabIndex={isSelection ? -1 : undefined}
-              disabled={entry.disabled}
-              onClick={() => {
-                entry.onSelect();
-                onDismiss();
-              }}
-              className={`relative flex min-h-7 w-full shrink-0 cursor-default items-center gap-2 rounded-control text-left text-ui-base/relaxed text-ink outline-none select-none hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:text-ink disabled:pointer-events-none disabled:text-ink-subtlest [&_svg]:pointer-events-none [&_svg]:ui-icon-16 [&_svg]:shrink-0 ${
-                // radio 行对照 ZCode DropdownMenuRadioItem（dropdown-menu.tsx:149）：
-                // py-1.5 pr-8 pl-2，右侧留出指示位；普通项维持 ContextMenuItem 的 px-2 py-1
-                entry.radio || entry.checked !== undefined
-                  ? "py-1.5 pr-8 pl-2"
-                  : "px-2 py-1"
-              } ${
-                entry.danger
-                  ? // destructive 对照 ZCode data-[variant=destructive]（context-menu.tsx:52）：
-                    // 常态实字色，实底高亮 + 白字（text-destructive-foreground 同值）
-                    "text-danger hover:bg-danger hover:text-danger-contrast focus-visible:bg-danger focus-visible:text-danger-contrast"
-                  : entry.warning
-                    ? "text-warn-ink"
-                    : ""
-              } ${isSelection ? "min-h-8 items-start focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring" : ""}`}
-            >
-              {entry.icon}
-              {entry.description ? (
-                <span className="min-w-0 flex-1 break-words">
-                  <span className="block">{entry.label}</span>
-                  <span className="mt-0.5 block text-ui-sm leading-snug text-ink-soft">
-                    {entry.description}
-                  </span>
-                </span>
-              ) : (
-                <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
-                  {entry.label}
-                </span>
-              )}
-              {entry.shortcut !== undefined ? (
-                <span className="ml-auto text-ui-xs tracking-widest text-ink-subtlest">
-                  {entry.shortcut}
-                </span>
-              ) : null}
-              {entry.radio || entry.checked !== undefined ? (
-                // 选中指示：绝对定位右缘的 CheckIcon（ZCode RadioItem
-                // indicator span right-2 + CheckIcon size-4 text-foreground-subtle）
-                <span
-                  aria-hidden={true}
-                  className="pointer-events-none absolute right-2 flex items-center justify-center"
-                >
-                  {(entry.checked ?? entry.selected) ? (
-                    <CheckIcon className="ui-icon-16 text-ink-subtle" />
-                  ) : null}
-                </span>
-              ) : null}
-            </button>
-          ),
-        )}
-      </MenuItems>
+      {hasHeader ? (
+        <div
+          className="flex min-h-0 flex-col gap-0.5 overflow-y-auto overscroll-contain"
+          ref={search ? listRef : undefined}
+          id={search ? listId : undefined}
+          role={search ? "listbox" : undefined}
+          aria-label={search ? label : undefined}
+        >
+          {renderedEntries}
+        </div>
+      ) : (
+        renderedEntries
+      )}
+      {search && visibleEntries.length === 0 && (
+        <p role="status" className="px-2 py-2 text-ui-sm text-ink-mute">
+          {entries.length ? search.noMatchesLabel : search.emptyLabel}
+        </p>
+      )}
     </div>,
     portalContainer,
   );

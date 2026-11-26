@@ -78,7 +78,7 @@ import {
 
 import { sessionPinKey } from "../sessions/sessionPin.ts";
 import { SESSION_LIST_PAGE_SIZE } from "./sidebarState.ts";
-import { Badge, StatusDot, focusVisibleRing, rowSelectedClass } from "../../../shared/ui/controls.tsx";
+import { Badge, StatusDot, keyboardFocusClass, rowSelectedClass } from "../../../shared/ui/controls.tsx";
 import { SessionRunningIndicator } from "./SessionRunningIndicator.tsx";
 import {
   ContextMenu,
@@ -219,10 +219,10 @@ function isContextMenuKey(event: { key: string; shiftKey: boolean }): boolean {
 
 const projectRowActionClass =
   "rounded-control text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink " +
-  focusVisibleRing;
+  keyboardFocusClass;
 const sessionRowActionReveal =
   "opacity-0 group-hover/session-row:opacity-100 group-has-[:focus-visible]/session-row:opacity-100 [@media(hover:none)]:opacity-100";
-const sessionRowActionClass = `shrink-0 rounded-control transition-opacity hover:bg-surface-hover ${sessionRowActionReveal} ${focusVisibleRing}`;
+const sessionRowActionClass = `shrink-0 rounded-control transition-opacity hover:bg-surface-hover ${sessionRowActionReveal} ${keyboardFocusClass}`;
 const sessionRowFrameClass =
   "group/session-row relative flex min-w-0 items-center gap-1 rounded-control pr-1 transition-colors";
 const sessionRowStatusClass =
@@ -362,7 +362,6 @@ function ProjectNodeRow({
         id: "remove",
         label: "从列表移除",
         icon: <XIcon className="ui-icon-16" />,
-        danger: true,
         disabled: !navigation || removing,
         onSelect: () => setConfirmRemoval(true),
       },
@@ -1103,7 +1102,7 @@ function SessionGroupNode({
             aria-expanded={expanded}
             aria-label={`${expanded ? "收起" : "展开"} ${group.title}`}
             onClick={() => setExpanded(!expanded)}
-            className={`ml-1 flex shrink-0 cursor-pointer items-center justify-center rounded-control text-ink-mute hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
+            className={`ml-1 flex shrink-0 cursor-pointer items-center justify-center rounded-control text-ink-mute hover:bg-surface-hover hover:text-ink ${keyboardFocusClass}`}
           >
             {chevron}
           </IconButton>
@@ -1668,7 +1667,7 @@ function SessionsView({ menu }: { readonly menu: SidebarMenuApi }) {
 /**
  * 树头部/分组头的小方钮（视角菜单、【+】动作位共用）。
  */
-const TREE_HEADER_BUTTON_CLASS = `flex shrink-0 items-center justify-center rounded-control text-ink-subtle transition-colors hover:bg-hover hover:text-ink ${focusVisibleRing}`;
+const TREE_HEADER_BUTTON_CLASS = `flex shrink-0 items-center justify-center rounded-control text-ink-subtle transition-colors hover:bg-hover hover:text-ink ${keyboardFocusClass}`;
 
 /**
  * 最近会话视角的列表头：标题 + 视角切换钮。项目视角不渲染本行（切换钮

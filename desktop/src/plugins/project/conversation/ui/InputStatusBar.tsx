@@ -343,25 +343,17 @@ export function ModelTag(): React.JSX.Element {
           : `模型：${label ?? "—"}（仅本会话生效）`
       }
       menuLabel="模型选择"
+      search={{
+        label: "搜索模型",
+        emptyLabel: "暂无可用模型",
+        noMatchesLabel: "未找到匹配的模型",
+        action: isBound ? <RefreshButton label="刷新模型" onRefresh={refreshModels} /> : undefined,
+      }}
       header={
-        isBound && (
-          <>
-            <div className="flex items-center justify-between gap-2 pb-0.5 pl-2">
-              <span className="text-ui-sm text-ink-mute">
-                {availableModels.length ? "可用模型" : "暂无可用模型"}
-              </span>
-              <RefreshButton
-                role="menuitem"
-                label="刷新模型"
-                onRefresh={refreshModels}
-              />
-            </div>
-            {modelSelectionError && (
-              <p role="status" className="px-2 pb-1 text-ui-sm text-danger-ink">
-                模型切换失败：{modelSelectionError}
-              </p>
-            )}
-          </>
+        modelSelectionError && (
+          <p role="status" className="px-2 pb-1 text-ui-sm text-danger-ink">
+            模型切换失败：{modelSelectionError}
+          </p>
         )
       }
       label={

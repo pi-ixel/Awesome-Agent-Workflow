@@ -86,6 +86,21 @@ test("项目树在切换外观时保留展开、当前会话和行内操作的�
   await actions.press("Enter");
   const projectMenu = sidebar.getByRole("menu", { name: "项目菜单" });
   await expect(projectMenu).toBeFocused();
+  const pin = projectMenu.getByRole("menuitem", { name: "置顶", exact: true });
+  const remove = projectMenu.getByRole("menuitem", { name: "从列表移除" });
+  for (const theme of ["暖白", "暗夜", "暖白"]) {
+    await page.getByRole("button", { name: theme, exact: true }).click();
+    await pin.hover();
+    expect(await color(remove, "color")).toEqual(await color(pin, "color"));
+    await remove.hover();
+    expect(await color(remove, "color")).toEqual(await color(pin, "color"));
+    expect(await color(remove, "background-color")).toEqual(
+      await color(remove, "--color-menu-hover"),
+    );
+  }
+  await projectMenu.press("End");
+  await expect(remove).toBeFocused();
+  expect(await color(remove, "color")).toEqual(await color(pin, "color"));
   await projectMenu.press("Escape");
   await expect(actions).toBeFocused();
   await project.press("Enter");

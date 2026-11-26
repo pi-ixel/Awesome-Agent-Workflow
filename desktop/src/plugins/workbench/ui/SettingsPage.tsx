@@ -12,7 +12,7 @@ import { useStore } from "zustand";
 import { nativeConfigurationStatus } from "../../host/service.ts";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
 import { translateWorkbenchSettings } from "./settingsText.ts";
-import { focusVisibleRing } from "../../../shared/ui/controls";
+import { keyboardFocusClass } from "../../../shared/ui/controls";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import {
   useWorkbenchAppearance,
@@ -191,7 +191,7 @@ function SettingsContent({
           aria-label="关闭设置"
           data-hint="关闭设置"
           onClick={() => readWorkbenchUi(workbenchLayout).closeOverlay()}
-          className={`flex items-center justify-center rounded-control hover:bg-surface-hover ${focusVisibleRing}`}
+          className={`flex items-center justify-center rounded-control hover:bg-surface-hover ${keyboardFocusClass}`}
         >
           <XIcon className="ui-icon-16" strokeWidth={1.5} />
         </IconButton>

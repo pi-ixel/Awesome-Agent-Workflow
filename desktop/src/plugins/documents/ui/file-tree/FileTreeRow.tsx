@@ -1,5 +1,5 @@
 import { treeRowEnterClass } from "../../../../shared/ui/TreeMotion.tsx";
-import { focusVisibleRing, rowSelectedClass } from "../../../../shared/ui/controls.tsx";
+import { keyboardFocusClass, rowSelectedClass } from "../../../../shared/ui/controls.tsx";
 /**
  * 文件树单行渲染（对齐 ZCode WorkspaceFileTreeRowView.tsx:210-333；token
  * 换算：foreground→ink、subtlest→ink-subtlest，text-ui-base 两边同名同源
@@ -113,9 +113,9 @@ export function FileTreeRow({
         "relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded-control border pr-2 text-left text-ui-base leading-tight text-ink outline-none transition-[background-color,border-color,box-shadow]",
         isDeleted ? "cursor-default" : "cursor-pointer",
         "pl-[calc(var(--workspace-file-tree-depth)*0.75rem+0.5rem)]",
-        "border-transparent focus-visible:ring-inset",
+        "border-transparent",
         selected ? rowSelectedClass : "hover:bg-surface-hover",
-        focusVisibleRing,
+        keyboardFocusClass,
       ].join(" ")}
       onClick={handleRowClick}
       onContextMenu={(event) => {

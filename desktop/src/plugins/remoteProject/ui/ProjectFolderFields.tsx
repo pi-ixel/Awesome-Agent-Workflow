@@ -33,7 +33,7 @@ export function ProjectFolderFields({
   return (
     <>
       {!hideName && (
-        <div className="flex items-center overflow-hidden rounded-control border border-line-strong bg-surface focus-within:border-ink-faint">
+        <div className="flex items-center overflow-hidden rounded-control border border-line-strong bg-surface">
           <span
             aria-hidden="true"
             className="flex min-h-10 w-10 shrink-0 items-center justify-center border-r border-line text-ink-mute"
@@ -47,7 +47,7 @@ export function ProjectFolderFields({
             value={name}
             onChange={(event) => onNameChange(event.target.value)}
             placeholder="项目名称"
-            className={`${fieldSurfaceClass} min-h-10 min-w-0 flex-1 rounded-flat border-0 bg-transparent px-3 py-1.5 text-ui-sm focus:ring-0`}
+            className={`${fieldSurfaceClass} min-h-10 min-w-0 flex-1 rounded-flat border-0 bg-transparent px-3 py-1.5 text-ui-sm`}
           />
         </div>
       )}

@@ -81,8 +81,7 @@
     "BoundEmbeddedSession · <textarea>"
   ],
   "plugins/project/conversation/ui/InputStatusBar.tsx": [
-    "ContextRing · 内嵌图形",
-    "ModelTag · role=menuitem"
+    "ContextRing · 内嵌图形"
   ],
   "plugins/project/conversation/ui/SessionPerformanceBadge.tsx": [
     "SessionPerformanceBadge · 内嵌图形"
@@ -263,9 +262,10 @@
   "shared/ui/Breadcrumb.tsx": ["Breadcrumb · <button>"],
   "shared/ui/Callout.tsx": ["ToneIcon · 内嵌图形"],
   "shared/ui/ContextMenu.tsx": [
-    "ContextMenu · <button>",
+    "ContextMenu · 原生 role=dialog",
     "ContextMenu · 原生 role=menu",
-    "ContextMenu · 原生 role=menu"
+    "ContextMenu/renderedEntries · <button>",
+    "ContextMenu/renderedEntries · 原生 role=menu"
   ],
   "shared/ui/Disclosure.tsx": [
     "Disclosure · <details>",

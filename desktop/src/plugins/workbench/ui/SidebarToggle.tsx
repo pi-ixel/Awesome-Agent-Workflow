@@ -1,5 +1,5 @@
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
-import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
+import { keyboardFocusClass } from "../../../shared/ui/controls.tsx";
 import { readWorkbenchUi, useWorkbenchLayout } from "./bindings/layoutView.ts";
 /**
  * 侧栏开关钮（共享组件，两处挂载）：
@@ -42,7 +42,7 @@ export function SidebarToggle({ collapsed }: { readonly collapsed: boolean }) {
           document.querySelector<HTMLButtonElement>(`[data-sidebar-toggle="${destination}"]`)?.focus();
         });
       }}
-      className={`flex shrink-0 items-center justify-center rounded-control text-ink transition-colors hover:bg-hover hover:text-ink focus-visible:ring-inset ${focusVisibleRing} ${collapsed ? "" : "order-2 ml-1"}`}
+      className={`flex shrink-0 items-center justify-center rounded-control text-ink transition-colors hover:bg-hover hover:text-ink ${keyboardFocusClass} ${collapsed ? "" : "order-2 ml-1"}`}
     >
       <Icon className="ui-icon-16" />
     </IconButton>

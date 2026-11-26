@@ -1,6 +1,6 @@
 import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import { NavigationRow } from "../../../../shared/ui/NavigationRow.tsx";
-import { focusVisibleRing } from "../../../../shared/ui/controls.tsx";
+import { keyboardFocusClass } from "../../../../shared/ui/controls.tsx";
 import type { PanelTab } from "../../layout/types.ts";
 import { emptyPanel } from "../../layout/rightPanelStore.ts";
 import type { PanelTabPresentation } from "../../types.ts";
@@ -53,7 +53,7 @@ const CONVERSATION_TAB_CLASS =
 
 /** tab 触发器根类串（ZCode SidePaneTabTrigger.tsx:144-155，token 换 desktop）。 */
 const TAB_TRIGGER_CLASS =
-  `group relative inline-flex h-7 min-w-15 max-w-39 flex-[1_1_9.75rem] items-center justify-start gap-1 overflow-hidden whitespace-nowrap rounded-control border px-1.5 pr-2 text-ui-base font-medium transition-colors cursor-default border-transparent bg-transparent text-ink-subtle hover:text-ink hover:bg-hover data-active:bg-selected data-active:text-ink focus-visible:ring-inset ${focusVisibleRing}`;
+  `group relative inline-flex h-7 min-w-15 max-w-39 flex-[1_1_9.75rem] items-center justify-start gap-1 overflow-hidden whitespace-nowrap rounded-control border px-1.5 pr-2 text-ui-base font-medium transition-colors cursor-default border-transparent bg-transparent text-ink-subtle hover:text-ink hover:bg-hover data-active:bg-selected data-active:text-ink ${keyboardFocusClass}`;
 
 /** tab 标题行：向 × 区域 8px 渐隐防重叠（ZCode :240-247 原文）。 */
 const TAB_CONTENT_CLASS =
@@ -61,7 +61,7 @@ const TAB_CONTENT_CLASS =
 
 /** ×关闭钮（ZCode :164-184；基色 text-ink 对齐 ghost text-foreground 100%）。 */
 const TAB_CLOSE_CLASS =
-  `absolute right-1 top-1/2 flex -translate-y-1/2 items-center justify-center rounded-control text-ink transition-opacity hover:bg-hover hover:text-ink focus-visible:ring-inset ${focusVisibleRing}`;
+  `absolute right-1 top-1/2 flex -translate-y-1/2 items-center justify-center rounded-control text-ink transition-opacity hover:bg-hover hover:text-ink ${keyboardFocusClass}`;
 
 const EMPTY_MASK_EDGES = { left: false, right: false } as const;
 
@@ -518,7 +518,7 @@ export function PanelTabStrip({
       type="button"
       aria-label="新增标签"
       data-side-pane-add-trigger=""
-      className={`${GHOST_ICON_MD} focus-visible:ring-inset ${focusVisibleRing}`}
+      className={`${GHOST_ICON_MD} ${keyboardFocusClass}`}
       onClick={() => {
         const store = readRightPanel(workbenchLayout);
         if (fullView) store.fullViewPatch(project, { surface: "side-pane" });

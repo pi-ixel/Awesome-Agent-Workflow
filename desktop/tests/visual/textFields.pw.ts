@@ -26,20 +26,25 @@ for (const theme of ["暖白", "暗夜"]) {
           const surface = await field.evaluate(
             (el) => getComputedStyle(el).backgroundColor,
           );
+          const border = await color(field, "border-top-color");
           await field.hover();
           await expect(field).toHaveCSS("background-color", surface);
+          await field.click();
+          await expect(field).toBeFocused();
+          await expect(field).toHaveCSS("box-shadow", "none");
+          await expect(field).toHaveCSS("outline-style", "none");
+          expect(await color(field, "border-top-color")).toEqual(border);
           await field.press("Tab");
           await page.keyboard.press("Shift+Tab");
           await expect(field).toBeFocused();
-          await expect(field).not.toHaveCSS("box-shadow", "none");
+          await expect(field).toHaveCSS("box-shadow", "none");
+          await expect(field).toHaveCSS("outline-style", "none");
+          expect(await color(field, "border-top-color")).toEqual(border);
           const container = await color(section, "background-color");
           const bg = blend(await color(field, "background-color"), container);
           expect(
             ratio(blend(await color(field, "color"), bg), bg),
           ).toBeGreaterThanOrEqual(4.5);
-          expect(
-            ratio(await color(field, "--color-focus-ring"), container),
-          ).toBeGreaterThanOrEqual(3);
           await field.fill(String(size));
           await expect(field).toHaveValue(String(size));
         }
@@ -59,8 +64,13 @@ for (const theme of ["暖白", "暗夜"]) {
           await readOnly.press("Tab");
           await page.keyboard.press("Shift+Tab");
           await expect(readOnly).toBeFocused();
+          await expect(readOnly).toHaveCSS("box-shadow", "none");
+          expect(await color(readOnly, "background-color")).toEqual(
+            await color(readOnly, "--color-surface-hover"),
+          );
         }
         const invalid = section.getByLabel("重命名错误");
+        await invalid.click();
         expect(await color(invalid, "border-top-color")).toEqual(
           await color(invalid, "--color-danger-ink"),
         );

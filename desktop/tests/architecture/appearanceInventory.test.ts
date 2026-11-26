@@ -223,10 +223,12 @@ it("模态语义与焦点由共享 ModalShell 管理", () => {
 it("页面通过共享表面声明弹窗语义", () => {
   const rawRole = " · 原生 role=dialog";
   expect(
-    Object.values(productionAppearance)
-      .flat()
-      .filter((use) => use.endsWith(rawRole)),
-  ).toEqual([]);
+    Object.entries(productionAppearance).flatMap(([file, uses]) =>
+      uses
+        .filter((use) => use.endsWith(rawRole))
+        .map((use) => file + "#" + use),
+    ),
+  ).toEqual(["shared/ui/ContextMenu.tsx#ContextMenu" + rawRole]);
   expect(
     inventoryAppearance(
       "page.tsx",
@@ -249,7 +251,7 @@ it("按钮语义由登记的共享控件渲染", () => {
   );
   expect(owners).toEqual([
     "shared/ui/Breadcrumb.tsx#Breadcrumb · <button>",
-    "shared/ui/ContextMenu.tsx#ContextMenu · <button>",
+    "shared/ui/ContextMenu.tsx#ContextMenu/renderedEntries · <button>",
     "shared/ui/IconButton.tsx#IconButton · <button>",
     "shared/ui/NavigationRow.tsx#NavigationRow · <button>",
     "shared/ui/TextLink.tsx#TextLink · <button>",
@@ -270,8 +272,11 @@ it("菜单和菜单项的原生语义由共享 ContextMenu 管理", () => {
       .filter((use) => use.endsWith(nativeMenu))
       .map((use) => file + "#" + use),
   );
-  const owner = "shared/ui/ContextMenu.tsx#ContextMenu" + nativeMenu;
-  expect(owners).toEqual([owner, owner]);
+  const owner = "shared/ui/ContextMenu.tsx#ContextMenu";
+  expect(owners).toEqual([
+    owner + nativeMenu,
+    owner + "/renderedEntries" + nativeMenu,
+  ]);
   expect(
     inventoryAppearance(
       "page.tsx",

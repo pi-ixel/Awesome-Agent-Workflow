@@ -201,7 +201,7 @@ export function UpdateReleaseNotes({
           onMouseLeave={scheduleClose}
           onFocus={clearTimer}
           onClick={(event) => event.stopPropagation()}
-          className="fixed z-[60] flex w-96 max-w-[calc(100vw-32px)] flex-col overflow-y-auto p-4 focus-visible:outline focus-visible:outline-focus-ring"
+          className="fixed z-[60] flex w-96 max-w-[calc(100vw-32px)] flex-col overflow-y-auto p-4 focus-visible:keyboard-focus-marker"
         >
           <h2 id={id} className="mb-1 text-sm font-medium">
             v{release.version} 更新日志

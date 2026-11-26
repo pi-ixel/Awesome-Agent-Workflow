@@ -87,7 +87,7 @@
 .workflow-start label { display:block; margin-bottom:8px; color:var(--color-ink-soft); }
 .workflow-start label>input,.workflow-start label>textarea { margin-top:4px; }
 .workflow-start textarea,.workflow-reconcile textarea,.workflow-draft-session textarea { display:block; width:100%; box-sizing:border-box; padding:6px 10px; border:1px solid var(--color-line-strong); border-radius:var(--radius-control); background:var(--color-base); color:var(--color-ink); }
-.workflow-start textarea:focus,.workflow-reconcile textarea:focus,.workflow-draft-session textarea:focus { border-color:var(--color-ink-faint); outline:none; }
+.workflow-start textarea:focus,.workflow-reconcile textarea:focus,.workflow-draft-session textarea:focus { outline:none; }
 .workflow-start textarea { min-height:65px; resize:vertical; }
 .workflow-start p { margin:6px 0; color:var(--color-ink-mute); }
 

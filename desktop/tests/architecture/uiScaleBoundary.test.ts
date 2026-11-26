@@ -43,7 +43,7 @@ it("keeps skill and MCP page filters on the shared control font scale", () => {
   const controls = readFileSync("src/shared/ui/PageFilterControls.tsx", "utf8");
   expect(controls).toContain('const pageFilterSize = "min-h-9 text-ui-sm"');
   expect(controls).toMatch(
-    /<input\s+type="search"[\s\S]*?className=\{[^}]*\}\s*\$\{pageFilterSize\}/,
+    /<input\s+type="search"[\s\S]*?className=\{[^}]*\}\s*\$\{compact \? "min-h-7 text-ui-sm" : pageFilterSize\}/,
   );
   expect(controls).toMatch(
     /<Listbox\s+\{\.\.\.props\}\s+className=\{[^\n]*\$\{pageFilterSize\}/,
@@ -60,6 +60,10 @@ it("keeps skill and MCP page filters on the shared control font scale", () => {
   expect(mcp).toMatch(/<PageFilterSearch\s+label="搜索 MCP"/);
   expect(mcp).toMatch(/<PageFilterListbox\s+label="筛选状态"/);
   expect(mcp).toMatch(/<PageFilterListbox\s+label="筛选传输方式"/);
+  const menu = readFileSync("src/shared/ui/ContextMenu.tsx", "utf8");
+  expect(menu).toMatch(
+    /<PageFilterSearch\b[\s\S]*?className="flex-1"\s+compact/,
+  );
 });
 
 function jsxAttribute(

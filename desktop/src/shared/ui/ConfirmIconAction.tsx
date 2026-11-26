@@ -5,7 +5,7 @@
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { IconButton } from "./IconButton.tsx";
 import { hintTooltipProps } from "./controls/HintTooltip.tsx";
-import { ActionButton, focusVisibleRing } from "./controls.tsx";
+import { ActionButton, keyboardFocusClass } from "./controls.tsx";
 
 export function ConfirmIconAction({
   label,
@@ -92,7 +92,7 @@ export function ConfirmIconAction({
             event.stopPropagation();
             setConfirming(true);
           }}
-          className={`rounded-control text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${focusVisibleRing}`}
+          className={`rounded-control text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${keyboardFocusClass}`}
         >
           {icon}
         </IconButton>

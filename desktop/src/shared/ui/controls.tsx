@@ -28,22 +28,17 @@
  * 一块系统白底列表。
  */
 
-/**
- * 键盘焦点指示环（focus-visible 体系）：可交互元素的统一键盘焦点样式。
- * 只在键盘聚焦（focus-visible）时显示中性细环并隐藏默认 outline，
- * 鼠标点击不出现（保留浏览器默认 focus 语义的工具类出口）。
- */
 import { UiIcon } from "./UiIcon.tsx";
 import { forwardRef, useEffect, useId, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from "react";
 
 import { useAnchoredPopover } from "./controls/useAnchoredPopover.ts";
 import { CheckIcon, ChevronDownIcon } from "./icons.tsx";
 
-export const focusVisibleRing =
-  "focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:outline-none";
+/** 键盘导航时在控件底边显示焦点标记。 */
+export const keyboardFocusClass = "focus-visible:keyboard-focus-marker";
 
 /** 各级按钮的公共底样式（尺寸由调用处叠加）。 */
-const btnBase = `press rounded-control font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${focusVisibleRing}`;
+const btnBase = `press rounded-control font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${keyboardFocusClass}`;
 
 /**
  * 按钮尺寸（高度 + 内边距 + 不换行）：同组按钮同高用的那一档。
@@ -53,7 +48,7 @@ export const btnSize =
   "inline-flex min-h-7 shrink-0 items-center justify-center gap-1 px-2.5 py-0.5 text-ui-sm leading-tight whitespace-nowrap";
 
 /** 主操作：主题正文色实底，文字使用对应的反色。 */
-export const btnPrimary = `${btnBase} bg-ink text-foreground-inverse enabled:hover:bg-ink/90`;
+export const btnPrimary = `${btnBase} bg-ink text-foreground-inverse enabled:hover:bg-ink/90 focus-visible:[--keyboard-focus-color:var(--color-foreground-inverse)]`;
 
 /** 常规操作：描边植面。 */
 export const btnSecondary = `${btnBase} border border-line-strong bg-surface text-ink enabled:hover:border-ink-faint enabled:hover:bg-raised`;
@@ -69,7 +64,7 @@ const actionTones = {
   secondary: btnSecondary,
   ghost: btnGhost,
   danger: btnDanger,
-  "danger-solid": `${btnBase} bg-danger-solid text-danger-solid-ink enabled:hover:bg-danger-solid-hover`,
+  "danger-solid": `${btnBase} bg-danger-solid text-danger-solid-ink enabled:hover:bg-danger-solid-hover focus-visible:[--keyboard-focus-color:var(--color-danger-solid-ink)]`,
   media: `${btnBase} border border-media-ink/30 text-media-ink enabled:hover:bg-media-ink/10`,
 };
 export const ActionButton = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<"button"> & {
@@ -145,7 +140,7 @@ export function ProgressBar({
 }
 
 /** 自绘 radio 指示器：外圈 + 选中时填充点（accent 描边 + 填充强化辨识）。
- *  视觉隐藏的原生 input 承担键盘焦点，经 peer-focus-visible 显环。 */
+ *  视觉隐藏的原生 input 承担键盘焦点，外观通过 peer-focus-visible 响应。 */
 export function RadioDot({
   checked,
   appearance = "accent",
@@ -156,7 +151,7 @@ export function RadioDot({
   return (
     <span
       aria-hidden={true}
-      className={`flex ui-icon-16 shrink-0 items-center justify-center rounded-pill border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring peer-focus-visible:outline-none ${
+      className={`flex ui-icon-16 shrink-0 items-center justify-center rounded-pill border transition-colors peer-focus-visible:keyboard-focus-marker ${
         checked
           ? appearance === "neutral"
             ? "border-ink bg-surface"
@@ -210,7 +205,7 @@ export function Checkbox({
       />
       {appearance === "pill" ? (
         <span
-          className={`grid min-h-8 min-w-8 place-items-center rounded-pill text-ui-base transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring ${
+          className={`grid min-h-8 min-w-8 place-items-center rounded-pill text-ui-base transition-colors peer-focus-visible:keyboard-focus-marker ${
             checked
               ? "bg-ink text-foreground-inverse"
               : "text-ink-soft peer-enabled:hover:bg-surface-hover"
@@ -222,7 +217,7 @@ export function Checkbox({
         <>
           <span
             aria-hidden="true"
-            className={`flex ui-icon-16 shrink-0 items-center justify-center rounded-control border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring ${
+            className={`flex ui-icon-16 shrink-0 items-center justify-center rounded-control border transition-colors peer-focus-visible:keyboard-focus-marker ${
               checked ? "border-info-ink bg-info-bg" : "border-line-strong bg-base"
             }`}
           >
@@ -281,7 +276,7 @@ export function ToggleSwitch({
       />
       <span
         aria-hidden={true}
-        className={`relative h-[calc(18*var(--ui-icon-unit))] w-[calc(32*var(--ui-icon-unit))] shrink-0 rounded-pill border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring ${checked ? "border-ink bg-ink" : "border-transparent bg-ink/30"}`}
+        className={`relative h-[calc(18*var(--ui-icon-unit))] w-[calc(32*var(--ui-icon-unit))] shrink-0 rounded-pill border transition-colors peer-focus-visible:keyboard-focus-marker ${checked ? "border-ink bg-ink [--keyboard-focus-color:var(--color-foreground-inverse)]" : "border-transparent bg-ink/30"}`}
       >
         <span
           className={`ui-icon-14 absolute top-1/2 -translate-y-1/2 rounded-pill bg-base transition-[left] motion-reduce:transition-none ${checked ? "left-[calc(100%_-_15*var(--ui-icon-unit))]" : "left-[var(--ui-icon-unit)]"}`}
@@ -592,7 +587,7 @@ export function Listbox({
           }
         }}
         onKeyDown={handleKeyDown}
-        className={`inline-flex min-h-7 items-center justify-between gap-2 rounded-control px-2.5 text-left text-ink transition-colors ${appearance === "quiet" ? "border border-transparent bg-transparent enabled:hover:bg-surface-hover" : "border border-line-strong bg-surface enabled:hover:border-ink-faint"} disabled:cursor-not-allowed disabled:opacity-40 ${focusVisibleRing} ${className} ${
+        className={`inline-flex min-h-7 items-center justify-between gap-2 rounded-control px-2.5 text-left text-ink transition-colors ${appearance === "quiet" ? "border border-transparent bg-transparent enabled:hover:bg-surface-hover" : "border border-line-strong bg-surface enabled:hover:border-ink-faint"} disabled:cursor-not-allowed disabled:opacity-40 ${keyboardFocusClass} ${className} ${
           fullWidth ? "w-full" : "min-w-24"
         }`}
       >
@@ -732,7 +727,7 @@ export function MultiListbox({
         aria-expanded={isOpen}
         onClick={() => setIsOpen((open) => !open)}
         onKeyDown={handleKeyDown}
-        className={`inline-flex min-w-24 items-center justify-between gap-2 rounded-control border border-line-strong bg-surface px-2.5 text-left text-ink transition-colors hover:border-ink-faint ${focusVisibleRing} ${className}`}
+        className={`inline-flex min-w-24 items-center justify-between gap-2 rounded-control border border-line-strong bg-surface px-2.5 text-left text-ink transition-colors hover:border-ink-faint ${keyboardFocusClass} ${className}`}
       >
         <span className="truncate">{summary}</span>
         <ChevronDownIcon className="ui-icon-12 text-ink-faint" />

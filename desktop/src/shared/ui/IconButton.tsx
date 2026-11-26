@@ -4,7 +4,7 @@ import {
   type ComponentPropsWithRef,
   type ReactNode,
 } from "react";
-import { focusVisibleRing } from "./controls.tsx";
+import { keyboardFocusClass } from "./controls.tsx";
 
 export type IconBarPlacement = "left" | "right" | "top" | "bottom";
 type IconButtonSize =
@@ -51,7 +51,7 @@ export function IconButton({
       data-hint={appearance === "toolbar" ? props["aria-label"] : undefined}
       {...props}
       type={type}
-      className={`${focusVisibleRing} disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+      className={`${keyboardFocusClass} disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
       data-icon-hover-button=""
       data-icon-button-size={iconSize}
     >

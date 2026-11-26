@@ -170,7 +170,7 @@ function TablePreviewDialog({
         </IconButton>
       </div>
       <div className="min-h-0 flex-1 p-3">
-        <div tabIndex={0} aria-label="预览表格滚动" className="h-full overflow-auto rounded-popover border border-line bg-surface focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-inset focus-visible:outline-none">
+        <div tabIndex={0} aria-label="预览表格滚动" className="h-full overflow-auto rounded-popover border border-line bg-surface focus-visible:keyboard-focus-marker">
           <table
             className="w-max min-w-full border-separate border-spacing-0 text-ui-base [&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-surface"
             {...tableProps}
@@ -309,7 +309,7 @@ export function MarkdownTable({
           role="region"
           aria-label="表格横向滚动"
           tabIndex={edgeShadow === "none" ? undefined : 0}
-          className="w-full overflow-x-auto focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring focus-visible:outline-none"
+          className="w-full overflow-x-auto focus-visible:keyboard-focus-marker"
           onScroll={updateEdgeShadow}
         >
           <table
