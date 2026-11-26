@@ -26,10 +26,13 @@ import { createSnapshotView, type ReadonlySnapshot } from "../../../shared/state
 import { createLogger, type Logger } from "../../../shared/logging/logger.ts";
 import {
   isAbsolutePath,
+  newProjectPath,
+  projectFolderPath,
   isRemoteProjectPath,
   pathKey,
   parseRemoteProjectPath,
 } from "../../../shared/panelPaths.ts";
+import { knownWorkspacePaths } from "./knownPaths.ts";
 import type { HostStorage } from "../../host/types.ts";
 import { defaultToolPaths, emptyWorkspace } from "./types.ts";
 import type {
@@ -171,7 +174,7 @@ function normalizeProjectFolders(
   primary: string,
   folders: ProjectFolders,
 ): ProjectFolders {
-  const seen = new Set([pathKey(primary)]);
+  const seen = new Set([pathKey(projectFolderPath(primary))]);
   const remote = isRemoteProjectPath(primary);
   return {
     name: folders.name.trim(),
@@ -188,6 +191,23 @@ function normalizeProjectFolders(
       return true;
     }),
   };
+}
+
+function findProjectByFolders(
+  state: WorkspaceSnapshot,
+  primary: string,
+  relatedPaths: readonly string[],
+  except?: string,
+  paths = knownWorkspacePaths(state),
+): string | undefined {
+  const root = pathKey(projectFolderPath(primary));
+  const related = new Set(relatedPaths.map((path) => pathKey(projectFolderPath(path))));
+  return paths.find((path) => {
+    if (pathKey(path) === pathKey(except ?? "") || pathKey(projectFolderPath(path)) !== root) return false;
+    const existing = state.projectFolders?.[pathKey(path)]?.relatedPaths ?? [];
+    return existing.length === related.size &&
+      existing.every((folder) => related.has(pathKey(projectFolderPath(folder))));
+  });
 }
 
 function writePersisted(
@@ -247,6 +267,8 @@ export function workspaceCommands(source: ReadonlySnapshot<WorkspaceStoreState>)
     updateProjectFolders,
   } = source.getState();
   return {
+    findProjectByFolders: (primary: string, related: readonly string[], except?: string) =>
+      findProjectByFolders(source.getState(), primary, related, except),
     updateProjectFolders,
     selectWorkspace,
     openWorkspace,
@@ -274,33 +296,39 @@ export function createWorkspaceStore(
     ...emptyWorkspace,
 
     registerProject: (path, folders) => {
-      if (signal.aborted) return;
-      const target = path.trim();
-      if (!target) return;
+      if (signal.aborted) throw new Error("项目工作区已关闭");
+      const primary = path.trim();
+      if (!primary) throw new Error("请选择主目录");
+      const config = folders ? normalizeProjectFolders(primary, folders) : undefined;
+      if (config && findProjectByFolders(get(), primary, config.relatedPaths))
+        throw new Error("这个主目录和关联目录的组合已有项目");
+      const saved = config && findProjectByFolders(
+        get(), primary, config.relatedPaths, undefined, Object.keys(get().projectFolders ?? {}),
+      );
+      // 单目录沿用原目录键，可恢复以前移出列表但仍保留的本地会话。
+      const needsId = config && (config.relatedPaths.length > 0 || get().projectFolders?.[pathKey(primary)]);
+      const target = saved || (needsId ? newProjectPath(primary) : primary);
       set((state) => ({
         selectedPath: target,
-        recentWorkspaces: withRecentEntry(
-          state.recentWorkspaces,
-          target,
-          state.projectFolders,
-        ),
-        ...(folders && {
-          projectFolders: {
-            ...state.projectFolders,
-            [pathKey(target)]: normalizeProjectFolders(target, folders),
-          },
+        recentWorkspaces: withRecentEntry(state.recentWorkspaces, target, state.projectFolders),
+        ...(config && {
+          projectFolders: { ...state.projectFolders, [pathKey(target)]: config },
         }),
       }));
       writePersisted(storage, get(), logger);
+      return target;
     },
 
     updateProjectFolders: (path, folders) => {
       if (signal.aborted) return;
+      const config = normalizeProjectFolders(path, folders);
+      const state = get();
+      if (findProjectByFolders(state, path, config.relatedPaths, path, [
+        ...knownWorkspacePaths(state), ...Object.keys(state.projectFolders ?? {}),
+      ]))
+        throw new Error("这个主目录和关联目录的组合已有项目");
       set((state) => ({
-        projectFolders: {
-          ...state.projectFolders,
-          [pathKey(path)]: normalizeProjectFolders(path, folders),
-        },
+        projectFolders: { ...state.projectFolders, [pathKey(path)]: config },
       }));
       writePersisted(storage, get(), logger);
     },
@@ -422,11 +450,11 @@ export function createWorkspaceStore(
           (entry) => !matches(entry.path),
         ),
         pinnedPaths: state.pinnedPaths.filter((item) => !matches(item)),
-        projectFolders: Object.fromEntries(
-          Object.entries(state.projectFolders ?? {}).filter(
-            ([path]) => path !== key,
-          ),
-        ),
+        // 移除只隐藏项目，重新添加同一组目录时仍使用原会话归属。
+        projectFolders: {
+          ...state.projectFolders,
+          [key]: state.projectFolders?.[key] ?? { name: "", relatedPaths: [] },
+        },
         // 项目移出列表时其会话级置顶一并清掉：置顶任务带不渲染幽灵行
         //（项目不在列表里，行点了也只能落失败回滚）
         pinnedSessions: state.pinnedSessions.filter(

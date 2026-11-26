@@ -18,6 +18,7 @@ import { withDeadline } from "../../../shared/asyncDeadline.ts";
 import {
   isRemoteProjectPath,
   parseRemoteProjectPath,
+  projectFolderPath,
 } from "../../../shared/panelPaths.ts";
 import type {
   OpenSessionOptions,
@@ -164,7 +165,7 @@ export function createSessionCoordinator({
   getProtocol,
   getAgents,
   getBrowser,
-  resolveSessionCwd = (workspacePath) => Promise.resolve(workspacePath),
+  resolveSessionCwd = (workspacePath) => Promise.resolve(projectFolderPath(workspacePath)),
   getTurnChanges,
   getApprovalMode,
   interactionPreferences,
@@ -204,6 +205,22 @@ export function createSessionCoordinator({
     );
   }
 
+  function isProjectSession(workspace: string, agent: string, id: string): boolean {
+    if (indexes.isModelProbe({ workspacePath: workspace, agentKey: agent, sessionId: id })) return false;
+    const knownOwner = indexes.ownerOf(workspace, agent, id);
+    if (knownOwner) return pathKey(knownOwner) === pathKey(workspace);
+    const root = projectFolderPath(workspace);
+    if (pathKey(root) !== pathKey(workspace) || projectScope(root).length) {
+      try {
+        // 旧版多目录会话已把自己的关联记录落在主目录的会话存储下。
+        if (readRelatedProjects(root, agent, id)) return pathKey(root) === pathKey(workspace);
+      } catch {
+        return false;
+      }
+    }
+    return projectScope(workspace).length === 0;
+  }
+
   function requestedScope(runtime: SessionRuntime): readonly string[] {
     const configured = projectScope(runtime.workspacePath);
     const primaryOnly = primaryOnlyScopes.get(runtime);
@@ -236,7 +253,7 @@ export function createSessionCoordinator({
     runtime.store.setState({
       relatedProjects: {
         ...scope,
-        primary: runtime.workspacePath,
+        primary: projectFolderPath(runtime.workspacePath),
         error,
         isApplying,
         retry: () => {
@@ -487,6 +504,8 @@ export function createSessionCoordinator({
           ? undefined
           : related,
       establish: async (establishedId: string) => {
+        if (!runtime.ephemeral)
+          await indexes.claimSessionProject(runtime.workspacePath, runtime.agentKey, establishedId);
         if (
           desired === undefined &&
           !scope?.error &&
@@ -1318,7 +1337,7 @@ export function createSessionCoordinator({
     agentKey = selectedAgentKey(),
   ): boolean {
     const target = { workspacePath, agentKey, sessionId };
-    if (indexes.deletions.blocked(target) || indexes.isModelProbe(target))
+    if (!isProjectSession(workspacePath, agentKey, sessionId) || indexes.deletions.blocked(target))
       return false;
     if (
       loadingSession &&
@@ -1384,14 +1403,7 @@ export function createSessionCoordinator({
       runtime,
       retainedCatalogSessions(sameProject),
       catalogStore.getState(),
-    ).filter(
-      ({ id }) =>
-        !indexes.isModelProbe({
-          workspacePath: runtime.workspacePath,
-          agentKey: runtime.agentKey,
-          sessionId: id,
-        }),
-    );
+    ).filter(({ id }) => isProjectSession(runtime.workspacePath, runtime.agentKey, id));
     store.setSessions(entries, runtime.workspacePath);
     publishCatalog(
       runtime,
@@ -1473,6 +1485,8 @@ export function createSessionCoordinator({
     )
       throw new Error("此会话正在删除或已删除");
     const agentKey = activateCatalog();
+    if (preferredSessionId && !isProjectSession(workspacePath, agentKey, preferredSessionId))
+      throw new Error("该会话属于其他项目");
     const sameProject = (runtime: SessionRuntime) =>
       runtime.agentKey === agentKey &&
       pathKey(runtime.workspacePath) === pathKey(workspacePath);
@@ -1925,6 +1939,7 @@ export function createSessionCoordinator({
         })
       )
         throw new Error("此会话正在删除或已删除");
+      if (!isProjectSession(workspacePath, agentKey, resumeId)) throw new Error("该会话属于其他项目");
       const existing = findSessionRuntime(workspacePath, agentKey, resumeId);
       if (existing) {
         // 用户那边正在恢复这个会话的历史（如刷新后自动打开）：等恢复完再交给插件，
@@ -2199,28 +2214,18 @@ export function createSessionCoordinator({
       try {
         const listed = await project.refreshHistory(
           agentKey,
-          async (isCurrent) => {
-            const results = await protocol.readProjectHistory(
-              session,
-              historyCwd,
-              isCurrent,
-            );
-            return (
-              results?.filter(
-                ({ sessionId }) =>
-                  !indexes.isModelProbe({ workspacePath, agentKey, sessionId }),
-              ) ?? null
-            );
-          },
+          (isCurrent) => protocol.readProjectHistory(session, historyCwd, isCurrent),
           valid,
         );
         if (!listed) return null;
+        const matches = (id: string) => isProjectSession(workspacePath, agentKey, id);
+        const scopedHistory = listed.filter(({ sessionId }) => matches(sessionId));
         const entries = sessionListEntries(
           {
             sessionsByPath: catalogStore.getState().sessionsByPath,
             items: [],
           },
-          listed,
+          scopedHistory,
           null,
           { workspacePath, agentKey },
           retainedCatalogSessions(
@@ -2229,14 +2234,14 @@ export function createSessionCoordinator({
               pathKey(runtime.workspacePath) === pathKey(workspacePath),
           ),
           catalogStore.getState(),
-        ).map((entry) => ({
+        ).filter(({ id }) => matches(id)).map((entry) => ({
           ...entry,
           nativeTitle: entry.title,
           title: displayTitleOf(entry.id, entry.title, agentKey),
         }));
         publishCatalog({ workspacePath, agentKey }, entries);
         setListStatus(workspacePath, agentKey, { state: "ready" });
-        return listed;
+        return scopedHistory;
       } catch (error) {
         if (!valid()) return null;
         setListStatus(
@@ -2307,7 +2312,7 @@ export function createSessionCoordinator({
     if (!retained)
       viewStore.setState({
         sessionsByPath: catalogStore.getState().sessionsByPath,
-        workingDirectory: plugin?.cwd ?? workspacePath,
+        workingDirectory: plugin?.cwd ?? projectFolderPath(workspacePath),
       });
     let candidate: SessionRuntime | null = null;
     const changesHost = getTurnChanges?.();
@@ -2676,9 +2681,9 @@ export function createSessionCoordinator({
       };
 
       if (!backgroundAdapter && isCurrent()) {
-        runtime.listed = [
-          ...projectFactory.open(workspacePath).history(agentKey),
-        ];
+        runtime.listed = projectFactory.open(workspacePath).history(agentKey).filter(
+          ({ sessionId }) => isProjectSession(workspacePath, agentKey, sessionId),
+        );
         backfillSessionList(
           viewStore,
           runtime.listed,
@@ -2823,6 +2828,21 @@ export function createSessionCoordinator({
     const stopSelection = getAgents().subscribeLaunchConfiguration(sync);
     const stopWorkspace = workspaceStore.subscribe((state, previous) => {
       if (state.projectFolders !== previous.projectFolders) {
+        for (const path of knownWorkspacePaths(state)) {
+          const key = pathKey(path);
+          const newCount = state.projectFolders?.[key]?.relatedPaths.length ?? 0;
+          const oldCount = previous.projectFolders?.[key]?.relatedPaths.length ?? 0;
+          if ((newCount === 0) === (oldCount === 0) ||
+              catalogStore.getState().statusByPath[key]?.state !== "ready") continue;
+          const agentKey = selectedAgentKey();
+          const catalog = catalogStore.getState();
+          const entries = catalog.sessionsByPath[path] ?? [];
+          publishCatalog(
+            { workspacePath: path, agentKey },
+            entries.filter(({ id }) => isProjectSession(path, agentKey, id)),
+          );
+          void preloadSessionList(path, true);
+        }
         for (const runtime of projectFactory.sessions()) {
           const path = pathKey(runtime.workspacePath);
           if (
@@ -3086,6 +3106,8 @@ export function createSessionCoordinator({
     cleanup: () => Promise<void>,
     hasNativeDirectory = false,
   ): Promise<void> {
+    if (!isProjectSession(target.workspacePath, target.agentKey, target.sessionId))
+      return Promise.reject(new Error("该会话属于其他项目"));
     return indexes.deletions.run(target, async () => {
       const started = performance.now();
       let sourceMs = 0;
@@ -3181,7 +3203,7 @@ export function createSessionCoordinator({
           const sourceStarted = performance.now();
           await getAgents().deleteSession!(
             target.agentKey,
-            target.workspacePath,
+            projectFolderPath(target.workspacePath),
             target.sessionId,
           );
           sourceMs = Math.round(performance.now() - sourceStarted);
@@ -3198,7 +3220,7 @@ export function createSessionCoordinator({
                 target.workspacePath,
                 target.agentKey,
                 target.sessionId,
-              ) ?? target.workspacePath,
+              ) ?? projectFolderPath(target.workspacePath),
             agentKey: target.agentKey,
             sessionId: target.sessionId,
           });
@@ -3316,7 +3338,7 @@ export function createSessionCoordinator({
       )
         throw new Error("Agent 返回了已有会话标识，模型刷新未完成");
       indexes.rememberModelProbe({ workspacePath, agentKey, sessionId: id });
-      if (pathKey(cwd) !== pathKey(workspacePath))
+      if (pathKey(cwd) !== pathKey(projectFolderPath(workspacePath)))
         indexes.rememberModelProbe({
           workspacePath: cwd,
           agentKey,

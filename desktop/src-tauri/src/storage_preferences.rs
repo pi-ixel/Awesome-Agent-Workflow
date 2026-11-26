@@ -28,6 +28,36 @@ pub(crate) fn write_record(path: &Path, record: &impl Serialize) -> Result<(), S
 
 type Titles = BTreeMap<String, Option<String>>;
 
+pub(crate) fn migrate_session_project_owners(data: &Path) -> Result<(), String> {
+    const KEY: &str = "aaw-desktop/session-project-owners.v1";
+    let _guard = WRITER.lock().map_err(|e| e.to_string())?;
+    let path = data.join("configuration/preferences.json");
+    let mut current: Titles = read_record(&path)?;
+    if current.get(KEY).is_some_and(Option::is_some) {
+        return Ok(());
+    }
+    let mut owners = BTreeMap::<String, Option<String>>::new();
+    for owner in crate::session_layout::identities(data).map_err(|e| e.to_string())? {
+        let Some(session) = owner.session_id.as_deref() else { continue };
+        let primary = crate::session_layout::SessionIdentity::new(
+            &owner.agent_id, &owner.primary_project(), None,
+        ).ok_or("会话主目录无法确认")?;
+        let key = serde_json::to_string(&(owner.agent_id, primary.project, session))
+            .map_err(|e| e.to_string())?;
+        owners.entry(key).and_modify(|project| {
+            if project.as_ref() != Some(&owner.project) {
+                *project = None;
+            }
+        }).or_insert(Some(owner.project));
+    }
+    // 多个旧目录存在同一会话时保留原数据，不替用户选定归属。
+    let owners: BTreeMap<_, _> = owners.into_iter()
+        .filter_map(|(key, project)| project.map(|project| (key, project)))
+        .collect();
+    current.insert(KEY.into(), Some(serde_json::to_string(&owners).map_err(|e| e.to_string())?));
+    write_record(&path, &current)
+}
+
 fn titles_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(data_dir(app)?
         .join("configuration")
@@ -372,6 +402,39 @@ pub fn storage_thresholds_write(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn migrates_unique_session_project_owners_without_overwriting_new_assignments() {
+        use crate::session_layout::SessionIdentity;
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path();
+        for (project, id) in [
+            ("D:/AAW", "known"),
+            ("D:/AAW", "same-id"),
+            ("D:/Other", "same-id"),
+        ] {
+            SessionIdentity::new("agent", project, Some(id))
+                .unwrap()
+                .ensure(data)
+                .unwrap();
+        }
+        let path = data.join("configuration/preferences.json");
+        write_record(&path, &Titles::from([("unrelated".into(), Some("keep".into()))])).unwrap();
+        migrate_session_project_owners(data).unwrap();
+        let current: Titles = read_record(&path).unwrap();
+        assert_eq!(current["unrelated"].as_deref(), Some("keep"));
+        let owners: BTreeMap<String, String> = serde_json::from_str(
+            current["aaw-desktop/session-project-owners.v1"].as_deref().unwrap(),
+        ).unwrap();
+        assert_eq!(owners, BTreeMap::from([
+            (r#"["agent","d:/aaw","known"]"#.into(), "d:/aaw".into()),
+            (r#"["agent","d:/aaw","same-id"]"#.into(), "d:/aaw".into()),
+            (r#"["agent","d:/other","same-id"]"#.into(), "d:/other".into()),
+        ]));
+        SessionIdentity::new("agent", "D:/AAW", Some("later")).unwrap().ensure(data).unwrap();
+        migrate_session_project_owners(data).unwrap();
+        assert_eq!(read_record::<Titles>(&path).unwrap(), current);
+    }
 
     #[test]
     fn session_titles_move_only_with_one_matching_owner() {

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { pathKey, pathName } from "../panelPaths.ts";
+import { pathKey, pathName, projectFolderPath } from "../panelPaths.ts";
 import type { ReadonlySnapshot } from "../state/readonlySnapshot.ts";
 import { useRegisteredSnapshot } from "../state/useRegisteredSnapshot.ts";
 import { Listbox } from "./controls.tsx";
@@ -25,8 +25,9 @@ export function useToolProject(
       : undefined,
   );
   const [selected, select] = useState<string>();
-  const projects = primary ? [primary, ...(related ?? [])] : [];
-  const project = projects.find((path) => path === selected) ?? primary;
+  const root = primary ? projectFolderPath(primary) : null;
+  const projects = root ? [root, ...(related ?? [])] : [];
+  const project = projects.find((path) => path === selected) ?? root;
   return { project, projects, select };
 }
 

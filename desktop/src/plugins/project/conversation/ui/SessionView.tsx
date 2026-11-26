@@ -86,6 +86,7 @@ import {
 } from "../../../../shared/ui/icons.tsx";
 import { AssistantMessage } from "./AssistantMessage.tsx";
 import { ChatInput } from "./ChatInput.tsx";
+import { projectFolderPath } from "../../../../shared/panelPaths.ts";
 import { isRelatedScopeBlocked } from "../../sessions/relatedProjects.ts";
 import { PlanCard } from "./PlanCard.tsx";
 import { QuestionDock } from "../../interactions/ui/QuestionDock.tsx";
@@ -1399,7 +1400,7 @@ export function SessionView({
                       fileCandidateProjects={fileCandidateProjects}
                       skillCandidates={skillCandidates}
                       resolveSlashSkills={resolveSlashSkills}
-                      skillWorkspace={contextPath ?? activePath}
+                      skillWorkspace={projectFolderPath(contextPath ?? activePath ?? "") || null}
                       extensionEntries={extensionEntries}
                       extensionGroup={extension?.slashGroup}
                       openDiagnostics={openDiagnostics}

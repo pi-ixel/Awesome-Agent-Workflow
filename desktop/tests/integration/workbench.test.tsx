@@ -36,7 +36,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { dialogHost } from "../../src/plugins/host/window/dialogs.ts";
 import { NativePanelService } from "../../src/plugins/host/filesystem/panelService.ts";
-import { pathKey } from "../../src/shared/panelPaths.ts";
+import { pathKey, projectFolderPath } from "../../src/shared/panelPaths.ts";
 
 import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
 import { renderDesktopApp } from "../helpers/renderDesktopApp.tsx";
@@ -291,7 +291,7 @@ describe("项目树 → 项目总览", () => {
     await userEvent.click(pickButton);
     await screen.findByText(PATH);
     await userEvent.click(screen.getByRole("button", { name: "创建项目" }));
-    await waitFor(() => expect(useWorkspaceStore.getState().selectedPath).toBe(PATH));
+    await waitFor(() => expect(projectFolderPath(useWorkspaceStore.getState().selectedPath ?? "")).toBe(PATH));
     expect(screen.queryByText(/目录选择已取消或当前环境不可用/)).toBeNull();
   });
 
@@ -299,6 +299,10 @@ describe("项目树 → 项目总览", () => {
     const primary = "D:/dev/new-project";
     const library = "D:/dev/shared-library";
     const docs = "D:/dev/docs";
+    const single = services.project.projects.registerProject(primary, {
+      name: "独立项目",
+      relatedPaths: [],
+    });
     vi.mocked(dialogHost.pickDirectory)
       .mockResolvedValueOnce(primary)
       .mockResolvedValueOnce(library)
@@ -317,9 +321,14 @@ describe("项目树 → 项目总览", () => {
     expect(screen.queryByLabelText("新建会话面板")).not.toBeInTheDocument();
 
     const tree = screen.getByLabelText("项目树");
-    const row = getByHint(tree, primary);
+    const row = within(tree).getByRole("button", { name: "new-project" });
     expect(queryByHint(tree, library)).not.toBeInTheDocument();
-    expect(useWorkspaceStore.getState().selectedPath).toBe(primary);
+    const project = useWorkspaceStore.getState().selectedPath!;
+    expect(projectFolderPath(project)).toBe(primary);
+    expect(project).not.toBe(single);
+    expect(within(tree).getByRole("button", { name: "独立项目" }))
+      .not.toHaveAttribute("aria-current");
+    expect(row).toHaveAttribute("aria-current", "true");
 
     await userEvent.hover(row);
     const card = await screen.findByRole("group", { name: "项目详情" });
@@ -345,7 +354,7 @@ describe("项目树 → 项目总览", () => {
     await userEvent.click(within(editor).getByRole("button", { name: "保存" }));
     await waitFor(() => expect(editor).not.toBeInTheDocument());
     expect(
-      useWorkspaceStore.getState().projectFolders?.[pathKey(primary)]
+      useWorkspaceStore.getState().projectFolders?.[project]
         ?.relatedPaths,
     ).toEqual([docs]);
   });

@@ -120,8 +120,9 @@ export interface ProjectWorkspace {
   readonly patchToolPaths: (paths: Partial<WorkspaceToolPaths>) => void;
   readonly reloadWorkspacePreferences: () => void;
   pickDirectory(): Promise<string | null>;
-  registerProject(path: string, folders?: ProjectFolders): void;
+  registerProject(path: string, folders?: ProjectFolders): string;
   updateProjectFolders(path: string, folders: ProjectFolders): void;
+  findProjectByFolders(primary: string, related: readonly string[], except?: string): string | undefined;
   /** Check and release the addressed project's resources before removing its list entry. */
   removeProject(path: string, isCurrent?: () => boolean): Promise<boolean>;
   registerProjectClose(participant: ProjectCloseParticipant): () => void;

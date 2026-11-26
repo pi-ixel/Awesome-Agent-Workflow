@@ -73,7 +73,7 @@ it("debounces foreground workspace activity and cancels callbacks on switch and 
 
 it("drops a directory picked by a retired Project without waiting for the dialog to close", async ({ onTestFinished }) => {
   let root: Context | undefined;
-  const registerProject = vi.fn();
+  const registerProject = vi.fn((path: string) => path);
   const preloadSessionList = vi.fn(() => Promise.resolve());
   const runtime = createTestDesktopRuntime({
     attachPreloading: () => () => {}, close: () => Promise.resolve(),
@@ -100,7 +100,9 @@ it("drops a directory picked by a retired Project without waiting for the dialog
   expect(workbench.navigation.getState().contextPath).toBeNull();
 
   await expect(addProjectViaDialog(root.project, workbench)).resolves.toBe("D:/current");
-  expect(registerProject).toHaveBeenCalledExactlyOnceWith("D:/current");
+  expect(registerProject).toHaveBeenCalledExactlyOnceWith("D:/current", {
+    name: "", relatedPaths: [],
+  });
   expect(preloadSessionList).toHaveBeenCalledExactlyOnceWith("D:/current", false);
   expect(workbench.navigation.getState().contextPath).toBe("D:/current");
 });

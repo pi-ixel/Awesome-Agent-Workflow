@@ -3,6 +3,7 @@ import type { TerminalService } from "../service.ts";
 import type { Context } from "cordis";
 import type { WorkbenchContributions } from "../../workbench/types.ts";
 import { SquareTerminalIcon } from "../../../shared/ui/icons.tsx";
+import { pathKey, projectFolderPath } from "../../../shared/panelPaths.ts";
 import { registerTerminalExit } from "../pty/lifecycle.ts";
 import { TerminalPanel } from "./TerminalPanel.tsx";
 import {
@@ -78,7 +79,20 @@ export function apply(ctx: Context): void {
       project.projects.registerProjectClose({
         id: "terminal",
         check: () => true,
-        closed: (path) => terminal.closeTabs(path),
+        closed: (path) => {
+          const folder = projectFolderPath(path);
+          const workspace = project.projects.workspace.getState();
+          const paths = [...workspace.pinnedPaths, ...workspace.recentWorkspaces.map((entry) => entry.path)];
+          const isShared = paths.some((other) =>
+            pathKey(other) !== pathKey(path) && (
+              pathKey(projectFolderPath(other)) === pathKey(folder) ||
+              workspace.projectFolders?.[pathKey(other)]?.relatedPaths.some(
+                (related) => pathKey(related) === pathKey(folder),
+              )
+            ),
+          );
+          if (!isShared) return terminal.closeTabs(folder);
+        },
       }),
     "terminal:project-close",
   );

@@ -493,6 +493,7 @@ fn migrate_with_index(
             .iter()
             .all(|record| record.phase != Phase::Cleaning)
     {
+        crate::storage_preferences::migrate_session_project_owners(data)?;
         return Ok(MigrationResult {
             moved,
             deleted_orphans,
@@ -741,6 +742,7 @@ fn migrate_with_index(
     completed.sort_by(|a, b| {
         (&a.agent_id, &a.project, &a.session_id).cmp(&(&b.agent_id, &b.project, &b.session_id))
     });
+    crate::storage_preferences::migrate_session_project_owners(data)?;
     crate::storage_preferences::write_record(&version_path, &4u32)?;
     Ok(MigrationResult {
         moved,

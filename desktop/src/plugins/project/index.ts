@@ -18,7 +18,7 @@ import { createAnnotationDraftStore } from "./composer/annotationDraftStore.ts";
 import { createMessageImageHistory } from "./conversation/messageImageHistory.ts";
 import { createProjectComposer } from "./composer/service.ts";
 import { createWorkspaceStore } from "./workspace/workspaceStore.ts";
-import { parseRemoteProjectPath } from "../../shared/panelPaths.ts";
+import { parseRemoteProjectPath, projectFolderPath } from "../../shared/panelPaths.ts";
 import { projectPreferenceFields } from "./config.ts";
 import { createProjectPreferences } from "./configuration/preferences.ts";
 import { initializeUsage, usageStorageCategory } from "./usage/service.ts";
@@ -105,7 +105,7 @@ export async function apply(
       getBrowser: () => ctx.host.browser,
       resolveSessionCwd: async (workspacePath) => {
         const remote = parseRemoteProjectPath(workspacePath);
-        if (!remote) return workspacePath;
+        if (!remote) return projectFolderPath(workspacePath);
         const dir = await ctx.host.commands.userDataDir(
           "remote-projects",
           remote.projectId,

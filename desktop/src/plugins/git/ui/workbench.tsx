@@ -59,7 +59,7 @@ export function gitPanels(
         const target = selection.project ?? project;
         const request = useRegisteredSnapshot(
           requests,
-          (state) => state?.[pathKey(target)],
+          (state) => state?.[pathKey(project)] ?? state?.[pathKey(target)],
         );
         return (
           <GitPanel
@@ -67,7 +67,7 @@ export function gitPanels(
             git={git}
             reveal={reveal}
             revealRequest={request}
-            watchActivity={watchActivity}
+            watchActivity={watchActivity && ((_, listener) => watchActivity(project, listener))}
             projectSelector={
               selection.projects.length > 1 ? (
                 <ToolProjectSelector

@@ -1,4 +1,4 @@
-import { isAbsolutePath, pathKey } from "../../../shared/panelPaths.ts";
+import { isAbsolutePath, pathKey, projectFolderPath } from "../../../shared/panelPaths.ts";
 import {
   sameSessionAgent,
   sessionAgentId,
@@ -17,35 +17,35 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
   const scope = new AbortController();
   const deletions = createSessionDeletions(storage);
   const modelProbeStorageKey = "aaw-desktop/model-probe-sessions.v1";
-  const modelProbeKey = ({
-    workspacePath,
-    agentKey,
-    sessionId,
-  }: DeleteSessionTarget) =>
-    JSON.stringify([
-      sessionAgentId(agentKey) ?? agentKey,
-      pathKey(workspacePath),
-      sessionId,
-    ]);
   const modelProbes = new Set<string>();
+  const ownerKey = (project: string, agent: string, id: string) =>
+    JSON.stringify([
+      sessionAgentId(agent) ?? agent,
+      pathKey(projectFolderPath(project)),
+      id,
+    ]);
+  const modelProbeKey = ({ workspacePath, agentKey, sessionId }: DeleteSessionTarget) =>
+    ownerKey(workspacePath, agentKey, sessionId);
   try {
     const saved: unknown = JSON.parse(
       storage.getItem(modelProbeStorageKey) ?? "[]",
     );
-    if (Array.isArray(saved))
-      for (const key of saved)
-        if (typeof key === "string") modelProbes.add(key);
+    if (Array.isArray(saved)) {
+      for (const key of saved) {
+        if (typeof key !== "string") continue;
+        const value: unknown = JSON.parse(key);
+        if (Array.isArray(value) && typeof value[0] === "string" &&
+            typeof value[1] === "string" && typeof value[2] === "string") {
+          modelProbes.add(ownerKey(value[1], value[0], value[2]));
+        }
+      }
+    }
   } catch (error) {
     logger?.warn("读取模型探测会话记录失败", { error: String(error) });
   }
   const isModelProbe = (target: DeleteSessionTarget) =>
     modelProbes.has(modelProbeKey(target));
   const retainedSessions = (agent: string) => storage.managed?.retainedSessions?.(agent) ?? [];
-  const catalog = createSessionCatalog(
-    scope.signal,
-    (target) => deletions.blocked(target) || isModelProbe(target),
-    retainedSessions,
-  );
   const deletionView = createSnapshotView(deletions.store, (state) => state);
   const activity = createSessionActivityStore(scope.signal, storage);
   const directoryStorageKey = "aaw-desktop/session-working-directories.v1";
@@ -56,6 +56,60 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
       workingDirectories = saved as Record<string, unknown>;
   } catch (error) {
     logger?.warn("读取会话工作目录失败", { error: String(error) });
+  }
+  const ownersKey = "aaw-desktop/session-project-owners.v1";
+  let owners: Readonly<Record<string, string>> = {};
+  try {
+    const saved: unknown = JSON.parse(storage.getItem(ownersKey) ?? "{}");
+    if (saved && typeof saved === "object" && !Array.isArray(saved)) {
+      owners = Object.fromEntries(Object.entries(saved).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string" && isAbsolutePath(entry[1]),
+      ));
+    }
+  } catch (error) {
+    logger?.warn("读取会话项目归属失败", { error: String(error) });
+  }
+  const legacyOwners = new Map<string, string>();
+  for (const key of Object.keys(workingDirectories)) {
+    try {
+      const [agent, project, id]: unknown[] = JSON.parse(key) as unknown[];
+      if (typeof agent === "string" && typeof project === "string" && typeof id === "string")
+        legacyOwners.set(ownerKey(project, agent, id), project);
+    } catch {
+      // 跳过无法恢复的旧键。
+    }
+  }
+  const ownerOf = (project: string, agent: string, id: string) => {
+    const key = ownerKey(project, agent, id);
+    return owners[key] ?? legacyOwners.get(key) ??
+      retainedSessions(agent).find((entry) => ownerKey(entry.project, agent, entry.sessionId) === key)?.project;
+  };
+  const catalog = createSessionCatalog(
+    scope.signal,
+    (target) => {
+      const owner = ownerOf(target.workspacePath, target.agentKey, target.sessionId);
+      return (owner !== undefined && pathKey(owner) !== pathKey(target.workspacePath)) ||
+        deletions.blocked(target) || isModelProbe(target);
+    },
+    retainedSessions,
+  );
+  let writes = Promise.resolve();
+  function claimSessionProject(project: string, agentKey: string, sessionId: string): Promise<void> {
+    const operation = writes.then(async () => {
+      const owner = ownerOf(project, agentKey, sessionId);
+      if (owner && pathKey(owner) !== pathKey(project))
+        throw new Error("该会话属于其他项目");
+      const key = ownerKey(project, agentKey, sessionId);
+      if (owners[key]) return;
+      const next = { ...owners, [key]: project };
+      const value = JSON.stringify(next);
+      if (storage.setConfigurationItem) await storage.setConfigurationItem(ownersKey, value);
+      else storage.setItem(ownersKey, value);
+      owners = next;
+      catalog.refreshVisibility();
+    });
+    writes = operation.catch(() => {});
+    return operation;
   }
   const saveWorkingDirectories = () =>
     storage.setItem(directoryStorageKey, JSON.stringify(workingDirectories));
@@ -79,6 +133,8 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
   return {
     catalog,
     retainedSessions,
+    ownerOf,
+    claimSessionProject,
     finishSessionRecovery: storage.managed?.finishSessionRecovery,
     isModelProbe,
     rememberModelProbe(target: DeleteSessionTarget) {

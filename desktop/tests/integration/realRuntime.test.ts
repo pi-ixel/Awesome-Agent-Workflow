@@ -2025,9 +2025,58 @@ it("离开项目不终止已经打开的工作会话", async () => {
 });
 
 describe("新会话草稿先行", () => {
+  it("共用主目录的单目录和多目录项目各自保留会话，Agent 旧会话只在单目录项目显示", async () => {
+    const primary = "D:/isolation/aaw";
+    const related = "D:/isolation/wuziqi";
+    const legacy = { sessionId: "isolation-agent-history", cwd: primary };
+    const projects = navigationProject.projects;
+    const group = projects.registerProject(primary, { name: "AAW + wuziqi", relatedPaths: [related] });
+    fakeSessionControl.listed = [legacy];
+    const list = (project: string) =>
+      projectIndexes.catalog.store.getState().sessionsByPath[project]?.map(({ id }) => id);
+
+    await preloadSessionList(group, true);
+    expect(list(group)).toEqual([]);
+    expect(fakeSessionControl.loadCalls).toEqual([]);
+    const single = projects.registerProject(primary, { name: "AAW", relatedPaths: [] });
+    await preloadSessionList(single, true);
+    expect(list(single)).toEqual([legacy.sessionId]);
+    expect(list(group)).toEqual([]);
+
+    fakeSessionControl.supportsRelatedDirectories = true;
+    fakeSessionControl.newSessionId = "isolation-group-chat";
+    const create = vi.spyOn(FakeAcpSession.prototype, "newSession");
+    try {
+      expect(await navigationProject.sessions.startNewSession(group)).toEqual({ ok: true });
+      expect(useSessionStore.getState().sendPrompt("开始多目录会话")).toBe(true);
+      await vi.waitFor(() =>
+        expect(useSessionStore.getState().activeSessionId).toBe(fakeSessionControl.newSessionId),
+      );
+      expect(create).toHaveBeenCalledWith(
+        primary,
+        expect.objectContaining({ additionalDirectories: [related] }),
+      );
+      const groupChat = { sessionId: fakeSessionControl.newSessionId, cwd: primary };
+      fakeSessionControl.listed = [legacy, groupChat];
+      await closeRealRuntime();
+      projects.updateProjectFolders(group, { name: "AAW + docs", relatedPaths: ["D:/isolation/docs"] });
+      await preloadSessionList(group, true);
+      await preloadSessionList(single, true);
+      expect(list(single)).toEqual([legacy.sessionId]);
+      expect(list(group)).toEqual([groupChat.sessionId]);
+      await expect(openRealWorkspace(single, { sessionId: groupChat.sessionId }))
+        .rejects.toThrow("该会话属于其他项目");
+      expect(fakeSessionControl.loadCalls).not.toContain(groupChat.sessionId);
+      await openRealWorkspace(group, { sessionId: groupChat.sessionId });
+      expect(fakeSessionControl.loadCalls).toContain(groupChat.sessionId);
+    } finally {
+      create.mockRestore();
+    }
+  });
+
   it("新建会话继承项目配置，首发附加目录，恢复不依赖最近项目列表", async () => {
     const related = "D:/related-project";
-    navigationProject.projects.registerProject(WORKSPACE, {
+    const project = navigationProject.projects.registerProject(WORKSPACE, {
       name: "Demo",
       relatedPaths: [related],
     });
@@ -2037,7 +2086,7 @@ describe("新会话草稿先行", () => {
     const load = vi.spyOn(FakeAcpSession.prototype, "loadSession");
     try {
       expect(
-        await navigationProject.sessions.startNewSession(WORKSPACE),
+        await navigationProject.sessions.startNewSession(project),
       ).toEqual({ ok: true });
       expect(useSessionStore.getState().activeSessionId).toBeNull();
       expect(useSessionStore.getState().relatedProjects?.paths).toEqual([
@@ -2056,7 +2105,7 @@ describe("新会话草稿先行", () => {
       );
       const scope = useSessionStore.getState().agentKey!;
       expect(
-        readRelatedProjects(WORKSPACE, scope, fakeSessionControl.newSessionId)
+        readRelatedProjects(project, scope, fakeSessionControl.newSessionId)
           ?.paths,
       ).toEqual([related]);
       for (let index = 0; index < 10; index++)
@@ -2067,7 +2116,7 @@ describe("新会话草稿先行", () => {
           .recentWorkspaces.some(({ path }) => path === related),
       ).toBe(false);
       await closeRealRuntime();
-      await openRealWorkspace(WORKSPACE, {
+      await openRealWorkspace(project, {
         sessionId: fakeSessionControl.newSessionId,
       });
       expect(load).toHaveBeenLastCalledWith(
@@ -2082,14 +2131,15 @@ describe("新会话草稿先行", () => {
   });
 
   it("不支持关联目录的 Agent 必须显式选择仅用主目录才可发送", async () => {
-    navigationProject.projects.registerProject(WORKSPACE, {
+    const project = navigationProject.projects.registerProject(WORKSPACE, {
       name: "Demo",
       relatedPaths: ["D:/related-project"],
     });
+    fakeSessionControl.newSessionId = "primary-only-group-session";
     const create = vi.spyOn(FakeAcpSession.prototype, "newSession");
     try {
       expect(
-        await navigationProject.sessions.startNewSession(WORKSPACE),
+        await navigationProject.sessions.startNewSession(project),
       ).toEqual({ ok: true });
       expect(useSessionStore.getState().relatedProjects?.error).toContain(
         "不支持关联目录",
@@ -2102,7 +2152,7 @@ describe("新会话草稿先行", () => {
         expect(create).toHaveBeenCalledWith(WORKSPACE, undefined),
       );
       expect(
-        useWorkspaceStore.getState().projectFolders?.["d:/demo-project"]
+        useWorkspaceStore.getState().projectFolders?.[project]
           ?.relatedPaths,
       ).toEqual(["D:/related-project"]);
     } finally {

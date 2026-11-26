@@ -62,6 +62,7 @@ export function documentPanels(
       props.ownerProject ? undefined : view?.scope,
     );
     const root = selection.project ?? props.root;
+    const watchActivity = view?.watchActivity;
     const latestFileTabPath = useStore(panels, (state) => {
       const tabs =
         state.projects[pathKey(props.ownerProject ?? props.root)]?.tabs;
@@ -88,7 +89,7 @@ export function documentPanels(
           }}
           latestFileTabPath={latestFileTabPath}
           readGitStatus={gitStatus?.read}
-          watchActivity={view?.watchActivity}
+          watchActivity={watchActivity && ((_, listener) => watchActivity(props.ownerProject ?? props.root, listener))}
           openExternal={openExternal}
           treePosition={fileTreePosition}
           onOpenTreeSettings={() =>

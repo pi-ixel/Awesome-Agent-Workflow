@@ -1,4 +1,22 @@
 export const REMOTE_PROJECT_PREFIX = "//aaw-remote/";
+const PROJECT_ID_PREFIX = "//aaw-project/";
+
+/** 项目引用包含稳定身份和创建时的主目录，供工作台索引及旧路径接口使用。 */
+export function newProjectPath(primary: string): string {
+  return `${PROJECT_ID_PREFIX}${crypto.randomUUID()}/${encodeURIComponent(projectFolderPath(primary))}`;
+}
+
+export function projectFolderPath(project: string): string {
+  if (!project.startsWith(PROJECT_ID_PREFIX)) return project;
+  const parts = project.slice(PROJECT_ID_PREFIX.length).split("/");
+  if (parts.length !== 2 || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(parts[0] ?? "")) return project;
+  try {
+    const primary = decodeURIComponent(parts[1] ?? "");
+    return isAbsolutePath(primary) && !primary.startsWith(PROJECT_ID_PREFIX) ? primary : project;
+  } catch {
+    return project;
+  }
+}
 
 export interface ParsedRemoteProjectPath {
   readonly projectId: string;
@@ -6,7 +24,7 @@ export interface ParsedRemoteProjectPath {
 }
 
 export function isRemoteProjectPath(path: string): boolean {
-  return path.replaceAll("\\", "/").startsWith(REMOTE_PROJECT_PREFIX);
+  return projectFolderPath(path).replaceAll("\\", "/").startsWith(REMOTE_PROJECT_PREFIX);
 }
 
 export function formatRemoteProjectPath(
@@ -25,7 +43,7 @@ export function formatRemoteProjectPath(
 export function parseRemoteProjectPath(
   path: string,
 ): ParsedRemoteProjectPath | null {
-  const normalized = normalizePath(path);
+  const normalized = normalizePath(projectFolderPath(path));
   if (!normalized.startsWith(REMOTE_PROJECT_PREFIX)) return null;
   const rest = normalized.slice(REMOTE_PROJECT_PREFIX.length);
   const slash = rest.indexOf("/");
@@ -55,7 +73,7 @@ export function normalizePath(path: string): string {
 export function pathKey(path: string): string {
   const normalized = normalizePath(path);
   // 远程 Linux 项目路径保留大小写语义，仅按项目 ID + POSIX 路径区分。
-  if (normalized.startsWith(REMOTE_PROJECT_PREFIX)) {
+  if (normalized.startsWith(REMOTE_PROJECT_PREFIX) || normalized.startsWith(PROJECT_ID_PREFIX)) {
     return normalized;
   }
   return /^[a-z]:/i.test(normalized) || normalized.startsWith("//")
@@ -66,12 +84,13 @@ export function isAbsolutePath(path: string): boolean {
   return /^(?:[a-z]:[\\/]|[\\/])/i.test(path);
 }
 export function insidePath(root: string, path: string): boolean {
-  const key = pathKey(root).replace(/\/$/, "");
-  const target = pathKey(path);
+  const key = pathKey(projectFolderPath(root)).replace(/\/$/, "");
+  const target = pathKey(projectFolderPath(path));
   return target === key || target.startsWith(`${key}/`);
 }
 export function pathName(path: string): string {
-  return normalizePath(path).split("/").at(-1) || path;
+  const folder = projectFolderPath(path);
+  return normalizePath(folder).split("/").at(-1) || folder;
 }
 export function parentPath(path: string): string {
   const value = normalizePath(path);
@@ -132,7 +151,7 @@ export function resolveFileReference(
   const line = suffix ? Number(suffix[1] ?? suffix[2]) : undefined;
   if (suffix) target = target.slice(0, suffix.index);
   const absolute = isAbsolutePath(target);
-  const path = normalizePath(absolute ? target : `${base}/${target}`);
+  const path = normalizePath(absolute ? target : `${projectFolderPath(base)}/${target}`);
   if (!absolute && !insidePath(root, path)) return null;
   return { path, ...(line !== undefined && line > 0 ? { line } : {}) };
 }

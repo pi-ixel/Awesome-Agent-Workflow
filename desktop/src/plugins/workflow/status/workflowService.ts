@@ -1,3 +1,4 @@
+import { projectFolderPath } from "../../../shared/panelPaths.ts";
 /**
  * 引擎线 WorkflowService 实现（ADR 024 §5 ③ / §8）。
  *
@@ -170,7 +171,7 @@ function requireCwd(cwd: string | null): string {
   if (cwd === null || cwd.trim() === "") {
     throw new Error("WORKSPACE_NOT_BOUND");
   }
-  return cwd;
+  return projectFolderPath(cwd);
 }
 
 function parsePreflight(value: unknown): WorkflowPreflightReport | null {
@@ -249,10 +250,11 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
   // 失败只记日志、保留上一份。
   const fetchOtherLinks = async (cwd: string | null, request: number): Promise<void> => {
     const revision = linksRevision;
+    const owner = workspace;
     try {
       const raw = await client.request<unknown>("session-links-others", { exclude: cwd ?? "" });
       if (disposed || request !== listRequest || revision !== linksRevision) return;
-      if (Array.isArray(raw) && cwd === workspace) {
+      if (Array.isArray(raw) && owner === workspace) {
         otherLinksLoaded = true;
         otherLinks = raw.flatMap((item: unknown) => {
           if (typeof item !== "object" || item === null) return [];
@@ -275,7 +277,8 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       if (!disposed && version === bindingVersion && request === listRequest) emit({ type: "runs-changed", runId: "" });
       return;
     }
-    const cwd = requireCwd(workspace);
+    const owner = workspace;
+    const cwd = requireCwd(owner);
     const raw = await client.request<unknown>("list", { cwd });
     if (disposed || version !== bindingVersion || request !== listRequest || !Array.isArray(raw)) return;
     const previous = new Map(runList.map((run) => [run.runId, run]));
@@ -291,11 +294,11 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       const rawLinks = await client.request<unknown>("session-links", { cwd });
       if (disposed || version !== bindingVersion || request !== listRequest) return;
       // 已归档的运行带 archived 标记：侧栏据此把它的会话一起隐去（ADR 036）。
-      if (cwd === workspace && revision === linksRevision && Array.isArray(rawLinks)) {
+      if (owner === workspace && revision === linksRevision && Array.isArray(rawLinks)) {
         const previous = new Map(links.runs.map((run) => [run.runId, run]));
         const versionsOf = new Map((Array.isArray(rawLinks) ? rawLinks : []).map((item) => [text((item as { runId?: unknown } | null)?.runId), versionOf(item)]));
         links = {
-          workspace: cwd,
+          workspace: owner,
           runs: deriveSessionLinks(rawLinks).map((run) => {
             const kept = previous.get(run.runId);
             return kept && !fresher(run.runId, versionsOf.get(run.runId) ?? 0) ? kept : run;
@@ -717,17 +720,17 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
 
     async renameRun(runId, title, project) {
       if (disposed) throw new Error("Workflow service is disposed");
-      await client.request("run-rename", { cwd: project ?? requireCwd(workspace), runId, title });
+      await client.request("run-rename", { cwd: requireCwd(project ?? workspace), runId, title });
     },
 
     async archiveRun(runId, archived, project) {
       if (disposed) throw new Error("Workflow service is disposed");
-      await client.request("run-archive", { cwd: project ?? requireCwd(workspace), runId, archived });
+      await client.request("run-archive", { cwd: requireCwd(project ?? workspace), runId, archived });
     },
 
     async deleteRun(runId, project) {
       if (disposed) throw new Error("Workflow service is disposed");
-      await client.request("run-delete", { cwd: project ?? requireCwd(workspace), runId });
+      await client.request("run-delete", { cwd: requireCwd(project ?? workspace), runId });
     },
 
     nodePlan: (runId, siteId, ordinal) => deps.plans?.get(runId, siteId, ordinal) ?? null,

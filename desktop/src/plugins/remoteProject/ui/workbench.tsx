@@ -5,6 +5,8 @@ import { ActionButton } from "../../../shared/ui/controls.tsx";
 import {
   pathKey,
   isRemoteProjectPath,
+  normalizePath,
+  projectFolderPath,
   parseRemoteProjectPath,
 } from "../../../shared/panelPaths.ts";
 import {
@@ -33,6 +35,10 @@ export function apply(ctx: Context): void {
   const onPickLocalDirectory = () => project.projects.pickDirectory();
   const onOpenRemoteHostSettings = () =>
     workbench.navigation.getState().openSettingsTab("remote-hosts");
+  const findRemoteFolder = (deviceId: string, root: string) =>
+    remoteProject.projects.getState().records.find(
+      (record) => record.connectionId === deviceId && record.remoteRoot === normalizePath(root),
+    );
 
   const createProject: Parameters<
     typeof CreateProjectFormBody
@@ -46,29 +52,20 @@ export function apply(ctx: Context): void {
     )
       return false;
     const local = deviceId === "local";
-    const workspace = project.projects.workspace.getState();
-    const known = local
-      ? primary
-      : remoteProject
-          .listProjectsForConnection(deviceId)
-          .find((record) => record.remoteRoot === primary)?.workspacePath;
-    if (
-      known &&
-      (workspace.projectFolders?.[pathKey(known)] ||
-        [
-          ...workspace.pinnedPaths,
-          ...workspace.recentWorkspaces.map((entry) => entry.path),
-        ].some((path) => pathKey(known) === pathKey(path)))
-    ) {
-      throw new Error("这个主目录已有项目，可以从项目树编辑");
+    const existing = local ? undefined : findRemoteFolder(deviceId, primary);
+    const relatedPaths = local ? related : related.map((root) => findRemoteFolder(deviceId, root)?.workspacePath);
+    if (existing && relatedPaths.every((path): path is string => path !== undefined) &&
+        project.projects.findProjectByFolders(existing.workspacePath, relatedPaths)) {
+      throw new Error("这个主目录和关联目录的组合已有项目");
     }
-    const remote = local
-      ? undefined
-      : await remoteProject.saveProjectGroup(deviceId, primary, name, related);
+    const remote = local ? undefined : await remoteProject.saveProjectGroup(
+      deviceId, primary, existing?.name ?? name, related,
+    );
     if (!current()) return false;
-    const path = remote?.record.workspacePath ?? primary;
-    const relatedPaths = remote?.relatedPaths ?? related;
-    project.projects.registerProject(path, { name, relatedPaths });
+    const path = project.projects.registerProject(remote?.record.workspacePath ?? primary, {
+      name,
+      relatedPaths: remote?.relatedPaths ?? related,
+    });
     workbench.navigation.getState().openView("project-overview", path, current);
     void project.sessions.preloadSessionList(path);
     return true;
@@ -114,11 +111,16 @@ export function apply(ctx: Context): void {
       },
       onSave: async (_, name, _primary, related) => {
         if (!project.isActive()) return false;
+        const candidates = related.map((root) => findRemoteFolder(deviceId, root)?.workspacePath);
+        if (record && candidates.every((entry): entry is string => entry !== undefined) &&
+            project.projects.findProjectByFolders(path, candidates, path)) {
+          throw new Error("这个主目录和关联目录的组合已有项目");
+        }
         const stored = record
           ? await remoteProject.saveProjectGroup(
               deviceId,
               record.remoteRoot,
-              name,
+              record.name,
               related,
               record.workspacePath,
             )
@@ -175,15 +177,15 @@ export function apply(ctx: Context): void {
         id: "remoteProject",
         check: () => true,
         closed: (path) => {
-          const key = pathKey(path);
-          const folders =
-            project.projects.workspace.getState().projectFolders ?? {};
-          const isReferenced = Object.entries(folders).some(
-            ([primary, config]) =>
-              primary !== key &&
-              config.relatedPaths.some((related) => pathKey(related) === key),
+          const folder = projectFolderPath(path);
+          if (!isRemoteProjectPath(folder)) return;
+          const workspace = project.projects.workspace.getState();
+          const folderKey = pathKey(folder);
+          const otherProject = [...workspace.pinnedPaths, ...workspace.recentWorkspaces.map(({ path }) => path)].some(
+            (entry) => pathKey(entry) !== pathKey(path) && pathKey(projectFolderPath(entry)) === folderKey,
           );
-          return remoteProject.removeProjectByPath(path, isReferenced);
+          if (otherProject) return;
+          return remoteProject.removeProjectByPath(folder, true);
         },
       }),
     "remoteProject:project-close",
