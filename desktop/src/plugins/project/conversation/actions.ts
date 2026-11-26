@@ -36,6 +36,7 @@ import {
   queuedSkillOptions,
 } from "./queuedPrompt.ts";
 import { createLogger } from "../../../shared/logging/logger.ts";
+import { isRelatedScopeBlocked } from "../sessions/relatedProjects.ts";
 
 interface SessionActionContext {
   get: () => SessionStoreState;
@@ -221,6 +222,7 @@ export function createSessionActions(
       ownsApplication() &&
       generation === context.turnGeneration &&
       !get().operationsBlocked &&
+      !isRelatedScopeBlocked(get().relatedProjects) &&
       !get().queuePaused;
     set({ isApplyingModel: true, modelSelectionError: null });
     void (async () => {
@@ -280,6 +282,7 @@ export function createSessionActions(
       steering.active ||
       state.isAgentRunning ||
       state.operationsBlocked ||
+      isRelatedScopeBlocked(state.relatedProjects) ||
       state.isConnecting ||
       binding === null
     ) {
@@ -307,6 +310,7 @@ export function createSessionActions(
   let modeChangeGeneration = 0;
   return {
     steerPrompt: (text, attachments = [], options) => {
+      if (isRelatedScopeBlocked(get().relatedProjects)) return false;
       const first = firstPrompt;
       if (!first) return steering.steer(text, attachments, options);
       const state = get();
@@ -471,6 +475,7 @@ export function createSessionActions(
         (steering.active && !steering.dispatching) ||
         (trimmed.length === 0 && attachments.length === 0) ||
         get().operationsBlocked ||
+        isRelatedScopeBlocked(get().relatedProjects) ||
         get().isAgentRunning ||
         get().isConnecting ||
         get().isApplyingModel
@@ -755,6 +760,7 @@ export function createSessionActions(
       return true;
     },
     enqueuePrompt: (text, attachments = [], options) => {
+      if (isRelatedScopeBlocked(get().relatedProjects)) return false;
       const trimmed = text.trim();
       if (get().directSteering || (trimmed.length === 0 && attachments.length === 0)) {
         return false;

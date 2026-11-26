@@ -14,6 +14,10 @@ export function createProjectViewNavigation(
     readonly isCurrent: () => boolean;
     readonly openFileTree: (path: string) => void;
     readonly openAddRemoteProject?: () => boolean;
+    readonly renderEditProjectForm?: (
+      path: string,
+      onClose: () => void,
+    ) => ReactNode;
     readonly renderAddProjectForm?: (onClose: () => void) => ReactNode;
   },
 ) {
@@ -39,6 +43,8 @@ export function createProjectViewNavigation(
       },
       renderAddProjectForm: (onClose: () => void): ReactNode =>
         options.renderAddProjectForm?.(onClose) ?? null,
+      renderEditProjectForm: (path: string, onClose: () => void): ReactNode =>
+        options.renderEditProjectForm?.(path, onClose) ?? null,
       showOverview,
       showConversation: (path: string) => {
         if (isActive()) project.sessions.showConversation(path);

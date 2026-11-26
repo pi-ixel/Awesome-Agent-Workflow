@@ -1,5 +1,5 @@
 import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
-import { createTurnChangesSession } from "../conversation/changes/service.ts";
+import { createProjectTurnChangesSession } from "../conversation/changes/service.ts";
 import {
   createSessionTools,
   type SessionToolProvider,
@@ -15,7 +15,10 @@ import { projectConversationPageId } from "../workspace/pageIds.ts";
 import type { WorkbenchUiState } from "../../workbench/types.ts";
 import type { AcpSessionPort } from "../../acpRuntime/types.ts";
 import { withDeadline } from "../../../shared/asyncDeadline.ts";
-import { isRemoteProjectPath } from "../../../shared/panelPaths.ts";
+import {
+  isRemoteProjectPath,
+  parseRemoteProjectPath,
+} from "../../../shared/panelPaths.ts";
 import type {
   OpenSessionOptions,
   PluginSessionOptions,
@@ -105,6 +108,13 @@ import { browserObservationUrl } from "../../../shared/urlPrivacy.ts";
 import { browserPageContextPrefix } from "../../../shared/browser/promptContext.ts";
 import { browserToolsUnavailable } from "../../../shared/browser/toolAvailability.ts";
 import { asRecord } from "../../../shared/valueGuards.ts";
+import {
+  isRelatedScopeBlocked,
+  readRelatedProjects,
+  saveRelatedProjects,
+  sameRelatedPaths,
+  type RelatedProjects,
+} from "./relatedProjects.ts";
 
 export type RealWorkspaceOpenResult = NonNullable<OpenSessionResult>;
 
@@ -173,14 +183,262 @@ export function createSessionCoordinator({
   let focusRevision = 0;
   const projectFactory = new ProjectFactory<SessionRuntime>();
   const sessionTools = createSessionTools(logger);
-  const toolDisposals = new WeakMap<AcpSessionPort, Set<() => Promise<void>>>();
+  const toolDisposals = new WeakMap<
+    AcpSessionPort,
+    Set<(strict?: boolean) => Promise<void>>
+  >();
   const disposedToolSessions = new WeakSet<AcpSessionPort>();
+  const scopeOverrides = new WeakMap<SessionRuntime, readonly string[]>();
+  const pendingScopeClosures = new WeakMap<
+    SessionRuntime,
+    Set<AcpSessionPort>
+  >();
+
+  const scopeUpdates = new WeakMap<SessionRuntime, Promise<void>>();
+  const primaryOnlyScopes = new WeakMap<SessionRuntime, readonly string[]>();
+
+  function projectScope(path: string): readonly string[] {
+    return (
+      workspaceStore.getState().projectFolders?.[pathKey(path)]?.relatedPaths ??
+      []
+    );
+  }
+
+  function requestedScope(runtime: SessionRuntime): readonly string[] {
+    const configured = projectScope(runtime.workspacePath);
+    const primaryOnly = primaryOnlyScopes.get(runtime);
+    return primaryOnly && sameRelatedPaths(configured, primaryOnly)
+      ? []
+      : configured;
+  }
+
+  function validateProjectScope(
+    runtime: SessionRuntime,
+    paths: readonly string[],
+  ) {
+    if (!isRemoteProjectPath(runtime.workspacePath)) return;
+    const connection = sessionTools.connectionForProject(runtime.workspacePath);
+    if (
+      paths.some(
+        (path) =>
+          !connection || sessionTools.connectionForProject(path) !== connection,
+      )
+    )
+      throw new Error("关联目录必须位于同一远程主机");
+  }
+
+  function setRelatedScope(
+    runtime: SessionRuntime,
+    scope: RelatedProjects,
+    error?: string,
+    isApplying?: boolean,
+  ): void {
+    runtime.store.setState({
+      relatedProjects: {
+        ...scope,
+        primary: runtime.workspacePath,
+        error,
+        isApplying,
+        retry: () => {
+          primaryOnlyScopes.delete(runtime);
+          return applyRelatedScope(
+            runtime,
+            projectScope(runtime.workspacePath),
+          );
+        },
+        usePrimaryOnly: () => {
+          primaryOnlyScopes.set(runtime, projectScope(runtime.workspacePath));
+          return applyRelatedScope(runtime, []);
+        },
+      },
+    });
+  }
+
+  function canUseRelatedDirectories(
+    runtime: SessionRuntime,
+    session: AcpSessionPort,
+  ): boolean {
+    const capabilities = session.agentInfo?.agentCapabilities;
+    return (
+      isRemoteProjectPath(runtime.workspacePath) ||
+      (capabilities?.loadSession === true &&
+        !!asRecord(
+          asRecord(capabilities.sessionCapabilities)?.["additionalDirectories"],
+        ))
+    );
+  }
+
+  function initializeRelatedScope(
+    runtime: SessionRuntime,
+    sessionId: string | null,
+  ): void {
+    const requested = projectScope(runtime.workspacePath);
+    let scope: RelatedProjects = { paths: requested };
+    try {
+      const saved =
+        sessionId === null
+          ? undefined
+          : readRelatedProjects(
+              runtime.workspacePath,
+              runtime.agentKey,
+              sessionId,
+            );
+      if (saved) {
+        scope = {
+          paths: requested,
+          historyPaths: [
+            ...new Set([...(saved.historyPaths ?? []), ...saved.paths]),
+          ],
+        };
+      }
+      if (requested.length) {
+        validateProjectScope(runtime, requested);
+        if (!canUseRelatedDirectories(runtime, runtime.session))
+          throw new Error("当前 Agent 不支持关联目录");
+      }
+      setRelatedScope(runtime, scope);
+    } catch (error) {
+      setRelatedScope(
+        runtime,
+        { ...scope, paths: [], pending: requested },
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  async function applyRelatedScope(
+    runtime: SessionRuntime,
+    paths: readonly string[],
+  ): Promise<void> {
+    const state = runtime.store.getState();
+    const old = state.relatedProjects;
+    if (
+      !old ||
+      old.isApplying ||
+      runtime.disposed ||
+      runtime.recovering ||
+      state.isConnecting
+    )
+      return;
+    const sessionId = runtime.session.sessionId ?? state.activeSessionId;
+    const historyPaths = [
+      ...new Set([...(old.historyPaths ?? []), ...old.paths]),
+    ];
+    const scope = { paths: old.paths, pending: paths, historyPaths };
+    const { workspacePath, agentKey } = runtime;
+    setRelatedScope(runtime, scope, undefined, true);
+    try {
+      await whenIdle(runtime);
+      if (runtime.recovering) await recoverRuntime(runtime, true);
+      if (runtime.disposed) return;
+      validateProjectScope(runtime, paths);
+      const canApply = canUseRelatedDirectories(runtime, runtime.session);
+      if (paths.length && !canApply)
+        throw new Error("当前 Agent 不支持关联目录");
+      const mustRestore =
+        sessionId &&
+        (canApply ||
+          old.paths.length > 0 ||
+          runtime.session.sessionId !== sessionId);
+      if (mustRestore) {
+        scopeOverrides.set(runtime, paths);
+        if (
+          runtime.session.sessionId === sessionId &&
+          isRemoteProjectPath(workspacePath)
+        ) {
+          const listeners = toolDisposals.get(runtime.session);
+          for (const dispose of [...(listeners ?? [])]) {
+            await dispose(true);
+            listeners?.delete(dispose);
+          }
+        }
+        await recoverRuntime(runtime, true, true);
+        if (runtime.disposed) return;
+        const recovery = runtime.store.getState().recovery;
+        if (
+          recovery.state !== "idle" ||
+          runtime.session.sessionId !== sessionId
+        )
+          throw new Error(recovery.reason || "原会话重连失败");
+      }
+      if (sessionId && (paths.length || historyPaths.length))
+        await saveRelatedProjects(workspacePath, agentKey, sessionId, {
+          paths,
+          historyPaths,
+        });
+      setRelatedScope(runtime, { paths, historyPaths });
+    } catch (error) {
+      setRelatedScope(
+        runtime,
+        scope,
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      scopeOverrides.delete(runtime);
+    }
+  }
+
+  function updateProjectScope(runtime: SessionRuntime) {
+    if (
+      runtime.disposed ||
+      runtime.listOnly ||
+      runtime.ephemeral ||
+      scopeUpdates.has(runtime)
+    )
+      return;
+    const state = runtime.store.getState();
+    if (
+      !state.relatedProjects ||
+      state.isConnecting ||
+      runtime.recovering ||
+      state.relatedProjects.isApplying
+    )
+      return;
+    const initial = requestedScope(runtime);
+    if (
+      sameRelatedPaths(
+        initial,
+        state.relatedProjects.pending ?? state.relatedProjects.paths,
+      )
+    )
+      return;
+    const task = (async () => {
+      let requested = initial;
+      for (;;) {
+        await applyRelatedScope(runtime, requested);
+        if (runtime.disposed) return;
+        const latest = requestedScope(runtime);
+        if (sameRelatedPaths(latest, requested)) break;
+        requested = latest;
+      }
+    })();
+    scopeUpdates.set(runtime, task);
+    void task.finally(() => scopeUpdates.delete(runtime));
+  }
+
   /** 会话的附加工具：打开它的插件给的在前，登记方给的在后；同名只留第一个。 */
   const toolsFor = async (
     runtime: SessionRuntime,
     sessionId: string | null,
     session = runtime.session,
   ) => {
+    const desired = scopeOverrides.get(runtime);
+    if (!runtime.ephemeral && !runtime.store.getState().relatedProjects) {
+      initializeRelatedScope(runtime, sessionId);
+    }
+    const scope = runtime.store.getState().relatedProjects;
+    if (
+      desired === undefined &&
+      sessionId === null &&
+      isRelatedScopeBlocked(scope)
+    )
+      throw new Error(scope?.error ?? "关联目录尚未生效");
+    const related = desired ?? (scope?.error ? [] : scope?.paths) ?? [];
+    validateProjectScope(runtime, related);
+    if (related.length && !canUseRelatedDirectories(runtime, session))
+      throw new Error("当前 Agent 不支持关联目录");
+    const remote = isRemoteProjectPath(runtime.workspacePath);
+    let remoteScopeBound = false;
     const explicit = runtime.openTools?.(session.agentInfo) ?? [];
     const resolved = await sessionTools.resolve({
       workspacePath: runtime.workspacePath,
@@ -188,6 +446,10 @@ export function createSessionCoordinator({
       agentKey: runtime.agentKey,
       agentId: runtime.adapter.id,
       sessionId,
+      relatedProjects: remote ? related : undefined,
+      onRemoteScopeBound: () => {
+        remoteScopeBound = true;
+      },
       agent: session.agentInfo,
       requestExtension: session.requestAgentExtension?.bind(session),
       requestPermission: (toolCall, options) => {
@@ -210,9 +472,38 @@ export function createSessionCoordinator({
         toolDisposals.set(session, listeners);
       },
     });
+    if (remote && related?.length && !remoteScopeBound) {
+      await resolved.dispose?.();
+      throw new Error("无法绑定关联的远程项目");
+    }
     const tools = [...explicit, ...resolved.servers];
     return {
       ...resolved,
+      additionalDirectories:
+        remote ||
+        (!related.length &&
+          desired === undefined &&
+          !scope?.historyPaths?.length)
+          ? undefined
+          : related,
+      establish: async (establishedId: string) => {
+        if (
+          desired === undefined &&
+          !scope?.error &&
+          (related.length || scope?.historyPaths?.length)
+        ) {
+          await saveRelatedProjects(
+            runtime.workspacePath,
+            runtime.agentKey,
+            establishedId,
+            {
+              paths: related,
+              historyPaths: scope?.historyPaths,
+            },
+          );
+        }
+        await resolved.establish(establishedId);
+      },
       servers: tools.filter(
         (tool, index) =>
           tools.findIndex((other) => other.name === tool.name) === index,
@@ -681,22 +972,43 @@ export function createSessionCoordinator({
   function recoverRuntime(
     runtime: SessionRuntime,
     immediate: boolean,
+    graceful = false,
   ): Promise<void> {
     if (runtimeDeleting(runtime))
       return Promise.reject(new Error("此会话正在删除或已删除"));
+    const releaseForReload = async (session: AcpSessionPort) => {
+      try {
+        await getProtocol().release(session, { forReload: true });
+        pendingScopeClosures.get(runtime)?.delete(session);
+      } catch (error) {
+        const pending = pendingScopeClosures.get(runtime) ?? new Set();
+        pending.add(session);
+        pendingScopeClosures.set(runtime, pending);
+        throw error;
+      }
+    };
     return runtime.recover({
       immediate,
       isClosing: () => retired || closing || switchingAgent,
-      release: releaseSessionResources,
-      recoverConnection: recoverSessionResources,
+      release: graceful ? releaseForReload : releaseSessionResources,
+      recoverConnection: graceful
+        ? async (session) => {
+            for (const pending of pendingScopeClosures.get(runtime) ?? []) {
+              if (pending !== session) await releaseForReload(pending);
+            }
+            await releaseForReload(session);
+          }
+        : recoverSessionResources,
       restore: async (session, options) => {
         const resolved = await toolsFor(runtime, options.sessionId, session);
         try {
           await getProtocol().restore(session, {
             ...options,
+            ...(graceful ? { scopeReload: true } : {}),
             mcpServers: resolved.servers,
+            additionalDirectories: resolved.additionalDirectories,
           });
-          if (options.isCurrent()) resolved.establish(options.sessionId);
+          if (options.isCurrent()) await resolved.establish(options.sessionId);
           else await resolved.dispose?.();
         } catch (error) {
           await resolved.dispose?.();
@@ -771,7 +1083,12 @@ export function createSessionCoordinator({
       supportsSteer,
       runtime.adapter.id,
     );
+    const detachScope = runtime.store.subscribe((state, previous) => {
+      if (previous.isConnecting && !state.isConnecting)
+        updateProjectScope(runtime);
+    });
     const detach = () => {
+      detachScope();
       detachContext();
       detachViews();
     };
@@ -1165,7 +1482,7 @@ export function createSessionCoordinator({
         (runtime) =>
           sameProject(runtime) &&
           !runtime.listOnly &&
-          draft &&
+          (draft || createFromDraft) &&
           preferredSessionId === null &&
           !runtime.store.getState().agentCrashed &&
           runtime.session.sessionId === null &&
@@ -1248,6 +1565,7 @@ export function createSessionCoordinator({
       : undefined;
     if (openingKey) openingRuntimes.set(openingKey, candidate);
     candidate.listOnly = false;
+    initializeRelatedScope(candidate, preferredSessionId);
     candidate.store.setState({ activeSessionId: null });
     projectFactory.addSession(candidate);
     const {
@@ -1327,7 +1645,15 @@ export function createSessionCoordinator({
           );
         }
       }
-      if (draft) {
+      const scope = viewStore.getState().relatedProjects;
+      if (
+        draft ||
+        (targetId === null &&
+          (createFromDraft || !options.background) &&
+          scope &&
+          (isRelatedScopeBlocked(scope) ||
+            (createFromDraft && scope.paths.length > 0)))
+      ) {
         // 草稿连接就绪：会话不创建，日志/快照/侧栏回填全部延后到
         // ensureSession 转正时。转正能力只挂草稿运行时的绑定——非草稿
         // 运行时保持 prompt 同步派发（取消竞态与测试都依赖同步性）。
@@ -1354,6 +1680,13 @@ export function createSessionCoordinator({
               (r) => r === candidate,
             ),
         );
+        if (createFromDraft) {
+          if (!mayFocus()) {
+            await disposeRuntime(candidate);
+            return null;
+          }
+          focusRuntime(candidate);
+        }
         logger.info("草稿连接就绪（会话待首条消息创建）", { workspacePath });
         return { sessionId: null };
       }
@@ -1409,7 +1742,15 @@ export function createSessionCoordinator({
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       reportFailure(`连接 agent 失败：${reason}`);
-      if(confirmedAbsent && recoveryOwner){
+      const related = candidate?.store.getState().relatedProjects;
+      if (
+        candidate &&
+        preferredSessionId &&
+        related?.paths.length &&
+        !related.error
+      )
+        setRelatedScope(candidate, related, reason);
+      if (confirmedAbsent && recoveryOwner) {
         await disposeRuntime(candidate);
         await indexes.finishSessionRecovery?.(recoveryOwner,"absent");
         directory.excludeSessions([{workspacePath,agentKey,sessionId:recoveryOwner.sessionId}]);
@@ -1447,6 +1788,7 @@ export function createSessionCoordinator({
       if (loading && loadingSession === loading) loadingSession = null;
       if (loading) viewStore.getState().endOpenSession(loading.sessionId);
       viewStore.getState().setConnecting(false);
+      updateProjectScope(candidate);
     }
   }
 
@@ -1461,12 +1803,27 @@ export function createSessionCoordinator({
    */
   /** 在同一个连接上重新载入会话，换上它现在的 openTools。 */
   function reloadTools(runtime: SessionRuntime): Promise<void> {
+    if (
+      !isRemoteProjectPath(runtime.workspacePath) &&
+      runtime.store.getState().relatedProjects?.paths.length
+    ) {
+      return recoverRuntime(runtime, true, true).then(() => {
+        if (runtime.store.getState().recovery.state !== "idle")
+          throw new Error(
+            runtime.store.getState().recovery.reason || "原会话重连失败",
+          );
+      });
+    }
     return runtime.reload({
       restore: async (session, restoreOptions) => {
         const resolved = await toolsFor(runtime, restoreOptions.sessionId, session);
         try {
-          await getProtocol().restore(session, { ...restoreOptions, mcpServers: resolved.servers });
-          resolved.establish(restoreOptions.sessionId);
+          await getProtocol().restore(session, {
+            ...restoreOptions,
+            mcpServers: resolved.servers,
+            additionalDirectories: resolved.additionalDirectories,
+          });
+          await resolved.establish(restoreOptions.sessionId);
         } catch (error) {
           await resolved.dispose?.();
           throw error;
@@ -1957,11 +2314,11 @@ export function createSessionCoordinator({
     if (
       changesHost &&
       !plugin?.ephemeral &&
-      !isRemoteProjectPath(workspacePath) &&
-      !viewStore.getState().turnChanges
+      !viewStore.getState().turnChanges &&
+      !isRemoteProjectPath(workspacePath)
     ) {
       viewStore.setState({
-        turnChanges: createTurnChangesSession(
+        turnChanges: createProjectTurnChangesSession(
           changesHost,
           viewStore,
           workspacePath,
@@ -2117,9 +2474,28 @@ export function createSessionCoordinator({
           }
         },
         onPromptContext: async (sessionId: string) => {
-          if (!browser.isAvailable() || !browserEndpoint) return [];
-          return (
-            (await browserOperation(
+          const paths = viewStore.getState().relatedProjects?.paths ?? [];
+          const projectContext =
+            isRemoteProjectPath(workspacePath) && paths.length
+              ? [
+                  {
+                    type: "text" as const,
+                    text:
+                      "本会话的远程项目与 MCP 工具对应关系：\n" +
+                      [workspacePath, ...paths]
+                        .map(
+                          (path, index) =>
+                            `${index === 0 ? "aaw-remote-project" : `aaw-remote-project-${index + 1}`} → ${parseRemoteProjectPath(path)?.remotePath ?? path}`,
+                        )
+                        .join("\n") +
+                      "\n远端路径的文件和命令操作请使用对应项目的 MCP 工具。",
+                  },
+                ]
+              : [];
+          if (!browser.isAvailable() || !browserEndpoint) return projectContext;
+          return [
+            ...projectContext,
+            ...((await browserOperation(
               "读取浏览器页面",
               async () => {
                 const enabled = await browser.agentControlEnabled();
@@ -2155,8 +2531,8 @@ export function createSessionCoordinator({
               },
               sessionId,
               ["SESSION_NOT_FOUND"],
-            )) ?? []
-          );
+            )) ?? []),
+          ];
         },
         project: { id: pathKey(workspacePath), path: workspacePath },
         onElicitation: (form, signal, scopeMethod) => {
@@ -2446,6 +2822,20 @@ export function createSessionCoordinator({
     sync();
     const stopSelection = getAgents().subscribeLaunchConfiguration(sync);
     const stopWorkspace = workspaceStore.subscribe((state, previous) => {
+      if (state.projectFolders !== previous.projectFolders) {
+        for (const runtime of projectFactory.sessions()) {
+          const path = pathKey(runtime.workspacePath);
+          if (
+            !sameRelatedPaths(
+              state.projectFolders?.[path]?.relatedPaths ?? [],
+              previous.projectFolders?.[path]?.relatedPaths ?? [],
+            )
+          ) {
+            primaryOnlyScopes.delete(runtime);
+            updateProjectScope(runtime);
+          }
+        }
+      }
       if (previous.activePath && state.activePath === null) {
         const key = connectionKey(selectedAgentKey(), previous.activePath);
         projectFactory.invalidatePreparations(

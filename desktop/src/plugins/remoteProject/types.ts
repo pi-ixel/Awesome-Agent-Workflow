@@ -99,6 +99,8 @@ export interface RemoteProjectRecord {
   readonly projectId: string;
   readonly connectionId: string;
   readonly remoteRoot: string;
+  /** 仅参与项目目录解析与历史检索。 */
+  readonly associationOnly?: true;
   /** 写入 AAW 工作区与面板系统的虚拟唯一路径（`//aaw-remote/<projectId><remoteRoot>`）。 */
   readonly workspacePath: string;
   /** 供后续 ACP 会话使用的本机稳定工作目录标识。 */
@@ -117,6 +119,7 @@ export interface RemoteProjectUi {
   openAddRemoteProject(): void;
   /** 供「新建会话」弹窗的「新建项目」Tab 直接内嵌渲染，避免套娃弹窗。 */
   renderAddProjectForm?(onClose: () => void): ReactNode;
+  renderEditProjectForm?(path: string, onClose: () => void): ReactNode;
 }
 
 export type RemoteFilePreviewResult = FilePreview & {

@@ -99,7 +99,11 @@ export function HintTooltip() {
     const pointerOver = (event: PointerEvent) => {
       if (event.pointerType === "touch") return;
       const target = anchorOf(event.target);
-      if (target !== anchorOf(event.relatedTarget)) open(target, hoverDelay);
+      if (target !== anchorOf(event.relatedTarget))
+        open(
+          target?.hasAttribute("data-hint-focus-only") ? null : target,
+          hoverDelay,
+        );
     };
     const leave = (event: PointerEvent | FocusEvent) => {
       if (anchor && anchorOf(event.target) === anchor && anchorOf(event.relatedTarget) !== anchor)

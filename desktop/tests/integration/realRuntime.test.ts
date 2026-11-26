@@ -60,6 +60,7 @@ import {
   type MockInstance,
 } from "vitest";
 import { readChrysArchive } from "../../src/plugins/agents/enhancements/icode/chrysArchive.ts";
+import { readRelatedProjects } from "../../src/plugins/project/sessions/relatedProjects.ts";
 
 vi.mock("../../src/plugins/agents/enhancements/icode/chrysArchive.ts", () => ({
   readChrysArchive: vi.fn(() => Promise.resolve([])),
@@ -142,6 +143,7 @@ function resetAll(): void {
     lastConnectError: null,
     recentWorkspaces: [],
     pinnedPaths: [],
+    projectFolders: {},
   });
   useApprovalStore.getState().clear();
   useWorkbenchUiStore.setState({
@@ -663,6 +665,71 @@ describe("openRealWorkspace：会话恢复装配", () => {
       stop();
       load.mockRestore();
       create.mockRestore();
+    }
+  });
+
+  it("编辑项目目录等待当前轮结束，使用原会话 ID 更新生效范围", async () => {
+    const related = "D:/related-project";
+    fakeSessionControl.supportsRelatedDirectories = true;
+    fakeSessionControl.listed = [
+      { sessionId: "scope-history", cwd: WORKSPACE },
+    ];
+    const load = vi.spyOn(FakeAcpSession.prototype, "loadSession");
+    let stopPreloading: (() => void) | undefined;
+    try {
+      await openRealWorkspace(WORKSPACE, { sessionId: "scope-history" });
+      stopPreloading = attachSessionPreloading();
+      const original = fakeSessionControl.lastInstance;
+      useSessionStore.getState().beginTurn("这一轮继续运行");
+      useWorkspaceStore.getState().updateProjectFolders(WORKSPACE, {
+        name: "Demo",
+        relatedPaths: [related],
+      });
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(useSessionStore.getState().relatedProjects?.isApplying).toBe(true);
+      useSessionStore.getState().endTurn({ stopReason: "end_turn" });
+      await vi.waitFor(() =>
+        expect(useSessionStore.getState().relatedProjects?.paths).toEqual([
+          related,
+        ]),
+      );
+      const state = useSessionStore.getState();
+      expect(load).toHaveBeenLastCalledWith(
+        "scope-history",
+        WORKSPACE,
+        expect.objectContaining({
+          additionalDirectories: [related],
+        }),
+      );
+      expect(original?.isReleased).toBe(true);
+      expect(state.activeSessionId).toBe("scope-history");
+      expect(
+        readRelatedProjects(WORKSPACE, state.agentKey!, "scope-history")?.paths,
+      ).toEqual([related]);
+      expect(
+        useWorkspaceStore.getState().projectFolders?.["d:/demo-project"]
+          ?.relatedPaths,
+      ).toEqual([related]);
+      useWorkspaceStore.getState().updateProjectFolders(WORKSPACE, {
+        name: "Demo",
+        relatedPaths: [],
+      });
+      await vi.waitFor(() =>
+        expect(useSessionStore.getState().relatedProjects?.paths).toEqual([]),
+      );
+      expect(load).toHaveBeenLastCalledWith(
+        "scope-history",
+        WORKSPACE,
+        expect.objectContaining({
+          additionalDirectories: [],
+        }),
+      );
+      expect(
+        readRelatedProjects(WORKSPACE, state.agentKey!, "scope-history")?.paths,
+      ).toEqual([]);
+    } finally {
+      stopPreloading?.();
+      load.mockRestore();
     }
   });
 
@@ -1958,6 +2025,91 @@ it("离开项目不终止已经打开的工作会话", async () => {
 });
 
 describe("新会话草稿先行", () => {
+  it("新建会话继承项目配置，首发附加目录，恢复不依赖最近项目列表", async () => {
+    const related = "D:/related-project";
+    navigationProject.projects.registerProject(WORKSPACE, {
+      name: "Demo",
+      relatedPaths: [related],
+    });
+    fakeSessionControl.supportsRelatedDirectories = true;
+    fakeSessionControl.newSessionId = "new-multi-project-fixture";
+    const create = vi.spyOn(FakeAcpSession.prototype, "newSession");
+    const load = vi.spyOn(FakeAcpSession.prototype, "loadSession");
+    try {
+      expect(
+        await navigationProject.sessions.startNewSession(WORKSPACE),
+      ).toEqual({ ok: true });
+      expect(useSessionStore.getState().activeSessionId).toBeNull();
+      expect(useSessionStore.getState().relatedProjects?.paths).toEqual([
+        related,
+      ]);
+      expect(create).not.toHaveBeenCalled();
+      expect(useSessionStore.getState().sendPrompt("读取关联项目")).toBe(true);
+      await vi.waitFor(() =>
+        expect(useSessionStore.getState().activeSessionId).toBe(
+          fakeSessionControl.newSessionId,
+        ),
+      );
+      expect(create).toHaveBeenCalledWith(
+        WORKSPACE,
+        expect.objectContaining({ additionalDirectories: [related] }),
+      );
+      const scope = useSessionStore.getState().agentKey!;
+      expect(
+        readRelatedProjects(WORKSPACE, scope, fakeSessionControl.newSessionId)
+          ?.paths,
+      ).toEqual([related]);
+      for (let index = 0; index < 10; index++)
+        useWorkspaceStore.getState().selectWorkspace(`D:/unrelated-${index}`);
+      expect(
+        useWorkspaceStore
+          .getState()
+          .recentWorkspaces.some(({ path }) => path === related),
+      ).toBe(false);
+      await closeRealRuntime();
+      await openRealWorkspace(WORKSPACE, {
+        sessionId: fakeSessionControl.newSessionId,
+      });
+      expect(load).toHaveBeenLastCalledWith(
+        fakeSessionControl.newSessionId,
+        WORKSPACE,
+        expect.objectContaining({ additionalDirectories: [related] }),
+      );
+    } finally {
+      create.mockRestore();
+      load.mockRestore();
+    }
+  });
+
+  it("不支持关联目录的 Agent 必须显式选择仅用主目录才可发送", async () => {
+    navigationProject.projects.registerProject(WORKSPACE, {
+      name: "Demo",
+      relatedPaths: ["D:/related-project"],
+    });
+    const create = vi.spyOn(FakeAcpSession.prototype, "newSession");
+    try {
+      expect(
+        await navigationProject.sessions.startNewSession(WORKSPACE),
+      ).toEqual({ ok: true });
+      expect(useSessionStore.getState().relatedProjects?.error).toContain(
+        "不支持关联目录",
+      );
+      expect(useSessionStore.getState().sendPrompt("保留草稿")).toBe(false);
+      expect(create).not.toHaveBeenCalled();
+      await useSessionStore.getState().relatedProjects?.usePrimaryOnly();
+      expect(useSessionStore.getState().sendPrompt("保留草稿")).toBe(true);
+      await vi.waitFor(() =>
+        expect(create).toHaveBeenCalledWith(WORKSPACE, undefined),
+      );
+      expect(
+        useWorkspaceStore.getState().projectFolders?.["d:/demo-project"]
+          ?.relatedPaths,
+      ).toEqual(["D:/related-project"]);
+    } finally {
+      create.mockRestore();
+    }
+  });
+
   it("慢连接期间立即切换空草稿，旧任务保活，迟到结果不抢回焦点", async () => {
     fakeSessionControl.listed = [{ sessionId: "running-A", cwd: WORKSPACE }];
     await openRealWorkspace(WORKSPACE, { sessionId: "running-A" });

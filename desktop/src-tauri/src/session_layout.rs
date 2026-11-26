@@ -86,7 +86,8 @@ impl SessionIdentity {
     pub(crate) fn from_composer_key(key: &str) -> Option<Self> {
         let key = key
             .strip_prefix("aaw-desktop/draft/")
-            .or_else(|| key.strip_prefix("aaw-desktop/prompt-history/"))?;
+            .or_else(|| key.strip_prefix("aaw-desktop/prompt-history/"))
+            .or_else(|| key.strip_prefix("aaw-desktop/session-projects/"))?;
         let mut parts = key.split('/');
         let version = parts.next()?;
         if !matches!(version, "v2" | "v3") {

@@ -78,6 +78,7 @@ if (params.has("sessions")) {
   renderProjectTree(root, {
     running: params.has("running"),
     statuses: params.has("statuses"),
+    folders: params.has("folders"),
   });
 } else {
   root.render(<Fixture />);

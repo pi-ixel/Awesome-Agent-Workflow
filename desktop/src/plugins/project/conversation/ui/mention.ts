@@ -74,6 +74,8 @@ function isSubsequence(target: string, query: string): boolean {
 /** @ 候选条目（文件引用 / skill 提示两种插入语义）。 */
 export interface MentionOption {
   readonly kind: "file" | "skill";
+  readonly group?: string;
+  readonly project?: string;
   /** 显示名：文件相对路径 / skill 名。 */
   readonly label: string;
   /** 选中后的插入文本（含尾随空格）。 */

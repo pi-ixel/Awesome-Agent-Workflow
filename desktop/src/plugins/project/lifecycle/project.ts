@@ -424,9 +424,11 @@ export class DesktopProject {
     return this.isActive() ? path : null;
   }
 
-  registerProject(path: string): void {
+  registerProject(
+    ...args: Parameters<ProjectWorkspace["registerProject"]>
+  ): void {
     this.assertOpen();
-    this.operations.registerProject(path);
+    this.operations.registerProject(...args);
   }
 
   beginDraft(path: string) {

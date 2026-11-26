@@ -330,14 +330,13 @@ export class SessionRuntime {
             }),
           ]);
         } catch (error) {
-          this.logger.warn("恢复前终止旧 Agent 进程树", {
+          this.logger.warn("恢复前关闭旧 ACP 通道失败", {
             sessionId,
             reason: String(error),
           });
-          throw new RecoveryCleanupError(
-            "无法确认旧 Agent 进程树退出，停止恢复",
-            { cause: error },
-          );
+          throw new RecoveryCleanupError("无法确认旧连接已关闭，停止恢复", {
+            cause: error,
+          });
         } finally {
           clearTimeout(deadline);
         }

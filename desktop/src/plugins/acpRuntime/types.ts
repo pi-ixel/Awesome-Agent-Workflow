@@ -160,7 +160,9 @@ type SessionRequestOptions = { readonly timeoutMs?: number };
  * 如按 Agent 声明的 mcpCapabilities 选择传输（ADR 024 §9-3）。
  */
 export type SessionSetupOptions = SessionRequestOptions & {
+  readonly scopeReload?: boolean;
   readonly mcpServers?: readonly McpServer[];
+  readonly additionalDirectories?: readonly string[];
 };
 
 /** One normalized ACP session. The runtime owns the underlying channel. */
@@ -179,6 +181,7 @@ export interface AcpSessionPort {
   refreshForNewSession?(): Promise<boolean>;
   readonly agentInfo: InitializeResult | null;
   closeSession(): Promise<void>;
+  closeRemoteForReload?(): Promise<void>;
   onEvent(listener: (event: AcpSessionEvent) => void): () => void;
   initialize(options?: SessionRequestOptions): Promise<InitializeResult>;
   newSession(
@@ -212,6 +215,7 @@ export interface AcpSessionPort {
 }
 
 export interface AcpProtocolRestoreOptions {
+  readonly scopeReload?: boolean;
   readonly sessionId: string;
   readonly workspacePath: string;
   readonly modelId: string | null;
@@ -221,6 +225,7 @@ export interface AcpProtocolRestoreOptions {
   readonly onReplay: (event: AcpSessionEvent) => void;
   /** 恢复时下发的附加 MCP 工具（缺省用会话构造时的清单）。 */
   readonly mcpServers?: readonly McpServer[];
+  readonly additionalDirectories?: readonly string[];
 }
 
 export interface AcpProtocolSessionOptions
@@ -266,7 +271,10 @@ export interface AcpProtocolResources {
   ): Promise<readonly SessionInfo[] | null>;
   has(session: AcpSessionPort): boolean;
   promote(session: AcpSessionPort): void;
-  release(session: AcpSessionPort): Promise<void>;
+  release(
+    session: AcpSessionPort,
+    options?: { forReload?: boolean },
+  ): Promise<void>;
   recover(session: AcpSessionPort): Promise<void>;
   restore(
     session: AcpSessionPort,

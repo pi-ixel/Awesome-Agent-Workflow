@@ -1,5 +1,6 @@
 import { fieldSurfaceClass } from "../../../shared/ui/inputStyles.ts";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
+import { ActionButton } from "../../../shared/ui/controls.tsx";
 import type { FileEntry } from "../../host/types.ts";
 import { describeUnknownError } from "../../../shared/errors.ts";
 import { CollapsibleTreePane } from "../../../shared/ui/TreeMotion.tsx";
@@ -38,6 +39,7 @@ import {
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   CopyIcon,
+  ChevronDownIcon,
   EllipsisIcon,
   FolderGlyph,
   PanelLeftCloseIcon,
@@ -56,6 +58,7 @@ import {
   isRemoteProjectPath,
   normalizePath,
   pathKey,
+  pathName,
 } from "../../../shared/panelPaths.ts";
 import { formatCopyablePath } from "../../../shared/workspaceText.ts";
 import { useFeedback } from "../../../shared/ui/feedback.ts";
@@ -151,6 +154,7 @@ export function FileTree({
   openExternal,
   treePosition = "right",
   onOpenTreeSettings,
+  projectSelection,
 }: {
   documents: DocumentsService;
   root: string;
@@ -162,6 +166,10 @@ export function FileTree({
   openExternal?: (url: string) => Promise<void>;
   treePosition?: "left" | "right";
   onOpenTreeSettings?: () => void;
+  projectSelection?: {
+    readonly paths: readonly string[];
+    readonly onSelect: (path: string) => void;
+  };
   /** 兼容保留（RightPanel 仍传入）：树内点击不再外开 tab——ZCode 形态是
    *  树 + 并列预览区，点击文件只在预览区换内容（见 preview 状态）。 */
   onOpen?: (entry: FileEntry) => void;
@@ -812,66 +820,107 @@ export function FileTree({
         className={`@container relative isolate flex min-h-0 flex-1 ${treeOnRight ? "flex-row-reverse" : "flex-row"}`}
       >
         <>
-            <CollapsibleTreePane
-              paneRef={treeColRef}
-              open={treeVisible}
-              width={`var(${TREE_PREVIEW_WIDTH}, ${treeWidth(split.ratio, "%")})`}
-              contentWidth={treeWidth(split.ratio, "cqw")}
-              resizing={resizingTree}
-              scope={root}
-            >
-              {/* 搜索在目录模组内（ZCode 图1/2：树列宽，不横跨预览列） */}
-              <div className="flex shrink-0 items-center px-2 pb-1.5 pt-2">
-                <div className="relative min-w-0 flex-1">
-                  <SearchIcon className="pointer-events-none absolute left-2 top-1/2 ui-icon-14 -translate-y-1/2 text-ink-subtlest" />
-                  <input
-                    type="text"
-                    value={fileSearchQuery}
-                    placeholder="搜索文件..."
-                    aria-label="搜索文件"
-                    className={`${fieldSurfaceClass} min-h-6 w-full py-0.5 pl-[calc(14px_+_14*var(--ui-icon-unit))] pr-7 text-ui-xs`}
-                    onChange={(event) =>
-                      setFileSearchQuery(event.currentTarget.value)
-                    }
-                  />
-                  {fileSearchQuery.length > 0 ? (
-                    <IconButton iconSize="compact"
-                      type="button"
-                      aria-label="清空文件搜索"
-                      data-hint="清空文件搜索"
-                      className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center justify-center rounded-control text-ink-subtlest transition-colors hover:bg-surface-hover hover:text-ink"
-                      onClick={() => setFileSearchQuery("")}
-                    >
-                      <XIcon className="ui-icon-12" />
-                    </IconButton>
-                  ) : null}
-                </div>
-              </div>
-              <div className="flex shrink-0 items-center px-2 pb-1.5">
-                <div className="flex min-w-0 flex-1 items-center gap-1">
-                  <h3
-                    className="min-w-0 truncate py-0.5 pl-2.5 pr-0.5 text-ui-sm font-medium text-ink-subtlest"
-                    style={{ whiteSpace: "nowrap" }}
+          <CollapsibleTreePane
+            paneRef={treeColRef}
+            open={treeVisible}
+            width={`var(${TREE_PREVIEW_WIDTH}, ${treeWidth(split.ratio, "%")})`}
+            contentWidth={treeWidth(split.ratio, "cqw")}
+            resizing={resizingTree}
+            scope={root}
+          >
+            {/* 搜索在目录模组内（ZCode 图1/2：树列宽，不横跨预览列） */}
+            <div className="flex shrink-0 items-center px-2 pb-1.5 pt-2">
+              <div className="relative min-w-0 flex-1">
+                <SearchIcon className="pointer-events-none absolute left-2 top-1/2 ui-icon-14 -translate-y-1/2 text-ink-subtlest" />
+                <input
+                  type="text"
+                  value={fileSearchQuery}
+                  placeholder="搜索文件..."
+                  aria-label="搜索文件"
+                  className={`${fieldSurfaceClass} min-h-6 w-full py-0.5 pl-[calc(14px_+_14*var(--ui-icon-unit))] pr-7 text-ui-xs`}
+                  onChange={(event) =>
+                    setFileSearchQuery(event.currentTarget.value)
+                  }
+                />
+                {fileSearchQuery.length > 0 ? (
+                  <IconButton
+                    iconSize="compact"
+                    type="button"
+                    aria-label="清空文件搜索"
+                    data-hint="清空文件搜索"
+                    className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center justify-center rounded-control text-ink-subtlest transition-colors hover:bg-surface-hover hover:text-ink"
+                    onClick={() => setFileSearchQuery("")}
                   >
-                    {title}
+                    <XIcon className="ui-icon-12" />
+                  </IconButton>
+                ) : null}
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center px-2 pb-1.5">
+              <div className="flex min-w-0 flex-1 items-center gap-1">
+                {projectSelection && projectSelection.paths.length > 1 ? (
+                  <ActionButton
+                    tone="ghost"
+                    size="compact"
+                    aria-label={`切换文件树项目，当前项目 ${title}`}
+                    aria-haspopup="menu"
+                    aria-expanded={menu?.id === "projects" && !menu.closing}
+                    className="min-w-0 max-w-full text-ink"
+                    onClick={(event) => {
+                      if (menu?.id === "projects" && !menu.closing) {
+                        dismissMenu();
+                        return;
+                      }
+                      openMenu(
+                        "projects",
+                        "文件树项目",
+                        projectSelection.paths.map((path) => {
+                          const selected = pathKey(path) === rootKey;
+                          const select = () => projectSelection.onSelect(path);
+                          return {
+                            id: path,
+                            label: pathName(path),
+                            icon: <FolderGlyph isExpanded={selected} className="ui-icon-16 shrink-0 text-ink-subtle" />,
+                            radio: true,
+                            selected,
+                            onSelect: () => {
+                              if (!selected && documents.editor.guard(select)) select();
+                            },
+                          };
+                        }),
+                        { trigger: event.currentTarget, align: "start" },
+                      );
+                    }}
+                  >
+                    <FolderGlyph className="ui-icon-16 shrink-0 text-ink-subtle" />
+                    <span className="min-w-0 truncate">{title}</span>
+                    <ChevronDownIcon className="ui-icon-12 shrink-0 text-ink-faint" />
+                  </ActionButton>
+                ) : (
+                  <h3 className="flex min-w-0 items-center gap-1.5 py-0.5 pl-2.5 pr-0.5 text-ui-sm font-medium text-ink-subtle">
+                    <FolderGlyph className="ui-icon-16 shrink-0 text-ink-subtle" />
+                    <span className="truncate">{title}</span>
                   </h3>
-                </div>
-                <IconButton iconSize="compact"
-                  type="button"
-                  aria-label="更多"
-                  data-hint="更多"
-                  aria-haspopup="menu"
-                  aria-expanded={menu?.id === "header" && !menu.closing}
-                  className="flex items-center justify-center rounded-control text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
-                  onClick={(event) => {
-                    if (menu?.id === "header" && !menu.closing) dismissMenu();
-                    else openHeaderMenu(event.currentTarget);
-                  }}
-                >
-                  <EllipsisIcon className="ui-icon-14" />
-                </IconButton>
-                {tree.gitStatusAvailable ? (
-                  <IconButton iconSize="compact"
+                )}
+              </div>
+              <IconButton
+                iconSize="compact"
+                type="button"
+                aria-label="更多"
+                data-hint="更多"
+                aria-haspopup="menu"
+                aria-expanded={menu?.id === "header" && !menu.closing}
+                className="flex items-center justify-center rounded-control text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+                onClick={(event) => {
+                  if (menu?.id === "header" && !menu.closing) dismissMenu();
+                  else openHeaderMenu(event.currentTarget);
+                }}
+              >
+                <EllipsisIcon className="ui-icon-14" />
+              </IconButton>
+              {tree.gitStatusAvailable ? (
+                  <IconButton
+                    iconSize="compact"
                     type="button"
                     aria-pressed={changedOnly}
                     aria-label={changedOnly ? "显示全部文件" : "仅显示变更文件"}

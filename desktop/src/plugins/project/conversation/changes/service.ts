@@ -1,3 +1,4 @@
+import { insidePath, pathKey } from "../../../../shared/panelPaths.ts";
 import { createLogger } from "../../../../shared/logging/logger.ts";
 import { createStore } from "zustand/vanilla";
 import type { StoreApi } from "zustand";
@@ -45,12 +46,13 @@ export function createTurnChangesSession(
   workspace: string,
   agentKey: string,
   journal = false,
+  targetRoot?: string,
 ) {
   const state = createStore<ChangesView>(() => empty);
   let loadedSession = "";
   type Owner = Pick<TurnChangesRequest, "cwd" | "sessionId">;
   const owner = (): Owner => ({
-    cwd: session.getState().workingDirectory ?? workspace,
+    cwd: targetRoot ?? session.getState().workingDirectory ?? workspace,
     sessionId: session.getState().activeSessionId ?? loadedSession,
   });
   const latestUser = () =>
@@ -173,6 +175,13 @@ export function createTurnChangesSession(
   };
   async function readJournal(outcome: TurnOutcome) {
     const scope = owner();
+    const journalCwd = session.getState().workingDirectory ?? workspace;
+    const excludedProjectRoots = session
+      .getState()
+      .relatedProjects?.paths.filter(
+        (path) =>
+          pathKey(path) !== pathKey(scope.cwd) && insidePath(scope.cwd, path),
+      );
     const user = latestUser();
     if (!user || !scope.sessionId) return;
     const items = session.getState().items;
@@ -195,6 +204,8 @@ export function createTurnChangesSession(
       if (!isCurrent()) return;
       const records = await request("readJournal", {
         ...scope,
+        journalCwd,
+        excludedProjectRoots,
         userId: user.id,
         startedAt: Date.parse(user.createdAt),
         toolIds,
@@ -212,6 +223,7 @@ export function createTurnChangesSession(
   const stop = session.subscribe(() => {
     void load();
   });
+  void load();
   const act = (
     action: "restore" | "undo",
     paths?: readonly string[],
@@ -319,4 +331,126 @@ export function createTurnChangesSession(
     },
   };
 }
-export type TurnChangesSession = ReturnType<typeof createTurnChangesSession>;
+export interface ProjectTurnChanges {
+  readonly path: string;
+  readonly changes: ReturnType<typeof createTurnChangesSession>;
+  readonly view: ChangesView;
+  readonly tracked: boolean;
+}
+
+export type TurnChangesSession = ReturnType<typeof createTurnChangesSession> & {
+  readonly projectGroups?: StoreApi<{
+    readonly projects: readonly ProjectTurnChanges[];
+  }>;
+};
+
+export function createProjectTurnChangesSession(
+  host: TurnChangesHost,
+  session: StoreApi<SessionStoreState>,
+  workspace: string,
+  agentKey: string,
+  journal = false,
+): TurnChangesSession {
+  const primary = createTurnChangesSession(
+    host,
+    session,
+    workspace,
+    agentKey,
+    journal,
+  );
+  const projectGroups = createStore<{
+    readonly projects: readonly ProjectTurnChanges[];
+  }>(() => ({ projects: [] }));
+  const children = new Map<
+    string,
+    {
+      path: string;
+      changes: typeof primary;
+      tracked: boolean;
+      stop: () => void;
+    }
+  >();
+  const publish = () => {
+    projectGroups.setState({
+      projects: [
+        {
+          path: session.getState().workingDirectory ?? workspace,
+          changes: primary,
+          tracked: true,
+          view: primary.state.getState(),
+        },
+        ...[...children.values()].map(({ path, changes, tracked }) => ({
+          path,
+          changes,
+          tracked,
+          view: changes.state.getState(),
+        })),
+      ],
+    });
+  };
+  const sync = () => {
+    const scope = session.getState().relatedProjects;
+    const active = new Set(scope?.paths.map(pathKey));
+    const primaryKey = pathKey(
+      session.getState().workingDirectory ?? workspace,
+    );
+    for (const child of children.values())
+      child.tracked = active.has(pathKey(child.path));
+    for (const path of [
+      ...(scope?.paths ?? []),
+      ...(scope?.historyPaths ?? []),
+    ]) {
+      const key = pathKey(path);
+      if (key === primaryKey || children.has(key)) continue;
+      const changes = createTurnChangesSession(
+        host,
+        session,
+        workspace,
+        agentKey,
+        journal,
+        path,
+      );
+      children.set(key, {
+        path,
+        changes,
+        tracked: active.has(key),
+        stop: changes.state.subscribe(publish),
+      });
+    }
+    publish();
+  };
+  const stopSession = session.subscribe((next, previous) => {
+    if (
+      next.relatedProjects !== previous.relatedProjects ||
+      next.workingDirectory !== previous.workingDirectory
+    )
+      sync();
+  });
+  const stopPrimary = primary.state.subscribe(publish);
+  const collectors = (trackedOnly: boolean) => [
+    primary,
+    ...[...children.values()]
+      .filter(({ tracked }) => !trackedOnly || tracked)
+      .map(({ changes }) => changes),
+  ];
+  sync();
+  return {
+    ...primary,
+    projectGroups,
+    recordSubmission: () =>
+      collectors(false).forEach((changes) => changes.recordSubmission()),
+    submitted: () =>
+      collectors(false).forEach((changes) => changes.submitted()),
+    async finish(outcome) {
+      await Promise.all(
+        collectors(true).map((changes) => changes.finish(outcome)),
+      );
+    },
+    async dispose() {
+      stopSession();
+      stopPrimary();
+      for (const child of children.values()) child.stop();
+      await Promise.all(collectors(false).map((changes) => changes.dispose()));
+    },
+  };
+}

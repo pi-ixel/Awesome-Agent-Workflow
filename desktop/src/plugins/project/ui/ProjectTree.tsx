@@ -1,3 +1,5 @@
+import { createPortal } from "react-dom";
+import { HintSurface } from "../../../shared/ui/controls/HintSurface.tsx";
 import { ActionButton } from "../../../shared/ui/controls.tsx";
 import { fieldSurfaceClass } from "../../../shared/ui/inputStyles.ts";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
@@ -5,7 +7,7 @@ import { ConfirmIconAction } from "../../../shared/ui/ConfirmIconAction.tsx";
 import { NavigationRow } from "../../../shared/ui/NavigationRow.tsx";
 import { TreeBranch, treeChevronClass } from "../../../shared/ui/TreeMotion.tsx";
 import { useSessionValue } from "./bindings/conversationView.ts";
-import { useWorkspaceCommands, useWorkspaceValue } from "./bindings/workspaceView.ts";
+import { useProjectName, useWorkspaceCommands, useWorkspaceValue } from "./bindings/workspaceView.ts";
 import { useProject, useProjectNavigation, useProjectPageValue, useProjectSidebarValue, useProjectExtension } from "./bindings/projectView.tsx";
 import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
 import { parseSessionPinKey } from "../sessions/sessionPin.ts";
@@ -94,7 +96,9 @@ import {
   PinOffIcon,
   XIcon,
   EllipsisIcon,
+  MessageCircleIcon,
   MessageCirclePlusIcon,
+  SettingsIcon,
   PencilIcon,
   ArchiveIcon,
   FileTreeIcon,
@@ -102,7 +106,10 @@ import {
   StarFilledIcon,
   StarOutlineIcon,
 } from "../../../shared/ui/icons.tsx";
-import { basenameOf } from "../../../shared/workspaceText.ts";
+import {
+  basenameOf,
+  formatWorkspacePathLabel,
+} from "../../../shared/workspaceText.ts";
 import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
 import { useFeedback } from "../../../shared/ui/feedback.ts";
 import type { SessionSummary } from "../conversation/sessionStore.ts";
@@ -233,12 +240,14 @@ function ProjectNodeRow({
   isPinned,
   isExpanded,
   isSelected,
+  sessionCount,
   menu,
 }: {
   readonly path: string;
   readonly isPinned: boolean;
   readonly isExpanded: boolean;
   readonly isSelected: boolean;
+  readonly sessionCount: number;
   readonly menu: SidebarMenuApi;
 }) {
   const projectService = useProject();
@@ -247,7 +256,57 @@ function ProjectNodeRow({
   const treeAction = useProjectExtension()?.getState().view?.treeAction;
   const togglePinned = projectService?.projects.togglePinned;
   const toggleExpanded = useProjectSidebarValue((state) => state.toggleExpanded);
-  const name = basenameOf(path);
+  const config = useWorkspaceValue((state) => state.projectFolders?.[pathKey(path)]);
+  const name = useProjectName(path);
+  const row = useRef<HTMLDivElement>(null);
+  const hoverTimer = useRef<number>(0);
+  const [card, setCard] = useState<{ left: number; top: number }>();
+  const [isEditing, setIsEditing] = useState(false);
+  const editForm = isEditing
+    ? navigation?.renderEditProjectForm?.(path, () => setIsEditing(false))
+    : null;
+
+  const closeCard = useCallback(() => {
+    window.clearTimeout(hoverTimer.current);
+    setCard(undefined);
+  }, []);
+  useEffect(() => {
+    if (!card) return;
+    window.addEventListener("resize", closeCard);
+    return () => window.removeEventListener("resize", closeCard);
+  }, [card, closeCard]);
+  useEffect(() => () => window.clearTimeout(hoverTimer.current), []);
+
+  function beginHover() {
+    window.clearTimeout(hoverTimer.current);
+    if (card || isEditing) return;
+    hoverTimer.current = window.setTimeout(() => {
+      const rect = row.current?.getBoundingClientRect();
+      if (!rect) return;
+      const width = Math.min(340, window.innerWidth - 32);
+      const height = Math.min(
+        278,
+        122 + (1 + (config?.relatedPaths.length ?? 0)) * 26,
+      );
+      setCard({
+        left: Math.max(
+          16,
+          Math.min(rect.right + 6, window.innerWidth - width - 16),
+        ),
+        top: Math.max(16, Math.min(rect.top, window.innerHeight - height - 16)),
+      });
+    }, 260);
+  }
+
+  function endHover() {
+    window.clearTimeout(hoverTimer.current);
+    hoverTimer.current = window.setTimeout(closeCard, 180);
+  }
+
+  function editProject() {
+    closeCard();
+    setIsEditing(true);
+  }
   const hintNewSession = hintTooltipProps("新建会话");
   const hintExtension = hintTooltipProps(treeAction?.hint ?? "");
   const hintFiles = hintTooltipProps("浏览项目文件");
@@ -279,6 +338,13 @@ function ProjectNodeRow({
           void projectService?.sessions.startNewSession(path);
         },
       },
+      {
+        id: "edit-project",
+        label: "编辑项目",
+        icon: <SettingsIcon className="ui-icon-16" />,
+        disabled: !navigation?.renderEditProjectForm,
+        onSelect: editProject,
+      },
       { type: "separator" },
       {
         id: "pin",
@@ -305,8 +371,11 @@ function ProjectNodeRow({
 
   return (
     <div
+      ref={row}
+      onPointerLeave={endHover}
       onContextMenu={(event) => {
         event.preventDefault();
+        closeCard();
         menu.openAtPointer(
           event.clientX,
           event.clientY,
@@ -317,6 +386,7 @@ function ProjectNodeRow({
       onKeyDown={(event) => {
         if (isContextMenuKey(event)) {
           event.preventDefault();
+          closeCard();
           menu.openAtRect(
             event.currentTarget.getBoundingClientRect(),
             "项目菜单",
@@ -331,13 +401,18 @@ function ProjectNodeRow({
       {/* 点项目名进总览，悬停显示完整路径。 */}
       <NavigationRow
         layout="compound"
+        onPointerEnter={(event) => {
+          if (event.pointerType !== "touch") beginHover();
+        }}
         onClick={() => {
+          closeCard();
           toggleExpanded(path, isExpanded);
         }}
         aria-expanded={isExpanded}
         aria-current={isSelected ? "true" : undefined}
+        data-hint={formatWorkspacePathLabel(path)}
+        data-hint-focus-only=""
         className="min-h-8 items-center gap-2 pl-1.5 pr-1"
-        data-hint={path}
       >
         {/* 前导槽（ZCode ProjectNodeContent.tsx:231-255 同构）：置顶提示
             复用固定槽位，仅悬停时替换图标，避免行尾常驻钉子占位 */}
@@ -368,6 +443,7 @@ function ProjectNodeRow({
           {...hintMoreActions}
           onClick={(event) => {
             event.stopPropagation();
+            closeCard();
             menu.openAtRect(
               event.currentTarget.getBoundingClientRect(),
               "项目菜单",
@@ -419,6 +495,59 @@ function ProjectNodeRow({
           </IconButton>
         )}
       </div>
+      {typeof document !== "undefined" &&
+        createPortal(
+          <HintSurface
+            open={Boolean(card) && !isEditing}
+            role="group"
+            aria-label="项目详情"
+            unfoldFrom="left"
+            className="fixed z-40 max-h-[calc(100dvh-32px)] w-[min(340px,calc(100vw-32px))] overflow-auto border border-line p-2"
+            style={card}
+            onPointerEnter={() => window.clearTimeout(hoverTimer.current)}
+            onPointerLeave={endHover}
+            onFocus={() => window.clearTimeout(hoverTimer.current)}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget))
+                endHover();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                closeCard();
+                row.current?.querySelector("button")?.focus();
+              }
+            }}
+          >
+            <div className="space-y-1.5 px-2 py-1.5">
+              <div className="flex items-center gap-2 text-ui-base font-semibold text-ink">
+                <FolderGlyph className="ui-icon-16 shrink-0 text-ink-mute" />
+                <span className="min-w-0 break-all">{name}</span>
+              </div>
+              <div className="flex items-center gap-2 text-ui-sm text-ink-mute">
+                <MessageCircleIcon className="ui-icon-14" />
+                {sessionCount} 次会话
+              </div>
+            </div>
+            <ul className="max-h-36 space-y-1.5 overflow-auto border-y border-line px-2 py-2 text-ui-sm text-ink-subtle">
+              {[path, ...(config?.relatedPaths ?? [])].map((folder) => (
+                <li className="flex items-start gap-2" key={pathKey(folder)}>
+                  <FolderGlyph className="mt-0.5 ui-icon-14 shrink-0 text-ink-mute" />
+                  <span className="min-w-0 break-all">
+                    {formatWorkspacePathLabel(folder)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {navigation?.renderEditProjectForm && (
+              <NavigationRow className="mt-1 gap-2" onClick={editProject}>
+                <SettingsIcon className="ui-icon-14 text-ink-mute" />
+                编辑项目
+              </NavigationRow>
+            )}
+          </HintSurface>,
+          document.body,
+        )}
+      {editForm}
       {confirmRemoval && (
         <RemoveProjectDialog
           path={path}
@@ -1421,6 +1550,7 @@ function ProjectsView({
           isPinned={isPinned}
           isExpanded={isExpanded}
           isSelected={isSelected}
+          sessionCount={sessions?.length ?? 0}
           menu={menu}
         />
         <TreeBranch open={isExpanded}>

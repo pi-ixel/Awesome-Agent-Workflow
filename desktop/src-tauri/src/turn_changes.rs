@@ -115,6 +115,9 @@ pub struct Request {
     action: String,
     cwd: String,
     workspace_path: Option<String>,
+    journal_cwd: Option<String>,
+    #[serde(default)]
+    excluded_project_roots: Vec<String>,
     agent_key: String,
     session_id: String,
     id: Option<String>,

@@ -19,7 +19,8 @@ export function projectOperationsFrom(
   workspace: ProjectSessionDependencies["workspace"],
 ): ProjectOperations {
   return {
-    registerProject: (path) => workspace.getState().selectWorkspace(path),
+    registerProject: (path, folders) =>
+      workspace.getState().registerProject(path, folders),
     beginDraft: coordinator.beginDraftWorkspace,
     focusSession: coordinator.focusExistingSession,
     preloadSessionList: coordinator.preloadSessionList,

@@ -81,6 +81,10 @@ import { useProjectPreferences } from "../../ui/preferencesView.tsx";
 import { chatWidthClassOf } from "./chatWidth.ts";
 import { StatusChipMenu } from "./StatusChipMenu.tsx";
 import type { FileCandidates } from "./documentView.ts";
+import {
+  parseRemoteProjectPath,
+  pathName,
+} from "../../../../shared/panelPaths.ts";
 import { InputStatusRight } from "./InputStatusBar.tsx";
 import {
   ArrowUpIcon,
@@ -174,6 +178,12 @@ export interface ChatInputProps {
   /** 卡片最上面一行（如工作流节点会话的那一条），排在排队消息上面。 */
   readonly header?: ReactNode;
   readonly fileCandidates?: FileCandidates;
+  readonly fileCandidateGroups?: readonly {
+    readonly project: string;
+    readonly label: string;
+    readonly paths: readonly string[];
+  }[];
+  readonly fileCandidateProjects?: readonly string[];
   readonly skillCandidates?: SkillsService["candidates"];
   readonly resolveSlashSkills?: SkillsService["resolveSlashSkills"];
   readonly skillWorkspace?: string | null;
@@ -212,6 +222,8 @@ export function ChatInput({
   queue,
   header,
   fileCandidates,
+  fileCandidateGroups,
+  fileCandidateProjects,
   skillCandidates,
   resolveSlashSkills,
   skillWorkspace,
@@ -483,22 +495,69 @@ export function ChatInput({
     readonly owner: FileCandidates;
     readonly project: string;
     readonly paths: readonly string[];
+    readonly projects?: readonly string[];
+    readonly groups?: ChatInputProps["fileCandidateGroups"];
   }>();
   if (files && files.owner !== fileCandidates) setFiles(undefined);
   const filesReady =
-    files?.owner === fileCandidates && files?.project === activePath;
+    files?.owner === fileCandidates &&
+    files?.project === activePath &&
+    files?.projects === fileCandidateProjects;
   const mentioning = mention !== null;
   useEffect(() => {
-    if (!mentioning || !fileCandidates || !activePath || filesReady) return;
+    if (
+      !mentioning ||
+      !fileCandidates ||
+      !activePath ||
+      filesReady ||
+      fileCandidateGroups
+    )
+      return;
     let current = true;
-    void fileCandidates.listWorkspaceFiles(activePath).then((paths) => {
-      if (current && fileCandidates.isActive())
-        setFiles({ owner: fileCandidates, project: activePath, paths });
-    });
+    if (fileCandidateProjects?.length) {
+      void Promise.all(
+        fileCandidateProjects.map(async (project) => ({
+          project,
+          label: pathName(project),
+          paths: await fileCandidates.listWorkspaceFiles(project),
+        })),
+      )
+        .then((groups) => {
+          if (current && fileCandidates.isActive())
+            setFiles({
+              owner: fileCandidates,
+              project: activePath,
+              paths: [],
+              projects: fileCandidateProjects,
+              groups,
+            });
+        })
+        .catch(() => {
+          if (current)
+            setFiles({
+              owner: fileCandidates,
+              project: activePath,
+              paths: [],
+              projects: fileCandidateProjects,
+            });
+        });
+    } else {
+      void fileCandidates.listWorkspaceFiles(activePath).then((paths) => {
+        if (current && fileCandidates.isActive())
+          setFiles({ owner: fileCandidates, project: activePath, paths });
+      });
+    }
     return () => {
       current = false;
     };
-  }, [activePath, fileCandidates, filesReady, mentioning]);
+  }, [
+    activePath,
+    fileCandidates,
+    fileCandidateGroups,
+    fileCandidateProjects,
+    filesReady,
+    mentioning,
+  ]);
 
   // 输入历史浏览（命令式索引，不进渲染态）
   const historyIndexRef = useRef<number | null>(null);
@@ -690,13 +749,48 @@ export function ChatInput({
     if (mention === null) {
       return [];
     }
+    const groups =
+      fileCandidateGroups ?? (filesReady ? files?.groups : undefined);
+    if (groups) {
+      const labelCounts = new Map<string, number>();
+      for (const { label } of groups)
+        labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
+      return [
+        ...groups.flatMap(({ project, label, paths }) =>
+          filterMentionOptions(paths, [], mention.query).map((option) => ({
+            ...option,
+            project,
+            group:
+              labelCounts.get(label) === 1 ? label : `${label} · ${project}`,
+            insert:
+              project === activePath
+                ? option.insert
+                : `@${(parseRemoteProjectPath(project)?.remotePath ?? project).replace(/[\\/]+$/, "")}/${option.label} `,
+          })),
+        ),
+        ...filterMentionOptions(
+          [],
+          skillNames,
+          mention.query,
+          skillInvocations,
+        ),
+      ];
+    }
     return filterMentionOptions(
       filesReady ? (files?.paths ?? []) : [],
       skillNames,
       mention.query,
       skillInvocations,
     );
-  }, [mention, files, filesReady, skillNames, skillInvocations]);
+  }, [
+    activePath,
+    mention,
+    files,
+    filesReady,
+    fileCandidateGroups,
+    skillNames,
+    skillInvocations,
+  ]);
 
   const slashOptions = useMemo(
     () =>
@@ -771,11 +865,13 @@ export function ChatInput({
   const mentionRows = useMemo(
     () =>
       mentionOptions.map((option, index) => ({
-        key: `${option.kind}:${option.label}`,
+        key: `${option.kind}:${option.project ?? ""}:${option.label}`,
         header:
-          index === 0 || mentionOptions[index - 1]?.kind !== option.kind
+          index === 0 ||
+          mentionOptions[index - 1]?.kind !== option.kind ||
+          mentionOptions[index - 1]?.project !== option.project
             ? option.kind === "file"
-              ? "文件"
+              ? (option.group ?? "文件")
               : "Skills"
             : null,
         option,
@@ -1260,7 +1356,10 @@ export function ChatInput({
           >
             {mentionOptions.length === 0 ? (
               <p className="px-4 py-3 text-ui-base text-ink-subtlest">
-                {filesReady || !fileCandidates || !activePath
+                {filesReady ||
+                fileCandidateGroups ||
+                !fileCandidates ||
+                !activePath
                   ? "没有匹配的文件或 skill"
                   : "正在读取文件列表…"}
               </p>

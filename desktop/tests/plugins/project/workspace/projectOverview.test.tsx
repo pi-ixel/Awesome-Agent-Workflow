@@ -85,7 +85,9 @@ describe("ProjectOverview", () => {
     // 点击「添加项目」打开创建项目弹窗；jsdom 下本地目录对话框不可用，
     // 在弹窗中点击「添加」给出重试提示而非无响应
     await userEvent.click(addButton);
-    const pickLocalButton = await screen.findByRole("button", { name: "添加" });
+    const pickLocalButton = await screen.findByRole("button", {
+      name: "添加文件夹",
+    });
     await userEvent.click(pickLocalButton);
     expect(
       await screen.findByText(/目录选择已取消或当前环境不可用/),

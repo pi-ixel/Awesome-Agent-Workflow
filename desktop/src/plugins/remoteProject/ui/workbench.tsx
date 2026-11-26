@@ -1,10 +1,18 @@
 import type { Context } from "cordis";
 import { createElement } from "react";
 import { createStore, useStore } from "zustand";
-import { parseRemoteProjectPath } from "../../../shared/panelPaths.ts";
 import { ActionButton } from "../../../shared/ui/controls.tsx";
+import {
+  pathKey,
+  isRemoteProjectPath,
+  parseRemoteProjectPath,
+} from "../../../shared/panelPaths.ts";
+import {
+  basenameOf,
+  formatCopyablePath,
+} from "../../../shared/workspaceText.ts";
 import { MonitorIcon } from "../../../shared/ui/icons.tsx";
-import type { RemoteProjectRecord, RemoteProjectUi } from "../service.ts";
+import type { RemoteProjectUi } from "../service.ts";
 import { createRemoteSessionToolProvider } from "../session/sessionBridge.ts";
 import { createRemoteTerminalResolver } from "../terminal/remoteTerminal.ts";
 import {
@@ -22,19 +30,48 @@ export function apply(ctx: Context): void {
     open: false,
   }));
 
-  const handleAdded = (record: RemoteProjectRecord) => {
-    project.projects.registerProject(record.workspacePath);
-    project.projects.selectWorkspace(record.workspacePath);
-    workbench.navigation
-      .getState()
-      .openView("project-overview", record.workspacePath);
-  };
+  const onPickLocalDirectory = () => project.projects.pickDirectory();
+  const onOpenRemoteHostSettings = () =>
+    workbench.navigation.getState().openSettingsTab("remote-hosts");
 
-  const handleLocalAdded = (localPath: string) => {
-    project.projects.registerProject(localPath);
-    project.projects.selectWorkspace(localPath);
-    workbench.navigation.getState().openView("project-overview", localPath);
-    void project.sessions.preloadSessionList(localPath);
+  const createProject: Parameters<
+    typeof CreateProjectFormBody
+  >[0]["onSave"] = async (deviceId, name, primary, related) => {
+    const current = () =>
+      project.isActive() && workbench.navigationGuard.isActive();
+    if (
+      !current() ||
+      !(await workbench.navigationGuard.confirm()) ||
+      !current()
+    )
+      return false;
+    const local = deviceId === "local";
+    const workspace = project.projects.workspace.getState();
+    const known = local
+      ? primary
+      : remoteProject
+          .listProjectsForConnection(deviceId)
+          .find((record) => record.remoteRoot === primary)?.workspacePath;
+    if (
+      known &&
+      (workspace.projectFolders?.[pathKey(known)] ||
+        [
+          ...workspace.pinnedPaths,
+          ...workspace.recentWorkspaces.map((entry) => entry.path),
+        ].some((path) => pathKey(known) === pathKey(path)))
+    ) {
+      throw new Error("这个主目录已有项目，可以从项目树编辑");
+    }
+    const remote = local
+      ? undefined
+      : await remoteProject.saveProjectGroup(deviceId, primary, name, related);
+    if (!current()) return false;
+    const path = remote?.record.workspacePath ?? primary;
+    const relatedPaths = remote?.relatedPaths ?? related;
+    project.projects.registerProject(path, { name, relatedPaths });
+    workbench.navigation.getState().openView("project-overview", path, current);
+    void project.sessions.preloadSessionList(path);
+    return true;
   };
 
   function EmbeddedAddProjectForm({
@@ -45,13 +82,52 @@ export function apply(ctx: Context): void {
     return createElement(CreateProjectFormBody, {
       service: remoteProject,
       onClose,
-      onAdded: handleAdded,
-      onPickLocalDirectory: () => project.projects.pickDirectory(),
-      onLocalAdded: handleLocalAdded,
-      onOpenRemoteHostSettings: () => {
-        workbench.navigation.getState().openSettingsTab("remote-hosts");
-      },
+      onSave: createProject,
+      onPickLocalDirectory,
+      onOpenRemoteHostSettings,
       embedded: true,
+    });
+  }
+
+  function EditProjectForm({
+    path,
+    onClose,
+  }: {
+    readonly path: string;
+    readonly onClose: () => void;
+  }) {
+    const config =
+      project.projects.workspace.getState().projectFolders?.[pathKey(path)];
+    const record = remoteProject.getByPath(path);
+    const deviceId = record?.connectionId ?? "local";
+    if (isRemoteProjectPath(path) && !record) return null;
+    return createElement(AddRemoteProjectModal, {
+      service: remoteProject,
+      onClose,
+      onPickLocalDirectory,
+      edit: {
+        deviceId,
+        name: config?.name || record?.name || basenameOf(path),
+        folders: [path, ...(config?.relatedPaths ?? [])].map(
+          formatCopyablePath,
+        ),
+      },
+      onSave: async (_, name, _primary, related) => {
+        if (!project.isActive()) return false;
+        const stored = record
+          ? await remoteProject.saveProjectGroup(
+              deviceId,
+              record.remoteRoot,
+              name,
+              related,
+              record.workspacePath,
+            )
+          : undefined;
+        if (!project.isActive()) return false;
+        const relatedPaths = stored?.relatedPaths ?? related;
+        project.projects.updateProjectFolders(path, { name, relatedPaths });
+        return true;
+      },
     });
   }
 
@@ -61,6 +137,9 @@ export function apply(ctx: Context): void {
     },
     renderAddProjectForm(onClose) {
       return createElement(EmbeddedAddProjectForm, { onClose });
+    },
+    renderEditProjectForm(path, onClose) {
+      return createElement(EditProjectForm, { path, onClose });
     },
   };
   ctx.provide("remoteProjectUi", ui);
@@ -95,7 +174,17 @@ export function apply(ctx: Context): void {
       project.projects.registerProjectClose({
         id: "remoteProject",
         check: () => true,
-        closed: (path) => remoteProject.removeProjectByPath(path),
+        closed: (path) => {
+          const key = pathKey(path);
+          const folders =
+            project.projects.workspace.getState().projectFolders ?? {};
+          const isReferenced = Object.entries(folders).some(
+            ([primary, config]) =>
+              primary !== key &&
+              config.relatedPaths.some((related) => pathKey(related) === key),
+          );
+          return remoteProject.removeProjectByPath(path, isReferenced);
+        },
       }),
     "remoteProject:project-close",
   );
@@ -103,22 +192,23 @@ export function apply(ctx: Context): void {
   function RemoteProjectModalOverlay() {
     const { open, repairPath } = useStore(modal);
     if (!open) return null;
+    const onSave = repairPath
+      ? async (deviceId: string) => {
+          await remoteProject.repairProject(repairPath, deviceId);
+          workbench.showToast({
+            message: "连接已修复，可刷新文件树",
+            variant: "ok",
+          });
+          return true;
+        }
+      : createProject;
     return createElement(AddRemoteProjectModal, {
       service: remoteProject,
       repairPath,
-      onClose: () => modal.setState({ open: false }),
-      onAdded: repairPath
-        ? () =>
-            workbench.showToast({
-              message: "连接已修复，可刷新文件树",
-              variant: "ok",
-            })
-        : handleAdded,
-      onPickLocalDirectory: () => project.projects.pickDirectory(),
-      onLocalAdded: handleLocalAdded,
-      onOpenRemoteHostSettings: () => {
-        workbench.navigation.getState().openSettingsTab("remote-hosts");
-      },
+      onClose: () => modal.setState({ open: false, repairPath: undefined }),
+      onSave,
+      onPickLocalDirectory,
+      onOpenRemoteHostSettings,
     });
   }
 

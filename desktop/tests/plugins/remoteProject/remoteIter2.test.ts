@@ -241,4 +241,80 @@ describe("Iteration 2: remote saveMarkdown, remote Git, and session MCP approval
     expect(unbindSessionMcp).toHaveBeenCalledWith("ptok-session-1");
     expect(approvalListener).toBeNull();
   });
+
+  it("同一 SSH 连接的关联项目独立绑定，其他连接在发放令牌前被拒绝", async () => {
+    const related = {
+      ...remoteRecord,
+      projectId: "rp_related",
+      remoteRoot: "/srv/related",
+      workspacePath: formatRemoteProjectPath("rp_related", "/srv/related"),
+    };
+    const other = {
+      ...related,
+      projectId: "rp_other",
+      connectionId: "conn-2",
+      workspacePath: formatRemoteProjectPath("rp_other", "/srv/related"),
+    };
+    const records = [remoteRecord, related, other];
+    const bind = vi.fn(({ projectId }: { projectId: string }) =>
+      Promise.resolve({
+        token: `token-${projectId}`,
+        url: "http://127.0.0.1:45678/project-mcp",
+        revision: 0,
+      }),
+    );
+    const unbind = vi.fn().mockResolvedValue(undefined);
+    const provider = createRemoteSessionToolProvider({
+      getByPath: (path) =>
+        records.find((record) => record.workspacePath === path) ?? null,
+      bindSessionMcp: bind,
+      unbindSessionMcp: unbind,
+      replyApproval: vi.fn(),
+      onApprovalRequest: () => () => {},
+    });
+    const disposers: (() => Promise<void>)[] = [];
+    const onRemoteScopeBound = vi.fn();
+    const context = {
+      workspacePath: remoteRecord.workspacePath,
+      agentKey: "icode",
+      agentId: "icode",
+      sessionId: "shared-session",
+      agent: null,
+      onDispose: (fn: () => Promise<void>) => disposers.push(fn),
+      onRemoteScopeBound,
+    };
+
+    await expect(
+      provider({ ...context, relatedProjects: [other.workspacePath] }),
+    ).rejects.toThrow("同一条 SSH 连接");
+    expect(bind).not.toHaveBeenCalled();
+    expect(onRemoteScopeBound).not.toHaveBeenCalled();
+
+    const servers = await provider({
+      ...context,
+      relatedProjects: [related.workspacePath],
+    });
+    expect(servers.map(({ name }) => name)).toEqual([
+      "aaw-remote-project",
+      "aaw-remote-project-2",
+    ]);
+    expect(bind).toHaveBeenNthCalledWith(1, {
+      projectId: remoteRecord.projectId,
+      connectionId: remoteRecord.connectionId,
+      remoteRoot: remoteRecord.remoteRoot,
+      sessionHint: context.sessionId,
+    });
+    expect(bind).toHaveBeenNthCalledWith(2, {
+      projectId: related.projectId,
+      connectionId: related.connectionId,
+      remoteRoot: related.remoteRoot,
+      sessionHint: context.sessionId,
+    });
+    expect(onRemoteScopeBound).toHaveBeenCalledTimes(1);
+    await Promise.all(disposers.map((dispose) => dispose()));
+    expect(unbind.mock.calls).toEqual([
+      [`token-${remoteRecord.projectId}`],
+      [`token-${related.projectId}`],
+    ]);
+  });
 });

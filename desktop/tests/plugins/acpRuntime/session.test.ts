@@ -22,6 +22,7 @@ import { EchoAgent } from "../../helpers/echo-agent.ts";
 import { createTransportPair } from "../../../src/plugins/acpConnection/protocol/transport/inMemoryTransport.ts";
 import type { PermissionOption } from "../../../src/plugins/acpRuntime/types.ts";
 import { createChrysDialect } from "../../../src/plugins/agents/enhancements/icode/chrysDialect.ts";
+import { createAcpSession } from "../../../src/plugins/acpRuntime/sessions/channelSession.ts";
 
 type SessionOptions = ConstructorParameters<typeof AcpSession>[1];
 
@@ -236,6 +237,124 @@ describe("会话生命周期", () => {
     ).resolves.toMatchObject({
       models: { currentModelId: "echo-model" },
     });
+  });
+
+  it("附加目录随原会话加载重新下发，显式空列表清除范围", async () => {
+    const { client, peer } = createTransportPair();
+    const requests: {
+      id: number;
+      method: string;
+      params: Record<string, unknown>;
+    }[] = [];
+    peer.onLine((line) => {
+      const request = JSON.parse(line) as (typeof requests)[number];
+      if (typeof request.id !== "number") return;
+      requests.push(request);
+      const result =
+        request.method === "initialize"
+          ? {
+              protocolVersion: 1,
+              agentInfo: { name: "fixture", version: "1" },
+              agentCapabilities: {
+                loadSession: true,
+                sessionCapabilities: { additionalDirectories: {} },
+              },
+            }
+          : request.method === "session/new"
+            ? { sessionId: "same-session" }
+            : {};
+      peer.writeLine(
+        JSON.stringify({ jsonrpc: "2.0", id: request.id, result }),
+      );
+    });
+    const session = createOwnedSession(client);
+    await session.initialize();
+    await session.newSession("D:/primary", {
+      additionalDirectories: ["D:/related"],
+    });
+    await session.loadSession("same-session", "D:/primary", {
+      additionalDirectories: ["D:/new-related"],
+    });
+    await session.loadSession("same-session", "D:/primary", {
+      additionalDirectories: [],
+    });
+    expect(requests.slice(1).map((request) => request.params)).toEqual([
+      {
+        cwd: "D:/primary",
+        mcpServers: [],
+        additionalDirectories: ["D:/related"],
+      },
+      {
+        sessionId: "same-session",
+        cwd: "D:/primary",
+        mcpServers: [],
+        additionalDirectories: ["D:/new-related"],
+      },
+      {
+        sessionId: "same-session",
+        cwd: "D:/primary",
+        mcpServers: [],
+        additionalDirectories: [],
+      },
+    ]);
+  });
+
+  it("重载前单条会话关闭失败保留通道，同进程其它会话仍可发送", async () => {
+    const { client, peer } = createTransportPair();
+    let canClose = false;
+    let isLoadStalled = false;
+    peer.onLine((line) => {
+      const request = JSON.parse(line) as { id?: unknown; method: string };
+      if (typeof request.id !== "number") return;
+      if (request.method === "session/load" && isLoadStalled) return;
+      const result =
+        request.method === "initialize"
+          ? {
+              protocolVersion: 1,
+              agentInfo: { name: "fixture", version: "1" },
+              agentCapabilities: { loadSession: true },
+            }
+          : request.method === "session/prompt"
+            ? { stopReason: "end_turn" }
+            : {};
+      peer.writeLine(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          ...(request.method === "session/close" && !canClose
+            ? { error: { code: -32603, message: "关闭失败" } }
+            : { result }),
+        }),
+      );
+    });
+    const original = createOwnedSession(client);
+    const neighbor = createAcpSession(sessionConnection(original));
+    await original.initialize();
+    await neighbor.initialize();
+    await original.loadSession("target", "D:/primary");
+    await neighbor.loadSession("neighbor", "D:/other");
+    await expect(original.closeRemoteForReload()).rejects.toThrow("关闭失败");
+    expect(original.sessionId).toBe("target");
+    await expect(neighbor.prompt("仍可执行")).resolves.toMatchObject({
+      stopReason: "end_turn",
+    });
+    canClose = true;
+    await original.closeRemoteForReload();
+    expect(original.sessionId).toBeNull();
+    const candidate = createAcpSession(sessionConnection(original));
+    await candidate.initialize();
+    isLoadStalled = true;
+    await expect(
+      candidate.loadSession("target", "D:/primary", {
+        scopeReload: true,
+        timeoutMs: 25,
+      }),
+    ).rejects.toBeInstanceOf(AcpTimeoutError);
+    expect(candidate.sessionId).toBe("target");
+    await expect(neighbor.prompt("依然可执行")).resolves.toMatchObject({
+      stopReason: "end_turn",
+    });
+    await candidate.closeRemoteForReload();
   });
 
   it("setMode 触发 current_mode_update 事件", async () => {

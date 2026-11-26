@@ -75,6 +75,7 @@ import {
 import { chatWidthClassOf, chatWidthOptions } from "./chatWidth.ts";
 import { useProjectPreferences } from "../../ui/preferencesView.tsx";
 import { ActionButton, Spinner } from "../../../../shared/ui/controls.tsx";
+import { Callout } from "../../../../shared/ui/Callout.tsx";
 import { ScopedErrorBoundary } from "../../../../shared/ui/ErrorBoundary.tsx";
 import {
   ArrowDownIcon,
@@ -85,6 +86,7 @@ import {
 } from "../../../../shared/ui/icons.tsx";
 import { AssistantMessage } from "./AssistantMessage.tsx";
 import { ChatInput } from "./ChatInput.tsx";
+import { isRelatedScopeBlocked } from "../../sessions/relatedProjects.ts";
 import { PlanCard } from "./PlanCard.tsx";
 import { QuestionDock } from "../../interactions/ui/QuestionDock.tsx";
 import { QueueDock } from "./QueueDock.tsx";
@@ -431,6 +433,14 @@ export function SessionView({
     values: { messageStreamShowTodos: showPlans, messageStreamMode, chatWidth },
   } = useProjectPreferences();
   const activeSessionId = useSessionValue((state) => state.activeSessionId);
+  const relatedProjects = useSessionValue((state) => state.relatedProjects);
+  const fileCandidateProjects = useMemo(
+    () =>
+      relatedProjects?.paths.length
+        ? [relatedProjects.primary, ...relatedProjects.paths]
+        : undefined,
+    [relatedProjects],
+  );
   const agentKey = useSessionValue((state) => state.agentKey);
   const hasCumulativePromptUsage = useSessionValue(
     (state) => state.hasCumulativePromptUsage,
@@ -1351,9 +1361,42 @@ export function SessionView({
                       <QuestionDock />
                       <ElicitationDock />
                     </SessionDock>
+                    {relatedProjects?.isApplying ? (
+                      <div className="mx-4 mb-2">
+                        <Callout tone="info" title="正在应用项目目录" />
+                      </div>
+                    ) : relatedProjects?.error ? (
+                      <div className="mx-4 mb-2 space-y-1">
+                        <Callout
+                          tone="danger"
+                          title="关联目录未生效，发送已暂停"
+                        >
+                          {relatedProjects.error}
+                        </Callout>
+                        <div className="flex flex-wrap gap-1">
+                          <ActionButton
+                            size="compact"
+                            tone="secondary"
+                            onClick={() => void relatedProjects.retry()}
+                          >
+                            重试
+                          </ActionButton>
+                          <ActionButton
+                            size="compact"
+                            tone="ghost"
+                            onClick={() =>
+                              void relatedProjects.usePrimaryOnly()
+                            }
+                          >
+                            仅用主目录
+                          </ActionButton>
+                        </div>
+                      </div>
+                    ) : null}
                     <ChatInput
                       queue={<QueueDock />}
                       fileCandidates={fileCandidates}
+                      fileCandidateProjects={fileCandidateProjects}
                       skillCandidates={skillCandidates}
                       resolveSlashSkills={resolveSlashSkills}
                       skillWorkspace={contextPath ?? activePath}
@@ -1363,7 +1406,10 @@ export function SessionView({
                       isAgentRunning={isAgentRunning}
                       disabled={isConnecting && !isDraftPreparing}
                       sendDisabled={
-                        isDraftPreparing || isConnecting || isApplyingModel
+                        isDraftPreparing ||
+                        isConnecting ||
+                        isApplyingModel ||
+                        isRelatedScopeBlocked(relatedProjects)
                       }
                       onSend={sendPrompt}
                       onSendWithMotion={sendWithMorph}
