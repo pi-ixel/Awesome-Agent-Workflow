@@ -38,7 +38,7 @@ W3 cookie 由 `login.huawei.com` 下发（`Domain=.huawei.com`、SameSite=Lax）
 ```ts
 // src/plugins/account/sso/authConfig.ts
 export const SSO_ENDPOINT =
-  "https://dev.longriver.rnd.huawei.com/mateopenapi/rolex/matestoreauthservice/v1/users/validate";
+  "https://longriver.rnd.huawei.com/mateopenapi/rolex/matestoreauthservice/v1/users/validate";
 export const SSO_LOGIN_URL = "https://login.huawei.com/login1";
 ```
 
