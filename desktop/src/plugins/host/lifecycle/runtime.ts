@@ -42,6 +42,7 @@ export class DesktopHost implements HostService {
   readonly storage = webviewStorage;
   readonly mcp: HostService["mcp"];
   readonly turnChanges: HostService["turnChanges"];
+  readonly visualGuide: HostService["visualGuide"];
   readonly diagnostics = diagnosticsHost;
   readonly exitGate = createHostExitGate();
   private exitDiagnostics?: ExitDiagnostics;
@@ -213,6 +214,12 @@ export class DesktopHost implements HostService {
       ? {
           request: (request) =>
             this.resources.run(() => this.invoke("turn_changes", { request })),
+        }
+      : undefined;
+    this.visualGuide = isTauriEnv()
+      ? {
+          endpoint: () =>
+            this.resources.run(() => this.invoke("visual_guide_endpoint")),
         }
       : undefined;
     this.mcp = isTauriEnv()

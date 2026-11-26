@@ -1,35 +1,30 @@
----
-name: visual-explain
-description: 在 AAW Desktop 会话回答里用 ```visual 代码块画讲解图（分层结构、组件关系、数据流、方案对比、分步过程、可调参数的小演示），应用会直接渲染成统一风格的图。凡是打算用 ASCII/文本字符画示意图、分层图、框图或对比图时，都改用本 skill；解释系统结构、组件关系、数据去向、方案对比或抽象概念时优先使用。纯流程图、时序图、状态图用 Mermaid。
----
+# 可视化演示（```visual）
 
-# 讲解图（```visual）
-
-在回答正文里写一个 ```visual 代码块，内容是 HTML 片段，AAW Desktop 会把它渲染成卡片式讲解图。不需要调用工具。
+在回答正文里写一个 ```visual 代码块，内容是 HTML 片段，应用会把它渲染成卡片式讲解图或可交互演示。画图本身不需要再调用工具。
 
 ## 什么时候画
 
 - 画：结构与边界（谁在哪、谁能看见谁）、数据或请求经过哪些环节、两三种方案/场景对比、分步发生的过程、需要拖动参数才能体会的关系。
 - 不画：一句话或一个短列表就能说清；代码、命令、配置本身；只是把正文换个形式重复一遍。
-- 标准流程图 / 时序图 / 状态图 / ER 图：用 ```mermaid，不用本 skill。
+- 标准流程图 / 时序图 / 状态图 / ER 图：用 `mermaid，不用 `visual。
 - 一张图只回答一个问题；图前用一句话说明看什么，图后只补图里表达不了的结论。
 
 ## 怎么写
 
 只写片段（不要 `<html>`、`<head>`、`<body>`），优先用套件标签，样式、配色、深浅主题、窄屏换行都由应用负责：
 
-| 标签 | 用途 | 常用属性 |
-|---|---|---|
-| `v-row` / `v-col` | 横排 / 竖排（横排放不下时自动变竖排，不用自己判断宽度） | — |
-| `v-grid` | 网格 | `cols="4"`，`repeat="12"`（把第一个子元素复制到 12 个） |
-| `v-box` | 区域、系统、阶段 | `title` `sub` `tone` |
-| `v-item` | 区域里的一行条目（文件、服务、步骤） | `icon` `title` `sub` `tone` `center`；也可直接写文字 |
-| `v-arrow` | 相邻元素之间的箭头，方向按所在容器自动判断 | `label`，`dir="down/up/left/both"` |
-| `v-icon` | 线性图标 | `name` `size="lg/xl"` `tone` |
-| `v-tag` | 小标签 | `tone` |
-| `v-text` / `v-note` | 说明文字 / 底部结论句 | `tone`（v-note） |
-| `v-tabs` > `v-tab` | 切换视角对比 | `label`，`active` |
-| `v-steps` > `v-step` | 上一步 / 下一步分步讲解 | `label` |
+| 标签                 | 用途                                                    | 常用属性                                                |
+| -------------------- | ------------------------------------------------------- | ------------------------------------------------------- |
+| `v-row` / `v-col`    | 横排 / 竖排（横排放不下时自动变竖排，不用自己判断宽度） | —                                                       |
+| `v-grid`             | 网格                                                    | `cols="4"`，`repeat="12"`（把第一个子元素复制到 12 个） |
+| `v-box`              | 区域、系统、阶段                                        | `title` `sub` `tone`                                    |
+| `v-item`             | 区域里的一行条目（文件、服务、步骤）                    | `icon` `title` `sub` `tone` `center`；也可直接写文字    |
+| `v-arrow`            | 相邻元素之间的箭头，方向按所在容器自动判断              | `label`，`dir="down/up/left/both"`                      |
+| `v-icon`             | 线性图标                                                | `name` `size="lg/xl"` `tone`                            |
+| `v-tag`              | 小标签                                                  | `tone`                                                  |
+| `v-text` / `v-note`  | 说明文字 / 底部结论句                                   | `tone`（v-note）                                        |
+| `v-tabs` > `v-tab`   | 切换视角对比                                            | `label`，`active`                                       |
+| `v-steps` > `v-step` | 上一步 / 下一步分步讲解                                 | `label`                                                 |
 
 - `tone`：`accent`（重点/我方）、`good`（正常/可见/安全）、`warn`（注意/中间产物）、`bad`（风险/不可见）、`muted`。只用来表达含义，不为装饰上色。
 - 图标 `name`：file file-text folder database server monitor laptop phone cloud user users lock unlock key shield globe network cpu disk zip mail message code terminal settings bot search check x alert info clock chart layers box link download upload play eye bug zap branch list image。

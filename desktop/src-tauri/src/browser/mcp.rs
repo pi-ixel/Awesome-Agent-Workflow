@@ -377,11 +377,10 @@ pub fn validate_http_request(headers: &str, port: u16) -> Result<(), String> {
     }
 }
 
-async fn serve_connection(
-    mut stream: TcpStream,
-    app: AppHandle,
-    registry: SharedMcpRegistry,
-) -> Result<(), String> {
+/// 读取一条本机 MCP 请求（POST /mcp），校验对端与 Host。返回 None 表示对端已关闭。
+pub(crate) async fn read_http_request(
+    stream: &mut TcpStream,
+) -> Result<Option<(String, Vec<u8>)>, String> {
     let mut bytes = Vec::new();
     let mut buffer = [0; 4096];
     let header_end = loop {
@@ -390,7 +389,7 @@ async fn serve_connection(
             .map_err(|_| "TIMEOUT")?
             .map_err(|error| error.to_string())?;
         if read == 0 {
-            return Ok(());
+            return Ok(None);
         }
         bytes.extend_from_slice(&buffer[..read]);
         if bytes.len() > 1_048_576 {
@@ -429,12 +428,29 @@ async fn serve_connection(
         }
         bytes.extend_from_slice(&buffer[..read]);
     }
-    let authorized = headers.lines().find_map(|line| {
+    let body = bytes[header_end..header_end + content_length].to_vec();
+    Ok(Some((headers, body)))
+}
+
+/// 请求头里的 Bearer 令牌。
+pub(crate) fn bearer_token(headers: &str) -> Option<String> {
+    headers.lines().find_map(|line| {
         let (name, value) = line.split_once(':')?;
         name.eq_ignore_ascii_case("authorization")
             .then(|| value.trim().strip_prefix("Bearer ").map(str::to_owned))
             .flatten()
-    });
+    })
+}
+
+async fn serve_connection(
+    mut stream: TcpStream,
+    app: AppHandle,
+    registry: SharedMcpRegistry,
+) -> Result<(), String> {
+    let Some((headers, body)) = read_http_request(&mut stream).await? else {
+        return Ok(());
+    };
+    let authorized = bearer_token(&headers);
     let response = match authorized {
         Some(token) => {
             let endpoint = {
@@ -444,7 +460,7 @@ async fn serve_connection(
             match endpoint {
                 Ok(endpoint) => {
                     let request: Value =
-                        serde_json::from_slice(&bytes[header_end..header_end + content_length])
+                        serde_json::from_slice(&body)
                             .unwrap_or(Value::Null);
                     let method = request.get("method").and_then(Value::as_str).unwrap_or("");
                     let gate = {

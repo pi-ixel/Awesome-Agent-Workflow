@@ -113,6 +113,8 @@ flowchart TB
   browser -. "UI 注册" .-> workbench
   remoteProject -. "UI 注册" .-> workbench
   visual -. "UI 注册" .-> workbench
+  visual -. "可选：可视化演示 MCP 端点" .-> host
+  visual -. "登记会话附加工具" .-> project
   agents -. "设置页读取项目上下文并请求切换 Agent" .-> project
   project -. "注册标题区与新建会话入口" .-> workbench
   documents -. "登记文件路径解析" .-> workbench

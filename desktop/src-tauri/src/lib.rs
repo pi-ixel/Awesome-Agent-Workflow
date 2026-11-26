@@ -30,6 +30,7 @@ mod taskbar_badge;
 mod terminal_pty;
 mod tray;
 mod usage_statistics;
+mod visual_guide;
 mod workflow_service;
 mod ops_service;
 
@@ -61,6 +62,7 @@ pub fn run() {
         .manage(codeagent_credit::CreditQuota::default())
         .manage(workflow_service::WorkflowHost::default())
         .manage(ops_service::OpsHost::default())
+        .manage(visual_guide::VisualGuideHost::default())
         .manage(desktop_update::Updates::new(&context.package_info().name))
         .manage(notification_links::NotificationRoutes::default())
         .manage(tray::TrayPreference::default())
@@ -179,6 +181,7 @@ pub fn run() {
             browser::enhancements::browser_pick_start,
             browser::enhancements::browser_pick_cancel,
             browser::mcp::browser_mcp_create,
+            visual_guide::visual_guide_endpoint,
             browser::mcp::browser_mcp_status,
             browser::mcp::browser_mcp_registration,
             browser::mcp::browser_mcp_bind,

@@ -333,6 +333,18 @@ export interface WorkflowEngineHost {
   ): Promise<() => void>;
 }
 
+/** 可视化演示 MCP 端点（visual_guide.rs）：只返回 ```visual 写法，随会话下发给 Agent。 */
+export interface VisualGuideEndpoint {
+  readonly name: string;
+  readonly url: string;
+  readonly token: string;
+}
+
+export interface VisualGuideHost {
+  /** 首次调用时启动本机端点，之后返回同一个。 */
+  endpoint(): Promise<VisualGuideEndpoint>;
+}
+
 /** 运维/远程项目 sidecar（ops_service_* / aaw://ops-service*）的受限 IPC 面。 */
 export interface OpsSidecarHost {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;

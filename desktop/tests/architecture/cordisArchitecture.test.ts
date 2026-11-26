@@ -432,6 +432,20 @@ it("keeps plugin names and dependency relations aligned with their production ow
       "project.projects.registerProjectClose",
     ],
     [
+      "visual",
+      "可选：可视化演示 MCP 端点",
+      "host",
+      "src/plugins/visual/index.ts",
+      "scoped.host.visualGuide",
+    ],
+    [
+      "visual",
+      "登记会话附加工具",
+      "project",
+      "src/plugins/visual/index.ts",
+      "scoped.project.sessions.registerSessionTools(",
+    ],
+    [
       "project",
       "可选：添加远程项目入口",
       "remoteProject",
@@ -474,7 +488,7 @@ it("keeps plugin names and dependency relations aligned with their production ow
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => /^(?:\w+ --> \w+|\w+ -\. ".+" \.-> \w+)$/.test(line));
-  expect(new Set(edges).size).toBe(100);
+  expect(new Set(edges).size).toBe(102);
   expect(edges.sort()).toEqual([...required, ...weak].sort());
 
   const runtime = createTestDesktopRuntime(
