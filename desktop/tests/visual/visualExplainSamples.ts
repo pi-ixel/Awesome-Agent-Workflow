@@ -117,6 +117,16 @@ export const crowdedSample = `<v-row>
   <v-box title="MCP 服务器 ×N"><v-item icon="list" sub="把工具清单交给 Agent">tools/list</v-item></v-box>
 </v-row>`;
 
+/** 一对多：左侧一个小块、右侧一列两个大块。小块与箭头应落在行中线上，不贴顶。 */
+export const fanoutSample = `<v-row>
+  <v-col><v-item icon="user" title="浏览器"></v-item></v-col>
+  <v-arrow label="HTTPS"></v-arrow>
+  <v-col>
+    <v-box title="网关集群" tone="accent"><v-item icon="server">nginx ×3</v-item><v-item icon="shield">WAF</v-item></v-box>
+    <v-box title="业务服务"><v-item icon="cpu">订单</v-item><v-item icon="cpu">库存</v-item></v-box>
+  </v-col>
+</v-row>`;
+
 export const visualSamples: readonly {
   readonly id: string;
   readonly code: string;
@@ -130,4 +140,5 @@ export const visualSamples: readonly {
   { id: "table", code: tableSample },
   { id: "error", code: errorSample },
   { id: "crowded", code: crowdedSample },
+  { id: "fanout", code: fanoutSample },
 ];
