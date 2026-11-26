@@ -126,6 +126,8 @@ flowchart TB
   browser -. "UI 注册" .-> workbench
   remoteProject -. "UI 注册" .-> workbench
   visual -. "UI 注册" .-> workbench
+  visual -. "可选：可视化演示 MCP 端点" .-> host
+  visual -. "登记会话附加工具" .-> project
   agents -. "设置页读取项目上下文并请求切换 Agent" .-> project
   project -. "注册标题区与新建会话入口" .-> workbench
   documents -. "登记文件路径解析" .-> workbench
@@ -176,7 +178,7 @@ flowchart TB
 | updates        | host、configuration、diagnostics                                                                                                                                                                                               | —                                                                                              | workbench（设置、顶栏指示、窗口弹层）                                   | workbench（安装前请求退出）                                                            |
 | scheduledTasks | host、project、agents、account、workbench                                                                                                                                                                                      | —                                                                                              | —                                                                       | —                                                                                      |
 | browser        | host                                                                                                                                                                                                                           | —                                                                                              | workbench（浏览器面板、设置、元素引用与恢复交互）                       | —                                                                                      |
-| visual         | — | — | workbench（Markdown 代码块渲染器：```visual 讲解图） | — |
+| visual         | — | host（可视化演示 MCP 端点） | workbench（Markdown 代码块渲染器：```visual 讲解图） | project（登记会话附加工具：可视化演示 MCP） |
 
 配置注册、诊断记录等能力已包含在对应必需依赖中，不重复计边。待后续明确的其他关闭参与者不凭空补入本图。
 

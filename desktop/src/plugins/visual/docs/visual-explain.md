@@ -23,7 +23,7 @@ Agent 回答 ──```visual──▶ MarkdownView(pre 映射)
 
 - 契约：`src/shared/ui/markdown/codeRenderers.ts` 定义 `MarkdownCodeRenderer`（语言列表 + View）。工作台提供 `markdownCodeRenderers` 注册位，根组件 `WorkbenchWindow` 通过上下文把它下发给 `MarkdownView`。只有打开 `canUseCodeRenderers` 的 `MarkdownView` 才使用渲染器：会话里的 Agent 回答、嵌入的子会话、文件预览（Agent 写进 .md 的讲解图，含带脚本的沙箱图）。更新说明、工作流提示词等照常显示代码块。文件预览里的源码可能来自第三方仓库，安全边界与会话相同：内联图不执行脚本、拦截一切链接激活；沙箱图拿不到宿主与网络，打开链接只放行 http(s) 且限频。shared 层不依赖任何插件。
 - 插件：`index.ts` 提供 `visual` 服务（接管的语言）并持有解析 / 高度缓存的生命周期；`ui/workbench.tsx`（`visual-workbench`）注入 `workbench` 与 `visual`，从服务读取语言并登记渲染器。`visual` 卸载时界面插件随之卸载、撤销登记，缓存同时清空。
-- Agent 指导：仓库 `skills/visual-explain/SKILL.md`，随「AAW skills 安装器」装到 Agent。平时只有 description 常驻上下文，正文在用到时才加载。
+- Agent 指导：写法正文在 `guide.md`，由 Rust 侧 `src-tauri/src/visual_guide.rs` 编译时打包，以本机 HTTP MCP（`aaw-visual`，只读、无状态，应用运行期间共用一个端口和令牌）提供。`session/guideTools.ts` 经 project 的会话附加工具随每个 AAW 会话下发（Agent 未声明 HTTP MCP 能力时不下发）。常驻上下文的只有工具 `visual_demo` 的描述和服务说明 `instructions`，调用工具才返回完整写法。不做成全局 skill：原生启动的 Agent 不该知道 ```visual，否则会在渲染不了的界面里写出整段 HTML；写法也因此和渲染器始终同版本。
 
 ## 3. 渲染
 
@@ -143,10 +143,9 @@ Agent 回答 ──```visual──▶ MarkdownView(pre 映射)
 - 顶层或标签页里的 `v-arrow` 默认横向且靠左 → 不在 `v-row` 里就竖向，并居中；
 - skill 没加载上时，模型自创 `flow LR …` / `steps …` 这类文本记法写进 ```visual，被挤成一段 → 分流出“文本”路径，按源码原样显示。
 
-触发与分发（需要另行决定，未在本插件内处理）：
+触发与分发：
 
-- 只靠 skill 描述，弱模型在普通问答里不会主动调用 skill 工具，照旧用 ASCII 画图；在项目指令（AGENTS.md）里加一句“需要示意图时先加载 visual-explain”后稳定触发。渲染器在应用侧，由应用向会话注入这句能力提示是更可靠的做法，但目前各 Agent 没有统一的注入通道。
-- 内置的 OpenCode 不读 AAW 技能安装器的目标目录（`%APPDATA%/chrys/skills`，iCode 用），mermaid-diagram 等 AAW skill 在 OpenCode 下同样找不到；OpenCode 的技能表在进程启动时缓存，技能目录中途变更要重启 Agent 进程。
+- 早期以 skill 分发时，只靠 skill 描述，弱模型在普通问答里不会主动调用，照旧用 ASCII 画图；在项目指令里加一句提示后稳定触发。现改为随会话下发的 MCP，工具描述与服务说明直接写明“优先于 ASCII 字符画图”，起同样的提示作用。
 
 ## 6. 已知取舍
 

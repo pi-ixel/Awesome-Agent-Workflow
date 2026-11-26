@@ -28,6 +28,7 @@ import type {
   RemoteTerminalResolver,
   SkillFiles,
   UpdatesHost,
+  VisualGuideHost,
   WorkflowEngineHost,
 } from "./types.ts";
 
@@ -42,6 +43,8 @@ declare module "cordis" {
 export interface HostService {
   readonly turnChanges?: TurnChangesHost;
   readonly mcp?: McpManagementHost;
+  /** 仅桌面端提供。 */
+  readonly visualGuide?: VisualGuideHost;
   isNative(): boolean;
   readonly acpProcess: AcpProcessHost;
   readonly browser: BrowserHost;

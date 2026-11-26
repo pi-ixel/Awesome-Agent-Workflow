@@ -15,6 +15,7 @@ export function apply(ctx: Context, options?: HostOptions): void {
     openDevelopmentAcpTransport: host.openDevelopmentAcpTransport,
     storage: host.storage,
     mcp: host.mcp,
+    visualGuide: host.visualGuide,
     turnChanges: host.turnChanges,
     diagnostics: host.diagnostics,
     registerExitDiagnostics: host.registerExitDiagnostics.bind(host),
