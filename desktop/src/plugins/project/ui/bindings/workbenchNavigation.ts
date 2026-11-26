@@ -13,6 +13,7 @@ export function createProjectViewNavigation(
   options: {
     readonly isCurrent: () => boolean;
     readonly openFileTree: (path: string) => void;
+    readonly openInFileManager: (path: string) => Promise<void>;
     readonly openAddRemoteProject?: () => boolean;
     readonly renderEditProjectForm?: (
       path: string,
@@ -59,6 +60,9 @@ export function createProjectViewNavigation(
         if (pathKey(context ?? "") !== pathKey(path)) showOverview(path);
         options.openFileTree(path);
       }),
+      openInFileManager: async (path: string) => {
+        if (isActive()) await options.openInFileManager(path);
+      },
       clearContext: (path: string) => run(() => navigation.getState().clearContextIf(path)),
       async removeProject(path: string) {
         if (!isActive()) return;

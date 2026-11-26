@@ -113,6 +113,7 @@ export async function prepareWorkspaceSwitch(projectCount: number) {
   const navigation = createProjectViewNavigation(workbench, project, {
     isCurrent: () => true,
     openFileTree() {},
+    openInFileManager: () => Promise.resolve(),
   });
   workbench.navigation.getState().restoreContextView({ contextPath: paths[0]!, viewId: projectConversationPageId });
   const releases: (() => void)[] = [];

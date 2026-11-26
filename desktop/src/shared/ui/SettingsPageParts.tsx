@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 export { SegmentedControl } from "./controls/SegmentedControl.tsx";
 
 import { settingsNumberInputClass } from "./inputStyles.ts";
+import { settingsLabelClass, settingsDescriptionClass } from "./settingsTypography.ts";
 export { fieldSurfaceClass, settingsInputClass, settingsNumberInputClass, settingsTextareaClass } from "./inputStyles.ts";
 
 /** 整数设置在失焦或回车时提交，取整与空值规则由设置项提供。 */
@@ -95,7 +96,7 @@ export function SettingRow({
   const compact = density === "compact";
   const labelClass = compact
     ? "block text-ui-sm text-ink-soft"
-    : "block text-ui-base font-medium text-ink";
+    : settingsLabelClass;
   return (
     <div
       id={id}
@@ -121,7 +122,7 @@ export function SettingRow({
             <span className={labelClass}>{label}</span>
           )}
           {desc !== undefined && desc.length > 0 ? (
-            <p className="mt-1 text-ui-caption leading-relaxed text-ink-mute">
+            <p className={`mt-1 ${settingsDescriptionClass}`}>
               {desc}
             </p>
           ) : null}

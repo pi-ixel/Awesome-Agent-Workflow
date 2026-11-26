@@ -12,29 +12,7 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
   }
 }
 
-function isMacLike(): boolean {
-  if (typeof navigator === "undefined") return false;
-  return /mac/i.test(navigator.userAgent);
-}
-
-function isWindowsLike(): boolean {
-  if (typeof navigator === "undefined") return false;
-  return /windows/i.test(navigator.userAgent);
-}
-
-/** 更多菜单「在文件管理器中打开」文案（Finder/资源管理器平台化）。 */
-export function getFileManagerOpenLabel(): string {
-  if (isMacLike()) return "在 Finder 中打开";
-  if (isWindowsLike()) return "在资源管理器中打开";
-  return "在文件管理器中打开";
-}
-
-/** 行右键菜单「显示」文案。 */
-export function getFileManagerRevealLabel(): string {
-  if (isMacLike()) return "在 Finder 中显示";
-  if (isWindowsLike()) return "在资源管理器中显示";
-  return "在文件管理器中显示";
-}
+export { getFileManagerOpenLabel, getFileManagerRevealLabel } from "../../../../shared/fileManager.ts";
 
 /** ZCode buildFileMentionMarkdown 同格式：[名称](相对路径)。 */
 function escapeMarkdownLabel(label: string): string {

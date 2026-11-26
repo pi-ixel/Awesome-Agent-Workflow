@@ -13,12 +13,7 @@
  * 视口尺寸 + 0 高度推出，focus 断言走 activeElement；Enter/Space 激活在
  * jsdom 不派发 click（已知限制），激活路径由 onClick 处理器测试承担。
  */
-import {
-  createEvent,
-  fireEvent,
-  render,
-  screen,
-} from "@testing-library/react";
+import { createEvent, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -26,11 +21,6 @@ import {
   ContextMenu,
   type ContextMenuEntry,
 } from "../../src/shared/ui/ContextMenu.tsx";
-
-
-
-
-
 
 function renderMenu(
   entries: readonly ContextMenuEntry[],
@@ -206,5 +196,93 @@ describe("ContextMenu 菜单项语义", () => {
     // 反向从首项循环到末项
     fireEvent.keyDown(first, { key: "ArrowUp" });
     expect(screen.getByRole("menuitem", { name: "动作三" })).toHaveFocus();
+  });
+});
+
+describe("ContextMenu 子菜单", () => {
+  const select = vi.fn();
+  const entries: ContextMenuEntry[] = [
+    {
+      id: "folders",
+      label: "打开目录",
+      children: [
+        {
+          id: "main",
+          label: "主项目",
+          description: "D:/项目/main",
+          onSelect: select,
+        },
+        { id: "disabled", label: "不可用", disabled: true, onSelect: select },
+        { id: "related", label: "关联项目", onSelect: select },
+      ],
+    },
+    { id: "other", label: "其他操作", onSelect: select },
+  ];
+  it("父项展开不执行；子项的完整指针操作仅执行一次并关闭整棵菜单", async () => {
+    const user = userEvent.setup();
+    const dismiss = vi.fn();
+    select.mockClear();
+    renderMenu(entries, { onDismiss: dismiss });
+    const parent = screen.getByRole("menuitem", { name: "打开目录" });
+    expect(parent).toHaveAttribute("aria-haspopup", "menu");
+    await user.click(parent);
+    expect(parent).toHaveAttribute("aria-expanded", "true");
+    expect(dismiss).not.toHaveBeenCalled();
+    expect(select).not.toHaveBeenCalled();
+    const child = screen.getByRole("menuitem", { name: "主项目" });
+    expect(child.closest('[role="menu"]')?.parentElement).toBe(document.body);
+    expect(child).toHaveFocus();
+    await user.click(child);
+    expect(select).toHaveBeenCalledTimes(1);
+    expect(dismiss).toHaveBeenCalledTimes(1);
+  });
+  it("左右方向键切换层级，Esc 逐层返回，Tab 关闭整棵菜单", () => {
+    const dismiss = vi.fn();
+    renderMenu(entries, { onDismiss: dismiss });
+    const parent = screen.getByRole("menuitem", { name: "打开目录" });
+    parent.focus();
+    fireEvent.keyDown(parent, { key: "ArrowRight" });
+    expect(screen.getByRole("menuitem", { name: "主项目" })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect(screen.getByRole("menuitem", { name: "关联项目" })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowLeft" });
+    expect(
+      screen.queryByRole("menu", { name: "打开目录" }),
+    ).not.toBeInTheDocument();
+    expect(parent).toHaveFocus();
+    fireEvent.keyDown(parent, { key: "ArrowRight" });
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(parent).toHaveFocus();
+    expect(dismiss).not.toHaveBeenCalled();
+    fireEvent.keyDown(parent, { key: "ArrowRight" });
+    fireEvent.keyDown(document.activeElement!, { key: "Tab" });
+    expect(dismiss).toHaveBeenCalledTimes(1);
+  });
+  it("子菜单打开时，外部指针只触发一次根关闭；关闭中的父子面板均不可交互", () => {
+    const dismiss = vi.fn();
+    const view = render(
+      <ContextMenu
+        entries={entries}
+        placement={{ x: 0, y: 0, side: "bottom" }}
+        label="根菜单"
+        closing={false}
+        onDismiss={dismiss}
+      />,
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: "打开目录" }));
+    fireEvent.pointerDown(document.body);
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    view.rerender(
+      <ContextMenu
+        entries={entries}
+        placement={{ x: 0, y: 0, side: "bottom" }}
+        label="根菜单"
+        closing
+        onDismiss={dismiss}
+      />,
+    );
+    expect(screen.queryAllByRole("menu")).toHaveLength(0);
+    for (const menu of screen.getAllByRole("menu", { hidden: true }))
+      expect(menu).toHaveAttribute("inert");
   });
 });

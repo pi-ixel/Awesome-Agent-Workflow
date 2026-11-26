@@ -27,7 +27,10 @@ type ProjectFixture = {
   extension?: ProjectViewBinding["extension"];
 };
 
-export function createTestProjectWorkbench(project: ProjectFixture) {
+export function createTestProjectWorkbench(
+  project: ProjectFixture,
+  options?: { openInFileManager: (path: string) => Promise<void> },
+) {
   const scope = createConfigurationScope(webviewStorage, desktopSettingsKey);
   const appearance = createWorkbenchAppearance(scope);
   const workbench = new DesktopWorkbench(windowHost, appearance, webviewStorage, {
@@ -66,6 +69,7 @@ export function createTestProjectWorkbench(project: ProjectFixture) {
     const navigation = createProjectViewNavigation(workbench, registeredProject, {
       isCurrent,
       openFileTree: (path) => workbench.panels.getState().tool(path, "files"),
+      openInFileManager: options?.openInFileManager ?? (() => Promise.resolve()),
     });
     const binding: ProjectViewBinding = {
       sidebar: sidebar.snapshot,
