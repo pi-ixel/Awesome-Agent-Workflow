@@ -6,14 +6,13 @@ import {
   formatRemoteProjectPath,
   normalizePath,
   parseRemoteProjectPath,
-  pathKey,
 } from "../../../shared/panelPaths.ts";
 import type {
   RemoteProjectRecord,
   RemoteProjectStoreSnapshot,
 } from "../types.ts";
 
-const STORAGE_KEY = "aaw-desktop/remote-projects/v1";
+export const remoteProjectsKey = "aaw-desktop/remote-projects/v1";
 const RECENT_DIR_LIMIT = 8;
 
 interface PersistedRemoteProjects {
@@ -25,7 +24,9 @@ interface PersistedRemoteProjects {
 function cleanRemoteRoot(raw: string): string {
   const trimmed = raw.trim().replaceAll("\\", "/");
   if (!trimmed || trimmed === "/") return "/";
-  const normalized = normalizePath(trimmed.startsWith("/") ? trimmed : `/${trimmed}`);
+  const normalized = normalizePath(
+    trimmed.startsWith("/") ? trimmed : `/${trimmed}`,
+  );
   return normalized || "/";
 }
 
@@ -45,7 +46,7 @@ function generateProjectId(): string {
 
 function readPersisted(storage: HostStorage): RemoteProjectStoreSnapshot {
   try {
-    const raw = storage.getItem(STORAGE_KEY);
+    const raw = storage.getItem(remoteProjectsKey);
     if (!raw) return { records: [], recentDirsByConnection: {} };
     const parsed: unknown = JSON.parse(raw);
     if (
@@ -61,10 +62,12 @@ function readPersisted(storage: HostStorage): RemoteProjectStoreSnapshot {
       for (const rawItem of candidate["records"] as unknown[]) {
         if (typeof rawItem !== "object" || rawItem === null) continue;
         const item = rawItem as Record<string, unknown>;
-        const projectId = typeof item["projectId"] === "string" ? item["projectId"] : "";
+        const projectId =
+          typeof item["projectId"] === "string" ? item["projectId"] : "";
         const connectionId =
           typeof item["connectionId"] === "string" ? item["connectionId"] : "";
-        const rawRoot = typeof item["remoteRoot"] === "string" ? item["remoteRoot"] : "";
+        const rawRoot =
+          typeof item["remoteRoot"] === "string" ? item["remoteRoot"] : "";
         if (!projectId.trim() || !connectionId.trim()) continue;
         const remoteRoot = cleanRemoteRoot(rawRoot);
         const workspacePath = formatRemoteProjectPath(projectId, remoteRoot);
@@ -104,7 +107,9 @@ function readPersisted(storage: HostStorage): RemoteProjectStoreSnapshot {
       )) {
         if (Array.isArray(dirs)) {
           recentDirsByConnection[connId] = dirs
-            .filter((d): d is string => typeof d === "string" && d.trim().length > 0)
+            .filter(
+              (d): d is string => typeof d === "string" && d.trim().length > 0,
+            )
             .map(cleanRemoteRoot)
             .slice(0, RECENT_DIR_LIMIT);
         }
@@ -116,35 +121,30 @@ function readPersisted(storage: HostStorage): RemoteProjectStoreSnapshot {
   }
 }
 
-function writePersisted(
-  storage: HostStorage,
-  snapshot: RemoteProjectStoreSnapshot,
-  logger: Logger,
-): void {
-  try {
-    const payload: PersistedRemoteProjects = {
-      version: 1,
-      records: snapshot.records,
-      recentDirsByConnection: snapshot.recentDirsByConnection,
-    };
-    storage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  } catch (error) {
-    logger.warn("远程项目记录持久化写入失败", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
 export function createRemoteProjectStore(storage: HostStorage, logger: Logger) {
   const store = createStore<RemoteProjectStoreSnapshot>(() =>
     readPersisted(storage),
   );
   const view = createSnapshotView(store, (state) => state);
 
-  const persist = (next: RemoteProjectStoreSnapshot) => {
+  let pending = Promise.resolve();
+  // 每次从上一次成功保存的状态计算，失败的项目不会混入后续写入。
+  function enqueue<T>(change: () => T | Promise<T>): Promise<T> {
+    const result = pending.then(change);
+    pending = result.then(
+      () => {},
+      () => {},
+    );
+    return result;
+  }
+  async function persist(next: RemoteProjectStoreSnapshot) {
+    const payload: PersistedRemoteProjects = { version: 1, ...next };
+    const value = JSON.stringify(payload);
+    if (storage.setConfigurationItem)
+      await storage.setConfigurationItem(remoteProjectsKey, value);
+    else storage.setItem(remoteProjectsKey, value);
     store.setState(next);
-    writePersisted(storage, next, logger);
-  };
+  }
 
   const getById = (projectId: string): RemoteProjectRecord | null =>
     store.getState().records.find((r) => r.projectId === projectId) ?? null;
@@ -160,92 +160,103 @@ export function createRemoteProjectStore(storage: HostStorage, logger: Logger) {
   ): readonly RemoteProjectRecord[] =>
     store.getState().records.filter((r) => r.connectionId === connectionId);
 
-  const recordRecentDir = (connectionId: string, dirPath: string): void => {
-    const id = connectionId.trim();
-    if (!id) return;
-    const cleaned = cleanRemoteRoot(dirPath);
-    const state = store.getState();
-    const existing = state.recentDirsByConnection[id] ?? [];
-    const nextDirs = [cleaned, ...existing.filter((d) => d !== cleaned)].slice(
-      0,
-      RECENT_DIR_LIMIT,
-    );
-    persist({
-      ...state,
-      recentDirsByConnection: {
-        ...state.recentDirsByConnection,
-        [id]: nextDirs,
-      },
-    });
-  };
+  function recentWith(
+    state: RemoteProjectStoreSnapshot,
+    connectionId: string,
+    remoteRoot: string,
+  ) {
+    const previous = state.recentDirsByConnection[connectionId] ?? [];
+    return {
+      ...state.recentDirsByConnection,
+      [connectionId]: [
+        remoteRoot,
+        ...previous.filter((dir) => dir !== remoteRoot),
+      ].slice(0, RECENT_DIR_LIMIT),
+    };
+  }
 
-  const addProject = (
+  function recordRecentDir(
+    connectionId: string,
+    dirPath: string,
+  ): Promise<void> {
+    const id = connectionId.trim();
+    if (!id) return Promise.resolve();
+    const remoteRoot = cleanRemoteRoot(dirPath);
+    return enqueue(async () => {
+      const state = store.getState();
+      if (state.recentDirsByConnection[id]?.[0] === remoteRoot) return;
+      await persist({
+        ...state,
+        recentDirsByConnection: recentWith(state, id, remoteRoot),
+      });
+    }).catch((error: unknown) => {
+      logger.warn("远程目录历史保存失败", { error: String(error) });
+    });
+  }
+
+  function addProject(
     connectionId: string,
     remoteRoot: string,
     name?: string,
-  ): RemoteProjectRecord => {
-    const id = connectionId.trim();
-    const cleanedRoot = cleanRemoteRoot(remoteRoot);
-    const now = new Date().toISOString();
-    const state = store.getState();
-    const existing = state.records.find(
-      (r) => r.connectionId === id && r.remoteRoot === cleanedRoot,
-    );
-    if (existing) {
-      const updated: RemoteProjectRecord = {
-        ...existing,
-        name: name?.trim() || existing.name,
+    repairPath?: string,
+  ): Promise<RemoteProjectRecord> {
+    return enqueue(async () => {
+      const id = connectionId.trim();
+      const cleanedRoot = cleanRemoteRoot(remoteRoot);
+      const now = new Date().toISOString();
+      const state = store.getState();
+      const repair = repairPath ? parseRemoteProjectPath(repairPath) : null;
+      if (!id || (repairPath && repair?.remotePath !== cleanedRoot)) {
+        throw new Error("无效的远程项目连接或目录");
+      }
+      const existing = state.records.find((record) =>
+        repair
+          ? record.projectId === repair.projectId
+          : record.connectionId === id && record.remoteRoot === cleanedRoot,
+      );
+      if (
+        repair &&
+        existing &&
+        (existing.connectionId !== id || existing.remoteRoot !== cleanedRoot)
+      ) {
+        throw new Error("该项目的连接已恢复，请重新打开项目");
+      }
+      const projectId =
+        existing?.projectId ?? repair?.projectId ?? generateProjectId();
+      const record: RemoteProjectRecord = {
+        projectId,
+        connectionId: id,
+        remoteRoot: cleanedRoot,
+        workspacePath: formatRemoteProjectPath(projectId, cleanedRoot),
+        agentCwd: existing?.agentCwd ?? `remote-projects/${projectId}`,
+        name: name?.trim() || existing?.name || defaultProjectName(cleanedRoot),
+        createdAt: existing?.createdAt ?? now,
         lastOpenedAt: now,
       };
-      persist({
-        ...state,
-        records: state.records.map((r) =>
-          r.projectId === existing.projectId ? updated : r,
-        ),
+      await persist({
+        records: existing
+          ? state.records.map((item) =>
+              item.projectId === projectId ? record : item,
+            )
+          : [record, ...state.records],
+        recentDirsByConnection: recentWith(state, id, cleanedRoot),
       });
-      recordRecentDir(id, cleanedRoot);
-      return updated;
-    }
-
-    const projectId = generateProjectId();
-    const record: RemoteProjectRecord = {
-      projectId,
-      connectionId: id,
-      remoteRoot: cleanedRoot,
-      workspacePath: formatRemoteProjectPath(projectId, cleanedRoot),
-      agentCwd: `remote-projects/${projectId}`,
-      name: name?.trim() || defaultProjectName(cleanedRoot),
-      createdAt: now,
-      lastOpenedAt: now,
-    };
-    const nextDirs = [
-      cleanedRoot,
-      ...(state.recentDirsByConnection[id] ?? []).filter(
-        (d) => d !== cleanedRoot,
-      ),
-    ].slice(0, RECENT_DIR_LIMIT);
-    persist({
-      records: [record, ...state.records],
-      recentDirsByConnection: {
-        ...state.recentDirsByConnection,
-        [id]: nextDirs,
-      },
+      return record;
     });
-    return record;
-  };
+  }
 
-  const removeProjectByPath = (path: string): void => {
-    const targetKey = pathKey(path);
+  function removeProjectByPath(path: string): Promise<void> {
     const parsed = parseRemoteProjectPath(path);
-    const state = store.getState();
-    const nextRecords = state.records.filter(
-      (r) =>
-        pathKey(r.workspacePath) !== targetKey &&
-        (!parsed || r.projectId !== parsed.projectId),
-    );
-    if (nextRecords.length === state.records.length) return;
-    persist({ ...state, records: nextRecords });
-  };
+    if (!parsed) return Promise.resolve();
+    return enqueue(async () => {
+      const state = store.getState();
+      const nextRecords = state.records.filter(
+        (record) => record.projectId !== parsed.projectId,
+      );
+      if (nextRecords.length === state.records.length) return;
+      await persist({ ...state, records: nextRecords });
+    });
+  }
 
   return {
     snapshot: view.snapshot,

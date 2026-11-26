@@ -32,9 +32,10 @@ export interface RemoteProjectService {
   getByPath(path: string): RemoteProjectRecord | null;
   getById(projectId: string): RemoteProjectRecord | null;
   listProjectsForConnection(connectionId: string): readonly RemoteProjectRecord[];
-  addProject(connectionId: string, remoteRoot: string, name?: string): RemoteProjectRecord;
-  removeProjectByPath(path: string): void;
-  recordRecentDir(connectionId: string, dirPath: string): void;
+  addProject(connectionId: string, remoteRoot: string, name?: string): Promise<RemoteProjectRecord>;
+  repairProject(path: string, connectionId: string): Promise<RemoteProjectRecord>;
+  removeProjectByPath(path: string): Promise<void>;
+  recordRecentDir(connectionId: string, dirPath: string): Promise<void>;
   listConnections(): Promise<readonly RemoteConnectionDTO[]>;
   createConnection(input: RemoteConnectionInput): Promise<RemoteConnectionDTO>;
   updateConnection(

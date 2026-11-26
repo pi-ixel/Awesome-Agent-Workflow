@@ -47,16 +47,25 @@ function createMockService(
     getByPath: () => null,
     getById: () => null,
     listProjectsForConnection: () => [],
-    addProject: (connectionId, remoteRoot, name): RemoteProjectRecord => ({
-      projectId: `rp_${connectionId}`,
+    addProject: (
       connectionId,
       remoteRoot,
-      workspacePath: formatRemoteProjectPath(`rp_${connectionId}`, remoteRoot),
-      agentCwd: `remote-projects/rp_${connectionId}`,
-      name: name ?? remoteRoot.split("/").filter(Boolean).at(-1) ?? "/",
-      createdAt: "2026-01-01T00:00:00Z",
-      lastOpenedAt: "2026-01-01T00:00:00Z",
-    }),
+      name,
+    ): Promise<RemoteProjectRecord> =>
+      Promise.resolve({
+        projectId: `rp_${connectionId}`,
+        connectionId,
+        remoteRoot,
+        workspacePath: formatRemoteProjectPath(
+          `rp_${connectionId}`,
+          remoteRoot,
+        ),
+        agentCwd: `remote-projects/rp_${connectionId}`,
+        name: name ?? remoteRoot.split("/").filter(Boolean).at(-1) ?? "/",
+        createdAt: "2026-01-01T00:00:00Z",
+        lastOpenedAt: "2026-01-01T00:00:00Z",
+      }),
+    repairProject: vi.fn(),
     removeProjectByPath: vi.fn(),
     recordRecentDir: vi.fn(),
     listConnections: vi.fn().mockResolvedValue(connections),
@@ -112,6 +121,54 @@ function createMockService(
 }
 
 describe("AddRemoteProjectModal", () => {
+  it("修复时要求显式选择主机，失败保留原目录，成功后才关闭", async () => {
+    const path = formatRemoteProjectPath("rp_original", "/srv/repo");
+    const onAdded = vi.fn();
+    const onClose = vi.fn();
+    const repairProject = vi
+      .fn<RemoteProjectService["repairProject"]>()
+      .mockRejectedValueOnce(new Error("配置未写入"))
+      .mockResolvedValueOnce({
+        projectId: "rp_original",
+        connectionId: "conn-bob",
+        remoteRoot: "/srv/repo",
+        workspacePath: path,
+        agentCwd: "remote-projects/rp_original",
+        name: "repo",
+        createdAt: "",
+        lastOpenedAt: "",
+      });
+    render(
+      <AddRemoteProjectModal
+        service={createMockService({ repairProject })}
+        onClose={onClose}
+        onAdded={onAdded}
+        repairPath={path}
+      />,
+    );
+    expect(screen.getByText("/srv/repo")).toBeVisible();
+    const confirm = screen.getByRole("button", { name: "修复连接" });
+    expect(confirm).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /切换设备/ }));
+    fireEvent.click(
+      await screen.findByRole("menuitemradio", { name: /Dev Bob/ }),
+    );
+    fireEvent.click(confirm);
+    expect(await screen.findByRole("alert")).toHaveTextContent("配置未写入");
+    expect(repairProject).toHaveBeenCalledWith(path, "conn-bob");
+    expect(onAdded).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByText("/srv/repo")).toBeVisible();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(onAdded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspacePath: path,
+        projectId: "rp_original",
+      }),
+    );
+  });
+
   it("支持默认在此电脑选择本地目录并创建本地项目", async () => {
     const service = createMockService();
     const onPickLocalDirectory = vi.fn().mockResolvedValue("D:/work/demo-app");
@@ -235,12 +292,14 @@ describe("AddRemoteProjectModal", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
 
-    expect(onAdded).toHaveBeenCalledWith(
-      expect.objectContaining({
-        connectionId: "conn-alice",
-        remoteRoot: "/home/alice/repo",
-        name: "My Remote Repo",
-      }),
+    await waitFor(() =>
+      expect(onAdded).toHaveBeenCalledWith(
+        expect.objectContaining({
+          connectionId: "conn-alice",
+          remoteRoot: "/home/alice/repo",
+          name: "My Remote Repo",
+        }),
+      ),
     );
     expect(onClose).toHaveBeenCalled();
   });

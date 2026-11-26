@@ -11,6 +11,7 @@ const configurationKeys = new Set([
   "aaw-desktop/model-probe-sessions.v1",
   "aaw-desktop.auth.v1",
   "aaw-desktop/workspace/v1",
+  "aaw-desktop/remote-projects/v1",
   "aaw-desktop/archived-sessions.v1",
   "aaw-desktop/archived-session-metadata.v1",
   "aaw-desktop/sidebar/view",
@@ -112,6 +113,15 @@ function createNativeRecords(
     load,
     flush,
     status,
+    async writeConfirmed(key: string, value: string) {
+      await load();
+      if (!persisted) throw new Error(status.getState().error || "配置存储未就绪");
+      await invoke("storage_configuration_write", {
+        changes: { [key]: value },
+        conversationText,
+      });
+      persisted[key] = value;
+    },
     getItem(key: string) {
       if (inFlight.has(key)) return inFlight.get(key) ?? null;
       return persisted ? (persisted[key] ?? null) : localStorage.getItem(key);
@@ -193,5 +203,10 @@ export const webviewStorage: HostStorage = {
     return records ? records.getItem(key) : localStorage.getItem(key);
   },
   setItem: change,
+  async setConfigurationItem(key, value) {
+    if (!isNativeConfigurationKey(key)) throw new Error("未登记的配置键");
+    if (isTauri()) await configuration.writeConfirmed(key, value);
+    else localStorage.setItem(key, value);
+  },
   removeItem: (key) => change(key, null),
 };

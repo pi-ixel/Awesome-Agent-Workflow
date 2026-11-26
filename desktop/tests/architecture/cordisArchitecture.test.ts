@@ -553,6 +553,7 @@ it("keeps plugin names and dependency relations aligned with their production ow
       ["project-dialogs", "workspace"],
       ["updates-dialog", "window"],
       ["documents-dialogs", "window"],
+      ["remote-project-recovery", "workspace"],
       ["remote-project-add-modal", "window"],
     ]);
     expect(view.headerIndicators.map(({ id }) => id)).toEqual(["updates"]);

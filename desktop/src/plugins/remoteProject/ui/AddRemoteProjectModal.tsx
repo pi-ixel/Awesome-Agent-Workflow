@@ -22,6 +22,7 @@ import {
   XIcon,
 } from "../../../shared/ui/icons.tsx";
 import { describeUnknownError } from "../../../shared/errors.ts";
+import { parseRemoteProjectPath } from "../../../shared/panelPaths.ts";
 import type {
   RemoteConnectionDTO,
   RemoteProjectRecord,
@@ -41,6 +42,7 @@ export interface AddRemoteProjectModalProps {
   readonly service: RemoteProjectService;
   readonly onClose: () => void;
   readonly onAdded: (record: RemoteProjectRecord) => void;
+  readonly repairPath?: string;
   /** 可选：提供本地目录选择回调时，支持在「此电脑」与「远程主机」间切换。 */
   readonly onPickLocalDirectory?: () => Promise<string | null>;
   /** 可选：确认创建本地项目后的回调。 */
@@ -60,12 +62,22 @@ export function CreateProjectFormBody({
   onPickLocalDirectory,
   onLocalAdded,
   onOpenRemoteHostSettings,
+  repairPath,
+  onSavingChange,
   embedded = false,
-}: AddRemoteProjectModalProps & { readonly embedded?: boolean }) {
-  const supportsLocal = Boolean(onPickLocalDirectory && onLocalAdded);
+}: AddRemoteProjectModalProps & {
+  readonly embedded?: boolean;
+  readonly onSavingChange?: (saving: boolean) => void;
+}) {
+  const supportsLocal =
+    !repairPath && Boolean(onPickLocalDirectory && onLocalAdded);
 
   const [projectName, setProjectName] = useState("");
-  const [connections, setConnections] = useState<readonly RemoteConnectionDTO[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [connections, setConnections] = useState<
+    readonly RemoteConnectionDTO[]
+  >([]);
   const [loadingConnections, setLoadingConnections] = useState(true);
   const [connectionsError, setConnectionsError] = useState<string | null>(null);
 
@@ -79,7 +91,11 @@ export function CreateProjectFormBody({
   } | null>(null);
 
   // 已选中的源文件夹（根据 deviceId 区分本地路径或远端路径）
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(
+    repairPath
+      ? (parseRemoteProjectPath(repairPath)?.remotePath ?? null)
+      : null,
+  );
   const [localPickUnavailable, setLocalPickUnavailable] = useState(false);
 
   // 二级弹窗：添加远程主机 / 远端文件夹选择器
@@ -89,7 +105,7 @@ export function CreateProjectFormBody({
   const selectedConnection = useMemo(
     () =>
       deviceId && deviceId !== "local"
-        ? connections.find((c) => c.id === deviceId) ?? null
+        ? (connections.find((c) => c.id === deviceId) ?? null)
         : null,
     [connections, deviceId],
   );
@@ -106,6 +122,7 @@ export function CreateProjectFormBody({
           if (prev === "local") return "local";
           if (prev && list.some((c) => c.id === prev)) return prev;
           if (supportsLocal) return "local";
+          if (repairPath) return null;
           return list[0]?.id ?? null;
         });
       })
@@ -119,13 +136,14 @@ export function CreateProjectFormBody({
     return () => {
       cancelled = true;
     };
-  }, [service, supportsLocal]);
+  }, [service, supportsLocal, repairPath]);
 
   const switchDevice = (nextDeviceId: string | null) => {
     if (nextDeviceId !== deviceId) {
       setDeviceId(nextDeviceId);
-      setSelectedFolder(null);
+      if (!repairPath) setSelectedFolder(null);
       setLocalPickUnavailable(false);
+      setSaveError(null);
     }
   };
 
@@ -247,8 +265,8 @@ export function CreateProjectFormBody({
     setAddHostOpen(true);
   };
 
-  const handleConfirm = () => {
-    if (!selectedFolder) return;
+  const handleConfirm = async () => {
+    if (!selectedFolder || isSaving) return;
     if (deviceId === "local") {
       if (!onLocalAdded) return;
       onLocalAdded(selectedFolder);
@@ -256,13 +274,25 @@ export function CreateProjectFormBody({
       return;
     }
     if (!selectedConnection) return;
-    const record = service.addProject(
-      selectedConnection.id,
-      selectedFolder,
-      projectName.trim() || undefined,
-    );
-    onAdded(record);
-    onClose();
+    setSaveError(null);
+    setIsSaving(true);
+    onSavingChange?.(true);
+    try {
+      const record = repairPath
+        ? await service.repairProject(repairPath, selectedConnection.id)
+        : await service.addProject(
+            selectedConnection.id,
+            selectedFolder,
+            projectName.trim() || undefined,
+          );
+      onAdded(record);
+      onClose();
+    } catch (error) {
+      setSaveError(describeUnknownError(error));
+    } finally {
+      setIsSaving(false);
+      onSavingChange?.(false);
+    }
   };
 
   const deviceLabel =
@@ -274,24 +304,31 @@ export function CreateProjectFormBody({
 
   return (
     <>
-      <div className={embedded ? "flex flex-col gap-4" : "flex flex-col gap-4 px-5 pb-4"}>
+      <div
+        className={
+          embedded ? "flex flex-col gap-4" : "flex flex-col gap-4 px-5 pb-4"
+        }
+      >
         {/* 项目名称输入框 */}
-        <div className="flex items-center overflow-hidden rounded-control border border-line-strong bg-surface focus-within:border-ink-faint">
-          <span
-            aria-hidden={true}
-            className="flex min-h-10 w-10 shrink-0 items-center justify-center border-r border-line text-ink-mute"
-          >
-            <FolderGlyph className="ui-icon-16" />
-          </span>
-          <input
-            type="text"
-            aria-label="项目名称"
-            value={projectName}
-            onChange={(e) => setProjectName(e.target.value)}
-            placeholder="项目名称"
-            className={`${fieldSurfaceClass} min-h-10 min-w-0 flex-1 rounded-flat border-0 bg-transparent px-3 py-1.5 text-ui-sm focus:ring-0`}
-          />
-        </div>
+        {!repairPath && (
+          <div className="flex items-center overflow-hidden rounded-control border border-line-strong bg-surface focus-within:border-ink-faint">
+            <span
+              aria-hidden={true}
+              className="flex min-h-10 w-10 shrink-0 items-center justify-center border-r border-line text-ink-mute"
+            >
+              <FolderGlyph className="ui-icon-16" />
+            </span>
+            <input
+              type="text"
+              aria-label="项目名称"
+              disabled={isSaving}
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              placeholder="项目名称"
+              className={`${fieldSurfaceClass} min-h-10 min-w-0 flex-1 rounded-flat border-0 bg-transparent px-3 py-1.5 text-ui-sm focus:ring-0`}
+            />
+          </div>
+        )}
 
         {/* 源文件夹区域：统领句 + 设备切换胶囊放在区域左上角 */}
         <div className="flex flex-col gap-2.5">
@@ -304,6 +341,7 @@ export function CreateProjectFormBody({
               aria-expanded={Boolean(menuState)}
               aria-label={`切换设备，当前：${deviceLabel}`}
               onClick={handleToggleMenu}
+              disabled={isSaving}
               className="inline-flex items-center gap-1.5 rounded-control px-2.5 py-1 text-ui-sm font-medium text-ink"
             >
               {deviceId === "local" ? (
@@ -314,7 +352,7 @@ export function CreateProjectFormBody({
               <span>{deviceLabel}</span>
               <ChevronDownIcon className="ui-icon-14 shrink-0 text-ink-mute" />
             </ActionButton>
-            <span>上添加文件夹</span>
+            <span>{repairPath ? "连接原远端目录" : "上添加文件夹"}</span>
           </div>
 
           {selectedFolder ? (
@@ -340,14 +378,17 @@ export function CreateProjectFormBody({
                   </div>
                 </div>
               </div>
-              <ActionButton
-                tone="secondary"
-                type="button"
-                onClick={() => void handlePickFolder()}
-                className="shrink-0 px-2.5 py-1 text-ui-xs"
-              >
-                更改
-              </ActionButton>
+              {!repairPath && (
+                <ActionButton
+                  tone="secondary"
+                  type="button"
+                  disabled={isSaving}
+                  onClick={() => void handlePickFolder()}
+                  className="shrink-0 px-2.5 py-1 text-ui-xs"
+                >
+                  更改
+                </ActionButton>
+              )}
             </div>
           ) : (
             <div className="flex min-h-[120px] flex-col items-center justify-center gap-2.5 rounded-popover border border-dashed border-line-strong bg-raised/30 px-4 py-5">
@@ -381,6 +422,11 @@ export function CreateProjectFormBody({
             variant="selection"
           />
         )}
+        {saveError && (
+          <p role="alert" className="text-ui-sm text-danger-ink">
+            {saveError}
+          </p>
+        )}
       </div>
 
       {/* 底部按钮栏 */}
@@ -394,6 +440,7 @@ export function CreateProjectFormBody({
         <ActionButton
           tone="ghost"
           type="button"
+          disabled={isSaving}
           onClick={onClose}
           className="px-3.5 py-1.5 text-ui-sm"
         >
@@ -402,11 +449,21 @@ export function CreateProjectFormBody({
         <ActionButton
           tone="primary"
           type="button"
-          disabled={!selectedFolder}
-          onClick={handleConfirm}
+          disabled={
+            isSaving ||
+            !selectedFolder ||
+            (deviceId !== "local" && !selectedConnection)
+          }
+          onClick={() => void handleConfirm()}
           className="px-4 py-1.5 text-ui-sm"
         >
-          创建项目
+          {isSaving
+            ? repairPath
+              ? "正在验证并保存…"
+              : "正在保存…"
+            : repairPath
+              ? "修复连接"
+              : "创建项目"}
         </ActionButton>
       </div>
 
@@ -447,15 +504,20 @@ export function CreateProjectFormBody({
 }
 
 export function AddRemoteProjectModal(props: AddRemoteProjectModalProps) {
+  const [isSaving, setIsSaving] = useState(false);
+  const label = props.repairPath ? "修复远程项目连接" : "创建项目";
+  const dismiss = () => {
+    if (!isSaving) props.onClose();
+  };
   return (
-    <ModalShell onDismiss={props.onClose} label="创建项目" size="default">
+    <ModalShell onDismiss={dismiss} label={label} size="default">
       <div className="flex items-center justify-between px-5 pt-4 pb-3">
-        <h2 className="text-ui-lg font-semibold text-ink">创建项目</h2>
-        <IconButton aria-label="关闭" onClick={props.onClose}>
+        <h2 className="text-ui-lg font-semibold text-ink">{label}</h2>
+        <IconButton aria-label="关闭" disabled={isSaving} onClick={dismiss}>
           <XIcon className="ui-icon-16" />
         </IconButton>
       </div>
-      <CreateProjectFormBody {...props} />
+      <CreateProjectFormBody {...props} onSavingChange={setIsSaving} />
     </ModalShell>
   );
 }
