@@ -46,7 +46,12 @@ export type { WorkflowClient, WorkflowPlatform } from "./engine/client.ts";
 
 /** `list` 投影的一次运行摘要（引擎 run_value 的稳定字段）。 */
 /** 跨项目总览里的运行：带上所属项目。 */
-export type ProjectRunSummary = RunSummary & { readonly project: string };
+export interface DesktopRunOwner {
+  readonly project: string;
+  readonly agentId: string;
+}
+
+export type ProjectRunSummary = RunSummary & { readonly project: string; readonly unassigned?: boolean };
 
 export interface RunSummary {
   readonly runId: string;
@@ -283,6 +288,7 @@ export interface InterventionOutcome {
 
 /** 画布快照：引擎 run-detail → 插件面板渲染面（status/snapshot.ts 投影）。 */
 export interface CanvasSnapshot {
+  readonly unassigned?: boolean;
   readonly runId: string;
   /** 运行的版本号（ADR 040）：引擎推来的变化比它新才重取快照。 */
   readonly version?: number;
@@ -355,6 +361,7 @@ export interface RunSessionLink {
 }
 
 export interface RunSessionLinks {
+  readonly desktopOwner?: DesktopRunOwner;
   readonly runId: string;
   readonly workflowName: string;
   /** 运行标题（同 RunSummary.title）。 */
@@ -539,6 +546,8 @@ export interface WorkflowStartRequest {
   readonly autoConfirm?: boolean;
   /** 发起运行的会话（ADR 039）：第一个 Agent 步骤接着用它。 */
   readonly entrySession?: string;
+  readonly workspacePath?: string;
+  readonly entryAgentKey?: string;
 }
 
 export interface WorkflowPreflightItem {
@@ -569,6 +578,8 @@ export type WorkflowPanelRequest =
   | { readonly kind: "run"; readonly project: string; readonly runId: string; readonly returnFilters: RunManagerFilters };
 
 export interface WorkflowService {
+  sessionAgentKey?(id: string): string;
+  runAgentId?(runId: string): string | undefined;
   isActive(): boolean;
   /** 工作区绑定（运行列表作用域）；返回解绑函数。 */
   bindWorkspace(path: string | null): () => void;

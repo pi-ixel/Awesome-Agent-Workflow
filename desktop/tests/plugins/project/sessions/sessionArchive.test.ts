@@ -47,14 +47,14 @@ describe("全局归档覆盖层（sessionArchiveStore）", () => {
     const a = createSessionStore();
     const b = createSessionStore();
     selectSessionStore(a);
-    indexes.archive.getState().archiveSession(PATH_A, "s1");
+    void indexes.archive.getState().archiveSession(PATH_A, "s1");
     selectSessionStore(b);
     expect(
       indexes.archive
         .getState()
         .archivedSessions.has(sessionArchiveKey(PATH_A, "s1")),
     ).toBe(true);
-    indexes.archive.getState().archiveSession(PATH_B, "s2");
+    void indexes.archive.getState().archiveSession(PATH_B, "s2");
     selectSessionStore(a);
     // Agent 列表回填不会改动归档覆盖层。
     a.getState().setSessions([summary("s1", null)], PATH_A);
@@ -73,12 +73,12 @@ describe("全局归档覆盖层（sessionArchiveStore）", () => {
   it("恢复后切回旧 runtime 再归档，不会把恢复的会话重新归档", () => {
     const a = createSessionStore();
     selectSessionStore(a);
-    indexes.archive.getState().archiveSession(PATH_A, "s1");
+    void indexes.archive.getState().archiveSession(PATH_A, "s1");
     const b = createSessionStore();
     selectSessionStore(b);
-    indexes.archive.getState().unarchiveSession(PATH_A, "s1");
+    void indexes.archive.getState().unarchiveSession(PATH_A, "s1");
     selectSessionStore(a);
-    indexes.archive.getState().archiveSession(PATH_B, "s2");
+    void indexes.archive.getState().archiveSession(PATH_B, "s2");
     expect(createTestProjectIndexes().archive.getState().archivedSessions).toEqual(
       new Set([sessionArchiveKey(PATH_B, "s2")]),
     );
@@ -102,7 +102,7 @@ describe("全局归档覆盖层（sessionArchiveStore）", () => {
     useSessionStore.setState({ sessionsByPath });
     indexes.catalog.setState({ sessionsByPath });
 
-    indexes.archive.getState().archiveSession(PATH_A, "s1");
+    void indexes.archive.getState().archiveSession(PATH_A, "s1");
 
     const store = useSessionStore.getState();
     expect(
@@ -118,7 +118,7 @@ describe("全局归档覆盖层（sessionArchiveStore）", () => {
     ) as readonly string[];
     expect(persisted).toContain(sessionArchiveKey(PATH_A, "s1"));
 
-    indexes.archive.getState().unarchiveSession(PATH_A, "s1");
+    void indexes.archive.getState().unarchiveSession(PATH_A, "s1");
     expect(
       indexes.archive
         .getState()
@@ -127,9 +127,9 @@ describe("全局归档覆盖层（sessionArchiveStore）", () => {
   });
 
   it("同键重复归档幂等；clear() 不清覆盖层（设备级组织态）", () => {
-    indexes.archive.getState().archiveSession(PATH_A, "s1");
+    void indexes.archive.getState().archiveSession(PATH_A, "s1");
     const afterFirst = indexes.archive.getState().archivedSessions;
-    indexes.archive.getState().archiveSession(PATH_A, "s1");
+    void indexes.archive.getState().archiveSession(PATH_A, "s1");
     expect(indexes.archive.getState().archivedSessions).toBe(afterFirst);
 
     useSessionStore.getState().clear();
@@ -141,7 +141,7 @@ describe("全局归档覆盖层（sessionArchiveStore）", () => {
   });
 
   it("键按 pathKey 归一：大小写不同的路径指向同一覆盖层条目", () => {
-    indexes.archive.getState().archiveSession(PATH_A, "s1");
+    void indexes.archive.getState().archiveSession(PATH_A, "s1");
     expect(
       indexes.archive
         .getState()
@@ -155,7 +155,7 @@ describe("自动归档候选判定（selectAutoArchiveCandidates）", () => {
     const a = createSessionStore();
     const b = createSessionStore();
     selectSessionStore(a);
-    indexes.archive.getState().archiveSession(PATH_A, "manual");
+    void indexes.archive.getState().archiveSession(PATH_A, "manual");
     selectSessionStore(b);
     b.getState().setSessions(
       [summary("automatic", "2000-01-01T00:00:00Z")],
@@ -181,11 +181,11 @@ describe("自动归档候选判定（selectAutoArchiveCandidates）", () => {
   });
 
   it("undoes the exact legacy archive after Agent selection changes", () => {
-    indexes.archive.getState().archiveWithNotice(PATH_A, "same");
+    void indexes.archive.getState().archiveWithNotice(PATH_A, "same");
     indexes.catalog.setState({ agentKey: "another-agent" });
-    indexes.archive.getState().archiveSession(PATH_A, "same");
+    void indexes.archive.getState().archiveSession(PATH_A, "same");
     const notice = indexes.archive.getState().notice!;
-    indexes.archive.getState().unarchiveSession(notice.workspacePath, notice.sessionId, notice.agentKey);
+    void indexes.archive.getState().unarchiveSession(notice.workspacePath, notice.sessionId, notice.agentKey);
     expect(indexes.archive.getState().archivedSessions).toEqual(
       new Set([sessionArchiveKey(PATH_A, "same", "another-agent")]),
     );

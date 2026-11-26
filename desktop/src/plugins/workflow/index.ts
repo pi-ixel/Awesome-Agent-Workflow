@@ -75,23 +75,36 @@ export function apply(ctx: Context): void {
 
   // 节点 Agent 启动信封：当前选中 agent 的启动命令（单 Agent 原则：新运行
   // 的全部节点用同一个 Agent，模型用 Agent 的默认模型）。
-  function agentLaunch() {
-    const adapter = agents.resolve();
+  function agentLaunch(_runId?: string, _workflowId?: string, agentId?: string) {
+    const adapter = agents.resolve(agentId);
     if (adapter === null) {
       throw new Error("未找到所选 ACP Agent，请先检查 Agent 配置。");
     }
     const state = project.projects.workspace.getState();
-    const launch = agents.buildLaunch(adapter, state.toolPaths, state.activePath);
+    const launch = agents.buildLaunch(adapter, state.toolPaths, state.activePath ? projectFolderPath(state.activePath) : null);
     if (Object.keys(launch.extraEnv).length > 0) {
       throw new Error("当前工作流服务尚不支持此 Agent 的额外环境变量配置。");
     }
     return { command: launch.command, mcpServers: [], agentId: adapter.id };
   }
 
+  const legacyProject = (cwd: string, ids: readonly string[]): { project: string; agentId?: string } | null => {
+    const evidence = project.sessions.workflowOwner(cwd, ids);
+    if (evidence !== undefined) return evidence;
+    const single = project.projects.findProjectByFolders(cwd, []);
+    return single ? { project: single } : null;
+  };
+
   const { service, project: projectEvent, dispose } = createWorkflowService({
     client,
     logger,
     agentLaunch,
+    legacyProject,
+    sessionAgentKey: (id) => agents.selectionKey(project.projects.workspace.getState().toolPaths, id),
+    sessionAgentId: (key) => {
+      const parsed: unknown = JSON.parse(key);
+      return Array.isArray(parsed) && typeof parsed[0] === "string" ? parsed[0] : undefined;
+    },
     plans: createNodePlans(host.storage),
     // 会话是唯一来源（ADR 040）：节点「在干什么」读会话视图用的同一份会话活动。
     sessionActivity: project.sessions.activity,
@@ -105,14 +118,20 @@ export function apply(ctx: Context): void {
     cancel: (target) => project.conversation.cancel(target),
     isRunning: (target) =>
       target.sessionId !== null && project.sessions.busySessionIds(target.agentKey, target.workspacePath).has(target.sessionId),
-    watchTurns: (sessionId, listener) => project.sessions.watchTurns(sessionId, listener),
+    watchTurns: (target, listener) => project.sessions.watchTurns(target, listener),
     watchEvents: (target, listener) => project.sessions.watchEvents(target, listener),
   };
   // 登记在没结束的运行上的会话（所有项目）：运行停着也一直报它们的状态（ADR 040）。
-  const registeredSessions = (): ReadonlySet<string> => {
-    const runs = [...service.sessionLinks().runs, ...service.otherSessionLinks().flatMap((item) => item.runs)];
-    return new Set(runs.filter((run) => run.status !== "completed").flatMap((run) => run.links.map((link) => link.sessionId)));
-  };
+  const registeredSessions = () => [
+    { project: service.sessionLinks().workspace, runs: service.sessionLinks().runs },
+    ...service.otherSessionLinks(),
+  ].flatMap(({ project: path, runs }) => !path ? [] : runs.flatMap((run) => {
+    if (run.status === "completed") return [];
+    const owner = run.desktopOwner ?? legacyProject(projectFolderPath(path), run.links.map((link) => link.sessionId));
+    if (!owner?.agentId || pathKey(owner.project) !== pathKey(path)) return [];
+    const agentKey = agents.selectionKey(project.projects.workspace.getState().toolPaths, owner.agentId);
+    return run.links.map(({ sessionId }) => ({ runId: run.runId, target: { workspacePath: path, agentKey, sessionId } }));
+  }));
   const detachHost = platform.isTauriEnv()
     ? attachNodeSessionHost({
         workflow: client,
@@ -139,7 +158,7 @@ export function apply(ctx: Context): void {
   // 认得的会话（当前项目运行的会话关联），不为普通会话启动工作流服务。
   ctx.effect(
     () =>
-      project.sessions.registerSessionTools(async ({ workspacePath, sessionId, agent }) => {
+      project.sessions.registerSessionTools(async ({ workspacePath, sessionId, agent, agentId }) => {
         if (!sessionId) return [];
         const links = service.sessionLinks();
         // 运行列表还没为这个项目加载（如应用刚启动就恢复了上次打开的节点会话）时直接问引擎；
@@ -147,7 +166,12 @@ export function apply(ctx: Context): void {
         const loaded = links.workspace !== null && pathKey(links.workspace) === pathKey(workspacePath);
         const known = links.runs.some((run) => run.status !== "completed" && run.links.some((link) => link.sessionId === sessionId));
         if (loaded && !known) return [];
-        const raw = await client.request("session-tools", { cwd: projectFolderPath(workspacePath), sessionId }).catch(() => null);
+        const cwd = projectFolderPath(workspacePath);
+        const legacy = legacyProject(cwd, [sessionId]);
+        const raw = await client.request("session-tools", {
+          cwd, sessionId, desktopProject: pathKey(workspacePath), agentId,
+          allowLegacy: !!legacy && pathKey(legacy.project) === pathKey(workspacePath) && legacy.agentId === agentId,
+        }).catch(() => null);
         const offer = asResultChannelOffer(raw);
         return offer ? [resultChannelServer(offer, agentSupportsHttpMcp(agent))] : [];
       }),
@@ -167,7 +191,9 @@ export function apply(ctx: Context): void {
       storage: host.storage,
       warn: (message) => logger.warn(message),
       openRun: (path, runId) => openRunFromNotification(scoped.workbench, scoped.workflowUi.openRun, path, runId),
-      openSession: (path, sessionId) => project.sessions.openSessionFromEntry(path, sessionId),
+      legacyProject,
+      openSession: (path, sessionId, agentId) => project.sessions.openSessionFromEntry(path, sessionId,
+        agentId ? agents.selectionKey(project.projects.workspace.getState().toolPaths, agentId) : undefined),
     }), "workflow:notifications");
   });
   ctx.inject(["workbench"], function workflowExitGate(scoped) {

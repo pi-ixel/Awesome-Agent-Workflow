@@ -252,8 +252,12 @@ impl SessionIdentity {
 fn rebuild_index(data: &Path, project: &Path, owner: &SessionIdentity) -> io::Result<()> {
     let mut ids = BTreeSet::new();
     for dir in children(&project.join("sessions"))? {
-        let entry: SessionIdentity =
-            serde_json::from_reader(fs::File::open(dir.join("identity.json"))?)?;
+        let entry: SessionIdentity = match fs::File::open(dir.join("identity.json")) {
+            Ok(file) => serde_json::from_reader(file)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound
+                && fs::read_dir(&dir)?.next().is_none() => continue,
+            Err(error) => return Err(error),
+        };
         if entry.directory(data) != dir
             || entry.project != owner.project
             || entry.agent_id != owner.agent_id
@@ -436,6 +440,49 @@ pub(crate) fn identities(data: &Path) -> io::Result<Vec<SessionIdentity>> {
             Ok(owner)
         })
         .collect()
+}
+
+/// 正常读取项目级索引，落盘中断时只从受影响的项目恢复可核验的身份。
+pub(crate) fn indexed_sessions(data: &Path, agent: Option<&str>) -> io::Result<Vec<SessionIdentity>> {
+    let mut result = Vec::new();
+    let agents = match agent {
+        Some(id) => vec![id_directory(&data.join("agents"), id)],
+        None => children(&data.join("agents"))?,
+    };
+    for agent_dir in agents {
+        for project in children(&agent_dir.join("projects"))? {
+            let index = project.join("sessions-index.json");
+            let meta: Option<SessionIdentity> = fs::File::open(project.join("project.json"))
+                .ok()
+                .and_then(|file| serde_json::from_reader(file).ok());
+            if let Some(meta) = meta.filter(|owner| owner.project_directory(data) == project
+                && owner.session_id.is_none() && agent.is_none_or(|id| owner.agent_id == id)) {
+                if !project.join(".index-pending").try_exists()? {
+                    if let Some(ids) = fs::File::open(&index).ok()
+                        .and_then(|file| serde_json::from_reader::<_, BTreeSet<String>>(file).ok()) {
+                        result.extend(ids.into_iter().map(|id| SessionIdentity {
+                            session_id: Some(id),
+                            ..meta.clone()
+                        }));
+                        continue;
+                    }
+                }
+            }
+            for directory in children(&project.join("sessions"))? {
+                let identity = match fs::File::open(directory.join("identity.json")) {
+                    Ok(file) => serde_json::from_reader::<_, SessionIdentity>(file)?,
+                    Err(error) if error.kind() == io::ErrorKind::NotFound
+                        && fs::read_dir(&directory)?.next().is_none() => continue,
+                    Err(error) => return Err(error),
+                };
+                if identity.directory(data) != directory || identity.session_id.is_none() {
+                    return Err(io::Error::other("会话归属与目录不一致"));
+                }
+                result.push(identity);
+            }
+        }
+    }
+    Ok(result)
 }
 
 #[cfg(test)]

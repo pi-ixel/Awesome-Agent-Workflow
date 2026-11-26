@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { WorkflowEvent } from "../../../src/plugins/workflow/engine/protocol.ts";
-import { createWorkflowService } from "../../../src/plugins/workflow/status/workflowService.ts";
+import { createWorkflowService, type WorkflowServiceDeps } from "../../../src/plugins/workflow/status/workflowService.ts";
 import { emptyCanvasSnapshot } from "../../../src/plugins/workflow/status/snapshot.ts";
 import { createNodePlans, type NodePlans } from "../../../src/plugins/workflow/status/nodePlans.ts";
 
@@ -10,7 +10,7 @@ import { createNodePlans, type NodePlans } from "../../../src/plugins/workflow/s
  * 站点身份解析、reconcile 的 executed 分派、只读会话流缓冲。
  * 引擎客户端以桩驱动（request 记录方法与参数；emit 手动泵事件）。
  */
-function harness(options: { plans?: NodePlans } = {}) {
+function harness(options: { plans?: NodePlans; legacyProject?: WorkflowServiceDeps["legacyProject"] } = {}) {
   const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
   let respond: ((method: string, params: Record<string, unknown>) => unknown) | null = null;
   const client = {
@@ -66,6 +66,34 @@ function snapshotAt(version: number) {
 }
 
 describe("createWorkflowService", () => {
+  it("isolates runs with the same working directory and keeps unassigned history accessible", async () => {
+    const group = "//aaw-project/12345678-1234-1234-1234-123456789abc/D%3A%2Fproject";
+    let single = false;
+    const h = harness({ legacyProject: (project) => single ? { project } : null });
+    const owner = { project: group, agentId: "codeagent" };
+    const groupRun = { ...snapshotAt(1).run, runId: "group", desktopOwner: owner };
+    const oldRun = { ...snapshotAt(1).run, runId: "legacy" };
+    h.respondWith((method, params) => {
+      if (method === "list" || method === "list-all") return [groupRun, oldRun].map((run) => ({ ...run, project: "D:/project" }));
+      if (method === "snapshot" && params.runId === "legacy") return { ...snapshotAt(1), run: oldRun };
+      return [];
+    });
+    h.service.bindWorkspace(group);
+    await vi.waitFor(() => expect(h.service.allRuns().map((run) => run.runId)).toEqual(["group"]));
+    expect(await h.service.runsAcrossProjects()).toMatchObject([
+      { runId: "group", project: group }, { runId: "legacy", unassigned: true },
+    ]);
+    const legacy = h.service.snapshot("legacy");
+    await vi.waitFor(() => expect(legacy.getState()).toMatchObject({ unassigned: true, run: { runId: "legacy" } }));
+    await expect(h.service.archiveRun("group", true, "D:/project")).rejects.toThrow("所属项目");
+    expect(h.requests.filter((entry) => entry.method === "run-archive")).toEqual([]);
+    await h.service.resume("group");
+    expect(h.agentLaunch).toHaveBeenLastCalledWith("group", undefined, "codeagent");
+    single = true;
+    h.service.bindWorkspace("D:/project");
+    await vi.waitFor(() => expect(h.service.allRuns().map((run) => run.runId)).toEqual(["legacy"]));
+    h.dispose();
+  });
   it("selects the launch configuration using the run being resumed", async () => {
     const h = harness();
     h.service.bindWorkspace("D:/project");

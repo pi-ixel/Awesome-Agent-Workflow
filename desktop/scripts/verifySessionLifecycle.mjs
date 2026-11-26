@@ -34,6 +34,18 @@ export async function seedLifecycle(root, workspace) {
       );
     }
   }
+  const configuration = path.join(root, "configuration");
+  await fs.mkdir(configuration, { recursive: true });
+  const project = projectKey(workspace);
+  await fs.writeFile(path.join(configuration, "preferences.json"), JSON.stringify({
+    "aaw-desktop/session-unread-replies.v1": JSON.stringify([{ agentId: "codeagent", project, sessionId: neighbor }]),
+    "aaw-desktop/session-working-directories.v1": JSON.stringify({
+      [JSON.stringify(["codeagent", project, neighbor])]: `${project}/nested`,
+    }),
+  }));
+  await fs.writeFile(path.join(configuration, "session-titles.json"), JSON.stringify({
+    [`aaw-desktop/session-title/${neighbor}`]: "迁移后的标题",
+  }));
   await fs.mkdir(path.dirname(transcript(root)), { recursive: true });
   await fs.writeFile(
     transcript(root),
@@ -74,6 +86,15 @@ export async function verifyLifecycle({
     '[...document.querySelectorAll("button")].find(b=>b.textContent==="进入工作台").click()',
   );
   await ready();
+  const migrated = await call("session_metadata_list", {});
+  assert.deepEqual(
+    migrated.records.find((record) => record.sessionId === neighbor),
+    {
+      agentId: "codeagent", project: projectKey(workspace), sessionId: neighbor,
+      title: "迁移后的标题",
+      metadata: { archive: null, unread: true, cwd: `${projectKey(workspace)}/nested` },
+    },
+  );
   if (process.env.AAW_ARCHIVE_DELETE_BENCH === "1") {
     const scenarios = [
       ...Array.from({ length: 20 }, () => ({ count: 1, large: false })),
@@ -124,7 +145,7 @@ export async function verifyLifecycle({
         }
       }
       await withService(`
-        for(const sessionId of ${JSON.stringify(ids)}) s.archiveWithNotice(workspace,sessionId);
+        for(const sessionId of ${JSON.stringify(ids)}) await s.archiveWithNotice(workspace,sessionId);
       `);
       if (count === 1) {
         await click(`${archive}?.querySelector('button[aria-label^="彻底删除 "]')`);
@@ -204,7 +225,7 @@ export async function verifyLifecycle({
     assert.equal(await read("snapshot", id), "[]");
   assert.equal(
     await withService(
-      "s.archiveWithNotice(workspace,id);return s.archive.getState().archivedSessions.size",
+      "await s.archiveWithNotice(workspace,id);return s.archive.getState().archivedSessions.size",
     ),
     1,
   );
@@ -285,7 +306,7 @@ export async function verifyLifecycle({
     });
     await withService(`
       const sessionId=${JSON.stringify(id)};
-      s.archiveWithNotice(workspace,sessionId);
+      await s.archiveWithNotice(workspace,sessionId);
       await s.deleteArchivedSession({...target,sessionId});
       if(s.archive.getState().archivedSessions.size) throw new Error("缺失源历史的归档仍存在");
     `);
@@ -302,7 +323,7 @@ export async function verifyLifecycle({
     await withService(`
       const started={...target,sessionId:${JSON.stringify(startedId)}};
       for(const sessionId of [started.sessionId,${JSON.stringify(queuedId)}]) {
-        s.archiveWithNotice(workspace,sessionId);
+        await s.archiveWithNotice(workspace,sessionId);
       }
       const {deletionKey}=await import("/src/plugins/project/sessions/sessionDeletion.ts");
       const {webviewStorage,flushNativeConfiguration}=await import("/src/plugins/host/storage/storage.ts");

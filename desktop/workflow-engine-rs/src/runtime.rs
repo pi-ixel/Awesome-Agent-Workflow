@@ -209,6 +209,7 @@ pub struct Runtime<H: Host> {
     project: String,
     owner: String,
     config: RuntimeConfig,
+    desktop_owner: Option<crate::journal::DesktopRunOwner>,
     host: Arc<H>,
     /// Who hosts node sessions (ADR 023): message relay, event buffering and
     /// session processes all live behind this seam.
@@ -325,6 +326,7 @@ impl<H: Host> Runtime<H> {
             project,
             owner,
             config,
+            desktop_owner: snapshot.desktop_owner,
             host,
             session_host,
             actors: BTreeMap::new(),
@@ -452,6 +454,7 @@ impl<H: Host> Runtime<H> {
                 let requirement = crate::session_host::SessionRequirement {
                     action: action.clone(),
                     cwd: self.config.cwd.clone(),
+                    desktop_owner: self.desktop_owner.clone(),
                     command: self.config.command_for(&action.actor).to_vec(),
                     model: None,
                     profile: self.config.profile.clone(),

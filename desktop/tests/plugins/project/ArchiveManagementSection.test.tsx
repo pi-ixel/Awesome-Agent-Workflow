@@ -36,9 +36,9 @@ beforeEach(() => {
     },
   });
   const archive = indexes.archive.getState().archiveSession;
-  archive("D:/alpha", "old");
-  archive("D:/alpha", "new");
-  archive("D:/beta", "unknown");
+  void archive("D:/alpha", "old");
+  void archive("D:/alpha", "new");
+  void archive("D:/beta", "unknown");
   useWorkbenchUiStore.setState({ overlay: "settings" });
 });
 afterEach(() => {
@@ -136,7 +136,7 @@ it("asks once before deleting a CodeAgent session and reports a retryable failur
     metadata: {},
     notice: null,
   });
-  indexes.archive.getState().archiveSession("D:/alpha", "new", agentKey);
+  void indexes.archive.getState().archiveSession("D:/alpha", "new", agentKey);
   const deleteArchivedSession = vi.fn(() =>
     Promise.reject(new Error("文件被占用，请稍后重试")),
   );
@@ -175,10 +175,10 @@ it("confirms only the selected filtered targets, including a folded project, and
   fixture.dispose();
   indexes.catalog.setState({ agentKey });
   const archive = indexes.archive.getState().archiveSession;
-  archive("D:/alpha", "new", agentKey);
-  archive("D:/alpha", "old", agentKey);
-  archive("D:/alpha", "other-agent", otherAgent);
-  archive("D:/beta", "unknown", agentKey);
+  void archive("D:/alpha", "new", agentKey);
+  void archive("D:/alpha", "old", agentKey);
+  void archive("D:/alpha", "other-agent", otherAgent);
+  void archive("D:/beta", "unknown", agentKey);
   const deleteArchivedSessions = vi
     .fn<(targets: readonly DeleteSessionTarget[]) => Promise<void>>()
     .mockResolvedValue(undefined);
@@ -206,7 +206,7 @@ it("confirms only the selected filtered targets, including a folded project, and
   expect(dialog).toHaveTextContent("D:/alpha");
   expect(dialog).not.toHaveTextContent("D:/beta");
   expect(deleteArchivedSessions).not.toHaveBeenCalled();
-  act(() => archive("D:/alpha", "late", agentKey));
+  void act(() => archive("D:/alpha", "late", agentKey));
   await user.click(
     within(dialog).getByRole("button", { name: "彻底删除 2 条" }),
   );
@@ -221,13 +221,13 @@ it("keeps processing the confirmed batch while the archive view is closed", asyn
   fixture.dispose();
   indexes.catalog.setState({ agentKey });
   const { archiveSession, unarchiveSession } = indexes.archive.getState();
-  archiveSession("D:/alpha", "new", agentKey);
-  archiveSession("D:/alpha", "old", agentKey);
+  void archiveSession("D:/alpha", "new", agentKey);
+  void archiveSession("D:/alpha", "old", agentKey);
   const queue = createSessionDeletions(webviewStorage);
   const complete: (() => void)[] = [];
   const deleteArchivedSession = vi.fn(async (item: DeleteSessionTarget) => {
     await new Promise<void>((resolve) => complete.push(resolve));
-    unarchiveSession(item.workspacePath, item.sessionId, item.agentKey);
+    void unarchiveSession(item.workspacePath, item.sessionId, item.agentKey);
   });
   fixture = createTestProjectWorkbench({
     sessions: {

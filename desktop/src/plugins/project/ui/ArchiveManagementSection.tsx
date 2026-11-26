@@ -9,6 +9,7 @@ import {
 } from "../../../shared/ui/controls.tsx";
 import {
   deletionKey,
+  sessionAgentId,
   type DeleteSessionTarget,
   type SessionDeletionSnapshot,
 } from "../sessions/sessionDeletion.ts";
@@ -91,7 +92,7 @@ export function ArchiveManagementSection() {
         const parts = key.split("\0");
         if (
           (parts[2] ?? "") !==
-          (agentKey === null ? "" : encodeURIComponent(agentKey))
+          (agentKey === null ? "" : encodeURIComponent(sessionAgentId(agentKey) ?? agentKey))
         )
           return [];
         const split = key.indexOf("\0");
@@ -500,7 +501,7 @@ export function ArchiveManagementSection() {
                                     key: row.key,
                                     groupKey: row.projectKey,
                                   };
-                                projectService?.sessions.unarchiveSession(
+                                void projectService?.sessions.unarchiveSession(
                                   row.path,
                                   row.sessionId,
                                   agentKey,

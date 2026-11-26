@@ -73,6 +73,7 @@ import {
   manualTitleOf,
   setManualTitle,
 } from "../sessions/sessionTitles.ts";
+import { pathKey } from "../../../shared/panelPaths.ts";
 
 /** 把某会话的原生名落到列表条目：记录 nativeTitle，展示标题套手动覆盖层。 */
 function applyNativeTitleToList(
@@ -81,6 +82,7 @@ function applyNativeTitleToList(
   nativeTitle: string | null,
   agentKey?: string,
   updatedAt?: string,
+  project?: string,
 ): readonly SessionSummary[] {
   return list.map((entry) =>
     entry.id === sessionId
@@ -89,7 +91,7 @@ function applyNativeTitleToList(
           ...(nativeTitle !== null
             ? {
                 nativeTitle,
-                title: displayTitleOf(sessionId, nativeTitle, agentKey),
+                title: displayTitleOf(sessionId, nativeTitle, agentKey, project),
               }
             : {}),
           ...(updatedAt !== undefined ? { updatedAt } : {}),
@@ -800,7 +802,8 @@ export const createSessionStore = (
   annotationDrafts?: AnnotationDraftService,
   messageImages?: ReturnType<typeof createMessageImageHistory>,
   logger = createLogger("session"),
-  { playbackActive: playbackInitiallyActive = true }: { readonly playbackActive?: boolean } = {},
+  { playbackActive: playbackInitiallyActive = true, workspacePath: ownerPath }:
+    { readonly playbackActive?: boolean; readonly workspacePath?: string } = {},
 ) => {
   const storeId = crypto.randomUUID();
   let itemSequence = 0;
@@ -1466,13 +1469,13 @@ export const createSessionStore = (
       },
 
       renameSession: (sessionId, title) => {
-        const save = setManualTitle(sessionId, title, agentKey);
+        const save = setManualTitle(sessionId, title, agentKey, ownerPath);
         if (save) return save.then(() => get().refreshSessionTitle(sessionId));
         get().refreshSessionTitle(sessionId);
       },
 
       refreshSessionTitle: (sessionId) => {
-        const manual = manualTitleOf(sessionId, agentKey);
+        const manual = manualTitleOf(sessionId, agentKey, ownerPath);
         // 展示标题重算：手动 > 原生（无原生名时清除手动则保持原值）
         const retitle = (entry: SessionSummary): SessionSummary =>
           entry.id === sessionId
@@ -1486,7 +1489,7 @@ export const createSessionStore = (
           sessionsByPath: Object.fromEntries(
             Object.entries(state.sessionsByPath).map(([path, list]) => [
               path,
-              list.map(retitle),
+              !ownerPath || pathKey(path) === pathKey(ownerPath) ? list.map(retitle) : list,
             ]),
           ),
         }));
@@ -1596,16 +1599,18 @@ export const createSessionStore = (
                 native ?? null,
                 agentKey,
                 event.updatedAt,
+                ownerPath,
               ),
               sessionsByPath: Object.fromEntries(
                 Object.entries(state.sessionsByPath).map(([path, list]) => [
                   path,
-                  applyNativeTitleToList(
+                  ownerPath && pathKey(path) !== pathKey(ownerPath) ? list : applyNativeTitleToList(
                     list,
                     event.sessionId,
                     native ?? null,
                     agentKey,
                     event.updatedAt,
+                    path,
                   ),
                 ]),
               ),
@@ -1894,7 +1899,7 @@ export const createSessionStore = (
         const blended = sessions.map((entry) => ({
           ...entry,
           nativeTitle: entry.title,
-          title: displayTitleOf(entry.id, entry.title, agentKey),
+          title: displayTitleOf(entry.id, entry.title, agentKey, workspacePath ?? ownerPath),
         }));
         set((state) => ({
           sessions: blended,
@@ -1937,7 +1942,7 @@ export const createSessionStore = (
             next[path] = sessions.map((entry) => ({
               ...entry,
               nativeTitle: entry.title,
-              title: displayTitleOf(entry.id, entry.title, agentKey),
+              title: displayTitleOf(entry.id, entry.title, agentKey, path),
             }));
             changed = true;
           }

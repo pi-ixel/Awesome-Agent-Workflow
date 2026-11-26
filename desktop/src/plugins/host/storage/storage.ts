@@ -6,15 +6,10 @@ import { retainedSessions, finishSessionRecovery } from "./sessionRecovery.ts";
 const configurationKeys = new Set([
   "aaw-desktop.settings.v1",
   "aaw-desktop/session-deletions.v1",
-  "aaw-desktop/session-unread-replies.v1",
-  "aaw-desktop/session-working-directories.v1",
-  "aaw-desktop/session-project-owners.v1",
   "aaw-desktop/model-probe-sessions.v1",
   "aaw-desktop.auth.v1",
   "aaw-desktop/workspace/v1",
   "aaw-desktop/remote-projects/v1",
-  "aaw-desktop/archived-sessions.v1",
-  "aaw-desktop/archived-session-metadata.v1",
   "aaw-desktop/sidebar/view",
   "aaw-desktop/storage-reminders.v1",
   "aaw-desktop/scheduled-tasks.v1",
@@ -23,6 +18,13 @@ const configurationKeys = new Set([
   "aaw-desktop/right-panel/zcode-v1",
   "aaw-desktop/right-panel/v1",
   "aaw:document-outline-width",
+]);
+const legacySessionKeys = new Set([
+  "aaw-desktop/archived-sessions.v1",
+  "aaw-desktop/archived-session-metadata.v1",
+  "aaw-desktop/session-project-owners.v1",
+  "aaw-desktop/session-working-directories.v1",
+  "aaw-desktop/session-unread-replies.v1",
 ]);
 export function isNativeConfigurationKey(key: string): boolean {
   return (
@@ -206,6 +208,10 @@ export const webviewStorage: HostStorage = {
   },
   setItem: change,
   async setConfigurationItem(key, value) {
+    if (!isTauri() && legacySessionKeys.has(key)) {
+      localStorage.setItem(key, value);
+      return;
+    }
     if (!isNativeConfigurationKey(key)) throw new Error("未登记的配置键");
     if (isTauri()) await configuration.writeConfirmed(key, value);
     else localStorage.setItem(key, value);

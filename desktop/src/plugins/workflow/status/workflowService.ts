@@ -31,6 +31,7 @@ import type { WorkflowClient } from "../engine/client.ts";
 import type { WorkflowEvent } from "../engine/protocol.ts";
 import type {
   CanvasSnapshot,
+  DesktopRunOwner,
   RunSessionLink,
   RunSessionLinkNode,
   RunSessionLinks,
@@ -62,7 +63,7 @@ export interface WorkflowServiceDeps {
     warn(message: string, context?: Record<string, unknown>): void;
   };
   /** 节点 Agent 启动信封（start / resume 的 command/mcpServers）。 */
-  readonly agentLaunch: (runId?: string, workflowId?: string) => {
+  readonly agentLaunch: (runId?: string, workflowId?: string, agentId?: string) => {
     readonly command: readonly string[];
     readonly mcpServers: unknown;
     readonly agentId?: string;
@@ -71,6 +72,10 @@ export interface WorkflowServiceDeps {
   readonly plans?: NodePlans;
   /** 会话的实时状态（project 的会话活动，ADR 040）。 */
   readonly sessionActivity?: SessionActivitySource;
+  readonly legacyProject?: (cwd: string, ids: readonly string[]) =>
+    { readonly project: string; readonly agentId?: string } | null;
+  readonly sessionAgentKey?: (agentId: string) => string;
+  readonly sessionAgentId?: (agentKey: string) => string | undefined;
 }
 
 /** 工厂返回值：服务本体 + index.ts 接线用的生命周期钩子。 */
@@ -120,6 +125,15 @@ function deriveRunSummary(value: unknown): RunSummary | null {
 }
 
 const text = (value: unknown): string => (typeof value === "string" ? value : "");
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value !== null && typeof value === "object" ? value as Record<string, unknown> : {};
+
+export function desktopRunOwner(raw: unknown): DesktopRunOwner | undefined {
+  const value = asRecord(asRecord(raw).desktopOwner);
+  return typeof value.project === "string" && value.project && typeof value.agentId === "string" && value.agentId
+    ? { project: value.project, agentId: value.agentId }
+    : undefined;
+}
 
 /** 引擎 session-links（未知来源，宽容解析）→ 每次运行的会话关联。 */
 export function deriveSessionLinks(value: unknown): RunSessionLinks[] {
@@ -132,6 +146,7 @@ export function deriveSessionLinks(value: unknown): RunSessionLinks[] {
     const links = Array.isArray(item.links) ? item.links : [];
     return [{
       runId,
+      ...(desktopRunOwner(item) ? { desktopOwner: desktopRunOwner(item) } : {}),
       workflowName: text(item.workflowName),
       title: text(item.title) || text(item.workflowName),
       status: text(item.status),
@@ -210,6 +225,32 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
   let listRequest = 0;
   let linksRevision = 0;
   let otherLinksLoaded = false;
+  const runOwners = new Map<string, { readonly project: string; readonly agentId?: string }>();
+  const runOrigins = new Map<string, string>();
+  const scoped = (path: string | null) => deps.legacyProject && path ? { desktopProject: pathKey(path) } : {};
+
+  function ownerOf(cwd: string, raw: unknown, ids: readonly string[] = []) {
+    const entry = asRecord(raw);
+    const owner = desktopRunOwner(raw) ?? (deps.legacyProject
+      ? deps.legacyProject(cwd, Array.isArray(entry.sessionIds) ? entry.sessionIds.filter((id): id is string => typeof id === "string") : ids)
+      : { project: cwd });
+    const id = text(entry.runId || entry.id);
+    if (id) {
+      runOrigins.set(id, cwd);
+      if (owner) runOwners.set(id, owner);
+      else runOwners.delete(id);
+    }
+    return owner;
+  }
+
+  function boundRun(runId: string, project: string | null = workspace) {
+    if (deps.legacyProject && runOrigins.has(runId)) {
+      const owner = runOwners.get(runId);
+      if (!owner || pathKey(owner.project) !== pathKey(project ?? ""))
+        throw new Error("请先在所属项目中打开工作流");
+    }
+    return { cwd: runOrigins.get(runId) ?? requireCwd(project), runId, ...scoped(project) };
+  }
 
   // 切换只交换前台与后台投影，保留每个项目最近一次确认的分组。
   const selectLinks = (path: string | null): void => {
@@ -252,15 +293,25 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
     const revision = linksRevision;
     const owner = workspace;
     try {
-      const raw = await client.request<unknown>("session-links-others", { exclude: cwd ?? "" });
+      const raw = await client.request<unknown>("session-links-others", { exclude: deps.legacyProject ? "" : cwd ?? "" });
       if (disposed || request !== listRequest || revision !== linksRevision) return;
       if (Array.isArray(raw) && owner === workspace) {
         otherLinksLoaded = true;
-        otherLinks = raw.flatMap((item: unknown) => {
-          if (typeof item !== "object" || item === null) return [];
+        const grouped = new Map<string, { project: string; runs: RunSessionLinks[] }>();
+        for (const item of raw) {
+          if (typeof item !== "object" || item === null) continue;
           const { project, runs } = item as { project?: unknown; runs?: unknown };
-          return typeof project === "string" && project ? [{ project, runs: deriveSessionLinks(runs) }] : [];
-        });
+          if (typeof project !== "string" || !project) continue;
+          for (const run of deriveSessionLinks(runs)) {
+            const owner = ownerOf(project, run, run.links.map(({ sessionId }) => sessionId));
+            if (!owner || pathKey(owner.project) === pathKey(workspace ?? "")) continue;
+            const key = pathKey(owner.project);
+            let entry = grouped.get(key);
+            if (!entry) { entry = { project: owner.project, runs: [] }; grouped.set(key, entry); }
+            entry.runs.push(run);
+          }
+        }
+        otherLinks = [...grouped.values()];
       }
     } catch (error) {
       logger.warn("其他项目的会话关联刷新失败", {
@@ -285,6 +336,8 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
     runList = raw.flatMap((item) => {
       const run = deriveRunSummary(item);
       if (run === null) return [];
+      const project = ownerOf(cwd, { ...asRecord(item), runId: run.runId })?.project;
+      if (!project || pathKey(project) !== pathKey(owner)) return [];
       const kept = previous.get(run.runId);
       return [kept && !fresher(run.runId, versionOf(item)) ? kept : run];
     });
@@ -299,7 +352,10 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
         const versionsOf = new Map((Array.isArray(rawLinks) ? rawLinks : []).map((item) => [text((item as { runId?: unknown } | null)?.runId), versionOf(item)]));
         links = {
           workspace: owner,
-          runs: deriveSessionLinks(rawLinks).map((run) => {
+          runs: deriveSessionLinks(rawLinks).filter((run) => {
+            const target = ownerOf(cwd, run, run.links.map(({ sessionId }) => sessionId));
+            return target && pathKey(target.project) === pathKey(owner);
+          }).map((run) => {
             const kept = previous.get(run.runId);
             return kept && !fresher(run.runId, versionsOf.get(run.runId) ?? 0) ? kept : run;
           }),
@@ -348,13 +404,18 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
     store.cwd ??= workspace;
     if (store.cwd === null) return;
     const cwd = store.cwd;
+    const origin = runOrigins.get(runId) ?? requireCwd(cwd);
+    const pending = deps.legacyProject && runOrigins.has(runId) && !runOwners.has(runId);
     const seq = ++store.seq;
     store.fetching = true;
     store.stale = false;
     try {
-      const raw = await client.request<unknown>("snapshot", { cwd, runId });
+      const raw = await client.request<unknown>("snapshot", { cwd: origin, runId, ...(pending ? {} : scoped(runOwners.get(runId)?.project ?? cwd)) });
       if (disposed || store.seq !== seq || runStores.get(runId) !== store) return;
-      setState(store, deriveCanvasSnapshot(raw));
+      const snapshot = deriveCanvasSnapshot(raw);
+      const owner = ownerOf(origin, { ...asRecord(raw), runId },
+        snapshot.actors.flatMap((actor) => actor.sessionId ? [actor.sessionId] : []));
+      setState(store, { ...snapshot, ...(deps.legacyProject && !owner ? { unassigned: true } : {}) });
     } catch (error) {
       if (disposed) return;
       const message = error instanceof Error ? error.message : String(error);
@@ -387,13 +448,15 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
   /** 一次运行的新状态（ADR 040）：按版本号替换列表与会话关联里的那一行。 */
   const applyRunChanged = (event: WorkflowEvent): void => {
     const runId = event.runId;
-    const project = text(event.project);
+    const cwd = text(event.project);
     const version = versionOf(event);
     if (runId === "" || version < (versions.get(runId) ?? 0)) return;
     versions.set(runId, version);
     linksRevision++;
     const summary = deriveRunSummary(event.run);
     const [link] = deriveSessionLinks([event.links]);
+    const project = cwd && ownerOf(cwd, { ...asRecord(event.links), runId },
+      link?.links.map(({ sessionId }) => sessionId))?.project || "";
     if (workspace !== null && pathKey(project) === pathKey(workspace)) {
       if (summary !== null) {
         const at = runList.findIndex((run) => run.runId === runId);
@@ -464,7 +527,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
     if (store === undefined) {
       const initialState = emptyCanvasSnapshot();
       store = {
-        cwd: workspace,
+        cwd: runOwners.get(runId)?.project ?? runOrigins.get(runId) ?? workspace,
         state: initialState,
         initialState,
         listeners: new Set(),
@@ -517,9 +580,11 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
   // ---------------------------------------------------------------- 服务面
 
   function startInput(request: WorkflowStartRequest, onAgentError?: (message: string) => void): Record<string, unknown> {
-    const cwd = requireCwd(workspace);
+    const project = request.workspacePath ?? workspace;
+    const cwd = requireCwd(project);
+    const agentId = request.entryAgentKey ? deps.sessionAgentId?.(request.entryAgentKey) : undefined;
     let launch: ReturnType<WorkflowServiceDeps["agentLaunch"]>;
-    try { launch = deps.agentLaunch(undefined, request.workflowId); }
+    try { launch = agentId ? deps.agentLaunch(undefined, request.workflowId, agentId) : deps.agentLaunch(undefined, request.workflowId); }
     catch (error) {
       onAgentError?.(error instanceof Error ? error.message : String(error));
       launch = { command: [], mcpServers: [] };
@@ -532,12 +597,17 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       ...(request.entrySession ? { entrySession: request.entrySession } : {}),
       command: [...launch.command],
       ...(launch.agentId ? { agentId: launch.agentId } : {}),
+      ...(deps.legacyProject && project && launch.agentId
+        ? { desktopOwner: { project: pathKey(project), agentId: launch.agentId } }
+        : {}),
       mcpServers: Array.isArray(launch.mcpServers) ? launch.mcpServers : [],
     };
   }
 
   const service: WorkflowService = {
     isActive: () => !disposed,
+    runAgentId: (runId) => runOwners.get(runId)?.agentId,
+    ...(deps.sessionAgentKey ? { sessionAgentKey: deps.sessionAgentKey } : {}),
     ...(deps.sessionActivity ? { sessionActivity: deps.sessionActivity } : {}),
 
     bindWorkspace(path: string | null): () => void {
@@ -687,20 +757,25 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
 
     async resume(runId: string) {
       if (disposed) throw new Error("Workflow service is disposed");
-      const cwd = requireCwd(workspace);
-      const launch = deps.agentLaunch(runId);
+      const cwd = runOrigins.get(runId) ?? requireCwd(workspace);
+      const owner = runOwners.get(runId);
+      if (deps.legacyProject && (!owner || pathKey(workspace ?? "") !== pathKey(owner.project)))
+        throw new Error("请先在所属项目中打开工作流");
+      const launch = owner?.agentId ? deps.agentLaunch(runId, undefined, owner.agentId) : deps.agentLaunch(runId);
       await client.request("resume", {
         cwd,
         runId,
         command: [...launch.command],
         mcpServers: Array.isArray(launch.mcpServers) ? launch.mcpServers : [],
+        ...(deps.legacyProject && owner && launch.agentId
+          ? { desktopOwner: { project: pathKey(owner.project), agentId: launch.agentId } }
+          : {}),
       });
     },
 
     async recover(runId: string, reason: string) {
       if (disposed) throw new Error("Workflow service is disposed");
-      const cwd = requireCwd(workspace);
-      await client.request("recover", { cwd, runId, reason });
+      await client.request("recover", { ...boundRun(runId), reason });
     },
 
     runs: () => runList.filter((run) => run.archivedAt == null),
@@ -714,23 +789,25 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       return raw.flatMap((item) => {
         const run = deriveRunSummary(item);
         const project = typeof item === "object" && item !== null ? text((item as { project?: unknown }).project) : "";
-        return run === null || !project ? [] : [{ ...run, project }];
+        if (run === null || !project) return [];
+        const owner = ownerOf(project, { ...asRecord(item), runId: run.runId });
+        return [{ ...run, project: owner?.project ?? project, ...(!owner ? { unassigned: true } : {}) }];
       });
     },
 
     async renameRun(runId, title, project) {
       if (disposed) throw new Error("Workflow service is disposed");
-      await client.request("run-rename", { cwd: requireCwd(project ?? workspace), runId, title });
+      await client.request("run-rename", { ...boundRun(runId, project ?? workspace), title });
     },
 
     async archiveRun(runId, archived, project) {
       if (disposed) throw new Error("Workflow service is disposed");
-      await client.request("run-archive", { cwd: requireCwd(project ?? workspace), runId, archived });
+      await client.request("run-archive", { ...boundRun(runId, project ?? workspace), archived });
     },
 
     async deleteRun(runId, project) {
       if (disposed) throw new Error("Workflow service is disposed");
-      await client.request("run-delete", { cwd: requireCwd(project ?? workspace), runId });
+      await client.request("run-delete", boundRun(runId, project ?? workspace));
     },
 
     nodePlan: (runId, siteId, ordinal) => deps.plans?.get(runId, siteId, ordinal) ?? null,
@@ -782,25 +859,24 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
 
     async authorizeRetry(runId: string, site: string, evidence: string) {
       if (disposed) throw new Error("Workflow service is disposed");
-      const cwd = requireCwd(workspace);
       const { siteId, ordinal } = parseSite(site);
       if (evidence.trim() === "") throw new Error("WORKFLOW_EVIDENCE_REQUIRED");
-      await client.request("authorize-retry", { cwd, runId, siteId, ordinal, evidence: evidence.trim() });
+      await client.request("authorize-retry", { ...boundRun(runId), siteId, ordinal, evidence: evidence.trim() });
     },
 
     async reconcile(runId, site, resolution) {
       if (disposed) throw new Error("Workflow service is disposed");
-      const cwd = requireCwd(workspace);
+      const target = boundRun(runId);
       const { siteId, ordinal } = parseSite(site);
       if (resolution.evidence.trim() === "") throw new Error("WORKFLOW_EVIDENCE_REQUIRED");
       if (!resolution.executed) {
         // 确认未执行：引擎侧走 authorize-retry（允许重试一次）。
         await client.request("authorize-retry", {
-          cwd, runId, siteId, ordinal, evidence: resolution.evidence.trim(),
+          ...target, siteId, ordinal, evidence: resolution.evidence.trim(),
         });
       } else {
         await client.request("reconcile", {
-          cwd, runId, siteId, ordinal,
+          ...target, siteId, ordinal,
           evidence: resolution.evidence.trim(),
           result: resolution.result ?? null,
         });
@@ -814,16 +890,14 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
 
     async intervene(runId, request, options) {
       if (disposed) throw new Error("Workflow service is disposed");
-      const cwd = requireCwd(workspace);
       const preview = options?.preview === true;
-      const result = await client.request("intervene", { cwd, runId, preview, request });
+      const result = await client.request("intervene", { ...boundRun(runId), preview, request });
       return parseInterventionOutcome(result);
     },
 
     async confirm(runId, instance) {
       if (disposed) throw new Error("Workflow service is disposed");
-      const cwd = requireCwd(workspace);
-      await client.request("confirm", { cwd, runId, instance: [...instance] });
+      await client.request("confirm", { ...boundRun(runId), instance: [...instance] });
       await service.resume(runId);
     },
   };

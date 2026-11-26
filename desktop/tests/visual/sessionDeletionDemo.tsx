@@ -64,7 +64,7 @@ const projects = {
 indexes.catalog.store.setState({ agentKey, sessionsByPath: projects });
 for (const [path, sessions] of Object.entries(projects))
   for (const session of sessions)
-    indexes.archive.getState().archiveSession(path, session.id, agentKey);
+    void indexes.archive.getState().archiveSession(path, session.id, agentKey);
 const attempts = new Map<string, number>();
 const pause = () => new Promise((resolve) => setTimeout(resolve, 700));
 const project = {

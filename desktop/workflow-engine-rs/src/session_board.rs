@@ -33,6 +33,10 @@ pub struct SessionBoard {
 /// 等待时多久看一次取消标志。
 const CANCEL_POLL: Duration = Duration::from_millis(100);
 
+pub fn session_scope(run_id: &str, session_id: &str) -> String {
+    format!("{run_id}\0{session_id}")
+}
+
 impl SessionBoard {
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())

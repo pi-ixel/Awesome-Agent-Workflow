@@ -94,6 +94,7 @@ pub enum HostFramePayload {
 /// 成请求帧并同步等待应答。会话 id 由宿主在 spawn 应答中给出。
 struct RemoteSession {
     session_id: String,
+    board_key: String,
     link: Arc<RemoteLink>,
     board: Arc<SessionBoard>,
     /// 接上会话时宿主的换代次数：之后宿主换代，等待以 HOST_RESET 醒来。
@@ -127,7 +128,7 @@ impl NodeSession for RemoteSession {
         response.result["turn"].as_u64().filter(|turn| *turn > 0).ok_or_else(|| "HOST_FRAME_INVALID".into())
     }
     fn wait_state(&mut self, after: u64, cancel: Arc<AtomicBool>) -> Result<SessionState, String> {
-        self.board.wait(&self.session_id, after, self.generation, &cancel)
+        self.board.wait(&self.board_key, after, self.generation, &cancel)
     }
 }
 
@@ -272,6 +273,7 @@ pub struct RemoteHost {
     link: Arc<RemoteLink>,
     /// 宿主报告的会话状态（服务内所有运行共用一块）。
     board: Arc<SessionBoard>,
+    run_scope: Option<String>,
 }
 
 /// 宿主换代（WebView 重载）时挂起请求的应答码：对端持有的会话与轮次
@@ -297,7 +299,13 @@ impl RemoteHost {
                 response_timeout,
             }),
             board,
+            run_scope: None,
         }
+    }
+
+    pub fn with_run_scope(mut self, run_id: Option<String>) -> Self {
+        self.run_scope = run_id;
+        self
     }
 
     /// 宿主换代：以 [`HOST_RESET`] 应答当前全部挂起请求（旧宿主已不存在，
@@ -357,6 +365,10 @@ impl SessionHost for RemoteHost {
             .ok_or("HOST_FRAME_INVALID")?
             .to_owned();
         Ok(Box::new(RemoteSession {
+            board_key: self.run_scope.as_ref().map_or_else(
+                || session_id.clone(),
+                |run| crate::session_board::session_scope(run, &session_id),
+            ),
             session_id,
             link: self.link.clone(),
             board: self.board.clone(),
@@ -409,6 +421,7 @@ mod tests {
 
     fn requirement() -> SessionRequirement {
         SessionRequirement {
+            desktop_owner: None,
             action: crate::Action {
                 site: "ask#1".into(),
                 ordinal: 1,
@@ -434,6 +447,7 @@ mod tests {
 
     fn requirement_reviewer() -> SessionRequirement {
         SessionRequirement {
+            desktop_owner: None,
             action: crate::Action {
                 site: "ask#1".into(),
                 ordinal: 1,
@@ -602,7 +616,7 @@ mod tests {
             }),
             Duration::from_secs(5),
             board.clone(),
-        ));
+        ).with_run_scope(Some("run-a".into())));
         let handle = {
             let host = host.clone();
             std::thread::spawn(move || {
@@ -628,7 +642,9 @@ mod tests {
             running: None,
             ended: Some(crate::session_host::EndedTurn { turn: 41, outcome: crate::session_host::TurnOutcome::Cancelled, error: None }),
         };
-        board.report("host-s2", ended.clone());
+        let scope = crate::session_board::session_scope;
+        board.report(&scope("run-b", "host-s2"), SessionState { seq: 100, ..ended.clone() });
+        board.report(&scope("run-a", "host-s2"), ended.clone());
         let (turn, state) = handle.join().unwrap();
         assert_eq!(turn, 41);
         assert_eq!(state, ended);

@@ -107,7 +107,7 @@ export function sessionListEntries(
       title:
         entry.title !== nativeTitle
           ? entry.title
-          : displayTitleOf(entry.id, fallback, runtime.agentKey),
+          : displayTitleOf(entry.id, fallback, runtime.agentKey, runtime.workspacePath),
     });
   };
   for (const entry of [...catalogSessions, ...cachedSessions]) retain(entry);
@@ -253,6 +253,7 @@ export function createSessionCatalog(
     sessionId: string,
     title: string,
     updateOpenViews: () => void,
+    workspacePath?: string,
   ): void | Promise<void> {
     if (signal.aborted) return;
     const publish = () => {
@@ -264,21 +265,21 @@ export function createSessionCatalog(
         sessionsByPath: Object.fromEntries(
           Object.entries(state.sessionsByPath).map(([path, list]) => [
             path,
-            list.map((entry) => {
+            !workspacePath || pathKey(path) === pathKey(workspacePath) ? list.map((entry) => {
               if (entry.id !== sessionId) return entry;
               const nativeTitle = entry.nativeTitle ?? entry.title;
               return {
                 ...entry,
                 nativeTitle,
-                title: displayTitleOf(sessionId, nativeTitle, agentKey),
+                title: displayTitleOf(sessionId, nativeTitle, agentKey, path),
               };
-            }),
+            }) : list,
           ]),
         ),
       };
       });
     };
-    const save = setManualTitle(sessionId, title, agentKey);
+    const save = setManualTitle(sessionId, title, agentKey, workspacePath);
     if (save) return save.then(publish);
     publish();
   }

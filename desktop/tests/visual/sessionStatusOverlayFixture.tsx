@@ -271,7 +271,7 @@ export function RightPanelFixture() {
       <ContextBar />
       {archive && (
         <div className="bg-base px-2 py-1">
-          <ActionButton size="compact" tone="secondary" onClick={() => archive.getState().archiveWithNotice(path, "sample")}>
+          <ActionButton size="compact" tone="secondary" onClick={() => void archive.getState().archiveWithNotice(path, "sample")}>
             演示归档
           </ActionButton>
         </div>

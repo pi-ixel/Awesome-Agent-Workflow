@@ -1,7 +1,7 @@
 use aaw_workflow_core::{
     ProcessOutput, Workflow,
     session_host::{EndedTurn, SessionState, TurnOutcome},
-    journal::{Journal, RunSnapshot, TurnFactKind},
+    journal::{DesktopRunOwner, Journal, RunSnapshot, TurnFactKind},
 };
 use rusqlite::Connection;
 use serde_json::json;
@@ -289,6 +289,7 @@ fn run_snapshot_is_atomic_immutable_and_project_scoped() {
         .unwrap()
         .knowledge = "初始知识".into();
     let snapshot = RunSnapshot {
+        desktop_owner: None,
         execution_hash: None,
     };
     let mut invalid = snapshot.clone();
@@ -319,9 +320,18 @@ fn run_snapshot_is_atomic_immutable_and_project_scoped() {
     );
     assert_eq!(db.load_snapshot("run-1", "project").unwrap(), snapshot);
     assert!(db.load_snapshot("run-1", "other-project").is_err());
+    let original = DesktopRunOwner { project: "group-a".into(), agent_id: "original-agent".into() };
+    db.assign_desktop_owner("run-1", "project", original.clone()).unwrap();
+    db.assign_desktop_owner("run-1", "project", original.clone()).unwrap();
+    let wrong = DesktopRunOwner { project: "group-b".into(), agent_id: "another-agent".into() };
+    assert!(db.assign_desktop_owner("run-1", "project", wrong).is_err());
+    assert_eq!(db.load_snapshot("run-1", "project").unwrap().desktop_owner, Some(original.clone()));
     drop(db);
     let db = Journal::open(&file).unwrap();
-    assert_eq!(db.load_snapshot("run-1", "project").unwrap(), snapshot);
+    assert_eq!(db.load_snapshot("run-1", "project").unwrap(), RunSnapshot {
+        desktop_owner: Some(original),
+        ..snapshot
+    });
     drop(db);
     std::fs::remove_file(file).unwrap();
 }

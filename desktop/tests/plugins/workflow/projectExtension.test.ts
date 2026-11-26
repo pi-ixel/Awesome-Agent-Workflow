@@ -114,7 +114,7 @@ describe("在会话里发起（ADR 039）", () => {
     expect(command.placeholder).toBe("本次需求，Enter 开始运行");
     await command.submit!({ session, text: "给登录页加验证码" });
     expect(start).toHaveBeenCalledWith(
-      { workflowId: "aaw-dev", entry: "dev", inputs: { requirement: "给登录页加验证码" }, entrySession: "s-1" },
+      { workflowId: "aaw-dev", entry: "dev", inputs: { requirement: "给登录页加验证码" }, entrySession: "s-1", workspacePath: "D:/p", entryAgentKey: "agent-a" },
       { revision: "rev", acceptedWarnings: [] },
     );
     expect(focusRun).toHaveBeenCalledWith("run-9");

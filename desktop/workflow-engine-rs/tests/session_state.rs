@@ -183,7 +183,7 @@ fn run_definition(definition: Value, steps: Vec<Step>) -> (Stage, Script) {
     };
     let mut journal = Journal::open(project.join("journal.sqlite")).unwrap();
     journal
-        .create_with_snapshot("r", &project_str, &workflow, &RunSnapshot { execution_hash: Some(config.execution_hash("r")) })
+        .create_with_snapshot("r", &project_str, &workflow, &RunSnapshot { desktop_owner: None, execution_hash: Some(config.execution_hash("r")) })
         .unwrap();
     let script: Shared = Arc::new(Mutex::new(Script { steps: steps.into(), ..Script::default() }));
     let mut runtime = Runtime::start(

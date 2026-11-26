@@ -69,6 +69,18 @@ async function setup() {
   return { runtime, emit, load, evidence, read, factory, images, listeners };
 }
 
+it("retries ownership registration on the same ACP session after a write fails", async () => {
+  const runtime = createRuntime("D:/repo", "codeagent");
+  const create = vi.spyOn(runtime.session, "newSession").mockResolvedValue({ sessionId: sid });
+  const establish = vi.fn().mockRejectedValueOnce(new Error("无法确认归属")).mockResolvedValue(undefined);
+  const factory = new SessionFactory(() => Promise.resolve([]), undefined, createLogger, undefined,
+    () => Promise.resolve({ servers: [], establish }));
+  await expect(factory.ensureCreated(runtime)).rejects.toThrow("无法确认归属");
+  await expect(factory.ensureCreated(runtime)).resolves.toEqual({ sessionId: sid });
+  expect(create).toHaveBeenCalledTimes(1);
+  expect(establish.mock.calls).toEqual([[sid], [sid]]);
+});
+
 describe("CodeAgent compaction loading", () => {
   beforeEach(() => localStorage.clear());
   afterEach(() => vi.restoreAllMocks());

@@ -68,12 +68,12 @@ it("opens the latest round directly and lets the inspector open the original rou
   }), { onOpenSession: open });
   await findStep("需求确认，运行中");
   fireEvent.click(screen.getByRole("button", { name: "打开「需求确认」第 2 轮会话" }));
-  expect(open).toHaveBeenLastCalledWith("latest");
+  expect(open).toHaveBeenLastCalledWith("latest", "run-1");
   expect(screen.queryByRole("complementary", { name: "节点详情" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "需求确认，运行中" }));
   fireEvent.click(screen.getByRole("button", { name: "第 1 轮" }));
   fireEvent.click(screen.getByRole("button", { name: "打开本轮会话" }));
-  expect(open).toHaveBeenLastCalledWith("previous");
+  expect(open).toHaveBeenLastCalledWith("previous", "run-1");
 });
 
 it("folds every abnormal state into one banner with the error code collapsed", async () => {

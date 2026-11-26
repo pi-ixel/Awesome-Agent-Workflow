@@ -43,6 +43,7 @@ fn controlled_run_uses_supervised_agents_and_real_scanner_process() {
         role_commands: Default::default(),
     };
     let snapshot = RunSnapshot {
+        desktop_owner: None,
         execution_hash: Some(config.execution_hash("r")),
     };
     let defined_workflow = workflow("test fixture".into(), true);

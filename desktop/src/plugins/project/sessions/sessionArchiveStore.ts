@@ -7,6 +7,8 @@ import type {
 import { createStore } from "zustand";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { createLogger, type Logger } from "../../../shared/logging/logger.ts";
+import { sessionAgentId } from "./sessionDeletion.ts";
+import type { SessionMetadata, SessionRecords } from "./sessionMetadata.ts";
 
 const METADATA_KEY = "aaw-desktop/archived-session-metadata.v1";
 function loadMetadata(storage: HostStorage): Record<string, ArchiveMetadata> {
@@ -22,7 +24,7 @@ function loadMetadata(storage: HostStorage): Record<string, ArchiveMetadata> {
           typeof m.title === "string" &&
           (m.updatedAt === null || typeof m.updatedAt === "string")
         );
-      }),
+      }).map(([key, value]) => [normalizeArchiveKey(key), value]),
     );
   } catch {
     return {};
@@ -51,7 +53,17 @@ export function sessionArchiveKey(
   const legacy = `${pathKey(workspacePath)}\u0000${sessionId}`;
   return agentKey == null
     ? legacy
-    : `${legacy}\u0000${encodeURIComponent(agentKey)}`;
+    : `${legacy}\u0000${encodeURIComponent(sessionAgentId(agentKey) ?? agentKey)}`;
+}
+
+function normalizeArchiveKey(key: string): string {
+  const parts = key.split("\u0000");
+  if (parts.length !== 3) return key;
+  try {
+    return sessionArchiveKey(parts[0]!, parts[1]!, decodeURIComponent(parts[2]!));
+  } catch {
+    return key;
+  }
 }
 
 function loadArchivedSessions(storage: HostStorage): ReadonlySet<string> {
@@ -65,7 +77,7 @@ function loadArchivedSessions(storage: HostStorage): ReadonlySet<string> {
       return new Set();
     }
     return new Set(
-      parsed.filter((item): item is string => typeof item === "string"),
+      parsed.filter((item): item is string => typeof item === "string").map(normalizeArchiveKey),
     );
   } catch {
     return new Set();
@@ -97,10 +109,23 @@ export function createSessionArchiveStore(
     id: string,
     agentKey: string | null | undefined,
   ) => boolean = () => false,
+  native?: {
+    readonly backend: SessionMetadata;
+    readonly initial: SessionRecords["records"];
+    readonly claim: (project: string, agent: string, sessionId: string) => Promise<void>;
+  },
 ) {
+  const archivedRecords = native?.initial.filter((entry) => entry.metadata.archive !== null);
   return createStore<SessionArchiveState>()((set, get) => ({
-    archivedSessions: loadArchivedSessions(storage),
-    metadata: loadMetadata(storage),
+    archivedSessions: archivedRecords
+      ? new Set(archivedRecords.map((entry) => sessionArchiveKey(entry.project, entry.sessionId, entry.agentId)))
+      : loadArchivedSessions(storage),
+    metadata: archivedRecords
+      ? Object.fromEntries(archivedRecords.map((entry) => [
+          sessionArchiveKey(entry.project, entry.sessionId, entry.agentId),
+          { ...entry.metadata.archive!, projectPath: entry.project },
+        ]))
+      : loadMetadata(storage),
     notice: null,
     dismissNotice: () => {
       if (!signal.aborted) set({ notice: null });
@@ -108,14 +133,13 @@ export function createSessionArchiveStore(
     archiveWithNotice: (workspacePath, sessionId) => {
       if (signal.aborted) return;
       const agentKey = readCatalog().agentKey;
-      get().archiveSession(workspacePath, sessionId, agentKey);
-      set({
-        notice: {
-          workspacePath,
-          sessionId,
-          agentKey,
-        },
-      });
+      const saved = get().archiveSession(workspacePath, sessionId, agentKey);
+      const show = () => {
+        if (!signal.aborted && get().archivedSessions.has(sessionArchiveKey(workspacePath, sessionId, agentKey)))
+          set({ notice: { workspacePath, sessionId, agentKey } });
+      };
+      if (saved) return saved.then(show);
+      show();
     },
 
     archiveSession: (workspacePath, sessionId, agentKey) => {
@@ -143,6 +167,22 @@ export function createSessionArchiveStore(
           updatedAt: session?.updatedAt ?? null,
         },
       };
+      if (native) {
+        if (!owner || deleting(workspacePath, sessionId, owner)) return;
+        const snapshot = metadata[key]!;
+        return native.claim(workspacePath, owner, sessionId)
+          .then(() => native.backend.write(workspacePath, owner, sessionId, {
+            kind: "archive",
+            value: { title: snapshot.title, updatedAt: snapshot.updatedAt },
+          }))
+          .then(() => {
+            if (!signal.aborted) set((state) => ({
+              archivedSessions: new Set([...state.archivedSessions, key]),
+              metadata: { ...state.metadata, [key]: snapshot },
+            }));
+          })
+          .catch((error: unknown) => { logger.warn("归档未保存", { error: String(error) }); });
+      }
       persistMetadata(storage, metadata, logger);
       persistArchivedSessions(storage, next, logger);
       set({ archivedSessions: next, metadata });
@@ -166,6 +206,22 @@ export function createSessionArchiveStore(
       );
       if (!get().archivedSessions.has(key)) {
         return;
+      }
+      if (native) {
+        const owner = agentKey === undefined ? readCatalog().agentKey : agentKey;
+        if (!owner) return;
+        return native.backend.write(workspacePath, owner, sessionId, { kind: "archive", value: null })
+          .then(() => {
+            if (signal.aborted) return;
+            set((state) => {
+              const archivedSessions = new Set(state.archivedSessions);
+              const metadata = { ...state.metadata };
+              archivedSessions.delete(key);
+              delete metadata[key];
+              return { archivedSessions, metadata, notice: null };
+            });
+          })
+          .catch((error: unknown) => { logger.warn("取消归档未保存", { error: String(error) }); });
       }
       const next = new Set(get().archivedSessions);
       next.delete(key);

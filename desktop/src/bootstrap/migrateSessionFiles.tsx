@@ -15,6 +15,16 @@ export async function migrateSessionFiles(): Promise<void> {
   const container = document.getElementById("root");
   if (!container) throw new Error("找不到工作台容器");
   const root = createRoot(container);
+  const metadataKeys = [
+    "aaw-desktop/session-project-owners.v1",
+    "aaw-desktop/session-working-directories.v1",
+    "aaw-desktop/session-unread-replies.v1",
+    "aaw-desktop/archived-sessions.v1",
+    "aaw-desktop/archived-session-metadata.v1",
+    ...Object.keys(localStorage).filter((key) =>
+      key.startsWith("aaw-desktop/session-title/") ||
+      key.startsWith("aaw-desktop/session-title.v2/")),
+  ];
   const show = (message: string, label?: string, action?: () => void) => {
     root.render(
       <ModalShell
@@ -52,20 +62,13 @@ export async function migrateSessionFiles(): Promise<void> {
           "migrate_session_files",
           {
             webviewIndex: Object.fromEntries(
-              [
-                "workspace/v1",
-                "archived-sessions.v1",
-                "archived-session-metadata.v1",
-                "session-working-directories.v1",
-                "session-unread-replies.v1",
-              ].map((key) => {
-                const name = "aaw-desktop/" + key;
-                return [name, window.localStorage.getItem(name)];
-              }),
+              ["aaw-desktop/workspace/v1", ...metadataKeys].map((key) =>
+                [key, window.localStorage.getItem(key)]),
             ),
           },
         );
         await prepareSessionRecovery(report, clearRecoveryImages);
+        for (const key of metadataKeys) localStorage.removeItem(key);
       } catch (error) {
         window.clearTimeout(pending);
         await new Promise<void>((retry) => show(String(error), "重试", retry));

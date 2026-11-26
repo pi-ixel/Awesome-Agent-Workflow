@@ -48,7 +48,7 @@ const sessionsByPath: Record<string, SessionSummary[]> = params.has(
 indexes.catalog.store.setState({ agentKey, sessionsByPath });
 for (const [path, sessions] of Object.entries(sessionsByPath))
   for (const session of sessions)
-    indexes.archive.getState().archiveSession(path, session.id, agentKey);
+    void indexes.archive.getState().archiveSession(path, session.id, agentKey);
 let attempts = 0;
 const project = {
   sessions: {

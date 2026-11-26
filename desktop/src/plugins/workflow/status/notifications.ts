@@ -6,6 +6,7 @@ import { projectOverviewPageId } from "../../project/service.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import type { WorkflowEvent } from "../engine/protocol.ts";
 import { deriveCanvasSnapshot } from "./snapshot.ts";
+import { desktopRunOwner } from "./workflowService.ts";
 
 interface NotificationDeps {
   readonly client: {
@@ -16,7 +17,9 @@ interface NotificationDeps {
   readonly window: Pick<DesktopWindowHost, "isFocused" | "showAndFocus">;
   readonly storage: HostStorage;
   readonly openRun: (project: string, runId: string) => void;
-  readonly openSession: (project: string, sessionId: string) => Promise<void>;
+  readonly openSession: (project: string, sessionId: string, agentId?: string) => Promise<void>;
+  readonly legacyProject?: (cwd: string, ids: readonly string[]) =>
+    { readonly project: string; readonly agentId?: string } | null;
   readonly warn: (message: string) => void;
 }
 
@@ -72,12 +75,19 @@ export function attachWorkflowNotifications(deps: NotificationDeps): () => Promi
     const sessionId = typeof extra.sessionId === "string" ? extra.sessionId : "";
     void (async () => {
       // 点击可能来自通知中心里的旧通知，也可能是外部打开的链接：先由引擎确认运行属于该项目。
-      const snapshot = deriveCanvasSnapshot(await deps.client.request("snapshot", { cwd: projectFolderPath(project), runId }));
+      const cwd = projectFolderPath(project);
+      const raw = await deps.client.request("snapshot", { cwd, runId });
+      const snapshot = deriveCanvasSnapshot(raw);
       if (disposed || !snapshot.run) return;
+      const owner = desktopRunOwner(raw) ?? (deps.legacyProject
+        ? deps.legacyProject(cwd, snapshot.actors.flatMap((actor) => actor.sessionId ? [actor.sessionId] : []))
+        : { project });
+      if (!owner) throw new Error("工作流所属项目尚未登记");
       await deps.window.showAndFocus();
       if (disposed) return;
-      if (extra.kind === "reply" && sessionId) await deps.openSession(project, sessionId);
-      else deps.openRun(project, runId);
+      if (extra.kind === "reply" && sessionId)
+        await (owner.agentId ? deps.openSession(owner.project, sessionId, owner.agentId) : deps.openSession(owner.project, sessionId));
+      else deps.openRun(owner.project, runId);
     })().catch(() => deps.warn("无法打开工作流通知对应的位置"));
   });
   void ready.catch(() => deps.warn("系统通知监听不可用"));

@@ -133,9 +133,6 @@ export function openSessionFromEntry(
     const canFocus = () => isCurrent() && isLatest();
     try {
       if (!canFocus()) return;
-      const workspace = project.workspace.getState();
-      if (pathKey(workspace.activePath ?? "") !== pathKey(path))
-        workspace.selectWorkspace(path);
       const opened = await project.openSession(path, {
         sessionId,
         shouldFocus: canFocus,

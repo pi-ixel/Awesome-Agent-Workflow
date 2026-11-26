@@ -54,7 +54,7 @@ beforeEach(() => {
       selectionKey: () => agentKey,
     } as unknown as AgentsService,
   );
-  projectIndexes.archive
+  void projectIndexes.archive
     .getState()
     .archiveSession(target.workspacePath, target.sessionId, agentKey);
 });
@@ -65,7 +65,7 @@ it("processes a fixed batch sequentially, retaining precheck failures for retry"
   const late = { ...target, sessionId: "late" };
   const archive = projectIndexes.archive.getState().archiveSession;
   for (const item of [owned, last])
-    archive(item.workspacePath, item.sessionId, agentKey);
+    void archive(item.workspacePath, item.sessionId, agentKey);
   const groups = projectIndexes.groups.register();
   groups.publish(owned.workspacePath, [
     {
@@ -92,7 +92,7 @@ it("processes a fixed batch sequentially, retaining precheck failures for retry"
   );
   await vi.waitFor(() => expect(nativeDelete).toHaveBeenCalledOnce());
   expect(projectIndexes.deletions.store.getState().batch?.isRunning).toBe(true);
-  archive(late.workspacePath, late.sessionId, agentKey);
+  void archive(late.workspacePath, late.sessionId, agentKey);
   queue.push(late);
   finish();
   await deleting;
@@ -116,7 +116,7 @@ it("processes a fixed batch sequentially, retaining precheck failures for retry"
 
 it("leaves untouched batch entries out of the persisted recovery log", async () => {
   const later = { ...target, sessionId: "later" };
-  projectIndexes.archive
+  void projectIndexes.archive
     .getState()
     .archiveSession(later.workspacePath, later.sessionId, agentKey);
   let isOpen = true;
@@ -195,7 +195,7 @@ it("retries only local cleanup when deleting the target browser snapshot fails",
     .mockResolvedValue(undefined);
   const other = { ...target, workspacePath: "D:/Other" };
   const clean = () => Promise.resolve();
-  projectIndexes.archive
+  void projectIndexes.archive
     .getState()
     .archiveSession(other.workspacePath, other.sessionId, other.agentKey);
   try {
@@ -284,7 +284,7 @@ it("retains archive and error status after source deletion fails", async () => {
     projectIndexes.deletions.store.getState().entries[deletionKey(target)]
       ?.error,
   ).toBe("source is locked");
-  projectIndexes.archive
+  void projectIndexes.archive
     .getState()
     .unarchiveSession(target.workspacePath, target.sessionId, agentKey);
   expect(projectIndexes.archive.getState().archivedSessions.size).toBe(1);

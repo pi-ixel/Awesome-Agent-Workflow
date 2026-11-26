@@ -66,7 +66,7 @@ function member(link: RunSessionLink, active: boolean, foldDone: boolean, openSe
 export function runSessionGroups(
   runs: readonly RunSessionLinks[],
   open: (runId: string) => void,
-  openSession?: (sessionId: string) => void,
+  openSession?: (sessionId: string, runId: string) => void,
   archive?: (runId: string) => void,
   session?: SessionLookup,
 ): SessionGroup[] {
@@ -74,7 +74,8 @@ export function runSessionGroups(
     if (run.archived) return { id: run.runId, title: run.title, status: "idle", members: run.links.map((link) => ({ sessionId: link.sessionId, title: link.actorName })), hidden: true };
     // 停下等你确认时也收起做完的会话，不让十几个会话一下全摊开。
     const stopping = run.active && run.stopping === true;
-    const members = run.links.map((link) => member(link, run.active && !stopping, run.active || run.status === "waiting", openSession, session));
+    const openMember = openSession ? (sessionId: string) => openSession(sessionId, run.runId) : undefined;
+    const members = run.links.map((link) => member(link, run.active && !stopping, run.active || run.status === "waiting", openMember, session));
     const waiting = members.some((item) => item.attention !== undefined);
     const leadMember = members.find((item) => item.attention !== undefined);
     const confirming = !run.active && run.status === "waiting";
