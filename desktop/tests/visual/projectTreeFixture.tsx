@@ -28,6 +28,11 @@ export function renderProjectTree(
     setItem: (key: string, value: string) => {
       values.set(key, value);
     },
+    setConfigurationItems: (changes: Readonly<Record<string, string>>) => {
+      for (const [key, value] of Object.entries(changes))
+        values.set(key, value);
+      return Promise.resolve();
+    },
   };
   const path = "D:/desktop/design-workbench";
   const agentKey = '["chrys",{"command":["icode","acp"],"cwd":null}]';

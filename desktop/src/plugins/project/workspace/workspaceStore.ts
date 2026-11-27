@@ -32,6 +32,7 @@ import {
   pathKey,
   parseRemoteProjectPath,
 } from "../../../shared/panelPaths.ts";
+import { basenameOf } from "../../../shared/workspaceText.ts";
 import { knownWorkspacePaths } from "./knownPaths.ts";
 import type { HostStorage } from "../../host/types.ts";
 import { defaultToolPaths, emptyWorkspace } from "./types.ts";
@@ -291,11 +292,13 @@ export function workspaceCommands(source: ReadonlySnapshot<WorkspaceStoreState>)
     dismissConnectError,
     hydrateFromStorage,
     updateProjectFolders,
+    renameProject,
   } = source.getState();
   return {
     findProjectByFolders: (primary: string, related: readonly string[], except?: string) =>
       findProjectByFolders(source.getState(), primary, related, except),
     updateProjectFolders,
+    renameProject,
     selectWorkspace,
     openWorkspace,
     closeWorkspace,
@@ -337,20 +340,21 @@ export function createWorkspaceStore(
     if (signal.aborted) throw new Error("项目工作区已关闭");
     if (savingProject) throw new Error("项目正在保存，请稍后重试");
   }
-  async function saveProjectFolders(path: string, folders: ProjectFolders, options: ProjectFolderSave): Promise<string> {
+  async function saveWorkspaceUpdate(
+    apply: (state: WorkspaceSnapshot) => Partial<WorkspaceSnapshot>,
+    binding?: ProjectFolderSave,
+  ): Promise<void> {
     assertProjectWritable();
     if (!storage.setConfigurationItems) throw new Error("项目配置存储未就绪");
     const state = store.getState();
-    const plan = options.edit ? prepareFolderEdit(state, path, folders) : prepareRegistration(state, path, folders);
     savingProject = true;
     try {
       await storage.setConfigurationItems({
-        ...options.configuration,
-        [STORAGE_KEY]: serializeWorkspace({ ...state, ...plan.apply(state) }),
+        ...binding?.configuration,
+        [STORAGE_KEY]: serializeWorkspace({ ...state, ...apply(state) }),
       });
-      options.publishBinding();
-      if (!signal.aborted) store.setState(plan.apply);
-      return plan.target;
+      binding?.publishBinding();
+      if (!signal.aborted) store.setState(apply);
     } finally {
       savingProject = false;
       if (workspaceChangedWhileSaving) {
@@ -358,6 +362,18 @@ export function createWorkspaceStore(
         persistWorkspace();
       }
     }
+  }
+  async function saveProjectFolders(
+    path: string,
+    folders: ProjectFolders,
+    options: ProjectFolderSave,
+  ): Promise<string> {
+    const state = store.getState();
+    const plan = options.edit
+      ? prepareFolderEdit(state, path, folders)
+      : prepareRegistration(state, path, folders);
+    await saveWorkspaceUpdate(plan.apply, options);
+    return plan.target;
   }
   const store = createStore<WorkspaceStoreState>()((set, get) => ({
     ...emptyWorkspace,
@@ -375,6 +391,20 @@ export function createWorkspaceStore(
       assertProjectWritable();
       set(prepareFolderEdit(get(), path, folders).apply);
       persistWorkspace();
+    },
+
+    renameProject: (path, value) => {
+      const key = pathKey(path);
+      const name = value.trim() || basenameOf(path);
+      return saveWorkspaceUpdate((state) => ({
+        projectFolders: {
+          ...state.projectFolders,
+          [key]: {
+            name,
+            relatedPaths: state.projectFolders?.[key]?.relatedPaths ?? [],
+          },
+        },
+      }));
     },
 
     selectWorkspace: (path) => {

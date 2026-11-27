@@ -37,6 +37,38 @@ test("reduced motion removes tree animations", async ({ page }) => {
   );
 });
 
+test("项目更多操作打开重命名弹窗，Esc 取消，Enter 保存", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 600 });
+  await page.goto("/tests/visual/treeMotionFixture.html?sessions");
+  const tree = page.getByRole("main", { name: "项目与会话" });
+  const project = tree.getByRole("button", { name: "design-workbench" });
+  const actions = tree.getByRole("button", { name: "更多操作" });
+  const dialog = page.getByRole("dialog", { name: "重命名项目" });
+  const input = dialog.getByRole("textbox", { name: "项目名称" });
+  const open = async () => {
+    await actions.focus();
+    await actions.press("Enter");
+    await page.getByRole("menuitem", { name: "重命名项目" }).click();
+    await expect(input).toBeFocused();
+  };
+  await open();
+  await expect(input).toHaveValue("design-workbench");
+  await input.dispatchEvent("contextmenu");
+  await expect(page.getByRole("menu", { name: "项目菜单" })).toBeHidden();
+  await input.fill("取消的名称");
+  await input.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(project).toBeVisible();
+  await open();
+  await input.fill("新的项目名称");
+  await input.press("Enter");
+  await expect(dialog).toBeHidden();
+  const renamed = tree.getByRole("button", { name: "新的项目名称" });
+  await expect(renamed).toHaveAttribute("aria-expanded", "true");
+  await renamed.hover();
+  await expect(page.getByRole("group", { name: "项目详情" })).toContainText("新的项目名称");
+});
+
 test("nonvirtual file directory uses shared height and opacity motion", async ({
   page,
 }) => {

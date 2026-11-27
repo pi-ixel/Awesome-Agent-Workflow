@@ -123,6 +123,7 @@ export interface ProjectWorkspace {
   registerProject(path: string, folders?: ProjectFolders): string;
   updateProjectFolders(path: string, folders: ProjectFolders): void;
   saveProjectFolders(path: string, folders: ProjectFolders, options: ProjectFolderSave): Promise<string>;
+  renameProject(path: string, name: string): Promise<void>;
   findProjectByFolders(primary: string, related: readonly string[], except?: string): string | undefined;
   /** Check and release the addressed project's resources before removing its list entry. */
   removeProject(path: string, isCurrent?: () => boolean): Promise<boolean>;

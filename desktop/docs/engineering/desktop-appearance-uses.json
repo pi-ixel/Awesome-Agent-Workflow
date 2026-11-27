@@ -98,6 +98,7 @@
   "plugins/project/ui/LegacyAgentDataSection.tsx": [
     "LegacyAgentDataSection · <input>"
   ],
+  "plugins/project/ui/ProjectRenameDialog.tsx": ["ProjectRenameDialog · <input>"],
   "plugins/project/ui/ProjectTree.tsx": ["SessionRenameInput · <input>"],
   "plugins/project/ui/projectHeaders.tsx": [
     "SessionBar · <h1>",

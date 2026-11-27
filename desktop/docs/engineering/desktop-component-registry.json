@@ -777,6 +777,12 @@
     },
     "targets": []
   },
+  "plugins/project/ui/ProjectRenameDialog.tsx": {
+    "definitions": {
+      "提示与确认": ["ProjectRenameDialog"]
+    },
+    "targets": []
+  },
   "plugins/project/ui/ProjectTree.tsx": {
     "definitions": {
       "命令按钮": [

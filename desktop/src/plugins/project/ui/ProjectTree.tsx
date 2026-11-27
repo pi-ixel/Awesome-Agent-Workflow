@@ -86,6 +86,7 @@ import {
   type ContextMenuEntry,
 } from "../../../shared/ui/ContextMenu.tsx";
 import { useMenuController } from "../../../shared/ui/useMenuController.ts";
+import { ProjectRenameDialog } from "./ProjectRenameDialog.tsx";
 import {
   ChevronRightIcon,
   ClockIcon,
@@ -263,9 +264,9 @@ function ProjectNodeRow({
   const row = useRef<HTMLDivElement>(null);
   const hoverTimer = useRef<number>(0);
   const [card, setCard] = useState<{ left: number; top: number }>();
-  const [isEditing, setIsEditing] = useState(false);
-  const editForm = isEditing
-    ? navigation?.renderEditProjectForm?.(path, () => setIsEditing(false))
+  const [dialog, setDialog] = useState<"edit" | "rename">();
+  const editForm = dialog === "edit"
+    ? navigation?.renderEditProjectForm?.(path, () => setDialog(undefined))
     : null;
 
   const closeCard = useCallback(() => {
@@ -281,7 +282,7 @@ function ProjectNodeRow({
 
   function beginHover() {
     window.clearTimeout(hoverTimer.current);
-    if (card || isEditing) return;
+    if (card || dialog) return;
     hoverTimer.current = window.setTimeout(() => {
       const rect = row.current?.getBoundingClientRect();
       if (!rect) return;
@@ -307,7 +308,7 @@ function ProjectNodeRow({
 
   function editProject() {
     closeCard();
-    setIsEditing(true);
+    setDialog("edit");
   }
   const hintNewSession = hintTooltipProps("新建会话");
   const hintExtension = hintTooltipProps(treeAction?.hint ?? "");
@@ -369,6 +370,16 @@ function ProjectNodeRow({
         disabled: !navigation?.renderEditProjectForm,
         onSelect: editProject,
       },
+      {
+        id: "rename-project",
+        label: "重命名项目",
+        icon: <PencilIcon className="ui-icon-16" />,
+        disabled: !projectService,
+        onSelect: () => {
+          closeCard();
+          setDialog("rename");
+        },
+      },
       ...(!isRemoteProjectPath(path)
         ? [
             folders.length === 1
@@ -420,6 +431,7 @@ function ProjectNodeRow({
       ref={row}
       onPointerLeave={endHover}
       onContextMenu={(event) => {
+        if (event.target instanceof Node && !event.currentTarget.contains(event.target)) return;
         event.preventDefault();
         closeCard();
         menu.openAtPointer(
@@ -430,7 +442,11 @@ function ProjectNodeRow({
         );
       }}
       onKeyDown={(event) => {
-        if (isContextMenuKey(event)) {
+        if (
+          isContextMenuKey(event) &&
+          event.target instanceof Node &&
+          event.currentTarget.contains(event.target)
+        ) {
           event.preventDefault();
           closeCard();
           menu.openAtRect(
@@ -548,7 +564,7 @@ function ProjectNodeRow({
       {typeof document !== "undefined" &&
         createPortal(
           <HintSurface
-            open={Boolean(card) && !isEditing}
+            open={Boolean(card) && !dialog}
             role="group"
             aria-label="项目详情"
             unfoldFrom="left"
@@ -598,6 +614,14 @@ function ProjectNodeRow({
           document.body,
         )}
       {editForm}
+      {dialog === "rename" && projectService && (
+        <ProjectRenameDialog
+          name={name}
+          defaultName={basenameOf(path)}
+          onSave={(value) => projectService.projects.renameProject(path, value)}
+          onClose={() => setDialog(undefined)}
+        />
+      )}
       {confirmRemoval && (
         <RemoveProjectDialog
           path={path}
