@@ -175,6 +175,26 @@ it("远程创建和编辑确认落盘失败时保留表单，可按原输入重�
     expect(
       remote.snapshot.getState().records.map(({ remoteRoot }) => remoteRoot),
     ).toContain("/srv/docs");
+    const config = workspace.view.getState().projectFolders?.[target];
+    const folders = config?.relatedPaths ?? [];
+    await remote.removeProjectByPath(target, true);
+    await workspace.store.getState().removeFromRecent(target);
+    expect(remote.getByPath(target)?.associationOnly).toBe(true);
+    const saveRestore = (_group: unknown, configuration: Readonly<Record<string, string>>, publishBinding: () => void) =>
+      workspace.commands.restoreRemovedProject(target, { configuration, publishBinding });
+    await expect(remote.restoreProjectGroup(target, folders, "missing-connection", saveRestore))
+      .resolves.toBe(false);
+    commit.mockRejectedValueOnce(new Error("恢复写盘失败"));
+    await expect(remote.restoreProjectGroup(target, folders, "ssh", saveRestore))
+      .rejects.toThrow("恢复写盘失败");
+    expect(workspace.view.getState().removedProjects.map((entry) => entry.path)).toEqual([target]);
+    expect(remote.getByPath(target)?.associationOnly).toBe(true);
+    await expect(remote.restoreProjectGroup(target, folders, "ssh", saveRestore)).resolves.toBe(true);
+    expect(workspace.view.getState()).toMatchObject({
+      removedProjects: [], recentWorkspaces: [{ path: target }],
+      projectFolders: { [target]: config },
+    });
+    expect(remote.getByPath(target)?.associationOnly).toBeUndefined();
   } finally {
     unmount();
     dispose.reverse().forEach((release) => release());

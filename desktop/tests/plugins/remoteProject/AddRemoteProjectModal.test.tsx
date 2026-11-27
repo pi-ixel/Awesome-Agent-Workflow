@@ -70,6 +70,7 @@ function createMockService(
       }),
     saveProjectGroup: vi.fn(),
     repairProject: vi.fn(),
+    restoreProjectGroup: vi.fn(() => Promise.resolve(false)),
     removeProjectByPath: vi.fn(),
     recordRecentDir: vi.fn(),
     listConnections: vi.fn().mockResolvedValue(connections),

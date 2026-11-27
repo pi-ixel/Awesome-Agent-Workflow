@@ -705,7 +705,7 @@
   "plugins/project/ui/AddProjectPanel.tsx": {
     "definitions": {
       "布局与操纵": ["AddProjectPanel"],
-      "导航与列表": ["KnownProjectRow"]
+      "导航与列表": ["KnownProjectRow", "RemovedProjects"]
     },
     "targets": []
   },

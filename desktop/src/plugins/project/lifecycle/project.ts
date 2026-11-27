@@ -634,7 +634,7 @@ export class DesktopProject {
         if (failures.length)
           throw new AggregateError(failures, "项目资源释放失败");
         if (this.stopping) return false;
-        this.workspace.getState().removeFromRecent(path);
+        await this.workspace.getState().removeFromRecent(path);
         return true;
       })
       .finally(() => this.removingProjects.delete(key));

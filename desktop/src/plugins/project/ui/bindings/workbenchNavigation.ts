@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { pathKey } from "../../../../shared/panelPaths.ts";
+import { isRemoteProjectPath, pathKey } from "../../../../shared/panelPaths.ts";
 import { createSnapshotView } from "../../../../shared/state/readonlySnapshot.ts";
 import type { WorkbenchLayout } from "../../../workbench/types.ts";
 import type { ProjectService } from "../../service.ts";
@@ -19,7 +19,9 @@ export function createProjectViewNavigation(
       path: string,
       onClose: () => void,
     ) => ReactNode;
-    readonly renderAddProjectForm?: (onClose: () => void) => ReactNode;
+    readonly renderAddProjectForm?: (onClose: () => void, history?: ReactNode) => ReactNode;
+    readonly restoreRemoteProject?: (path: string) => Promise<boolean>;
+    readonly repairRemoteProject?: (path: string) => void;
   },
 ) {
   const { navigation, navigationGuard } = layout;
@@ -42,8 +44,20 @@ export function createProjectViewNavigation(
         if (!isActive()) return false;
         return options.openAddRemoteProject?.() ?? false;
       },
-      renderAddProjectForm: (onClose: () => void): ReactNode =>
-        options.renderAddProjectForm?.(onClose) ?? null,
+      renderAddProjectForm: (onClose: () => void, history?: ReactNode): ReactNode =>
+        options.renderAddProjectForm?.(onClose, history) ?? null,
+      async restoreRemovedProject(path: string): Promise<boolean> {
+        if (!isActive()) throw new Error("项目工作区已关闭");
+        if (isRemoteProjectPath(path)) {
+          if (!options.restoreRemoteProject) throw new Error("远程项目服务不可用");
+          return options.restoreRemoteProject(path);
+        }
+        await project.projects.restoreRemovedProject(path);
+        return true;
+      },
+      repairRemovedProject: (path: string) => {
+        if (isActive()) options.repairRemoteProject?.(path);
+      },
       renderEditProjectForm: (path: string, onClose: () => void): ReactNode =>
         options.renderEditProjectForm?.(path, onClose) ?? null,
       showOverview,

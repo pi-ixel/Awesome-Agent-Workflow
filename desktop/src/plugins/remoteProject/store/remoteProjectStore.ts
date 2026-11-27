@@ -343,6 +343,29 @@ export function createRemoteProjectStore(storage: HostStorage, logger: Logger) {
     });
   }
 
+  function restoreProjectGroup(
+    path: string,
+    relatedPaths: readonly string[],
+    connectionId: string,
+    save: SaveRemoteProjectGroup,
+  ): Promise<boolean> {
+    return enqueue(async () => {
+      const primary = getByPath(path);
+      if (
+        !primary || primary.connectionId !== connectionId ||
+        relatedPaths.some((folder) => getByPath(folder)?.connectionId !== connectionId)
+      ) return false;
+      const state = store.getState();
+      const record = { ...primary, associationOnly: undefined };
+      const next = {
+        ...state,
+        records: state.records.map((item) => item.projectId === record.projectId ? record : item),
+      };
+      await save({ record, relatedPaths }, { [remoteProjectsKey]: serialize(next) }, () => store.setState(next));
+      return true;
+    });
+  }
+
   function removeProjectByPath(
     path: string,
     retainAssociation = false,
@@ -390,6 +413,7 @@ export function createRemoteProjectStore(storage: HostStorage, logger: Logger) {
     addProject,
     saveProjectGroup,
     repairProjectGroup,
+    restoreProjectGroup,
     removeProjectByPath,
     removeConnectionMetadata,
     recordRecentDir,

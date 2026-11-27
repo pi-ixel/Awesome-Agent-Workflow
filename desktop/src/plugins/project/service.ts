@@ -127,6 +127,8 @@ export interface ProjectWorkspace {
   findProjectByFolders(primary: string, related: readonly string[], except?: string): string | undefined;
   /** Check and release the addressed project's resources before removing its list entry. */
   removeProject(path: string, isCurrent?: () => boolean): Promise<boolean>;
+  restoreRemovedProject(path: string, binding?: ProjectFolderSave): Promise<void>;
+  forgetRemovedProjects(path?: string): Promise<void>;
   registerProjectClose(participant: ProjectCloseParticipant): () => void;
 }
 

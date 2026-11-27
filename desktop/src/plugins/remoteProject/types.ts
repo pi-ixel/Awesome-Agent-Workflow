@@ -129,7 +129,9 @@ export interface RemoteProjectStoreSnapshot {
 export interface RemoteProjectUi {
   openAddRemoteProject(): void;
   /** 供「新建会话」弹窗的「新建项目」Tab 直接内嵌渲染，避免套娃弹窗。 */
-  renderAddProjectForm?(onClose: () => void): ReactNode;
+  renderAddProjectForm?(onClose: () => void, history?: ReactNode): ReactNode;
+  restoreRemovedProject?(path: string): Promise<boolean>;
+  repairRemovedProject?(path: string): void;
   renderEditProjectForm?(path: string, onClose: () => void): ReactNode;
 }
 

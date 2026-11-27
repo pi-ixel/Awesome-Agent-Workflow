@@ -1,5 +1,5 @@
 import type { Context } from "cordis";
-import { createElement } from "react";
+import { createElement, type ReactNode } from "react";
 import { createStore, useStore } from "zustand";
 import { ActionButton } from "../../../shared/ui/controls.tsx";
 import {
@@ -75,8 +75,10 @@ export function apply(ctx: Context): void {
 
   function EmbeddedAddProjectForm({
     onClose,
+    history,
   }: {
     readonly onClose: () => void;
+    readonly history?: ReactNode;
   }) {
     return createElement(CreateProjectFormBody, {
       service: remoteProject,
@@ -85,6 +87,7 @@ export function apply(ctx: Context): void {
       onPickLocalDirectory,
       onOpenRemoteHostSettings,
       embedded: true,
+      history,
     });
   }
 
@@ -135,8 +138,17 @@ export function apply(ctx: Context): void {
     openAddRemoteProject() {
       modal.setState({ open: true, repairPath: undefined });
     },
-    renderAddProjectForm(onClose) {
-      return createElement(EmbeddedAddProjectForm, { onClose });
+    renderAddProjectForm(onClose, history) {
+      return createElement(EmbeddedAddProjectForm, { onClose, history });
+    },
+    restoreRemovedProject(path) {
+      const related = project.projects.workspace.getState().projectFolders?.[pathKey(path)]?.relatedPaths ?? [];
+      return remoteProject.restoreProjectGroup(path, related, async (_, configuration, publishBinding) => {
+        await project.projects.restoreRemovedProject(path, { configuration, publishBinding });
+      });
+    },
+    repairRemovedProject(path) {
+      modal.setState({ open: true, repairPath: path });
     },
     renderEditProjectForm(path, onClose) {
       return createElement(EditProjectForm, { path, onClose });
@@ -211,7 +223,9 @@ export function apply(ctx: Context): void {
     const onSave = repairPath
       ? async (deviceId: string) => {
           await remoteProject.repairProject(repairPath, deviceId, repairRelatedPaths);
-          void project.sessions.preloadSessionList(repairPath, true);
+          if (!project.projects.workspace.getState().removedProjects.some(({ path }) => pathKey(path) === pathKey(repairPath))) {
+            void project.sessions.preloadSessionList(repairPath, true);
+          }
           workbench.showToast({
             message: "连接已修复，可刷新文件树",
             variant: "ok",

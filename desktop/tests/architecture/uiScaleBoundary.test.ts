@@ -247,3 +247,11 @@ it("routes desktop glyphs, text and control heights through scalable UI styles",
   }
   expect(violations).toEqual([]);
 });
+
+it("shares project form fields across new, edit and repair flows", () => {
+  const form = readFileSync("src/plugins/remoteProject/ui/AddRemoteProjectModal.tsx", "utf8");
+  const fields = readFileSync("src/plugins/remoteProject/ui/ProjectFolderFields.tsx", "utf8");
+  expect(form).toContain("<ProjectFolderFields");
+  expect(fields).toMatch(/aria-label="项目名称"[\s\S]*?className=\{[^\n]*text-ui-sm/);
+  expect(fields).toMatch(/className=\{[^\n]*items-center[^\n]*text-ui-sm[^\n]*\n[^\n]*\n[^\n]*PlusIcon[^\n]*\n\s*添加文件夹/);
+});

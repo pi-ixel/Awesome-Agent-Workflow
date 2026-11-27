@@ -295,6 +295,47 @@ describe("项目树 → 项目总览", () => {
     expect(screen.queryByText(/目录选择已取消或当前环境不可用/)).toBeNull();
   });
 
+  it("新建项目页可搜索并加回已移除的项目，弹窗保持打开", async () => {
+    const path = services.project.projects.registerProject(PATH, {
+      name: "恢复测试项目",
+      relatedPaths: [],
+    });
+    await useWorkspaceStore.getState().removeFromRecent(path);
+    renderDesktopApp(services.workbench);
+    await openAddPanel("新建项目");
+    const history = screen.getByRole("region", { name: "最近移除的项目" });
+    const search = within(history).getByRole("searchbox");
+    await userEvent.type(search, "找不到");
+    expect(within(history).queryByRole("button", { name: "加回 恢复测试项目" })).toBeNull();
+    await userEvent.clear(search);
+    await userEvent.click(within(history).getByRole("button", { name: "加回 恢复测试项目" }));
+    await waitFor(() => expect(history).not.toBeInTheDocument());
+    expect(screen.getByLabelText("新建会话面板")).toBeInTheDocument();
+    expect(useWorkspaceStore.getState().recentWorkspaces.map((entry) => entry.path)).toContain(path);
+    expect(useWorkspaceStore.getState().activePath).toBeNull();
+  });
+
+  it("单条恢复记录可直接移除，清空记录需要确认", async () => {
+    for (const [path, name] of [[PATH, "项目甲"], [PATH_B, "项目乙"]] as const) {
+      services.project.projects.registerProject(path, { name, relatedPaths: [] });
+      await useWorkspaceStore.getState().removeFromRecent(path);
+    }
+    renderDesktopApp(services.workbench);
+    await openAddPanel("新建项目");
+    const history = screen.getByRole("region", { name: "最近移除的项目" });
+    await userEvent.click(within(history).getByRole("button", { name: "移除 项目甲 的恢复记录" }));
+    await waitFor(() => expect(within(history).queryByText("项目甲")).toBeNull());
+    const clear = within(history).getByRole("button", { name: "清空记录" });
+    await userEvent.click(clear);
+    const confirmation = screen.getByRole("dialog", { name: "清空恢复记录" });
+    await userEvent.click(within(confirmation).getByRole("button", { name: "取消" }));
+    expect(within(history).getByText("项目乙")).toBeInTheDocument();
+    await userEvent.click(clear);
+    await userEvent.click(within(screen.getByRole("dialog", { name: "清空恢复记录" })).getByRole("button", { name: "清空记录" }));
+    await waitFor(() => expect(history).not.toBeInTheDocument());
+    expect(useWorkspaceStore.getState().projectFolders?.[pathKey(PATH_B)]?.name).toBe("项目乙");
+  });
+
   it("创建多目录项目后只新增一条项目，悬浮可见目录并可编辑", async () => {
     const primary = "D:/dev/new-project";
     const library = "D:/dev/shared-library";
@@ -424,6 +465,7 @@ describe("项目树 → 项目总览", () => {
     expect(await screen.findByText(/移除项目失败.*关闭超时/)).toBeInTheDocument();
     expect(getByHint(tree, PATH)).toBeInTheDocument();
     expect(useWorkbenchUiStore.getState().contextPath).toBe(PATH);
+    expect(useWorkspaceStore.getState().removedProjects).toEqual([]);
 
     const accepted = await openConfirmation();
     await userEvent.click(within(accepted).getByRole("button", { name: "确认移除" }));
@@ -434,6 +476,7 @@ describe("项目树 → 项目总览", () => {
       screen.getByText(/从左侧选择或新建一个项目目录/),
     ).toBeInTheDocument();
     expect(useWorkbenchUiStore.getState().contextPath).toBeNull();
+    expect(useWorkspaceStore.getState().removedProjects.map((entry) => entry.path)).toEqual([PATH]);
   });
 });
 

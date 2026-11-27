@@ -54,6 +54,11 @@ export interface RemoteProjectService {
     connectionId: string,
     relatedPaths?: readonly string[],
   ): Promise<RemoteProjectRecord>;
+  restoreProjectGroup(
+    path: string,
+    relatedPaths: readonly string[],
+    save: SaveRemoteProjectGroup,
+  ): Promise<boolean>;
   removeProjectByPath(path: string, retainAssociation?: boolean): Promise<void>;
   recordRecentDir(connectionId: string, dirPath: string): Promise<void>;
   listConnections(): Promise<readonly RemoteConnectionDTO[]>;
