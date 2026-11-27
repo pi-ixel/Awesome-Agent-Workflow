@@ -890,10 +890,11 @@ export function FileTree({
                         { trigger: event.currentTarget, align: "start" },
                       );
                     }}
+                    leadingIcon={<FolderGlyph className="ui-icon-16 shrink-0 text-ink-subtle" />}
+                    trailingIcon={<ChevronDownIcon className="ui-icon-12 shrink-0 text-ink-faint" />}
+                    labelOverflow="truncate"
                   >
-                    <FolderGlyph className="ui-icon-16 shrink-0 text-ink-subtle" />
-                    <span className="min-w-0 truncate">{title}</span>
-                    <ChevronDownIcon className="ui-icon-12 shrink-0 text-ink-faint" />
+                    {title}
                   </ActionButton>
                 ) : (
                   <h3 className="flex min-w-0 items-center gap-1.5 py-0.5 pl-2.5 pr-0.5 text-ui-sm font-medium text-ink-subtle">

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { btnSecondary } from "../../../shared/ui/controls.tsx";
+import { ActionButton } from "../../../shared/ui/controls.tsx";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import type { HostService } from "../../host/service.ts";
 import type { ProjectService } from "../../project/service.ts";
@@ -137,9 +137,9 @@ export function ToolPreviewTab({
             ))}
           </ul>
         )}
-        <button type="button" className={btnSecondary} onClick={reread}>
+        <ActionButton tone="secondary" type="button" onClick={reread}>
           重新读取
-        </button>
+        </ActionButton>
       </div>
     );
 

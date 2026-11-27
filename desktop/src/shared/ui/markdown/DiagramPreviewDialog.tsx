@@ -606,8 +606,9 @@ export function DiagramPreviewDialog({
                 });
               }}
               className="flex min-h-8 min-w-14 items-center justify-center gap-1 px-1.5 font-mono text-ui-sm"
+              trailingIcon={<ChevronDownIcon className="ui-icon-12" />}
             >
-              {zoomPercent}%<ChevronDownIcon className="ui-icon-12" />
+              {zoomPercent}%
             </ActionButton>
             {activeZoomMenu && (
               <ContextMenu

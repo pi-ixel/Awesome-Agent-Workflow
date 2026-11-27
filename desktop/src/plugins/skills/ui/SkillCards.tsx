@@ -103,8 +103,8 @@ export function ActionsRow({
         tone="ghost"
         className={button}
         onClick={() => void copyPath()}
+        leadingIcon={<CopyIcon className="ui-icon-16" />}
       >
-        <CopyIcon className="ui-icon-16" />
         复制路径
       </ActionButton>
       {!skill.disabledId && (
@@ -112,8 +112,8 @@ export function ActionsRow({
           tone="ghost"
           className={button}
           onClick={() => actions.open(skill)}
+          leadingIcon={<FolderGlyph className="ui-icon-16" isExpanded={false} />}
         >
-          <FolderGlyph className="ui-icon-16" isExpanded={false} />
           {skill.kind === "inline" ? "定位配置" : "打开目录"}
         </ActionButton>
       )}

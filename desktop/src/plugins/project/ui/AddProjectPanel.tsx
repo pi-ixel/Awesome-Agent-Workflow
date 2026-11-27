@@ -340,9 +340,9 @@ export function AddProjectPanel({ onClose }: AddProjectPanelProps) {
                 type="button"
                 onClick={() => void handleAddProject()}
                 className="inline-flex items-center gap-1.5 rounded-pill px-4 py-1.5 text-ui-sm"
+                leadingIcon={<FolderGlyph className="ui-icon-14 shrink-0" />}
               >
-                <FolderGlyph className="ui-icon-14 shrink-0" />
-                <span>选择本地文件夹…</span>
+                选择本地文件夹…
               </ActionButton>
             </div>
             {history}

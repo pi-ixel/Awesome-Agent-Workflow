@@ -441,8 +441,10 @@ export function RemoteHostFormModal({
           type="button"
           disabled={busy}
           onClick={() => void handleTest()}
+          aria-busy={busy}
+          leadingIcon={busy ? <Spinner className="ui-icon-12" /> : undefined}
         >
-          {busy ? <Spinner className="ui-icon-12" /> : "测试连接"}
+          测试连接
         </ActionButton>
         <div className="flex items-center gap-2">
           <ActionButton

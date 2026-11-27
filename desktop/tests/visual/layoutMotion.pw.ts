@@ -871,7 +871,9 @@ test("file find floats above the document and keeps the query when switching to 
   await page.getByRole("button", { name: "打开文件栏" }).click();
   await page.getByRole("treeitem", { name: "README.md" }).click();
   const title = page.getByRole("heading", { name: "文件视图示例" });
+  await expect(title).toBeVisible();
   const originalBox = await title.boundingBox();
+  expect(originalBox).not.toBeNull();
   await page.getByRole("button", { name: "搜索文件" }).click();
   const find = page.getByRole("dialog", { name: "文件查找" });
   const query = find.getByRole("textbox", { name: "搜索当前文件" });
@@ -879,7 +881,7 @@ test("file find floats above the document and keeps the query when switching to 
   await expect(query).toBeFocused();
   await expect(query).toHaveCSS("box-shadow", "none");
   await expect(query).toHaveCSS("outline-style", "none");
-  expect(await title.boundingBox()).toEqual(originalBox);
+  await expect.poll(() => title.boundingBox()).toEqual(originalBox);
   await query.fill("alpha");
   await expect(count).toHaveText("1/3");
   await query.press("Enter");
