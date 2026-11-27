@@ -4277,16 +4277,19 @@ fn handle_event_loop<T: UserEvent>(
               .get(&window_id)
               .map(|w| (w.inner.clone(), w.webviews.clone()))
             {
-              let size = size.to_logical::<f32>(window.scale_factor());
-              for webview in webviews {
-                if let Some(b) = &*webview.bounds.lock().unwrap() {
-                  if let Err(e) = webview.set_bounds(wry::Rect {
-                    position: LogicalPosition::new(size.width * b.x_rate, size.height * b.y_rate)
-                      .into(),
-                    size: LogicalSize::new(size.width * b.width_rate, size.height * b.height_rate)
-                      .into(),
-                  }) {
-                    log::error!("failed to autoresize webview: {e}");
+              // Windows 最小化会给出非零的图标尺寸，不能用它重排 WebView。
+              if !cfg!(windows) || !window.is_minimized() {
+                let size = size.to_logical::<f32>(window.scale_factor());
+                for webview in webviews {
+                  if let Some(b) = &*webview.bounds.lock().unwrap() {
+                    if let Err(e) = webview.set_bounds(wry::Rect {
+                      position: LogicalPosition::new(size.width * b.x_rate, size.height * b.y_rate)
+                        .into(),
+                      size: LogicalSize::new(size.width * b.width_rate, size.height * b.height_rate)
+                        .into(),
+                    }) {
+                      log::error!("failed to autoresize webview: {e}");
+                    }
                   }
                 }
               }

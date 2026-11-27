@@ -13,6 +13,7 @@ import { setTimeout as delay } from "node:timers/promises";
 if (process.platform !== "win32")
   throw new Error("Windows-only IPC smoke test");
 const workspaceSwitch = process.argv[2] === "--isolated-workspace-switch";
+const layoutRestore = process.argv[2] === "--isolated-layout-restore";
 const handoff = process.argv[2] === "--isolated-handoff";
 const diagnostics = process.argv[2] === "--isolated-diagnostics";
 const promptLatency = process.argv[2] === "--isolated-prompt-latency";
@@ -24,6 +25,7 @@ const sessionRecovery =
   crashRecovery ||
   process.argv[2] === "--isolated-session-recovery";
 const isolated =
+  layoutRestore ||
   workspaceSwitch ||
   handoff ||
   diagnostics ||
@@ -268,6 +270,9 @@ try {
   if (workspaceSwitch) {
     const { verifyWorkspaceSwitch } = await import("./verifyWorkspaceSwitch.mjs");
     await verifyWorkspaceSwitch({ evaluate, pid: child.pid, bootMs: Date.now() - launchStartedAt });
+  } else if (layoutRestore) {
+    const { verifyLayoutRestore } = await import("./verifyLayoutRestore.mjs");
+    await verifyLayoutRestore({ evaluate, invoke, waitFor });
   } else if (lifecycle) {
     const { verifyLifecycle } = await import("./verifySessionLifecycle.mjs");
     await verifyLifecycle({
@@ -815,7 +820,7 @@ async function prepareIsolatedWindow(handoff) {
   };
   try {
     if (
-      (workspaceSwitch || promptLatency || sessionRecovery || lifecycle) &&
+      (layoutRestore || workspaceSwitch || promptLatency || sessionRecovery || lifecycle) &&
       !process.env.AAW_CORDIS_SMOKE_DEV_ORIGIN
     ) {
       const { createServer } = await import("vite");
