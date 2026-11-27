@@ -535,7 +535,7 @@ async function checkProcessFiles(
       ruleId: "FIELD",
       level: "warn",
       where: "manifest.runtime",
-      message: `这是 L3 进程工具：打开时会启动 ${entry}，它以你的身份运行，拥有你账户下的文件与网络权限。${inventory}平台不检查这个程序做什么，装之前请自己确认来源。`,
+      message: `这是 L3 进程工具：打开时会启动 ${entry}，并以当前账号权限访问系统资源。${inventory}请在安装前确认程序来源。`,
       hint: "只装你信得过的可执行文件；不确定来源就别装。只是做界面与数据处理的话，L1/L2 不需要进程，也不会有这道确认。",
     },
   ];

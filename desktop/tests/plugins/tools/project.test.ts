@@ -463,6 +463,7 @@ it("L3 缺件必须拦，有件则把 bin/ 里的东西点名", async () => {
     (problem) => problem.where === "manifest.runtime",
   );
   expect(notice?.message).toContain("bin/run.exe");
+  expect(notice?.message).toContain("以当前账号权限访问系统资源");
   expect(notice?.message).toContain("bin/ 下现在有 2 项");
 });
 

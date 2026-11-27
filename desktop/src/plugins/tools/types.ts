@@ -65,7 +65,7 @@ export interface ToolBuild {
  *
  * 只有四条满足其一时才该用：原生模块、非 HTTP 协议、不受对话框约束的文件
  * 系统、真正无窗口的常驻进程。它不是"更强大的 L2"，而是**放弃沙箱**：
- * 一旦声明，用户账户下的文件与网络权限都归这个进程。
+ * 独立进程以当前账号权限访问系统资源。
  */
 export interface ToolRuntime {
   readonly kind: "process";
