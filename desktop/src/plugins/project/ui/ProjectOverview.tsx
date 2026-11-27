@@ -25,7 +25,7 @@ import { useProject, useProjectNavigation } from "./bindings/projectView.tsx";
  * 路径 / 「关闭项目」按钮在内容区顶部的上下文条（ContextBar 的
  * OverviewBar）。
  */
-import { useState, type ComponentType } from "react";
+import type { ComponentType } from "react";
 
 import { ActionButton, Badge, Spinner } from "../../../shared/ui/controls.tsx";
 
@@ -73,18 +73,11 @@ function ProjectSetup() {
   const projectNav = useProjectNavigation();
   const addProject = projectNav?.addProject;
   const addRemoteProject = projectNav?.addRemoteProject;
-  // 目录对话框不可用 / 取消时的重试提示
-  const [isDialogUnavailable, setIsDialogUnavailable] = useState(false);
-
   const handleAddProject = (): void => {
     if (addRemoteProject?.()) {
       return;
     }
-    void addProject?.().then((path) => {
-      if (path === null) {
-        setIsDialogUnavailable(true);
-      }
-    });
+    void addProject?.();
   };
 
   return (
@@ -98,11 +91,6 @@ function ProjectSetup() {
           </ActionButton>
         }
       />
-      {isDialogUnavailable ? (
-        <p role="alert" className="text-ui-sm text-warn-ink">
-          目录选择不可用或已取消，可重试，或从左侧列表选择已有项目。
-        </p>
-      ) : null}
     </div>
   );
 }

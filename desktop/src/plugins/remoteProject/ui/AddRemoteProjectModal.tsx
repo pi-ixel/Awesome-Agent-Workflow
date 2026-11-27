@@ -272,8 +272,6 @@ export function CreateProjectFormBody({
       try {
         const picked = await onPickLocalDirectory();
         if (picked) addFolder(picked);
-        else if (folders.length === 0)
-          setError("目录选择已取消或当前环境不可用，可点击重试。");
       } catch (error) {
         setError(describeUnknownError(error));
       } finally {

@@ -277,7 +277,7 @@ describe("项目树 → 项目总览", () => {
     expect(useWorkbenchUiStore.getState().contextPath).toBe(PATH);
   });
 
-  it("项目空态取消目录选择后可重试并进入项目", async () => {
+  it("项目空态取消目录选择时静默返回，可重试并进入项目", async () => {
     vi.mocked(dialogHost.pickDirectory).mockResolvedValueOnce(null).mockResolvedValueOnce(PATH);
     renderDesktopApp(services.workbench);
     const add = within(screen.getByText(/从左侧选择或新建一个项目目录/).closest('[role="status"]') as HTMLElement)
@@ -287,12 +287,14 @@ describe("项目树 → 项目总览", () => {
       name: "添加文件夹",
     });
     await userEvent.click(pickButton);
-    expect(await screen.findByText(/目录选择已取消或当前环境不可用/)).toBeInTheDocument();
+    await waitFor(() => expect(pickButton).toBeEnabled());
+    expect(
+      within(screen.getByRole("dialog", { name: "创建项目" })).queryByRole("alert"),
+    ).not.toBeInTheDocument();
     await userEvent.click(pickButton);
     await screen.findByText(PATH);
     await userEvent.click(screen.getByRole("button", { name: "创建项目" }));
     await waitFor(() => expect(projectFolderPath(useWorkspaceStore.getState().selectedPath ?? "")).toBe(PATH));
-    expect(screen.queryByText(/目录选择已取消或当前环境不可用/)).toBeNull();
   });
 
   it("新建项目页可搜索并加回已移除的项目，弹窗保持打开", async () => {
@@ -1002,17 +1004,17 @@ describe("【+】弹出面板", () => {
     expect(screen.queryByLabelText("新建会话面板")).not.toBeInTheDocument();
   });
 
-  it("「新建项目」tab：对话框取消返回 null 时提示重试且面板不关", async () => {
+  it("「新建项目」tab：对话框取消时静默保留面板和选目录入口", async () => {
     vi.mocked(dialogHost.pickDirectory).mockResolvedValue(null);
     renderDesktopApp(services.workbench);
     await openAddPanel("新建项目");
 
-    await userEvent.click(screen.getByRole("button", { name: "添加文件夹" }));
-    expect(
-      await screen.findByText(/目录选择已取消或当前环境不可用/),
-    ).toBeInTheDocument();
-    // 取消不关面板：提示留在面板内供重试
-    expect(screen.getByLabelText("新建会话面板")).toBeInTheDocument();
+    const panel = screen.getByLabelText("新建会话面板");
+    const pickButton = within(panel).getByRole("button", { name: "添加文件夹" });
+    await userEvent.click(pickButton);
+    await waitFor(() => expect(pickButton).toBeEnabled());
+    expect(panel).toBeInTheDocument();
+    expect(within(panel).queryByRole("alert")).not.toBeInTheDocument();
   });
 });
 

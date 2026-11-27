@@ -16,7 +16,12 @@ import { WorkbenchContext } from "../../../../src/plugins/workbench/ui/bindings/
  * 其行为在 workbench/ContextBar.test.tsx 覆盖。树侧的选中交互见
  * workbench.test.tsx。
  */
-import { render as renderReact, screen } from "@testing-library/react";
+import {
+  render as renderReact,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import type { ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -82,16 +87,16 @@ describe("ProjectOverview", () => {
     expect(addButton).toBeEnabled();
     expect(screen.getByText(/添加后自动检查项目环境/)).toBeInTheDocument();
 
-    // 点击「添加项目」打开创建项目弹窗；jsdom 下本地目录对话框不可用，
-    // 在弹窗中点击「添加」给出重试提示而非无响应
+    // 本地目录对话框不可用时，创建表单保持打开并可再次选择。
     await userEvent.click(addButton);
     const pickLocalButton = await screen.findByRole("button", {
       name: "添加文件夹",
     });
     await userEvent.click(pickLocalButton);
+    await waitFor(() => expect(pickLocalButton).toBeEnabled());
     expect(
-      await screen.findByText(/目录选择已取消或当前环境不可用/),
-    ).toBeInTheDocument();
+      within(screen.getByRole("dialog", { name: "创建项目" })).queryByRole("alert"),
+    ).not.toBeInTheDocument();
   });
 
   it("连接前后唯一主动作都是「新建会话」；总览不放「进入会话」（会话入口在树上）", () => {

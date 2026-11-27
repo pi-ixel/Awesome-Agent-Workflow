@@ -239,7 +239,6 @@ export function AddProjectPanel({ onClose }: AddProjectPanelProps) {
   const embeddedAddProjectNode =
     projectNav?.renderAddProjectForm?.(onClose, history) ?? null;
   const [tab, setTab] = useState<AddPanelTab>("new-session");
-  const [isDialogUnavailable, setIsDialogUnavailable] = useState(false);
   const tabsContainerRef = useRef<HTMLDivElement | null>(null);
   const recentWorkspaces = useWorkspaceValue((state) => state.recentWorkspaces);
   const pinnedPaths = useWorkspaceValue((state) => state.pinnedPaths);
@@ -268,12 +267,7 @@ export function AddProjectPanel({ onClose }: AddProjectPanelProps) {
 
   async function handleAddProject(): Promise<void> {
     const path = await addProject?.();
-    if (path) {
-      setIsDialogUnavailable(false);
-      onClose();
-      return;
-    }
-    setIsDialogUnavailable(true);
+    if (path) onClose();
   }
 
   return (
@@ -350,11 +344,6 @@ export function AddProjectPanel({ onClose }: AddProjectPanelProps) {
                 <FolderGlyph className="ui-icon-14 shrink-0" />
                 <span>选择本地文件夹…</span>
               </ActionButton>
-              {isDialogUnavailable && (
-                <p className="text-ui-xs text-warn-ink">
-                  目录选择不可用或已取消；可重试，或从「新建会话」列表选择已有项目。
-                </p>
-              )}
             </div>
             {history}
           </>
