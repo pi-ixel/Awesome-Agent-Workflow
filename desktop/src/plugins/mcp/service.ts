@@ -1,13 +1,12 @@
 import type { ComponentType } from "react";
-import type { McpServer } from "../../contracts/acp/protocol.ts";
 import type {
+  BuiltinMcpProbeTarget,
   ManagedMcpDefinition,
   McpImportPlan,
   McpInstallResult,
   McpTool,
 } from "../../contracts/mcp/management.ts";
 import type { ReadonlySnapshot } from "../../shared/state/readonlySnapshot.ts";
-import type { SessionMcpTargets } from "../project/service.ts";
 import type {} from "cordis";
 
 declare module "cordis" {
@@ -48,23 +47,12 @@ export interface BuiltinMcp {
     ): Promise<readonly string[]>;
   };
   readonly probe?: {
-    readonly transports: readonly ("http" | "stdio")[];
-  } & (
-    | {
-        readonly scope: "session";
-        readonly sessionSource?: {
-          read(): SessionMcpTargets | undefined;
-          subscribe(listener: () => void): () => void;
-        };
-      }
-    | {
-        readonly scope: "desktop";
-        acquire(): Promise<{
-          readonly server: McpServer;
-          release?(): Promise<unknown>;
-        }>;
-      }
-  );
+    readonly transport: BuiltinMcpProbeTarget["type"];
+    acquire(): Promise<{
+      readonly server: BuiltinMcpProbeTarget;
+      release?(): Promise<unknown>;
+    }>;
+  };
   readonly registration?: (sessionId: string) => Promise<{
     readonly name: string;
     readonly connected: boolean;

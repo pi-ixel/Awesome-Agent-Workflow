@@ -28,8 +28,7 @@ export function apply(ctx: Context): void {
             description: "提供讲解图和交互演示的写法。",
             scope: "支持 HTTP MCP 的 Desktop 会话",
             probe: {
-              scope: "desktop",
-              transports: ["http"],
+              transport: "http",
               acquire: async () => ({ server: await visualGuideServer(guide) }),
             },
           }),

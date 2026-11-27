@@ -111,7 +111,7 @@ export interface BrowserHost {
   setVisible(sessionId: string, tabId: string, visible: boolean): Promise<void>;
   setZoom(sessionId: string, tabId: string, zoom: number): Promise<void>;
   snapshot(sessionId: string): Promise<BrowserSpace>;
-  createMcpEndpoint(): Promise<BrowserMcpEndpoint>;
+  createMcpEndpoint(options?: { inspection: boolean }): Promise<BrowserMcpEndpoint>;
   mcpStatus(sessionId: string): Promise<BrowserMcpStatus>;
   mcpRegistration(sessionId: string): Promise<BrowserMcpRegistration | null>;
   bindMcpEndpoint(

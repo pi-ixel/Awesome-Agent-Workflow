@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { Context } from "cordis";
 import type {
+  BuiltinMcpProbeTarget,
   McpManagementHost,
   ManagedMcpSnapshot,
   NativeMcpHost,
@@ -22,15 +23,9 @@ import { BrowserAgentControlSettings } from "../../../src/plugins/browser/servic
 import { browserMcpContribution } from "../../../src/plugins/browser/domain/mcpContribution.ts";
 import { createBuiltinMcpRegistry } from "../../../src/plugins/mcp/runtime/builtinRegistry.ts";
 import type { BuiltinMcp } from "../../../src/plugins/mcp/service.ts";
-import type {
-  McpServer,
-  McpServerHttp,
-} from "../../../src/contracts/acp/protocol.ts";
+
 import { codeAgentAdapter } from "../../../src/plugins/agents/enhancements/codeagent/adapter.ts";
-import type {
-  ProjectService,
-  SessionMcpTargets,
-} from "../../../src/plugins/project/service.ts";
+import type { ProjectService } from "../../../src/plugins/project/service.ts";
 import { createTestBrowserHost } from "../../helpers/browserHost.ts";
 import { createSessionTools } from "../../../src/plugins/project/sessions/sessionTools.ts";
 import { createStore } from "zustand";
@@ -1183,93 +1178,70 @@ it("独立插件登记后出现，切换会话只更新状态，卸载后移除�
   ).not.toBeInTheDocument();
 });
 
-it("内置 MCP 统一检测五项能力，按当前会话中的真实传输取目标", async () => {
+it("五项内置 MCP 无 ACP 会话也可以检测，浏览器检测不修改控制开关", async () => {
   const user = userEvent.setup();
   const { service, host } = fixture();
-  const save = vi.fn().mockResolvedValue(undefined);
-  const probeBuiltin = vi.fn((server: McpServer) =>
+  const probeBuiltin = vi.fn((target: BuiltinMcpProbeTarget) =>
     Promise.resolve({
       ok: true,
       checkedAt: 100,
       durationMs: 10,
       message: "检测成功",
-      tools: [{ name: `${server.name}-tool` }],
+      tools: [{ name: target.type === "http" ? "http-tool" : "stdio-tool" }],
     }),
   );
   Object.assign(host, {
-    inspection: { read: () => Promise.resolve({}), save, probeBuiltin },
+    inspection: {
+      read: () => Promise.resolve({}),
+      save: () => Promise.resolve(),
+      probeBuiltin,
+    },
   });
   const browser = createTestBrowserHost();
+  await browser.setAgentControl(false);
   const createEndpoint = vi.spyOn(browser, "createMcpEndpoint");
   const revoke = vi.spyOn(browser, "revokeMcpEndpoint");
-  const http = (name: string): McpServerHttp => ({
-    type: "http",
-    name,
-    url: "http://127.0.0.1:4567/mcp",
-    headers: [],
-  });
-  const stdio = (name: string): McpServer => ({
-    name,
-    command: "workflow_service",
-    args: [],
-    env: [],
-  });
-  const visual = http("aaw-visual");
-  const ssh = {
-    ...http("aaw-remote-project"),
-    url: "http://127.0.0.1:4567/project-mcp",
-  };
-  const extraRoot = { ...ssh, name: "aaw-remote-project-2" };
-  const author = stdio("aaw-workflow-authoring");
-  const draftSession = createStore<SessionMcpTargets | undefined>(
-    () => undefined,
-  );
-  const resultStdio = stdio("aaw-workflow-result");
-  const resultHttp = http("aaw-workflow-result");
+  const releaseSsh = vi.fn(() => Promise.resolve());
+  const fixtures: readonly [string, BuiltinMcpProbeTarget][] = [
+    [
+      "可视化讲解",
+      {
+        type: "http",
+        name: "aaw-visual",
+        url: "http://127.0.0.1:4567/mcp",
+        headers: [],
+      },
+    ],
+    [
+      "远程项目工具",
+      {
+        type: "http",
+        name: "aaw-remote-project",
+        url: "http://127.0.0.1:4567/project-mcp",
+        headers: [],
+      },
+    ],
+    ["工作流编写", { type: "stdio", service: "workflow-authoring" }],
+    ["工作流结果提交", { type: "stdio", service: "workflow-result" }],
+  ];
   const builtins: BuiltinMcp[] = [
     browserMcpContribution(browser, undefined),
-    {
-      id: visual.name,
-      name: "可视化讲解",
+    ...fixtures.map(([name, server]) => ({
+      id: server.type === "http" ? server.name : server.service,
+      name,
       description: "",
-      scope: "Desktop",
+      scope: "内置服务",
       probe: {
-        scope: "desktop",
-        transports: ["http"],
-        acquire: () => Promise.resolve({ server: visual }),
+        transport: server.type,
+        acquire: () =>
+          Promise.resolve({
+            server,
+            release: name === "远程项目工具" ? releaseSsh : undefined,
+          }),
       },
-    },
-    {
-      id: ssh.name,
-      name: "远程项目工具",
-      description: "",
-      scope: "SSH 项目会话",
-      matchesServer: (name) => name === extraRoot.name,
-      probe: { scope: "session", transports: ["http"] },
-    },
-    {
-      id: author.name,
-      name: "工作流编写",
-      description: "",
-      scope: "工作流草稿编辑会话",
-      probe: {
-        scope: "session",
-        transports: ["stdio"],
-        sessionSource: {
-          read: draftSession.getState,
-          subscribe: draftSession.subscribe,
-        },
-      },
-    },
-    {
-      id: resultStdio.name,
-      name: "工作流结果提交",
-      description: "",
-      scope: "运行中的工作流节点会话",
-      probe: { scope: "session", transports: ["http", "stdio"] },
-    },
+    })),
   ];
-  const view = (generation?: number, servers: readonly McpServer[] = []) => (
+  render(
     <McpView
       service={service}
       agentId="chrys"
@@ -1278,70 +1250,31 @@ it("内置 MCP 统一检测五项能力，按当前会话中的真实传输取�
       canManageNative={false}
       canManageInjected={false}
       canTest={false}
-      sessionMcpTargets={
-        generation === undefined ? undefined : { generation, servers }
-      }
-    />
+    />,
   );
-  const { rerender } = render(view());
   const open = async (name: string) => {
     const row = await screen.findByRole("article", { name });
     await user.click(within(row).getByRole("button", { name }));
-    return within(screen.getByRole("complementary", { name: `${name} 详情` }));
+    return within(screen.getByRole("complementary", { name: name + " 详情" }));
   };
   const browserDetails = await open("AAW 内置浏览器");
-  await vi.waitFor(() => expect(createEndpoint).toHaveBeenCalledTimes(1));
-  await vi.waitFor(() => expect(revoke).toHaveBeenCalledTimes(1));
+  const browserProbe = browserDetails.getByRole("button", { name: "测试连接" });
+  expect(browserProbe).toBeEnabled();
   probeBuiltin.mockRejectedValueOnce(new Error("fixture failure"));
-  await user.click(browserDetails.getByRole("button", { name: "测试连接" }));
+  await user.click(browserProbe);
   await browserDetails.findByText("无法完成 MCP 检测");
+  expect(revoke).toHaveBeenCalledTimes(1);
+  await user.click(browserProbe);
+  await browserDetails.findByText("http-tool");
+  expect(createEndpoint).toHaveBeenCalledWith({ inspection: true });
   expect(revoke).toHaveBeenCalledTimes(2);
+  expect(await browser.agentControlEnabled()).toBe(false);
 
-  const visualDetails = await open("可视化讲解");
-  await user.click(visualDetails.getByRole("button", { name: "测试连接" }));
-  await visualDetails.findByText("aaw-visual-tool");
-  expect(probeBuiltin).toHaveBeenLastCalledWith(visual);
-
-  const sshDetails = await open("远程项目工具");
-  expect(sshDetails.getByRole("button", { name: "测试连接" })).toBeDisabled();
-  expect(
-    sshDetails.getByText("请打开对应会话后再检测（SSH 项目会话）。"),
-  ).toBeVisible();
-  const cachedWrites = save.mock.calls.length;
-  rerender(view(1, [ssh, extraRoot]));
-  await user.click(sshDetails.getByRole("button", { name: "测试连接" }));
-  await sshDetails.findByText("aaw-remote-project-2-tool");
-  expect(probeBuiltin.mock.calls.slice(-2)).toEqual([[ssh], [extraRoot]]);
-  expect(save).toHaveBeenCalledTimes(cachedWrites);
-
-  rerender(view());
-  expect(sshDetails.getByRole("button", { name: "测试连接" })).toBeDisabled();
-  expect(
-    sshDetails.queryByText("aaw-remote-project-2-tool"),
-  ).not.toBeInTheDocument();
-  const authorDetails = await open("工作流编写");
-  const authorProbe = authorDetails.getByRole("button", { name: "测试连接" });
-  expect(authorProbe).toBeDisabled();
-  act(() => draftSession.setState({ generation: 2, servers: [author] }, true));
-  await user.click(authorProbe);
-  await authorDetails.findByText("aaw-workflow-authoring-tool");
-  expect(probeBuiltin).toHaveBeenLastCalledWith(author);
-  act(() => draftSession.setState(undefined, true));
-  expect(authorProbe).toBeDisabled();
-  expect(
-    authorDetails.queryByText("aaw-workflow-authoring-tool"),
-  ).not.toBeInTheDocument();
-
-  rerender(view(3, [resultStdio]));
-  const resultDetails = await open("工作流结果提交");
-  await user.click(resultDetails.getByRole("button", { name: "测试连接" }));
-  await resultDetails.findByText("aaw-workflow-result-tool");
-  expect(probeBuiltin).toHaveBeenLastCalledWith(resultStdio);
-  rerender(view(4, [resultHttp]));
-  expect(
-    resultDetails.queryByText("aaw-workflow-result-tool"),
-  ).not.toBeInTheDocument();
-  await user.click(resultDetails.getByRole("button", { name: "测试连接" }));
-  await resultDetails.findByText("aaw-workflow-result-tool");
-  expect(probeBuiltin).toHaveBeenLastCalledWith(resultHttp);
+  for (const [name, target] of fixtures) {
+    const details = await open(name);
+    await user.click(details.getByRole("button", { name: "测试连接" }));
+    await details.findByText(target.type + "-tool");
+    expect(probeBuiltin).toHaveBeenLastCalledWith(target);
+  }
+  expect(releaseSsh).toHaveBeenCalledOnce();
 });

@@ -182,6 +182,7 @@ pub fn run() {
             browser::enhancements::browser_pick_start,
             browser::enhancements::browser_pick_cancel,
             browser::mcp::browser_mcp_create,
+            browser::mcp::browser_mcp_create_inspection,
             visual_guide::visual_guide_endpoint,
             browser::mcp::browser_mcp_status,
             browser::mcp::browser_mcp_registration,

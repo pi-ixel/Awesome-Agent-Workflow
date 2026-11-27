@@ -20,7 +20,6 @@
 import type { AgentSwitchGuard } from "../../agents/service.ts";
 import { createDraftEditor } from "../editing/draftSessions.ts";
 import type { Context } from "cordis";
-import type {} from "../../mcp/service.ts";
 import type { WorkflowEvent } from "../engine/protocol.ts";
 import { createStore } from "zustand/vanilla";
 import type { WorkbenchContributions } from "../../workbench/types.ts";
@@ -517,7 +516,6 @@ export function createWorkflowWorkbench(
     openRun,
     openWorkflow,
     openNodeSession,
-    templates,
     publishStatus,
     sessionLookup,
     loadEntries,
@@ -572,60 +570,6 @@ export function apply(ctx: Context): void {
       return path ? host.archives.readTextFile(path) : null;
     },
   }, draftEditor, host.storage);
-  ctx.inject(["mcp"], (scoped) => {
-    const selectedDraft = () => {
-      const { route } = ui.templates.getState();
-      return route.kind === "draft"
-        ? draftEditor.sessionTarget(route.draftId)
-        : undefined;
-    };
-    const read = () => {
-      const target = selectedDraft();
-      return target ? project.sessions.sessionMcpTargets?.(target) : undefined;
-    };
-    scoped.effect(
-      () =>
-        scoped.mcp.registerBuiltin({
-          id: "aaw-workflow-authoring",
-          name: "工作流编写",
-          description: "为 AI 编写工作流提供草稿校验工具。",
-          scope: "工作流草稿里的 AI 助手会话",
-          probe: {
-            scope: "session",
-            transports: ["stdio"],
-            sessionSource: {
-              read,
-              subscribe(listener) {
-                let watched: (() => void) | undefined;
-                let snapshot = read();
-                const update = () => {
-                  const next = read();
-                  if (next === snapshot) return;
-                  snapshot = next;
-                  listener();
-                };
-                const watchDraft = () => {
-                  watched?.();
-                  const target = selectedDraft();
-                  watched =
-                    target && project.sessions.watchEvents(target, update);
-                  update();
-                };
-                watchDraft();
-                const stopTemplates = ui.templates.subscribe(watchDraft);
-                const stopSessions = draftEditor.subscribeSessions(watchDraft);
-                return () => {
-                  watched?.();
-                  stopTemplates();
-                  stopSessions();
-                };
-              },
-            },
-          },
-        }),
-      "workflow:authoring-mcp-catalog",
-    );
-  });
   ctx.effect(() => () => ui.dispose(), "workflow:resources");
   ctx.effect(() => {
     // 工作区作用域：只在当前项目路径真的变化时重绑引擎请求作用域（run

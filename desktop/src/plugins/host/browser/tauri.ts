@@ -207,8 +207,10 @@ export function createBrowserHost(
     },
     snapshot: (sessionId) =>
       nativeInvoke<BrowserSpace>("browser_snapshot", { sessionId }),
-    createMcpEndpoint: () =>
-      nativeInvoke<BrowserMcpEndpoint>("browser_mcp_create"),
+    createMcpEndpoint: (options) =>
+      nativeInvoke<BrowserMcpEndpoint>(
+        options?.inspection ? "browser_mcp_create_inspection" : "browser_mcp_create",
+      ),
     mcpStatus: (sessionId) =>
       nativeInvoke<BrowserMcpStatus>("browser_mcp_status", { sessionId }),
     mcpRegistration: (sessionId) =>

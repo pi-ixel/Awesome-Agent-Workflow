@@ -44,10 +44,7 @@ export function createMcpHost(invoke: NativeInvoke): McpManagementHost {
       save: (key, result) => invoke("mcp_inspection_save", { key, result }),
       probe: (draft) => invoke("mcp_managed_inspect", { draft }),
       browserTools: () => invoke("mcp_browser_tools", {}),
-      probeBuiltin: (server) =>
-        invoke("mcp_builtin_inspect", {
-          target: "type" in server ? server : { ...server, type: "stdio" },
-        }),
+      probeBuiltin: (target) => invoke("mcp_builtin_inspect", { target }),
       setBrowserTools: (tools, enabled) =>
         invoke("mcp_browser_set_tools", { tools, enabled }),
       setManagedTools: (agentId, name, revision, tools, enabled) =>

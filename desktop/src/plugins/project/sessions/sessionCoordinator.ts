@@ -85,7 +85,6 @@ import {
   type LoggerFactory,
 } from "../../../shared/logging/logger.ts";
 import type { SessionInfo } from "../../../contracts/acp/protocol.ts";
-import type { SessionMcpTargets } from "../service.ts";
 import type { AgentAdapter } from "../../agents/types.ts";
 import type { AgentsService } from "../../agents/service.ts";
 import {
@@ -190,8 +189,6 @@ export function createSessionCoordinator({
     Set<(strict?: boolean) => Promise<void>>
   >();
   const disposedToolSessions = new WeakSet<AcpSessionPort>();
-  const attachedMcp = new WeakMap<AcpSessionPort, SessionMcpTargets>();
-  let mcpGeneration = 0;
   const scopeOverrides = new WeakMap<SessionRuntime, readonly string[]>();
   const pendingScopeClosures = new WeakMap<
     SessionRuntime,
@@ -502,10 +499,6 @@ export function createSessionCoordinator({
       throw new Error("无法绑定关联的远程项目");
     }
     const tools = [...explicit, ...resolved.servers];
-    const servers = tools.filter(
-      (tool, index) =>
-        tools.findIndex((other) => other.name === tool.name) === index,
-    );
     return {
       ...resolved,
       additionalDirectories:
@@ -534,10 +527,11 @@ export function createSessionCoordinator({
           );
         }
         await resolved.establish(establishedId);
-        if (!disposedToolSessions.has(session))
-          attachedMcp.set(session, { generation: ++mcpGeneration, servers });
       },
-      servers,
+      servers: tools.filter(
+        (tool, index) =>
+          tools.findIndex((other) => other.name === tool.name) === index,
+      ),
     };
   };
   /** 会话原始事件的订阅方（按会话）。 */
@@ -2490,7 +2484,6 @@ export function createSessionCoordinator({
           releaseBrowserApprovals();
           if (session) {
             disposedToolSessions.add(session);
-            attachedMcp.delete(session);
             const listeners = toolDisposals.get(session);
             toolDisposals.delete(session);
             await Promise.allSettled(
@@ -3124,21 +3117,6 @@ export function createSessionCoordinator({
     );
   }
 
-  function readSessionMcpTargets(
-    runtime: SessionRuntime | null | undefined,
-    sessionId: string | null,
-  ): SessionMcpTargets | undefined {
-    if (!runtime || runtime.disposed || !sessionId) return undefined;
-    const state = runtime.store.getState();
-    if (
-      runtime.session.sessionId !== sessionId ||
-      !state.isBound ||
-      state.recovery.state !== "idle"
-    )
-      return undefined;
-    return attachedMcp.get(runtime.session);
-  }
-
   function deleteArchivedSession(
     target: DeleteSessionTarget,
     cleanup: () => Promise<void>,
@@ -3617,20 +3595,6 @@ export function createSessionCoordinator({
       getAgents().canDeleteSession?.(agentKey) ?? false,
     registerSessionTools: (provider: SessionToolProvider) =>
       sessionTools.register(provider),
-    activeSessionMcpTargets: (sessionId: string, agentKey: string) => {
-      const runtime = activeRuntime;
-      if (runtime?.agentKey === agentKey)
-        return readSessionMcpTargets(runtime, sessionId);
-    },
-    sessionMcpTargets: ({
-      workspacePath,
-      agentKey,
-      sessionId,
-    }: SessionTarget) =>
-      readSessionMcpTargets(
-        findSessionRuntime(workspacePath, agentKey, sessionId),
-        sessionId,
-      ),
     openPluginSessionRuntime,
     closePluginSessionRuntime,
     watchSessionTurns,

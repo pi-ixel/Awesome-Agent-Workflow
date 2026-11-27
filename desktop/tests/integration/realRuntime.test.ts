@@ -24,17 +24,7 @@ import {
 import { manualTitleOf } from "../../src/plugins/project/sessions/sessionTitles.ts";
 import { AcpResponseError } from "../../src/plugins/acpRuntime/service.ts";
 import { FakeAcpSession } from "../fixtures/fakeAcpSession.ts";
-import {
-  activeSessionMcpTargets,
-  attachSessionPreloading,
-  closePluginSessionRuntime,
-  findSessionRuntime,
-  openPluginSessionRuntime,
-  pluginSessionReady,
-  registerSessionTools,
-  sessionMcpTargets,
-  watchSessionTurns,
-} from "../helpers/projectCoordinatorFixture.ts";
+import { attachSessionPreloading, findSessionRuntime, openPluginSessionRuntime, pluginSessionReady, registerSessionTools, watchSessionTurns } from "../helpers/projectCoordinatorFixture.ts";
 import { sessionActivityKey } from "../../src/plugins/project/sessions/sessionActivityStore.ts";
 import {
   hasRunningSessions,
@@ -666,23 +656,10 @@ describe("openRealWorkspace：会话恢复装配", () => {
       expect(load).toHaveBeenCalledWith("sess-old", WORKSPACE, {
         mcpServers: [tool],
       });
-      const agentKey = useSessionStore.getState().agentKey!;
-      const target = activeSessionMcpTargets("sess-old", agentKey);
-      expect(target?.servers).toEqual([tool]);
-      expect(
-        activeSessionMcpTargets("sess-old", "other-agent"),
-      ).toBeUndefined();
       await openRealWorkspace(WORKSPACE, { forceNew: true, draft: true });
-      expect(activeSessionMcpTargets("sess-old", agentKey)).toBeUndefined();
       useSessionStore.getState().sendPrompt("第一条消息");
       await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(1));
       expect(create).toHaveBeenCalledWith(WORKSPACE, { mcpServers: [tool] });
-      await vi.waitFor(() => {
-        const id = useSessionStore.getState().activeSessionId!;
-        const current = activeSessionMcpTargets(id, agentKey);
-        expect(current?.servers).toEqual([tool]);
-        expect(current?.generation).not.toBe(target?.generation);
-      });
       expect(asked).toEqual(["sess-old", null]);
     } finally {
       stop();
@@ -784,29 +761,6 @@ describe("openRealWorkspace：会话恢复装配", () => {
     } finally {
       create.mockRestore();
     }
-  });
-
-  it("内嵌草稿会话的 MCP 检测目标按原会话读取，关闭后失效", async () => {
-    const tool = {
-      name: "aaw-workflow-authoring",
-      command: "tool.exe",
-      args: [],
-      env: [],
-    };
-    const target = await openPluginSessionRuntime({
-      workspacePath: "D:/drafts/d1",
-      tools: () => [tool],
-      ephemeral: true,
-    });
-    expect(
-      activeSessionMcpTargets(target.sessionId!, target.agentKey),
-    ).toBeUndefined();
-    expect(sessionMcpTargets(target)?.servers).toEqual([tool]);
-    expect(
-      sessionMcpTargets({ ...target, workspacePath: WORKSPACE }),
-    ).toBeUndefined();
-    await closePluginSessionRuntime(target);
-    expect(sessionMcpTargets(target)).toBeUndefined();
   });
 
   it("插件恢复会话：按原 id 载入；已经开着的会话不再载入第二次", async () => {

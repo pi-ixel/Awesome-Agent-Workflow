@@ -41,8 +41,6 @@ export function projectOperationsFrom(
     backgroundPromptOptions: coordinator.backgroundPromptOptions,
     refreshModels: coordinator.refreshModels,
     registerSessionTools: coordinator.registerSessionTools,
-    activeSessionMcpTargets: coordinator.activeSessionMcpTargets,
-    sessionMcpTargets: coordinator.sessionMcpTargets,
     openPluginSession: coordinator.openPluginSessionRuntime,
     closePluginSession: coordinator.closePluginSessionRuntime,
     pluginSessionReady: coordinator.pluginSessionReady,

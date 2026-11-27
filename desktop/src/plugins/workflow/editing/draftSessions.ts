@@ -74,32 +74,13 @@ export function createDraftEditor(deps: {
 }): WorkflowDraftEditor & {
   /** 编辑会话重新打开或重连时继续带上编写工具（登记到 project.sessions.registerSessionTools）。 */
   readonly sessionTools: SessionToolProvider;
-  sessionTarget(draftId: string): SessionTarget | undefined;
-  subscribeSessions(listener: () => void): () => void;
 } {
-  const sessions = new Map<
-    string,
-    {
-      readonly target: SessionTarget & { readonly sessionId: string };
-      readonly tools: readonly McpServer[];
-    }
-  >();
-  const listeners = new Set<() => void>();
-  const toolsOf = (draft: WorkflowDraft): readonly McpServer[] =>
-    draft.mcpServer ? [draft.mcpServer as McpServer] : [];
+  const sessions = new Map<string, { readonly target: SessionTarget & { readonly sessionId: string }; readonly tools: readonly McpServer[] }>();
+  const toolsOf = (draft: WorkflowDraft): readonly McpServer[] => (draft.mcpServer ? [draft.mcpServer as McpServer] : []);
 
   return {
-    sessionTarget: (draftId) => sessions.get(draftId)?.target,
-    subscribeSessions(listener) {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
     sessionTools: ({ sessionId }) =>
-      [...sessions.values()].find(
-        (session) => session.target.sessionId === sessionId,
-      )?.tools ?? [],
+      [...sessions.values()].find((session) => session.target.sessionId === sessionId)?.tools ?? [],
 
     async start(draft: WorkflowDraft, title: string, firstMessage: { readonly text: string; readonly display: MessageDisplay }) {
       const tools = toolsOf(draft);
@@ -116,10 +97,7 @@ export function createDraftEditor(deps: {
       if (!sessionId) throw new Error("ACP_SESSION_ID_MISSING");
       const target = { ...opened, sessionId };
       sessions.set(draft.draftId, { target, tools });
-      for (const listener of listeners) listener();
-      deps.project.conversation.send(target, firstMessage.text, undefined, {
-        display: firstMessage.display,
-      });
+      deps.project.conversation.send(target, firstMessage.text, undefined, { display: firstMessage.display });
     },
 
     async show(draftId: string) {
@@ -153,7 +131,6 @@ export function createDraftEditor(deps: {
       const session = sessions.get(draftId);
       if (!session) return;
       sessions.delete(draftId);
-      for (const listener of listeners) listener();
       if (deps.project.sessions.closePluginSession) {
         await deps.project.sessions.closePluginSession(session.target);
       } else {

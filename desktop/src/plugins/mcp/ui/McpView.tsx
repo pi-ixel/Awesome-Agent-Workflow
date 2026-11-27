@@ -5,7 +5,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
   type MouseEvent,
   type ReactNode,
 } from "react";
@@ -32,10 +31,8 @@ import {
 } from "../../../shared/ui/PageFilterControls.tsx";
 import { PlugIcon, PlusIcon, TrashIcon } from "../../../shared/ui/icons.tsx";
 import type { BuiltinMcp } from "../service.ts";
-import type { SessionMcpTargets } from "../../project/service.ts";
 import {
-  builtinInspection,
-  builtinSessionSources,
+  inspectBuiltin,
   matchesBuiltin,
 } from "../runtime/builtinInspection.ts";
 import { useBuiltinControls } from "./builtinControls.ts";
@@ -274,7 +271,6 @@ export function McpView({
   hasScopedNative = false,
   hasHostInspection = false,
   sessionId,
-  sessionMcpTargets,
   runtime,
 }: {
   service: McpManagement | null;
@@ -289,7 +285,6 @@ export function McpView({
   hasScopedNative?: boolean;
   hasHostInspection?: boolean;
   sessionId?: string;
-  sessionMcpTargets?: SessionMcpTargets;
   runtime?: RuntimeSnapshot;
 }) {
   const feedback = useFeedback();
@@ -435,46 +430,6 @@ export function McpView({
     native.data?.profile.name ??
     activeProfile;
 
-  const sessionSources = useMemo(
-    () => builtinSessionSources(builtins),
-    [builtins],
-  );
-  const sourceTargets = useSyncExternalStore(
-    sessionSources.subscribe,
-    sessionSources.read,
-  );
-
-  const builtinJobs = useMemo(() => {
-    return new Map(
-      builtins.flatMap((entry) => {
-        if (!inspector) return [];
-        const target = builtinInspection(
-          entry,
-          sessionMcpTargets,
-          (server) => inspector.probeBuiltin(server),
-          sourceTargets.get(entry),
-        );
-        if (!target) return [];
-        const isSessionTarget = target.generation !== undefined;
-        return [
-          [
-            entry,
-            {
-              key: isSessionTarget
-                ? `${builtinKey(entry)}:session:${target.generation}`
-                : builtinKey(entry),
-              enabled:
-                !entry.enabled || builtinControls.get(entry)?.enabled === true,
-              manualOnly: isSessionTarget || !entry.enabled,
-              isSessionTarget,
-              run: target.run,
-            },
-          ] as const,
-        ];
-      }),
-    );
-  }, [builtins, builtinControls, inspector, sessionMcpTargets, sourceTargets]);
-
   const jobs = useMemo(() => {
     if (!service || !inspector) return [];
     const available = targets.flatMap((target) => {
@@ -490,7 +445,6 @@ export function McpView({
           key: healthKey(agentId, inspectionProfile, target),
           enabled: entry.enabled,
           manualOnly,
-          isSessionTarget: false,
           run: async (): Promise<McpInspection> => {
             if (target.source === "managed")
               return inspector.probe(target.entry);
@@ -509,7 +463,18 @@ export function McpView({
         },
       ];
     });
-    return [...available, ...builtinJobs.values()];
+    for (const entry of builtins) {
+      const probe = entry.probe;
+      if (!probe) continue;
+      available.push({
+        key: builtinKey(entry),
+        enabled: builtinControls.get(entry)?.enabled === true,
+        manualOnly: !entry.enabled,
+        run: () =>
+          inspectBuiltin(probe, (target) => inspector.probeBuiltin(target)),
+      });
+    }
+    return available;
   }, [
     service,
     inspector,
@@ -519,7 +484,8 @@ export function McpView({
     nativeWorkspace,
     agentId,
     inspectionProfile,
-    builtinJobs,
+    builtins,
+    builtinControls,
   ]);
 
   const runCheck = useCallback(
@@ -537,9 +503,7 @@ export function McpView({
             checkedAt: Date.now(),
             durationMs: Date.now() - started,
           }));
-        const result = job.isSessionTarget
-          ? await inspect()
-          : await service.inspectCached(job.key, fresh, inspect);
+        const result = await service.inspectCached(job.key, fresh, inspect);
         setHealth((previous) => ({
           ...previous,
           [job.key]:
@@ -565,9 +529,7 @@ export function McpView({
     if (!inspector || !jobs.length || (canManageNative && native.isLoading))
       return;
     let isCurrent = true;
-    const missing = jobs.filter(
-      (job) => !job.isSessionTarget && !seen.current.has(job.key),
-    );
+    const missing = jobs.filter((job) => !seen.current.has(job.key));
     if (!missing.length) return;
     void inspector
       .read(missing.map(({ key }) => key))
@@ -625,7 +587,7 @@ export function McpView({
     );
     const status = summary(
       failed ?? "",
-      builtinJobs.get(entry)?.key ?? builtinKey(entry),
+      builtinKey(entry),
       enabled,
       entry.registration
         ? registration?.connected === true
@@ -642,10 +604,7 @@ export function McpView({
     const reported = Object.entries(runtime?.mcpToolsByServer ?? {}).filter(
       ([name]) => matchesBuiltin(entry, name),
     );
-    if (reported.length === 0) {
-      const job = builtinJobs.get(entry);
-      return job && health[job.key]?.tools;
-    }
+    if (reported.length === 0) return health[builtinKey(entry)]?.tools;
     return [
       ...new Set(
         reported.flatMap(([name, items]) =>
@@ -827,7 +786,7 @@ export function McpView({
         <ActionButton
           tone="secondary"
           size="compact"
-          disabled={!job || (isBuiltin && !job.enabled) || pending.has(key)}
+          disabled={!job || pending.has(key)}
           onClick={() => {
             if (job) void runCheck(job, true);
           }}
@@ -838,16 +797,11 @@ export function McpView({
     );
   }
 
-  const currentBuiltinJob = currentBuiltin && builtinJobs.get(currentBuiltin);
   const currentBuiltinHealth =
-    currentBuiltinJob && health[currentBuiltinJob.key];
+    currentBuiltin && health[builtinKey(currentBuiltin)];
   function builtinInspectionNote(entry: BuiltinMcp) {
     if (!inspector) return "当前桌面环境无法检测此服务。";
-    if (entry.enabled && builtinControls.get(entry)?.enabled !== true)
-      return "启用服务后可测试连接。";
-    if (entry.probe?.scope === "session" && !currentBuiltinJob)
-      return `请打开对应会话后再检测（${entry.scope}）。`;
-    return currentBuiltinHealth?.ok && builtinStatus(entry) === "已连接"
+    return currentBuiltinHealth?.ok && builtinStatus(entry) !== "检测成功"
       ? currentBuiltinHealth.message
       : undefined;
   }
@@ -1412,10 +1366,7 @@ export function McpView({
                 toggle={builtinToggle(currentBuiltin)}
                 actions={
                   currentBuiltin.probe &&
-                  testButton(
-                    currentBuiltinJob?.key ?? builtinKey(currentBuiltin),
-                    true,
-                  )
+                  testButton(builtinKey(currentBuiltin), true)
                 }
                 onToggleTools={
                   currentBuiltin.tools

@@ -27,10 +27,9 @@ export function browserMcpContribution(
       );
     },
     probe: {
-      scope: "desktop",
-      transports: ["http"],
+      transport: "http",
       acquire: async () => {
-        const endpoint = await browser.createMcpEndpoint();
+        const endpoint = await browser.createMcpEndpoint({ inspection: true });
         return {
           server: {
             type: "http",

@@ -455,10 +455,8 @@ fn serve_one(mut stream: TcpStream, secret: &str, state: &Mutex<State>) {
     };
     let response = match msg["method"].as_str() {
         Some("schema") => json!({"schema":state.schema}),
-        Some(method @ ("tools" | "inspect-tools")) => {
-            if method == "tools" {
-                state.tools_listed = true;
-            }
+        Some("tools") => {
+            state.tools_listed = true;
             json!({"tools":tools(&state.schema, &state.pool_tools)})
         }
         Some("list") => read_result(&state, None, None),
@@ -501,7 +499,6 @@ fn serve_http(
 ) {
     let mut len = None;
     let mut auth = false;
-    let mut is_inspection = false;
     let mut header_bytes = 0usize;
     loop {
         let mut line = String::new();
@@ -522,9 +519,6 @@ fn serve_http(
             if name.eq_ignore_ascii_case("authorization") {
                 auth = value.trim() == format!("Bearer {secret}");
             }
-            if name.eq_ignore_ascii_case("x-aaw-mcp-inspection") {
-                is_inspection = value.trim() == "1";
-            }
         }
     }
     let (status, body) = if !auth {
@@ -537,7 +531,7 @@ fn serve_http(
             return;
         }
         match serde_json::from_slice::<Value>(&bytes) {
-            Ok(msg) => match http_rpc(&msg, state, is_inspection) {
+            Ok(msg) => match http_rpc(&msg, state) {
                 Some(response) => ("200 OK", Some(response)),
                 None => ("202 Accepted", None),
             },
@@ -719,11 +713,8 @@ fn tool_response(response: Value) -> Value {
     }
 }
 
-fn http_rpc(msg: &Value, state: &Mutex<State>, is_inspection: bool) -> Option<Value> {
+fn http_rpc(msg: &Value, state: &Mutex<State>) -> Option<Value> {
     let id = msg.get("id")?;
-    if is_inspection && msg["method"] == "tools/call" {
-        return Some(json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"检测连接时不能调用工具"}}));
-    }
     let mut state = state.lock().ok()?;
     let result = match msg["method"].as_str() {
         Some("initialize") => {
@@ -740,9 +731,7 @@ fn http_rpc(msg: &Value, state: &Mutex<State>, is_inspection: bool) -> Option<Va
         }
         Some("ping") => json!({}),
         Some("tools/list") => {
-            if !is_inspection {
-                state.tools_listed = true;
-            }
+            state.tools_listed = true;
             json!({"tools":tools(&state.schema, &state.pool_tools)})
         }
         Some("tools/call") if msg["params"]["name"] == "capture_workflow_artifact" => {
@@ -856,7 +845,17 @@ fn call_bridge(addr: &str, token: &str, method: &str, result: Value) -> Result<V
 const METHOD_NOT_FOUND: &str = "MCP_METHOD_NOT_FOUND";
 
 /// MCP stdio entry point; stdout contains only JSON-RPC messages.
-pub fn serve_mcp(addr: &str, token: &str, is_inspection: bool) -> Result<(), String> {
+pub fn serve_mcp(addr: &str, token: &str) -> Result<(), String> {
+    serve_mcp_connection(addr, token, false)
+}
+
+pub fn serve_mcp_inspection() -> Result<(), String> {
+    // 复用结果通道与 stdio 桥。这个临时通道没有运行、节点或工作目录。
+    let channel = ResultChannel::new(json!({"type":"object"}))?;
+    serve_mcp_connection(&channel.addr, &channel.token, true)
+}
+
+fn serve_mcp_connection(addr: &str, token: &str, is_inspection: bool) -> Result<(), String> {
     let stdin = std::io::stdin();
     let mut out = std::io::stdout().lock();
     for line in stdin.lock().lines() {
@@ -886,12 +885,7 @@ pub fn serve_mcp(addr: &str, token: &str, is_inspection: bool) -> Result<(), Str
                 json!({"protocolVersion":version,"capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"aaw-workflow-result","version":"1.0.0"}})
             }
             Some("ping") => json!({}),
-            Some("tools/list") => call_bridge(
-                addr,
-                token,
-                if is_inspection { "inspect-tools" } else { "tools" },
-                Value::Null,
-            )?,
+            Some("tools/list") => call_bridge(addr, token, "tools", Value::Null)?,
             Some("tools/call") if is_inspection => return Err(METHOD_NOT_FOUND.into()),
             Some("tools/call") if msg["params"]["name"] == "capture_workflow_artifact" => {
                 tool_response(call_bridge(
@@ -983,25 +977,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn desktop_inspection_lists_tools_without_marking_agent_ready() {
-        let channel = ResultChannel::new(json!({"type":"object"})).unwrap();
-        let request = json!({"jsonrpc":"2.0","id":1,"method":"tools/list"});
-        let http = http_rpc(&request, &channel.state, true).unwrap();
-        let stdio = call_bridge(&channel.addr, &channel.token, "inspect-tools", Value::Null).unwrap();
-        assert_eq!(http["result"]["tools"], stdio["tools"]);
-        assert!(stdio["tools"].as_array().is_some_and(|tools| !tools.is_empty()));
-        assert!(!channel.tools_listed().unwrap());
-        let blocked = http_rpc(
-            &json!({"jsonrpc":"2.0","id":1,"method":"tools/call"}),
-            &channel.state,
-            true,
-        ).unwrap();
-        assert_eq!(blocked["error"]["code"], -32601);
-        http_rpc(&request, &channel.state, false).unwrap();
-        assert!(channel.tools_listed().unwrap());
-    }
-
-    #[test]
     fn mcp_submission_preserves_dynamic_fields_inside_declared_envelope() {
         let schema = json!({"type":"object","properties":{},"additionalProperties":true});
         let channel = ResultChannel::new(schema.clone()).unwrap();
@@ -1018,7 +993,7 @@ mod tests {
         assert_eq!(declared.as_array().unwrap().last().unwrap()["name"], "submit_workflow_result");
         channel.begin(schema).unwrap();
         let result = json!({"files":{"comment":"交付的文件","values":["a.md"]},"custom":42});
-        let response = http_rpc(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"submit_workflow_result","arguments":{"result":result}}}), &channel.state, false).unwrap();
+        let response = http_rpc(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"submit_workflow_result","arguments":{"result":result}}}), &channel.state).unwrap();
         assert_ne!(response["result"]["isError"], true);
         assert_eq!(channel.finish().unwrap(), result);
     }
@@ -1032,7 +1007,7 @@ mod tests {
 做检查".into(), vars: json!({"design":{"reference":"d.md"},"count":1}), knowledge: Vec::new() })
             .unwrap();
         // HTTP：不带参数给工单原文。
-        let brief = http_rpc(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_workflow_step","arguments":{}}}), &channel.state, false).unwrap();
+        let brief = http_rpc(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_workflow_step","arguments":{}}}), &channel.state).unwrap();
         assert_eq!(brief["result"]["content"][0]["text"], "【这一步】代码检查
 做检查");
         // stdio 桥：按名字读当前版本。
@@ -1070,7 +1045,6 @@ mod tests {
         let index = http_rpc(
             &json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_workflow_knowledge","arguments":{}}}),
             &channel.state,
-            false,
         )
         .unwrap();
         let index_text = index["result"]["content"][0]["text"].as_str().unwrap();
@@ -1081,7 +1055,6 @@ mod tests {
         let doc = http_rpc(
             &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_workflow_knowledge","arguments":{"name":"knowledge/svg-motion.md"}}}),
             &channel.state,
-            false,
         )
         .unwrap();
         assert!(doc["result"]["content"][0]["text"].as_str().unwrap().contains("这里是很长的正文内容"));
@@ -1150,7 +1123,7 @@ mod tests {
             }))
             .unwrap();
         channel.begin(json!({"type":"object"})).unwrap();
-        let captured=http_rpc(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"capture_workflow_artifact","arguments":{"reference":"a.md"}}}),&channel.state,false).unwrap();
+        let captured=http_rpc(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"capture_workflow_artifact","arguments":{"reference":"a.md"}}}),&channel.state).unwrap();
         assert!(
             captured["result"]["content"][0]["text"]
                 .as_str()
@@ -1215,7 +1188,6 @@ mod tests {
             let list = http_rpc(
                 &json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}),
                 &first.state,
-                false,
             )
             .unwrap();
             assert!(
@@ -1227,9 +1199,9 @@ mod tests {
             );
             let add = call_bridge(&first.addr, &first.token, "pool", json!({"name":"aaw_pool_add_questions","arguments":{"session":"wrong-run","questions":["question one"]}})).unwrap();
             assert!(add.get("error").is_none());
-            let answer = http_rpc(&json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"aaw_pool_answer_question","arguments":{"question":"question one","answer":"answer one"}}}), &first.state, false).unwrap();
+            let answer = http_rpc(&json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"aaw_pool_answer_question","arguments":{"question":"question one","answer":"answer one"}}}), &first.state).unwrap();
             assert_ne!(answer["result"]["isError"], true);
-            let status = http_rpc(&json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"aaw_pool_get_status","arguments":{"detail":"full"}}}), &second.state, false).unwrap();
+            let status = http_rpc(&json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"aaw_pool_get_status","arguments":{"detail":"full"}}}), &second.state).unwrap();
             assert!(status.to_string().contains("answer one"));
             assert!(!root.join("wrong-run").exists());
         }

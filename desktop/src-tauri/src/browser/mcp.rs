@@ -22,6 +22,8 @@ pub struct McpEndpoint {
     pub generation: u64,
     pub revoked: bool,
     pub image_capable: bool,
+    #[serde(skip)]
+    is_inspection: bool,
 }
 
 #[derive(Default)]
@@ -42,7 +44,16 @@ pub(crate) fn random_id(bytes: usize) -> Result<String, String> {
     Ok(buffer.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
+#[cfg(test)]
 pub fn create_endpoint(registry: &mut McpRegistry, port: u16) -> Result<McpEndpoint, String> {
+    register_endpoint(registry, port, false)
+}
+
+fn register_endpoint(
+    registry: &mut McpRegistry,
+    port: u16,
+    is_inspection: bool,
+) -> Result<McpEndpoint, String> {
     let endpoint_id = random_id(12)?;
     let endpoint = McpEndpoint {
         name: format!("aaw-browser-{endpoint_id}"),
@@ -54,6 +65,7 @@ pub fn create_endpoint(registry: &mut McpRegistry, port: u16) -> Result<McpEndpo
         generation: 1,
         revoked: false,
         image_capable: false,
+        is_inspection,
     };
     registry
         .endpoints
@@ -73,6 +85,9 @@ pub fn bind_endpoint(
         .ok_or("ENDPOINT_UNKNOWN")?;
     if endpoint.revoked {
         return Err("ENDPOINT_INVALIDATED".into());
+    }
+    if endpoint.is_inspection {
+        return Err("INSPECTION_ENDPOINT".into());
     }
     if endpoint
         .session_id
@@ -119,6 +134,24 @@ pub fn resolve_endpoint(registry: &McpRegistry, token: &str) -> Result<McpEndpoi
         return Err("ENDPOINT_NOT_BOUND".into());
     }
     Ok(endpoint)
+}
+
+#[test]
+fn inspection_endpoint_can_handshake_without_becoming_a_session_endpoint() {
+    let mut registry = McpRegistry::default();
+    let endpoint = register_endpoint(&mut registry, 41021, true).unwrap();
+    complete_handshake(&mut registry, &endpoint.endpoint_id).unwrap();
+    ensure_protocol_ready(&registry, &endpoint.endpoint_id).unwrap();
+    assert_eq!(
+        bind_endpoint(&mut registry, &endpoint.endpoint_id, "session", None),
+        Err("INSPECTION_ENDPOINT".into()),
+    );
+    assert_eq!(
+        resolve_endpoint(&registry, &endpoint.token),
+        Err("ENDPOINT_NOT_BOUND".into()),
+    );
+    revoke_endpoint(&mut registry, &endpoint.endpoint_id).unwrap();
+    assert!(!registry.endpoints.contains_key(&endpoint.endpoint_id));
 }
 
 pub fn session_status(registry: &McpRegistry, session_id: &str) -> &'static str {
@@ -255,6 +288,9 @@ pub fn revoke_endpoint(
     if let Some(shutdown) = registry.shutdowns.remove(endpoint_id) {
         let _ = shutdown.send(());
     }
+    if endpoint.is_inspection {
+        registry.endpoints.remove(endpoint_id);
+    }
     Ok(endpoint)
 }
 
@@ -263,7 +299,27 @@ pub async fn browser_mcp_create(
     app: AppHandle,
     state: State<'_, BrowserHost>,
 ) -> Result<McpEndpoint, String> {
-    if !state.agent_control_enabled() {
+    start_endpoint(app, &state, false).await
+}
+
+#[tauri::command]
+pub async fn browser_mcp_create_inspection(
+    app: AppHandle,
+    webview: tauri::Webview,
+    state: State<'_, BrowserHost>,
+) -> Result<McpEndpoint, String> {
+    if webview.label() != "main" {
+        return Err("当前窗口无法检测浏览器 MCP".into());
+    }
+    start_endpoint(app, &state, true).await
+}
+
+async fn start_endpoint(
+    app: AppHandle,
+    state: &BrowserHost,
+    is_inspection: bool,
+) -> Result<McpEndpoint, String> {
+    if !is_inspection && !state.agent_control_enabled() {
         return Err("AGENT_CONTROL_DISABLED".into());
     }
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -276,20 +332,29 @@ pub async fn browser_mcp_create(
     let (shutdown, mut stopped) = tokio::sync::oneshot::channel();
     let endpoint = {
         let mut registry = state.mcp.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
-        if !state.agent_control_enabled() {
+        if !is_inspection && !state.agent_control_enabled() {
             return Err("AGENT_CONTROL_DISABLED".into());
         }
-        let endpoint = create_endpoint(&mut registry, port)?;
+        let endpoint = register_endpoint(&mut registry, port, is_inspection)?;
         registry
             .shutdowns
             .insert(endpoint.endpoint_id.clone(), shutdown);
         endpoint
     };
     let registry = state.mcp.clone();
+    let endpoint_id = endpoint.endpoint_id.clone();
     tokio::spawn(async move {
+        let expires = tokio::time::sleep(Duration::from_secs(45));
+        tokio::pin!(expires);
         loop {
             tokio::select! {
                 _ = &mut stopped => break,
+                _ = &mut expires, if is_inspection => {
+                    if let Ok(mut registry) = registry.lock() {
+                        let _ = revoke_endpoint(&mut registry, &endpoint_id);
+                    }
+                    break;
+                }
                 accepted = listener.accept() => {
                     let Ok((stream, _)) = accepted else { break };
                     let app = app.clone();
@@ -549,6 +614,7 @@ async fn handle_rpc(app: &AppHandle, endpoint: McpEndpoint, request: Value) -> V
             Ok(result) => json!({"jsonrpc":"2.0","id":id,"result":result}),
             Err(error) => rpc_error(id, -32002, &error),
         },
+        "tools/call" if endpoint.is_inspection => rpc_error(id, -32601, "INSPECTION_ENDPOINT"),
         "tools/call" => {
             let params = request.get("params").cloned().unwrap_or(Value::Null);
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");

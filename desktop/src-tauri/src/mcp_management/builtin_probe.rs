@@ -1,8 +1,7 @@
 use super::*;
-use std::{net::SocketAddrV4, time::Duration};
+use std::time::Duration;
 
 const INVALID_TARGET: &str = "无效的内置 MCP 检测目标";
-const RESULT_TOKEN: &str = "AAW_RESULT_TOKEN";
 
 #[derive(Deserialize)]
 pub struct NameValue {
@@ -11,7 +10,23 @@ pub struct NameValue {
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
+pub enum StdioService {
+    WorkflowAuthoring,
+    WorkflowResult,
+}
+
+impl StdioService {
+    fn argument(self) -> &'static str {
+        match self {
+            Self::WorkflowAuthoring => "--probe-authoring-mcp",
+            Self::WorkflowResult => "--probe-result-mcp",
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
 pub enum Target {
     Http {
         name: String,
@@ -19,9 +34,7 @@ pub enum Target {
         headers: Vec<NameValue>,
     },
     Stdio {
-        command: String,
-        args: Vec<String>,
-        env: Vec<NameValue>,
+        service: StdioService,
     },
 }
 
@@ -45,70 +58,48 @@ fn http_config(name: String, url: String, headers: &[NameValue]) -> Result<HttpC
         || !authorization
             .value
             .strip_prefix("Bearer ")
-            .is_some_and(valid_token)
+            .is_some_and(|token| {
+                !token.is_empty()
+                    && token.len() <= 256
+                    && token.bytes().all(|byte| byte.is_ascii_graphic())
+            })
     {
         return Err(INVALID_TARGET.into());
     }
     Ok(HttpConfig {
         name,
         url,
-        headers: BTreeMap::from([
-            ("Authorization".into(), authorization.value.clone()),
-            ("X-AAW-MCP-Inspection".into(), "1".into()),
-        ]),
+        headers: BTreeMap::from([("Authorization".into(), authorization.value.clone())]),
         options: BTreeMap::new(),
     })
 }
 
-fn valid_token(token: &str) -> bool {
-    !token.is_empty() && token.len() <= 256 && token.bytes().all(|byte| byte.is_ascii_graphic())
-}
-
-fn stdio_config(
-    sidecar: &Path,
-    drafts: &Path,
-    command: String,
-    mut args: Vec<String>,
-    env: Vec<NameValue>,
-) -> Result<stdio_probe::Config> {
-    let binary = fs::canonicalize(sidecar).map_err(|_| INVALID_TARGET)?;
-    if fs::canonicalize(&command).ok().as_ref() != Some(&binary) {
-        return Err(INVALID_TARGET.into());
+pub(super) async fn inspect(app: AppHandle, target: Target) -> Result<Vec<inspection::Tool>> {
+    match target {
+        Target::Http { name, url, headers } => {
+            let config = http_config(name, url, &headers)?;
+            tokio::time::timeout(Duration::from_secs(10), proxy::inspect(config))
+                .await
+                .map_err(|_| "MCP 检测超时")?
+        }
+        Target::Stdio { service } => {
+            let sidecar = crate::workflow_service::sidecar_path(&app)?;
+            let cwd = sidecar.parent().ok_or(INVALID_TARGET)?.to_path_buf();
+            stdio_probe::inspect(stdio_probe::Config {
+                command: sidecar.to_string_lossy().into_owned(),
+                args: vec![service.argument().into()],
+                env: BTreeMap::new(),
+                cwd,
+            })
+            .await
+        }
     }
-    let cwd = sidecar.parent().ok_or(INVALID_TARGET)?.to_path_buf();
-    let env = match (args.as_mut_slice(), env.as_slice()) {
-        ([mode, dir], []) if mode.as_str() == "--authoring-mcp" => {
-            let drafts = fs::canonicalize(drafts).map_err(|_| INVALID_TARGET)?;
-            let draft = fs::canonicalize(dir.as_str()).map_err(|_| INVALID_TARGET)?;
-            if !draft.is_dir() || draft.parent() != Some(drafts.as_path()) {
-                return Err(INVALID_TARGET.into());
-            }
-            BTreeMap::new()
-        }
-        ([mode, addr], [token])
-            if mode.as_str() == "--result-mcp"
-                && addr.parse::<SocketAddrV4>().is_ok_and(|addr| {
-                    *addr.ip() == std::net::Ipv4Addr::LOCALHOST && addr.port() != 0
-                })
-                && token.name == RESULT_TOKEN
-                && valid_token(&token.value) =>
-        {
-            *mode = "--result-mcp-inspect".into();
-            BTreeMap::from([(RESULT_TOKEN.into(), token.value.clone())])
-        }
-        _ => return Err(INVALID_TARGET.into()),
-    };
-    Ok(stdio_probe::Config {
-        command: sidecar.to_string_lossy().into_owned(),
-        args,
-        env,
-        cwd,
-    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn http_inspection_requires_authenticated_local_mcp() {
@@ -116,21 +107,16 @@ mod tests {
             name: "Authorization".into(),
             value: "Bearer fixture-token".into(),
         }];
-        let config = http_config(
-            "fixture".into(),
-            "http://127.0.0.1:5421/mcp".into(),
-            &headers,
-        )
-        .unwrap();
-        assert_eq!(config.headers["X-AAW-MCP-Inspection"], "1");
-        assert!(
-            http_config(
-                "ssh".into(),
-                "http://127.0.0.1:5421/project-mcp".into(),
-                &headers
-            )
-            .is_ok()
-        );
+        for path in ["mcp", "project-mcp"] {
+            assert!(
+                http_config(
+                    "fixture".into(),
+                    format!("http://127.0.0.1:5421/{path}"),
+                    &headers,
+                )
+                .is_ok()
+            );
+        }
         for invalid in [
             "http://localhost:5421/mcp",
             "http://192.0.2.1:5421/mcp",
@@ -142,65 +128,24 @@ mod tests {
     }
 
     #[test]
-    fn stdio_inspection_accepts_only_bundled_workflow_modes() {
-        let root = tempfile::tempdir().unwrap();
-        let sidecar = root.path().join("workflow_service");
-        fs::write(&sidecar, []).unwrap();
-        let drafts = root.path().join("workflow-drafts");
-        let draft = drafts.join("example");
-        fs::create_dir_all(&draft).unwrap();
-        let command = sidecar.to_string_lossy().into_owned();
-        let authoring = |dir: &Path| {
-            stdio_config(
-                &sidecar,
-                &drafts,
-                command.clone(),
-                vec!["--authoring-mcp".into(), dir.to_string_lossy().into_owned()],
-                vec![],
-            )
-        };
-        assert!(authoring(&draft).is_ok());
-        assert!(authoring(root.path()).is_err());
-        let result = |address: &str, program: String| {
-            stdio_config(
-                &sidecar,
-                &drafts,
-                program,
-                vec!["--result-mcp".into(), address.into()],
-                vec![NameValue {
-                    name: RESULT_TOKEN.into(),
-                    value: "fixture-token".into(),
-                }],
-            )
-        };
-        assert_eq!(
-            result("127.0.0.1:5421", command.clone()).unwrap().args[0],
-            "--result-mcp-inspect",
-        );
-        assert!(result("192.0.2.1:5421", command).is_err());
-        assert!(result("127.0.0.1:5421", "untrusted-program".into()).is_err());
-    }
-}
-
-pub(super) async fn inspect(app: AppHandle, target: Target) -> Result<Vec<inspection::Tool>> {
-    match target {
-        Target::Http { name, url, headers } => {
-            let config = http_config(name, url, &headers)?;
-            tokio::time::timeout(Duration::from_secs(10), proxy::inspect(config))
-                .await
-                .map_err(|_| "MCP 检测超时")?
+    fn stdio_allows_only_the_bundled_workflow_probe_modes() {
+        for (service, expected) in [
+            ("workflow-authoring", "--probe-authoring-mcp"),
+            ("workflow-result", "--probe-result-mcp"),
+        ] {
+            let Target::Stdio { service } = serde_json::from_value(json!({
+                "type": "stdio", "service": service,
+            }))
+            .unwrap() else {
+                panic!("预期 stdio 检测目标");
+            };
+            assert_eq!(service.argument(), expected);
         }
-        Target::Stdio { command, args, env } => {
-            let sidecar = crate::workflow_service::sidecar_path(&app)?;
-            let drafts = app
-                .path()
-                .app_data_dir()
-                .map_err(|_| INVALID_TARGET)?
-                .join("workflow-engine")
-                .join("workflow-drafts");
-            let config =
-                blocking(move || stdio_config(&sidecar, &drafts, command, args, env)).await?;
-            stdio_probe::inspect(config).await
+        for invalid in [
+            json!({"type":"stdio","service":"arbitrary"}),
+            json!({"type":"stdio","service":"workflow-authoring","command":"arbitrary"}),
+        ] {
+            assert!(serde_json::from_value::<Target>(invalid).is_err());
         }
     }
 }

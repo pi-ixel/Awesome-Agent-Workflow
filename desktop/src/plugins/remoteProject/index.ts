@@ -208,7 +208,27 @@ export function apply(ctx: Context): void {
           description: "提供当前远程项目及关联目录的操作。",
           scope: "SSH 项目会话",
           matchesServer: (name) => /^aaw-remote-project(?:-\d+)?$/.test(name),
-          probe: { scope: "session", transports: ["http"] },
+          probe: {
+            transport: "http",
+            acquire: async () => {
+              // 只绑定 Sidecar 的本机协议端点，不需要建立 SSH 连接或登记项目。
+              const probeId = `aaw-mcp-inspection-${crypto.randomUUID()}`;
+              const { url, token } = await service.bindSessionMcp({
+                projectId: probeId,
+                connectionId: probeId,
+                remoteRoot: "/",
+              });
+              return {
+                server: {
+                  type: "http",
+                  name: "aaw-remote-project",
+                  url,
+                  headers: [{ name: "Authorization", value: `Bearer ${token}` }],
+                },
+                release: () => service.unbindSessionMcp(token),
+              };
+            },
+          },
         }),
       "remoteProject:mcp-catalog",
     );
