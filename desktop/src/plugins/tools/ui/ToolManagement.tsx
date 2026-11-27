@@ -67,7 +67,7 @@ function Section({
     >
       <button
         type="button"
-        className="mg-section-head"
+        className="mg-section-head focus-visible:keyboard-focus-marker"
         aria-expanded={open}
         aria-controls={`${id}-panel`}
         onClick={onToggle}

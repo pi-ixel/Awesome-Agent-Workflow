@@ -2,7 +2,7 @@ import type { ProjectService } from "../service.ts";
 import type { WorkbenchService } from "../../workbench/service.ts";
 import type { HostService } from "../../host/service.ts";
 import { projectOverviewPageId } from "./pageIds.ts";
-import { pathKey } from "../../../shared/panelPaths.ts";
+import { parseRemoteProjectPath, pathKey, projectFolderPath } from "../../../shared/panelPaths.ts";
 
 /** Shared policy for global entries. Business plugins opt into session creation. */
 export async function prepareProjectLauncher(
@@ -11,7 +11,10 @@ export async function prepareProjectLauncher(
 ): Promise<string | null> {
   const workspace = project.projects.workspace.getState();
   let path = workbench.navigation.getState().contextPath ?? workspace.selectedPath ?? workspace.activePath ?? workspace.recentWorkspaces[0]?.path;
-  if (path && !await host.commands.pathExists(path)) path = undefined;
+  // 项目身份用于导航。本地磁盘校验使用主目录，远端由项目连接流程处理。
+  if (path && !parseRemoteProjectPath(path) && !await host.commands.pathExists(projectFolderPath(path))) {
+    path = undefined;
+  }
   if (!path) {
     await host.window.showAndFocus();
     path = await project.projects.pickDirectory() ?? undefined;

@@ -74,7 +74,6 @@ const quickNotes: ToolPackage = {
   header p { margin: 2px 0 0; font-size: 12px; opacity: .65; }
   .composer { display: grid; gap: 10px; padding: 14px; border: 1px solid color-mix(in srgb, CanvasText 16%, Canvas); border-radius: 14px; background: color-mix(in srgb, CanvasText 4%, Canvas); }
   textarea { width: 100%; min-height: 82px; resize: vertical; padding: 10px 12px; border: 1px solid color-mix(in srgb, CanvasText 20%, Canvas); border-radius: 10px; background: Canvas; color: CanvasText; font: inherit; font-size: 13px; }
-  textarea:focus { outline: 2px solid #3a6fd8; outline-offset: 1px; }
   .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   button { border: 0; border-radius: 9px; padding: 8px 15px; font: inherit; font-size: 13px; cursor: pointer; }
   .primary { background: #3a6fd8; color: #fff; }

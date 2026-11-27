@@ -437,10 +437,6 @@
 .aaw-tools .mg-section-head:hover {
   background: color-mix(in srgb, var(--color-ink) 4%, transparent);
 }
-.aaw-tools .mg-section-head:focus-visible {
-  outline: 2px solid var(--color-info);
-  outline-offset: -2px;
-}
 .aaw-tools .mg-section-title {
   flex: 1;
   min-width: 0;
@@ -540,10 +536,6 @@
   font-size: var(--text-xs);
   color: var(--color-ink);
   background: var(--color-base);
-}
-.aaw-tools .mg-field input:not([type="checkbox"]):focus-visible {
-  outline: 2px solid var(--color-info);
-  outline-offset: 2px;
 }
 .aaw-tools .mg-field.is-toggle {
   grid-template-columns: 1fr auto;
@@ -1621,10 +1613,6 @@
   background: var(--color-base);
   color: var(--color-ink);
   font-size: var(--text-xs);
-}
-.aaw-tools .build-rename input:focus-visible {
-  outline: 2px solid var(--color-info);
-  outline-offset: 1px;
 }
 .aaw-tools .build-rename .build-hint {
   flex: 1 1 100%;

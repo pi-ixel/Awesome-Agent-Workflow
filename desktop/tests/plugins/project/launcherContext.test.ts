@@ -3,15 +3,16 @@ import { prepareProjectLauncher } from "../../../src/plugins/project/service.ts"
 import type { ProjectService } from "../../../src/plugins/project/service.ts";
 import type { WorkbenchService } from "../../../src/plugins/workbench/service.ts";
 import type { HostService } from "../../../src/plugins/host/service.ts";
+import { formatRemoteProjectPath, newProjectPath } from "../../../src/shared/panelPaths.ts";
 
-function fixture() {
+function fixture(recentPath = "E:/demo") {
   let path: string | null = null;
   let visible = false;
   const startNewSession = vi.fn((next: string) => { path = next; visible = true; return Promise.resolve({ ok: false, reason: "agent offline" }); });
   const pickDirectory = vi.fn().mockResolvedValue(null);
   const project = {
     isActive: () => true,
-    projects: { workspace: { getState: () => ({ selectedPath: null, activePath: null, recentWorkspaces: [{ path: "E:/demo" }] }) },
+    projects: { workspace: { getState: () => ({ selectedPath: null, activePath: null, recentWorkspaces: [{ path: recentPath }] }) },
       selectWorkspace: vi.fn(), registerProject: vi.fn(), pickDirectory },
     sessions: { startNewSession, isConversationVisible: () => visible, showConversation: vi.fn() },
     conversation: { foreground: { session: { getState: () => ({ activeSessionId: null }) } } },
@@ -41,4 +42,26 @@ it("opens a project for management without creating a session and respects proje
   expect(await prepareProjectLauncher(f.project, f.workbench, f.host, true)).toBeNull();
   expect(f.pickDirectory).toHaveBeenCalledOnce();
   expect(f.startNewSession).not.toHaveBeenCalled();
+});
+
+it("keeps the multi-folder project's identity while validating its local main folder", async () => {
+  const primary = "E:/demo";
+  const path = newProjectPath(primary);
+  const f = fixture(path);
+  f.pathExists.mockImplementation((candidate: string) => Promise.resolve(candidate === primary));
+
+  expect(await prepareProjectLauncher(f.project, f.workbench, f.host, true)).toBe(path);
+  expect(f.pathExists).toHaveBeenCalledWith(primary);
+  expect(f.startNewSession).toHaveBeenCalledWith(path);
+  expect(f.pickDirectory).not.toHaveBeenCalled();
+});
+
+it("routes a remote project without a local disk probe", async () => {
+  const path = newProjectPath(formatRemoteProjectPath("ssh-demo", "/srv/app"));
+  const f = fixture(path);
+
+  expect(await prepareProjectLauncher(f.project, f.workbench, f.host, false)).toBe(path);
+  expect(f.workbench.navigation.getState().contextPath).toBe(path);
+  expect(f.pathExists).not.toHaveBeenCalled();
+  expect(f.pickDirectory).not.toHaveBeenCalled();
 });
