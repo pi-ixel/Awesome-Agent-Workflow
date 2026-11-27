@@ -238,6 +238,7 @@ export interface HostStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
   setConfigurationItem?(key: string, value: string): Promise<void>;
+  setConfigurationItems?(changes: Readonly<Record<string, string>>): Promise<void>;
   removeItem?(key: string): void;
 }
 

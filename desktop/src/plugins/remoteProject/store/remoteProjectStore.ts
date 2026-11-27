@@ -9,6 +9,8 @@ import {
 } from "../../../shared/panelPaths.ts";
 import type {
   RemoteProjectRecord,
+  RemoteProjectGroup,
+  SaveRemoteProjectGroup,
   RemoteProjectStoreSnapshot,
 } from "../types.ts";
 
@@ -138,9 +140,12 @@ export function createRemoteProjectStore(storage: HostStorage, logger: Logger) {
     );
     return result;
   }
-  async function persist(next: RemoteProjectStoreSnapshot) {
+  function serialize(next: RemoteProjectStoreSnapshot): string {
     const payload: PersistedRemoteProjects = { version: 1, ...next };
-    const value = JSON.stringify(payload);
+    return JSON.stringify(payload);
+  }
+  async function persist(next: RemoteProjectStoreSnapshot) {
+    const value = serialize(next);
     if (storage.setConfigurationItem)
       await storage.setConfigurationItem(remoteProjectsKey, value);
     else storage.setItem(remoteProjectsKey, value);
@@ -205,7 +210,8 @@ export function createRemoteProjectStore(storage: HostStorage, logger: Logger) {
     name: string | undefined,
     relatedRoots: readonly string[],
     repairPath?: string,
-  ): Promise<{ record: RemoteProjectRecord; relatedPaths: readonly string[] }> {
+    save?: SaveRemoteProjectGroup,
+  ): Promise<RemoteProjectGroup> {
     return enqueue(async () => {
       const id = connectionId.trim();
       const cleanedRoot = cleanRemoteRoot(remoteRoot);
@@ -266,11 +272,14 @@ export function createRemoteProjectStore(storage: HostStorage, logger: Logger) {
         }
         relatedPaths.push(child.workspacePath);
       }
-      await persist({
+      const next = {
         records,
         recentDirsByConnection: recentWith(state, id, cleanedRoot),
-      });
-      return { record, relatedPaths };
+      };
+      const group = { record, relatedPaths };
+      if (save) await save(group, { [remoteProjectsKey]: serialize(next) }, () => store.setState(next));
+      else await persist(next);
+      return group;
     });
   }
 
@@ -283,6 +292,55 @@ export function createRemoteProjectStore(storage: HostStorage, logger: Logger) {
     return (
       await saveProjectGroup(connectionId, remoteRoot, name, [], repairPath)
     ).record;
+  }
+
+  function repairProjectGroup(
+    path: string,
+    connectionId: string,
+    relatedPaths: readonly string[],
+    checkDirectory: (root: string) => Promise<void>,
+  ): Promise<RemoteProjectRecord> {
+    return enqueue(async () => {
+      const id = connectionId.trim();
+      const state = store.getState();
+      const now = new Date().toISOString();
+      const records = [path, ...relatedPaths].map<RemoteProjectRecord>((folder, index) => {
+        const target = parseRemoteProjectPath(folder);
+        if (!id || !target) throw new Error("无效的远程项目连接或目录");
+        const { projectId, remotePath: remoteRoot } = target;
+        const existing = getById(projectId);
+        if (
+          existing &&
+          (existing.connectionId !== id || existing.remoteRoot !== remoteRoot)
+        )
+          throw new Error("请使用项目中已绑定的 SSH 连接");
+        return existing ?? {
+          projectId,
+          connectionId: id,
+          remoteRoot,
+          workspacePath: formatRemoteProjectPath(projectId, remoteRoot),
+          agentCwd: `remote-projects/${projectId}`,
+          name: defaultProjectName(remoteRoot),
+          createdAt: now,
+          lastOpenedAt: now,
+          ...(index > 0 && { associationOnly: true }),
+        };
+      });
+      const [primary] = records;
+      if (
+        !primary ||
+        new Set(records.map(({ projectId }) => projectId)).size !== records.length
+      )
+        throw new Error("远程项目目录记录重复");
+      const missing = records.filter(({ projectId }) => !getById(projectId));
+      if (!missing.length) throw new Error("该项目无需修复，请重新打开项目");
+      await Promise.all(records.map(({ remoteRoot }) => checkDirectory(remoteRoot)));
+      await persist({
+        records: [...missing, ...state.records],
+        recentDirsByConnection: recentWith(state, id, primary.remoteRoot),
+      });
+      return primary;
+    });
   }
 
   function removeProjectByPath(
@@ -331,6 +389,7 @@ export function createRemoteProjectStore(storage: HostStorage, logger: Logger) {
     listProjectsForConnection,
     addProject,
     saveProjectGroup,
+    repairProjectGroup,
     removeProjectByPath,
     removeConnectionMetadata,
     recordRecentDir,

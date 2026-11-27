@@ -242,6 +242,10 @@ export interface WorkbenchContributions {
     id: "filesystem";
     inspect(path: string): Promise<NavigationTarget>;
   };
+  pathScopes: {
+    id: string;
+    associatedRoot(project: string, path: string): string | undefined;
+  };
   /** 按语言接管 Markdown 围栏代码块的渲染（如 ```visual 讲解图）。 */
   markdownCodeRenderers: MarkdownCodeRenderer;
 }

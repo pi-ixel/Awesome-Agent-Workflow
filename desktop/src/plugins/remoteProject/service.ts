@@ -13,6 +13,8 @@ import type {
   RemoteFileWriteResult,
   RemoteMcpBindResult,
   RemoteProjectRecord,
+  RemoteProjectGroup,
+  SaveRemoteProjectGroup,
   RemoteProjectStoreSnapshot,
   RemoteProjectUi,
   RemoteTerminalPrepareResult,
@@ -45,10 +47,12 @@ export interface RemoteProjectService {
     name: string | undefined,
     relatedRoots: readonly string[],
     existingPath?: string,
-  ): Promise<{ record: RemoteProjectRecord; relatedPaths: readonly string[] }>;
+    save?: SaveRemoteProjectGroup,
+  ): Promise<RemoteProjectGroup>;
   repairProject(
     path: string,
     connectionId: string,
+    relatedPaths?: readonly string[],
   ): Promise<RemoteProjectRecord>;
   removeProjectByPath(path: string, retainAssociation?: boolean): Promise<void>;
   recordRecentDir(connectionId: string, dirPath: string): Promise<void>;

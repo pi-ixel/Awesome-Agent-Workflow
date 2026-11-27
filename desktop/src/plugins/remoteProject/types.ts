@@ -110,6 +110,17 @@ export interface RemoteProjectRecord {
   readonly lastOpenedAt: string;
 }
 
+export interface RemoteProjectGroup {
+  readonly record: RemoteProjectRecord;
+  readonly relatedPaths: readonly string[];
+}
+
+export type SaveRemoteProjectGroup = (
+  group: RemoteProjectGroup,
+  configuration: Readonly<Record<string, string>>,
+  publishBinding: () => void,
+) => Promise<void>;
+
 export interface RemoteProjectStoreSnapshot {
   readonly records: readonly RemoteProjectRecord[];
   readonly recentDirsByConnection: Readonly<Record<string, readonly string[]>>;

@@ -45,3 +45,43 @@ it("从已满的 WebView 迁出旧绑定，并且只在原生写入成功后发�
     localStorage.removeItem(remoteProjectsKey);
   }
 });
+
+it("等待旧工作区写入，将远程绑定与工作区配置交给同一次原生写入", async () => {
+  const workspace = "aaw-desktop/workspace/v1";
+  let finishOlder!: () => void;
+  const older = new Promise<void>((resolve) => {
+    finishOlder = resolve;
+  });
+  const changes = {
+    [workspace]: "new workspace",
+    [remoteProjectsKey]: "new binding",
+  };
+  const native = vi
+    .mocked(invoke)
+    .mockReset()
+    .mockImplementation((command, args) => {
+      if (command === "storage_configuration_load") return Promise.resolve({});
+      const values = (args as { changes?: Record<string, string> } | undefined)
+        ?.changes;
+      if (values?.[workspace] === "recent") return older;
+      return Promise.resolve(undefined);
+    });
+  await loadNativeConfiguration();
+  native.mockClear();
+  webviewStorage.setItem(workspace, "recent");
+  const saving = webviewStorage.setConfigurationItems!(changes);
+  await vi.waitFor(() => expect(native).toHaveBeenCalledOnce());
+  expect(native).toHaveBeenCalledWith("storage_configuration_write", {
+    changes: { [workspace]: "recent" },
+    conversationText: false,
+  });
+  finishOlder();
+  await saving;
+  expect(native.mock.calls).toHaveLength(2);
+  expect(native).toHaveBeenLastCalledWith("storage_configuration_write", {
+    changes,
+    conversationText: false,
+  });
+  expect(webviewStorage.getItem(workspace)).toBe("new workspace");
+  expect(webviewStorage.getItem(remoteProjectsKey)).toBe("new binding");
+});

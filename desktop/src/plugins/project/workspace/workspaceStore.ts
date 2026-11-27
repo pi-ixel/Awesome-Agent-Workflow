@@ -23,7 +23,7 @@ import { sessionPinKey, parseSessionPinKey } from "../sessions/sessionPin.ts";
 import { createStore } from "zustand";
 import { createSnapshotView, type ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
 
-import { createLogger, type Logger } from "../../../shared/logging/logger.ts";
+import { createLogger } from "../../../shared/logging/logger.ts";
 import {
   isAbsolutePath,
   newProjectPath,
@@ -36,6 +36,7 @@ import { knownWorkspacePaths } from "./knownPaths.ts";
 import type { HostStorage } from "../../host/types.ts";
 import { defaultToolPaths, emptyWorkspace } from "./types.ts";
 import type {
+  ProjectFolderSave,
   ProjectFolders,
   WorkspaceEntry,
   WorkspaceSnapshot,
@@ -210,28 +211,17 @@ function findProjectByFolders(
   });
 }
 
-function writePersisted(
-  storage: HostStorage,
-  state: WorkspaceStoreState,
-  logger: Logger,
-): void {
-  try {
-    const payload: PersistedShape = {
-      version: 1,
-      recent: state.recentWorkspaces,
-      favorites: state.pinnedPaths,
-      pinnedSessions: state.pinnedSessions,
-      starredSessions: state.starredSessions,
-      toolPaths: state.toolPaths,
-      projectFolders: state.projectFolders,
-    };
-    storage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  } catch (error) {
-    // 隐私模式 / 存储满：仅记录，不影响功能
-    logger.warn("项目列表持久化写入失败", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+function serializeWorkspace(state: WorkspaceSnapshot): string {
+  const payload: PersistedShape = {
+    version: 1,
+    recent: state.recentWorkspaces,
+    favorites: state.pinnedPaths,
+    pinnedSessions: state.pinnedSessions,
+    starredSessions: state.starredSessions,
+    toolPaths: state.toolPaths,
+    projectFolders: state.projectFolders,
+  };
+  return JSON.stringify(payload);
 }
 
 /** 已有项目原位更新时间；只有新增项目置顶，避免切换时侧栏跳动。 */
@@ -239,9 +229,9 @@ function withRecentEntry(
   recent: readonly WorkspaceEntry[],
   path: string,
   configured?: WorkspaceSnapshot["projectFolders"],
+  lastOpenedAt = new Date().toISOString(),
 ): readonly WorkspaceEntry[] {
   const key = pathKey(path);
-  const lastOpenedAt = new Date().toISOString();
   if (recent.some((entry) => pathKey(entry.path) === key)) {
     return recent.map((entry) =>
       pathKey(entry.path) === key ? { ...entry, lastOpenedAt } : entry,
@@ -250,6 +240,42 @@ function withRecentEntry(
   return [{ path, lastOpenedAt }, ...recent].filter(
     (entry, index) => index < RECENT_LIMIT || configured?.[pathKey(entry.path)],
   );
+}
+
+function prepareRegistration(state: WorkspaceSnapshot, path: string, folders?: ProjectFolders) {
+  const primary = path.trim();
+  if (!primary) throw new Error("请选择主目录");
+  const config = folders ? normalizeProjectFolders(primary, folders) : undefined;
+  if (config && findProjectByFolders(state, primary, config.relatedPaths))
+    throw new Error("这个主目录和关联目录的组合已有项目");
+  const saved = config && findProjectByFolders(
+    state, primary, config.relatedPaths, undefined, Object.keys(state.projectFolders ?? {}),
+  );
+  const needsId = config && (config.relatedPaths.length > 0 || state.projectFolders?.[pathKey(primary)]);
+  const target = saved || (needsId ? newProjectPath(primary) : primary);
+  const openedAt = new Date().toISOString();
+  return {
+    target,
+    apply: (current: WorkspaceSnapshot) => ({
+      selectedPath: target,
+      recentWorkspaces: withRecentEntry(current.recentWorkspaces, target, current.projectFolders, openedAt),
+      ...(config && { projectFolders: { ...current.projectFolders, [pathKey(target)]: config } }),
+    }),
+  };
+}
+
+function prepareFolderEdit(state: WorkspaceSnapshot, path: string, folders: ProjectFolders) {
+  const config = normalizeProjectFolders(path, folders);
+  if (findProjectByFolders(state, path, config.relatedPaths, path, [
+    ...knownWorkspacePaths(state), ...Object.keys(state.projectFolders ?? {}),
+  ]))
+    throw new Error("这个主目录和关联目录的组合已有项目");
+  return {
+    target: path,
+    apply: (current: WorkspaceSnapshot) => ({
+      projectFolders: { ...current.projectFolders, [pathKey(path)]: config },
+    }),
+  };
 }
 
 // --------------------------------------------------------------- store 本体
@@ -292,45 +318,63 @@ export function createWorkspaceStore(
 ) {
   const lifecycle = new AbortController();
   const { signal } = lifecycle;
+  let savingProject = false;
+  let workspaceChangedWhileSaving = false;
+  function persistWorkspace(): void {
+    if (signal.aborted) return;
+    // 确认写入期间，普通工作区写入不能把旧项目状态盖回磁盘。
+    if (savingProject) {
+      workspaceChangedWhileSaving = true;
+      return;
+    }
+    try {
+      storage.setItem(STORAGE_KEY, serializeWorkspace(store.getState()));
+    } catch (error) {
+      logger.warn("项目列表持久化写入失败", { error: String(error) });
+    }
+  }
+  function assertProjectWritable(): void {
+    if (signal.aborted) throw new Error("项目工作区已关闭");
+    if (savingProject) throw new Error("项目正在保存，请稍后重试");
+  }
+  async function saveProjectFolders(path: string, folders: ProjectFolders, options: ProjectFolderSave): Promise<string> {
+    assertProjectWritable();
+    if (!storage.setConfigurationItems) throw new Error("项目配置存储未就绪");
+    const state = store.getState();
+    const plan = options.edit ? prepareFolderEdit(state, path, folders) : prepareRegistration(state, path, folders);
+    savingProject = true;
+    try {
+      await storage.setConfigurationItems({
+        ...options.configuration,
+        [STORAGE_KEY]: serializeWorkspace({ ...state, ...plan.apply(state) }),
+      });
+      options.publishBinding();
+      if (!signal.aborted) store.setState(plan.apply);
+      return plan.target;
+    } finally {
+      savingProject = false;
+      if (workspaceChangedWhileSaving) {
+        workspaceChangedWhileSaving = false;
+        persistWorkspace();
+      }
+    }
+  }
   const store = createStore<WorkspaceStoreState>()((set, get) => ({
     ...emptyWorkspace,
 
     registerProject: (path, folders) => {
-      if (signal.aborted) throw new Error("项目工作区已关闭");
-      const primary = path.trim();
-      if (!primary) throw new Error("请选择主目录");
-      const config = folders ? normalizeProjectFolders(primary, folders) : undefined;
-      if (config && findProjectByFolders(get(), primary, config.relatedPaths))
-        throw new Error("这个主目录和关联目录的组合已有项目");
-      const saved = config && findProjectByFolders(
-        get(), primary, config.relatedPaths, undefined, Object.keys(get().projectFolders ?? {}),
-      );
-      // 单目录沿用原目录键，可恢复以前移出列表但仍保留的本地会话。
-      const needsId = config && (config.relatedPaths.length > 0 || get().projectFolders?.[pathKey(primary)]);
-      const target = saved || (needsId ? newProjectPath(primary) : primary);
-      set((state) => ({
-        selectedPath: target,
-        recentWorkspaces: withRecentEntry(state.recentWorkspaces, target, state.projectFolders),
-        ...(config && {
-          projectFolders: { ...state.projectFolders, [pathKey(target)]: config },
-        }),
-      }));
-      writePersisted(storage, get(), logger);
-      return target;
+      assertProjectWritable();
+      const plan = prepareRegistration(get(), path, folders);
+      set(plan.apply);
+      persistWorkspace();
+      return plan.target;
     },
 
     updateProjectFolders: (path, folders) => {
       if (signal.aborted) return;
-      const config = normalizeProjectFolders(path, folders);
-      const state = get();
-      if (findProjectByFolders(state, path, config.relatedPaths, path, [
-        ...knownWorkspacePaths(state), ...Object.keys(state.projectFolders ?? {}),
-      ]))
-        throw new Error("这个主目录和关联目录的组合已有项目");
-      set((state) => ({
-        projectFolders: { ...state.projectFolders, [pathKey(path)]: config },
-      }));
-      writePersisted(storage, get(), logger);
+      assertProjectWritable();
+      set(prepareFolderEdit(get(), path, folders).apply);
+      persistWorkspace();
     },
 
     selectWorkspace: (path) => {
@@ -347,7 +391,7 @@ export function createWorkspaceStore(
           state.projectFolders,
         ),
       }));
-      if (!signal.aborted) writePersisted(storage, get(), logger);
+      persistWorkspace();
       logger.info("已选择项目", { path: trimmed });
     },
 
@@ -371,7 +415,7 @@ export function createWorkspaceStore(
           state.projectFolders,
         ),
       }));
-      if (!signal.aborted) writePersisted(storage, get(), logger);
+      persistWorkspace();
       logger.info("已打开项目（绑定 ACP session cwd）", { path: target });
     },
 
@@ -413,7 +457,7 @@ export function createWorkspaceStore(
           ? state.pinnedPaths.filter((item) => item !== path)
           : [...state.pinnedPaths, path],
       }));
-      if (!signal.aborted) writePersisted(storage, get(), logger);
+      persistWorkspace();
     },
 
     // 会话级置顶（ZCode task.pinned）：新置顶插到最前（置顶任务带 = 最新
@@ -426,7 +470,7 @@ export function createWorkspaceStore(
           ? state.pinnedSessions.filter((item) => item !== key)
           : [key, ...state.pinnedSessions],
       }));
-      if (!signal.aborted) writePersisted(storage, get(), logger);
+      persistWorkspace();
     },
 
     toggleSessionStarred: (path, sessionId, agentKey) => {
@@ -437,7 +481,7 @@ export function createWorkspaceStore(
           ? state.starredSessions.filter((item) => item !== key)
           : [...state.starredSessions, key],
       }));
-      if (!signal.aborted) writePersisted(storage, get(), logger);
+      persistWorkspace();
     },
 
     removeFromRecent: (path) => {
@@ -466,13 +510,13 @@ export function createWorkspaceStore(
         ...(matches(state.activePath) ? { activePath: null } : {}),
         ...(matches(state.lastConnectError?.path ?? null) ? { lastConnectError: null } : {}),
       }));
-      if (!signal.aborted) writePersisted(storage, get(), logger);
+      persistWorkspace();
     },
 
     setToolPaths: (paths) => {
       if (signal.aborted) return;
       set({ toolPaths: paths });
-      if (!signal.aborted) writePersisted(storage, get(), logger);
+      persistWorkspace();
       logger.info("工具路径已更新", { ...paths });
     },
 
@@ -508,7 +552,7 @@ export function createWorkspaceStore(
   return {
     store,
     view: view.snapshot,
-    commands: workspaceCommands(store),
+    commands: { ...workspaceCommands(store), saveProjectFolders },
     dispose() {
       if (signal.aborted) return;
       lifecycle.abort();

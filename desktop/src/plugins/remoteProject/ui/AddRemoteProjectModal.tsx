@@ -37,6 +37,7 @@ export interface AddRemoteProjectModalProps {
   readonly service: RemoteProjectService;
   readonly onClose: () => void;
   readonly repairPath?: string;
+  readonly repairRelatedPaths?: readonly string[];
   readonly onSave: (
     deviceId: string,
     name: string,
@@ -61,6 +62,7 @@ export function CreateProjectFormBody({
   service,
   onClose,
   repairPath,
+  repairRelatedPaths,
   onSavingChange,
   onSave,
   onPickLocalDirectory,
@@ -72,10 +74,6 @@ export function CreateProjectFormBody({
   readonly onSavingChange?: (isSaving: boolean) => void;
 }) {
   const supportsLocal = !repairPath && Boolean(onPickLocalDirectory);
-  const repairRoot = repairPath
-    ? parseRemoteProjectPath(repairPath)?.remotePath
-    : undefined;
-
   const [projectName, setProjectName] = useState(edit?.name);
   const [connections, setConnections] = useState<
     readonly RemoteConnectionDTO[]
@@ -92,8 +90,14 @@ export function CreateProjectFormBody({
     readonly trigger?: HTMLElement;
   } | null>(null);
 
-  const [folders, setFolders] = useState<readonly string[]>(
-    edit?.folders ?? (repairRoot ? [repairRoot] : []),
+  const [folders, setFolders] = useState<readonly string[]>(() =>
+    edit?.folders ??
+    (repairPath
+      ? [repairPath, ...(repairRelatedPaths ?? [])].flatMap((path) => {
+          const folder = parseRemoteProjectPath(path);
+          return folder ? [folder.remotePath] : [];
+        })
+      : []),
   );
   const [isPicking, setIsPicking] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -359,7 +363,7 @@ export function CreateProjectFormBody({
           hideName={Boolean(repairPath)}
           disabled={busy}
           onNameChange={setProjectName}
-          onFoldersChange={setFolders}
+          onFoldersChange={repairPath ? undefined : setFolders}
           onPick={repairPath ? undefined : () => void handlePickFolder()}
         />
         {!hasSaveHandler && (

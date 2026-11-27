@@ -159,19 +159,22 @@ describe("AddRemoteProjectModal", () => {
         onClose={onClose}
         onSave={onSave}
         repairPath={formatRemoteProjectPath("rp_original", "/srv/repo")}
+        repairRelatedPaths={[formatRemoteProjectPath("rp_library", "/srv/library")]}
         onPickLocalDirectory={vi.fn()}
       />,
     );
     const repair = screen.getByRole("button", { name: "修复连接" });
     expect(repair).toBeDisabled();
     expect(screen.queryByRole("button", { name: "添加文件夹" })).toBeNull();
+    expect(screen.getByText("/srv/library")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "移除 library" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /切换设备/ }));
     expect(screen.queryByRole("menuitemradio", { name: "此电脑" })).toBeNull();
     fireEvent.click(
       await screen.findByRole("menuitemradio", { name: /Dev Alice/ }),
     );
     fireEvent.click(repair);
-    expect(onSave).toHaveBeenCalledWith("conn-alice", "repo", "/srv/repo", []);
+    expect(onSave).toHaveBeenCalledWith("conn-alice", "repo", "/srv/repo", ["/srv/library"]);
     expect(await screen.findByText("写入失败")).toBeInTheDocument();
     expect(screen.getByText("/srv/repo")).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
