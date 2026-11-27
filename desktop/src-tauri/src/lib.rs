@@ -278,7 +278,7 @@ pub fn run() {
             mcp_management::mcp_inspection_read,
             mcp_management::mcp_inspection_save,
             mcp_management::mcp_browser_tools,
-            mcp_management::mcp_browser_inspect,
+            mcp_management::mcp_builtin_inspect,
             mcp_management::mcp_browser_set_tools,
             mcp_management::mcp_managed_set_tools,
             mcp_management::mcp_test_config,

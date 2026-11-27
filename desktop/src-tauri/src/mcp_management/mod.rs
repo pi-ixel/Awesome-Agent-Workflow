@@ -1,5 +1,6 @@
 mod codeagent;
 mod stdio_probe;
+mod builtin_probe;
 pub(crate) mod inspection;
 mod managed;
 mod native;
@@ -470,25 +471,14 @@ fn inspection_result(
 }
 
 #[tauri::command]
-pub async fn mcp_browser_inspect(
+pub async fn mcp_builtin_inspect(
     app: AppHandle,
     webview: Webview,
-    browser: tauri::State<'_, crate::browser::host::BrowserHost>,
+    target: builtin_probe::Target,
 ) -> Result<inspection::Inspection> {
     main_only(&webview)?;
     let started = std::time::Instant::now();
-    let endpoint = crate::browser::mcp::browser_mcp_create(app, browser.clone()).await?;
-    let config = HttpConfig {
-        name: endpoint.name,
-        url: endpoint.url,
-        headers: BTreeMap::from([("Authorization".into(), format!("Bearer {}", endpoint.token))]),
-        options: BTreeMap::new(),
-    };
-    let result = tokio::time::timeout(std::time::Duration::from_secs(10), proxy::inspect(config))
-        .await
-        .unwrap_or_else(|_| Err("浏览器 MCP 检测超时".into()));
-    let _ = crate::browser::mcp::browser_mcp_revoke(endpoint.endpoint_id, browser);
-    Ok(inspection_result(started, result))
+    Ok(inspection_result(started, builtin_probe::inspect(app, target).await))
 }
 
 #[tauri::command]

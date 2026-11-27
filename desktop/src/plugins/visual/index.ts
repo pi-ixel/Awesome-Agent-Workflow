@@ -5,7 +5,10 @@ import type {} from "../project/service.ts";
 import type {} from "../mcp/service.ts";
 import { VISUAL_LANGUAGES } from "./config.ts";
 import { clearVisualCaches } from "./render/caches.ts";
-import { createVisualGuideTools } from "./session/guideTools.ts";
+import {
+  createVisualGuideTools,
+  visualGuideServer,
+} from "./session/guideTools.ts";
 
 export const name = "visual";
 export const inject = [];
@@ -15,7 +18,8 @@ export function apply(ctx: Context): void {
   // 解析与高度缓存只在内存中；卸载时清空
   ctx.effect(() => clearVisualCaches, "visual:resources");
   ctx.inject(["host", "mcp"], (scoped) => {
-    if (scoped.host.visualGuide)
+    const guide = scoped.host.visualGuide;
+    if (guide)
       scoped.effect(
         () =>
           scoped.mcp.registerBuiltin({
@@ -23,6 +27,11 @@ export function apply(ctx: Context): void {
             name: "可视化讲解",
             description: "提供讲解图和交互演示的写法。",
             scope: "支持 HTTP MCP 的 Desktop 会话",
+            probe: {
+              scope: "desktop",
+              transports: ["http"],
+              acquire: async () => ({ server: await visualGuideServer(guide) }),
+            },
           }),
         "visual:mcp-catalog",
       );

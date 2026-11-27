@@ -1,5 +1,6 @@
 import type { ProjectFolders, ProjectFolderSave } from "./workspace/types.ts";
 import type { ComponentType, ReactNode } from "react";
+import type { McpServer } from "../../contracts/acp/protocol.ts";
 import type { SessionHandoff } from "./conversation/types.ts";
 import type { AcpSessionEvent } from "../acpRuntime/events.ts";
 import type {
@@ -15,6 +16,11 @@ import type {
 export { projectOverviewPageId } from "./workspace/pageIds.ts";
 export { knownWorkspacePaths } from "./workspace/knownPaths.ts";
 import type { ForegroundSessionListener } from "./events.ts";
+
+export interface SessionMcpTargets {
+  readonly generation: number;
+  readonly servers: readonly McpServer[];
+}
 import type { WorkspaceToolPaths, WorkspaceView } from "./workspace/types.ts";
 import type { AnnotationDraftSnapshot } from "./composer/annotationTypes.ts";
 import type { BrowserElement } from "../../contracts/browser/types.ts";
@@ -179,6 +185,10 @@ export interface ProjectSessions extends Pick<
    * 会话要额外装哪些 MCP 工具（如工作流的交结果工具）。返回的函数撤销登记。
    */
   registerSessionTools(provider: SessionToolProvider): () => void;
+  activeSessionMcpTargets?(
+    sessionId: string,
+    agentKey: string,
+  ): SessionMcpTargets | undefined;
   /**
    * 插件打开（新建或恢复）一个普通会话（ADR 037）：会话由应用持有，出现在
    * 侧栏，用户可以直接对话；打开时不抢前台。返回会话地址；失败时抛出原因。

@@ -42,6 +42,7 @@ export function McpServiceDetails({
   config,
   connection,
   health,
+  inspectionNote,
   tools,
   disabledTools,
   actions,
@@ -57,6 +58,7 @@ export function McpServiceDetails({
   config: unknown;
   connection: readonly (readonly [string, string])[];
   health?: McpInspection;
+  inspectionNote?: string;
   tools?: readonly McpTool[];
   disabledTools: readonly string[];
   actions: ReactNode;
@@ -104,6 +106,11 @@ export function McpServiceDetails({
         </div>
         {description && (
           <p className="break-words text-ui-sm text-ink">{description}</p>
+        )}
+        {inspectionNote && (
+          <p className="break-words text-ui-caption text-ink-mute">
+            {inspectionNote}
+          </p>
         )}
         {health?.ok === false && (
           <p className="break-words text-ui-caption text-danger-ink">

@@ -69,6 +69,7 @@ export const {
   deleteArchivedSession,
   canDeleteArchivedSession,
   registerSessionTools,
+  activeSessionMcpTargets,
   openPluginSessionRuntime,
   closePluginSessionRuntime,
   watchSessionTurns,

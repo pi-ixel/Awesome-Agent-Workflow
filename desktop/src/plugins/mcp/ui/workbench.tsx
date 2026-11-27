@@ -82,6 +82,14 @@ export function McpWorkbench({
         canManageInjected={!!capabilities?.injection}
         canTest={!!capabilities?.testHttp}
         sessionId={sessionId}
+        sessionMcpTargets={
+          sessionId && session.agentKey
+            ? project.sessions.activeSessionMcpTargets?.(
+                sessionId,
+                session.agentKey,
+              )
+            : undefined
+        }
         runtime={
           sessionId && runtime.lastSessionId === sessionId
             ? runtime.runtime

@@ -1,3 +1,5 @@
+import type { McpServer } from "../acp/protocol.ts";
+
 export interface McpProfile {
   readonly id: string | null;
   readonly name: string;
@@ -201,7 +203,7 @@ export interface McpManagementHost {
       tools: readonly McpTool[];
       disabledTools: readonly string[];
     }>;
-    probeBrowser(): Promise<McpInspection>;
+    probeBuiltin(server: McpServer): Promise<McpInspection>;
     setBrowserTools(
       tools: readonly string[],
       enabled: boolean,

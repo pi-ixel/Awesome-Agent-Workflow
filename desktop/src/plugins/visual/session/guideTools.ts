@@ -1,6 +1,21 @@
-import type { McpServer } from "../../../contracts/acp/protocol.ts";
+import type {
+  McpServer,
+  McpServerHttp,
+} from "../../../contracts/acp/protocol.ts";
 import type { VisualGuideHost } from "../../host/types.ts";
 import type { SessionToolProvider } from "../../project/service.ts";
+
+export async function visualGuideServer(
+  guide: VisualGuideHost,
+): Promise<McpServerHttp> {
+  const { name, url, token } = await guide.endpoint();
+  return {
+    type: "http",
+    name,
+    url,
+    headers: [{ name: "Authorization", value: `Bearer ${token}` }],
+  };
+}
 
 /**
  * 可视化演示 MCP 随会话下发（会话附加工具）：只有从 AAW 打开的会话知道 ```visual，
@@ -19,14 +34,6 @@ export function createVisualGuideTools(
       mcp.http !== true
     )
       return [];
-    const { name, url, token } = await guide.endpoint();
-    return [
-      {
-        type: "http",
-        name,
-        url,
-        headers: [{ name: "Authorization", value: `Bearer ${token}` }],
-      },
-    ];
+    return [await visualGuideServer(guide)];
   };
 }

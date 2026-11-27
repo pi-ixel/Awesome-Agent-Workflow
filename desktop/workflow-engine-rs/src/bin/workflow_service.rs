@@ -1155,13 +1155,18 @@ impl Service {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().collect();
-    if args.get(1).map(String::as_str) == Some("--result-mcp") {
+    let mode = args.get(1).map(String::as_str);
+    if matches!(mode, Some("--result-mcp" | "--result-mcp-inspect")) {
         let addr = args.get(2).ok_or("result channel address required")?;
         // The token rides the MCP server's env (ResultChannelOffer.stdio),
         // never the command line.
         let token = std::env::var(aaw_workflow_core::result_channel::RESULT_CHANNEL_TOKEN_ENV)
             .map_err(|_| "result channel token required")?;
-        return aaw_workflow_core::result_channel::serve_mcp(addr, &token)
+        return aaw_workflow_core::result_channel::serve_mcp(
+            addr,
+            &token,
+            mode == Some("--result-mcp-inspect"),
+        )
             .map_err(|e| std::io::Error::other(e).into());
     }
     // 编写工作流的 MCP 工具（ADR 036）：编辑会话里的 AI 用 check_workflow 自己检查草稿。

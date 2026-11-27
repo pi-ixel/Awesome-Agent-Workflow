@@ -181,18 +181,28 @@ export function apply(ctx: Context): void {
 
   ctx.provide(name, service);
   ctx.inject(["mcp"], (scoped) => {
-    scoped.effect(() => scoped.mcp.registerBuiltin({
-      id: "aaw-workflow-authoring",
-      name: "工作流编写",
-      description: "为 AI 编写工作流提供草稿校验工具。",
-      scope: "工作流草稿编辑会话",
-    }), "workflow:authoring-mcp-catalog");
-    scoped.effect(() => scoped.mcp.registerBuiltin({
-      id: "aaw-workflow-result",
-      name: "工作流结果提交",
-      description: "向工作流引擎提交节点执行结果。",
-      scope: "运行中的工作流节点会话",
-    }), "workflow:result-mcp-catalog");
+    scoped.effect(
+      () =>
+        scoped.mcp.registerBuiltin({
+          id: "aaw-workflow-authoring",
+          name: "工作流编写",
+          description: "为 AI 编写工作流提供草稿校验工具。",
+          scope: "工作流草稿编辑会话",
+          probe: { scope: "session", transports: ["stdio"] },
+        }),
+      "workflow:authoring-mcp-catalog",
+    );
+    scoped.effect(
+      () =>
+        scoped.mcp.registerBuiltin({
+          id: "aaw-workflow-result",
+          name: "工作流结果提交",
+          description: "向工作流引擎提交节点执行结果。",
+          scope: "运行中的工作流节点会话",
+          probe: { scope: "session", transports: ["http", "stdio"] },
+        }),
+      "workflow:result-mcp-catalog",
+    );
   });
   ctx.effect(() => () => {
     detachHost();

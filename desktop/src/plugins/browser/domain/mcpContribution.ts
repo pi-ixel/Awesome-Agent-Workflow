@@ -26,9 +26,26 @@ export function browserMcpContribution(
         }
       );
     },
+    probe: {
+      scope: "desktop",
+      transports: ["http"],
+      acquire: async () => {
+        const endpoint = await browser.createMcpEndpoint();
+        return {
+          server: {
+            type: "http",
+            name: endpoint.name,
+            url: endpoint.url,
+            headers: [
+              { name: "Authorization", value: `Bearer ${endpoint.token}` },
+            ],
+          },
+          release: () => browser.revokeMcpEndpoint(endpoint.endpointId),
+        };
+      },
+    },
     tools: inspection && {
       read: () => inspection.browserTools(),
-      probe: () => inspection.probeBrowser(),
       setEnabled: (names, enabled) =>
         inspection.setBrowserTools(names, enabled),
     },
