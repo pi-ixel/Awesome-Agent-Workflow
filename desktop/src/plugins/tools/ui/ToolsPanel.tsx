@@ -11,7 +11,11 @@ import {
 } from "../../../shared/ui/controls.tsx";
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
 import type { ContextMenuEntry } from "../../../shared/ui/ContextMenu.tsx";
-import { SquareTerminalIcon, WrenchIcon } from "../../../shared/ui/icons.tsx";
+import {
+  SquareTerminalIcon,
+  ToolboxIcon,
+  WrenchIcon,
+} from "../../../shared/ui/icons.tsx";
 // 外观由 tools.css 决定，挂共享常量是为了让编辑框守卫识别这两个输入框。
 import {
   composerFieldClass,
@@ -679,7 +683,7 @@ export function ToolsPanel({
       <header className="tools-header border-b border-line px-4 pb-3 pt-5">
         <div className="flex flex-wrap items-center gap-3">
           <span className="flex ui-icon-40 shrink-0 items-center justify-center rounded-popover border border-info/20 bg-info/10 text-info">
-            <WrenchIcon className="ui-icon-20" />
+            <ToolboxIcon className="ui-icon-20" />
           </span>
           <div className="tools-title mr-auto">
             <h2 className="text-ui-xl font-semibold text-ink">工具中心</h2>

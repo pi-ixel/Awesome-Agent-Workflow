@@ -18,7 +18,7 @@ const icons = {
   workflow:
     '<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/><path d="M6.5 10v5a3 3 0 0 0 3 3H14M14 6h4v4"/>',
   library:
-    '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 17.5h7m-3.5-3.5v7"/>',
+    '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M3 12h18M8 11v3m8-3v3"/>',
   tool: '<path d="m8 7-5 5 5 5m8-10 5 5-5 5m-3-13-2 16"/>',
 };
 function status(text) {

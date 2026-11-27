@@ -1,6 +1,6 @@
 import type { Context } from "cordis";
 import { useStore } from "zustand";
-import { WrenchIcon } from "../../../shared/ui/icons.tsx";
+import { ToolboxIcon, WrenchIcon } from "../../../shared/ui/icons.tsx";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import type { PanelViewProps } from "../../workbench/types.ts";
 import { ToolsPanel } from "./ToolsPanel.tsx";
@@ -198,7 +198,7 @@ export function apply(ctx: Context): void {
           label: "工具",
           description: "打开和管理个人工具",
           searchHint: "tools plugins",
-          Icon: WrenchIcon,
+          Icon: ToolboxIcon,
           order: 30,
           prepareGlobalOpen: () =>
             prepareProjectLauncher(ctx.project, workbench, host, false),

@@ -1187,7 +1187,7 @@
       "内容与专用绘制": ["apply/panels/previewKind/View"]
     },
     "targets": [
-      "apply/panels/\"tools\"/Icon → shared/ui/icons.tsx#WrenchIcon",
+      "apply/panels/\"tools\"/Icon → shared/ui/icons.tsx#ToolboxIcon",
       "apply/panels/\"tools\"/View → plugins/tools/ui/workbench.tsx#apply/ToolsView",
       "apply/panels/previewKind/View → (inline)"
     ]
@@ -2017,6 +2017,7 @@
         "StarFilledIcon",
         "StarOutlineIcon",
         "TerminalIcon",
+        "ToolboxIcon",
         "TrashIcon",
         "TriangleAlertIcon",
         "WidthFullIcon",

@@ -132,7 +132,7 @@ fn entries_of(app: &AppHandle) -> Result<Value, String> {
             "source": "builtin",
             "scope": "builtin",
             "icon": if target == "aaw" { "workflow" } else { "library" },
-            "glyph": if target == "aaw" { "W" } else { "T" },
+            "glyph": (target == "aaw").then_some("W"),
             "tone": catalog::tone_of(id),
             "recent": 0,
             "pinned": pinned.iter().any(|item| item == id),
