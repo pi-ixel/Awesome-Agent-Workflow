@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import {
   actionButtonGeometry,
+  actionInkCenterTolerance,
   expectCenteredAction,
 } from "./actionButtonGeometry.ts";
 test.setTimeout(60_000);
@@ -52,10 +53,14 @@ for (const theme of ["warm", "dark"]) {
       contentType: "image/png",
     });
 
+    const { inkY } = await actionButtonGeometry(emptyAction);
+    const direction = inkY < 0 ? -1 : 1;
     const mutation = await page.addStyleTag({
-      content: ".action-button-label { inset-block-start: -0.5px !important; }",
+      content: `.action-button-label { translate: 0 ${direction}px; }`,
     });
-    expect((await actionButtonGeometry(emptyAction)).inkY).toBeLessThan(-0.875);
+    const shifted = await actionButtonGeometry(emptyAction);
+    expect((shifted.inkY - inkY) * direction).toBeCloseTo(1, 2);
+    expect(Math.abs(shifted.inkY)).toBeGreaterThan(actionInkCenterTolerance);
     await mutation.evaluate((style) => {
       style.parentNode?.removeChild(style);
     });

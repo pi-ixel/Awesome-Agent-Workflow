@@ -1,5 +1,7 @@
 import { expect, type Locator } from "@playwright/test";
 
+export const actionInkCenterTolerance = 0.875;
+
 export async function actionButtonGeometry(button: Locator) {
   return button.evaluate((element) => {
     const label = element.querySelector<HTMLElement>(
@@ -40,6 +42,6 @@ export async function expectCenteredAction(button: Locator) {
   const geometry = await actionButtonGeometry(button);
   expect(Math.abs(geometry.contentX)).toBeLessThanOrEqual(0.5);
   expect(Math.abs(geometry.iconY)).toBeLessThanOrEqual(0.5);
-  expect(Math.abs(geometry.inkY)).toBeLessThanOrEqual(0.875);
+  expect(Math.abs(geometry.inkY)).toBeLessThanOrEqual(actionInkCenterTolerance);
   return geometry;
 }
