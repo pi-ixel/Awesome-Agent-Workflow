@@ -440,7 +440,7 @@ export function McpView({
         const target = builtinInspection(
           entry,
           sessionMcpTargets,
-          inspector.probeBuiltin,
+          (server) => inspector.probeBuiltin(server),
         );
         if (!target) return [];
         const isSessionTarget = target.generation !== undefined;
