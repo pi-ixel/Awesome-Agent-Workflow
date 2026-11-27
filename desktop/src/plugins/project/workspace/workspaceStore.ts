@@ -39,6 +39,7 @@ import { defaultToolPaths, emptyWorkspace } from "./types.ts";
 import type {
   ProjectFolderSave,
   ProjectFolders,
+  RemovedProject,
   WorkspaceEntry,
   WorkspaceSnapshot,
   WorkspaceStoreState,
@@ -62,6 +63,7 @@ export { sessionPinKey } from "../sessions/sessionPin.ts";
 interface PersistedShape {
   readonly version: 1;
   readonly recent: readonly WorkspaceEntry[];
+  readonly removedProjects?: readonly RemovedProject[];
   readonly favorites: readonly string[];
   /** 可选新增（不升版本，见文件头）：会话级置顶键集合。 */
   readonly pinnedSessions?: readonly string[];
@@ -97,6 +99,7 @@ function sanitizePersisted(
   // 中间载体可变，返回前满足 PersistedShape 的 readonly 形状
   const out: {
     recent?: WorkspaceEntry[];
+    removedProjects?: RemovedProject[];
     favorites?: string[];
     pinnedSessions?: string[];
     starredSessions?: string[];
@@ -119,6 +122,15 @@ function sanitizePersisted(
       }
     }
     out.recent = recent;
+  }
+  if (Array.isArray(record["removedProjects"])) {
+    out.removedProjects = record["removedProjects"].flatMap((item: unknown) => {
+      if (typeof item !== "object" || item === null) return [];
+      const { path, removedAt } = item as Partial<RemovedProject>;
+      return typeof path === "string" && isAbsolutePath(path) &&
+        typeof removedAt === "string" && Number.isFinite(Date.parse(removedAt))
+        ? [{ path, removedAt }] : [];
+    }).sort((a, b) => b.removedAt.localeCompare(a.removedAt));
   }
   if (Array.isArray(record["favorites"])) {
     out.favorites = record["favorites"].filter(
@@ -216,6 +228,7 @@ function serializeWorkspace(state: WorkspaceSnapshot): string {
   const payload: PersistedShape = {
     version: 1,
     recent: state.recentWorkspaces,
+    removedProjects: state.removedProjects,
     favorites: state.pinnedPaths,
     pinnedSessions: state.pinnedSessions,
     starredSessions: state.starredSessions,
@@ -259,6 +272,7 @@ function prepareRegistration(state: WorkspaceSnapshot, path: string, folders?: P
     target,
     apply: (current: WorkspaceSnapshot) => ({
       selectedPath: target,
+      removedProjects: current.removedProjects.filter((entry) => pathKey(entry.path) !== pathKey(target)),
       recentWorkspaces: withRecentEntry(current.recentWorkspaces, target, current.projectFolders, openedAt),
       ...(config && { projectFolders: { ...current.projectFolders, [pathKey(target)]: config } }),
     }),
@@ -293,12 +307,16 @@ export function workspaceCommands(source: ReadonlySnapshot<WorkspaceStoreState>)
     hydrateFromStorage,
     updateProjectFolders,
     renameProject,
+    restoreRemovedProject,
+    forgetRemovedProjects,
   } = source.getState();
   return {
     findProjectByFolders: (primary: string, related: readonly string[], except?: string) =>
       findProjectByFolders(source.getState(), primary, related, except),
     updateProjectFolders,
     renameProject,
+    restoreRemovedProject,
+    forgetRemovedProjects,
     selectWorkspace,
     openWorkspace,
     closeWorkspace,
@@ -345,8 +363,14 @@ export function createWorkspaceStore(
     binding?: ProjectFolderSave,
   ): Promise<void> {
     assertProjectWritable();
-    if (!storage.setConfigurationItems) throw new Error("项目配置存储未就绪");
     const state = store.getState();
+    if (!storage.setConfigurationItems) {
+      if (binding) throw new Error("项目配置存储未就绪");
+      const update = apply(state);
+      storage.setItem(STORAGE_KEY, serializeWorkspace({ ...state, ...update }));
+      store.setState(update);
+      return;
+    }
     savingProject = true;
     try {
       await storage.setConfigurationItems({
@@ -514,12 +538,33 @@ export function createWorkspaceStore(
       persistWorkspace();
     },
 
+    restoreRemovedProject: (path, binding) => {
+      const key = pathKey(path);
+      const openedAt = new Date().toISOString();
+      return saveWorkspaceUpdate((state) => {
+        if (!state.removedProjects.some((entry) => pathKey(entry.path) === key))
+          throw new Error("该项目已不在恢复列表中");
+        return {
+          removedProjects: state.removedProjects.filter((entry) => pathKey(entry.path) !== key),
+          recentWorkspaces: withRecentEntry(state.recentWorkspaces, path, state.projectFolders, openedAt),
+        };
+      }, binding);
+    },
+
+    forgetRemovedProjects: (path) => saveWorkspaceUpdate((state) => ({
+      removedProjects: path === undefined ? [] :
+        state.removedProjects.filter((entry) => pathKey(entry.path) !== pathKey(path)),
+    })),
+
     removeFromRecent: (path) => {
-      if (signal.aborted) return;
       const key = pathKey(path);
       const matches = (candidate: string | null) => candidate !== null && pathKey(candidate) === key;
       const pathPrefix = `${key}\u0000`;
-      set((state) => ({
+      const removedAt = new Date().toISOString();
+      return saveWorkspaceUpdate((state) => ({
+        removedProjects: knownWorkspacePaths(state).some(matches)
+          ? [{ path, removedAt }, ...state.removedProjects.filter((entry) => !matches(entry.path))]
+          : state.removedProjects,
         recentWorkspaces: state.recentWorkspaces.filter(
           (entry) => !matches(entry.path),
         ),
@@ -540,7 +585,6 @@ export function createWorkspaceStore(
         ...(matches(state.activePath) ? { activePath: null } : {}),
         ...(matches(state.lastConnectError?.path ?? null) ? { lastConnectError: null } : {}),
       }));
-      persistWorkspace();
     },
 
     setToolPaths: (paths) => {
@@ -558,6 +602,7 @@ export function createWorkspaceStore(
       }
       set((state) => ({
         recentWorkspaces: persisted.recent ?? state.recentWorkspaces,
+        removedProjects: persisted.removedProjects ?? [],
         pinnedPaths: persisted.favorites ?? state.pinnedPaths,
         pinnedSessions: persisted.pinnedSessions ?? state.pinnedSessions,
         starredSessions: persisted.starredSessions ?? state.starredSessions,
@@ -570,6 +615,7 @@ export function createWorkspaceStore(
   store.getState().hydrateFromStorage();
   const view = createSnapshotView(store, (state): WorkspaceSnapshot => ({
     recentWorkspaces: state.recentWorkspaces,
+    removedProjects: state.removedProjects,
     pinnedPaths: state.pinnedPaths,
     pinnedSessions: state.pinnedSessions,
     starredSessions: state.starredSessions,

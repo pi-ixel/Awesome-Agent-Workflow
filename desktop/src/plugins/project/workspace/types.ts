@@ -15,6 +15,11 @@ export interface WorkspaceEntry {
   readonly lastOpenedAt: string;
 }
 
+export interface RemovedProject {
+  readonly path: string;
+  readonly removedAt: string;
+}
+
 /** 项目目录配置，按逻辑项目归档。 */
 export interface ProjectFolders {
   readonly name: string;
@@ -35,6 +40,7 @@ export interface ConnectError {
 
 export interface WorkspaceSnapshot {
   readonly recentWorkspaces: readonly WorkspaceEntry[];
+  readonly removedProjects: readonly RemovedProject[];
   readonly pinnedPaths: readonly string[];
   /** 会话级置顶集合（sessionPinKey 键；持久化，序 = 置顶先后，最新在前）。 */
   readonly pinnedSessions: readonly string[];
@@ -66,7 +72,9 @@ export interface WorkspaceStoreState extends WorkspaceSnapshot {
     agentKey?: string,
   ) => void;
   toggleSessionStarred: (path: string, sessionId: string, agentKey?: string) => void;
-  removeFromRecent: (path: string) => void;
+  removeFromRecent: (path: string) => Promise<void>;
+  restoreRemovedProject: (path: string, binding?: ProjectFolderSave) => Promise<void>;
+  forgetRemovedProjects: (path?: string) => Promise<void>;
   setToolPaths: (paths: WorkspaceToolPaths) => void;
   /** 连接失败回填入口（realRuntime 调用；UI 据此渲染错误横幅与徽标）。 */
   reportConnectFailure: (path: string, message: string) => void;
@@ -78,6 +86,7 @@ export interface WorkspaceStoreState extends WorkspaceSnapshot {
 
 export const emptyWorkspace: WorkspaceSnapshot = {
   recentWorkspaces: [],
+  removedProjects: [],
   pinnedPaths: [],
   pinnedSessions: [],
   starredSessions: [],

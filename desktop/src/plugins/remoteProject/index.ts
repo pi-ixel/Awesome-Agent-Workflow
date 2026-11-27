@@ -46,6 +46,13 @@ export function apply(ctx: Context): void {
         },
       );
     },
+    async restoreProjectGroup(path, relatedPaths, save) {
+      const primary = store.getByPath(path);
+      if (!primary) return false;
+      const connections = await service.listConnections();
+      if (!connections.some(({ id }) => id === primary.connectionId)) return false;
+      return store.restoreProjectGroup(path, relatedPaths, primary.connectionId, save);
+    },
     removeProjectByPath: store.removeProjectByPath,
     recordRecentDir: store.recordRecentDir,
     async listConnections() {

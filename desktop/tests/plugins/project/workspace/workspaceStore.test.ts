@@ -15,6 +15,7 @@ function resetStore(): void {
   window.localStorage.clear();
   useWorkspaceStore.setState({
     recentWorkspaces: [],
+    removedProjects: [],
     projectFolders: {},
     pinnedPaths: [],
     pinnedSessions: [],
@@ -105,7 +106,7 @@ describe("useWorkspaceStore", () => {
     ).not.toContain(related);
   });
 
-  it("同一个主目录可以注册不同项目，创建和编辑都拒绝重复目录组合", () => {
+  it("同一个主目录可以注册不同项目，创建和编辑都拒绝重复目录组合", async () => {
     const state = useWorkspaceStore.getState();
     const related = ["D:/dev/library", "D:/dev/docs"];
     const single = state.registerProject(DEMO_PATH, { name: "单目录", relatedPaths: [] });
@@ -121,14 +122,38 @@ describe("useWorkspaceStore", () => {
     state.updateProjectFolders(group, { name: "编辑后", relatedPaths: [related[0]!] });
     expect(useWorkspaceStore.getState().projectFolders?.[group])
       .toEqual({ name: "编辑后", relatedPaths: [related[0]] });
-    state.removeFromRecent(group);
+    await state.removeFromRecent(group);
     expect(useWorkspaceStore.getState().recentWorkspaces.map(({ path }) => path)).toEqual([single]);
     state.hydrateFromStorage();
     expect(state.registerProject(DEMO_PATH, { name: "重新添加", relatedPaths: [related[0]!] }))
       .toBe(group);
   });
 
-  it("置顶切换与移除（语义自收藏迁移，数据同源）", () => {
+  it("重启后按原身份加回多目录项目，保持当前项目和清理后的星标", async () => {
+    const state = useWorkspaceStore.getState();
+    const config = { name: "多目录项目", relatedPaths: ["D:/dev/library"] };
+    const group = state.registerProject(DEMO_PATH, config);
+    state.toggleSessionStarred(group, "session", "agent");
+    state.openWorkspace("D:/dev/current");
+    await state.removeFromRecent(group);
+    const restarted = createTestWorkspace().getState();
+    expect(restarted.removedProjects.map((entry) => entry.path)).toEqual([group]);
+    await state.restoreRemovedProject(group);
+    expect(useWorkspaceStore.getState()).toMatchObject({
+      removedProjects: [],
+      activePath: "D:/dev/current",
+      selectedPath: "D:/dev/current",
+      starredSessions: [],
+      projectFolders: { [group]: config },
+    });
+    await state.removeFromRecent(group);
+    await state.forgetRemovedProjects();
+    expect(createTestWorkspace().getState()).toMatchObject({
+      removedProjects: [], projectFolders: { [group]: config },
+    });
+  });
+
+  it("置顶切换与移除（语义自收藏迁移，数据同源）", async () => {
     const store = useWorkspaceStore.getState();
     store.selectWorkspace(DEMO_PATH);
     store.togglePinned(DEMO_PATH);
@@ -137,7 +162,7 @@ describe("useWorkspaceStore", () => {
     expect(useWorkspaceStore.getState().pinnedPaths).toEqual([]);
     // removeFromRecent 同时清最近与置顶
     useWorkspaceStore.getState().togglePinned(DEMO_PATH);
-    useWorkspaceStore.getState().removeFromRecent(DEMO_PATH);
+    await useWorkspaceStore.getState().removeFromRecent(DEMO_PATH);
     expect(useWorkspaceStore.getState().pinnedPaths).toEqual([]);
     expect(useWorkspaceStore.getState().recentWorkspaces).toHaveLength(0);
   });
@@ -164,11 +189,11 @@ describe("useWorkspaceStore", () => {
       ]);
     });
 
-    it("removeFromRecent 连带清掉该项目的会话级置顶（不留幽灵键）", () => {
+    it("removeFromRecent 连带清掉该项目的会话级置顶（不留幽灵键）", async () => {
       useWorkspaceStore.getState().selectWorkspace(DEMO_PATH);
       useWorkspaceStore.getState().toggleSessionPinned(DEMO_PATH, "s-1");
       useWorkspaceStore.getState().toggleSessionPinned(OTHER_PATH, "s-2");
-      useWorkspaceStore.getState().removeFromRecent(DEMO_PATH);
+      await useWorkspaceStore.getState().removeFromRecent(DEMO_PATH);
       expect(useWorkspaceStore.getState().pinnedSessions).toEqual([
         `${OTHER_PATH.toLowerCase()}\u0000s-2`,
       ]);
@@ -215,7 +240,7 @@ describe("useWorkspaceStore", () => {
     });
   });
 
-  it("星标按项目与 Agent 持久化，且不修改全局置顶", () => {
+  it("星标按项目与 Agent 持久化，且不修改全局置顶", async () => {
     const store = useWorkspaceStore.getState();
     store.toggleSessionPinned(DEMO_PATH, "global", "codeagent");
     store.toggleSessionStarred(DEMO_PATH, "same", "codeagent");
@@ -226,7 +251,7 @@ describe("useWorkspaceStore", () => {
     store.toggleSessionStarred("d:/DEV/demo", "same", "icode");
     expect(useWorkspaceStore.getState().starredSessions).toHaveLength(1);
     expect(useWorkspaceStore.getState().pinnedSessions).toHaveLength(1);
-    store.removeFromRecent(DEMO_PATH);
+    await store.removeFromRecent(DEMO_PATH);
     expect(useWorkspaceStore.getState().starredSessions).toEqual([]);
   });
 

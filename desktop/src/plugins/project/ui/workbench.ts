@@ -50,7 +50,9 @@ export function apply(ctx: Context): void {
   let openAddRemoteProject: (() => void) | undefined;
   let renderEditProjectForm:
     ((path: string, onClose: () => void) => ReactNode) | undefined;
-  let renderAddProjectForm: ((onClose: () => void) => ReactNode) | undefined;
+  let renderAddProjectForm: ((onClose: () => void, history?: ReactNode) => ReactNode) | undefined;
+  let restoreRemoteProject: ((path: string) => Promise<boolean>) | undefined;
+  let repairRemoteProject: ((path: string) => void) | undefined;
   let active = true;
   const isCurrent = () => active && project.isActive();
   const navigation = createProjectViewNavigation(workbench, project, {
@@ -64,7 +66,12 @@ export function apply(ctx: Context): void {
     },
     renderEditProjectForm: (path, onClose) =>
       renderEditProjectForm?.(path, onClose) ?? null,
-    renderAddProjectForm: (onClose) => renderAddProjectForm?.(onClose) ?? null,
+    renderAddProjectForm: (onClose, history) => renderAddProjectForm?.(onClose, history) ?? null,
+    restoreRemoteProject: (path) => {
+      if (!restoreRemoteProject) throw new Error("远程项目服务不可用");
+      return restoreRemoteProject(path);
+    },
+    repairRemoteProject: (path) => repairRemoteProject?.(path),
   });
   const projectView = {
     project,
@@ -134,14 +141,16 @@ export function apply(ctx: Context): void {
       const ui = scoped.remoteProjectUi;
       scoped.effect(() => {
         openAddRemoteProject = ui ? () => ui.openAddRemoteProject() : undefined;
-        renderAddProjectForm = ui?.renderAddProjectForm
-          ? (onClose) => ui.renderAddProjectForm?.(onClose) ?? null
-          : undefined;
+        renderAddProjectForm = ui?.renderAddProjectForm?.bind(ui);
+        restoreRemoteProject = ui?.restoreRemovedProject?.bind(ui);
+        repairRemoteProject = ui?.repairRemovedProject?.bind(ui);
         renderEditProjectForm = ui?.renderEditProjectForm?.bind(ui);
         return () => {
           renderEditProjectForm = undefined;
           openAddRemoteProject = undefined;
           renderAddProjectForm = undefined;
+          restoreRemoteProject = undefined;
+          repairRemoteProject = undefined;
         };
       });
     });

@@ -435,3 +435,42 @@ test("项目悬浮卡可以跨过侧栏边缘并点击编辑", async ({ page }) 
   await expect(page.getByText("已打开编辑项目")).toBeVisible();
   await expect(card).toHaveCount(0);
 });
+
+test("项目表单文字和前导图标垂直居中，并共用字号和行高", async ({ page }) => {
+  await page.goto("/tests/visual/treeMotionFixture.html?project-form");
+  const name = page.getByRole("textbox", { name: "项目名称" });
+  const add = page.getByRole("button", { name: "添加文件夹" });
+  for (const size of [14, 20]) {
+    await page.evaluate((fontSize) => {
+      document.documentElement.style.setProperty("--ui-font-size", fontSize + "px");
+    }, size);
+    const inputLayout = await name.evaluate((el) => {
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      const icon = el.parentElement!.querySelector("svg")!.getBoundingClientRect();
+      const contentOffset = (parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)) / 2;
+      return {
+        centerGap: Math.abs(rect.y + rect.height / 2 + contentOffset - icon.y - icon.height / 2),
+        lineHeight: style.lineHeight,
+        fontSize: style.fontSize,
+      };
+    });
+    const actionLayout = await add.evaluate((el) => {
+      const icon = el.querySelector("svg")!.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const text = Array.from(range.getClientRects()).at(-1)!;
+      const style = getComputedStyle(el);
+      return {
+        centerGap: Math.abs(text.y + text.height / 2 - icon.y - icon.height / 2),
+        lineHeight: style.lineHeight,
+        fontSize: style.fontSize,
+      };
+    });
+    expect(inputLayout.fontSize).toBe(`${size - 2}px`);
+    expect(inputLayout.fontSize).toBe(actionLayout.fontSize);
+    expect(inputLayout.lineHeight).toBe(actionLayout.lineHeight);
+    expect(inputLayout.centerGap).toBeLessThanOrEqual(1);
+    expect(actionLayout.centerGap).toBeLessThanOrEqual(1);
+  }
+});

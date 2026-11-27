@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
   useEffect,
   useMemo,
@@ -69,8 +70,10 @@ export function CreateProjectFormBody({
   edit,
   onOpenRemoteHostSettings,
   embedded = false,
+  history,
 }: AddRemoteProjectModalProps & {
   readonly embedded?: boolean;
+  readonly history?: ReactNode;
   readonly onSavingChange?: (isSaving: boolean) => void;
 }) {
   const supportsLocal = !repairPath && Boolean(onPickLocalDirectory);
@@ -399,6 +402,8 @@ export function CreateProjectFormBody({
           />
         )}
       </div>
+
+      {history}
 
       {/* 底部按钮栏 */}
       <div

@@ -100,7 +100,7 @@ it("isolates same-ID running, waiting and unread states, including marking one A
   expect(entries[sessionActivityKey("D:/project", "same")]).toBeUndefined();
 });
 
-it("persists independent pins and removing one Agent's pin preserves the other", () => {
+it("persists independent pins and removing one Agent's pin preserves the other", async () => {
   const store = useWorkspaceStore.getState();
   store.toggleSessionPinned("D:/project", "same", "A");
   store.toggleSessionPinned("D:/project", "same", "B");
@@ -114,7 +114,7 @@ it("persists independent pins and removing one Agent's pin preserves the other",
   expect(useWorkspaceStore.getState().pinnedSessions).toEqual([
     sessionPinKey("D:/project", "same", "B"),
   ]);
-  store.removeFromRecent("D:/project");
+  await store.removeFromRecent("D:/project");
   expect(useWorkspaceStore.getState().pinnedSessions).toEqual([]);
 });
 

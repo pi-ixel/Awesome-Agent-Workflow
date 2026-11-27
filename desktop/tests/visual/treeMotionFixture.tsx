@@ -72,7 +72,13 @@ function Fixture() {
 
 const root = createRoot(document.getElementById("root")!);
 const params = new URLSearchParams(location.search);
-if (params.has("sessions")) {
+if (params.has("project-form")) {
+  const { ProjectFolderFields } = await import("../../src/plugins/remoteProject/ui/ProjectFolderFields.tsx");
+  root.render(
+    <ProjectFolderFields name="" folders={[]} device={<span>此电脑</span>} isEditing={false}
+      disabled={false} onNameChange={() => {}} onPick={() => {}} />,
+  );
+} else if (params.has("sessions")) {
   bindSecondaryWindowAppearance(document.documentElement);
   const { renderProjectTree } = await import("./projectTreeFixture.tsx");
   renderProjectTree(root, {
