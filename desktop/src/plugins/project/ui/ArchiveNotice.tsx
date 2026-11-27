@@ -28,7 +28,7 @@ export function ArchiveNotice({ openSettings }: { readonly openSettings?: () => 
       role="status"
       label="归档提示"
       title="已归档的聊天"
-      icon={<ArchiveIcon className="mt-0.5 ui-icon-16 shrink-0 text-ink-mute" />}
+      icon={<ArchiveIcon className="ui-icon-16 shrink-0 text-ink-mute" />}
       dismissLabel="关闭归档提示"
       onDismiss={dismiss}
       className="toast-in absolute left-1/2 top-4 z-40 w-max max-w-[calc(100%-24px)] -translate-x-1/2 shadow-floating"

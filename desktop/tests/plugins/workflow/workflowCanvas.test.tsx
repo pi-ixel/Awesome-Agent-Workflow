@@ -83,8 +83,9 @@ it("folds every abnormal state into one banner with the error code collapsed", a
   expect(alerts).toHaveLength(1);
   const banner = alerts[0]!;
   // 首行是人话原因（细节里更具体的错误码优先），处理建议另起一行，错误码折叠在「详情」之下，主操作只有一个。
-  expect(banner.firstElementChild?.nextElementSibling?.firstElementChild).toHaveTextContent("节点结果的提交通道出了问题。");
-  expect(banner).toHaveTextContent("可以在节点上点「处置…」");
+  const reason = within(banner).getByText(/节点结果的提交通道出了问题。/);
+  const hint = within(banner).getByText(/可以在节点上点「处置…」/);
+  expect(reason.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(within(banner).getByText("详情").closest("details")).not.toHaveAttribute("open");
   expect(within(banner).getAllByRole("button")).toHaveLength(1);
 });
