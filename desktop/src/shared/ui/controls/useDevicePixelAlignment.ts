@@ -47,8 +47,8 @@ function schedule() {
 
 function observeResolution() {
   resolution?.removeEventListener("change", observeResolution);
-  resolution = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
-  resolution.addEventListener("change", observeResolution);
+  resolution = window.matchMedia?.(`(resolution: ${window.devicePixelRatio}dppx)`);
+  resolution?.addEventListener("change", observeResolution);
   schedule();
 }
 

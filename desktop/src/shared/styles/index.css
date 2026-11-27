@@ -33,7 +33,7 @@
   --ink-switch-height: calc(18 * var(--ui-icon-unit));
   --ink-switch-gap: calc(2 * var(--ui-icon-unit));
   --ink-switch-knob-size: calc(var(--ink-switch-height) - 2 * var(--ink-switch-gap));
-  --ink-switch-knob-shadow: 0 0 2px rgb(0 0 0 / 12%);
+  --ink-switch-knob-shadow: 0 0 2px color-mix(in oklab, var(--color-overlay-shade) 12%, transparent);
   block-size: var(--ink-switch-height);
   @supports (block-size: round(nearest, 1px, 1px)) {
     /* 先取整上下留白，再从轨道高度推导圆钮尺寸。 */
