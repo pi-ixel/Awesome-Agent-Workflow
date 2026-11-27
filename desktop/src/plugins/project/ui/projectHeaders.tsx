@@ -73,8 +73,8 @@ function BackButton({
       aria-label="返回"
       className="flex shrink-0 items-center gap-1 px-1.5 py-1 text-xs"
       {...hint}
+      leadingIcon={<ArrowLeftIcon className="ui-icon-14" strokeWidth={2} />}
     >
-      <ArrowLeftIcon className="ui-icon-14" strokeWidth={2} />
       返回
     </ActionButton>
   );

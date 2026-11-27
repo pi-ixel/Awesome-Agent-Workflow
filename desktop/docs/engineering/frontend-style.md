@@ -63,4 +63,6 @@
 
 设置页和设置表单的普通字段标题复用 `settingsLabelClass`，说明复用 `settingsDescriptionClass`（与标准 `SettingRow` 同源）；技术路径、地址可追加 `font-mono`。输入使用完整 `settingsInputClass` / `settingsNumberInputClass` / `settingsTextareaClass`，不得在调用处缩小字号；紧凑操作使用 `ActionButton size="compact"`。架构测试检查共享输入规格的字号覆盖，以及远程主机页和弹窗的语义字体；浏览器测试核对两套主题下 12/14/20 字号的实际计算样式。
 
+普通文字按钮复用 `ActionButton` 或 `DangerButton`。文案放在组件内容中，前后图标用 `leadingIcon` 和 `trailingIcon`。共享控件负责图文对齐、文字行盒和紧凑规格。业务页通过外层容器处理位置和外围留白，需要左对齐的整行入口用 `align="start"`。架构用例检查调用侧的自绘图文和布局覆盖，Edge 用例检查远程主机空状态实际渲染的字形中线、图标位置和主次按钮高度。
+
 多层菜单复用共享 `ContextMenu` 的 `children`，父项点击或右方向键展开，左方向键或 Esc 逐层返回，Tab 关闭整棵菜单。子项在独立浮层定位，右侧空间不足向左展开，保持完整的焦点与关闭边界。

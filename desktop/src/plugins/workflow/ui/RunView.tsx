@@ -463,7 +463,7 @@ export function RunView({ service, runId, onRunAgain, onOpenWorkflow, onOpenSess
           {[...selectedRecords].reverse().map((item) => {
             const selected = item.ordinal === record?.ordinal;
             return (
-              <ActionButton
+              <ActionButton contentLayout="custom"
                 key={item.ordinal}
                 tone="ghost"
                 aria-pressed={selected}

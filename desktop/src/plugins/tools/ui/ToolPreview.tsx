@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { btnGhost } from "../../../shared/ui/controls.tsx";
+import { ActionButton } from "../../../shared/ui/controls.tsx";
 import type { ToolPackage } from "../types.ts";
 import { toolFramePolicy } from "../runtime/policy.ts";
 import { toolSettingsScript } from "../runtime/settings.ts";
@@ -96,18 +96,18 @@ export function ToolPreview({
     >
       <header className={`preview-head${embedded ? " is-embedded" : ""}`}>
         {onBack && (
-          <button type="button" className={btnGhost} onClick={onBack}>
+          <ActionButton tone="ghost" type="button" onClick={onBack}>
             ← 返回
-          </button>
+          </ActionButton>
         )}
         <div className="preview-title">
           <h2>{tool.name}</h2>
           <span>v{tool.version} · 预览</span>
         </div>
         <div className="preview-actions">
-          <button
+          <ActionButton
+            tone="ghost"
             type="button"
-            className={btnGhost}
             onClick={() => {
               setLogs([]);
               setNonce((value) => value + 1);
@@ -115,10 +115,10 @@ export function ToolPreview({
             }}
           >
             {onReload ? "重新读取" : "重新载入"}
-          </button>
-          <button
+          </ActionButton>
+          <ActionButton
+            tone="ghost"
             type="button"
-            className={btnGhost}
             aria-pressed={showLogs}
             onClick={() => setShowLogs((value) => !value)}
           >
@@ -128,15 +128,16 @@ export function ToolPreview({
               : logs.length
                 ? ` · ${logs.length}`
                 : ""}
-          </button>
+          </ActionButton>
           {onInstall && (
-            <button
+            <ActionButton
+              tone="ghost"
               type="button"
               className="preview-install"
               onClick={onInstall}
             >
               {installLabel ?? "安装"}
-            </button>
+            </ActionButton>
           )}
         </div>
       </header>
@@ -153,9 +154,9 @@ export function ToolPreview({
         <div className="preview-logs" role="log" aria-label="运行日志">
           <div className="preview-logs-head">
             <span>运行日志</span>
-            <button type="button" onClick={() => setLogs([])}>
+            <ActionButton tone="ghost" type="button" onClick={() => setLogs([])}>
               清空
-            </button>
+            </ActionButton>
           </div>
           <div className="preview-logs-body" ref={list}>
             {logs.length === 0 ? (

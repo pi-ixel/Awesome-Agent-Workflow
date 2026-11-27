@@ -153,8 +153,8 @@ export function CopyButton({
       tone={isOutlined ? "secondary" : "ghost"}
       size={isOutlined ? "compact" : undefined}
       {...buttonProps}
+      leadingIcon={isOutlined && glyph}
     >
-      {isOutlined && glyph}
       {feedback ? (
         <span aria-live="polite">{feedback}</span>
       ) : (

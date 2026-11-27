@@ -67,16 +67,48 @@ const actionTones = {
   "danger-solid": `${btnBase} bg-danger-solid text-danger-solid-ink enabled:hover:bg-danger-solid-hover focus-visible:[--keyboard-focus-color:var(--color-danger-solid-ink)]`,
   media: `${btnBase} border border-media-ink/30 text-media-ink enabled:hover:bg-media-ink/10`,
 };
-export const ActionButton = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<"button"> & {
+type ActionButtonProps = Omit<ComponentPropsWithoutRef<"button">, "dangerouslySetInnerHTML"> & {
   readonly tone: keyof typeof actionTones;
   readonly size?: "compact";
-}>(function ActionButton({ tone, size, className = "", type = "button", ...props }, ref) {
-  return <button {...props} ref={ref} type={type} className={`${actionTones[tone]} ${size === "compact" ? btnSize : ""} ${className}`} />;
+  readonly leadingIcon?: ReactNode;
+  readonly trailingIcon?: ReactNode;
+  readonly labelOverflow?: "truncate" | "wrap";
+  readonly align?: "start";
+  readonly contentLayout?: "custom";
+};
+
+export const ActionButton = forwardRef<HTMLButtonElement, ActionButtonProps>(function ActionButton(
+  { tone, size, className = "", type = "button", children, leadingIcon, trailingIcon, labelOverflow, align, contentLayout, ...props },
+  ref,
+) {
+  const standard = contentLayout !== "custom";
+  return (
+    <button
+      {...props}
+      ref={ref}
+      type={type}
+      className={`${actionTones[tone]} ${size === "compact" ? btnSize : ""} ${className}`}
+      data-action-button={standard ? size ?? "regular" : undefined}
+      data-action-align={align}
+    >
+      {standard ? (
+        <>
+          {leadingIcon}
+          {children != null && children !== false && (
+            <span className="ui-control-label action-button-label" data-overflow={labelOverflow}>
+              {children}
+            </span>
+          )}
+          {trailingIcon}
+        </>
+      ) : children}
+    </button>
+  );
 });
 
-export const DangerButton = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<"button">>(
-  function DangerButton({ className = "", type = "button", ...props }, ref) {
-    return <ActionButton {...props} ref={ref} type={type} tone="danger" className={className} />;
+export const DangerButton = forwardRef<HTMLButtonElement, Omit<ActionButtonProps, "tone">>(
+  function DangerButton(props, ref) {
+    return <ActionButton {...props} ref={ref} tone="danger" />;
   },
 );
 

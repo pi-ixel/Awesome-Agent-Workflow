@@ -97,9 +97,8 @@ export function apply(ctx: Context): void {
           )}
           <ActionButton
             tone={settings ? "secondary" : "ghost"}
-            size={settings ? "compact" : undefined}
+            size="compact"
             disabled={isLoading}
-            className={settings ? undefined : "shrink-0 px-2 py-1 text-ui-caption"}
             onClick={() =>
               void (tab === "credit" ? refreshCredit() : refreshToken())
             }
@@ -205,16 +204,19 @@ export function apply(ctx: Context): void {
           className="fixed inset-auto m-0 max-h-[calc(100dvh-2rem)] w-80 max-w-[calc(100dvw-4.5rem)] overflow-auto p-4"
         >
           {isOpen && <QuotaPanel isActive />}
-          <ActionButton
-            tone="ghost"
-            className="mt-4 w-full border-t border-line pt-3 text-left text-ui-caption"
-            onClick={() => {
-              panel.current?.hidePopover();
-              workbench.navigation.getState().openSettingsTab(name);
-            }}
-          >
-            查看用量配额
-          </ActionButton>
+          <div className="mt-4 border-t border-line pt-3">
+            <ActionButton
+              tone="ghost"
+              align="start"
+              className="w-full text-ui-caption"
+              onClick={() => {
+                panel.current?.hidePopover();
+                workbench.navigation.getState().openSettingsTab(name);
+              }}
+            >
+              查看用量配额
+            </ActionButton>
+          </div>
         </HintSurface>
       </>
     );

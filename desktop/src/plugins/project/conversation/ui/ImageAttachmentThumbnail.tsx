@@ -13,7 +13,7 @@ export function ImageAttachmentThumbnail({
 }) {
   return (
     <div className="size-16 shrink-0">
-      <ActionButton
+      <ActionButton contentLayout="custom"
         tone="ghost"
         aria-label={label}
         onClick={onPreview}

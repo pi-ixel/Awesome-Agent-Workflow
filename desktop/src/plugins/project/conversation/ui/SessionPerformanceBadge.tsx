@@ -82,7 +82,7 @@ export function SessionPerformanceBadge() {
     stats.tps === null ? "— tok/s" : `${stats.tps.toFixed(1)} tok/s`;
   return (
     <>
-      <ActionButton
+      <ActionButton contentLayout="custom"
         tone="ghost"
         ref={anchor}
         type="button"

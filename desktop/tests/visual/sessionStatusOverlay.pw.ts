@@ -123,7 +123,7 @@ test("窄窗归档提示居中或整组换行，换肤时保留操作焦点", as
   const textTop = (locator: Locator) =>
     locator.evaluate((element) => {
       const range = document.createRange();
-      range.selectNodeContents(element);
+      range.selectNodeContents(element.querySelector(":scope > .action-button-label") ?? element);
       return range.getBoundingClientRect().top;
     });
   for (const [theme, px] of [["暖白", 12], ["暗夜", 20], ["暖白", 14]] as const) {
@@ -306,6 +306,8 @@ test("提问轨道支持键盘跨越虚拟窗口，换肤时保留当前提问�
     const row = await previous.boundingBox();
     expect(marker!.x + marker!.width).toBeLessThanOrEqual(row!.x + row!.width + 1);
   }
+  await session.bringToFront();
+  await session.mouse.move(0, 0);
   await last.hover();
   await expect(last.locator("span")).toHaveCSS("background-color", "rgb(38, 38, 38)");
   await expect.poll(async () => (await last.locator("span").boundingBox())?.width ?? 0)
