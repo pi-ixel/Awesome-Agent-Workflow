@@ -144,6 +144,8 @@ Project 的 `ProjectFactory` 和 `ProjectContext` 管理项目归属、历史目
 
 project 内部包含 sessions、conversation、composer、queue、interactions 等功能模块，不将它们再拆成独立插件。
 
+内置 MCP 的所属插件通过可选的 `mcp.registerBuiltin` 登记名称、用途、适用场景和可选操作，在插件卸载时随 Cordis effect 注销。MCP 页订阅目录，读取当前会话的运行时回报或所属插件提供的连接确认。会话工具的创建、注入和释放沿用各插件的运行时入口。
+
 Git 差异与 Agent 工具的编辑结果分别建模，可以复用纯差异渲染组件。
 
 ## 6. 账户与更新插件

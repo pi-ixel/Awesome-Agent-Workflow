@@ -1,3 +1,12 @@
+import type { McpServerHttp } from "../acp/protocol.ts";
+
+export type BuiltinMcpProbeTarget =
+  | McpServerHttp
+  | {
+      readonly type: "stdio";
+      readonly service: "workflow-authoring" | "workflow-result";
+    };
+
 export interface McpProfile {
   readonly id: string | null;
   readonly name: string;
@@ -201,7 +210,7 @@ export interface McpManagementHost {
       tools: readonly McpTool[];
       disabledTools: readonly string[];
     }>;
-    probeBrowser(): Promise<McpInspection>;
+    probeBuiltin(target: BuiltinMcpProbeTarget): Promise<McpInspection>;
     setBrowserTools(
       tools: readonly string[],
       enabled: boolean,

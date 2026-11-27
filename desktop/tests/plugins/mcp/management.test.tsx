@@ -1,7 +1,9 @@
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
+import { Context } from "cordis";
 import type {
+  BuiltinMcpProbeTarget,
   McpManagementHost,
   ManagedMcpSnapshot,
   NativeMcpHost,
@@ -18,6 +20,10 @@ import { McpView } from "../../../src/plugins/mcp/ui/McpView.tsx";
 import { parseMcpImport } from "../../../src/plugins/mcp/runtime/importConfig.ts";
 import { McpWorkbench } from "../../../src/plugins/mcp/ui/workbench.tsx";
 import { BrowserAgentControlSettings } from "../../../src/plugins/browser/service.ts";
+import { browserMcpContribution } from "../../../src/plugins/browser/domain/mcpContribution.ts";
+import { createBuiltinMcpRegistry } from "../../../src/plugins/mcp/runtime/builtinRegistry.ts";
+import type { BuiltinMcp } from "../../../src/plugins/mcp/service.ts";
+
 import { codeAgentAdapter } from "../../../src/plugins/agents/enhancements/codeagent/adapter.ts";
 import type { ProjectService } from "../../../src/plugins/project/service.ts";
 import { createTestBrowserHost } from "../../helpers/browserHost.ts";
@@ -47,7 +53,6 @@ it("服务开关逐项更新，连续写入使用新版本，筛选结果同步�
       service={service}
       agentId="chrys"
       activeProfile={null}
-      browser={createTestBrowserHost()}
       canManageNative
       canManageInjected
       canTest
@@ -103,7 +108,6 @@ it("表单和 JSON 导入共用弹窗，切换保留草稿，预览后才写入"
       service={service}
       agentId="chrys"
       activeProfile={null}
-      browser={createTestBrowserHost()}
       canManageNative
       canManageInjected
       canTest
@@ -206,7 +210,7 @@ it("复用已保存的检测结果，展示工具权限并按服务版本提交"
       probe,
       setManagedTools,
       browserTools: () => Promise.resolve({ tools: [], disabledTools: [] }),
-      probeBrowser: () => Promise.resolve(result),
+      probeBuiltin: () => Promise.resolve(result),
     },
   });
   const browser = createTestBrowserHost();
@@ -216,7 +220,7 @@ it("复用已保存的检测结果，展示工具权限并按服务版本提交"
       service={service}
       agentId="chrys"
       activeProfile={null}
-      browser={browser}
+      builtins={[browserMcpContribution(browser, service.host.inspection)]}
       canManageNative
       canManageInjected
       canTest
@@ -579,7 +583,7 @@ it("CodeAgent 工作区条目仅手动检测，列表和批量检测不会启动
       browserTools: vi.fn(() =>
         Promise.resolve({ tools: [], disabledTools: [] }),
       ),
-      probeBrowser: managedProbe,
+      probeBuiltin: managedProbe,
       setBrowserTools: vi.fn(() => Promise.resolve([])),
       setManagedTools: vi.fn(() => Promise.resolve("managed-rev")),
     },
@@ -594,7 +598,6 @@ it("CodeAgent 工作区条目仅手动检测，列表和批量检测不会启动
       service={service}
       agentId="codeagent"
       activeProfile={null}
-      browser={createTestBrowserHost()}
       canManageNative
       canManageInjected
       canTest={false}
@@ -712,7 +715,6 @@ it("tests the unsaved HTTP draft from the unified card editor and confirms delet
       service={service}
       agentId="chrys"
       activeProfile={null}
-      browser={createTestBrowserHost()}
       canManageNative
       nativeTransports={["stdio", "http"]}
       canManageInjected
@@ -832,7 +834,6 @@ it("opens details on demand, switches cards in place, and dismisses from outside
       service={service}
       agentId="chrys"
       activeProfile={null}
-      browser={createTestBrowserHost()}
       canManageNative
       canManageInjected
       canTest
@@ -881,7 +882,6 @@ it("mixes native and Desktop cards, filters by configured state, and checks exac
       service={service}
       agentId="chrys"
       activeProfile={null}
-      browser={createTestBrowserHost()}
       canManageNative
       nativeTransports={["stdio", "http"]}
       canManageInjected
@@ -952,7 +952,6 @@ it("reloads an externally changed revision in the existing editor and keeps type
       service={service}
       agentId="chrys"
       activeProfile={null}
-      browser={createTestBrowserHost()}
       canManageNative
       canManageInjected
       canTest
@@ -991,10 +990,34 @@ it("reloads an externally changed revision in the existing editor and keeps type
   });
 });
 
-it("shows the built-in browser as a switch-only card with CodeAgent and mirrors the Settings switch", async () => {
+it("内置浏览器卡片与设置开关同步，详情保留工具权限和握手状态", async () => {
   const user = userEvent.setup();
   const browser = createTestBrowserHost();
   const { host } = fixture();
+  vi.spyOn(browser, "mcpRegistration").mockResolvedValue({
+    endpointName: "aaw-browser-0123456789abcdef01234567",
+    handshakeComplete: true,
+  });
+  const setBrowserTools = vi.fn().mockResolvedValue(["browser_open"]);
+  Object.assign(host, {
+    inspection: {
+      read: () => Promise.resolve({}),
+      save: () => Promise.resolve(),
+      browserTools: () =>
+        Promise.resolve({
+          tools: [{ name: "browser_open" }],
+          disabledTools: [],
+        }),
+      probeBuiltin: () =>
+        Promise.resolve({
+          ok: true,
+          message: "检测成功",
+          checkedAt: 0,
+          durationMs: 0,
+        }),
+      setBrowserTools,
+    },
+  });
   const recoverSession = vi.fn(() => Promise.resolve());
   const agents = {
     configuration: createStore(() => ({ activeAgentId: "codeagent" })),
@@ -1002,6 +1025,10 @@ it("shows the built-in browser as a switch-only card with CodeAgent and mirrors 
     selectionKey: () => "agent-key",
   } as unknown as AgentsService;
   const service = createMcpManagement(host, agents, () => ({}));
+  const catalog = createBuiltinMcpRegistry();
+  catalog.registerBuiltin(
+    browserMcpContribution(browser, service.host.inspection),
+  );
   const project = {
     projects: {
       workspace: createStore(() => ({ activePath: workspace, toolPaths: {} })),
@@ -1028,7 +1055,7 @@ it("shows the built-in browser as a switch-only card with CodeAgent and mirrors 
         agents={agents}
         project={project}
         service={service}
-        browser={browser}
+        builtins={catalog.builtins}
       />
     </>,
   );
@@ -1049,4 +1076,205 @@ it("shows the built-in browser as a switch-only card with CodeAgent and mirrors 
   expect(
     screen.queryByRole("button", { name: /重连|更多操作/ }),
   ).not.toBeInTheDocument();
+  const row = within(list).getByRole("article", { name: "AAW 内置浏览器" });
+  await within(row).findByText("已连接");
+  await user.click(within(row).getByRole("button", { name: "AAW 内置浏览器" }));
+  const details = screen.getByRole("complementary", {
+    name: "AAW 内置浏览器 详情",
+  });
+  const tool = await within(details).findByRole("switch", {
+    name: "browser_open 启用",
+  });
+  await user.click(tool);
+  await vi.waitFor(() => expect(tool).not.toBeChecked());
+  expect(setBrowserTools).toHaveBeenCalledExactlyOnceWith(
+    ["browser_open"],
+    false,
+  );
+});
+
+it("独立插件登记后出现，切换会话只更新状态，卸载后移除目录项", async () => {
+  const ctx = new Context();
+  const catalog = createBuiltinMcpRegistry();
+  ctx.provide("mcp", {
+    ...catalog,
+    View: () => null,
+    previewInstall: () => Promise.reject(new Error("测试未接入安装")),
+    commitInstall: () => Promise.reject(new Error("测试未接入安装")),
+  });
+  const agents = {
+    configuration: createStore(() => ({ activeAgentId: "codeagent" })),
+    resolve: () => codeAgentAdapter,
+    selectionKey: () => "agent-key",
+  } as unknown as AgentsService;
+  const session = createStore(() => ({
+    isBound: true,
+    agentKey: "agent-key",
+    activeSessionId: "first",
+  }));
+  const runtime = createStore(() => ({
+    lastSessionId: "first",
+    runtime: {
+      mcpServers: [{ name: "test-runtime", toolCount: 1 }],
+      mcpFailures: [],
+      mcpToolsByServer: { "test-runtime": ["mcp__test-runtime__test_tool"] },
+    },
+  }));
+  const project = {
+    projects: {
+      workspace: createStore(() => ({ activePath: workspace, toolPaths: {} })),
+    },
+    conversation: { foreground: { session, runtime } },
+    sessions: {},
+  } as unknown as ProjectService;
+  render(
+    <McpWorkbench
+      agents={agents}
+      project={project}
+      service={null}
+      builtins={catalog.builtins}
+    />,
+  );
+  const plugin = {
+    name: "test-mcp-catalog",
+    inject: ["mcp"],
+    apply(owner: Context) {
+      owner.effect(
+        () =>
+          owner.mcp.registerBuiltin({
+            id: "test-entry",
+            name: "扩展工具",
+            description: "测试插件注册的工具。",
+            scope: "示例会话",
+            matchesServer: (name) => name === "test-runtime",
+          }),
+        "test:mcp",
+      );
+    },
+  };
+  expect(
+    screen.queryByRole("article", { name: "扩展工具" }),
+  ).not.toBeInTheDocument();
+  await act(async () => {
+    await ctx.plugin(plugin);
+  });
+  const row = await screen.findByRole("article", { name: "扩展工具" });
+  expect(within(row).getByText("已连接")).toBeVisible();
+  expect(within(row).queryByRole("switch")).not.toBeInTheDocument();
+  await userEvent.click(within(row).getByRole("button", { name: "扩展工具" }));
+  expect(screen.getByText("test_tool")).toBeVisible();
+  act(() => session.setState({ activeSessionId: "second" }));
+  expect(screen.getByRole("article", { name: "扩展工具" })).toBe(row);
+  expect(within(row).getByText("未确认")).toBeVisible();
+  expect(screen.queryByText("test_tool")).not.toBeInTheDocument();
+  const [fiber] = ctx.registry.get(plugin)?.fibers ?? [];
+  expect(fiber).toBeDefined();
+  await act(async () => {
+    await fiber!.dispose();
+  });
+  expect(row).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("complementary", { name: "扩展工具 详情" }),
+  ).not.toBeInTheDocument();
+});
+
+it("五项内置 MCP 无 ACP 会话也可以检测，浏览器检测不修改控制开关", async () => {
+  const user = userEvent.setup();
+  const { service, host } = fixture();
+  const probeBuiltin = vi.fn((target: BuiltinMcpProbeTarget) =>
+    Promise.resolve({
+      ok: true,
+      checkedAt: 100,
+      durationMs: 10,
+      message: "检测成功",
+      tools: [{ name: target.type === "http" ? "http-tool" : "stdio-tool" }],
+    }),
+  );
+  Object.assign(host, {
+    inspection: {
+      read: () => Promise.resolve({}),
+      save: () => Promise.resolve(),
+      probeBuiltin,
+    },
+  });
+  const browser = createTestBrowserHost();
+  await browser.setAgentControl(false);
+  const createEndpoint = vi.spyOn(browser, "createMcpEndpoint");
+  const revoke = vi.spyOn(browser, "revokeMcpEndpoint");
+  const releaseSsh = vi.fn(() => Promise.resolve());
+  const fixtures: readonly [string, BuiltinMcpProbeTarget][] = [
+    [
+      "可视化讲解",
+      {
+        type: "http",
+        name: "aaw-visual",
+        url: "http://127.0.0.1:4567/mcp",
+        headers: [],
+      },
+    ],
+    [
+      "远程项目工具",
+      {
+        type: "http",
+        name: "aaw-remote-project",
+        url: "http://127.0.0.1:4567/project-mcp",
+        headers: [],
+      },
+    ],
+    ["工作流编写", { type: "stdio", service: "workflow-authoring" }],
+    ["工作流结果提交", { type: "stdio", service: "workflow-result" }],
+  ];
+  const builtins: BuiltinMcp[] = [
+    browserMcpContribution(browser, undefined),
+    ...fixtures.map(([name, server]) => ({
+      id: server.type === "http" ? server.name : server.service,
+      name,
+      description: "",
+      scope: "内置服务",
+      probe: {
+        transport: server.type,
+        acquire: () =>
+          Promise.resolve({
+            server,
+            release: name === "远程项目工具" ? releaseSsh : undefined,
+          }),
+      },
+    })),
+  ];
+  render(
+    <McpView
+      service={service}
+      agentId="chrys"
+      activeProfile={null}
+      builtins={builtins}
+      canManageNative={false}
+      canManageInjected={false}
+      canTest={false}
+    />,
+  );
+  const open = async (name: string) => {
+    const row = await screen.findByRole("article", { name });
+    await user.click(within(row).getByRole("button", { name }));
+    return within(screen.getByRole("complementary", { name: name + " 详情" }));
+  };
+  const browserDetails = await open("AAW 内置浏览器");
+  const browserProbe = browserDetails.getByRole("button", { name: "测试连接" });
+  expect(browserProbe).toBeEnabled();
+  probeBuiltin.mockRejectedValueOnce(new Error("fixture failure"));
+  await user.click(browserProbe);
+  await browserDetails.findByText("无法完成 MCP 检测");
+  expect(revoke).toHaveBeenCalledTimes(1);
+  await user.click(browserProbe);
+  await browserDetails.findByText("http-tool");
+  expect(createEndpoint).toHaveBeenCalledWith({ inspection: true });
+  expect(revoke).toHaveBeenCalledTimes(2);
+  expect(await browser.agentControlEnabled()).toBe(false);
+
+  for (const [name, target] of fixtures) {
+    const details = await open(name);
+    await user.click(details.getByRole("button", { name: "测试连接" }));
+    await details.findByText(target.type + "-tool");
+    expect(probeBuiltin).toHaveBeenLastCalledWith(target);
+  }
+  expect(releaseSsh).toHaveBeenCalledOnce();
 });

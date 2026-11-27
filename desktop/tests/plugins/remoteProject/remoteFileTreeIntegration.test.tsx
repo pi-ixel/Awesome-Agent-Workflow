@@ -163,6 +163,7 @@ describe("Remote project FileTree + FilePreview end-to-end self-test", () => {
           registerRemoteGit: () => () => {},
         },
         diagnostics: { createLogger },
+        inject() {},
         provide(_name: string, value: RemoteProjectService) {
           service = value;
         },

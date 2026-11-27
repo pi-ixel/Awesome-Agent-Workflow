@@ -362,7 +362,7 @@
     "definitions": {
       "布局与操纵": ["McpView"],
       "导航与列表": ["McpServiceRow"],
-      "选择控件": ["McpView/browserToggle"],
+      "选择控件": ["McpView/builtinToggle"],
       "命令按钮": ["McpView/testButton"]
     },
     "targets": []

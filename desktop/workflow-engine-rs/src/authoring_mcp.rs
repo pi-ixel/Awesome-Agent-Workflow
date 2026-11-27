@@ -53,7 +53,7 @@ fn tools() -> Value {
 }
 
 /// 处理一条 JSON-RPC 消息；通知（没有 id）不回复。
-pub fn handle(dir: &Path, message: &Value) -> Option<Value> {
+fn handle(dir: Option<&Path>, message: &Value) -> Option<Value> {
     let id = message.get("id")?.clone();
     let result = match message["method"].as_str() {
         Some("initialize") => {
@@ -63,8 +63,11 @@ pub fn handle(dir: &Path, message: &Value) -> Option<Value> {
         }
         Some("ping") => json!({}),
         Some("tools/list") => json!({"tools": tools()}),
+        Some("tools/call") if dir.is_none() => {
+            return Some(json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"检测连接时不能调用工具"}}));
+        }
         Some("tools/call") if message["params"]["name"] == TOOL => {
-            let (ok, text) = check_text(dir);
+            let (ok, text) = check_text(dir?);
             json!({"content": [{"type": "text", "text": text}], "isError": !ok})
         }
         Some("tools/call") => {
@@ -76,7 +79,7 @@ pub fn handle(dir: &Path, message: &Value) -> Option<Value> {
 }
 
 /// stdio 循环：一行一条消息。
-pub fn serve(dir: PathBuf) -> std::io::Result<()> {
+pub fn serve(dir: Option<PathBuf>) -> std::io::Result<()> {
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
     for line in stdin.lock().lines() {
@@ -85,7 +88,7 @@ pub fn serve(dir: PathBuf) -> std::io::Result<()> {
             continue;
         }
         let Ok(message) = serde_json::from_str::<Value>(&line) else { continue };
-        if let Some(reply) = handle(&dir, &message) {
+        if let Some(reply) = handle(dir.as_deref(), &message) {
             writeln!(stdout, "{reply}")?;
             stdout.flush()?;
         }
@@ -103,18 +106,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("flows")).unwrap();
         std::fs::write(dir.join("workflow.yaml"), "format: aaw-workflow/1\nid: demo\nnmae: 演示\nentries: []\n").unwrap();
-        let listed = handle(&dir, &json!({"jsonrpc":"2.0","id":1,"method":"tools/list"})).unwrap();
+        let listed = handle(Some(&dir), &json!({"jsonrpc":"2.0","id":1,"method":"tools/list"})).unwrap();
         assert_eq!(listed["result"]["tools"][0]["name"], TOOL);
-        let failed = handle(&dir, &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":TOOL,"arguments":{}}})).unwrap();
+        let failed = handle(Some(&dir), &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":TOOL,"arguments":{}}})).unwrap();
         assert_eq!(failed["result"]["isError"], true);
         assert!(failed["result"]["content"][0]["text"].as_str().unwrap().contains("workflow.yaml"), "{failed}");
 
         std::fs::write(dir.join("workflow.yaml"), "format: aaw-workflow/1\nid: demo\nname: 演示\nentries:\n  - id: go\n    label: 开始\n    start: ask\n").unwrap();
         std::fs::write(dir.join("flows/main.yaml"), "label: 主流程\nentry: ask\nsteps:\n  ask:\n    agent:\n      label: 确认\n      prompt: 确认需求\n      result:\n        status: [ready]\n    next:\n      - to: $complete\n        when: ask.status == \"ready\"\n      - to: $blocked\n").unwrap();
-        let passed = handle(&dir, &json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":TOOL,"arguments":{}}})).unwrap();
+        let passed = handle(Some(&dir), &json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":TOOL,"arguments":{}}})).unwrap();
         assert_eq!(passed["result"]["isError"], false);
         assert!(passed["result"]["content"][0]["text"].as_str().unwrap().starts_with("编译通过：演示"), "{passed}");
-        assert!(handle(&dir, &json!({"jsonrpc":"2.0","method":"notifications/initialized"})).is_none());
+        assert!(handle(Some(&dir), &json!({"jsonrpc":"2.0","method":"notifications/initialized"})).is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

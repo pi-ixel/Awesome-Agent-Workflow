@@ -42,7 +42,7 @@ fn log_tail(path: &std::path::Path, lines: usize) -> Vec<String> {
 }
 
 /// 解析随 Desktop 交付的工作流服务可执行文件。
-fn sidecar_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn sidecar_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let exe = if cfg!(windows) { "workflow_service.exe" } else { "workflow_service" };
     if cfg!(debug_assertions) {
         let debug = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../workflow-engine-rs/target/debug").join(exe);

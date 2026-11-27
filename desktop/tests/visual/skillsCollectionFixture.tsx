@@ -4,6 +4,8 @@ import * as skillsWorkbench from "../../src/plugins/skills/ui/workbench.tsx";
 import { McpView } from "../../src/plugins/mcp/ui/McpView.tsx";
 import type { McpManagement } from "../../src/plugins/mcp/runtime/management.ts";
 import { createTestBrowserHost } from "../helpers/browserHost.ts";
+import { browserMcpContribution } from "../../src/plugins/browser/domain/mcpContribution.ts";
+import { createBuiltinMcpRegistry } from "../../src/plugins/mcp/runtime/builtinRegistry.ts";
 import {
   createTestSkills,
   skillsWorkbenchFixture,
@@ -184,6 +186,8 @@ export async function createSkillsCollection(isPreview = false) {
     },
   } as unknown as Context["host"]);
   const browser = createTestBrowserHost();
+  const builtinCatalog = createBuiltinMcpRegistry();
+  builtinCatalog.registerBuiltin(browserMcpContribution(browser, undefined));
   const mcp = {
     host: {
       managedRead: () =>
@@ -202,12 +206,13 @@ export async function createSkillsCollection(isPreview = false) {
     },
   } as unknown as McpManagement;
   ctx.provide("mcp", {
+    ...builtinCatalog,
     View: () => (
       <McpView
         service={mcp}
         agentId="codeagent"
         activeProfile={null}
-        browser={browser}
+        builtins={builtinCatalog.builtins.getState()}
         canManageNative={false}
         canManageInjected
         canTest={false}

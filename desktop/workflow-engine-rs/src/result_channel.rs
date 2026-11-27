@@ -846,6 +846,16 @@ const METHOD_NOT_FOUND: &str = "MCP_METHOD_NOT_FOUND";
 
 /// MCP stdio entry point; stdout contains only JSON-RPC messages.
 pub fn serve_mcp(addr: &str, token: &str) -> Result<(), String> {
+    serve_mcp_connection(addr, token, false)
+}
+
+pub fn serve_mcp_inspection() -> Result<(), String> {
+    // 复用结果通道与 stdio 桥。这个临时通道没有运行、节点或工作目录。
+    let channel = ResultChannel::new(json!({"type":"object"}))?;
+    serve_mcp_connection(&channel.addr, &channel.token, true)
+}
+
+fn serve_mcp_connection(addr: &str, token: &str, is_inspection: bool) -> Result<(), String> {
     let stdin = std::io::stdin();
     let mut out = std::io::stdout().lock();
     for line in stdin.lock().lines() {
@@ -876,6 +886,7 @@ pub fn serve_mcp(addr: &str, token: &str) -> Result<(), String> {
             }
             Some("ping") => json!({}),
             Some("tools/list") => call_bridge(addr, token, "tools", Value::Null)?,
+            Some("tools/call") if is_inspection => return Err(METHOD_NOT_FOUND.into()),
             Some("tools/call") if msg["params"]["name"] == "capture_workflow_artifact" => {
                 tool_response(call_bridge(
                     addr,
