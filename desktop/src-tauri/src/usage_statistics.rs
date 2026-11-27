@@ -23,6 +23,7 @@ pub struct Turn {
     input: Option<i64>,
     output: Option<i64>,
     total: Option<i64>,
+    cumulative_total: Option<i64>,
     accounting: Option<String>,
 }
 
@@ -33,10 +34,10 @@ fn open_schema(directory: &Path) -> Result<Connection, String> {
     let version: i64 = db
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(sql_error)?;
-    if version > 7 {
+    if version > 8 {
         return Err("统计数据库版本较新".to_owned());
     }
-    if version < 7 {
+    if version < 8 {
         let tx = db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(sql_error)?;
@@ -106,6 +107,13 @@ fn open_schema(directory: &Path) -> Result<Connection, String> {
             )
             .map_err(sql_error)?;
         }
+        if version < 8 {
+            tx.execute_batch(
+                "ALTER TABLE usage_turn ADD COLUMN cumulative_total INTEGER;
+                 PRAGMA user_version = 8;",
+            )
+            .map_err(sql_error)?;
+        }
         tx.commit().map_err(sql_error)?;
     }
     Ok(db)
@@ -165,10 +173,13 @@ fn insert(db: &Connection, zone: Tz, enabled_at: i64, turn: Turn) -> Result<(), 
         ("codeagent", _) | (_, Some("session-total")) => "session-total",
         _ => "turn",
     };
+    let cumulative_total = turn
+        .cumulative_total
+        .filter(|total| *total >= 0 && accounting == "turn-delta");
     db.execute(
         "INSERT INTO usage_turn (workspace, agent, agent_key, session, turn, ended_at, day,
-          model, model_source, status, input, output, accounting, total)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+          model, model_source, status, input, output, accounting, total, cumulative_total)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
          ON CONFLICT(workspace, agent, agent_key, session, turn) DO UPDATE SET
            model = CASE WHEN usage_turn.model_source = 'actual' AND excluded.model_source != 'actual'
                         THEN usage_turn.model ELSE coalesce(excluded.model, usage_turn.model) END,
@@ -181,11 +192,13 @@ fn insert(db: &Connection, zone: Tz, enabled_at: i64, turn: Turn) -> Result<(), 
                         THEN excluded.input ELSE coalesce(excluded.input, usage_turn.input) END,
            output = CASE WHEN excluded.accounting = 'turn-delta' AND usage_turn.accounting <> 'turn-delta'
                          THEN excluded.output ELSE coalesce(excluded.output, usage_turn.output) END,
-           total = coalesce(excluded.total, usage_turn.total)
+           total = coalesce(excluded.total, usage_turn.total),
+           cumulative_total = coalesce(excluded.cumulative_total, usage_turn.cumulative_total)
          WHERE usage_turn.accounting <> 'turn-delta' OR excluded.accounting = 'turn-delta'",
         params![turn.workspace, turn.agent, turn.agent_key, turn.session, turn.turn,
             turn.ended_at, day, turn.model, turn.model_source, turn.status, input, output,
-            accounting, turn.total.filter(|total| *total >= 0 && accounting != "session-total")],
+            accounting, turn.total.filter(|total| *total >= 0 && accounting != "session-total"),
+            cumulative_total],
     ).map_err(sql_error)?;
     Ok(())
 }
@@ -196,6 +209,7 @@ pub struct Snapshot {
     zone: String,
     enabled_at: i64,
     today: String,
+    total: String,
     workspaces: Vec<String>,
     days: Vec<(String, String, i64, i64)>,
     models: Vec<(String, Option<String>, String, i64, Option<String>, String)>,
@@ -224,7 +238,7 @@ fn query(
     // Old CodeAgent rows have input/output only; their cache-inclusive total is unknown.
     let usage = format!(
         "WITH normalized AS (
-           SELECT *, CASE
+           SELECT usage_turn.rowid AS row_id, *, CASE
              WHEN agent = 'codeagent' OR accounting = 'session-total' THEN total
              ELSE coalesce(total, input + output)
            END AS tokens
@@ -269,10 +283,58 @@ fn query(
             .collect::<rusqlite::Result<_>>()
         })
         .map_err(sql_error)?;
+    // 会话总量按累计快照逐段累加：快照回落（计数重置、恢复会话）时从新值重新起算，
+    // 不丢回落前的消耗。没有快照的已记录轮次单独计入，首个快照不低于它时即视为已被覆盖；
+    // 完全没有快照的旧会话仍是单轮求和。
+    let total = db
+        .prepare(&format!(
+            "{usage}, session_totals AS (
+               SELECT workspace, agent, agent_key, session,
+                      coalesce(SUM(CASE WHEN cumulative_total IS NULL THEN tokens END), 0)
+                        AS delta_only
+               FROM normalized
+               GROUP BY workspace, agent, agent_key, session
+             ), snapshot_growth AS (
+               SELECT workspace, agent, agent_key, session,
+                      cumulative_total - (CASE WHEN baseline <= cumulative_total
+                                               THEN baseline ELSE 0 END) AS growth
+               FROM (
+                 SELECT n.workspace, n.agent, n.agent_key, n.session, n.cumulative_total,
+                        coalesce(LAG(n.cumulative_total) OVER (
+                          PARTITION BY n.workspace, n.agent, n.agent_key, n.session
+                          ORDER BY n.ended_at, n.row_id
+                        ), t.delta_only) AS baseline
+                 FROM normalized n
+                 JOIN session_totals t
+                   ON n.workspace = t.workspace AND n.agent = t.agent
+                  AND n.agent_key = t.agent_key AND n.session = t.session
+                 WHERE n.cumulative_total IS NOT NULL
+               )
+             ), snapshot_totals AS (
+               SELECT workspace, agent, agent_key, session, SUM(growth) AS growth
+               FROM snapshot_growth
+               GROUP BY workspace, agent, agent_key, session
+             )
+             SELECT CAST(coalesce(sum(session_totals.delta_only +
+                                      coalesce(snapshot_totals.growth, 0)), 0) AS TEXT)
+             FROM session_totals
+             LEFT JOIN snapshot_totals
+               ON session_totals.workspace = snapshot_totals.workspace
+              AND session_totals.agent = snapshot_totals.agent
+              AND session_totals.agent_key = snapshot_totals.agent_key
+              AND session_totals.session = snapshot_totals.session"
+        ))
+        .and_then(|mut stmt| {
+            stmt.query_row(params![workspace, agent, today.to_string()], |row| {
+                row.get(0)
+            })
+        })
+        .map_err(sql_error)?;
     Ok(Snapshot {
         zone: zone.name().to_owned(),
         enabled_at,
         today: today.to_string(),
+        total,
         workspaces,
         days: daily,
         models,
@@ -524,6 +586,7 @@ mod tests {
             input,
             output,
             total: None,
+            cumulative_total: None,
             accounting: None,
         }
     }
@@ -549,7 +612,7 @@ mod tests {
         let mut old = turn("old", end, Some(500), Some(0));
         old.started_at = 0;
         insert(&db, zone, enabled, old).unwrap();
-        db.execute_batch("DROP TABLE usage_model_name; ALTER TABLE usage_turn DROP COLUMN total; ALTER TABLE usage_turn DROP COLUMN accounting; PRAGMA user_version = 1;")
+        db.execute_batch("DROP TABLE usage_model_name; ALTER TABLE usage_turn DROP COLUMN total; ALTER TABLE usage_turn DROP COLUMN accounting; ALTER TABLE usage_turn DROP COLUMN cumulative_total; PRAGMA user_version = 1;")
             .unwrap();
         drop(db);
 
@@ -641,6 +704,7 @@ mod tests {
         }
         db.execute_batch(
             "ALTER TABLE usage_turn DROP COLUMN total;
+                          ALTER TABLE usage_turn DROP COLUMN cumulative_total;
                           UPDATE usage_turn SET accounting = 'session-total' WHERE agent = 'chrys';
                           PRAGMA user_version = 4;",
         )
@@ -695,6 +759,170 @@ mod tests {
     }
 
     #[test]
+    fn separates_session_total_from_cross_gap_turn_attribution() {
+        let directory = std::env::temp_dir().join(format!(
+            "aaw-usage-gap-total-{}-{}",
+            std::process::id(),
+            Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        let (db, zone, enabled) = open(&directory, "UTC", 1).unwrap();
+        let first_day = "2026-11-11T23:59:00Z";
+        let next_day = "2026-11-12T00:01:00Z";
+        let mut first = turn("first", first_day, Some(100), Some(10));
+        first.agent = "codeagent".into();
+        first.accounting = Some("turn-delta".into());
+        first.model = Some("model-a".into());
+        first.model_source = "actual".into();
+        first.total = Some(100);
+        first.cumulative_total = Some(100);
+        insert(&db, zone, enabled, first).unwrap();
+
+        let mut gap = turn("gap", first_day, None, None);
+        gap.agent = "codeagent".into();
+        gap.accounting = Some("turn-delta".into());
+        gap.model = Some("model-a".into());
+        gap.model_source = "actual".into();
+        insert(&db, zone, enabled, gap).unwrap();
+
+        let mut recovered = turn("recovered", next_day, None, None);
+        recovered.agent = "codeagent".into();
+        recovered.accounting = Some("turn-delta".into());
+        recovered.model = Some("model-b".into());
+        recovered.model_source = "actual".into();
+        recovered.cumulative_total = Some(160);
+        insert(&db, zone, enabled, recovered).unwrap();
+
+        let mut next = turn("next", next_day, Some(30), Some(5));
+        next.agent = "codeagent".into();
+        next.accounting = Some("turn-delta".into());
+        next.model = Some("model-b".into());
+        next.model_source = "actual".into();
+        next.total = Some(30);
+        next.cumulative_total = Some(190);
+        insert(&db, zone, enabled, next).unwrap();
+
+        let result = query(
+            &db,
+            zone,
+            enabled,
+            "2026-11-12T12:00:00Z".parse().unwrap(),
+            None,
+            Some("codeagent".into()),
+            30,
+        )
+        .unwrap();
+        assert_eq!(result.total, "190");
+        assert_eq!(
+            result.days,
+            vec![
+                ("2026-11-11".into(), "100".into(), 1, 2),
+                ("2026-11-12".into(), "30".into(), 1, 2),
+            ]
+        );
+        assert_eq!(
+            result
+                .models
+                .iter()
+                .map(|entry| entry.2.as_str())
+                .collect::<Vec<_>>(),
+            ["100", "30"]
+        );
+        drop(db);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn latest_snapshot_handles_reset_legacy_sessions_and_null_retries() {
+        let directory = std::env::temp_dir().join(format!(
+            "aaw-usage-reset-total-{}-{}",
+            std::process::id(),
+            Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        let (db, zone, enabled) = open(&directory, "UTC", 1).unwrap();
+        for (id, when, total, cumulative) in [
+            ("first", "2026-11-12T10:00:00Z", Some(100), Some(100)),
+            ("higher", "2026-11-12T10:01:00Z", Some(60), Some(160)),
+            ("reset", "2026-11-12T10:02:00Z", None, Some(20)),
+            ("after-reset", "2026-11-12T10:03:00Z", Some(10), Some(30)),
+        ] {
+            let mut row = turn(id, when, None, None);
+            row.agent = "codeagent".into();
+            row.accounting = Some("turn-delta".into());
+            row.session = "reset-session".into();
+            row.total = total;
+            row.cumulative_total = cumulative;
+            insert(&db, zone, enabled, row).unwrap();
+        }
+        let mut legacy = turn("legacy", "2026-11-12T10:04:00Z", None, None);
+        legacy.agent = "codeagent".into();
+        legacy.accounting = Some("turn-delta".into());
+        legacy.session = "legacy-session".into();
+        legacy.total = Some(40);
+        insert(&db, zone, enabled, legacy).unwrap();
+
+        let mut retry = turn("after-reset", "2026-11-12T10:03:00Z", None, None);
+        retry.agent = "codeagent".into();
+        retry.accounting = Some("turn-delta".into());
+        retry.session = "reset-session".into();
+        insert(&db, zone, enabled, retry).unwrap();
+
+        let result = query(
+            &db,
+            zone,
+            enabled,
+            "2026-11-12T12:00:00Z".parse().unwrap(),
+            None,
+            Some("codeagent".into()),
+            30,
+        )
+        .unwrap();
+        assert_eq!(result.total, "230");
+        drop(db);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn counts_recorded_turns_that_the_first_snapshot_does_not_cover() {
+        let directory = std::env::temp_dir().join(format!(
+            "aaw-usage-uncovered-total-{}-{}",
+            std::process::id(),
+            Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        let (db, zone, enabled) = open(&directory, "UTC", 1).unwrap();
+        // restart：旧版本只记录单轮差值，之后的首个快照低于已记录量，
+        // 说明计数没有涵盖这些轮次。covered：首个快照已涵盖更早的已记录轮次。
+        for (id, when, session, total, cumulative) in [
+            ("a", "2026-11-12T10:00:00Z", "restart", Some(100), None),
+            ("b", "2026-11-12T10:01:00Z", "restart", Some(60), None),
+            ("c", "2026-11-12T10:02:00Z", "restart", None, Some(20)),
+            ("d", "2026-11-12T10:03:00Z", "restart", Some(10), Some(30)),
+            ("e", "2026-11-12T10:00:00Z", "covered", Some(100), None),
+            ("f", "2026-11-12T10:01:00Z", "covered", Some(30), Some(130)),
+        ] {
+            let mut row = turn(id, when, None, None);
+            row.agent = "codeagent".into();
+            row.accounting = Some("turn-delta".into());
+            row.session = session.into();
+            row.total = total;
+            row.cumulative_total = cumulative;
+            insert(&db, zone, enabled, row).unwrap();
+        }
+        let result = query(
+            &db,
+            zone,
+            enabled,
+            "2026-11-12T12:00:00Z".parse().unwrap(),
+            None,
+            Some("codeagent".into()),
+            30,
+        )
+        .unwrap();
+        assert_eq!(result.total, "320");
+        drop(db);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn groups_one_hundred_thousand_turns_without_returning_raw_rows() {
         let directory = std::env::temp_dir().join(format!(
             "aaw-usage-scale-{}-{}",
@@ -707,8 +935,8 @@ mod tests {
                VALUES(1) UNION ALL SELECT i + 1 FROM n WHERE i < 100000
              )
              INSERT INTO usage_turn
-             SELECT 'p1', 'chrys', 'agent', 'session', cast(i AS TEXT), 0,
-                    '2026-11-12', 'model', 'actual', 'completed', 100, 20, 'turn', NULL FROM n;",
+             SELECT 'p1', 'chrys', 'agent', 'session-' || cast(i / 100 AS TEXT), cast(i AS TEXT), 0,
+                    '2026-11-12', 'model', 'actual', 'completed', 100, 20, 'turn', NULL, NULL FROM n;",
         )
         .unwrap();
         let started = std::time::Instant::now();

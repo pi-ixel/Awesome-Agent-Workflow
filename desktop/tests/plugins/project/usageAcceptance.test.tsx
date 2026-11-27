@@ -292,7 +292,7 @@ for (const agent of ["chrys", "codeagent"] as const) {
   );
 }
 
-it("records CodeAgent deltas only when the conversation has an adjacent baseline", async () => {
+it("keeps CodeAgent turn deltas adjacent while retaining cumulative session totals", async () => {
   const request = vi.fn<Request>().mockResolvedValue(undefined);
   bind(request);
   const session = createSessionStore();
@@ -331,7 +331,13 @@ it("records CodeAgent deltas only when the conversation has an adjacent baseline
       input,
       output,
       total,
+      cumulativeTotal: current?.totalTokens ?? null,
     });
+    if (index === 4) {
+      const item = session.getState().items.at(-1);
+      if (item?.kind !== "user") throw new Error("预期最新消息为用户轮次");
+      expect(item.performance?.outputTokens).toBeUndefined();
+    }
   }
   expect(session.getState().items.at(-1)).toMatchObject({ turnUsage: usage });
   await waitFor(async () => expect(await loadPendingUsage()).toHaveLength(0));
@@ -507,6 +513,15 @@ it("T05 A08 A12 A13 crosses leap day and distinguishes zero and missing tokens",
     { day: "2024-03-01", tokens: 0n, missing: 0, turns: 1 },
   ]);
   expect(result.models[0]).toMatchObject({ model: null, tokens: 3n });
+  const cumulative = summarizeUsage(
+    {
+      ...empty,
+      total: "190",
+      days: [["2024-03-01", "0", 2, 2]],
+    },
+    7,
+  );
+  expect(cumulative.total).toBe(190n);
   const year = summarizeUsage(
     {
       ...empty,

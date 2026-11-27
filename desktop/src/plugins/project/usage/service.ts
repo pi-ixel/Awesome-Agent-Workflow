@@ -38,12 +38,16 @@ interface UsageTurn extends Omit<UsageStart, "selectedModel"> {
   input: number | null;
   output: number | null;
   total: number | null;
+  /** turn-delta 响应中的原始会话累计总量，不参与单轮模型/日期分配。 */
+  cumulativeTotal: number | null;
 }
 
 export interface UsageSnapshot {
   zone: string;
   enabledAt: number;
   today: string;
+  /** 按会话累计快照计算的总量；旧测试夹具可省略并回退到每日求和。 */
+  total?: string;
   workspaces: string[];
   days: [day: string, tokens: string, missing: number, turns?: number][];
   models: [
@@ -134,12 +138,13 @@ export function recordUsage(
     actualModel?: string;
     status: UsageTurn["status"];
     usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+    cumulativeTotal?: number;
   },
 ) {
   const session = scope.sessionId();
   if (!managedProjectStorage()?.available() || !session) return;
   const { turn, startedAt, selectedModel } = start;
-  const { actualModel, usage, status } = result;
+  const { actualModel, usage, status, cumulativeTotal } = result;
   const valid = (count: number) => Number.isSafeInteger(count) && count >= 0;
   const known =
     usage &&
@@ -165,6 +170,8 @@ export function recordUsage(
     input: known ? usage.inputTokens : null,
     output: known ? usage.outputTokens : null,
     total: usage && valid(usage.totalTokens) ? usage.totalTokens : null,
+    cumulativeTotal:
+      cumulativeTotal !== undefined && valid(cumulativeTotal) ? cumulativeTotal : null,
   };
   const entry = {
     id: crypto.randomUUID(),

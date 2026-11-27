@@ -43,7 +43,7 @@ export interface RuntimeStatusState extends RuntimeStatusValues {
   setBrowserError: (error: string | null) => void;
   setCachedContext: (usage: ContextUsage | null) => void;
   restoreSessionCounters: (counters: SessionCounters) => void;
-  setTurnUsage: (usage: TurnUsage | null) => void;
+  setTurnUsage: (usage: TurnUsage | null, sessionUsageAsOf?: number | null) => void;
   handleSessionEvent: (event: AcpSessionEvent) => void;
   /** 轮次开始（桥接层驱动：sessionStore.isAgentRunning 翻 true）。 */
   beginTurn: () => void;
@@ -134,7 +134,7 @@ export const createRuntimeStatusStore = (logger?: Logger) => {
         ...pickSessionCounters(state.usage ?? {}),
       },
     })),
-    setTurnUsage: (usage) =>
+    setTurnUsage: (usage, sessionUsageAsOf = null) =>
       set((state) =>
         usage === null
           ? { usage: null, usageSource: null }
@@ -152,6 +152,7 @@ export const createRuntimeStatusStore = (logger?: Logger) => {
                 totalSessionInputTokens: usage.inputTokens,
                 totalSessionOutputTokens: usage.outputTokens,
                 totalSessionCacheHitTokens: usage.cachedReadTokens,
+                ...(sessionUsageAsOf === null ? {} : { sessionUsageAsOf }),
               },
             },
       ),
@@ -250,6 +251,9 @@ export const createRuntimeStatusStore = (logger?: Logger) => {
               outputTokens: state.usage?.outputTokens ?? null,
               cacheHitTokens: state.usage?.cacheHitTokens ?? null,
               ...pickSessionCounters({}, state.usage),
+              ...(state.usage?.sessionUsageAsOf === undefined
+                ? {}
+                : { sessionUsageAsOf: state.usage.sessionUsageAsOf }),
             },
             usageSource: "standard",
           }));

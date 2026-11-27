@@ -24,7 +24,7 @@ impl Drop for Sandbox {
 fn context_usage_migrates_and_replaces_only_the_matching_session() {
     let directory = Sandbox::new("session-context");
     let (db, _, _) = open(&directory.0, "UTC", 42).unwrap();
-    db.execute_batch("DROP TABLE session_context_usage; PRAGMA user_version = 6;")
+    db.execute_batch("DROP TABLE session_context_usage; ALTER TABLE usage_turn DROP COLUMN cumulative_total; PRAGMA user_version = 6;")
         .unwrap();
     drop(db);
 
@@ -107,6 +107,7 @@ fn row(workspace: &str, agent: &str, id: &str, when: &str, tokens: Option<i64>) 
         input: tokens,
         output: tokens.map(|_| 0),
         total: tokens,
+        cumulative_total: None,
         accounting: Some(
             if agent == "codeagent" {
                 "turn-delta"

@@ -19,13 +19,13 @@ export function summarizeUsage(snapshot: UsageSnapshot, range: number) {
       { tokens: BigInt(tokens), missing, turns },
     ]),
   );
-  let total = 0n;
+  let dailyTotal = 0n;
   let peak = 0n;
   let longest = 0;
   let streak = 0;
   let previous = -Infinity;
   for (const [day, { tokens }] of byDay) {
-    total += tokens;
+    dailyTotal += tokens;
     if (tokens > peak) peak = tokens;
     if (tokens <= 0) continue;
     const index = dayIndex(day);
@@ -93,6 +93,7 @@ export function summarizeUsage(snapshot: UsageSnapshot, range: number) {
     const label = displayModelName(model.model, model.name);
     return { ...model, label, showModelId: (labels.get(label) ?? 0) > 1 };
   });
+  const total = snapshot.total === undefined ? dailyTotal : BigInt(snapshot.total);
   return { total, peak, longest, current, trend, activity, models };
 }
 

@@ -707,6 +707,7 @@ export function createSessionActions(
         if (statistics && usageScope) recordUsage(usageScope, statistics, {
           status: context.cancelledByUser ? "cancelled" : "failed",
           usage: usageForStatistics(usage),
+          cumulativeTotal: usageScope.accounting === "turn-delta" ? usage?.totalTokens : undefined,
           actualModel: typeof data?.modelId === "string" ? data.modelId : undefined,
         });
         endTurn({ stopReason: null, errorMessage: message, quietFailure, usage, outputTokens: usageForStatistics(usage)?.outputTokens });
@@ -746,6 +747,7 @@ export function createSessionActions(
           if (statistics && usageScope) recordUsage(usageScope, statistics, {
             status: result.stopReason === "cancelled" ? "cancelled" : "completed",
             usage: usageForStatistics(usage),
+            cumulativeTotal: usageScope.accounting === "turn-delta" ? usage?.totalTokens : undefined,
             actualModel: result.modelId,
           });
           get().flushStreamingChunks();
