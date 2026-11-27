@@ -389,6 +389,7 @@ html.theme-warm {
   /* 暗夜常态边框统一使用输入框的柔和线色；焦点使用独立颜色。 */
   --color-line: #484848;
   --color-line-strong: #484848;
+  --color-line-muted: #6c6c6c;
   --color-control-line: #484848;
   --color-dialog-line: #484848;
   --color-focus-ring: #ababab;
@@ -663,6 +664,7 @@ html.theme-warm {
 
   --color-line: #e3e3e3; /* 常规描边（黑 10% 叠加等效） */
   --color-line-strong: #d3d3d3; /* 强描边 / hover（黑 15%） */
+  --color-line-muted: #c7c7c7;
   --color-control-line: #e3e3e3;
   --color-dialog-line: #d3d3d3;
   --color-focus-ring: #737373;

@@ -179,6 +179,12 @@ export function ConversationNavigator({
                   : distance === 2
                     ? 1.25
                     : 1;
+            const idle = !active && !item.running && distance > 2;
+            const tickColor = idle
+              ? "bg-line-muted"
+              : active || distance === 0
+                ? "bg-ink"
+                : "bg-ink-faint";
             const opacity =
               distance === 0
                 ? 1
@@ -190,7 +196,7 @@ export function ConversationNavigator({
                       ? 0.9
                       : item.running
                         ? 0.72
-                        : 0.58;
+                        : 1;
             return (
               <NavigationRow
                 layout="compound"
@@ -246,7 +252,7 @@ export function ConversationNavigator({
                 }}
               >
                 <span
-                  className={`block h-[calc(var(--ui-icon-unit)*2)] w-[calc(var(--ui-icon-unit)*12)] origin-left rounded-pill transition-[transform,opacity] duration-150 motion-reduce:transition-none ${active || distance === 0 ? "bg-ink" : "bg-ink-faint"}`}
+                  className={`block h-[calc(var(--ui-icon-unit)*2)] w-[calc(var(--ui-icon-unit)*12)] origin-left rounded-pill transition-[transform,opacity] duration-150 motion-reduce:transition-none ${tickColor}`}
                   style={{ opacity, transform: `scaleX(${scale})` }}
                 />
               </NavigationRow>
