@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, it } from "vitest";
 import { toolFramePolicy } from "../../../src/plugins/tools/runtime/policy.ts";
+import type { ToolPermissions } from "../../../src/plugins/tools/types.ts";
 
 /**
  * 预览（iframe，srcdoc）与真实工具窗口（Rust 自定义协议）必须用同一套 CSP。
@@ -25,20 +26,48 @@ function rustBasePolicy(): string[] {
   return [...block.matchAll(/"([^"]*)"/g)].map((match) => match[1] ?? "");
 }
 
-it("keeps preview and the real tool window on the same CSP", () => {
-  const directives = toolFramePolicy.split(";").map((item) => item.trim());
-  const rust = rustBasePolicy();
-  // connect-src 是唯一按工具声明参数化的指令，两边都取下限（宽松默认值）。
-  const rustConnect = /_ => "'self' https: http:"/.exec(protocol);
-  expect(rustConnect, "找不到 connect-src 的宽松默认值").not.toBeNull();
+const cases: {
+  name: string;
+  permissions: ToolPermissions | undefined;
+  suffix: string;
+}[] = [
+  { name: "未声明联网", permissions: undefined, suffix: " https: http:" },
+  { name: "允许联网", permissions: { network: true }, suffix: " https: http:" },
+  { name: "禁止联网", permissions: { network: false }, suffix: "" },
+  {
+    name: "指定域名、通配符和端口",
+    permissions: {
+      network: {
+        hosts: ["*.corp.example.com", "api.example.com:8443", "bad host"],
+      },
+    },
+    suffix: " *.corp.example.com api.example.com:8443",
+  },
+  {
+    name: "无效白名单不能回退为全网放行",
+    permissions: { network: { hosts: ["bad host", "bad; img-src *"] } },
+    suffix: "",
+  },
+];
 
-  const expected = [...rust, "connect-src 'self' https: http:"];
-  expect(directives, "预览策略与 Rust BASE_POLICY 不一致").toEqual(expected);
-});
+it.each(cases)(
+  "$name：预览和原生窗口使用相同的资源限制",
+  ({ permissions, suffix }) => {
+    expect(toolFramePolicy(permissions)).toBe(
+      [
+        ...rustBasePolicy(),
+        `connect-src 'self'${suffix}`,
+        `img-src 'self' data: blob:${suffix}`,
+        `media-src 'self' data: blob:${suffix}`,
+      ].join("; "),
+    );
+  },
+);
 
 it("allows the network but keeps implicit loading locked down", () => {
-  expect(toolFramePolicy).toContain("connect-src 'self' https: http:");
-  expect(toolFramePolicy).toContain("default-src 'none'");
-  expect(toolFramePolicy).toContain("form-action 'none'");
-  expect(toolFramePolicy).toContain("object-src 'none'");
+  const policy = toolFramePolicy();
+  expect(policy).toContain("connect-src 'self' https: http:");
+  expect(policy).toContain("default-src 'none'");
+  expect(policy).toContain("form-action 'none'");
+  expect(policy).toContain("object-src 'none'");
 });

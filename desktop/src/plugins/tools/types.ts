@@ -26,7 +26,7 @@ export interface ToolViolation {
  * 联网声明。
  *
  * `true` 等价于"不限域名的 http(s)"，是历史写法，继续支持；写成对象可以限定
- * 域名（会转成 CSP 的 `connect-src` 白名单），`insecure` 才放行自签证书。
+ * 域名（连接、图片和音视频共用同一白名单），`insecure` 才放行自签证书。
  */
 export interface ToolNetworkPermission {
   /** 允许访问的域名，支持 `*.corp.example.com` 这种通配；省略表示不限。 */
@@ -37,7 +37,7 @@ export interface ToolNetworkPermission {
 
 /** 工具在运行时申请的能力；安装时会展示给用户。 */
 export interface ToolPermissions {
-  /** 联网：`true` 不限域名，对象可限定域名或放行自签证书；省略表示不联网。 */
+  /** 联网：`false` 禁止外部请求；`true` 或省略保持允许，对象可限定域名。 */
   readonly network?: boolean | ToolNetworkPermission;
 }
 
