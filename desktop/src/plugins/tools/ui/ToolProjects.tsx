@@ -7,7 +7,7 @@ import {
   btnPrimary,
   btnSecondary,
 } from "../../../shared/ui/controls.tsx";
-import { WrenchIcon } from "../../../shared/ui/icons.tsx";
+import { ToolboxIcon } from "../../../shared/ui/icons.tsx";
 // 外观由 tools.css 的 .build-rename input 决定，挂共享常量是为了让编辑框守卫识别。
 import { settingsInputClass } from "../../../shared/ui/inputStyles.ts";
 import type { ToolProjectSummary } from "../runtime/project.ts";
@@ -80,7 +80,7 @@ export function ToolProjectList({
     return (
       <section className="build-empty" aria-label="还没有工具项目">
         <span className="build-empty-mark" aria-hidden="true">
-          <WrenchIcon />
+          <ToolboxIcon />
         </span>
         <div className="build-empty-copy">
           <strong>还没有工具项目</strong>

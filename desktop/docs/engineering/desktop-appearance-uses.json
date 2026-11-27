@@ -145,13 +145,6 @@
     "专用渲染依赖 · @xterm/xterm",
     "专用渲染依赖 · @xterm/xterm/css/xterm.css"
   ],
-  "plugins/tools/runtime/examples.ts": [
-    "quickNotes/html · #3a6fd8",
-    "quickNotes/html · #4a7ce0",
-    "quickNotes/html · #add",
-    "quickNotes/html · #add",
-    "quickNotes/html · #fff"
-  ],
   "plugins/tools/ui/ToolBuilder.tsx": [
     "NewToolForm · <button>",
     "NewToolForm · <button>",
@@ -205,7 +198,6 @@
   "plugins/tools/ui/ToolsPanel.tsx": [
     "EmptyLibrary · <button>",
     "EmptyLibrary · <button>",
-    "EmptyLibrary · <button>",
     "ToolsPanel · <button>",
     "ToolsPanel · <button>",
     "ToolsPanel · <button>",
@@ -218,10 +210,6 @@
     "ToolsPanel · <input>",
     "ToolsPanel · <input>",
     "ToolsPanel/exportTool/link · createElement(a)"
-  ],
-  "plugins/tools/ui/sample.ts": [
-    "sampleTool/html · #2957b8",
-    "sampleTool/html · #3568d1"
   ],
   "plugins/updates/ui/DesktopUpdate.tsx": [
     "UpdateSettings · <input>",

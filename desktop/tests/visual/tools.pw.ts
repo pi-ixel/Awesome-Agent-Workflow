@@ -219,22 +219,18 @@ for (const width of [360, 1100]) {
     await expect(
       page.getByRole("button", { name: "导入工具…", exact: true }),
     ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "载入示例工具", exact: true }),
-    ).toBeVisible();
-    // 主 CTA 明显大于两个备选，且两个备选等高：之前三种按钮各有一套内边距。
+    const empty = page.getByRole("region", { name: "还没有工具" });
+    await expect(empty.getByRole("button")).toHaveCount(2);
     const boxes = await page.evaluate(() => {
       const primary = document
         .querySelector<HTMLElement>(".tools-empty-primary")!
         .getBoundingClientRect();
-      const alts = [
-        ...document.querySelectorAll<HTMLElement>(".tools-empty-alt"),
-      ].map((el) => el.getBoundingClientRect());
-      return { primary: primary.height, alts: alts.map((box) => box.height) };
+      const importButton = document
+        .querySelector<HTMLElement>(".tools-empty-import")!
+        .getBoundingClientRect();
+      return { primary: primary.height, importButton: importButton.height };
     });
-    expect(boxes.alts).toHaveLength(2);
-    expect(boxes.primary).toBeGreaterThan(boxes.alts[0]!);
-    expect(Math.abs(boxes.alts[0]! - boxes.alts[1]!)).toBeLessThan(1);
+    expect(boxes.primary).toBeGreaterThan(boxes.importButton);
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -245,25 +241,6 @@ for (const width of [360, 1100]) {
     });
   });
 }
-
-test("loading example tools fills the library", async ({ page }) => {
-  await page.setViewportSize({ width: 1100, height: 850 });
-  await page.goto("/tests/visual/toolsFixture.html?empty");
-  await page.getByRole("button", { name: "载入示例工具", exact: true }).click();
-  const rows = page.getByRole("list", { name: "已安装工具" });
-  await expect(rows.getByRole("listitem")).toHaveCount(2);
-  await expect(rows.getByText("JSON 格式化")).toBeVisible();
-  await expect(rows.getByText("随手记")).toBeVisible();
-  await expect(page.getByRole("status")).toContainText("已载入 2 个示例工具");
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= window.innerWidth,
-    ),
-  ).toBe(true);
-  await page.screenshot({
-    path: "node_modules/.cache/tools-examples-1100.png",
-  });
-});
 
 for (const width of [300, 360, 740]) {
   test(`stalled project hands the work back to the user at ${width}px`, async ({

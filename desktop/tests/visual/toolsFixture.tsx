@@ -2,7 +2,7 @@ import { createRoot } from "react-dom/client";
 import { createStore } from "zustand";
 import { ToolsPanel } from "../../src/plugins/tools/ui/ToolsPanel.tsx";
 import { ToolsPanelSurface } from "../../src/plugins/tools/ui/surface.tsx";
-import { sampleTool } from "../../src/plugins/tools/ui/sample.ts";
+import { sampleTool } from "../fixtures/sampleTool.ts";
 import { resolveToolSettings } from "../../src/plugins/tools/runtime/settings.ts";
 import type { PersonalTool } from "../../src/plugins/tools/types.ts";
 import type { ToolsService } from "../../src/plugins/tools/service.ts";
@@ -79,21 +79,12 @@ const entries: PersonalTool[] = params.has("empty")
 const state = createStore<readonly PersonalTool[]>(() => entries);
 const service: ToolsService = {
   state,
-  // 真的写进状态：视觉用例要能验证「载入示例工具」之后列表确实长出来。
-  install: (tool) => {
-    state.setState(
-      (current) =>
-        current.some((entry) => entry.package.id === tool.id)
-          ? current
-          : [...current, { package: tool, installedAt: Date.now() }],
-      true,
-    );
-    return Promise.resolve({
+  install: (tool) =>
+    Promise.resolve({
       version: tool.version,
       updated: false,
       versionChanged: false,
-    });
-  },
+    }),
   rollback: () => Promise.resolve(undefined),
   setRunDir: () => {},
   setSourceDir: () => {},
@@ -148,7 +139,7 @@ const otherProjects = [
     network: false,
   },
 ];
-const workshopFixture = fakeWorkshop(
+const workshop = fakeWorkshop(
   params.has("stalled")
     ? {
         project: { dir: jsonTable.dir, id: jsonTable.id, name: jsonTable.name },
@@ -211,11 +202,6 @@ const workshopFixture = fakeWorkshop(
           }
         : {},
 );
-const workshop = {
-  ...workshopFixture,
-  // 工具中心通过工坊安装示例。夹具让该入口更新真实渲染所用的服务状态。
-  installArchive: (tool) => service.install(tool),
-} satisfies typeof workshopFixture;
 createRoot(document.getElementById("root")!).render(
   // 和真实应用一样挂进外壳里（`ToolsPanelSurface` 就是 workbench.tsx 里那个）。
   // 以前夹具直接把面板塞进 <main>：父级是 block，面板必然满宽，于是「面板在

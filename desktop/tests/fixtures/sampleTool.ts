@@ -1,11 +1,11 @@
-import type { ToolPackage } from "../types.ts";
+import type { ToolPackage } from "../../src/plugins/tools/types.ts";
 
 export const sampleTool: ToolPackage = {
   schemaVersion: 1,
   id: "json-formatter",
   name: "JSON 格式化",
   version: "1.0.0",
-  // 示例顺便演示可选字段 icon：卡片与小窗用它替代默认的工具图标。
+  // 测试卡片与小窗显示自定义工具图标。
   icon: "J",
   settingsSchema: [
     {

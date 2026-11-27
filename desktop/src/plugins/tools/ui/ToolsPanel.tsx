@@ -11,11 +11,7 @@ import {
 } from "../../../shared/ui/controls.tsx";
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
 import type { ContextMenuEntry } from "../../../shared/ui/ContextMenu.tsx";
-import {
-  SquareTerminalIcon,
-  ToolboxIcon,
-  WrenchIcon,
-} from "../../../shared/ui/icons.tsx";
+import { SquareTerminalIcon, ToolboxIcon } from "../../../shared/ui/icons.tsx";
 // 外观由 tools.css 决定，挂共享常量是为了让编辑框守卫识别这两个输入框。
 import {
   composerFieldClass,
@@ -24,7 +20,6 @@ import {
 import { useMenuController } from "../../../shared/ui/useMenuController.ts";
 import type { HostService } from "../../host/service.ts";
 import type { ProjectService } from "../../project/service.ts";
-import { exampleTools } from "../runtime/examples.ts";
 import {
   exportToolProject,
   readToolUpload,
@@ -66,18 +61,16 @@ const errorText = (error: unknown) =>
 function EmptyLibrary({
   onCreate,
   onImport,
-  onExamples,
 }: {
   onCreate: () => void;
   onImport: (event: ReactMouseEvent<HTMLButtonElement>) => void;
-  onExamples: () => void;
 }) {
   return (
     <section className="tools-empty" aria-label="还没有工具">
       <div className="tools-empty-hero">
         <span className="tools-empty-glow" aria-hidden="true" />
         <span className="tools-empty-mark" aria-hidden="true">
-          <WrenchIcon />
+          <ToolboxIcon />
         </span>
       </div>
       <h3 className="tools-empty-title">从你的想法开始，做一个自己的工具</h3>
@@ -116,26 +109,14 @@ function EmptyLibrary({
         >
           开始做工具 <span aria-hidden="true">→</span>
         </button>
-        <div className="tools-empty-alts">
-          <button
-            type="button"
-            className={`${btnSecondary} tools-empty-alt`}
-            onClick={onImport}
-          >
-            导入工具…
-          </button>
-          <button
-            type="button"
-            className={`${btnSecondary} tools-empty-alt`}
-            onClick={onExamples}
-          >
-            载入示例工具
-          </button>
-        </div>
+        <button
+          type="button"
+          className={`${btnSecondary} tools-empty-import`}
+          onClick={onImport}
+        >
+          导入工具…
+        </button>
       </div>
-      <p className="tools-empty-foot">
-        示例工具随时可以卸载；完整约定见「开发指导 ↗」。
-      </p>
     </section>
   );
 }
@@ -260,9 +241,7 @@ export function ToolsPanel({
     setFeedback(undefined);
     try {
       if (!host.isNative()) throw new Error("请在 AAW 桌面版中打开工具。");
-      // 运行副本缺失（示例工具只装配置不落盘 / 目录被移动或清理）时，按安装
-      // 记录当场重建并写回 dir。以前这条链路断在 Rust 侧：tools_open 只会去
-      // tools_root/<id> 找，找不到就报一句路径（2026-11-22 用户截图报）。
+      // 旧安装记录或目录移动后运行副本可能缺失，按安装记录重建并写回目录。
       const dir = id ? await workshop.resolveOpenDir(id) : undefined;
       await host.openTool(id, dir);
     } catch (error) {
@@ -273,11 +252,7 @@ export function ToolsPanel({
   }
 
   /**
-   * 示例工具 / 预览安装都走和导入 ZIP 完全一样的安装链路。
-   *
-   * 以前这里直接 `service.install()`：只写配置、不落盘，装完的工具没有运行
-   * 副本，打开时才临时补——补不了的时候（启动器小窗直接打开）就只能报路径。
-   * 现在一律先物化一份完整副本再写记录。
+   * 预览安装沿用导入 ZIP 的安装链路，先落盘完整运行副本，再写入安装记录。
    */
   async function installPackage(tool: ToolPackage) {
     setFeedback(undefined);
@@ -294,32 +269,6 @@ export function ToolsPanel({
     } catch (error) {
       setFeedback({ text: errorText(error), error: true });
     }
-  }
-
-  async function installExamples() {
-    const names: string[] = [];
-    const failures: string[] = [];
-    for (const tool of exampleTools) {
-      try {
-        await workshop.installArchive(tool);
-        names.push(tool.name);
-      } catch (error) {
-        failures.push(`${tool.name}：${errorText(error)}`);
-      }
-    }
-    const loaded = names.length
-      ? `已载入 ${names.length} 个示例工具：${names.join("、")}。在「已安装」里可以打开、改设置或卸载；卸载完空状态里还能再载入一次。`
-      : "";
-    setFeedback(
-      failures.length
-        ? {
-            text: [loaded, `载入示例失败：${failures.join("；")}`]
-              .filter(Boolean)
-              .join("\n"),
-            error: true,
-          }
-        : { text: loaded },
-    );
   }
 
   /**
@@ -780,7 +729,6 @@ export function ToolsPanel({
               <EmptyLibrary
                 onCreate={() => setView({ kind: "projects" })}
                 onImport={openImportMenu}
-                onExamples={() => void installExamples()}
               />
             )}
             {tools.length > 0 && (

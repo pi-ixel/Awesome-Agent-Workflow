@@ -17,7 +17,7 @@ import {
   toolSettingsScript,
   validateToolSettings,
 } from "../../../src/plugins/tools/runtime/settings.ts";
-import { sampleTool } from "../../../src/plugins/tools/ui/sample.ts";
+import { sampleTool } from "../../fixtures/sampleTool.ts";
 
 it("exports editable project sources and roundtrips authoring files, actions and setting declarations", () => {
   const tool = {

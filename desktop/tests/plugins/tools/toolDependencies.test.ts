@@ -19,7 +19,7 @@ import {
   writeToolFiles,
   type ToolProjectIO,
 } from "../../../src/plugins/tools/runtime/project.ts";
-import { sampleTool } from "../../../src/plugins/tools/ui/sample.ts";
+import { sampleTool } from "../../fixtures/sampleTool.ts";
 
 /** 能记二进制的假宿主：`files` 存 base64，`text` 存明文，便于分辨走了哪条通道。 */
 function fakeIO(seed: Readonly<Record<string, string>> = {}): ToolProjectIO & {

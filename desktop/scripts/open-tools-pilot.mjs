@@ -7,7 +7,7 @@
 //
 // 用法：
 //   npm run tools:pilot          # 打开 tools/pilot
-//   npm run tools:pilot quick-notes   # 打开任意工具目录名
+//   npm run tools:pilot my-tool       # 打开指定工具目录
 import { spawn } from "node:child_process";
 
 const toolId =

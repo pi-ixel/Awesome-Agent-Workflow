@@ -282,7 +282,7 @@ it("工具面板的行内按钮各归其主，新增时不会悄悄混进共享�
     );
   // 数量与归属分开断言：条数说明面板里有多少个按钮，唯一归属说明它们都还在
   // 工具面板自己那几个视图函数里。挪到别处、或新开一个文件写按钮，都会红。
-  expect(owners.length).toBe(47);
+  expect(owners.length).toBe(46);
   expect([...new Set(owners.map((owner) => owner.replace(" · <button>", "")))].sort()).toEqual([
     "plugins/tools/ui/ToolBuilder.tsx#NewToolForm",
     "plugins/tools/ui/ToolBuilder.tsx#ProjectDetail",

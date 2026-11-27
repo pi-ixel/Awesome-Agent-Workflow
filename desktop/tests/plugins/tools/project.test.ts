@@ -16,7 +16,7 @@ import {
   type ToolProjectIO,
 } from "../../../src/plugins/tools/runtime/project.ts";
 import { parseToolPackage } from "../../../src/plugins/tools/runtime/package.ts";
-import { sampleTool } from "../../../src/plugins/tools/ui/sample.ts";
+import { sampleTool } from "../../fixtures/sampleTool.ts";
 
 it("waits for in-flight writes before reporting a staging failure", async () => {
   const { io } = memoryIO();

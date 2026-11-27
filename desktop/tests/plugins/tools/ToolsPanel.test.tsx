@@ -1,8 +1,14 @@
 import { it, expect, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { createStore } from "zustand";
 import { ToolsPanel } from "../../../src/plugins/tools/ui/ToolsPanel.tsx";
-import { sampleTool } from "../../../src/plugins/tools/ui/sample.ts";
+import { sampleTool } from "../../fixtures/sampleTool.ts";
 import type {
   PersonalTool,
   ToolPackage,
@@ -14,7 +20,6 @@ import {
   importToolProject,
   exportToolProject,
 } from "../../../src/plugins/tools/runtime/projectArchive.ts";
-import { exampleTools } from "../../../src/plugins/tools/runtime/examples.ts";
 import { ToolManagement } from "../../../src/plugins/tools/ui/ToolManagement.tsx";
 import { fakeWorkshop } from "./fakeWorkshop.ts";
 import { createSnapshotView } from "../../../src/shared/state/readonlySnapshot.ts";
@@ -442,8 +447,7 @@ it("lets you change the project root even before any project exists", () => {
   expect(resetProjectsRoot).toHaveBeenCalledOnce();
 });
 
-/** 空状态是一个主 CTA + 两个统一尺寸的备选，不再是三种大小的按钮并排。 */
-it("gives the empty library one primary CTA and two equally-sized alternatives", () => {
+it("offers creating or importing a tool in an empty library", () => {
   const state = createStore<readonly PersonalTool[]>(() => []);
   const service = {
     state,
@@ -456,14 +460,13 @@ it("gives the empty library one primary CTA and two equally-sized alternatives",
     saveSettings: vi.fn(),
   } satisfies ToolsService;
   const host = { isNative: () => true } as unknown as HostService;
-  const { container } = render(
+  render(
     <ToolsPanel service={service} host={host} workshop={fakeWorkshop()} />,
   );
-  expect(container.querySelectorAll(".tools-empty-primary")).toHaveLength(1);
-  expect(container.querySelectorAll(".tools-empty-alt")).toHaveLength(2);
-  expect(container.querySelector(".tools-empty-examples")).toBeNull();
-  expect(screen.getByRole("button", { name: "导入工具…" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "载入示例工具" })).toBeTruthy();
+  const empty = within(screen.getByRole("region", { name: "还没有工具" }));
+  expect(empty.getAllByRole("button")).toHaveLength(2);
+  expect(empty.getByRole("button", { name: "导入工具…" })).toBeInTheDocument();
+  expect(empty.getByRole("button", { name: "开始做工具" })).toBeInTheDocument();
 });
 
 /** 导入只有一个入口：点「导入工具」弹菜单选 ZIP 还是文件夹（浏览器无文件夹项）。 */
@@ -497,52 +500,6 @@ it("routes both import kinds through a single menu entry", () => {
   fireEvent.click(screen.getByRole("button", { name: "导入工具" }));
   expect(screen.getByRole("menuitem", { name: "导入 ZIP 包…" })).toBeTruthy();
   expect(screen.queryByRole("menuitem", { name: "导入文件夹…" })).toBeNull();
-});
-
-/**
- * 示例工具也必须走"物化一份完整副本再写记录"的安装链路（OBS-02）。
- *
- * 旧实现直接 `service.install()`：只写配置、不落盘，示例装完根本没有运行副本。
- * 主窗打开时会临时补一份，启动器小窗直接开就只能报一句路径。
- */
-it("loads every example tool through the archive install path", async () => {
-  const state = createStore<readonly PersonalTool[]>(() => []);
-  const service = {
-    state,
-    install: vi.fn(),
-    rollback: vi.fn(),
-    setRunDir: vi.fn(),
-    setSourceDir: vi.fn(),
-    open: vi.fn(),
-    remove: vi.fn(),
-    saveSettings: vi.fn(),
-  } satisfies ToolsService;
-  const installArchive = vi.fn((tool: ToolPackage) =>
-    Promise.resolve({
-      version: tool.version,
-      updated: false,
-      versionChanged: false,
-    }),
-  );
-  const host = { isNative: () => true } as unknown as HostService;
-  render(
-    <ToolsPanel
-      service={service}
-      host={host}
-      workshop={{ ...fakeWorkshop(), installArchive }}
-    />,
-  );
-  fireEvent.click(screen.getByRole("button", { name: "载入示例工具" }));
-  await waitFor(() =>
-    expect(installArchive).toHaveBeenCalledTimes(exampleTools.length),
-  );
-  expect(installArchive.mock.calls.map(([tool]) => tool.id)).toEqual(
-    exampleTools.map((tool) => tool.id),
-  );
-  expect(service.install).not.toHaveBeenCalled();
-  expect(screen.getByRole("status")).toHaveTextContent(
-    `已载入 ${exampleTools.length} 个示例工具`,
-  );
 });
 
 /** 导入 ZIP 要把包里的文件一起交给安装链路，而不是只吞下清单。 */

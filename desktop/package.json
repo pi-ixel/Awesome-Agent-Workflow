@@ -18,7 +18,6 @@
     "ui:audit": "tsx scripts/reportUiInventory.ts",
     "tauri": "tauri",
     "tools:guide-skill": "node scripts/build-tool-dev-skill.mjs",
-    "tools:seed": "node scripts/seed-example-tools.mjs",
     "tools:pilot": "node scripts/open-tools-pilot.mjs",
     "acp:smoke": "tsx scripts/acp-smoke.ts",
     "test:prompt:native": "node scripts/test-update-command-ipc.mjs --isolated-prompt-latency",
