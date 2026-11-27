@@ -954,6 +954,9 @@ test("outline uses a single bulk button and animates nested branches and the who
   await page.goto("/tests/visual/layoutMotionFixture.html");
   await page.getByRole("button", { name: "打开文件栏" }).click();
   await page.getByRole("treeitem", { name: "README.md" }).click();
+  await expect(page.locator("[data-panel-dragging]")).not.toHaveAttribute(
+    "data-layout-moving",
+  );
   const title = page.getByRole("heading", { name: "文件视图示例" });
   const toggle = page.getByRole("button", { name: "大纲", exact: true });
   await widthTransition(title, toggle);
