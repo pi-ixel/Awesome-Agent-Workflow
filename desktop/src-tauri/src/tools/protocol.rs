@@ -203,19 +203,12 @@ pub fn content_type(path: &Path) -> &'static str {
 
 /// 不随工具声明变化的 CSP 指令。
 ///
-/// 与 `tools-runtime/runtime.mjs` 的 `basePolicy` 逐条对齐——**两处不一致就是
-/// 两套安全语义**，工具在 Electron 里能跑、在新宿主里被拦，是最难查的一类 bug。
-///
-/// 与旧实现的差别只有一条：`script-src` / `style-src` 多了 `'self'`。因为这里的
-/// 页面永远从工具目录加载（不像 Electron 还有"只存在 preferences 里的 html"
-/// 那种无目录形态），多文件工具必须能引用同目录的 js/css。
-pub const BASE_POLICY: [&str; 9] = [
+/// 与预览 runtime/policy.ts 保持一致，外部资源不能在基底里无条件放行。
+pub const BASE_POLICY: [&str; 7] = [
     "default-src 'none'",
     "script-src 'unsafe-inline' 'self'",
     "style-src 'unsafe-inline' 'self'",
-    "img-src 'self' data: blob: https: http:",
     "font-src 'self' data:",
-    "media-src 'self' data: blob: https: http:",
     "form-action 'none'",
     "base-uri 'none'",
     "object-src 'none'",
@@ -223,33 +216,34 @@ pub const BASE_POLICY: [&str; 9] = [
 
 /// 按工具声明拼出完整 CSP。
 ///
-/// `connect-src` 是唯一随声明变化的指令，与 `policyFor` 同语义：
+/// 连接、图片和音视频共同遵守联网声明：
 /// - 没写 `network` → 宽松（`https: http:`），保住存量工具
-/// - 写 `network: false` → `'none'`，作者主动收紧
+/// - 写 `network: false` → 只保留本地资源及宿主能力通道
 /// - 写 `hosts` → 白名单
 pub fn policy_for(network: Option<&crate::tools::manifest::NetworkRule>) -> String {
     let mut directives: Vec<String> = BASE_POLICY.iter().map(|item| item.to_string()).collect();
     // `'self'` 必须永远在 connect-src 里：工具调宿主能力走的是同源
     // `fetch("/__aaw/call/...")`。少了它，声明了 `network.hosts` 白名单的工具
     // 连 store 都写不进去——而作者只会看到"存储失败"，根本联想不到 CSP。
-    let connect = match network {
-        Some(rule) if !rule.enabled => "'self'".to_string(),
-        Some(rule) if !rule.hosts.is_empty() => {
-            let hosts: Vec<&str> = rule
-                .hosts
-                .iter()
-                .map(String::as_str)
-                .filter(|host| valid_host(host))
-                .collect();
-            if hosts.is_empty() {
-                "'self' https: http:".into()
-            } else {
-                format!("'self' {}", hosts.join(" "))
-            }
-        }
-        _ => "'self' https: http:".to_string(),
+    let remote = match network {
+        Some(rule) if !rule.enabled => String::new(),
+        Some(rule) if !rule.hosts.is_empty() => rule
+            .hosts
+            .iter()
+            .map(String::as_str)
+            .filter(|host| valid_host(host))
+            .collect::<Vec<_>>()
+            .join(" "),
+        _ => "https: http:".to_string(),
     };
-    directives.push(format!("connect-src {connect}"));
+    let suffix = if remote.is_empty() { String::new() } else { format!(" {remote}") };
+    for (directive, local) in [
+        ("connect-src", "'self'"),
+        ("img-src", "'self' data: blob:"),
+        ("media-src", "'self' data: blob:"),
+    ] {
+        directives.push(format!("{directive} {local}{suffix}"));
+    }
     directives.join("; ")
 }
 
@@ -386,22 +380,49 @@ mod tests {
     }
 
     #[test]
-    fn network_rule_narrows_connect_src_only() {
+    fn network_rule_controls_connections_images_and_media() {
         use crate::tools::manifest::NetworkRule;
-        let open = policy_for(None);
-        assert!(open.contains("connect-src 'self' https: http:"));
-
-        let closed = policy_for(Some(&NetworkRule { enabled: false, hosts: vec![], insecure: vec![] }));
-        assert!(closed.contains("connect-src 'self'"));
-
-        let hosted = policy_for(Some(&NetworkRule {
-            enabled: true,
-            hosts: vec!["api.corp.example.com".into(), "bad host".into()],
-            insecure: vec![],
-        }));
-        assert!(hosted.contains("'self' api.corp.example.com"));
-        // 带空格的非法域名不能进 CSP，否则整条指令被浏览器丢弃。
-        assert!(!hosted.contains("bad host"));
+        let unrestricted = [
+            "connect-src 'self' https: http:",
+            "img-src 'self' data: blob: https: http:",
+            "media-src 'self' data: blob: https: http:",
+        ];
+        let local = [
+            "connect-src 'self'",
+            "img-src 'self' data: blob:",
+            "media-src 'self' data: blob:",
+        ];
+        let cases = [
+            (None, unrestricted),
+            (Some(NetworkRule::default()), unrestricted),
+            (Some(NetworkRule { enabled: false, ..Default::default() }), local),
+            (Some(NetworkRule {
+                hosts: vec!["*.corp.example.com".into(), "api.example.com:8443".into(), "bad host".into()],
+                ..Default::default()
+            }), [
+                "connect-src 'self' *.corp.example.com api.example.com:8443",
+                "img-src 'self' data: blob: *.corp.example.com api.example.com:8443",
+                "media-src 'self' data: blob: *.corp.example.com api.example.com:8443",
+            ]),
+            // 显式白名单全部无效时也不能放开网络。
+            (Some(NetworkRule {
+                hosts: vec!["bad host".into(), "bad; img-src *".into()],
+                ..Default::default()
+            }), local),
+        ];
+        for (rule, expected) in cases {
+            let policy = policy_for(rule.as_ref());
+            for directive in expected {
+                let name = directive.split_once(' ').unwrap().0;
+                assert_eq!(
+                    policy.split("; ").find(|item| item.starts_with(&format!("{name} "))),
+                    Some(directive),
+                    "{policy}",
+                );
+            }
+            let response = file_response(Path::new("index.html"), Vec::new(), Some(policy.clone()));
+            assert_eq!(response.headers()["Content-Security-Policy"].to_str().unwrap(), policy);
+        }
     }
 
     #[test]

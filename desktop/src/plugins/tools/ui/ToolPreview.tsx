@@ -146,7 +146,7 @@ export function ToolPreview({
         aria-label={tool.name}
         sandbox="allow-scripts"
         referrerPolicy="no-referrer"
-        srcDoc={`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="${toolFramePolicy}">${toolSettingsScript(tool)}${collector}${tool.html}`}
+        srcDoc={`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="${toolFramePolicy(tool.permissions)}">${toolSettingsScript(tool)}${collector}${tool.html}`}
         className="preview-frame"
       />
       {showLogs && (

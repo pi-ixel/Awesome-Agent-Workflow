@@ -153,19 +153,22 @@ describe("工具运行契约", () => {
     expect(injectCode).not.toContain("plugin:event");
   });
 
-  it("CSP 基底写在 Rust 里，且只有 connect-src 随声明变化", () => {
+  it("CSP 基底不能绕过连接、图片和音视频的联网声明", () => {
     expect(protocol).toContain("pub const BASE_POLICY");
     expect(protocol).toContain("default-src 'none'");
     expect(protocol).toContain("form-action 'none'");
     expect(protocol).toContain("base-uri 'none'");
     expect(protocol).toContain("object-src 'none'");
-    // connect-src 不能进 BASE_POLICY 那个数组：它是唯一按工具声明拼出来的指令。
-    // 只取数组字面量本身，别把下面 `policy_for` 的注释也算进来。
+    // 只检查静态基底，三类网络指令都必须按声明生成。
     const base = /pub const BASE_POLICY[^=]*=\s*\[([\s\S]*?)\];/.exec(
       protocol,
     )?.[1];
     expect(base, "BASE_POLICY 数组没找到").toBeTruthy();
     expect(base).not.toContain("connect-src");
+    expect(base).not.toContain("img-src");
+    expect(base).not.toContain("media-src");
+    expect(base).not.toContain("http:");
+    expect(base).not.toContain("https:");
   });
 
   /**
