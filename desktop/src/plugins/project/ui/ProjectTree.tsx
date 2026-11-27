@@ -228,8 +228,9 @@ const sessionRowActionReveal =
 const sessionRowActionClass = `shrink-0 rounded-control transition-opacity hover:bg-surface-hover ${sessionRowActionReveal} ${keyboardFocusClass}`;
 const sessionRowFrameClass =
   "group/session-row relative flex min-w-0 items-center gap-1 rounded-control pr-1 transition-colors";
+// Center a status dot in the same 24px slot as the compact archive action.
 const sessionRowStatusClass =
-  "flex min-w-0 shrink-0 items-center justify-end gap-2 empty:hidden";
+  "flex min-w-0 shrink-0 items-center justify-end gap-2 empty:hidden has-[>[role=img]]:w-6 has-[>[role=img]]:justify-center";
 const sessionRowStatusReveal =
   "group-hover/session-row:hidden [@media(hover:hover)]:group-has-[:focus-visible]/session-row:hidden";
 const sessionRowActionsClass = "flex shrink-0 items-center gap-1";

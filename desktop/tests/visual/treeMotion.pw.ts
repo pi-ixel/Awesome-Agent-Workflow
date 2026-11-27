@@ -282,9 +282,9 @@ test("项目、置顶、最近和工作流分组只有文字提示共用右边�
     tree
       .locator("[data-session-row-status]:visible")
       .evaluateAll((slots) =>
-        slots.map(
-          (slot) => slot.lastElementChild!.getBoundingClientRect().right,
-        ),
+        slots
+          .filter((slot) => slot.textContent?.trim())
+          .map((slot) => slot.lastElementChild!.getBoundingClientRect().right),
       );
   await expect
     .poll(async () => {
@@ -315,9 +315,11 @@ test("项目、置顶、最近和工作流分组只有文字提示共用右边�
   expect(groupHint.x - groupRing.x - groupRing.width).toBeGreaterThan(8);
   await group.hover();
   await expect(group.locator("..").getByRole("img", { name: "等你回复" })).toBeHidden();
-  await expect(
-    group.locator("..").getByRole("button", { name: "归档", exact: true }),
-  ).toHaveCSS("opacity", "1");
+  const archive = group.locator("..").getByRole("button", { name: "归档", exact: true });
+  await expect(archive).toHaveCSS("opacity", "1");
+  const archiveIcon = (await archive.locator("svg").boundingBox())!;
+  expect(Math.abs(groupHint.x + groupHint.width / 2 - archiveIcon.x - archiveIcon.width / 2))
+    .toBeLessThanOrEqual(1);
 
   await tree.getByRole("button", { name: "切换视角" }).click();
   await page.getByRole("menuitemradio", { name: "最近会话" }).click();
