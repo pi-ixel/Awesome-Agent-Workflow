@@ -20,7 +20,7 @@ import { listen } from "@tauri-apps/api/event";
 
 import { asSsoLoginPollWire } from "./ssoWire.ts";
 import type { SsoLoginPollWire } from "../types.ts";
-import type { CommandResult, HostRuntime } from "../types.ts";
+import type { CommandResult, HostRuntime, ToolPruneReport, ToolPurgeReport } from "../types.ts";
 import { createBridgeHost } from "../dev/bridgeClient.ts";
 
 // ---------------------------------------------------------------------------
@@ -112,8 +112,56 @@ export function createTauriHost(invoke: NativeInvoke = defaultInvoke): HostRunti
     async writeTextFile(path, contents) {
       await invoke<null>("write_text_file", { path, contents });
     },
+    async writeBinaryFile(path, base64) {
+      await invoke<null>("write_binary_file", { path, base64Contents: base64 });
+    },
+    async readBinaryFile(path, limit) {
+      return invoke<string>("read_binary_file", { path, limit: limit ?? null });
+    },
+    async listToolFiles(root, limit) {
+      return invoke<string[]>("list_tool_files", { root, limit: limit ?? null });
+    },
     async userDataDir(namespace, directory) {
+      // 工具目录不再走裸 `%APPDATA%/tools`：统一由位置指针
+      // （tools-location.json）解析，迁移到别的盘后立即生效。其他
+      // namespace（chrys 等）保持原命令不动——那条命令是共享基础设施。
+      if (namespace === "tools") {
+        return invoke<string>("tools_root_dir", { directory });
+      }
       return invoke<string>("user_data_dir", { namespace, directory });
+    },
+    async readGuideDoc() {
+      // Rust 侧保证永远有正文可回（有副本读副本，没副本读编译默认），失败才抛错；
+      // 上层（projectGuide）会退回编译模板，不让一次 IPC 抖动打断 AGENTS.md 生成。
+      return invoke<string>("tools_guide_runtime_text");
+    },
+    async toolPurge(input) {
+      return invoke<ToolPurgeReport>("tool_purge", {
+        toolId: input.toolId,
+        owner: input.owner,
+        projectDirs: [...input.projectDirs],
+      });
+    },
+    async finishToolPurge(toolId, owner, commit) {
+      await invoke<null>("tool_purge_finish", { toolId, owner, commit });
+    },
+    async moveToolPath(from, to) {
+      await invoke<null>("tool_move_path", { from, to });
+    },
+    async dropToolStaging(path) {
+      // Rust 侧只接受 `installed/<账号>/<id>/versions/<名字>` 这个形状；
+      // 传别处会明确报错，不会静默删掉什么。
+      await invoke<null>("tool_drop_staging", { path });
+    },
+    async pruneToolVersions(toolId, owner) {
+      // 判据全在 Rust：安装记录与窗口表都只有它看得到。这里只把发起时的账号
+      // 带过去，让它在换账号那一瞬间能拒绝——路径按 owner 拼，不校验就删错人。
+      return invoke<ToolPruneReport>("tool_prune_versions", {
+        toolId,
+        // Rust 侧是 `String`：未登录（undefined）时传空串，由它按"账号不合法"
+        // 拒绝。这里不静默换成"当前账号"——那正是要防的越权。
+        owner: owner ?? "",
+      });
     },
     async ssoOpenLogin(loginUrl, attemptId) {
       try {
@@ -179,6 +227,15 @@ interface DemoDirNode {
 interface DemoFileNode {
   readonly type: "file";
   contents: string;
+  /**
+   * `"base64"` 表示 `contents` 是二进制原文的 base64。
+   *
+   * 工具可以带 `node_modules`、图片、wasm：这些字节不是 UTF-8，按文本存会把
+   * 它们改坏（读回来再"转回字节"已经不可逆）。真实宿主里文件就是文件，内存
+   * 文件树里必须显式记住这一位，才能让 `readTextFile` / `readBinaryFile`
+   * 各走各的路。
+   */
+  readonly encoding?: "base64";
 }
 
 /** 内存节点：目录（含子节点）或文本文件。 */
@@ -186,6 +243,13 @@ type DemoNode = DemoDirNode | DemoFileNode;
 
 function demoDir(): DemoDirNode {
   return { type: "dir", children: new Map() };
+}
+
+/** UTF-8 文本 → base64。宿主读二进制时不区分作者写的是文本还是图片，一律回字节。 */
+function textToBase64(text: string): string {
+  let binary = "";
+  for (const byte of new TextEncoder().encode(text)) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 /**
@@ -203,6 +267,13 @@ export interface DemoHost extends HostRuntime {
     result: CommandResult,
   ): void;
   setUserDataDir(namespace: string, directory: string, path: string): void;
+  /**
+   * 删除一个文件或整棵目录。
+   *
+   * 只给测试布置现场（"用户把这个文件删了""清理工具把安装目录扫走了"）——
+   * 生产删除一律走 `toolPurge` / `dropToolStaging` 这类有形状守卫的窄命令。
+   */
+  removePath(path: string): void;
   /** 预置 SSO 登录轮询结果队列（按次消费；耗尽后再轮询即报错）。 */
   scriptSsoLoginPoll(results: readonly (SsoLoginPollWire | Error)[]): void;
   /** 清空文件树、命令脚本与目标目录设置（测试隔离用）。 */
@@ -221,6 +292,7 @@ export function createDemoHost(): DemoHost {
   const root = demoDir();
   const scripts = new Map<string, CommandResult>();
   const dataDirs = new Map<string, string>();
+  const stagedRemovals = new Map<string, Array<{ segments: string[]; node: DemoNode }>>();
   const ssoPollScript: (SsoLoginPollWire | Error)[] = [];
 
   function nodeAt(segments: readonly string[]): DemoNode | undefined {
@@ -268,7 +340,11 @@ export function createDemoHost(): DemoHost {
 
   function deepClone(node: DemoNode): DemoNode {
     if (node.type === "file") {
-      return { type: "file", contents: node.contents };
+      return {
+        type: "file",
+        contents: node.contents,
+        ...(node.encoding ? { encoding: node.encoding } : {}),
+      };
     }
     const clone = demoDir();
     for (const [name, child] of node.children) {
@@ -336,6 +412,11 @@ export function createDemoHost(): DemoHost {
       if (node === undefined || node.type !== "file") {
         return Promise.reject(new Error(`文件不存在：${path}`));
       }
+      // 二进制按文本读出来是一串 base64，调用方会把它当源码/JSON 用——宁可
+      // 报错，也不给一份"看起来能解析、实际是乱码"的内容。
+      if (node.encoding === "base64") {
+        return Promise.reject(new Error(`这不是文本文件：${path}`));
+      }
       return Promise.resolve(node.contents);
     },
     writeTextFile(path, contents) {
@@ -352,6 +433,62 @@ export function createDemoHost(): DemoHost {
       parent.children.set(name, { type: "file", contents });
       return Promise.resolve();
     },
+    writeBinaryFile(path, base64) {
+      const segments = normalizeKey(path);
+      const name = segments[segments.length - 1];
+      if (name === undefined) {
+        return Promise.reject(new Error(`路径无效：${path}`));
+      }
+      const parent = ensureDir(segments.slice(0, -1));
+      if (parent.children.get(name)?.type === "dir") {
+        return Promise.reject(new Error(`目标已是目录：${path}`));
+      }
+      parent.children.set(name, { type: "file", contents: base64, encoding: "base64" });
+      return Promise.resolve();
+    },
+    readBinaryFile(path, limit) {
+      const node = nodeAt(normalizeKey(path));
+      if (node === undefined || node.type !== "file") {
+        return Promise.reject(new Error(`文件不存在：${path}`));
+      }
+      // 文本文件也按原始字节回 base64：宿主侧只认"文件"，不区分作者写的类型。
+      const base64 = node.encoding === "base64" ? node.contents : textToBase64(node.contents);
+      const bytes = Math.floor((base64.length * 3) / 4);
+      if (limit !== undefined && bytes > limit) {
+        return Promise.reject(new Error(`文件超过单包上限（${limit} 字节）：${path}`));
+      }
+      return Promise.resolve(base64);
+    },
+    listToolFiles(root, limit) {
+      const node = nodeAt(normalizeKey(root));
+      if (node === undefined || node.type !== "dir") {
+        return Promise.reject(new Error(`目录不存在或不是目录：${root}`));
+      }
+      const names: string[] = [];
+      const walk = (dir: DemoDirNode, prefix: string) => {
+        if (limit !== undefined && names.length >= limit) return;
+        for (const [name, child] of dir.children) {
+          const next = prefix ? `${prefix}/${name}` : name;
+          if (child.type === "dir") walk(child, next);
+          else names.push(next);
+        }
+      };
+      walk(node, "");
+      return Promise.resolve(names.sort((left, right) => left.localeCompare(right)));
+    },
+    dropToolStaging(path) {
+      // 与 Rust 侧同一条纪律：只接受 `<…>/versions/<目录>`。
+      // 删目录不可逆，宁可让它窄到只能干"清理本次安装"这一件事。
+      const segments = normalizeKey(path);
+      if (segments[segments.length - 2] !== "versions") {
+        return Promise.reject(new Error(`只允许清理 versions 下的暂存目录：${path}`));
+      }
+      if (nodeAt(segments) === undefined) {
+        return Promise.reject(new Error(`暂存目录不存在：${path}`));
+      }
+      removeAt(segments);
+      return Promise.resolve();
+    },
     userDataDir(namespace, directory) {
       if (
         ![namespace, directory].every((part) =>
@@ -364,6 +501,92 @@ export function createDemoHost(): DemoHost {
         dataDirs.get(`${namespace}/${directory}`) ??
           `%APPDATA%/${namespace}/${directory}`,
       );
+    },
+    toolPurge(input) {
+      const removedDirs: string[] = [];
+      const skippedDirs: string[] = [];
+      const staged: Array<{ segments: string[]; node: DemoNode }> = [];
+      const remove = (segments: string[]) => {
+        const node = nodeAt(segments);
+        if (input.stage && node) staged.push({ segments, node });
+        removeAt(segments);
+      };
+      for (const dir of input.projectDirs) {
+        const segments = normalizeKey(dir);
+        const node = nodeAt(segments);
+        const manifest = nodeAt([...segments, "manifest.json"]);
+        const staging = segments.at(-1)?.startsWith(".staging-") === true
+          && segments.at(-2) === "versions" && segments.at(-3) === input.toolId;
+        // 按解析后的 id 认领，不按字面量匹配：作者用别的排版写清单（`"id" : "x"`）
+        // 时，字符串包含判断会漏掉，卸载就留下一个再没人能清的目录。
+        let owns = false;
+        if (node?.type === "dir" && manifest?.type === "file") {
+          try {
+            const parsed: unknown = JSON.parse(manifest.contents);
+            owns = !!parsed && typeof parsed === "object"
+              && (parsed as Record<string, unknown>)["id"] === input.toolId;
+          } catch { owns = false; }
+        }
+        if (!owns && !(staging && node?.type === "dir")) {
+          skippedDirs.push(dir);
+          continue;
+        }
+        remove(segments);
+        removedDirs.push(dir);
+      }
+      const dataSegments = ["%LOCALAPPDATA%", "com.aaw.desktop", "tools", "storage", input.owner, `${input.toolId}.json`];
+      const removedData = nodeAt(dataSegments)?.type === "file";
+      if (removedData) remove(dataSegments);
+      // 工具存的密钥：与数据文件同一个根，按工具 id 一个 json。
+      const secretSegments = ["%LOCALAPPDATA%", "com.aaw.desktop", "tools", "secrets", input.owner, `${input.toolId}.json`];
+      const removedSecrets = nodeAt(secretSegments)?.type === "file";
+      if (removedSecrets) remove(secretSegments);
+      // 上一版清单同样落在一个独立目录里，卸载后没有任何记录指它。预览环境
+      // 不按账号分区（`userDataDir` 就是 `%APPDATA%/tools/backups`），所以这里
+      // 少一层账号段——按真实宿主的布局删会删空。
+      const backupSegments = ["%APPDATA%", "tools", "backups", input.toolId];
+      const removedBackup = nodeAt(backupSegments)?.type === "dir";
+      if (removedBackup) remove(backupSegments);
+      // 预览环境是一棵内存树，`removeAt` 不会失败：没有"该删但没删掉"这一类。
+      if (input.stage) stagedRemovals.set(`${input.owner}/${input.toolId}`, staged);
+      return Promise.resolve({ removedDirs, skippedDirs, failedDirs: [], removedData, removedBackup, removedSecrets, staged: input.stage === true });
+    },
+    finishToolPurge(toolId, owner, commit) {
+      const key = `${owner}/${toolId}`;
+      const staged = stagedRemovals.get(key);
+      if (!commit && staged) {
+        for (const { segments, node } of staged.reverse()) {
+          const leaf = segments.at(-1);
+          if (leaf) ensureDir(segments.slice(0, -1)).children.set(leaf, node);
+        }
+      }
+      stagedRemovals.delete(key);
+      return Promise.resolve();
+    },
+    pruneToolVersions() {
+      // 预览环境没有安装记录，也就没有"谁引用了哪份副本"这回事。按路径猜着删
+      // 会把演示里的工具删掉，所以一律回空报告：真回收只在桌面宿主发生。
+      return Promise.resolve<ToolPruneReport>({ removed: [], kept: [], skipped: [] });
+    },
+    moveToolPath(from, to) {
+      const sourceSegments = normalizeKey(from);
+      const targetSegments = normalizeKey(to);
+      const node = nodeAt(sourceSegments);
+      if (node === undefined) {
+        return Promise.reject(new Error(`源路径不存在：${from}`));
+      }
+      if (node.type === "dir" && nodeAt([...sourceSegments, "manifest.json"]) === undefined) {
+        return Promise.reject(new Error(`只允许移动工具项目目录（缺少 manifest.json）：${from}`));
+      }
+      if (nodeAt(targetSegments) !== undefined) {
+        return Promise.reject(new Error(`目标已经存在：${to}`));
+      }
+      ensureDir(targetSegments.slice(0, -1)).children.set(
+        targetSegments[targetSegments.length - 1] ?? "",
+        node,
+      );
+      removeAt(sourceSegments);
+      return Promise.resolve();
     },
     ssoOpenLogin() {
       return Promise.resolve();
@@ -387,6 +610,9 @@ export function createDemoHost(): DemoHost {
     },
     addDir(path) {
       ensureDir(normalizeKey(path));
+    },
+    removePath(path) {
+      removeAt(normalizeKey(path));
     },
     scriptCommand(program, args, result) {
       scripts.set(commandKey(program, args), result);

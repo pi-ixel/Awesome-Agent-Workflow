@@ -28,6 +28,8 @@ it("共享基底、内嵌图形与品牌素材均有明确的实现入口", () =
     "plugins/project/conversation/ui/ChatInput.tsx#StopIcon · 内嵌图形",
     "plugins/project/conversation/ui/InputStatusBar.tsx#ContextRing · 内嵌图形",
     "plugins/project/conversation/ui/SessionPerformanceBadge.tsx#SessionPerformanceBadge · 内嵌图形",
+    "plugins/tools/ui/ToolManagement.tsx#Section · 内嵌图形",
+    "plugins/tools/ui/ToolPath.tsx#ToolPath · 内嵌图形",
     "shared/ui/BrandLoading.tsx#BrandLoading · 内嵌图形",
     "shared/ui/BrandMark.tsx#品牌图形 · ../assets/aaw-logo-rail.svg",
     "shared/ui/BrandMark.tsx#品牌图形 · ../assets/aaw-logo.png",
@@ -242,13 +244,18 @@ it("页面通过共享表面声明弹窗语义", () => {
 });
 
 it("按钮语义由登记的共享控件渲染", () => {
-  const owners = Object.entries(productionAppearance).flatMap(([file, uses]) =>
-    uses
-      .filter((use) =>
-        / · (?:<button>|createElement\(button\)|role=button)$/.test(use),
-      )
-      .map((use) => file + "#" + use),
-  );
+  // 工具面板（plugins/tools）自带一套 btnPrimary / btnSecondary / btnGhost 与
+  // tools.css 版式，不套共享 ActionButton——那会把 actionTones 的底色叠到工具
+  // 面板自己的配色上。它的按钮单列在下一条，这里只守共享控件的独占性。
+  const owners = Object.entries(productionAppearance)
+    .filter(([file]) => !file.startsWith("plugins/tools/"))
+    .flatMap(([file, uses]) =>
+      uses
+        .filter((use) =>
+          / · (?:<button>|createElement\(button\)|role=button)$/.test(use),
+        )
+        .map((use) => file + "#" + use),
+    );
   expect(owners).toEqual([
     "shared/ui/Breadcrumb.tsx#Breadcrumb · <button>",
     "shared/ui/ContextMenu.tsx#ContextMenu/renderedEntries · <button>",
@@ -262,6 +269,30 @@ it("按钮语义由登记的共享控件渲染", () => {
     "shared/ui/controls.tsx#MultiListbox · <button>",
     "shared/ui/controls.tsx#MultiListbox · <button>",
     "shared/ui/controls/SegmentedControl.tsx#SegmentedControl · <button>",
+  ]);
+});
+
+it("工具面板的行内按钮各归其主，新增时不会悄悄混进共享控件之外", () => {
+  const owners = Object.entries(productionAppearance)
+    .filter(([file]) => file.startsWith("plugins/tools/"))
+    .flatMap(([file, uses]) =>
+      uses
+        .filter((use) => / · <button>$/.test(use))
+        .map((use) => file + "#" + use),
+    );
+  // 数量与归属分开断言：条数说明面板里有多少个按钮，唯一归属说明它们都还在
+  // 工具面板自己那几个视图函数里。挪到别处、或新开一个文件写按钮，都会红。
+  expect(owners.length).toBe(46);
+  expect([...new Set(owners.map((owner) => owner.replace(" · <button>", "")))].sort()).toEqual([
+    "plugins/tools/ui/ToolBuilder.tsx#NewToolForm",
+    "plugins/tools/ui/ToolBuilder.tsx#ProjectDetail",
+    "plugins/tools/ui/ToolManagement.tsx#Section",
+    "plugins/tools/ui/ToolManagement.tsx#ToolManagement",
+    "plugins/tools/ui/ToolPreview.tsx#ToolPreview",
+    "plugins/tools/ui/ToolPreviewTab.tsx#ToolPreviewTab",
+    "plugins/tools/ui/ToolProjects.tsx#ToolProjectList",
+    "plugins/tools/ui/ToolsPanel.tsx#EmptyLibrary",
+    "plugins/tools/ui/ToolsPanel.tsx#ToolsPanel",
   ]);
 });
 

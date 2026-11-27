@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "pilot",
+  "name": "P0 验收台",
+  "version": "0.1.0",
+  "icon": "◉",
+  "author": "AAW",
+  "description": "工具载体从 Electron 换到 Tauri 的验证页。它不做什么有用的事，只把三件最容易翻车的事摆在界面上：协议映射、脚本注入时机、能力调用链。",
+  "settingsSchema": [
+    {
+      "id": "greeting",
+      "type": "text",
+      "label": "招呼语",
+      "description": "用来验证设置默认值在建窗口时就已经内联进注入脚本。",
+      "default": "你好，新宿主"
+    },
+    {
+      "id": "autoCount",
+      "type": "boolean",
+      "label": "打开时自动加一",
+      "description": "用来验证布尔型设置的默认值也走同一条路。",
+      "default": false
+    }
+  ],
+  "actions": [
+    {
+      "id": "stats",
+      "description": "返回当前的存储键与计数，供宿主验证动作调用链",
+      "inputSchema": { "type": "object", "properties": {} }
+    },
+    {
+      "id": "add",
+      "description": "把计数加一",
+      "inputSchema": { "type": "object", "properties": { "by": { "type": "number" } } }
+    }
+  ]
+}

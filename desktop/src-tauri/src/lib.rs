@@ -29,6 +29,7 @@ mod storage_location;
 mod storage_preferences;
 mod taskbar_badge;
 mod terminal_pty;
+pub mod tools;
 mod tray;
 mod usage_statistics;
 mod visual_guide;
@@ -36,6 +37,12 @@ mod workflow_service;
 mod ops_service;
 
 use tauri::{Emitter, Manager};
+
+fn request_window_exit(app: &tauri::AppHandle) {
+    if !tools::guide::defer_exit_for_editor(app) {
+        let _ = app.emit("aaw://close-requested", ());
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -56,11 +63,13 @@ pub fn run() {
         }
         context
     };
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .manage(panel_files::PanelWatchers::default())
         .manage(browser::host::BrowserHost::default())
         .manage(mcp_management::ProxyHost::default())
         .manage(codeagent_credit::CreditQuota::default())
+        .manage(tools::ToolsHost::default())
+        .manage(tools::launcher::LauncherState::default())
         .manage(workflow_service::WorkflowHost::default())
         .manage(ops_service::OpsHost::default())
         .manage(visual_guide::VisualGuideHost::default())
@@ -75,6 +84,13 @@ pub fn run() {
             }
             storage_location::initialize(app.handle()).map_err(std::io::Error::other)?;
             browser::host::initialize_agent_control(app.handle());
+            // 新的工具载体（P0）。与 Electron 并存：它只注册协议与状态，
+            // 不开任何窗口，除非 `AAW_TOOLS_TAURI_PILOT=1`。
+            if let Err(error) = tools::initialize(app.handle()) {
+                eprintln!("工具载体（Tauri）初始化失败: {error}");
+            }
+            // 启动器：窗口默认不建，快捷键按下时才建；这里只注册热键。
+            tools::launcher::start(app.handle());
             if let Err(error) = diagnostics::start(app.handle()) {
                 eprintln!("日志服务启动失败: {error}");
             }
@@ -116,8 +132,24 @@ pub fn run() {
                 terminal_pty::retire_page(webview.label().to_owned());
             }
         })
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry, ()>::new("aaw-tool-runtime")
+                .invoke_handler(tauri::generate_handler![tools::tool_act])
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    // 只在按下时响应：松开也触发会让启动器闪一下就消失。
+                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        tools::launcher::on_hotkey(app);
+                    }
+                })
+                .build(),
+        )
         .plugin(
             tauri::plugin::Builder::<tauri::Wry, ()>::new("aawBrowserDialogBridge")
                 .js_init_script(browser::native_dialog::capture_script())
@@ -189,6 +221,39 @@ pub fn run() {
             browser::mcp::browser_mcp_bind,
             browser::mcp::browser_mcp_capabilities,
             browser::mcp::browser_mcp_revoke,
+            // 工具载体。P3 之后这里只有一份实现：没有第二种载体可以对照了。
+            tools::tools_open,
+            tools::tools_write_archive,
+            tools::tools_host_info,
+            tools::tool_store_get,
+            tools::tool_store_set,
+            tools::tool_store_delete,
+            tools::tool_store_keys,
+            tools::launcher::launcher_entries,
+            tools::launcher::launcher_open,
+            tools::launcher::launcher_hide,
+            tools::launcher::launcher_pin,
+            tools::launcher::launcher_theme,
+            tools::launcher::launcher_shortcut,
+            tools::launcher::launcher_capture,
+            tools::launcher::launcher_show,
+            tools::launcher::launcher_stop,
+            // 开发指导窗口：打开 + 正文读写（默认正文编在二进制里，用户副本在
+            // 数据目录；「恢复默认」是删副本，不是写快照——见 tools/guide.rs）
+            tools::guide::tools_guide_open,
+            tools::guide::tools_guide_load,
+            tools::guide::tools_guide_save,
+            tools::guide::tools_guide_reset,
+            tools::guide::tools_guide_dirty,
+            tools::guide::tools_guide_theme,
+            tools::guide::tools_guide_close,
+            tools::guide::tools_guide_open_url,
+            tools::guide::tools_guide_runtime_text,
+            // 工具整体位置（按账号单指针）与在线迁移
+            tools::location::tools_location_read,
+            tools::location::tools_location_schedule,
+            tools::location::tools_root_dir,
+            tools::location::tools_storage_open,
             codeagent_history::agent_history_evidence,
             codeagent_delete::agent_delete_session,
             codeagent_credit::codeagent_credit_quota,
@@ -285,7 +350,18 @@ pub fn run() {
             mcp_management::mcp_test_config,
             commands::read_text_file,
             commands::write_text_file,
+            commands::read_binary_file,
+            commands::write_binary_file,
             commands::user_data_dir,
+            tools::uninstall::tool_purge,
+            tools::uninstall::tool_purge_finish,
+            tools::tools_close,
+            commands::tool_move_path,
+            commands::tool_drop_staging,
+            // 回收孤儿版本副本（判断在宿主：它同时看得到安装记录与窗口表）
+            commands::tool_prune_versions,
+            // 工具目录整树列举（导出带依赖的工具；不跳过 node_modules）
+            commands::list_tool_files,
             // 工作区文件列举（@ 提及数据源；跳过依赖目录，深度/条目封顶）
             commands::list_workspace_files,
             // 关闭守卫：前端裁决后经它真正销毁窗口（跳过 CloseRequested）
@@ -327,7 +403,7 @@ pub fn run() {
             // 关闭守卫的 Rust 半边：CloseRequested 一律拦下转交前端——
             // 统一确认弹窗（忙闲双变体），确认后前端先收口 agent 进程树
             // （忙路径直杀、闲路径优雅关闭，均带 10s 预算），再经
-            // force_close（destroy）真正关窗——默认的直接销毁会把 agent
+            // force_close 退出整个应用——默认的直接销毁会把 agent
             // 进程树变成孤儿，抱着 chrys 的锁拖慢下一次启动（Job Object
             // 是它死透时的兜底，不是许可）。
             if matches!(event, tauri::WindowEvent::Destroyed) {
@@ -353,26 +429,34 @@ pub fn run() {
                 terminal_pty::retire_page(window.label().to_owned());
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // 诊断窗与 SSO 登录窗直接放行：无 agent 资源需要收口，
-                // 用户关登录窗即「放弃认证」，窗口销毁事件会通知前端。
-                if window.label() == "diagnostics"
-                    || window.label().starts_with(sso_login::SSO_LOGIN_WINDOW_PREFIX)
-                {
+                // 辅助窗口各自处理关闭；只有主窗口的关闭会请求退出应用。
+                if window.label() != "main" {
                     return;
                 }
                 if window.state::<desktop_update::Updates>().installing() {
                     api.prevent_close();
                     return;
                 }
-                if window.label() == "main" && window.state::<tray::TrayPreference>().hide_on_close() {
+                if window.state::<tray::TrayPreference>().hide_on_close() {
                     api.prevent_close();
                     let _ = window.hide();
                     return;
                 }
-                let _ = window.app_handle().emit("aaw://close-requested", ());
                 api.prevent_close();
+                request_window_exit(window.app_handle());
             }
-        })
-        .run(context)
-        .expect("error while running tauri application");
+        });
+
+    // 工具载体的自定义协议。注册必须在 `run` 之前，且用异步版本：
+    // 读文件是阻塞 IO，同步版本会卡住 wry 的协议线程。
+    let app = tools::register_protocol(builder)
+        .build(context)
+        .expect("error while building tauri application");
+    // 退出兜底：直接退出应用不走逐窗销毁，L3 子进程必须在这里收口（C-10）。
+    // `App::run` 不返回（事件循环结束即进程退出），没有可 expect 的返回值。
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            tools::shutdown_all_processes(app_handle);
+        }
+    });
 }

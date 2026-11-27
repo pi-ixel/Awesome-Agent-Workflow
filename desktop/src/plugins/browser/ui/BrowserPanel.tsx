@@ -775,7 +775,7 @@ function BrowserPanelSession({
     <section
       aria-label="内嵌浏览器"
       data-testid="browser-panel"
-      className="relative flex h-full min-h-0 min-w-0 flex-col bg-base text-ink"
+      className="@container/browser relative flex h-full min-h-0 min-w-0 flex-col bg-base text-ink"
       onKeyDown={(event) => {
         if (!event.ctrlKey) return;
         if (event.key === "0") changeZoom("reset");
@@ -783,7 +783,15 @@ function BrowserPanelSession({
         if (event.key === "-") changeZoom("out");
       }}
     >
-      <div className="flex min-h-10 min-w-0 flex-nowrap items-center gap-0.5 border-b border-line px-1">
+      {/* 工具条自己吞掉横向溢出。
+          以前这一行只有 min-w-0：窄栏（暗夜 300 CSS px）时 7 个图标按钮的下限
+          宽度超过容器，溢出一直冒到右栏那个 `overflow-hidden` 的共同祖先上；
+          键盘 Tab 到「新建标签页」，浏览器为了让焦点可见把祖先的 scrollLeft
+          推到 43.2，工具中心的管理内容左侧就被裁掉了（管理页自己
+          `clientWidth == scrollWidth == 289`，只量它看不出来）。
+          现在：缩放百分比在窄容器里先收起，剩下的极端情况由这一行自己滚，
+          不再动祖先。 */}
+      <div className="flex min-h-10 min-w-0 flex-nowrap items-center gap-0.5 overflow-x-auto overscroll-x-contain border-b border-line px-1">
         <IconButton
           type="button"
           aria-label="后退"
@@ -859,7 +867,9 @@ function BrowserPanelSession({
             className={`${fieldSurfaceClass} min-h-7 w-full rounded-pill! px-3 text-xs`}
           />
         </form>
-        <span className="w-8 shrink-0 text-center text-2xs text-ink-muted">
+        {/* 缩放百分比是纯信息，窄栏里第一个让位——它占的 32px 正好是压垮
+            300 px 那行宽度的那一点。 */}
+        <span className="hidden w-8 shrink-0 text-center text-2xs text-ink-muted @min-[340px]/browser:inline-block">
           {Math.round(pageZoom * 100)}%
         </span>
         <IconButton

@@ -241,6 +241,7 @@ export function Checkbox({
 }
 
 export interface ToggleSwitchProps {
+  readonly id?: string;
   readonly checked: boolean;
   readonly disabled?: boolean;
   readonly pending?: boolean;
@@ -251,6 +252,7 @@ export interface ToggleSwitchProps {
 
 /** 自绘开关（滑块式）：原生 checkbox 视觉隐藏，仅承担语义与键盘。 */
 export function ToggleSwitch({
+  id,
   checked,
   disabled = false,
   pending = false,
@@ -262,6 +264,7 @@ export function ToggleSwitch({
       className={`relative inline-flex min-h-6 shrink-0 items-center justify-center ${pending ? "cursor-wait opacity-70" : disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
     >
       <input
+        id={id}
         type="checkbox"
         role="switch"
         aria-label={label}

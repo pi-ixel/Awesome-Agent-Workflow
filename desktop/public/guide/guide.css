@@ -1,0 +1,443 @@
+/*
+ * 开发指导窗口的样式。
+ *
+ * 只用系统字体与语义色：这份文档要在任何主题下都读得清，而不是"跟主窗长得一样"。
+ * 深色是默认（与主窗一致），`data-theme="warm"` 时切浅色。
+ *
+ * 布局三行：顶栏（标题 / 状态 / 按钮）、主体（左侧目录 + 右侧正文，各自独立滚动）、
+ * 编辑态（整块换成 textarea）。滚动容器是 `main` 而不是 window——目录要一直可见。
+ */
+:root {
+  color-scheme: dark;
+  --bg: #16181f;
+  --panel: #1d2029;
+  --text: #e6e8ee;
+  --muted: #9aa1b1;
+  --line: #2b2f3c;
+  --accent: #7aa2ff;
+  --code: #101219;
+}
+
+:root[data-theme="warm"] {
+  color-scheme: light;
+  --bg: #f7f8fa;
+  --panel: #ffffff;
+  --text: #22252d;
+  --muted: #656b78;
+  --line: #e2e5ec;
+  --accent: #2f5fd0;
+  --code: #f0f2f6;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* `hidden` 必须压得住 `display: flex`——否则"隐藏"的编辑器照样占满一屏。 */
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font:
+    14px/1.75 system-ui,
+    "Segoe UI",
+    "Microsoft YaHei",
+    sans-serif;
+}
+
+/* ── 顶栏 ─────────────────────────────────────────────────────────────── */
+
+.bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.bar-title {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--accent);
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+/* 状态可能是长句（保存失败的原始原因）。让它占剩余宽度并被截断，
+ * 而不是把右边的按钮挤成竖排——窄窗口下这一点尤其明显。 */
+.status {
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+button {
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 4px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* 按钮不参与压缩：窗口窄到 720 时，宁可状态文字被截断，也不能让按钮变形。 */
+.bar > button,
+.editor-bar > button {
+  flex: 0 0 auto;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+button.ghost {
+  background: transparent;
+}
+
+/* ── 主体：目录 + 正文 ─────────────────────────────────────────────────── */
+
+.layout {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
+.toc {
+  flex: 0 0 236px;
+  overflow-y: auto;
+  padding: 16px 10px 40px 14px;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+}
+
+.toc-empty {
+  margin: 0 0 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.toc-item {
+  display: block;
+  margin: 1px 0;
+  padding: 3px 8px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.toc-item:hover {
+  color: var(--text);
+  background: var(--bg);
+}
+.toc-level-1 {
+  color: var(--text);
+  font-weight: 600;
+}
+.toc-level-2 {
+  padding-left: 14px;
+}
+.toc-level-3 {
+  padding-left: 26px;
+  font-size: 12.5px;
+}
+
+/* 当前章节：只有一条，避免整列都在发光 */
+.toc-item.active {
+  color: var(--accent);
+  background: var(--bg);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* 滚动容器是 main 本身，铺满除目录外的全部宽度——滚动条贴着窗口右缘，
+ * 是用户熟悉的位置。正文列宽由内层 .doc-body 控制：居中 + 可读行宽上限，
+ * 空白对称地留在文字两侧，而不是让滚动条孤零零悬在空白中间
+ * （2026-11-22 用户反馈：最大化之后滚动条离正文很远，看着像坏了）。 */
+main {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.doc-body {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 26px clamp(18px, 4vw, 44px) 64px;
+}
+
+/* 宽窗口下列宽跟着放大，别让大屏两侧都是大片空白；上限 1024 仍然
+ * 保住可读行宽（超过 ~70 汉字一行，扫到行尾会丢行）。 */
+@media (min-width: 1440px) {
+  .doc-body {
+    max-width: 1024px;
+  }
+}
+
+/* ── 正文排版 ──────────────────────────────────────────────────────────── */
+
+h1 {
+  font-size: 24px;
+  margin: 0 0 20px;
+  letter-spacing: -0.01em;
+}
+h2 {
+  font-size: 18px;
+  margin: 34px 0 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+h3 {
+  font-size: 15px;
+  margin: 24px 0 8px;
+}
+h4 {
+  font-size: 14px;
+  margin: 18px 0 6px;
+  color: var(--muted);
+}
+
+p {
+  margin: 10px 0;
+}
+a {
+  color: var(--accent);
+}
+
+/* 正文里的长串（URL、哈希、一长串没有空格的标识符）必须能在容器内断开。
+ * 没有这条，一个 200 字符的链接就会把整个正文顶出横向滚动条——目录还在，
+ * 右边内容却要拖着看，是很明显但很容易漏的排版事故。 */
+p,
+li,
+td,
+th,
+blockquote {
+  overflow-wrap: anywhere;
+}
+
+code {
+  font:
+    12.5px/1.5 ui-monospace,
+    Consolas,
+    "Cascadia Mono",
+    monospace;
+  background: var(--code);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+
+pre {
+  background: var(--code);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px;
+  overflow-x: auto;
+}
+
+pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+/* 表格单独一层横向滚动容器：列多时在**表格内部**左右滚，
+ * 而不是把整页顶宽。`width: auto` 让内容决定宽度、`min-width: 100%`
+ * 保证列少时仍然铺满正文。 */
+.table-wrap {
+  margin: 14px 0;
+  overflow-x: auto;
+}
+
+table {
+  width: auto;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table-wrap table {
+  margin: 0;
+}
+
+th,
+td {
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  background: var(--panel);
+  font-weight: 600;
+}
+
+ul,
+ol {
+  margin: 10px 0;
+  padding-left: 22px;
+}
+li {
+  margin: 4px 0;
+}
+
+blockquote {
+  margin: 14px 0;
+  padding: 8px 14px;
+  border-left: 3px solid var(--accent);
+  background: var(--panel);
+  color: var(--muted);
+  border-radius: 0 8px 8px 0;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 28px 0;
+}
+
+/* ── 编辑态 ────────────────────────────────────────────────────────────── */
+
+.editor {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.editor textarea {
+  flex: 1 1 auto;
+  width: 100%;
+  border: 0;
+  outline: none;
+  resize: none;
+  padding: 20px clamp(18px, 4vw, 40px);
+  background: var(--bg);
+  color: var(--text);
+  font:
+    13px/1.75 ui-monospace,
+    Consolas,
+    "Cascadia Mono",
+    monospace;
+}
+
+.editor-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+}
+
+/* 提示是一整句话，窄窗口下会和按钮抢位置。让它在自己的格子里截断，
+ * 完整内容留在 title 里（`flash()` 会写上）。 */
+.editor-hint {
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editor-hint code {
+  font-size: 11px;
+}
+
+/* ── 页内确认条 ────────────────────────────────────────────────────────── */
+
+/* 固定在底部居中，不占布局。`window.confirm` 在 WebView2 里不弹框
+ * （实测直接返回 true），危险操作要靠这一条真正拦一下。 */
+.ask {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(640px, calc(100vw - 48px));
+  padding: 12px 16px;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  z-index: 20;
+}
+
+.ask-text {
+  font-size: 13px;
+}
+
+/* 窗口最小宽 720：到这一步目录收窄但**不消失**——用户抱怨过"没有侧边导航"，
+ * 在小窗口里把导航藏起来等于把这个抱怨换个条件重现。 */
+@media (max-width: 860px) {
+  .toc {
+    flex-basis: 178px;
+    font-size: 12.5px;
+  }
+  .toc-item {
+    font-size: 12.5px;
+  }
+  .doc-body {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+}
+
+/* ── 状态 ──────────────────────────────────────────────────────────────── */
+
+.loading {
+  color: var(--muted);
+}
+
+/* 失败态要一眼看出来：红色 + 一条说明，与"正在加载"的灰色文字区分开。 */
+.error {
+  color: #e5534b;
+  font-weight: 500;
+}
+.hint {
+  color: var(--muted);
+  font-size: 13px;
+}

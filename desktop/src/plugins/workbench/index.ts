@@ -13,6 +13,7 @@ import { createWindowChrome } from "./window/windowChrome.ts";
 import { observeTaskbarUnread } from "./window/taskbarUnread.ts";
 import { createLogger, type LoggerFactory } from "../../shared/logging/logger.ts";
 import type { PanelLayoutCompatibility } from "./types.ts";
+import { openLauncherPanel } from "./navigation/launcher.ts";
 
 export const name = "workbench";
 export const inject = ["host", "configuration"];
@@ -60,6 +61,15 @@ export function apply(
     },
   );
   ctx.provide(name, workbench.service);
+  ctx.effect(() => {
+    let active = true;
+    let stop: (() => void) | undefined;
+    void ctx.host.listenLauncher((target) => {
+      if (!active) throw new Error("工作台正在关闭。");
+      return openLauncherPanel(workbench.service, target);
+    }).then((dispose) => { if (active) stop = dispose; else dispose(); }).catch((error: unknown) => logger.warn("launcher-listener", { error: String(error) }));
+    return () => { active = false; stop?.(); };
+  }, "workbench:launcher");
   ctx.effect(() => () => workbench.dispose(), "workbench:resources");
   if (ctx.host.isNative() && window.setTaskbarUnread) {
     const write = window.setTaskbarUnread.bind(window);

@@ -15,6 +15,7 @@ flowchart TB
     skills["skills<br/>技能"]
     mcp["mcp<br/>MCP 配置与注入"]
     account["account<br/>账户"]
+    tools["tools<br/>个人工具"]
     updates["updates<br/>更新"]
     browser["browser<br/>内嵌浏览器"]
     remoteProject["remoteProject<br/>远程项目（SSH）"]
@@ -79,6 +80,9 @@ flowchart TB
   account --> host
   account --> configuration
   account --> diagnostics
+  tools --> host
+  tools --> account
+  tools --> configuration
   updates --> host
   updates --> configuration
   updates --> diagnostics
@@ -113,6 +117,7 @@ flowchart TB
   visual -. "登记内置 MCP" .-> mcp
   workflow -. "登记内置 MCP" .-> mcp
   account -. "UI 注册" .-> workbench
+  tools -. "UI 注册" .-> workbench
   updates -. "UI 注册" .-> workbench
   browser -. "UI 注册" .-> workbench
   remoteProject -. "UI 注册" .-> workbench

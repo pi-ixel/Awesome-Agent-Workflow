@@ -13,7 +13,10 @@
 //!（返回形状是 `CommandResult { code, stdout, stderr }` 的超集），
 //! `src/aaw/processRunner.ts` 依赖超集字段（ok / failure / durationMs）。
 
-use std::time::Instant;
+use std::{
+    path::{Path, PathBuf},
+    time::Instant,
+};
 
 use serde::Serialize;
 
@@ -254,7 +257,11 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::
 /// 覆盖语义，供 skills 安装器逐项覆盖安装）。
 #[tauri::command]
 pub fn copy_dir(src: String, dst: String) -> Result<(), String> {
-    let (src, dst) = (std::path::Path::new(&src), std::path::Path::new(&dst));
+    copy_dir_impl(&src, &dst)
+}
+
+fn copy_dir_impl(src: &str, dst: &str) -> Result<(), String> {
+    let (src, dst) = (std::path::Path::new(src), std::path::Path::new(dst));
     if !src.is_dir() {
         return Err(format!("源目录不存在或不是目录：{}", src.display()));
     }
@@ -274,7 +281,11 @@ pub fn read_text_file(path: String) -> Result<String, String> {
 
 #[tauri::command]
 pub fn write_text_file(path: String, contents: String) -> Result<(), String> {
-    let target = std::path::Path::new(&path);
+    write_text_file_impl(&path, contents)
+}
+
+fn write_text_file_impl(path: &str, contents: String) -> Result<(), String> {
+    let target = std::path::Path::new(path);
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("创建父目录失败 {}: {error}", parent.display()))?;
@@ -283,10 +294,358 @@ pub fn write_text_file(path: String, contents: String) -> Result<(), String> {
         .map_err(|error| format!("写入文件失败 {path}: {error}"))
 }
 
+/// 写二进制文件（内容以 base64 传入）。
+///
+/// 工具现在可以自带 `node_modules`、图片、wasm，这些都不是 UTF-8 文本，走
+/// `write_text_file` 会把字节改坏。前端解压 ZIP 后逐个调用它落盘，运行时再从
+/// 工具目录加载——所以这里必须保字节原样。
+#[tauri::command]
+pub fn write_binary_file(path: String, base64_contents: String) -> Result<(), String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let bytes = STANDARD
+        .decode(base64_contents.as_bytes())
+        .map_err(|error| format!("内容不是合法 base64：{error}"))?;
+    let target = std::path::Path::new(&path);
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("创建父目录失败 {}: {error}", parent.display()))?;
+    }
+    std::fs::write(target, bytes)
+        .map_err(|error| format!("写入文件失败 {path}: {error}"))
+}
+
+/// 读二进制文件（返回 base64）。
+///
+/// 导出"带依赖的工具"时用：把工具目录里的 `node_modules` 一起打进 ZIP，接收方
+/// 才能原样跑起来。`limit` 由调用方给（导出上限），避免一次把几百 MB 读进内存。
+#[tauri::command]
+pub fn read_binary_file(path: String, limit: Option<u64>) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let meta = std::fs::metadata(&path)
+        .map_err(|error| format!("读取文件失败 {path}: {error}"))?;
+    if let Some(limit) = limit {
+        if meta.len() > limit {
+            return Err(format!("文件过大，拒绝读取：{path}"));
+        }
+    }
+    let bytes = std::fs::read(&path)
+        .map_err(|error| format!("读取文件失败 {path}: {error}"))?;
+    Ok(STANDARD.encode(bytes))
+}
+
+/// 递归列举工具目录里的**全部**文件（相对路径、`/` 分隔、按路径排序）。
+///
+/// 与 `list_workspace_files` 的关键区别：**不跳过 `node_modules`**。导出"带依赖
+/// 的工具"时必须把这些文件一起打包，否则接收方拿到的包缺依赖、跑不起来。
+/// 上限给得比 @ 提及宽（依赖树本来就深），但仍有封顶，避免一个异常目录把内存打满。
+#[tauri::command]
+pub fn list_tool_files(root: String, limit: Option<usize>) -> Result<Vec<String>, String> {
+    fn walk(root: &std::path::Path, dir: &std::path::Path, depth: u32, cap: usize, out: &mut Vec<String>) {
+        if depth > 24 || out.len() >= cap {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            if out.len() >= cap {
+                return;
+            }
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                walk(root, &entry.path(), depth + 1, cap, out);
+            } else if file_type.is_file() {
+                if let Ok(relative) = entry.path().strip_prefix(root) {
+                    out.push(relative.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+    }
+    let root_path = std::path::PathBuf::from(&root);
+    if !root_path.is_dir() {
+        return Err(format!("不是有效目录：{root}"));
+    }
+    let cap = limit.unwrap_or(20000).min(50000);
+    let mut files: Vec<String> = Vec::new();
+    walk(&root_path, &root_path, 0, cap, &mut files);
+    files.sort();
+    Ok(files)
+}
+
+/// 回收孤儿版本副本的结果。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolPruneReport {
+    /// 真删掉了的目录。
+    pub removed: Vec<String>,
+    /// 被记录引用或正被窗口/进程使用，因此保留的目录。
+    pub kept: Vec<String>,
+    /// 该删但没删掉（被占用、权限不足）。下次还会再试。
+    pub skipped: Vec<String>,
+}
+
+/// 回收一个工具的孤儿版本副本。
+///
+/// 「孤儿」= `installed/<账号>/<id>/versions/` 下，既没有被安装记录的
+/// `dir` / `previousDir` / `sourceDir` 引用，也没有窗口或进程正在用的目录。
+///
+/// 为什么要由宿主判断：只有这里同时看得到两样东西——preferences 里的安装
+/// 记录，和窗口/进程表。放前端算，等于让一个看不见窗口的进程决定"能不能
+/// 删"，再由宿主照单执行。删除不可逆，判断和动作必须在同一侧、同一时刻。
+///
+/// 边界刻意收窄：只扫 `versions/` 的直接子目录（别处的路径一概不碰）；
+/// 跳过 `.staging-*`（那是"安装失败清理"自己的活）与符号链接；记录读不出来
+/// 时一个都不删——"解析失败"不等于"没人引用"。
+///
+/// **异步命令**：一次可能删掉几百 MB（上一版带的 `node_modules`），同步命令
+/// 会把主线程占住，界面在回收期间不响应。
+#[tauri::command]
+pub async fn tool_prune_versions(
+    app: tauri::AppHandle,
+    tool_id: String,
+    owner: String,
+) -> Result<ToolPruneReport, String> {
+    use std::path::PathBuf;
+    fn valid_id(part: &str) -> bool {
+        !part.is_empty()
+            && part.len() <= 64
+            && part
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || c == b'.' || c == b'-' || c == b'_')
+    }
+    if !valid_id(&tool_id) || !valid_id(&owner) {
+        return Err("工具 ID 或账号标识不合法".into());
+    }
+    let host = tauri::Manager::try_state::<crate::tools::ToolsHost>(&app)
+        .ok_or("工具宿主未初始化。")?;
+    let store = host.store()?;
+    // 路径按传入的 owner 拼。它必须就是宿主当前的账号——否则会在换账号那一
+    // 瞬间，以新账号的身份去扫另一个人名下的目录。
+    if store.owner()? != owner {
+        return Err("账号已切换，已取消清理。".into());
+    }
+    let data = host.data_root()?;
+    let versions = crate::tools::location::tool_partition(&data, &owner, "installed")?
+        .join(&tool_id)
+        .join("versions");
+    let mut keep: Vec<PathBuf> = referenced_version_dirs(&store, &owner, &tool_id)?;
+    keep.extend(host.busy_dirs(&tool_id));
+    Ok(prune_versions_at(&versions, &keep))
+}
+
+/// 回收动作本身：只认 `versions/` 的直接子目录，`keep` 里有的原样保留。
+///
+/// 与命令分开是为了能单测。"不删谁"比"IPC 走通没有"更容易写错，而
+/// `AppHandle` 在单测里造不出来。
+fn prune_versions_at(
+    versions: &std::path::Path,
+    keep: &[std::path::PathBuf],
+) -> ToolPruneReport {
+    let mut report = ToolPruneReport::default();
+    if !versions.is_dir() {
+        return report;
+    }
+    let Ok(entries) = std::fs::read_dir(versions) else {
+        return report;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(kind) = entry.file_type() else { continue };
+        // 符号链接 / junction 不碰：Windows 上删链接会连带删掉它指向的地方。
+        if !kind.is_dir() || kind.is_symlink() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        // 暂存目录归 `tool_drop_staging`，这里不插手——两条通道各自清各自的。
+        if name.starts_with(".staging-") || name.starts_with(crate::tools::uninstall::PARKED_PREFIX) {
+            continue;
+        }
+        if keep.iter().any(|dir| same_path(dir, &path)) {
+            report.kept.push(crate::panel_files::display_path(&path));
+            continue;
+        }
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => report.removed.push(crate::panel_files::display_path(&path)),
+            // 被占用（窗口正开着它、杀毒还没放手）就留给下次：回收是后台
+            // 清洁，不该让安装结果因为这一步变成失败。
+            Err(_) => report.skipped.push(crate::panel_files::display_path(&path)),
+        }
+    }
+    report
+}
+
+/// 安装记录里属于这个工具的三个目录：当前运行副本、上一版副本、开发来源。
+///
+/// 三个都要排除。`sourceDir` 尤其不能漏：它可能被用户指到 `versions/` 下的
+/// 某一版（"就把这份当源码改"），删了等于删他的工作副本。
+fn referenced_version_dirs(
+    store: &crate::tools::store::ToolStore,
+    owner: &str,
+    tool_id: &str,
+) -> Result<Vec<std::path::PathBuf>, String> {
+    let preferences = store.preferences()?;
+    let library = match preferences.get("aaw-desktop.personal-tools.v1") {
+        // 正常形态是 JSON 字符串（前端 stringify 后写进去），老版本也可能是对象。
+        Some(serde_json::Value::String(text)) => serde_json::from_str(text)
+            .map_err(|error| format!("工具清单读不出来：{error}"))?,
+        Some(other) => other.clone(),
+        // 没有任何工具记录：这个 id 名下的目录确实没人引用。
+        None => return Ok(Vec::new()),
+    };
+    let Some(items) = library
+        .get(format!("user:{owner}"))
+        .and_then(serde_json::Value::as_array)
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(entry) = items.iter().find(|item| {
+        item.pointer("/package/id").and_then(serde_json::Value::as_str) == Some(tool_id)
+    }) else {
+        return Ok(Vec::new());
+    };
+    let mut dirs = Vec::new();
+    for field in ["dir", "previousDir", "sourceDir"] {
+        if let Some(path) = entry.get(field).and_then(serde_json::Value::as_str) {
+            dirs.push(std::path::PathBuf::from(path));
+        }
+    }
+    Ok(dirs)
+}
+
+/// 两个路径是不是同一个目录。Windows 上大小写不敏感，一边还可能是短路径。
+fn same_path(left: &std::path::Path, right: &std::path::Path) -> bool {
+    let normalize = |path: &std::path::Path| {
+        std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    };
+    let (left, right) = (normalize(left), normalize(right));
+    if cfg!(windows) {
+        left.to_string_lossy()
+            .as_ref()
+            .eq_ignore_ascii_case(right.to_string_lossy().as_ref())
+    } else {
+        left == right
+    }
+}
+
+/// 移动一个文件或目录（改名、换位置都用它）。
+///
+/// 为什么需要专门一条命令：工具项目改名要"同一个目录换个名字"，而其余
+/// 文件命令里只有 `copy_dir`（会先删目标）和 `tool_purge`（会连工具数据
+/// 一起清），都不适合。这里同盘走 `fs::rename`（原子、瞬间完成），跨盘
+/// 退回复制后删源。
+///
+/// 护栏：
+/// - 目标必须不存在（`exists` 就拒绝），不做任何隐式覆盖；
+/// - 源是目录时必须含 `manifest.json`，避免前端传错路径把用户的工作目录
+///   搬走；
+/// - 目标与源不能是同一个路径，也不能把目录搬到它自己的子目录里。
+#[tauri::command]
+pub fn tool_move_path(from: String, to: String) -> Result<(), String> {
+    let src = std::path::Path::new(&from);
+    let dst = std::path::Path::new(&to);
+    if from.trim().is_empty() || to.trim().is_empty() {
+        return Err("源路径或目标路径为空".into());
+    }
+    if !src.exists() {
+        return Err(format!("源路径不存在：{}", src.display()));
+    }
+    if src.is_dir() && !src.join("manifest.json").is_file() {
+        return Err(format!(
+            "只允许移动工具项目目录（缺少 manifest.json）：{}",
+            src.display()
+        ));
+    }
+    if dst.exists() {
+        return Err(format!("目标已经存在：{}", dst.display()));
+    }
+    if let Some(parent) = dst.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("创建目标父目录失败 {}: {error}", parent.display()))?;
+    }
+    match std::fs::rename(src, dst) {
+        Ok(()) => Ok(()),
+        Err(_) if src.is_dir() => {
+            // 跨盘时 rename 会失败（Windows 上还会报权限错），退回复制 + 删源。
+            copy_dir_recursive(src, dst).map_err(|error| error.to_string())?;
+            std::fs::remove_dir_all(src)
+                .map_err(|error| format!("复制完成但删除原目录失败 {}: {error}", src.display()))
+        }
+        Err(_) => {
+            std::fs::copy(src, dst)
+                .map_err(|error| format!("移动文件失败 {}: {error}", src.display()))?;
+            std::fs::remove_file(src)
+                .map_err(|error| format!("复制完成但删除原文件失败 {}: {error}", src.display()))
+        }
+    }
+}
+
+/// 删除一次安装创建的受管版本目录：
+/// `<installed>/<账号>/<id>/versions/<名字>`。
+///
+/// 只服务一件事——**安装失败时把刚写进去的东西清掉**。为了让这条命令不可能
+/// 变成"任意删目录"，护栏比 `tool_purge` 更窄：
+/// - 父目录必须叫 `versions`；
+/// - 祖父目录必须**直接**落在这个账号的 `installed` 分区下；
+/// - 全部走 `canonicalize` 之后再比，`..` 与符号链接都过不去；
+/// - 只删目录，不删文件，不碰工具数据。
+#[tauri::command]
+pub fn tool_drop_staging(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let target = std::path::PathBuf::from(&path);
+    let versions = target.parent().ok_or("路径无效")?;
+    if versions.file_name().and_then(|name| name.to_str()) != Some("versions") {
+        return Err(format!("只允许删除工具版本目录下的副本：{}", target.display()));
+    }
+    let tool_root = versions.parent().ok_or("路径无效")?;
+    let host = tauri::Manager::try_state::<crate::tools::ToolsHost>(&app)
+        .ok_or("工具宿主未就绪。")?;
+    let store = host.store()?;
+    let owner = store.owner()?;
+    let installed = crate::tools::location::tool_partition(&host.data_root()?, &owner, "installed")?;
+    drop_tool_version(&installed, tool_root, versions, &target)
+}
+
+fn drop_tool_version(installed: &Path, tool_root: &Path, versions: &Path, target: &Path) -> Result<(), String> {
+    fn canonical_dir(path: &Path) -> Result<Option<PathBuf>, String> {
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+                std::fs::canonicalize(path).map(Some).map_err(|error| format!("无法定位 {}：{error}", path.display()))
+            }
+            Ok(_) => Err(format!("不是普通目录：{}", path.display())),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(format!("无法读取 {}：{error}", path.display())),
+        }
+    }
+
+    let Some(installed) = canonical_dir(installed)? else { return Ok(()) };
+    let Some(tool_root) = canonical_dir(tool_root)? else { return Ok(()) };
+    if tool_root.parent() != Some(installed.as_path()) {
+        return Err(format!("这个目录不在工具库里，已拒绝删除：{}", target.display()));
+    }
+    if let Some(versions) = canonical_dir(versions)? {
+        if versions.parent() != Some(tool_root.as_path())
+            || versions.file_name().and_then(|name| name.to_str()) != Some("versions")
+        {
+            return Err(format!("只允许删除工具自身的版本目录：{}", target.display()));
+        }
+        if let Some(copy) = canonical_dir(target)? {
+            if copy.parent() != Some(versions.as_path()) {
+                return Err(format!("只允许删除 versions 下的目录：{}", target.display()));
+            }
+            std::fs::remove_dir_all(&copy)
+                .map_err(|error| format!("删除失败 {}：{error}", target.display()))?;
+        }
+        // 父目录只在空时回收，保留安装前已存在的其他版本及文件。
+        let _ = std::fs::remove_dir(&versions);
+    }
+    let _ = std::fs::remove_dir(&tool_root);
+    Ok(())
+}
+
 /// Resolve namespaced user data without knowledge of any agent implementation.
 #[tauri::command]
-pub fn user_data_dir(namespace: String, directory: String) -> Result<String, String> {
-    fn valid(part: &str) -> bool {
+pub fn user_data_dir(namespace: String, directory: String) -> Result<String, String> {    fn valid(part: &str) -> bool {
         !part.is_empty() && part.as_bytes()[0].is_ascii_alphanumeric()
             && part.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
     }
@@ -315,6 +674,34 @@ mod tests {
             "aaw-desktop-test-{}-{seq}-{label}",
             std::process::id()
         ))
+    }
+
+    #[test]
+    fn failed_install_cleans_only_empty_managed_version_parents() {
+        let home = temp_dir("failed-install");
+        let installed = home.join("installed");
+        let tool = installed.join("new-tool");
+        let versions = tool.join("versions");
+        let staged = versions.join(".staging-test");
+        std::fs::create_dir_all(&staged).unwrap();
+        drop_tool_version(&installed, &tool, &versions, &staged).unwrap();
+        assert!(!tool.exists());
+        assert!(installed.is_dir());
+
+        let old = versions.join("1.0.0");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&staged).unwrap();
+        std::fs::write(old.join("manifest.json"), "旧版本").unwrap();
+        drop_tool_version(&installed, &tool, &versions, &staged).unwrap();
+        assert!(!staged.exists());
+        assert_eq!(std::fs::read_to_string(old.join("manifest.json")).unwrap(), "旧版本");
+
+        let empty_tool = installed.join("without-staging");
+        let empty_versions = empty_tool.join("versions");
+        std::fs::create_dir_all(&empty_versions).unwrap();
+        drop_tool_version(&installed, &empty_tool, &empty_versions, &empty_versions.join(".staging-missing")).unwrap();
+        assert!(!empty_tool.exists());
+        std::fs::remove_dir_all(home).unwrap();
     }
 
     /// 睡 30s 的命令（跨平台；配合短超时验证超时杀进程语义）。
@@ -409,9 +796,9 @@ mod tests {
         std::fs::write(dst.join("SKILL.md"), "v1").expect("写旧文件");
         std::fs::write(dst.join("stale.txt"), "旧文件").expect("写多余文件");
 
-        copy_dir(
-            src.to_string_lossy().into_owned(),
-            dst.to_string_lossy().into_owned(),
+        copy_dir_impl(
+            &src.to_string_lossy(),
+            &dst.to_string_lossy(),
         )
         .expect("copy_dir 应成功");
 
@@ -426,9 +813,9 @@ mod tests {
         assert!(!dst.join("stale.txt").exists(), "先删后拷：多余文件应消失");
 
         // 源不存在 → Err
-        assert!(copy_dir(
-            base.join("missing").to_string_lossy().into_owned(),
-            dst.to_string_lossy().into_owned()
+        assert!(copy_dir_impl(
+            &base.join("missing").to_string_lossy(),
+            &dst.to_string_lossy()
         )
         .is_err());
 
@@ -496,8 +883,8 @@ mod tests {
     fn write_then_read_text_file_roundtrip() {
         let base = temp_dir("text-file");
         let file = base.join("nested").join("out.txt");
-        write_text_file(
-            file.to_string_lossy().into_owned(),
+        write_text_file_impl(
+            &file.to_string_lossy(),
             "内容 line1\nline2".to_string(),
         )
         .expect("写文件应成功（自动建父目录）");
@@ -543,16 +930,114 @@ mod tests {
         let root = skills.trim_end_matches("/skills");
         assert_eq!(sessions.trim_end_matches("/sessions"), root);
     }
+
+    // ── 孤儿版本副本回收 ────────────────────────────────────────────────
+    //
+    // 这组测试守的是"删错东西"：回收是不可逆的，规则写宽一次，用户就没有
+    // 那一版了。所以每条都明确断言"谁必须还在"。
+
+    fn make_version(versions: &std::path::Path, name: &str) -> std::path::PathBuf {
+        let dir = versions.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("manifest.json"), "{}").unwrap();
+        dir
+    }
+
+    #[test]
+    fn prune_keeps_referenced_and_running_dirs() {
+        let root = temp_dir("prune-keep");
+        let versions = root.join("versions");
+        // 当前运行副本 / 上一版副本 / 开发来源 / 正在被窗口加载的那一版
+        let current = make_version(&versions, "1.2.0");
+        let previous = make_version(&versions, "1.1.0");
+        let source = make_version(&versions, "dev-snapshot");
+        let open_in_window = make_version(&versions, "1.1.5");
+        let orphan = make_version(&versions, "1.0.0");
+        let staging = make_version(&versions, ".staging-crash");
+
+        let keep = vec![
+            current.clone(),
+            previous.clone(),
+            source.clone(),
+            open_in_window.clone(),
+        ];
+        let report = prune_versions_at(&versions, &keep);
+
+        assert!(current.is_dir() && previous.is_dir() && source.is_dir());
+        assert!(open_in_window.is_dir(), "窗口还开着这一版，不能删");
+        assert!(!orphan.exists(), "没有任何记录指向它，应当回收");
+        assert!(staging.is_dir(), "暂存目录归另一条通道，这里不能碰");
+        assert_eq!(report.removed.len(), 1);
+        assert_eq!(report.kept.len(), 4);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn prune_keeps_versions_parent_absent() {
+        // 还没装过（或已卸载）：目录不存在时报空报告，不能把"没有目录"当错误。
+        let root = temp_dir("prune-missing");
+        let report = prune_versions_at(&root.join("versions"), &[]);
+        assert!(report.removed.is_empty() && report.kept.is_empty());
+    }
+
+    #[test]
+    fn prune_reads_three_dirs_from_double_encoded_library() {
+        let root = temp_dir("prune-refs");
+        let config = root.join("configuration");
+        std::fs::create_dir_all(&config).unwrap();
+        let library = serde_json::json!({
+            "user:alice": [{
+                "package": { "id": "notes", "name": "Notes", "version": "1.2.0" },
+                "dir": "C:\\tools\\versions\\1.2.0",
+                "previousDir": "C:\\tools\\versions\\1.1.0",
+                "sourceDir": "C:\\work\\notes"
+            }]
+        });
+        let prefs = serde_json::json!({
+            // 账号与工具库都以 **JSON 字符串** 落盘（前端 stringify 后写入）。
+            // 当对象取字段会永远拿不到——那会让回收把三份都在用的目录全删掉。
+            "aaw-desktop.auth.v1": serde_json::json!({ "user": { "id": "alice" } }).to_string(),
+            "aaw-desktop.personal-tools.v1": library.to_string()
+        });
+        std::fs::write(config.join("preferences.json"), prefs.to_string()).unwrap();
+
+        let store = crate::tools::store::ToolStore::new(&root);
+        let dirs = referenced_version_dirs(&store, "alice", "notes").unwrap();
+        assert_eq!(dirs.len(), 3, "dir / previousDir / sourceDir 三个都要排除");
+        assert!(dirs.iter().any(|dir| dir.ends_with("1.2.0")));
+        assert!(dirs.iter().any(|dir| dir.ends_with("1.1.0")));
+        assert!(dirs.iter().any(|dir| dir.ends_with("notes")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn prune_refuses_when_library_is_unreadable() {
+        // 关键安全属性：解析失败 ≠ 没人引用。读不出记录必须报错，让调用方
+        // 一个都不删；如果这里退化成空表，下面整片目录会被当孤儿清掉。
+        let root = temp_dir("prune-broken");
+        let config = root.join("configuration");
+        std::fs::create_dir_all(&config).unwrap();
+        let prefs = serde_json::json!({
+            "aaw-desktop.auth.v1": serde_json::json!({ "user": { "id": "alice" } }).to_string(),
+            "aaw-desktop.personal-tools.v1": "{ not json"
+        });
+        std::fs::write(config.join("preferences.json"), prefs.to_string()).unwrap();
+
+        let store = crate::tools::store::ToolStore::new(&root);
+        assert!(referenced_version_dirs(&store, "alice", "notes").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+
 }
 
-/// 关闭守卫确认后的强制关闭：destroy 跳过 CloseRequested 事件直关窗口。
+/// 前端关闭守卫完成清理后退出整个应用，包括工具和启动器窗口。
 #[tauri::command]
 pub fn force_close(webview: tauri::Webview) -> Result<(), String> {
     if webview.label() != "main" {
         return Err("只有主窗口可以确认退出".into());
     }
-    webview
-        .window()
-        .destroy()
-        .map_err(|error| error.to_string())
+    use tauri::Manager;
+    webview.app_handle().exit(0);
+    Ok(())
 }

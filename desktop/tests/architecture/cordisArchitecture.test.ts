@@ -22,6 +22,7 @@ const plugins = [
   "skills",
   "mcp",
   "account",
+  "tools",
   "updates",
   "browser",
   "remoteProject",
@@ -38,6 +39,7 @@ const uiOwners = [
   "workflow",
   "skills",
   "account",
+  "tools",
   "updates",
   "browser",
   "remoteProject",
@@ -570,6 +572,9 @@ it("keeps plugin names and dependency relations aligned with their production ow
       "file",
       "files",
       "git",
+      // 工具预览是独立标签：能和工具列表、文件、终端并排存在。
+      "tool-preview",
+      "tools",
     ]);
     expect(view.settings.map(({ id }) => id).sort()).toEqual([
       "agents",

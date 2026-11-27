@@ -12,6 +12,8 @@
 
 文档批注的操作与恢复说明见 [文档批注](docs/features/document-annotations.md)。
 
+个人 JavaScript 工具的开发规范与红线见 [工具开发技能手册](../skills/tool-dev/SKILL.md)；工具专栏的架构设计、变更清单与各轮整改记录统一收录在独立文档仓库，不在本代码仓维护。
+
 ## 常用命令
 
 | 命令                              | 作用                                      |

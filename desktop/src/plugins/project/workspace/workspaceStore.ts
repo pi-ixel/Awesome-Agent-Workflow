@@ -50,6 +50,37 @@ import type {
 /** 最近打开列表上限。 */
 const RECENT_LIMIT = 8;
 
+/**
+ * 「不进入最近项目」的路径前缀（由工具中心注册）。
+ *
+ * 工具项目是 AI 按需求生成的小工具，归工具中心自己管；如果它们也进最近
+ * 项目，8 条上限很快被一堆生成物占满，真正的代码项目反而在侧栏里找不到。
+ * 只影响最近列表，不影响当前打开的项目本身。
+ */
+let recentExclusions: readonly string[] = [];
+
+export function setRecentExclusions(prefixes: readonly string[]): void {
+  recentExclusions = prefixes.map((prefix) => pathKey(prefix));
+}
+
+function excludedFromRecent(path: string): boolean {
+  if (!recentExclusions.length) return false;
+  const key = pathKey(path);
+  return recentExclusions.some((prefix) => key === prefix || key.startsWith(`${prefix}/`));
+}
+
+/**
+ * 「不进入最近项目」的判定（导出给侧栏树用）。
+ *
+ * 工具项目的目录被排除出最近列表后，它们上面的会话在项目树里就没有了
+ * 落点——用户点「继续开发」新开的会话在侧栏完全不可见，只能看到时间上
+ * 巧合的其他项目会话行，点了就切进错误的会话。树据此把「有会话记录且
+ * 被排除」的路径渲染成「工具项目」分区，会话重新可见（Z-21）。
+ */
+export function isExcludedFromRecent(path: string): boolean {
+  return excludedFromRecent(path);
+}
+
 /** localStorage 持久化键（带版本号，形状变更时升版本）。 */
 const STORAGE_KEY = "aaw-desktop/workspace/v1";
 
@@ -245,6 +276,7 @@ function withRecentEntry(
   configured?: WorkspaceSnapshot["projectFolders"],
   lastOpenedAt = new Date().toISOString(),
 ): readonly WorkspaceEntry[] {
+  if (excludedFromRecent(path)) return recent;
   const key = pathKey(path);
   if (recent.some((entry) => pathKey(entry.path) === key)) {
     return recent.map((entry) =>
@@ -329,6 +361,11 @@ export function workspaceCommands(source: ReadonlySnapshot<WorkspaceStoreState>)
       setToolPaths({ ...toolPaths, ...paths });
     },
     reloadWorkspacePreferences: hydrateFromStorage,
+    /**
+     * 注册「不进入最近项目」的路径前缀。工具中心用它在拿到工具项目根目录后
+     * 调用一次，避免 AI 生成的工具把侧栏 8 条最近项目挤满。
+     */
+    setRecentExclusions,
   };
 }
 
@@ -601,7 +638,8 @@ export function createWorkspaceStore(
         return;
       }
       set((state) => ({
-        recentWorkspaces: persisted.recent ?? state.recentWorkspaces,
+        recentWorkspaces: (persisted.recent ?? state.recentWorkspaces)
+          .filter((entry) => !excludedFromRecent(entry.path)),
         removedProjects: persisted.removedProjects ?? [],
         pinnedPaths: persisted.favorites ?? state.pinnedPaths,
         pinnedSessions: persisted.pinnedSessions ?? state.pinnedSessions,

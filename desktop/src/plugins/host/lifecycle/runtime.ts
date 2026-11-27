@@ -11,7 +11,7 @@ import type { HostService } from "../service.ts";
 import { createTauriAcpProcessHost } from "../process/acpProcess.ts";
 import { createAccountHost } from "../adapters/account.ts";
 import { createMcpHost } from "../adapters/mcp.ts";
-import { webviewStorage } from "../storage/storage.ts";
+import { flushNativeConfiguration, webviewStorage } from "../storage/storage.ts";
 import { diagnosticsHost } from "../adapters/diagnostics.ts";
 import { createHostRuntime, isTauriEnv } from "../adapters/host.ts";
 import { createBridgeAcpClient } from "../dev/bridgeClient.ts";
@@ -44,6 +44,53 @@ export class DesktopHost implements HostService {
   readonly turnChanges: HostService["turnChanges"];
   readonly visualGuide: HostService["visualGuide"];
   readonly diagnostics = diagnosticsHost;
+  readonly writeToolArchive: HostService["writeToolArchive"] = (path, bytes) => this.resources.run(async () => {
+    if (bytes.length > 1024 * 1024) throw new Error("源码 ZIP 不能超过 1 MB。");
+    let binary = "";
+    for (let at = 0; at < bytes.length; at += 8192) binary += String.fromCharCode(...bytes.subarray(at, at + 8192));
+    await this.invoke("tools_write_archive", { path, contents: btoa(binary) });
+  });
+  readonly listenLauncher: HostService["listenLauncher"] = (open) => this.resources.listen(async () => {
+    if (!isTauriEnv()) return () => {};
+    const { listen } = await import("@tauri-apps/api/event");
+    return listen<{ target: string }>("aaw://launcher-open", (event) => { void (async () => {
+      try { if (!this.resources.isActive()) throw new Error("主窗口正在关闭。"); await open(event.payload.target); }
+      catch (cause) {
+        // 启动器此时已经藏起自己、把焦点交回主窗，所以原因要在主窗里说。
+        // 走系统通知而不是弹窗：这条路径上没有现成的模态容器，而"按了快捷键、
+        // 选了一项、结果什么也没发生"正是这个功能最容易被骂的地方。
+        const detail = cause instanceof Error ? cause.message : String(cause);
+        if (this.notifications.isAvailable())
+          void this.notifications.send({ id: Date.now(), title: "这个功能没能打开", body: detail, extra: {} }).catch(() => {});
+        else console.warn("launcher-open", detail);
+      }
+    })(); });
+  });
+  readonly openTool: HostService["openTool"] = (toolId, dir) =>
+    this.resources.run(async () => {
+      if (!isTauriEnv()) throw new Error("请在 AAW 桌面版中打开工具。");
+      // 工具设置存在偏好文件里，工具窗口会把它读出来当初始值。不先落盘的话，
+      // 刚在工具中心改过的设置要等下一次刷写才生效，用户看着像"没保存"。
+      await flushNativeConfiguration();
+      // 不给 id 就是"打开工具列表"——那是启动器的职责，不是某个工具的窗口。
+      await (toolId
+        ? this.invoke("tools_open", { toolId, ...(dir ? { dir } : {}) })
+        : this.invoke("launcher_show"));
+    });
+  readonly stopTool: HostService["stopTool"] = (toolId) =>
+    this.resources.run(async () => {
+      if (!isTauriEnv()) throw new Error("请在 AAW 桌面版中停止后台工具。");
+      await this.invoke("launcher_stop", { toolId });
+    });
+  readonly closeTool = (toolId: string): Promise<void> =>
+    this.resources.run(async () => {
+      if (isTauriEnv()) await this.invoke("tools_close", { toolId });
+    });
+  readonly openToolsGuide: HostService["openToolsGuide"] = () =>
+    this.resources.run(async () => {
+      if (!isTauriEnv()) throw new Error("请在 AAW 桌面版中打开工具开发指导。");
+      await this.invoke("tools_guide_open");
+    });
   readonly exitGate = createHostExitGate();
   private exitDiagnostics?: ExitDiagnostics;
   readonly readCodeAgentCredit = (): Promise<CodeAgentCreditResult> =>
@@ -307,6 +354,51 @@ export class DesktopHost implements HostService {
         this.resources.run(() => backend.copyDir(from, to)),
       writeTextFile: (path, text) =>
         this.resources.run(() => backend.writeTextFile(path, text)),
+      toolPurge: (input) => this.resources.run(() => backend.toolPurge(input)),
+      ...(backend.finishToolPurge ? {
+        finishToolPurge: (toolId: string, owner: string, commit: boolean) =>
+          this.resources.run(() => backend.finishToolPurge!(toolId, owner, commit)),
+      } : {}),
+      moveToolPath: (from, to) =>
+        this.resources.run(() => backend.moveToolPath(from, to)),
+      // 二进制与整树列举：带 node_modules / 图片 / wasm 的工具要按字节落盘，
+      // 导出要按字节读回。这几个口以前只接在 backend 上、门面没转发，前端
+      // 永远看不到它们——带附件的 ZIP 装到一半就报"不支持写入二进制文件"。
+      ...(backend.writeBinaryFile
+        ? {
+            writeBinaryFile: (path: string, base64: string) =>
+              this.resources.run(() => backend.writeBinaryFile!(path, base64)),
+          }
+        : {}),
+      ...(backend.readBinaryFile
+        ? {
+            readBinaryFile: (path: string, limit?: number) =>
+              this.resources.run(() => backend.readBinaryFile!(path, limit)),
+          }
+        : {}),
+      ...(backend.listToolFiles
+        ? {
+            listToolFiles: (root: string, limit?: number) =>
+              this.resources.run(() => backend.listToolFiles!(root, limit)),
+          }
+        : {}),
+      // 开发指导正文：用户改过的规范要贯通到 AGENTS.md 与技能目录。
+      ...(backend.readGuideDoc
+        ? { readGuideDoc: () => this.resources.run(() => backend.readGuideDoc!()) }
+        : {}),
+      ...(backend.dropToolStaging
+        ? {
+            dropToolStaging: (path: string) =>
+              this.resources.run(() => backend.dropToolStaging!(path)),
+          }
+        : {}),
+      // 孤儿版本回收：判据在宿主侧（安装记录 + 窗口表），门面只负责转发。
+      ...(backend.pruneToolVersions
+        ? {
+            pruneToolVersions: (toolId: string, owner?: string) =>
+              this.resources.run(() => backend.pruneToolVersions!(toolId, owner)),
+          }
+        : {}),
     };
     this.account = createAccountHost(backend, this.resources);
     this.process = {

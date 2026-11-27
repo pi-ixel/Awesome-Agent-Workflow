@@ -978,3 +978,29 @@ it("会话链接只在浏览器面板可见且恢复完毕后打开一次", asyn
   view.rerender(<BrowserPanel {...props} visible />);
   expect(createTab).toHaveBeenCalledTimes(1);
 });
+
+/**
+ * 窄栏：工具条必须自己吞掉横向溢出。
+ *
+ * 2026-11-24 实机（暗夜 300 CSS px）：7 个图标按钮 + 64 px 地址栏的下限宽度
+ * 超过容器，溢出冒到右栏那个 `overflow-hidden` 的共同祖先上；键盘 Tab 到
+ * 「新建标签页」时浏览器为了让焦点可见，把祖先的 scrollLeft 推到 43.2——
+ * 工具中心的管理内容左侧整块被裁掉。管理页自己 clientWidth == scrollWidth
+ * == 289，只量它看不出来，所以这里从结构上钉住两件事：溢出归工具条自己，
+ * 以及窄容器里省出那 32 px。
+ */
+describe("TD-025-U02 窄栏工具条", () => {
+  it("工具条自己吞掉横向溢出，窄容器里先收起缩放百分比", () => {
+    render(<BrowserPanel host={host()} sessionId="session-a" visible />);
+    const form = screen.getByRole("textbox", { name: "地址栏" }).parentElement;
+    const toolbar = form?.parentElement;
+    expect(toolbar).toHaveClass("overflow-x-auto", "overscroll-x-contain");
+    // 容器查询的锚点必须在面板根上，否则 @min-[340px]/browser 不成立。
+    expect(screen.getByTestId("browser-panel")).toHaveClass("@container/browser");
+    // 300 px 下总量刚好差这 32 px：收起它之后图标不必压缩、地址栏保住
+    // min-w-16（TD-025-U01 的约束），也不会再有横向溢出。
+    expect(screen.getByText("100%")).toHaveClass(
+      "@min-[340px]/browser:inline-block",
+    );
+  });
+});

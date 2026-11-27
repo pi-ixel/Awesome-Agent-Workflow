@@ -1,0 +1,300 @@
+export interface ToolAction {
+  readonly id: string;
+  readonly description: string;
+  readonly inputSchema: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * 一条校验结果。
+ *
+ * 两档：`block` 装不上，`warn` 只提醒作者（例如把密钥写进 html）。分级的意义是
+ * 让"尽量不约束"落在 warn 上——提醒但不阻止，用户自己决定。
+ */
+export interface ToolViolation {
+  /** `FIELD` 表示清单字段问题；`R1`…`R9` 对应手册里的红线编号。 */
+  readonly ruleId: string;
+  readonly level: "block" | "warn";
+  /** 位置，例如 `manifest.id`、`index.html`。 */
+  readonly where?: string;
+  /** 给人看的说明。 */
+  readonly message: string;
+  /** 给 AI 看的修复建议——它要能照着改，而不是再猜一次。 */
+  readonly hint: string;
+}
+
+/**
+ * 联网声明。
+ *
+ * `true` 等价于"不限域名的 http(s)"，是历史写法，继续支持；写成对象可以限定
+ * 域名（会转成 CSP 的 `connect-src` 白名单），`insecure` 才放行自签证书。
+ */
+export interface ToolNetworkPermission {
+  /** 允许访问的域名，支持 `*.corp.example.com` 这种通配；省略表示不限。 */
+  readonly hosts?: readonly string[];
+  /** 放行自签证书。安装时会明确警告。 */
+  readonly insecure?: boolean;
+}
+
+/** 工具在运行时申请的能力；安装时会展示给用户。 */
+export interface ToolPermissions {
+  /** 联网：`true` 不限域名，对象可限定域名或放行自签证书；省略表示不联网。 */
+  readonly network?: boolean | ToolNetworkPermission;
+}
+
+/** 归一化后的联网声明，供校验器、运行时与手册共用。 */
+export interface NetworkRule {
+  /** 清单里是否真的写了 `network`。false 表示"没表态"。 */
+  readonly declared: boolean;
+  readonly enabled: boolean;
+  readonly hosts: readonly string[];
+  readonly insecure: boolean;
+}
+
+/**
+ * 归一化联网声明。
+ *
+ * **没写 `network` 时按"允许"处理**，而不是按"禁止"。这是刻意的取舍：早期工具
+ * 都没写这个字段，一律断网会让存量工具当场静默失效——那正是本轮要消灭的现象。
+ * 想真正收紧的作者可以显式写 `network: false`；校验器会对"看起来在联网却没表态"
+ * 的包给 warn，把声明这件事推给作者，而不是靠运行时突然翻脸。
+ */
+export function readNetworkRule(
+  permissions: ToolPermissions | undefined,
+): NetworkRule {
+  const value = permissions?.network;
+  if (value === undefined)
+    return { declared: false, enabled: true, hosts: [], insecure: false };
+  if (value === false)
+    return { declared: true, enabled: false, hosts: [], insecure: false };
+  if (value === true)
+    return { declared: true, enabled: true, hosts: [], insecure: false };
+  return {
+    declared: true,
+    enabled: true,
+    hosts: Array.isArray(value.hosts) ? value.hosts : [],
+    insecure: value.insecure === true,
+  };
+}
+
+/** 工具包对宿主契约的要求。省略表示"只要清单格式兼容就能跑"。 */
+export interface ToolRequires {
+  /** 最低契约代际。宿主 `toolContractVersion` 低于它就装不上。 */
+  readonly contract?: number;
+  /** 需要的能力名；缺失时按"当前宿主没有这个能力"处理。 */
+  readonly capabilities?: readonly string[];
+}
+
+/**
+ * 后台意图声明。
+ *
+ * 常驻与定时都必须显式声明：用户关掉窗口之后工具还在跑，这件事不能靠作者
+ * 偷偷决定。安装时会用一句人话把这个意图展示出来。
+ */
+export interface ToolBackground {
+  /** 为什么要常驻，写给人看（例如「剪切板历史」）。 */
+  readonly reason?: string;
+  /** 是否需要定时唤醒。最小间隔 1 分钟，实际频率由宿主兜底。 */
+  readonly schedule?: boolean;
+}
+
+/**
+ * L2 打包页的构建声明。
+ *
+ * 三个键的地位**不一样**，这一点必须写死，否则平台又会越权：
+ * - `out` 是运行时的唯一依据，宿主只认它；它必须存在，否则装不上。
+ * - `entry` / `command` 是作者元数据（"我是怎么构建的"），平台**不读取、
+ *   不校验对应文件是否存在**。`src/` 带不带是作者的自由（见 `04 §5`）。
+ */
+export interface ToolBuild {
+  /** 作者记录的源码入口，例如 `src/main.js`。平台不读它。 */
+  readonly entry?: string;
+  /** 构建产物，例如 `app.js`。运行只认这个文件。 */
+  readonly out: string;
+  /** 作者记录的构建命令，例如 `npm run bundle`。平台不执行它。 */
+  readonly command?: string;
+}
+
+/**
+ * L3 进程载体的声明。
+ *
+ * 只有四条满足其一时才该用：原生模块、非 HTTP 协议、不受对话框约束的文件
+ * 系统、真正无窗口的常驻进程。它不是"更强大的 L2"，而是**放弃沙箱**：
+ * 一旦声明，用户账户下的文件与网络权限都归这个进程。
+ */
+export interface ToolRuntime {
+  readonly kind: "process";
+  /** 可执行文件，必须在 `bin/` 内，例如 `bin/run.exe`。 */
+  readonly entry: string;
+  /** NDJSON over stdio 的协议代际。宿主只接受自己支持的那个。 */
+  readonly protocol?: number;
+}
+
+/** 宿主支持的进程协议代际。与 Rust 侧 `process_host::PROTOCOL` 保持一致。 */
+export const toolProcessProtocol = 1;
+
+export interface ToolPackage {
+  readonly schemaVersion: 1;
+  readonly id: string;
+  readonly name: string;
+  readonly version: string;
+  /**
+   * 卡片与小窗上显示的 1–2 个字符（emoji 或字母）。缺省取名称首字。
+   *
+   * 加它是因为所有个人工具此前共用同一个图标，只能靠 4 色循环区分；这是
+   * 可选字段，旧清单不受影响。
+   */
+  readonly icon?: string;
+  readonly html: string;
+  readonly actions?: readonly ToolAction[];
+  readonly settingsSchema?: readonly ToolSetting[];
+  readonly permissions?: ToolPermissions;
+  /** 作者 / 团队名，导入别人给的包时用于判断可信度。 */
+  readonly author?: string;
+  /** 来源说明（仓库地址、内部文档链接等）。 */
+  readonly source?: string;
+  /** 对宿主契约的要求。省略即宽松放行。 */
+  readonly requires?: ToolRequires;
+  /** 需要在唤起时带上可用文本（选中内容或剪切板）。声明后才会注入 `aawContext.selection`。 */
+  readonly needsSelection?: boolean;
+  /** 后台意图：常驻理由、是否需要定时。声明后才允许窗口关闭后继续运行。 */
+  readonly background?: ToolBackground;
+  /**
+   * L2 构建声明。有它就是"打包页工具"：`index.html` 引 `app.js`，
+   * `app.js` 是作者用 esbuild 之类的工具打出来的。
+   *
+   * 平台不执行 `command`、不读 `entry`——它只检查 `out` 在不在工具目录里。
+   */
+  readonly build?: ToolBuild;
+  /**
+   * L3 进程声明。有它就**没有沙箱**：进程以用户身份运行。
+   *
+   * 平台不检查 `bin/` 里的可执行文件做什么——验收时会按磁盘核对入口在不在，
+   * 并把 `bin/` 里的文件点名给用户，来源由他自己确认。
+   */
+  readonly runtime?: ToolRuntime;
+  /**
+   * 作者附加的 UTF-8 文本文件。
+   *
+   * 注意：这个字段只承载**文本**。二进制资源、`node_modules`、`bin/` 这类
+   * 东西不进清单，它们躺在工具目录里（安装时落盘），运行时直接从目录加载。
+   */
+  readonly sourceFiles?: Readonly<Record<string, string>>;
+}
+
+/**
+ * 一个工具的载体。
+ *
+ * - `L1` 单页：只有 `index.html`；
+ * - `L2` 打包页：有 `build.out`，仍然是同一个 WebView2；
+ * - `L3` 进程：有 `runtime.kind === "process"`，作者自带运行时。
+ *
+ * L1 与 L2 算同一级：同一个引擎、同一套 `window.aaw*`、同一套动作语义。
+ * 把它俩当成两种运行时，会让工具中心、启动器、校验器全部多一个没收益的分支。
+ */
+export type ToolCarrierLevel = "L1" | "L2" | "L3";
+
+export function readToolCarrier(
+  tool: Pick<ToolPackage, "build" | "runtime">,
+): ToolCarrierLevel {
+  if (tool.runtime?.kind === "process") return "L3";
+  return tool.build ? "L2" : "L1";
+}
+
+/** 工具被判定为不可用时的记录。保留条目本身，只标记原因——绝不静默丢弃。 */
+export interface ToolBrokenState {
+  /**
+   * 坏在哪一类：`incompatible` = 包与当前桌面端不兼容（默认）；
+   * `missing-dir` = 安装记录还在、目录没了（被移动/清理）。
+   * 界面标签与恢复建议都跟着它走——目录丢了说"不兼容"会把人带偏。
+   */
+  readonly kind?: "incompatible" | "missing-dir";
+  /** 给用户看的一句话。 */
+  readonly reason: string;
+  /** 怎么恢复：升级桌面端 / 重新导入 / 卸载。 */
+  readonly hint: string;
+  /** 判定时间（毫秒）。 */
+  readonly at: number;
+}
+
+export type ToolSettingValue = string | number | boolean;
+export type ToolSettings = Readonly<Record<string, ToolSettingValue>>;
+export type ToolSetting = {
+  readonly id: string;
+  readonly label: string;
+  readonly description?: string;
+} & (
+  | { readonly type: "text"; readonly default: string }
+  | {
+      readonly type: "number";
+      readonly default: number;
+      readonly min?: number;
+      readonly max?: number;
+    }
+  | { readonly type: "boolean"; readonly default: boolean }
+  | {
+      readonly type: "select";
+      readonly default: string;
+      readonly options: readonly {
+        readonly label: string;
+        readonly value: string;
+      }[];
+    }
+);
+
+export interface PersonalTool {
+  readonly package: ToolPackage;
+  readonly lastOpened?: number;
+  /** 首次安装时间（毫秒）。升级不改写，用来回答"这工具什么时候装上的"。 */
+  readonly installedAt?: number;
+  /** 最近一次覆盖安装的时间（毫秒）。 */
+  readonly updatedAt?: number;
+  /** 被这次覆盖掉的版本号，安装后提示「v1.0 → v2.0」用。 */
+  readonly previousVersion?: string;
+  /**
+   * 生效的运行副本目录：`<installed>/<账号>/<id>/versions/<版本>`。
+   *
+   * 打开工具、导出源码、读取动作都只认这一份，而且它是一次安装的**快照**：
+   * 作者随后改了开发目录，这里的文件不会跟着变。要更新就重新安装一次。
+   */
+  readonly dir?: string;
+  /**
+   * 这一版是从哪个项目目录装进来的（开发来源）。
+   *
+   * 与 `dir` 分工：`dir` 是能跑的那一份，这里是"作者在哪儿改"。管理页拿它
+   * 显示来源、判断"项目改了还没重装"，但它**永远不参与运行**——以前这两件
+   * 事共用一个字段，于是改开发目录会当场改变已安装工具的行为。
+   */
+  readonly sourceDir?: string;
+  /**
+   * 被这次覆盖掉的上一版**运行副本**目录，退版时直接切回去。
+   *
+   * 与 `previousVersion` 配对：只有这个目录还在、且清单 id 对得上，"退回
+   * 上一版"才是一个能用的入口。旧记录（只有 `previous.json`）没有它，退版
+   * 会按清单重新物化一份，缺文件时明确拒绝并提示重新导入。
+   */
+  readonly previousDir?: string;
+  readonly settings?: ToolSettings;
+  /**
+   * 安装时宿主提供的契约代际。
+   *
+   * 存量保护靠它：读取已装工具时，用"它自己安装时的规则"判断，而不是用现行
+   * 规则判死。否则宿主每收紧一条校验，存量工具就会集体消失。
+   */
+  readonly installedContractVersion?: number;
+  /**
+   * 这份清单是按第几代 schema 规则读进来的。
+   *
+   * 与 `installedContractVersion` 分工：契约管"宿主少了什么能力"（**运行
+   * 问题**，按当前能力表判）；这里管"校验规则收紧后清单还读不读得出"
+   * （**读取问题**，按安装时的规则回读）。旧数据缺字段时视为 1——
+   * schemaVersion 1 的规则从发布起冻结，不会误判（见 `readToolPackageV1`）。
+   */
+  readonly installedSchemaVersion?: number;
+  /**
+   * 判定为不可用时的原因。
+   *
+   * 有它就说明条目还在、只是跑不了——界面要显示一张说明卡（可看原因、可卸载、
+   * 可重新导入），而不是把它从列表里抹掉。这是"工具神秘消失"的正面解法。
+   */
+  readonly broken?: ToolBrokenState;
+}

@@ -1,0 +1,1272 @@
+//! 工具载体的 Tauri 实现。
+//!
+//! # 这一层在验证什么
+//!
+//! 设计稿 §8 说 P0 必须先做，因为它同时验证三件最容易翻车的事：
+//!
+//! 1. **自定义协议在 Windows 上的映射** —— `tools/protocol.rs`，`aaw-tool://` 会
+//!    变成 `http://aaw-tool.localhost/`，host 降级成第一个路径段。
+//! 2. **脚本注入时机** —— `tools/inject.rs`，`initialization_script` 必须跑在
+//!    页面脚本之前，且 `aawSettings` 是同步可读的值而不是 Promise。
+//! 3. **能力调用链** —— `window.aawStore.set` → 命令 → 磁盘 → 回来。
+//!
+//! # 现在只有这一条链路
+//!
+//! P3 删掉了 `tools-runtime/`（Electron 载体）。所以「同一工具在两个载体里行为
+//! 一致」这个对照条件已经不存在，取而代之的是两条：**12 项能力的语义在
+//! `contract.ts` 里只有一份**，以及**动作语义（20 秒 / 512 KB / 幂等）在 L1/L2/L3
+//! 三种载体上完全一样**。改任何一项能力前，先看 `caps.rs` 与 `inject.rs` 是不是
+//! 一起改了——它们是同一件事的两半（下行注入、上行命令面）。
+//!
+//! 文件的读法：
+//!
+//! | 文件 | 管什么 |
+//! |---|---|
+//! | `protocol.rs` | 把工具目录挂成 origin，每个工具一个 |
+//! | `inject.rs` | 往页面里塞 `window.aaw*` |
+//! | `caps.rs` | 页面 `fetch /__aaw/call/…` 落到哪个 Rust 函数 |
+//! | `catalog.rs` | 从 `preferences.json` 读出工具目录与设置 |
+//! | `native.rs` | 文件、剪贴板、系统信息、DPAPI 密钥、进程间总线 |
+//! | `process_host.rs` | L3 进程载体（NDJSON over stdio） |
+//! | `launcher.rs` | 全局快捷键唤出的启动器窗口 |
+
+pub mod caps;
+pub mod catalog;
+pub mod compat;
+pub mod guide;
+pub mod inject;
+pub mod launcher;
+pub mod limits;
+pub mod location;
+pub mod manifest;
+pub mod native;
+pub mod process_host;
+pub mod protocol;
+pub mod store;
+pub(crate) mod uninstall;
+
+// 只要 trait 在作用域里，`decode` 才是 `STANDARD` 的方法；别名成 `_`
+// 是为了不让它出现在需要具名引用的地方。
+use base64::Engine as _;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+/// 宿主当前提供的工具契约代际。
+///
+/// 与前端 `runtime/contract.ts` 的 `toolContractVersion` 是同一个数字，两处
+/// 不一致就会出现"界面说兼容、宿主说不兼容"。第 2 代删掉了 `preload`。
+pub const CONTRACT_GENERATION: u32 = 2;
+
+/// 契约里的十二项能力名。`initialize` 时告诉进程它能拿什么。
+pub fn caps_capability_names() -> Vec<&'static str> {
+    vec![
+        "settings", "store", "sharedStore", "files", "clipboard", "actions",
+        "system", "secrets", "lifecycle", "context", "bus", "network",
+    ]
+}
+
+use tauri::http::{Request, Response};
+use tauri::{AppHandle, Manager};
+
+use limits::LIMITS;
+use manifest::NetworkRule;
+use store::ToolStore;
+
+/// 动作执行的超时。与 Electron 版一致（`runtime.mjs:478` 的 20 秒），
+/// 不因为换了运行时就改语义——作者按 20 秒写的代码不该在新宿主里失效。
+
+/// 一个打开着的工具窗口的身份。
+///
+/// 关键设计：**命令通过窗口 label 反查它**，而不是信前端传的 toolId。
+/// 页面主世界里 `__TAURI_INTERNALS__.invoke` 是公开的，作者（或任何注入进来的
+/// 脚本）都能带着任意 `toolId` 调命令；只有"哪个窗口调的"是宿主自己知道的。
+pub(crate) struct ToolSession {
+    pub(crate) tool_id: String,
+    pub(crate) dir: PathBuf,
+    pub(crate) name: String,
+    pub(crate) network: NetworkRule,
+    pub(crate) background: Option<manifest::BackgroundDecl>,
+    /// 每次建窗随机生成的通道令牌。
+    ///
+    /// 为什么需要它：能力通道是"同源 fetch"，而**跨子域**的 `no-cors` POST 也
+    /// 能发出去（浏览器只挡读响应，不挡发送）。也就是说 `aaw-tool.pilot` 里的
+    /// 一段脚本能往 `aaw-tool.notes` 的能力通道塞请求。令牌把这条路封掉——
+    /// 令牌只注入到本窗口，页面拿不到别的工具的令牌。
+    pub(crate) token: String,
+    /// 载体：`page` 或 `process`。诊断与手册自检用。
+    pub(crate) carrier: String,
+    /// 这一窗建起来时注入的那组设置（序列化后的 JSON）。
+    ///
+    /// 复用窗口前拿它和"现在生效的设置"比：不一样就重建窗口。注入脚本是建窗
+    /// 时的常量，复用旧窗口等于用户保存了设置、打开还是旧值。
+    pub(crate) settings: String,
+    /// `aawLifecycle.keepAlive` 的开关：声明之后关窗只是隐藏。
+    pub(crate) keep_alive: AtomicBool,
+    /// 定时唤醒：`(间隔秒, 下次到点)`。
+    pub(crate) schedule: Mutex<Option<(u64, Instant)>>,
+}
+
+impl ToolSession {
+    pub(crate) fn set_schedule(&self, seconds: u64) {
+        if let Ok(mut slot) = self.schedule.lock() {
+            *slot = Some((seconds, Instant::now() + Duration::from_secs(seconds)));
+        }
+    }
+
+    /// 到点了吗？到点顺手把下一次时间推后。
+    fn due(&self) -> bool {
+        let Ok(mut slot) = self.schedule.lock() else { return false };
+        let Some((seconds, next)) = slot.as_mut() else { return false };
+        if Instant::now() < *next {
+            return false;
+        }
+        *next = Instant::now() + Duration::from_secs(*seconds);
+        true
+    }
+}
+
+/// 宿主状态。
+#[derive(Default)]
+pub struct ToolsHost {
+    sessions: Mutex<HashMap<String, Arc<ToolSession>>>,
+    /// 动作调用的一次性等待者：`requestId → 结果通道`。
+    pending: Mutex<HashMap<String, mpsc::SyncSender<Result<serde_json::Value, String>>>>,
+    data_root: Mutex<Option<PathBuf>>,
+    tools_root: Mutex<Option<PathBuf>>,
+    /// 工具间广播。进程内一条总线，页面与进程共用同一份。
+    bus: native::Bus,
+    /// 跑着的 L3 进程工具。
+    processes: Mutex<HashMap<String, Arc<process_host::ProcessHandle>>>,
+    /// 打开时登记的**运行目录**（`tool_id → dir`）。
+    ///
+    /// 协议层只认得 origin 里的 tool_id，不知道目录在哪——以前固定去
+    /// `tools_root/<id>` 找，于是「前端物化在 `installed/<账号>/<id>` 的示例
+    /// 工具」装完打开必 404（2026-11-22 用户截图报）。打开成功时在这里登记，
+    /// 协议层优先查这张表。
+    runtime_dirs: Mutex<HashMap<String, PathBuf>>,
+}
+
+impl ToolsHost {
+    fn session(&self, label: &str) -> Result<Arc<ToolSession>, String> {
+        self.sessions
+            .lock()
+            .map_err(|error| error.to_string())?
+            .get(label)
+            .cloned()
+            .ok_or_else(|| "这个窗口不是工具窗口。".to_string())
+    }
+
+    /// 按工具 id 找会话。能力通道用它校验令牌——协议层只知道 origin 里的 id，
+    /// 不知道请求来自哪个窗口。
+    fn session_of_tool(&self, tool_id: &str) -> Option<Arc<ToolSession>> {
+        self.sessions
+            .lock()
+            .ok()?
+            .values()
+            .find(|item| item.tool_id == tool_id)
+            .cloned()
+    }
+
+    /// 取走一个动作等待者。`None` 表示没有在等的调用，调用方要报错而不是静默丢弃。
+    pub(super) fn take_pending(
+        &self,
+        request_id: &str,
+    ) -> Result<Option<mpsc::SyncSender<Result<serde_json::Value, String>>>, String> {
+        Ok(self
+            .pending
+            .lock()
+            .map_err(|error| error.to_string())?
+            .remove(request_id))
+    }
+
+    pub fn bus(&self) -> &native::Bus {
+        &self.bus
+    }
+
+    pub(crate) fn insert_process(&self, tool_id: &str, handle: Arc<process_host::ProcessHandle>) -> Result<(), String> {
+        self.processes
+            .lock()
+            .map_err(|error| error.to_string())?
+            .insert(tool_id.to_string(), handle);
+        Ok(())
+    }
+
+    pub(crate) fn process(&self, tool_id: &str) -> Option<Arc<process_host::ProcessHandle>> {
+        self.processes.lock().ok()?.get(tool_id).cloned()
+    }
+
+    /// 取出一个进程句柄（取出即不在表里）。给"重开前清掉上次残留"用。
+    pub(crate) fn take_process(
+        &self,
+        tool_id: &str,
+    ) -> Option<Arc<process_host::ProcessHandle>> {
+        self.processes.lock().ok()?.remove(tool_id)
+    }
+
+    pub(crate) fn remove_process(&self, tool_id: &str) {
+        // 取出来再杀，不能只删表：`Child` 的 Drop 没有"杀进程"语义，而且
+        // 读线程还持有 Arc 克隆，表一删对象根本不会析构——只删表的版本放过
+        // 了大量孤儿进程（2026-11-22 修）。
+        let handle = self.processes.lock().ok().and_then(|mut map| map.remove(tool_id));
+        if let Some(handle) = handle {
+            handle.kill();
+        }
+    }
+
+    pub(crate) fn store(&self) -> Result<ToolStore, String> {
+        Ok(ToolStore::new(self.data_root()?))
+    }
+
+    /// 数据根（已含数据根迁移后的 active 位置）。工具数据、位置指针都从这里拼。
+    pub(crate) fn data_root(&self) -> Result<PathBuf, String> {
+        self.data_root
+            .lock()
+            .map_err(|error| error.to_string())?
+            .clone()
+            .ok_or_else(|| "工具宿主未初始化。".to_string())
+    }
+
+    /// dev 期的工具根目录：环境变量指定的目录或仓库内 `desktop/tools`。
+    /// 只有 dev 期才有值——打包后返回 `None`，生产环境的工具目录统一走
+    /// `location::tool_root`（含位置指针），消灭了以前"Rust 算一个地方、
+    /// 前端写另一个地方"的分裂。
+    fn dev_tools_root(&self) -> Option<PathBuf> {
+        if let Ok(path) = self.tools_root.lock() {
+            return path.clone();
+        }
+        None
+    }
+
+    /// 打开成功时登记运行目录。重复打开覆盖旧值——以最近一次解析为准。
+    fn set_runtime_dir(&self, tool_id: &str, dir: &Path) {
+        if let Ok(mut map) = self.runtime_dirs.lock() {
+            map.insert(tool_id.to_string(), dir.to_path_buf());
+        }
+    }
+
+    /// 卸载时移除登记，避免留下指向已删目录的悬空项。
+    pub(crate) fn clear_runtime_dir(&self, tool_id: &str) {
+        if let Ok(mut map) = self.runtime_dirs.lock() {
+            map.remove(tool_id);
+        }
+    }
+
+    /// 这个工具此刻正被哪些目录占着：窗口会话打开的目录 + 打开时登记的运行目录。
+    ///
+    /// 回收孤儿版本副本前必须问它。一个目录没有记录指向，不等于没人正在用：
+    /// 用户可能还开着更新前那一版的窗口，删掉就是当场白屏。这件事判断不了
+    /// 也就不该删——所以由宿主自己回答，而不是让只看得到配置的前端去猜。
+    pub(crate) fn busy_dirs(&self, tool_id: &str) -> Vec<PathBuf> {
+        let mut dirs: Vec<PathBuf> = self
+            .sessions
+            .lock()
+            .map(|map| {
+                map.values()
+                    .filter(|session| session.tool_id == tool_id)
+                    .map(|session| session.dir.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        // L3 进程工具的目录只登记在 runtime_dirs，不一定有会话（不带界面的）。
+        if let Ok(map) = self.runtime_dirs.lock() {
+            if let Some(dir) = map.get(tool_id) {
+                dirs.push(dir.clone());
+            }
+        }
+        dirs
+    }
+
+    /// 协议层的目录解析：优先查打开时登记的运行目录（它比 `tools_root/<id>`
+    /// 更接近事实——前端物化、ZIP 导入的副本都记在这里）；登记的目录不在了
+    /// 才退回旧路径。`runtime_dir` 只在 open 成功后存在，返回 `None` 时让
+    /// 调用方走 `tool_dir` 的兼容路径与报错文案。
+    pub(crate) fn resolve_runtime_dir(&self, tool_id: &str) -> Option<PathBuf> {
+        let dir = self.runtime_dirs.lock().ok()?.get(tool_id).cloned()?;
+        // 目录被移动/删除后登记就成了悬空项：当作没有，别拿它 404。
+        if dir.is_dir() { Some(dir) } else { None }
+    }
+
+    fn tool_dir(&self, tool_id: &str) -> Result<PathBuf, String> {
+        if !valid_tool_id(tool_id) {
+            return Err("无效的工具 id。".into());
+        }
+        // dev 期仓库根里工具直接躺在根下。
+        if let Some(root) = self.dev_tools_root() {
+            let dir = root.join(tool_id);
+            if dir.is_dir() {
+                return Ok(dir);
+            }
+        }
+        // 生产环境：安装记录里的 `dir` 是**唯一真源**。
+        //
+        // 以前这里猜 `installed/<账号>/<id>`。副本现在住在
+        // `installed/<账号>/<id>/versions/<版本>` 下，猜出来的路径永远是空的——
+        // 启动器小窗第一次打开工具就是这么坏的（主窗会先解析再传 `hint`，
+        // 小窗没有那一步）。
+        let mut recorded = None;
+        if let Ok(store) = self.store() {
+            if let Ok(library) = catalog::read(&store) {
+                if let Some(entry) = library.entries.iter().find(|entry| entry.tool.id == tool_id) {
+                    if let Some(dir) = entry.dir.as_ref() {
+                        let dir = PathBuf::from(dir);
+                        if dir.is_dir() {
+                            return Ok(dir);
+                        }
+                        recorded = Some(dir);
+                    }
+                }
+            }
+        }
+        // 兼容旧布局：`installed/<账号>/<id>` 本身就是运行副本（没有 versions 层）。
+        let legacy = match (self.data_root(), self.store().and_then(|store| store.owner())) {
+            (Ok(data_root), Ok(owner)) => location::tool_partition(&data_root, &owner, "installed")
+                .ok()
+                .map(|partition| partition.join(tool_id)),
+            _ => None,
+        };
+        if let Some(dir) = legacy.filter(|dir| dir.is_dir()) {
+            return Ok(dir);
+        }
+        // 都找不到：把"记录里写着的那个路径"报出来，用户才知道去哪找。
+        Err(match recorded {
+            Some(dir) => format!(
+                "这个工具的运行副本不在了（{}）。它可能已被移动或删除：在工具中心点「打开」会按安装记录重建，或卸载这条记录后重新安装。",
+                dir.display()
+            ),
+            None => "这个工具还没有可运行的副本：在工具中心点一次「打开」会补齐，或重新导入一次 ZIP。".to_string(),
+        })
+    }
+}
+
+fn valid_tool_id(id: &str) -> bool {
+    if id.is_empty() || id.len() > 64 {
+        return false;
+    }
+    let mut chars = id.chars();
+    match chars.next() {
+        Some(ch) if ch.is_ascii_lowercase() || ch.is_ascii_digit() => {}
+        _ => return false,
+    }
+    id.chars()
+        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '.' || ch == '-')
+}
+
+/// 退出应用时的兜底：把所有 L3 子进程杀干净。
+///
+/// 挂在 `RunEvent::Exit` 上。平时关窗走 `Destroyed` → `remove_process`，
+/// 但"直接退出应用"（任务栏右键关闭、系统关机）不触发逐窗销毁，没有这一步
+/// 每个还在跑的进程工具都会变成孤儿（对应验收清单 C-10）。
+pub fn shutdown_all_processes(app: &tauri::AppHandle) {
+    let host = app.state::<ToolsHost>();
+    let Ok(mut map) = host.processes.lock() else { return };
+    for (_, handle) in map.drain() {
+        handle.kill();
+    }
+}
+
+/// 进程内唯一的临时文件名。
+///
+/// 固定后缀（`json.tmp`、`json.tmp-<pid>`）在两次保存撞上时会互相截断——
+/// pid 只隔离进程，不隔离同一进程里的两个并发线程。所有"写临时文件再改名"
+/// 的落盘（store / secrets / 启动器偏好）一律走这里。
+pub(crate) fn unique_temp(path: &Path) -> PathBuf {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let stem = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("file");
+    let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("json");
+    path.with_file_name(format!("{stem}.{ext}.{}.{}.tmp", std::process::id(), seq))
+}
+
+/// 在 `setup` 里调一次：确定数据根与工具根，并在 dev 期按环境变量自动开窗。
+pub fn initialize(app: &AppHandle) -> Result<(), String> {    // 开发指导窗口的未保存标记。建在初始化里而不是建窗时：窗口事件可能在任何时候到达，
+    // 状态必须先于窗口存在。窗口本身的存活不在这里记账——直接问系统（`IsWindow`），
+    // 因为 Tauri 的窗口表在窗口销毁后仍留着条目，自记账两次都被实测证伪了。
+    if app.try_state::<guide::GuideDirty>().is_none() {
+        app.manage(guide::GuideDirty::default());
+    }
+    let host = app.state::<ToolsHost>();
+    // 数据根必须用**迁移后的 active 根**（storage_location::initialize 先于本
+    // 函数运行）。以前拿原始 app_local_data_dir，数据根迁走后工具宿主还在读
+    // 旧位置——迁移清单与实际读取各说各话。
+    let data_root = std::env::var_os("AAW_TOOLS_TAURI_DATA_ROOT")
+        .map(PathBuf::from)
+        .or_else(|| crate::storage_location::data_dir(app).ok())
+        .ok_or("拿不到 AAW 数据目录")?;
+    *host.data_root.lock().map_err(|error| error.to_string())? = Some(data_root.clone());
+
+    // dev 期工具根：环境变量 > 仓库内 `desktop/tools`。生产环境没有这一层，
+    // 工具目录一律由 location::tool_root 解析。
+    let dev_root = std::env::var_os("AAW_TOOLS_TAURI_ROOT")
+        .map(PathBuf::from)
+        .or_else(|| {
+            let dev = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("tools");
+            dev.is_dir().then_some(dev)
+        });
+    *host.tools_root.lock().map_err(|error| error.to_string())? = dev_root;
+
+    // 定时唤醒：一个线程扫所有打开了定时的工具窗口，到点 eval 一次。
+    // 5 秒粒度足够（契约最小间隔 60 秒），也不会让低配机多一份常驻负担。
+    start_ticker(app);
+
+    // 自检入口：`npm run tools:pilot` 带上这个变量，起 dev 的同时开一个工具窗口，
+    // 用来确认注入脚本、能力通道、动作调用三件事都还在。正常打开工具走前端
+    // `host.openTool()` → `tools_open`，不经过这里。
+    if std::env::var("AAW_TOOLS_TAURI_PILOT").is_ok_and(|value| value == "1") {
+        let app = app.clone();
+        // setup 阶段建窗口会与主窗口抢初始化顺序，放到事件循环下一拍更稳。
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(900));
+            let tool_id = std::env::var("AAW_TOOLS_TAURI_PILOT_ID").unwrap_or_else(|_| "pilot".into());
+            if let Err(error) = open_tool(&app, &tool_id, None) {
+                eprintln!("[aaw-tools] 打开 pilot 失败：{error}");
+            }
+        });
+    }
+
+    // 诊断入口：`AAW_GUIDE_PROBE=1` 启动时自动开一次开发指导窗口。存在的理由
+    // 和上面那条一样——"窗口白屏"必须眼见为实，而点按钮这件事没法自动化。
+    // 它走的是和用户点按钮完全相同的 `open_guide`，不是另开一条路。
+    //
+    // `AAW_GUIDE_PROBE=2` 改成从主窗**发一次真的 IPC**（`invoke('tools_guide_open')`），
+    // 这条才是用户点按钮的真实路径：命令由主线程派发，和这里直接调
+    // `open_guide`（后台线程）走的是两条线程。2026-11-21 的白屏正是这两条
+    // 路的差别——用 =2 才能复现。
+    if let Ok(probe) = std::env::var("AAW_GUIDE_PROBE") {
+        let app = app.clone();
+        let via_ipc = probe == "2";
+        if via_ipc || probe == "1" {
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(1500));
+                if via_ipc {
+                    let Some(main) = app.get_webview_window("main") else {
+                        eprintln!("[aaw-guide] 没有主窗，无法走 IPC 诊断");
+                        return;
+                    };
+                    let _ = main.eval(
+                        "window.__TAURI_INTERNALS__.invoke('tools_guide_open').catch(function (error) { console.error(error); })",
+                    );
+                    return;
+                }
+                if let Err(error) = guide::open(&app) {
+                    eprintln!("[aaw-guide] 诊断开窗失败：{error}");
+                }
+            });
+        }
+    }
+    Ok(())
+}
+
+/// 每 5 秒扫一遍带定时声明的工具窗口。
+///
+/// 用 eval 而不是事件：工具页面是 remote origin，Tauri 的 emit 到它那里要么被
+/// ACL 拦、要么得给窗口开权限（那是错的方向）。eval 一段"调用页面自己挂的回调"
+/// 只需要窗口句柄，权限面为零。
+fn start_ticker(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(LIMITS.ticker_interval);
+        let due: Vec<String> = match app.state::<ToolsHost>().sessions.lock() {
+            Ok(map) => map
+                .iter()
+                .filter(|(_, session)| session.due())
+                .map(|(label, _)| label.clone())
+                .collect(),
+            Err(_) => continue,
+        };
+        for label in due {
+            if let Some(window) = app.get_webview_window(&label) {
+                let _ = window.eval("window.__aawTick && window.__aawTick()");
+            }
+        }
+    });
+}
+
+/// 工具根目录的解析顺序。抽成函数是为了能被测试直接打。
+/// 注册 `aaw-tool://` 协议。
+///
+/// 必须是**异步**版本：读文件是阻塞 IO，用同步版本会在低配机上卡住整个 UI 线程
+/// （工具页面里一次 `import` 可能连发十几个请求）。
+pub fn register_protocol(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    builder.register_asynchronous_uri_scheme_protocol(protocol::SCHEME, move |context, request, responder| {
+        // Tauri 2 的第一参数是 `UriSchemeContext`，不是 `&AppHandle`。
+        let app = context.app_handle().clone();
+        // 再开一个线程：即使 handler 自己变慢，也不能阻塞 wry 的协议线程。
+        std::thread::spawn(move || {
+            let response = serve(&app, &request);
+            responder.respond(response.map(std::borrow::Cow::Owned));
+        });
+    })
+}
+
+/// 把一个请求变成响应。抽出来是为了能被单元测试直接打（不必起整个 Tauri）。
+fn serve(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
+    let Some((tool_id, path)) = protocol::split_request(request.uri()) else {
+        eprintln!("[aaw-tools] 拒绝无法解析的请求：{}", protocol::describe(request));
+        return protocol::empty(404);
+    };
+    let host = app.state::<ToolsHost>();
+
+    // ── 能力通道 ──────────────────────────────────────────────────────
+    // 走同源 fetch，不走 Tauri IPC。原因见 `caps.rs` 文件头。
+    if let Some(command) = protocol::call_command(&path) {
+        // 只收 POST：能力调用有副作用，不该被一个 GET 触发（也不该被浏览器预取）。
+        if request.method() != tauri::http::Method::POST {
+            return protocol::empty(405);
+        }
+        // 令牌校验：跨子域的 no-cors POST 发得出去，只有令牌能区分"本窗口"。
+        let session = host.session_of_tool(&tool_id);
+        let expected = session.as_ref().map(|item| item.token.clone());
+        let provided = request
+            .headers()
+            .get("x-aaw-token")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("");
+        let authorized = match expected {
+            Some(token) => {
+                // 定长比较，避免把令牌长度也漏出去（这里几乎不值一提，但便宜）。
+                token.len() == provided.len()
+                    && token.bytes().zip(provided.bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+            }
+            None => false,
+        };
+        if !authorized {
+            eprintln!("[aaw-tools] 拒绝未授权的能力调用：{tool_id} · {command}");
+            return protocol::empty(403);
+        }
+        return caps::dispatch(&host, Some(app), &tool_id, session.as_deref(), command, request.body());
+    }
+
+    // ── 静态文件 ──────────────────────────────────────────────────────
+    // 打开时登记的运行目录优先：示例工具物化在 installed/<账号>/<id>，
+    // tools_root/<id> 里根本没有它——以前固定查后者，装完打开必 404。
+    let dir = match host.resolve_runtime_dir(&tool_id) {
+        Some(dir) => dir,
+        None => match host.tool_dir(&tool_id) {
+            Ok(dir) => dir,
+            Err(error) => {
+                eprintln!("[aaw-tools] {error}");
+                return protocol::empty(404);
+            }
+        },
+    };
+    let Some(file) = protocol::resolve_file(&dir, &path) else {
+        eprintln!("[aaw-tools] 工具 {tool_id} 找不到 {path}");
+        return protocol::empty(404);
+    };
+    let Some(body) = protocol::read_capped(&file) else {
+        eprintln!("[aaw-tools] 工具 {tool_id} 的 {path} 读不了或超过 8 MB");
+        return protocol::empty(404);
+    };
+    // CSP 只挂在 HTML 上：挂在 js/css 上不生效，还会让响应变大。
+    let is_html = matches!(
+        file.extension().and_then(|value| value.to_str()).map(str::to_ascii_lowercase).as_deref(),
+        Some("html") | Some("htm")
+    );
+    let policy = if is_html {
+        // 首次导航可能早于会话注册，这时读该版本的清单，仍按它的声明限制连接。
+        let network = host
+            .sessions
+            .lock()
+            .ok()
+            .and_then(|map| map.values().find(|item| item.tool_id == tool_id).cloned())
+            .map(|item| item.network.clone());
+        let network = network.or_else(|| manifest::read(&dir).ok().map(|manifest| manifest.network()));
+        Some(protocol::policy_for(network.as_ref()))
+    } else {
+        None
+    };
+    protocol::file_response(&file, body, policy)
+}
+
+/// 打开一个工具窗口。
+///
+/// `hint` 是前端安装记录里的目录（示例工具打开前会当场物化并记录）。解析
+/// 顺序：`hint` 存在且是目录就用它，否则回退 `tools_root/<id>`——后一条是
+/// 兼容路径，不是主路：前端知道自己装的东西在哪，Rust 不该再猜一遍。
+///
+/// `tool-<id>` 这个 label 形状是有意的：`capabilities/tools.json` 用 `tool-*`
+/// 一条就覆盖全部工具窗口，不必每加一个工具就改权限表。
+pub fn open_tool(app: &AppHandle, tool_id: &str, hint: Option<&str>) -> Result<(), String> {
+    let label = format!("tool-{tool_id}");
+    let host = app.state::<ToolsHost>();
+    if uninstall::pending(&host, tool_id)? {
+        return Err("这个工具正在卸载，暂时无法打开。".into());
+    }
+    // 这次应该打开哪个目录。窗口已经存在时也要先算出来：更新/重装之后安装
+    // 记录的 `dir` 换到了新版本目录，而窗口还停在旧的那一份——不比对就会
+    // 一直给用户看更新前的界面，而他点「打开」正是想刷新。
+    let target = hint
+        .map(std::path::PathBuf::from)
+        .filter(|dir| dir.is_dir())
+        .or_else(|| host.tool_dir(tool_id).ok());
+    if let Some(window) = app.get_webview_window(&label) {
+        if let Some((dir, created_with, name)) = session_baseline(&host, &label) {
+            // 设置比对也要用**目标目录**的清单：拿旧目录算，更新后清单里新增的
+            // 默认值永远对不上，窗口会莫名其妙重建一次。
+            let moved = target
+                .as_deref()
+                .is_some_and(|target| !same_dir(&dir, target));
+            let current = manifest::read(target.as_deref().unwrap_or(&dir))
+                .map(|manifest| settings_json(&resolve_settings(&host, tool_id, &manifest)))
+                .unwrap_or_default();
+            if moved || current != created_with {
+                // 复用旧窗口只能拿到旧页面：版本目录换了，页面、样式、依赖都在
+                // 新目录里；而 `aawSettings` 是建窗时烘焙进去的常量，reload 也
+                // 还是旧值。只能按新目录重建。
+                //
+                // 代价是工具里没保存的内容会没。这一步只在"版本或设置真的变了、
+                // 用户又点开工具"时发生，与界面上写的"保存后重新打开生效"一致。
+                host.remove_process(tool_id);
+                window.destroy().ok();
+                if moved {
+                    notify_version_applied(app, &name);
+                } else {
+                    notify_settings_applied(app, &name);
+                }
+                // `destroy()` 只是投一次销毁请求：窗口表里那条要等事件循环跑
+                // 一拍才消失。同一拍里再走一次打开，`open_page_window` 会看到
+                // "窗口已经开着"，show 一下直接返回 Ok——旧窗已销毁、新窗没建，
+                // 用户看到的是"点了打开，工具窗口没了"（2026-11-22 真机复现）。
+                //
+                // 所以重建放到后台线程：等 label 真的空出来，再完整走一遍打开。
+                // 不在当前线程里等——这条路也可能跑在主线程上（启动器热键），
+                // 主线程一睡，销毁请求就永远没人处理。
+                let app = app.clone();
+                let tool_id = tool_id.to_string();
+                let hint = target.as_ref().map(|dir| dir.to_string_lossy().into_owned());
+                std::thread::spawn(move || {
+                    for _ in 0..200 {
+                        if app.get_webview_window(&format!("tool-{tool_id}")).is_none() {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    if let Err(error) = open_tool(&app, &tool_id, hint.as_deref()) {
+                        eprintln!("[aaw-tools] 重建工具窗口失败：{error}");
+                    }
+                });
+                return Ok(());
+            }
+        }
+        if let Some(window) = app.get_webview_window(&label) {
+            // 「停止后台运行」只杀进程、不关窗；之后用户点「打开」会在这里提前
+            // 返回。不重生进程的话，窗口是活的、工具是死的——用户看到的就是
+            // "重新打开了还是不能用"（2026-11-22 真机验收发现）。
+            process_host::respawn(app, &host, tool_id)?;
+            window.show().ok();
+            window.set_focus().ok();
+            return Ok(());
+        }
+    }
+    let dir = match hint {
+        Some(dir) if std::path::Path::new(dir).is_dir() => std::path::PathBuf::from(dir),
+        // hint 给了但目录不在了：不静默换成 tools_root（那会打开另一份完全
+        // 不同的内容），把矛盾报出来。
+        Some(dir) => return Err(format!("安装记录里的工具目录不存在：{dir}")),
+        None => host.tool_dir(tool_id)?,
+    };
+    let manifest = manifest::read(&dir)?;
+    // hint 目录是前端传来的参数，必须验里面的清单确实是自己：装错目录
+    // 时宁可报错，也不能把 A 工具的窗口当成 B 工具打开（能力、存储都挂在
+    // tool_id 上，错配会读到别人的数据）。
+    if manifest.id != tool_id {
+        return Err(format!(
+            "目录 {} 里的清单 id 是「{}」，与要打开的工具「{tool_id}」不一致。",
+            dir.display(),
+            manifest.id
+        ));
+    }
+    // 打开关口在**建窗口之前**：判定放后面就会出现"先闪一个空白窗口、再关掉"，
+    // 那是用户最难描述的一类故障。判定本身只读清单，不需要窗口。
+    compat::check(&manifest)?;
+    // 目录解析成功且验过身份：登记进运行目录表。协议层（serve）从这里拿
+    // 目录——tools_root/<id> 只是不在前端记录里的兼容路径。
+    host.set_runtime_dir(tool_id, &dir);
+    // L3：先拉进程。进程起不来就不开窗——否则用户会看到一个界面，点任何东西
+    // 都报"工具进程没有在运行"。
+    if manifest.is_process() {
+        return process_host::open(app, tool_id, &dir, &manifest);
+    }
+    open_page_window(app, tool_id, &dir, &manifest, "page")
+}
+
+pub(crate) async fn close_tool(app: &AppHandle, tool_id: &str) -> Result<(), String> {
+    let host = app.state::<ToolsHost>();
+    let label = format!("tool-{tool_id}");
+    host.remove_process(tool_id);
+    if let Some(window) = app.get_webview_window(&label) {
+        window.destroy().map_err(|error| error.to_string())?;
+        let expires = Instant::now() + Duration::from_secs(2);
+        while app.get_webview_window(&label).is_some() {
+            if Instant::now() >= expires {
+                return Err("工具窗口还没有关闭，请稍后重试。".into());
+            }
+            tokio::time::sleep(Duration::from_millis(15)).await;
+        }
+    }
+    host.clear_runtime_dir(tool_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn tools_close(window: tauri::WebviewWindow, tool_id: String) -> Result<(), String> {
+    if window.label() != "main" || !valid_tool_id(&tool_id) {
+        return Err("无效的关闭工具请求。".into());
+    }
+    close_tool(window.app_handle(), &tool_id).await
+}
+
+/// 一个工具**现在生效**的设置：清单默认值打底，用户存过的值覆盖。
+///
+/// 与建窗时注入的那组必须同源，否则"设置变没变"的判断会一直报变。
+fn resolve_settings(
+    host: &ToolsHost,
+    tool_id: &str,
+    manifest: &manifest::ToolManifest,
+) -> serde_json::Map<String, serde_json::Value> {
+    if let Ok(store) = host.store() {
+        if let Ok(library) = catalog::read(&store) {
+            if let Some(entry) = library.entries.into_iter().find(|entry| entry.tool.id == tool_id) {
+                return entry.settings;
+            }
+        }
+    }
+    manifest.settings_defaults()
+}
+
+fn settings_json(settings: &serde_json::Map<String, serde_json::Value>) -> String {
+    serde_json::to_string(settings).unwrap_or_default()
+}
+
+/// 窗口那一代的基线：建窗时用的运行目录、注入的设置、工具名。
+fn session_baseline(host: &ToolsHost, label: &str) -> Option<(PathBuf, String, String)> {
+    let sessions = host.sessions.lock().ok()?;
+    let session = sessions.get(label)?;
+    Some((session.dir.clone(), session.settings.clone(), session.name.clone()))
+}
+
+/// 设置变更导致窗口重建时给一句系统提示。
+///
+/// 为什么要提示：重建会丢掉工具界面里没保存的内容。那是这一步的代价，
+/// 不该只在代码注释里存在——用户得知道刚看到的界面重置是预期行为。
+fn notify_settings_applied(app: &AppHandle, name: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app
+        .notification()
+        .builder()
+        .title("工具已按新设置重新打开")
+        .body(format!("{name}：这次打开用的是刚保存的设置；界面里没保存的内容会重置。"))
+        .show();
+}
+
+/// 版本换了导致窗口重建时给一句系统提示。
+///
+/// 用户点「打开」的预期是"看到现在这一版"。窗口被他一直开着、更新之后又没
+/// 关掉时，只能重建；这一步会丢掉工具里没保存的内容，必须说一声。
+fn notify_version_applied(app: &AppHandle, name: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app
+        .notification()
+        .builder()
+        .title("工具已换到当前版本")
+        .body(format!("{name}：安装记录里的版本变了，窗口按新版本重新打开；界面里没保存的内容会重置。"))
+        .show();
+}
+
+/// 两个路径是不是同一个目录。
+///
+/// 先 `canonicalize` 再比，是为了让 `C:\a\b` 与 `c:/a/b/`、以及经过 junction
+/// 的写法都算同一个位置；拿不到（目录刚被删）就退回字面量比较。Windows 上
+/// 路径大小写不敏感，这条也要跟着。
+fn same_dir(left: &std::path::Path, right: &std::path::Path) -> bool {
+    let normalize = |path: &std::path::Path| {
+        std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    };
+    let (left, right) = (normalize(left), normalize(right));
+    if cfg!(windows) {
+        left.to_string_lossy()
+            .eq_ignore_ascii_case(right.to_string_lossy().as_ref())
+    } else {
+        left == right
+    }
+}
+
+/// 开一个页面工具窗口（L1/L2，以及带界面的 L3）。
+///
+/// `carrier` 只影响诊断信息与关窗时的回收：动作走哪条链路由 `manifest.runtime`
+/// 决定，不在这里分叉。
+pub(crate) fn open_page_window(
+    app: &AppHandle,
+    tool_id: &str,
+    dir: &Path,
+    manifest: &manifest::ToolManifest,
+    carrier: &str,
+) -> Result<(), String> {
+    let label = format!("tool-{tool_id}");
+    if let Some(window) = app.get_webview_window(&label) {
+        window.show().ok();
+        window.set_focus().ok();
+        return Ok(());
+    }
+
+    let host = app.state::<ToolsHost>();
+    let network = manifest.network();
+    let token = uuid::Uuid::new_v4().to_string();
+
+    // settings 要在建窗口之前算好——注入脚本是常量，不能等页面来问。
+    //
+    // 必须读**用户存过的值**，不能只用清单默认值：在工具中心改过设置的用户，
+    // 打开工具却看到默认值，会以为设置没生效（Electron 版用 sendSync 读的就是
+    // 这份，行为要一致）。
+    let settings = resolve_settings(&host, tool_id, manifest);
+    // 记下"这一窗是按哪组设置建的"：复用窗口时要靠它判断设置有没有变。
+    let settings_created = settings_json(&settings);
+    let script = inject::script(&inject::InjectContext {
+        tool_id: tool_id.to_string(),
+        token: token.clone(),
+        settings,
+        selection: String::new(),
+        origin: "launcher".into(),
+    });
+
+    let session = Arc::new(ToolSession {
+        tool_id: tool_id.to_string(),
+        dir: dir.to_path_buf(),
+        name: manifest.name.clone(),
+        network,
+        background: manifest.background.clone(),
+        token,
+        carrier: carrier.to_string(),
+        settings: settings_created,
+        keep_alive: AtomicBool::new(false),
+        schedule: Mutex::new(None),
+    });
+
+    let url = tauri::Url::parse(&format!("{}://{}", protocol::SCHEME, tool_id))
+        .map_err(|error| format!("地址不合法：{error}"))?;
+
+    let window = tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::CustomProtocol(url))
+        .title(format!("{} · 工具", manifest.name))
+        .inner_size(880.0, 640.0)
+        .min_inner_size(420.0, 320.0)
+        .initialization_script(&script)
+        .devtools(cfg!(debug_assertions))
+        .build()
+        .map_err(|error| format!("建窗口失败：{error}"))?;
+
+    host.sessions
+        .lock()
+        .map_err(|error| error.to_string())?
+        .insert(label.clone(), session.clone());
+
+    // 关窗即清账：留着旧 label 会让重新打开的窗口继承一个过期的目录与网络规则。
+    let app_handle = app.clone();
+    let closing = label.clone();
+    window.on_window_event(move |event| match event {
+        // keepAlive：声明过的工具关窗只是隐藏，进程（这里是主程序）继续。
+        // 没有声明的工具保持默认行为——关窗就是关掉，别让用户关不掉。
+        tauri::WindowEvent::CloseRequested { api, .. } => {
+            if session.keep_alive.load(Ordering::Relaxed) {
+                api.prevent_close();
+                if let Some(window) = app_handle.get_webview_window(&closing) {
+                    let _ = window.hide();
+                }
+            }
+        }
+        tauri::WindowEvent::Destroyed => {
+            // 只移除**这一代**的会话：设置变更后会先销毁再在同一个 label 上
+            // 重建，晚到的销毁事件不该把新窗口的会话删掉（删了页面还在，能力
+            // 通道却查不到会话，表现是点什么都报错）。
+            if let Ok(mut map) = app_handle.state::<ToolsHost>().sessions.lock() {
+                let current = map.get(&closing).map(|now| Arc::ptr_eq(now, &session)).unwrap_or(false);
+                if current {
+                    map.remove(&closing);
+                }
+            }
+            // 窗口没了，进程工具也就没有宿主了：留着它就是个孤儿进程。
+            // 同一个 label 上已经有新窗口时跳过——那一代的进程归它用。
+            if app_handle.get_webview_window(&closing).is_none() {
+                if let Some(tool_id) = closing.strip_prefix("tool-") {
+                    app_handle.state::<ToolsHost>().remove_process(tool_id);
+                }
+            }
+        }
+        _ => {}
+    });
+
+    window.show().ok();
+    Ok(())
+}
+
+/// `scope` 参数只接受 `""` 或 `"shared"`。规则与能力通道共用一份，
+/// 免得"从主窗调"和"从工具页调"落到两个文件里。
+fn storage_scope(session: &ToolSession, scope: &str) -> Result<String, String> {
+    caps::storage_owner(&session.tool_id, scope)
+}
+
+// ── 命令 ─────────────────────────────────────────────────────────────────
+
+/// 打开工具的入口。`async` 的理由与 `tools_guide_open` 相同：同步命令跑在
+/// 主线程，而 `open_page_window` / `process_host::open` 都要建窗口——主线程里
+/// 建 WebView2 会把消息循环堵在等自己上，结果是白窗 + 关不掉。
+///
+/// `dir` 是前端安装记录里的目录。必须限定主窗调用：工具页面是 remote
+/// origin，能传任意路径的目录参数之后，绝不能让它也够得着这条命令。
+#[tauri::command]
+pub async fn tools_open(
+    window: tauri::WebviewWindow,
+    app: AppHandle,
+    tool_id: String,
+    dir: Option<String>,
+) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("只有主窗口可以打开工具。".into());
+    }
+    open_tool(&app, &tool_id, dir.as_deref())?;
+    launcher::record_tool_open(&app, &tool_id);
+    Ok(())
+}
+
+/// 把导出的源码 ZIP 写到用户选定的路径。
+///
+/// 写盘限额（`archive_write_bytes`）与导入的整包限额（`archive_bytes`）同为
+/// 32 MB——能导进来的就应该能导出去；曾经这里只有 1 MB，L3 工具的 `bin/`
+/// 一超限就报一句莫名的「无效的源码导出请求」。
+///
+/// 其余校验防的是"页面借参数写到别处"：来源必须是主窗、扩展名必须是
+/// `.zip`、内容必须是合法 ZIP（`PK\x03\x04` 头）。base64 先按长度挡一次，
+/// 免得为了拒绝一个 500 MB 的请求先把它解码进内存。
+#[tauri::command]
+pub fn tools_write_archive(
+    window: tauri::WebviewWindow,
+    path: String,
+    contents: String,
+) -> Result<(), String> {
+    let cap = LIMITS.archive_write_bytes.div_ceil(3) * 4;
+    // 先按 base64 长度挡一次：拒绝一个几百 MB 的请求时不该先把它解码进内存。
+    // 超限要说出上限是多少——"无效的请求"会让作者以为自己的包坏了。
+    if window.label() != "main" {
+        return Err("无效的源码导出请求。".into());
+    }
+    if contents.len() > cap {
+        return Err(format!(
+            "导出的 ZIP 超过 {} MB 上限，没有写出。可以把依赖目录（node_modules）从导出里排除后重试。",
+            LIMITS.archive_write_bytes / 1024 / 1024
+        ));
+    }
+    if !path.to_lowercase().ends_with(".zip") {
+        return Err("请选择 .zip 文件名。".into());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(contents)
+        .map_err(|_| "无效的 ZIP 数据。")?;
+    if bytes.len() > LIMITS.archive_write_bytes {
+        return Err(format!(
+            "导出的 ZIP 解压后超过 {} MB 上限，没有写出。",
+            LIMITS.archive_write_bytes / 1024 / 1024
+        ));
+    }
+    if !bytes.starts_with(b"PK\x03\x04") {
+        return Err("无效的 ZIP 数据。".into());
+    }
+    std::fs::write(&path, bytes).map_err(|error| format!("导出失败：{error}"))
+}
+
+#[tauri::command]
+pub fn tool_store_get(window: tauri::WebviewWindow, scope: String, name: String) -> Result<serde_json::Value, String> {
+    let host = window.state::<ToolsHost>();
+    let session = host.session(window.label())?;
+    let owner = storage_scope(&session, &scope)?;
+    host.store()?.get(&owner, &name)
+}
+
+#[tauri::command]
+pub fn tool_store_set(
+    window: tauri::WebviewWindow,
+    scope: String,
+    name: String,
+    value: serde_json::Value,
+) -> Result<bool, String> {
+    let host = window.state::<ToolsHost>();
+    let session = host.session(window.label())?;
+    let owner = storage_scope(&session, &scope)?;
+    let size = serde_json::to_vec(&value).map(|bytes| bytes.len()).unwrap_or(0);
+    let result = host.store()?.set(&owner, &name, value)?;
+    // 只记体积不记内容：存储里可能有用户的业务数据，日志不该成为它的副本。
+    eprintln!("[aaw-tools] store.set {owner} · {name} · {size} 字节");
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn tool_store_delete(window: tauri::WebviewWindow, scope: String, name: String) -> Result<bool, String> {
+    let host = window.state::<ToolsHost>();
+    let session = host.session(window.label())?;
+    let owner = storage_scope(&session, &scope)?;
+    host.store()?.delete(&owner, &name)
+}
+
+#[tauri::command]
+pub fn tool_store_keys(window: tauri::WebviewWindow, scope: String) -> Result<Vec<String>, String> {
+    let host = window.state::<ToolsHost>();
+    let session = host.session(window.label())?;
+    let owner = storage_scope(&session, &scope)?;
+    host.store()?.keys(&owner)
+}
+
+/// 在工具窗口里执行一个动作。
+///
+/// 与 Electron 版有个刻意的差别：Electron 为每次动作**新建一个隐藏窗口**，动作
+/// 结束就销毁。这里直接在现有窗口里执行——P0 要验证的是调用链是否通，而不是
+/// 窗口生命周期策略；后者牵涉"动作会不会影响用户正在看的界面"，属于 P2 的设计题。
+///
+/// 返回值靠回调而不是 `eval` 的返回：wry 的 `eval` 是单向的，拿不到结果。
+/// 所以脚本执行完会自己调一次 `tool_act_result`，这边等通道。
+/// 在工具窗口里执行一个动作。
+///
+/// 与 Electron 版有个刻意的差别：Electron 为每次动作**新建一个隐藏窗口**，动作
+/// 结束就销毁。这里直接在现有窗口里执行——P0 要验证的是调用链是否通，而不是
+/// 窗口生命周期策略；后者牵涉"动作会不会影响用户正在看的界面"，属于 P2 的设计题。
+///
+/// 返回值靠回调而不是 `eval` 的返回：wry 的 `eval` 是单向的，拿不到结果。
+/// 所以脚本执行完会自己调一次能力通道的 `act.result`，这边等通道。
+///
+/// 同步实现：调用方（命令或能力通道）自己决定要不要挪到阻塞线程上。
+pub(super) fn run_action(
+    window: &tauri::WebviewWindow,
+    host: &ToolsHost,
+    action: &str,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    if action.trim().is_empty() {
+        return Err("动作 id 不能为空。".into());
+    }
+
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let (sender, receiver) = mpsc::sync_channel::<Result<serde_json::Value, String>>(1);
+    host.pending
+        .lock()
+        .map_err(|error| error.to_string())?
+        .insert(request_id.clone(), sender);
+
+    let script = format!(
+        r#"(async function () {{
+  var requestId = {request_id};
+  var id = {action};
+  // 结果回传走能力通道（fetch），不走 Tauri IPC——工具页面是 remote origin，
+  // 用 IPC 会被 ACL 拦。原因见 `caps.rs` 文件头。
+  var call = async function (cmd, args) {{
+    var res = await fetch("/__aaw/call/" + cmd, {{
+      method: "POST",
+      headers: {{ "Content-Type": "application/json", "x-aaw-token": window.__aawToken }},
+      body: JSON.stringify(args || {{}})
+    }});
+    var payload = await res.json();
+    if (!payload.ok) throw new Error(payload.error || "调用失败");
+    return payload.value;
+  }};
+  try {{
+    var handlers = window.aawActions;
+    if (!handlers || !Object.prototype.hasOwnProperty.call(handlers, id) || typeof handlers[id] !== "function") {{
+      throw new Error("工具未实现动作 " + id);
+    }}
+    var value = await handlers[id]({input});
+    var encoded = JSON.stringify(value);
+    if (encoded === undefined) throw new Error("动作必须返回可 JSON 序列化的值");
+    if (new TextEncoder().encode(encoded).length > 524288) throw new Error("动作必须返回 512 KB 以内的 JSON 值");
+    await call("act.result", {{ requestId: requestId, ok: true, value: encoded }});
+  }} catch (error) {{
+    await call("act.result", {{ requestId: requestId, ok: false, error: String((error && error.message) || error) }});
+  }}
+}})();"#,
+        request_id = serde_json::to_string(&request_id).unwrap_or_else(|_| "\"\"".into()),
+        action = serde_json::to_string(&action).unwrap_or_else(|_| "\"\"".into()),
+        input = input.to_string(),
+    );
+
+    window.eval(&script).map_err(|error| format!("执行失败：{error}"))?;
+
+    let waited = receiver.recv_timeout(LIMITS.action_timeout);
+    if let Ok(mut map) = host.pending.lock() {
+        map.remove(&request_id);
+    }
+    match waited {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => Err("工具动作执行超时（20 秒）。".into()),
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err("工具窗口已关闭。".into()),
+    }
+}
+
+#[tauri::command]
+pub async fn tool_act(
+    window: tauri::WebviewWindow,
+    action: String,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    // 身份校验放在 await 之前：不是工具窗口就立刻失败，别让调用方等 20 秒。
+    let session = window.state::<ToolsHost>().session(window.label())?;
+    let is_process = session.carrier == "process";
+    let tool_id = session.tool_id.clone();
+    // 阻塞等待必须离开 async 线程：一个动作最长 20 秒，占住 worker 会拖慢
+    // 其它窗口的 IPC。
+    tauri::async_runtime::spawn_blocking(move || {
+        let host = window.state::<ToolsHost>();
+        // 同一份动作语义，两种载体：L3 没有可 eval 的 `aawActions`，走 stdio。
+        if is_process {
+            return process_host::invoke(host.inner(), &tool_id, &action, input);
+        }
+        run_action(&window, host.inner(), &action, input)
+    })
+    .await
+    .map_err(|error| format!("等待动作结果失败：{error}"))?
+}
+
+/// 宿主自检：返回当前工具根、已打开窗口、协议形态。给 pilot 页面显示用，
+/// 也是排查"工具打不开"时最先该看的一行。
+///
+/// 注意这里**没有** `tool_act_result` 命令：动作结果走能力通道的 `act.result`。
+/// 早期版本用一个 Tauri 命令回传，被 ACL 拦住（工具页面是 remote origin），
+/// 于是和 store 一起收敛到了同一条 `fetch` 通道上。
+#[tauri::command]
+pub fn tools_host_info(app: AppHandle) -> Result<serde_json::Value, String> {
+    let host = app.state::<ToolsHost>();
+    let tools_root = host
+        .dev_tools_root()
+        .map(|root| root.to_string_lossy().into_owned())
+        .unwrap_or_else(|| {
+            let data_root = host.data_root().unwrap_or_default();
+            location::tool_home(&data_root)
+                .unwrap_or_else(|_| location::default_tool_root(&data_root))
+                .to_string_lossy()
+                .into_owned()
+        });
+    let sessions: Vec<serde_json::Value> = host
+        .sessions
+        .lock()
+        .map_err(|error| error.to_string())?
+        .iter()
+        .map(|(label, session)| {
+            serde_json::json!({
+                "label": label,
+                "toolId": session.tool_id,
+                "dir": session.dir.to_string_lossy(),
+                "name": session.name,
+                "carrier": session.carrier,
+            })
+        })
+        .collect();
+    // Windows 上自定义协议被映射成 http://<scheme>.localhost，这条也一并报出去，
+    // 免得排查时还要靠猜。
+    let protocol_base = if cfg!(windows) {
+        format!("http://{}.localhost", protocol::SCHEME)
+    } else {
+        format!("{}://", protocol::SCHEME)
+    };
+    Ok(serde_json::json!({
+        "toolsRoot": tools_root,
+        "protocol": protocol_base,
+        "contractGeneration": CONTRACT_GENERATION,
+        "capabilities": caps_capability_names(),
+        "sessions": sessions,
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_id_shape_matches_the_frontend_pattern() {
+        assert!(valid_tool_id("pilot"));
+        assert!(valid_tool_id("quick-notes"));
+        assert!(valid_tool_id("a1.b"));
+        assert!(!valid_tool_id(""));
+        assert!(!valid_tool_id("Pilot"));
+        assert!(!valid_tool_id("pi_lot"));
+        assert!(!valid_tool_id("pilot/../x"));
+        assert!(!valid_tool_id(&"a".repeat(65)));
+    }
+
+    /// 只用来测纯函数的最小会话。加字段时这里要跟着补——那正是它的作用：
+    /// 强迫新字段先有一个明确的默认值，而不是靠 `..Default::default()` 蒙过去。
+    fn session() -> ToolSession {
+        ToolSession {
+            tool_id: "pilot".into(),
+            dir: PathBuf::from("/tmp"),
+            name: "p".into(),
+            network: NetworkRule::default(),
+            background: None,
+            token: "t".into(),
+            carrier: "page".into(),
+            settings: String::new(),
+            keep_alive: AtomicBool::new(false),
+            schedule: Mutex::new(None),
+        }
+    }
+
+    #[test]
+    fn shared_scope_maps_to_one_fixed_file() {
+        let session = session();
+        assert_eq!(storage_scope(&session, "").unwrap(), "pilot");
+        assert_eq!(storage_scope(&session, "shared").unwrap(), "__shared");
+        assert!(storage_scope(&session, "team").is_err());
+    }
+
+
+
+    /// 运行目录注册表：打开时登记的目录优先于 tools_root；登记的目录被删后
+    /// 自愈为"没有登记"，退回旧路径。示例工具物化在 installed/<账号>/<id>，
+    /// tools_root 里根本没有它——没有这张表，协议层装完打开必 404
+    /// （2026-11-22 用户截图报的 Z-20）。
+    #[test]
+    fn runtime_dir_registry_overrides_tools_root_and_self_heals() {
+        let host = ToolsHost::default();
+        // 没登记：返回 None，调用方走 tool_dir 兼容路径。
+        assert!(host.resolve_runtime_dir("quick-notes").is_none());
+
+        // 登记一个真实存在的目录。
+        let dir = std::env::temp_dir().join("aaw-runtime-dir-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        host.set_runtime_dir("quick-notes", &dir);
+        assert_eq!(host.resolve_runtime_dir("quick-notes"), Some(dir.clone()));
+
+        // 目录被删：登记变悬空项，自愈为 None，不会拿它 404。
+        std::fs::remove_dir(&dir).unwrap();
+        assert!(host.resolve_runtime_dir("quick-notes").is_none());
+
+        // 卸载清理：登记被移除。
+        host.set_runtime_dir("quick-notes", &dir);
+        host.clear_runtime_dir("quick-notes");
+        assert!(host.resolve_runtime_dir("quick-notes").is_none());
+    }
+
+    /// "窗口跑的还是不是当前这一版"靠路径比对，比对错了就会要么每次都重建
+    /// 窗口（用户正在用的界面被莫名重置），要么永远不重建（更新后一直看旧版）。
+    #[test]
+    fn same_dir_treats_one_directory_spelled_differently_as_same() {
+        let root = std::env::temp_dir().join("aaw-same-dir-test");
+        let dir = root.join("versions").join("1.0.0");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // 同一个目录：正斜杠写法、大小写不同（Windows）都算同一个。
+        assert!(same_dir(&dir, &dir));
+        let slashes = std::path::PathBuf::from(dir.to_string_lossy().replace('\\', "/"));
+        assert!(same_dir(&dir, &slashes));
+        if cfg!(windows) {
+            let upper = root.join("VERSIONS").join("1.0.0");
+            assert!(same_dir(&dir, &upper));
+        }
+
+        // 不同版本目录：必须判为不同——这是"更新后重建窗口"的唯一依据。
+        let other = root.join("versions").join("1.1.0");
+        std::fs::create_dir_all(&other).unwrap();
+        assert!(!same_dir(&dir, &other));
+
+        // 目录已经不在（被删/被移走）：退回字面量比较，不能 panic。
+        assert!(!same_dir(&dir, &root.join("versions").join("gone")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
