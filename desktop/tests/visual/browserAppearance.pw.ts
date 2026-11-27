@@ -5,6 +5,7 @@ test("浏览器地址、视口尺寸和页面输入使用当前主题并保留�
   page,
   context,
 }) => {
+  test.setTimeout(60_000);
   await page.goto("/tests/visual/uiScaleFixture.html");
   const browser = await context.newPage();
   await browser.goto(

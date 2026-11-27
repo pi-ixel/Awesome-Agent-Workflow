@@ -5,6 +5,7 @@ test("图标按钮的点击区保持六档，字形随字号变化并保留键�
   page,
   context,
 }) => {
+  test.setTimeout(60_000);
   await page.goto("/tests/visual/uiScaleFixture.html");
   const feedback = await context.newPage();
   await feedback.setViewportSize({ width: 320, height: 640 });

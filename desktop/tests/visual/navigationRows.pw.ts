@@ -345,7 +345,7 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
   await expect(mcp).toHaveAttribute("aria-current", "page");
   const mcpCard = collections.getByRole("article", { name: "发布服务" });
   const browser = collections.getByRole("article", { name: "AAW 内置浏览器" });
-  await expect(browser.getByRole("switch")).toBeEnabled();
+  await expect(browser.getByRole("switch")).toBeChecked();
   const mcpHeader = collections
     .getByRole("heading", { name: "MCP", exact: true })
     .locator("xpath=ancestor::header");
