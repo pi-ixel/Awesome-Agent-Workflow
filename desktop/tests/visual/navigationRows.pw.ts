@@ -373,15 +373,15 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
     skillActionHeight,
     1,
   );
-  expect(
-    await browser
+  await expect
+    .poll(() => browser
       .getByRole("switch")
       .locator("+ span")
       .evaluate((track) => {
         const style = getComputedStyle(track);
         return [style.width, style.height, style.backgroundColor];
-      }),
-  ).toEqual(skillSwitchStyle);
+      }))
+    .toEqual(skillSwitchStyle);
   await expect(
     browser.getByRole("button", { name: "AAW 内置浏览器", exact: true }),
   ).toBeVisible();
