@@ -189,6 +189,7 @@ export interface ProjectSessions extends Pick<
     sessionId: string,
     agentKey: string,
   ): SessionMcpTargets | undefined;
+  sessionMcpTargets?(target: SessionTarget): SessionMcpTargets | undefined;
   /**
    * 插件打开（新建或恢复）一个普通会话（ADR 037）：会话由应用持有，出现在
    * 侧栏，用户可以直接对话；打开时不抢前台。返回会话地址；失败时抛出原因。

@@ -184,17 +184,6 @@ export function apply(ctx: Context): void {
     scoped.effect(
       () =>
         scoped.mcp.registerBuiltin({
-          id: "aaw-workflow-authoring",
-          name: "工作流编写",
-          description: "为 AI 编写工作流提供草稿校验工具。",
-          scope: "工作流草稿编辑会话",
-          probe: { scope: "session", transports: ["stdio"] },
-        }),
-      "workflow:authoring-mcp-catalog",
-    );
-    scoped.effect(
-      () =>
-        scoped.mcp.registerBuiltin({
           id: "aaw-workflow-result",
           name: "工作流结果提交",
           description: "向工作流引擎提交节点执行结果。",

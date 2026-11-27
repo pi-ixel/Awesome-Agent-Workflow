@@ -7,6 +7,7 @@ import type {
   McpTool,
 } from "../../contracts/mcp/management.ts";
 import type { ReadonlySnapshot } from "../../shared/state/readonlySnapshot.ts";
+import type { SessionMcpTargets } from "../project/service.ts";
 import type {} from "cordis";
 
 declare module "cordis" {
@@ -49,7 +50,13 @@ export interface BuiltinMcp {
   readonly probe?: {
     readonly transports: readonly ("http" | "stdio")[];
   } & (
-    | { readonly scope: "session" }
+    | {
+        readonly scope: "session";
+        readonly sessionSource?: {
+          read(): SessionMcpTargets | undefined;
+          subscribe(listener: () => void): () => void;
+        };
+      }
     | {
         readonly scope: "desktop";
         acquire(): Promise<{

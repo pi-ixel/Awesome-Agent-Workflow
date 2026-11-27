@@ -3,6 +3,29 @@ import type { McpManagementHost } from "../../../contracts/mcp/management.ts";
 import type { SessionMcpTargets } from "../../project/service.ts";
 import type { BuiltinMcp } from "../service.ts";
 
+export function builtinSessionSources(entries: readonly BuiltinMcp[]) {
+  const sources = entries.flatMap((entry) =>
+    entry.probe?.scope === "session" && entry.probe.sessionSource
+      ? [[entry, entry.probe.sessionSource] as const]
+      : [],
+  );
+  let snapshot = new Map<BuiltinMcp, SessionMcpTargets | undefined>();
+  return {
+    subscribe: (listener: () => void) => {
+      const releases = sources.map(([, source]) => source.subscribe(listener));
+      return () => releases.forEach((release) => release());
+    },
+    read: () => {
+      const items = sources.map(
+        ([entry, source]) => [entry, source.read()] as const,
+      );
+      if (items.some(([entry, targets]) => snapshot.get(entry) !== targets))
+        snapshot = new Map(items);
+      return snapshot;
+    },
+  };
+}
+
 export function matchesBuiltin(entry: BuiltinMcp, name: string) {
   return entry.id === name || entry.matchesServer?.(name) === true;
 }
@@ -11,6 +34,7 @@ export function builtinInspection(
   entry: BuiltinMcp,
   session: SessionMcpTargets | undefined,
   inspect: NonNullable<McpManagementHost["inspection"]>["probeBuiltin"],
+  embeddedSession?: SessionMcpTargets,
 ) {
   const probe = entry.probe;
   if (!probe) return;
@@ -31,13 +55,17 @@ export function builtinInspection(
       },
     };
   }
-  const targets = session?.servers.filter(
+  const bound = embeddedSession ?? session;
+  if (!bound) return;
+  const targets = bound.servers.filter(
     (server) => matchesBuiltin(entry, server.name) && accepts(server),
   );
-  if (!targets?.length) return;
+  if (!targets.length) return;
   return {
-    generation: session?.generation,
+    generation: bound.generation,
     run: async () => {
+      if ((probe.sessionSource?.read() ?? session) !== bound)
+        throw new Error("MCP 检测目标的会话已变化");
       const started = Date.now();
       const results = await Promise.all(
         targets.map((target) => inspect(target)),

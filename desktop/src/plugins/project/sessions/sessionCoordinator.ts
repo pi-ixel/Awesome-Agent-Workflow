@@ -3124,6 +3124,21 @@ export function createSessionCoordinator({
     );
   }
 
+  function readSessionMcpTargets(
+    runtime: SessionRuntime | null | undefined,
+    sessionId: string | null,
+  ): SessionMcpTargets | undefined {
+    if (!runtime || runtime.disposed || !sessionId) return undefined;
+    const state = runtime.store.getState();
+    if (
+      runtime.session.sessionId !== sessionId ||
+      !state.isBound ||
+      state.recovery.state !== "idle"
+    )
+      return undefined;
+    return attachedMcp.get(runtime.session);
+  }
+
   function deleteArchivedSession(
     target: DeleteSessionTarget,
     cleanup: () => Promise<void>,
@@ -3604,17 +3619,18 @@ export function createSessionCoordinator({
       sessionTools.register(provider),
     activeSessionMcpTargets: (sessionId: string, agentKey: string) => {
       const runtime = activeRuntime;
-      if (!runtime || runtime.disposed || runtime.agentKey !== agentKey)
-        return undefined;
-      const state = runtime.store.getState();
-      if (
-        runtime.session.sessionId !== sessionId ||
-        !state.isBound ||
-        state.recovery.state !== "idle"
-      )
-        return undefined;
-      return attachedMcp.get(runtime.session);
+      if (runtime?.agentKey === agentKey)
+        return readSessionMcpTargets(runtime, sessionId);
     },
+    sessionMcpTargets: ({
+      workspacePath,
+      agentKey,
+      sessionId,
+    }: SessionTarget) =>
+      readSessionMcpTargets(
+        findSessionRuntime(workspacePath, agentKey, sessionId),
+        sessionId,
+      ),
     openPluginSessionRuntime,
     closePluginSessionRuntime,
     watchSessionTurns,

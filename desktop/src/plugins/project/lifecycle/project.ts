@@ -74,6 +74,7 @@ export type ProjectOperations = Pick<ProjectWorkspace, "registerProject"> &
     | "openSession"
     | "registerSessionTools"
     | "activeSessionMcpTargets"
+    | "sessionMcpTargets"
     | "openPluginSession"
     | "pluginSessionReady"
     | "watchTurns"
@@ -246,6 +247,8 @@ export class DesktopProject {
           this.operations.registerSessionTools(provider),
         activeSessionMcpTargets: (sessionId, agentKey) =>
           this.operations.activeSessionMcpTargets?.(sessionId, agentKey),
+        sessionMcpTargets: (target) =>
+          this.operations.sessionMcpTargets?.(target),
         openPluginSession: (options) => {
           this.assertOpen();
           return this.operations.openPluginSession(options);

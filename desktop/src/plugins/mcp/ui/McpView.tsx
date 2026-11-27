@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type MouseEvent,
   type ReactNode,
 } from "react";
@@ -34,6 +35,7 @@ import type { BuiltinMcp } from "../service.ts";
 import type { SessionMcpTargets } from "../../project/service.ts";
 import {
   builtinInspection,
+  builtinSessionSources,
   matchesBuiltin,
 } from "../runtime/builtinInspection.ts";
 import { useBuiltinControls } from "./builtinControls.ts";
@@ -433,6 +435,15 @@ export function McpView({
     native.data?.profile.name ??
     activeProfile;
 
+  const sessionSources = useMemo(
+    () => builtinSessionSources(builtins),
+    [builtins],
+  );
+  const sourceTargets = useSyncExternalStore(
+    sessionSources.subscribe,
+    sessionSources.read,
+  );
+
   const builtinJobs = useMemo(() => {
     return new Map(
       builtins.flatMap((entry) => {
@@ -441,6 +452,7 @@ export function McpView({
           entry,
           sessionMcpTargets,
           (server) => inspector.probeBuiltin(server),
+          sourceTargets.get(entry),
         );
         if (!target) return [];
         const isSessionTarget = target.generation !== undefined;
@@ -461,7 +473,7 @@ export function McpView({
         ];
       }),
     );
-  }, [builtins, builtinControls, inspector, sessionMcpTargets]);
+  }, [builtins, builtinControls, inspector, sessionMcpTargets, sourceTargets]);
 
   const jobs = useMemo(() => {
     if (!service || !inspector) return [];

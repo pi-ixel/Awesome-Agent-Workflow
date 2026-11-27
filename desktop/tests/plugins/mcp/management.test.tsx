@@ -27,7 +27,10 @@ import type {
   McpServerHttp,
 } from "../../../src/contracts/acp/protocol.ts";
 import { codeAgentAdapter } from "../../../src/plugins/agents/enhancements/codeagent/adapter.ts";
-import type { ProjectService } from "../../../src/plugins/project/service.ts";
+import type {
+  ProjectService,
+  SessionMcpTargets,
+} from "../../../src/plugins/project/service.ts";
 import { createTestBrowserHost } from "../../helpers/browserHost.ts";
 import { createSessionTools } from "../../../src/plugins/project/sessions/sessionTools.ts";
 import { createStore } from "zustand";
@@ -1218,6 +1221,9 @@ it("内置 MCP 统一检测五项能力，按当前会话中的真实传输取�
   };
   const extraRoot = { ...ssh, name: "aaw-remote-project-2" };
   const author = stdio("aaw-workflow-authoring");
+  const draftSession = createStore<SessionMcpTargets | undefined>(
+    () => undefined,
+  );
   const resultStdio = stdio("aaw-workflow-result");
   const resultHttp = http("aaw-workflow-result");
   const builtins: BuiltinMcp[] = [
@@ -1246,7 +1252,14 @@ it("内置 MCP 统一检测五项能力，按当前会话中的真实传输取�
       name: "工作流编写",
       description: "",
       scope: "工作流草稿编辑会话",
-      probe: { scope: "session", transports: ["stdio"] },
+      probe: {
+        scope: "session",
+        transports: ["stdio"],
+        sessionSource: {
+          read: draftSession.getState,
+          subscribe: draftSession.subscribe,
+        },
+      },
     },
     {
       id: resultStdio.name,
@@ -1301,15 +1314,23 @@ it("内置 MCP 统一检测五项能力，按当前会话中的真实传输取�
   expect(probeBuiltin.mock.calls.slice(-2)).toEqual([[ssh], [extraRoot]]);
   expect(save).toHaveBeenCalledTimes(cachedWrites);
 
-  rerender(view(2, [author]));
+  rerender(view());
   expect(sshDetails.getByRole("button", { name: "测试连接" })).toBeDisabled();
   expect(
     sshDetails.queryByText("aaw-remote-project-2-tool"),
   ).not.toBeInTheDocument();
   const authorDetails = await open("工作流编写");
-  await user.click(authorDetails.getByRole("button", { name: "测试连接" }));
+  const authorProbe = authorDetails.getByRole("button", { name: "测试连接" });
+  expect(authorProbe).toBeDisabled();
+  act(() => draftSession.setState({ generation: 2, servers: [author] }, true));
+  await user.click(authorProbe);
   await authorDetails.findByText("aaw-workflow-authoring-tool");
   expect(probeBuiltin).toHaveBeenLastCalledWith(author);
+  act(() => draftSession.setState(undefined, true));
+  expect(authorProbe).toBeDisabled();
+  expect(
+    authorDetails.queryByText("aaw-workflow-authoring-tool"),
+  ).not.toBeInTheDocument();
 
   rerender(view(3, [resultStdio]));
   const resultDetails = await open("工作流结果提交");

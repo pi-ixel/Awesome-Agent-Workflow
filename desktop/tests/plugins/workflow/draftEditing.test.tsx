@@ -43,11 +43,47 @@ describe("编辑会话", () => {
       conversation: { send: vi.fn(() => true), cancel: vi.fn() },
     };
     const editor = createDraftEditor({ project: project as never });
-    const mcpServer = { name: "aaw-workflow-authoring", command: "workflow_service", args: ["--authoring-mcp", "D:/drafts/d1"], env: [] };
-    const first = { text: "第一条", display: { source: "workflow", visible: "", foldLabel: "说明" } };
-    await editor.start({ draftId: "d1", base: "mine", dir: "D:/drafts/d1", createdAt: 1, changes: 0, ok: true, mcpServer }, "编辑工作流：我的", first);
-    const options = project.sessions.openPluginSession.mock.calls[0]![0] as { workspacePath: string; cwd: string; title: string; ephemeral?: boolean; tools: (agent: null) => readonly unknown[] };
-    expect(options).toMatchObject({ workspacePath: "D:/drafts/d1", cwd: "D:/drafts/d1", title: "编辑工作流：我的", ephemeral: true });
+    const observe = vi.fn();
+    const stop = editor.subscribeSessions(observe);
+    const mcpServer = {
+      name: "aaw-workflow-authoring",
+      command: "workflow_service",
+      args: ["--authoring-mcp", "D:/drafts/d1"],
+      env: [],
+    };
+    const first = {
+      text: "第一条",
+      display: { source: "workflow", visible: "", foldLabel: "说明" },
+    };
+    await editor.start(
+      {
+        draftId: "d1",
+        base: "mine",
+        dir: "D:/drafts/d1",
+        createdAt: 1,
+        changes: 0,
+        ok: true,
+        mcpServer,
+      },
+      "编辑工作流：我的",
+      first,
+    );
+    expect(editor.sessionTarget("d1")).toEqual(target);
+    expect(editor.sessionTarget("other")).toBeUndefined();
+    expect(observe).toHaveBeenCalledTimes(1);
+    const options = project.sessions.openPluginSession.mock.calls[0]![0] as {
+      workspacePath: string;
+      cwd: string;
+      title: string;
+      ephemeral?: boolean;
+      tools: (agent: null) => readonly unknown[];
+    };
+    expect(options).toMatchObject({
+      workspacePath: "D:/drafts/d1",
+      cwd: "D:/drafts/d1",
+      title: "编辑工作流：我的",
+      ephemeral: true,
+    });
     expect(options.tools(null)).toEqual([mcpServer]);
     expect(project.sessions.openSessionFromEntry).not.toHaveBeenCalled();
     expect(project.conversation.send).toHaveBeenCalledWith(target, "第一条", undefined, { display: first.display });
@@ -66,8 +102,15 @@ describe("编辑会话", () => {
     expect(editor.has("d1")).toBe(true);
     expect(editor.send("d1", "报错")).toBe(true);
     expect(await editor.show("d1")).toBe(true);
-    expect(project.sessions.openSessionFromEntry).toHaveBeenCalledWith("D:/drafts/d1", "s-1", "key-a");
+    expect(project.sessions.openSessionFromEntry).toHaveBeenCalledWith(
+      "D:/drafts/d1",
+      "s-1",
+      "key-a",
+    );
     await editor.end("d1");
+    expect(editor.sessionTarget("d1")).toBeUndefined();
+    expect(observe).toHaveBeenCalledTimes(2);
+    stop();
     expect(project.sessions.closePluginSession).toHaveBeenCalledWith(target);
     expect(editor.has("d1")).toBe(false);
     expect(editor.send("d1", "x")).toBe(false);
