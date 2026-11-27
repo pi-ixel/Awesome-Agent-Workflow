@@ -614,11 +614,6 @@ mod tests {
             tool_id: "ssh".into(),
             dir: std::path::PathBuf::from("/data/tools/installed/u1/ssh"),
             name: "SSH".into(),
-            network: crate::tools::manifest::NetworkRule {
-                enabled: true,
-                hosts: vec![],
-                insecure: vec![],
-            },
             background: None,
             token: "token".into(),
             carrier: "process".into(),

@@ -18,7 +18,6 @@ export const ruleIds = [
   "R5",
   "R6",
   "R7",
-  "R8",
   "R9",
   "R10",
 ] as const;
@@ -102,11 +101,6 @@ export const ruleGuidance: Readonly<
     rule: "不得写死 ≥800px 的宽度",
     fix: "用 width:100% + max-width，避免窄窗口横向溢出",
   },
-  R8: {
-    level: "warn",
-    rule: "联网的工具应该声明 permissions.network",
-    fix: '不声明也能跑（默认允许），但用户看不到「这个工具会联网」；补上 "permissions": { "network": true }，或写 hosts 限定域名',
-  },
   R9: {
     level: "block",
     rule: "不得改动或夹带平台框架与关键契约文件",
@@ -153,8 +147,6 @@ function hasRemoteAsset(html: string): boolean {
   }
   return cssImport.test(html) || dynamicImport.test(html);
 }
-
-const remoteFetch = /\b(?:fetch|XMLHttpRequest|EventSource|WebSocket)\b/;
 const localStore = /\b(?:localStorage|sessionStorage)\b/;
 const legacySettingWrite =
   /(?:localStorage|sessionStorage)\s*\.\s*setItem\s*\(\s*["'`](?:setting|aaw-settings)/i;
@@ -356,19 +348,6 @@ export function runToolRules(
         `样式里写死了 ${widest}px 宽度。用户可能把工具窗口缩到 360px，会横向溢出。`,
         "改用 max-width、百分比或 clamp()，例如 width: 100%; max-width: 62rem;",
         "index.html",
-      ),
-    );
-
-  // R8 · 联网要能被用户在安装前看到。
-  const triesNetwork = remoteFetch.test(html) && /(?:https?:|\/\/)/.test(html);
-  if (triesNetwork && tool.permissions?.network !== true)
-    problems.push(
-      violation(
-        "R8",
-        "warn",
-        "html 里会发起网络请求，但清单没有声明 permissions.network。别的机器上仍然能跑（未声明默认允许），但用户看不到「这个工具会联网」。",
-        '在清单里补 "permissions": { "network": true }；只想连内网就写 { "network": { "hosts": ["*.corp.example.com"] } }；确实不该联网就写 false。',
-        "manifest.permissions",
       ),
     );
 

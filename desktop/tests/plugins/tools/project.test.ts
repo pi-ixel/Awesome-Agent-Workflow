@@ -318,7 +318,6 @@ it("summarises projects from manifest without loading the whole page", async () 
       name: "演示",
       version: "1.2.0",
       html: "",
-      permissions: { network: true },
     }),
   );
   // 一个 manifest 坏掉的目录：列表要能指出来，而不是让用户点进去才发现。
@@ -334,7 +333,6 @@ it("summarises projects from manifest without loading the whole page", async () 
     name: "演示",
     version: "1.2.0",
     hasHtml: true,
-    network: true,
   });
   expect(
     summaries.find((entry) => entry.dirName === "broken")?.broken,

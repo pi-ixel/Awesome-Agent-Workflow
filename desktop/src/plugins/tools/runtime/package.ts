@@ -3,7 +3,6 @@ import type {
   ToolBackground,
   ToolBuild,
   ToolPackage,
-  ToolPermissions,
   ToolRequires,
   ToolRuntime,
   ToolViolation,
@@ -12,21 +11,7 @@ import { toolProcessProtocol } from "../types.ts";
 import { toolLimits } from "./limits.ts";
 import { readSettingsSchema } from "./settings.ts";
 import { readSourceFiles, safeSourcePath } from "./sourceFiles.ts";
-/**
- * 运行时（`tools-runtime/runtime.mjs`）也从 `package-contract.mjs` 取这个函数。
- *
- * `readNetworkRule` 的定义在顶层 `types.ts`，而 `package.ts` 是本文件的入口，
- * esbuild 只按这里的导出产 bundle——少了这一行，产物里就没有这个导出，
- * `runtime.mjs` 的顶层 import 会在加载阶段直接抛
- * `does not provide an export named 'readNetworkRule'`，表现是工具窗口一片空白、
- * 标题变成 "Error"，日志里什么都没有。改动这里时务必同步检查
- * `runtime.mjs` / `cli.mjs` 从 `package-contract.mjs` 引用的每一个名字。
- */
-export {
-  readNetworkRule,
-  readToolCarrier,
-  toolProcessProtocol,
-} from "../types.ts";
+export { readToolCarrier, toolProcessProtocol } from "../types.ts";
 export { resolveToolSettings, toolSettingsScript } from "./settings.ts";
 export {
   capabilityAvailableIn,
@@ -62,10 +47,6 @@ export function toolOwnerSegment(userId: string | undefined): string {
     throw new Error("账号标识无法转换成安全的目录名，请联系管理员。");
   return cleaned;
 }
-
-/** 域名校验：允许 `*.corp.example.com` 与 `host:port`，挡住会污染 CSP 的字符。 */
-const hostPattern =
-  /^(\*\.)?[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?::\d{1,5})?$/i;
 
 /**
  * 清单（含 html 快照）的体积上限。
@@ -125,25 +106,6 @@ function objectOf(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
-}
-
-/** 把校验过的 permissions 归一化成可存储的形状（丢掉无效项，不保留脏数据）。 */
-function normalizePermissions(value: unknown): ToolPermissions | undefined {
-  const record = objectOf(value);
-  const network = record?.network;
-  if (network === undefined) return undefined;
-  if (typeof network === "boolean") return { network };
-  const asObject = objectOf(network);
-  if (!asObject) return undefined;
-  const hosts = Array.isArray(asObject.hosts)
-    ? asObject.hosts.filter((item): item is string => typeof item === "string")
-    : [];
-  return {
-    network: {
-      ...(hosts.length ? { hosts } : {}),
-      ...(asObject.insecure === true ? { insecure: true } : {}),
-    },
-  };
 }
 
 function normalizeRequires(value: unknown): ToolRequires | undefined {
@@ -810,70 +772,6 @@ export function validateToolPackage(value: unknown): ToolValidation {
     }
   }
 
-  const permissions = tool.permissions;
-  if (permissions !== undefined) {
-    const record = objectOf(permissions);
-    if (!record)
-      problems.push(
-        fail(
-          "FIELD",
-          "permissions 必须是对象。",
-          '例如 { "network": true } 或 { "network": { "hosts": ["*.corp.example.com"] } }。',
-          "permissions",
-        ),
-      );
-    else if (record.network !== undefined) {
-      const network = record.network;
-      const asObject = objectOf(network);
-      if (typeof network !== "boolean" && !asObject)
-        problems.push(
-          fail(
-            "FIELD",
-            "permissions.network 只能是 true / false，或 { hosts, insecure } 对象。",
-            '不限域名写 true；限定域名写 { "hosts": ["*.corp.example.com"] }；不要联网写 false。',
-            "permissions.network",
-          ),
-        );
-      else if (asObject) {
-        if (asObject.hosts !== undefined) {
-          if (!Array.isArray(asObject.hosts) || asObject.hosts.length > 16)
-            problems.push(
-              fail(
-                "FIELD",
-                "permissions.network.hosts 必须是 0–16 项数组。",
-                '每个域名写成 "api.example.com" 或 "*.example.com"；不限域名就删掉 hosts。',
-                "permissions.network.hosts",
-              ),
-            );
-          else
-            asObject.hosts.forEach((host, index) => {
-              if (typeof host !== "string" || !hostPattern.test(host))
-                problems.push(
-                  fail(
-                    "FIELD",
-                    `permissions.network.hosts[${index}] 不是合法域名：${JSON.stringify(host)}。`,
-                    "只写域名，可带 *. 前缀与端口；不要写协议、路径或 CIDR 网段。",
-                    `permissions.network.hosts[${index}]`,
-                  ),
-                );
-            });
-        }
-        if (
-          asObject.insecure !== undefined &&
-          typeof asObject.insecure !== "boolean"
-        )
-          problems.push(
-            fail(
-              "FIELD",
-              "permissions.network.insecure 只能是 true 或 false。",
-              "需要访问自签证书的内网接口才写 true。",
-              "permissions.network.insecure",
-            ),
-          );
-      }
-    }
-  }
-
   const requires = tool.requires;
   if (requires !== undefined) {
     const record = objectOf(requires);
@@ -1002,9 +900,6 @@ export function validateToolPackage(value: unknown): ToolValidation {
       ...(tool.settingsSchema === undefined
         ? {}
         : { settingsSchema: readSettingsSchema(tool.settingsSchema) }),
-      ...(normalizePermissions(tool.permissions) === undefined
-        ? {}
-        : { permissions: normalizePermissions(tool.permissions)! }),
       ...(typeof tool.author === "string" && tool.author.trim()
         ? { author: tool.author.trim() }
         : {}),

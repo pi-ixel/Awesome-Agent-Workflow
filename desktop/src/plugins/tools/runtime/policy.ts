@@ -1,7 +1,7 @@
 /**
  * 工具运行时的内容安全策略（预览用）。
  *
- * P3 之后真实窗口的 CSP 写在 `src-tauri/src/tools/protocol.rs` 的 `BASE_POLICY`，
+ * 真实窗口的 CSP 写在 `src-tauri/src/tools/protocol.rs` 的 `PAGE_POLICY`，
  * 预览这一份是它的镜像。两边必须逐条一致——预览要是比真实窗口松，用户就会
  * "预览能跑、打开就废"；比真实窗口紧，则会冤枉工具。
  *
@@ -21,6 +21,5 @@ export const toolFramePolicy = [
   "form-action 'none'",
   "base-uri 'none'",
   "object-src 'none'",
-  // 唯一随声明变化的指令。没写 network 时取这个宽松值（保住存量工具）。
   "connect-src 'self' https: http:",
 ].join("; ");

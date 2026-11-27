@@ -46,7 +46,7 @@ const withoutComments = (source: string) =>
 
 const inject = withoutTests(read("inject.rs"));
 const injectCode = withoutComments(inject);
-const protocol = read("protocol.rs");
+const host = read("mod.rs");
 
 /** `aawStore.scope` 归一到 `aawStore`：同一次 expose 里的附加入口。 */
 const baseEntry = (entry: string) => entry.split(".")[0] ?? entry;
@@ -54,7 +54,10 @@ const baseEntry = (entry: string) => entry.split(".")[0] ?? entry;
 describe("工具运行契约", () => {
   it("契约版本是显式常量，改动必须是有意识的决定", () => {
     // 这个断言故意写死：升契约版本时你会看到它失败，从而必须来改这一行。
-    expect(toolContractVersion).toBe(2);
+    expect(toolContractVersion).toBe(3);
+    expect(host).toContain(
+      `pub const CONTRACT_GENERATION: u32 = ${toolContractVersion};`,
+    );
   });
 
   it("能力表与 Rust 注入脚本实际挂的 window 入口完全一致", () => {
@@ -63,8 +66,7 @@ describe("工具运行契约", () => {
       .filter((name): name is string => typeof name === "string");
     // 正则没匹配到东西等于这条测试永远为真，先确认它真的在扫。
     expect(exposed.length).toBeGreaterThan(0);
-    // `capabilityEntries()` 只返回"下行且真有入口"的那些，上行与纯声明性能力
-    // （`actions` / `network`）本来就不该出现在注入脚本里。
+    // `capabilityEntries()` 只返回下行入口，`actions` 由工具自己提供。
     const declared = capabilityEntries().map((item) => baseEntry(item.entry));
     expect([...new Set(exposed)].sort()).toEqual([...new Set(declared)].sort());
   });
@@ -129,7 +131,6 @@ describe("工具运行契约", () => {
         "lifecycle|aawLifecycle|down|1|both",
         "context|aawContext|down|1|both",
         "bus|aawBus|down|1|both",
-        "network||none|1|both",
       ]
     `);
   });
@@ -153,19 +154,16 @@ describe("工具运行契约", () => {
     expect(injectCode).not.toContain("plugin:event");
   });
 
-  it("CSP 基底写在 Rust 里，且只有 connect-src 随声明变化", () => {
-    expect(protocol).toContain("pub const BASE_POLICY");
-    expect(protocol).toContain("default-src 'none'");
-    expect(protocol).toContain("form-action 'none'");
-    expect(protocol).toContain("base-uri 'none'");
-    expect(protocol).toContain("object-src 'none'");
-    // connect-src 不能进 BASE_POLICY 那个数组：它是唯一按工具声明拼出来的指令。
-    // 只取数组字面量本身，别把下面 `policy_for` 的注释也算进来。
-    const base = /pub const BASE_POLICY[^=]*=\s*\[([\s\S]*?)\];/.exec(
-      protocol,
-    )?.[1];
-    expect(base, "BASE_POLICY 数组没找到").toBeTruthy();
-    expect(base).not.toContain("connect-src");
+  it("页面能力表与 Rust 告知进程的能力名一致", () => {
+    const list =
+      /pub fn caps_capability_names\(\)[^{]*\{\s*vec!\[([\s\S]*?)\]/.exec(
+        host,
+      )?.[1];
+    expect(list, "宿主能力名单没找到").toBeTruthy();
+    const names = [...(list ?? "").matchAll(/"([^"]+)"/g)].map(
+      (match) => match[1],
+    );
+    expect(names).toEqual(toolCapabilities.map(({ name }) => name));
   });
 
   /**
@@ -190,7 +188,6 @@ describe("工具运行契约", () => {
         },
       ],
       requires: { contract: 1, capabilities: ["store", "files"] },
-      permissions: { network: { hosts: ["*.corp.example.com"] } },
       sourceFiles: { "src/main.js": "// 作者源码" },
     };
     const read = readToolPackageV1(fixture);
@@ -211,13 +208,6 @@ describe("工具运行契约", () => {
         "icon": "图",
         "id": "legacy.pin",
         "name": "存量护栏夹具",
-        "permissions": {
-          "network": {
-            "hosts": [
-              "*.corp.example.com",
-            ],
-          },
-        },
         "requires": {
           "capabilities": [
             "store",

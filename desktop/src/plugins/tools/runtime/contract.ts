@@ -18,7 +18,9 @@
 /**
  * 契约代际。破坏性变更时 +1，其余改动不动它。
  *
- * ## 2（当代）删掉了什么
+ * 第 3 代将 HTTP/HTTPS 作为页面基础能力，移除了契约中的联网声明。
+ *
+ * ## 第 2 代
  *
  * **`manifest.preload` 与它背后的 Node 侧桥接层。** 这不是"换个注入方式"，
  * 而是删掉了一整条能力路径：作者不能再靠 `preload.js` 拿 `require`。按
@@ -32,7 +34,7 @@
  * 替代路径不是"再给一个 Node"，而是：纯 JS/WASM 依赖打包成 `app.js`（L2），
  * 真的需要进程时由作者自带 `bin/` 运行时（L3）。两条都是**平台 0 字节**。
  */
-export const toolContractVersion = 2;
+export const toolContractVersion = 3;
 
 /** 能力在哪些载体里可用。页面载体 = L1/L2，进程载体 = L3。 */
 export type ToolCarrier = "page" | "process" | "both";
@@ -46,14 +48,13 @@ export interface ToolCapability {
    * 数据方向。这一栏不是装饰：
    * - `down`：宿主注入给工具（页面载体注入 `window`），工具依赖宿主；
    * - `up`：工具赋值给宿主（`aawActions`），宿主反向读取执行；
-   * - `none`：纯声明式授权（如联网），没有 window 入口。
    */
-  readonly direction: "down" | "up" | "none";
-  /** 挂在 `window` 上的入口名；纯声明性能力留空。 */
+  readonly direction: "down" | "up";
+  /** 挂在 `window` 上的入口名。 */
   readonly entry: string;
   /**
    * 载体。这一栏回答"这个能力在进程工具里有没有"：
-   * - `page`：只有页面载体（今天的 12 项都至少是 page）；
+   * - `page`：只有页面载体；
    * - `process`：只有进程载体；
    * - `both`：两种载体都有，语义一致（20 秒超时、512 KB 返回、幂等）。
    *
@@ -67,8 +68,6 @@ export interface ToolCapability {
 
 /**
  * 能力表。顺序即手册里的展示顺序。
- *
- * `entry` 为空表示它不是 `window` 上的对象，而是一种"声明式授权"（例如网络）。
  */
 export const toolCapabilities: readonly ToolCapability[] = [
   {
@@ -159,14 +158,6 @@ export const toolCapabilities: readonly ToolCapability[] = [
     carrier: "both",
     summary: "工具间在线事件广播",
   },
-  {
-    name: "network",
-    entry: "",
-    direction: "none",
-    since: 1,
-    carrier: "both",
-    summary: "联网（在清单 permissions 里声明，可限定域名）",
-  },
 ];
 
 /**
@@ -212,6 +203,6 @@ export function capabilityEntries(): readonly {
   summary: string;
 }[] {
   return toolCapabilities
-    .filter((item) => item.direction === "down" && item.entry)
+    .filter((item) => item.direction === "down")
     .map((item) => ({ entry: item.entry, summary: item.summary }));
 }

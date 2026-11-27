@@ -101,7 +101,6 @@ export interface ToolProjectSummary {
   readonly name?: string;
   readonly version?: string;
   readonly hasHtml: boolean;
-  readonly network: boolean;
   /** manifest 读不出来时的原因，列表上直接展示，免得用户点进去才发现坏了。 */
   readonly broken?: string;
 }
@@ -143,8 +142,6 @@ export async function listToolProjectSummaries(
       ]);
       const manifest =
         "manifest" in manifestResult ? manifestResult.manifest : undefined;
-      const permissions = manifest?.permissions as
-        { network?: unknown } | undefined;
       return {
         dir,
         dirName: pathName(dir),
@@ -152,7 +149,6 @@ export async function listToolProjectSummaries(
         name: text(manifest?.name),
         version: text(manifest?.version),
         hasHtml,
-        network: permissions?.network === true,
         broken: "broken" in manifestResult ? manifestResult.broken : undefined,
       };
     }),

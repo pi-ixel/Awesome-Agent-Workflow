@@ -201,15 +201,8 @@ pub fn content_type(path: &Path) -> &'static str {
     }
 }
 
-/// 不随工具声明变化的 CSP 指令。
-///
-/// 与 `tools-runtime/runtime.mjs` 的 `basePolicy` 逐条对齐——**两处不一致就是
-/// 两套安全语义**，工具在 Electron 里能跑、在新宿主里被拦，是最难查的一类 bug。
-///
-/// 与旧实现的差别只有一条：`script-src` / `style-src` 多了 `'self'`。因为这里的
-/// 页面永远从工具目录加载（不像 Electron 还有"只存在 preferences 里的 html"
-/// 那种无目录形态），多文件工具必须能引用同目录的 js/css。
-pub const BASE_POLICY: [&str; 9] = [
+/// 页面工具的默认策略。与工具预览逐条对齐，并允许同源宿主通道。
+pub const PAGE_POLICY: [&str; 10] = [
     "default-src 'none'",
     "script-src 'unsafe-inline' 'self'",
     "style-src 'unsafe-inline' 'self'",
@@ -219,48 +212,8 @@ pub const BASE_POLICY: [&str; 9] = [
     "form-action 'none'",
     "base-uri 'none'",
     "object-src 'none'",
+    "connect-src 'self' https: http:",
 ];
-
-/// 按工具声明拼出完整 CSP。
-///
-/// `connect-src` 是唯一随声明变化的指令，与 `policyFor` 同语义：
-/// - 没写 `network` → 宽松（`https: http:`），保住存量工具
-/// - 写 `network: false` → `'none'`，作者主动收紧
-/// - 写 `hosts` → 白名单
-pub fn policy_for(network: Option<&crate::tools::manifest::NetworkRule>) -> String {
-    let mut directives: Vec<String> = BASE_POLICY.iter().map(|item| item.to_string()).collect();
-    // `'self'` 必须永远在 connect-src 里：工具调宿主能力走的是同源
-    // `fetch("/__aaw/call/...")`。少了它，声明了 `network.hosts` 白名单的工具
-    // 连 store 都写不进去——而作者只会看到"存储失败"，根本联想不到 CSP。
-    let connect = match network {
-        Some(rule) if !rule.enabled => "'self'".to_string(),
-        Some(rule) if !rule.hosts.is_empty() => {
-            let hosts: Vec<&str> = rule
-                .hosts
-                .iter()
-                .map(String::as_str)
-                .filter(|host| valid_host(host))
-                .collect();
-            if hosts.is_empty() {
-                "'self' https: http:".into()
-            } else {
-                format!("'self' {}", hosts.join(" "))
-            }
-        }
-        _ => "'self' https: http:".to_string(),
-    };
-    directives.push(format!("connect-src {connect}"));
-    directives.join("; ")
-}
-
-/// 域名校验，挡住会污染 CSP 的字符（空格、分号、引号）。
-fn valid_host(host: &str) -> bool {
-    !host.is_empty()
-        && host.len() <= 260
-        && host
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '*' | ':'))
-}
 
 /// 构造一个错误响应。空 body + 状态码，别把路径信息回给页面。
 pub fn empty(status: u16) -> Response<Vec<u8>> {
@@ -271,13 +224,14 @@ pub fn empty(status: u16) -> Response<Vec<u8>> {
 }
 
 /// 构造一个成功响应。HTML 带 CSP，其它资源不带（CSP 只在文档上生效）。
-pub fn file_response(path: &Path, body: Vec<u8>, policy: Option<String>) -> Response<Vec<u8>> {
+pub fn file_response(path: &Path, body: Vec<u8>) -> Response<Vec<u8>> {
+    let mime = content_type(path);
     let mut builder = Response::builder()
         .status(StatusCode::OK)
-        .header("Content-Type", content_type(path))
+        .header("Content-Type", mime)
         .header("Cache-Control", "no-store");
-    if let Some(policy) = policy {
-        builder = builder.header("Content-Security-Policy", policy);
+    if mime.starts_with("text/html;") {
+        builder = builder.header("Content-Security-Policy", PAGE_POLICY.join("; "));
     }
     builder
         .body(body)
@@ -386,36 +340,14 @@ mod tests {
     }
 
     #[test]
-    fn network_rule_narrows_connect_src_only() {
-        use crate::tools::manifest::NetworkRule;
-        let open = policy_for(None);
-        assert!(open.contains("connect-src 'self' https: http:"));
-
-        let closed = policy_for(Some(&NetworkRule { enabled: false, hosts: vec![], insecure: vec![] }));
-        assert!(closed.contains("connect-src 'self'"));
-
-        let hosted = policy_for(Some(&NetworkRule {
-            enabled: true,
-            hosts: vec!["api.corp.example.com".into(), "bad host".into()],
-            insecure: vec![],
-        }));
-        assert!(hosted.contains("'self' api.corp.example.com"));
-        // 带空格的非法域名不能进 CSP，否则整条指令被浏览器丢弃。
-        assert!(!hosted.contains("bad host"));
-    }
-
-    #[test]
-    fn self_is_always_allowed_for_the_capability_channel() {
-        use crate::tools::manifest::NetworkRule;
-        // 少了 'self'，工具连 store 都写不进去，而作者只会看到"存储失败"。
-        for rule in [
-            None,
-            Some(&NetworkRule { enabled: false, hosts: vec![], insecure: vec![] }),
-            Some(&NetworkRule { enabled: true, hosts: vec!["a.example.com".into()], insecure: vec![] }),
-        ] {
-            let policy = policy_for(rule);
-            let connect = policy.split("; ").find(|item| item.starts_with("connect-src")).unwrap();
-            assert!(connect.contains("'self'"), "{connect}");
+    fn html_uses_the_default_policy_while_assets_are_served_normally() {
+        for name in ["index.html", "page.HTM"] {
+            let response = file_response(Path::new(name), Vec::new());
+            let policy = PAGE_POLICY.join("; ");
+            assert_eq!(response.headers()["content-security-policy"], policy.as_str());
         }
+
+        let response = file_response(Path::new("app.js"), Vec::new());
+        assert!(!response.headers().contains_key("content-security-policy"));
     }
 }

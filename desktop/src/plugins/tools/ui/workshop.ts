@@ -214,7 +214,6 @@ export function contentSignature(tool: ToolPackage): string {
     html: tool.html,
     actions: tool.actions ?? null,
     settingsSchema: tool.settingsSchema ?? null,
-    permissions: tool.permissions ?? null,
     requires: tool.requires ?? null,
     needsSelection: tool.needsSelection ?? null,
     background: tool.background ?? null,
@@ -273,7 +272,7 @@ export function describeProcessCarrier(
   tool: Pick<ToolPackage, "name" | "runtime">,
 ): string | undefined {
   if (tool.runtime?.kind !== "process") return undefined;
-  return `注意：${tool.name} 会启动独立进程 ${tool.runtime.entry}，它以你的身份运行——能读写你账户下的文件、能联网。平台不检查这个程序做什么，确认来源后再打开。`;
+  return `注意：${tool.name} 会启动独立进程 ${tool.runtime.entry}，并以当前账号权限访问系统资源。打开前请确认来源。`;
 }
 
 /** 校验通过时说同一句话：AI 停下后自动校验、用户手点重新校验，走的是同一个结论。 */

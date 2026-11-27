@@ -1,41 +1,17 @@
 //! 工具清单的 Rust 侧读取。
 //!
-//! P0 只解析宿主真正要用的字段：身份、窗口标题、设置默认值、网络声明、动作列表。
+//! P0 只解析宿主真正要用的字段：身份、窗口标题、设置默认值、动作列表。
 //! 其余字段（`build`、`runtime`、`description`…）留给 P1 落地——现在把它们读进
 //! 结构体只会造出一批没人读的字段，等 schema 冻结时再一次性补。
 //!
 //! 这里刻意**不做完整校验**。校验在 `runtime/package.ts` 里已经有一份成熟实现
-//! （R1–R11、体积上限、依赖清单），P0 不复制它——两份规则一旦漂移，就会出现
+//! （项目红线、体积上限、依赖清单），P0 不复制它——两份规则一旦漂移，就会出现
 //! "界面说能装、运行时说不能用"（设计稿 §7.5 的 P5）。到 P4 才把校验搬进 Rust，
 //! 那时是搬而不是抄。
 
 use std::path::Path;
 
-use serde::{Deserialize, Serialize};
-
-/// 网络声明。语义与 `package.ts` 的 `readNetworkRule` 一致。
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct NetworkRule {
-    /// 显式 `network: false` 时只保留能访问宿主能力的同源连接。
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    /// 允许连接的域名白名单（`*.corp.example.com`、`host:port`）。
-    #[serde(default)]
-    pub hosts: Vec<String>,
-    /// 允许自签证书的域名。
-    #[serde(default)]
-    pub insecure: Vec<String>,
-}
-
-impl Default for NetworkRule {
-    fn default() -> Self {
-        Self { enabled: true, hosts: Vec::new(), insecure: Vec::new() }
-    }
-}
-
-fn default_true() -> bool {
-    true
-}
+use serde::Deserialize;
 
 /// 设置项的默认值来源。
 ///
@@ -80,8 +56,6 @@ pub struct ToolManifest {
     pub settings_schema: Vec<SettingsField>,
     #[serde(default)]
     pub actions: Vec<ActionDecl>,
-    #[serde(default)]
-    pub permissions: Permissions,
     /// 声明了 `build.out` 就是 L2（打包页），否则 L1。P0 不用它，但先读出来，
     /// 免得后面判断载体时又要改一次解析。
     #[serde(default)]
@@ -119,29 +93,6 @@ pub struct BackgroundDecl {
     pub schedule: bool,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct Permissions {
-    #[serde(default)]
-    pub network: Option<NetworkRuleInput>,
-}
-
-/// 清单里 `permissions.network` 可以是 `false` 或 `{ hosts: [...] }`，
-/// 两种写法都要认（与 `readNetworkRule` 保持一致）。
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-pub enum NetworkRuleInput {
-    Enabled(bool),
-    Rule(NetworkRuleFields),
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct NetworkRuleFields {
-    #[serde(default)]
-    pub hosts: Vec<String>,
-    #[serde(default)]
-    pub insecure: Vec<String>,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct BuildDecl {
     #[serde(default)]
@@ -161,20 +112,6 @@ pub struct RuntimeDecl {
 }
 
 impl ToolManifest {
-    /// 网络规则归一化：`false` → 关闭；对象 → 开 + 白名单；缺失 → 开 + 全放行。
-    pub fn network(&self) -> NetworkRule {
-        match self.permissions.network.as_ref() {
-            Some(NetworkRuleInput::Enabled(false)) => NetworkRule { enabled: false, ..Default::default() },
-            Some(NetworkRuleInput::Enabled(true)) => NetworkRule::default(),
-            Some(NetworkRuleInput::Rule(fields)) => NetworkRule {
-                enabled: true,
-                hosts: fields.hosts.clone(),
-                insecure: fields.insecure.clone(),
-            },
-            None => NetworkRule::default(),
-        }
-    }
-
     /// 设置默认值。工具脚本常常第一行就读 `aawSettings["某个键"]`，
     /// 所以缺省值必须在这里补齐，不能等用户去管理页点一次保存。
     pub fn settings_defaults(&self) -> serde_json::Map<String, serde_json::Value> {

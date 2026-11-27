@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 import type { Context } from "cordis";
 import { createTestDesktopRuntime } from "../../helpers/desktopRuntime.ts";
 import { parseToolPackage } from "../../../src/plugins/tools/runtime/package.ts";
+import { toolContractVersion } from "../../../src/plugins/tools/runtime/contract.ts";
 import { readTools } from "../../../src/plugins/tools/index.ts";
 import * as backupRuntime from "../../../src/plugins/tools/runtime/backup.ts";
 
@@ -173,13 +174,16 @@ it("records the schema generation at install so future rule changes can read bac
     // 校验规则收紧不再会让已装好的工具集体标 broken。
     const entry = tools.state.getState()[0];
     expect(entry?.installedSchemaVersion).toBe(1);
-    expect(entry?.installedContractVersion).toBe(2);
+    expect(entry?.installedContractVersion).toBe(toolContractVersion);
     // 覆盖安装新版本：schema 代际跟新包走，契约代际仍是安装时刻的宿主。
     await tools.install(
       { ...makeTool("pinned"), version: "1.1.0" },
       { replace: true },
     );
     expect(tools.state.getState()[0]?.installedSchemaVersion).toBe(1);
+    expect(tools.state.getState()[0]?.installedContractVersion).toBe(
+      toolContractVersion,
+    );
   } finally {
     await runtime.shutdown();
   }

@@ -80,9 +80,11 @@ mod tests {
 
     #[test]
     fn a_tool_from_the_future_names_both_generations() {
-        let error = check(&tool(serde_json::json!({ "requires": { "contract": 99 } }))).unwrap_err();
-        assert!(error.contains("第 99 代"), "{error}");
-        assert!(error.contains("第 2 代"), "{error}");
+        let current = crate::tools::CONTRACT_GENERATION;
+        let required = current + 1;
+        let error = check(&tool(serde_json::json!({ "requires": { "contract": required } }))).unwrap_err();
+        assert!(error.contains(&format!("第 {required} 代")), "{error}");
+        assert!(error.contains(&format!("第 {current} 代")), "{error}");
         assert!(error.contains("升级"), "{error}");
     }
 
@@ -100,7 +102,7 @@ mod tests {
     #[test]
     fn everything_declared_and_available_passes() {
         assert!(check(&tool(serde_json::json!({
-            "requires": { "contract": 2, "capabilities": ["files", "bus"] },
+            "requires": { "contract": crate::tools::CONTRACT_GENERATION, "capabilities": ["files", "bus"] },
         })))
         .is_ok());
     }

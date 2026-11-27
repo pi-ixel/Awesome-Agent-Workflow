@@ -62,7 +62,6 @@ export function developerPrompt(): string {
 - html：必填，完整自包含 HTML（内联 <style> 与 <script>）
 - actions：可选，最多 32 个，见下
 - settingsSchema：可选，最多 32 项，见下
-- permissions：可选，会联网就写 { "network": true }
 
 ## 运行环境（重要限制）
 - 工具运行在沙箱窗口里：没有 Node、没有任意路径的文件读写、没有 Electron API。
@@ -153,7 +152,6 @@ export const toolPackageFields: readonly (keyof ToolPackage)[] = [
   "html",
   "actions",
   "settingsSchema",
-  "permissions",
   "author",
   "source",
   "sourceFiles",

@@ -37,7 +37,7 @@
 | 文件与小批处理   | 打开一个文本、清洗内容、再存成新文件；把一批文本合并导出                |
 | 个人留存         | 待办清单、随手记、常用配置、最近用过的输入（走 `aawStore`）             |
 
-它能读写系统剪切板、读写用户亲手选的文件、把数据留到下次打开、按声明联网访问 http/https，在你声明之后还能常驻后台与弹提醒。需要第三方库时，把纯 JS 依赖打进一个 `app.js`（见下面「带依赖的工具」）。**不能**读任意本地路径、不能调用摄像头或录屏——平台把这些挡在沙箱外面，是为了让一个 ZIP 能在别人机器上直接装、直接跑。
+它能读写系统剪切板、读写用户亲手选的文件、把数据留到下次打开和请求 HTTP/HTTPS 接口。声明后台用途后，还能常驻后台与弹提醒。需要第三方库时，把纯 JS 依赖打进一个 `app.js`（见下面「带依赖的工具」）。**不能**读任意本地路径、不能调用摄像头或录屏——平台把这些挡在沙箱外面，是为了让一个 ZIP 能在别人机器上直接装、直接跑。
 
 技术上的边界：默认形态是自包含的 `index.html`（HTML/CSS/JS 都在里面），`manifest.json` 描述身份、动作、设置与能力。**要带纯 JS 依赖时多一个 `app.js` 构建产物**（源码放 `src/`，带不带随你）；**确实需要进程、原生模块或非 HTTP 协议时**才用 `bin/` 自带运行时，那条路会放弃沙箱。不是多页面站点。**必须至少声明并实现一个动作**（红线 R3）：界面上的按钮和 `aawActions` 里的函数是同一件事，人和 AI 走同一条路。
 
@@ -187,8 +187,7 @@ L3 里 `store` / `sharedStore` / `secrets` / `settings` 这四项**必须走宿�
       "min": 0,
       "max": 8
     }
-  ],
-  "permissions": { "network": false }
+  ]
 }
 ```
 
@@ -234,8 +233,8 @@ L3 里 `store` / `sharedStore` / `secrets` / `settings` 这四项**必须走宿�
 
 补充规则：
 
-- **联网默认可用**。`permissions.network` 是声明给用户看的：写 `true`（会联网）、`false`（承诺不联网）、`{ "hosts": ["*.corp.example.com"] }`（限定域名）；访问自签证书的内网接口再加 `"insecure": true`（安装时会提示用户）。会联网的工具请声明，让用户知情。**进程载体不受 CSP 约束**——这是 L3 的真实代价，导入时会明说。
-- `requires`：`{ "contract": 2, "capabilities": [...] }` 说明最低要求，不写就宽松放行；写了之后，满足不了的宿主会显示说明页而不是白屏。**能力名只能是这十二个**：settings、store、sharedStore、files、clipboard、actions、system、secrets、lifecycle、context、bus、network（前十个与 `window.aaw*` 名一一对应；`network` 是声明式授权，没有 window 入口）。**当前契约代际是 2。**
+- 页面可以直接请求 HTTP/HTTPS 接口和加载远程图片、媒体资源，遵循浏览器的跨域和证书规则。脚本与样式使用工具包内的文件。
+- `requires`：`{ "contract": 3, "capabilities": [...] }` 说明最低要求，宿主不满足时会显示说明页。能力名取自宿主接口表（settings、store、sharedStore、files、clipboard、actions、system、secrets、lifecycle、context、bus）。**当前契约代际是 3。**
 - 分清两种「记住」：`settingsSchema` 是用户在工具中心能改的配置（代码里经 `aawSettings` 只读）；`aawStore` 是工具自己记的状态，用户看不见，不要拿来当设置项（R4）。
 - 密钥的推荐路径：运行时让用户输入一次 → `aawSecrets.set` 存下 → 以后 `aawSecrets.get`。不要写进 html、清单或 `aawStore`（R5）。
 - `navigator.clipboard` 也能用，但它要求用户手势、在 AI 执行的动作里拿不到；优先用 `aawClipboard`。
@@ -254,7 +253,6 @@ L3 里 `store` / `sharedStore` / `secrets` / `settings` 这四项**必须走宿�
 | R5   | warn  | 不得把密钥/口令写进 html                         | 改成设置项由用户填，或运行时让用户输入                                                                                                                                   |
 | R6   | warn  | 需要留存的数据走 window.aawStore                 | 用 await aawStore.set(k, v) / get(k) 保存需要持久化的数据                                                                                                                |
 | R7   | warn  | 不得写死 ≥800px 的宽度                           | 用 width:100% + max-width，避免窄窗口横向溢出                                                                                                                            |
-| R8   | warn  | 联网的工具应该声明 permissions.network           | 不声明也能跑（默认允许），但用户看不到「这个工具会联网」；补上 "permissions": { "network": true }，或写 hosts 限定域名                                                   |
 | R9   | block | 不得改动或夹带平台框架与关键契约文件             | 工具包只保留 manifest.json、index.html、构建产物 app.js 或 bin/ 里的运行时，以及你自己写的源码；AGENTS.md / README.md / runtime 框架这些平台文件不该出现在包里，出现就删 |
 | R10  | warn  | 声明了 build 却没带 src/，别人拿到只有产物没法读 | 想让人读懂就把 src/ 一起带上；不想公开实现就不带——这只是提醒，平台不拦。运行只认 build.out                                                                               |
 
@@ -272,14 +270,13 @@ L3 里 `store` / `sharedStore` / `secrets` / `settings` 这四项**必须走宿�
 - [ ] 没有覆盖或伪造任何 `window.aaw*` 注入，也没有把内核框架文件带进工具包
 - [ ] 清单里没有 `preload` 字段；带依赖时 `build.out` 指向的产物确实在目录里
 - [ ] 如果声明了 `runtime`：`bin/` 里的可执行文件是用户自己放进去的（你生成不了二进制），并且确认过来源
-- [ ] 没有任何远程引用（http / https / 协议相对地址）；用相对路径引用自己目录里的文件可以
+- [ ] 脚本和样式以相对路径引用包内文件
 - [ ] 界面只写在 `index.html`，清单的 `html` 字段留空
 - [ ] 每个 action 在 `aawActions` 里都有同名函数，界面按钮复用同一函数
 - [ ] 需要留存的数据走 `aawStore`；要跨工具共享才用 `aawStore.scope("shared")`
 - [ ] 用到剪切板时是用户主动触发的，不是打开就偷偷读
 - [ ] API Key / Token 走 `aawSecrets`，没有硬编码在 html 或 manifest 里
-- [ ] 用到的能力名写进了 `requires.capabilities`，名字来自上面那份十二个的名单
+- [ ] 用到的宿主能力写进了 `requires.capabilities`，名称来自上面的宿主接口表
 - [ ] 需要常驻或定时的话，在 `background` 里声明了，理由写得让人看得懂
-- [ ] 会联网就声明了 `permissions.network`（会联网 true / 不联网 false / 限域名写 hosts）
 - [ ] 空输入 / 超长输入 / 非法输入都有提示，不会白屏（代码里每个分支都有返回）
 - [ ] 容器没有写死像素宽度，宽内容在 `overflow-x: auto` 的容器里滚动（渲染效果让用户在预览里确认）

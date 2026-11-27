@@ -62,8 +62,7 @@ const scannableSuffix = /\.(js|mjs|cjs|ts|tsx|jsx|html?|json|txt)$/i;
  * 声明的 `requires` 为准）。多声明一条的代价是“旧宿主会拦下并给说明页”，
  * 漏声明的代价是“旧宿主装上后白屏”：宁严勿漏。
  *
- * `actions` 是上行能力（工具提供给宿主，永远可用），`network` 是声明式
- * 授权（清单 `permissions` 里已有）——两者都不进 `requires`。
+ * `actions` 由工具提供给宿主，自动扫描只补写工具依赖的下行能力。
  */
 export function scanUsedCapabilities(
   texts: readonly string[],
@@ -72,7 +71,7 @@ export function scanUsedCapabilities(
   if (!text) return [];
   const used = new Set<string>();
   for (const capability of toolCapabilities) {
-    if (capability.direction !== "down" || !capability.entry) continue;
+    if (capability.direction !== "down") continue;
     if (text.includes(capability.entry)) used.add(capability.name);
   }
   // `aawStore.scope` 挂在 `aawStore` 上：用 scope 的必然也用 store，但
@@ -188,7 +187,6 @@ ID 相同的会覆盖更新；界面会在安装后告诉你版本从哪一版�
   \`<script src="./app.js">\` 可以正常加载。
 - 图片小的话用 data URL；大文件直接放目录里。
 - 需要跨重启保留的数据用 \`window.aawStore\`，不要用 \`localStorage\`。
-- 会联网的工具要在 \`manifest.json\` 里写 \`"permissions": { "network": true }\`，用户安装时能看到。
 `,
   };
   // Windows treats paths case-insensitively. Author files win over generated
