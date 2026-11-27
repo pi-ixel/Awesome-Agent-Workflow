@@ -103,7 +103,7 @@ test("双主题下鼠标打开模型菜单无粗框，方向键和 Tab 有焦点
   }
 });
 
-test("连接失败和会话归档共用提示条，窄窗换肤保留操作焦点", async ({ page, context }) => {
+test("窄窗归档提示居中或整组换行，换肤时保留操作焦点", async ({ page, context }) => {
   await page.goto("/tests/visual/uiScaleFixture.html");
   const session = await context.newPage();
   await session.setViewportSize({ width: 320, height: 660 });
@@ -111,10 +111,14 @@ test("连接失败和会话归档共用提示条，窄窗换肤保留操作焦�
   const error = session.getByRole("alert").filter({ hasText: "连接失败" });
   const archive = session.getByRole("status", { name: "归档提示" });
   const settings = error.getByRole("button", { name: "打开设置" });
-  await session.getByRole("button", { name: "演示归档" }).press("Enter");
+  const trigger = session.getByRole("button", { name: "演示归档" });
+  await trigger.press("Enter");
   const undo = archive.getByRole("button", { name: "撤销" });
+  const view = archive.getByRole("button", { name: "查看" });
+  const dismiss = archive.getByRole("button", { name: "关闭归档提示" });
   await undo.focus();
   const font = page.getByRole("spinbutton", { name: "界面字号" });
+  const centerY = ({ y, height }: { y: number; height: number }) => y + height / 2;
   for (const [theme, px] of [["暖白", 12], ["暗夜", 20], ["暖白", 14]] as const) {
     await page.getByRole("button", { name: theme, exact: true }).click();
     await font.fill(String(px));
@@ -125,6 +129,23 @@ test("连接失败和会话归档共用提示条，窄窗换肤保留操作焦�
     for (const notice of [archive, error]) {
       expect(await notice.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
     }
+    const heading = archive.getByText("已归档的聊天", { exact: true });
+    const title = (await heading.boundingBox())!;
+    const lineHeight = await heading.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+    const icon = (await archive.locator("svg").first().boundingBox())!;
+    const close = (await dismiss.boundingBox())!;
+    const viewBox = (await view.boundingBox())!;
+    const undoBox = (await undo.boundingBox())!;
+    expect(title.height).toBeCloseTo(lineHeight, 1);
+    expect(Math.abs(centerY(icon) - centerY(title))).toBeLessThan(1);
+    expect(Math.abs(centerY(close) - centerY(title))).toBeLessThan(1);
+    expect(Math.abs(centerY(undoBox) - centerY(viewBox))).toBeLessThan(1);
+    expect(undoBox.x).toBeGreaterThan(viewBox.x + viewBox.width);
+    if (px === 20) {
+      expect(viewBox.y).toBeGreaterThan(title.y + title.height);
+    } else {
+      expect(Math.abs(centerY(viewBox) - centerY(title))).toBeLessThan(1);
+    }
     expect(ratio(await color(archive, "color"), await color(archive, "background-color"))).toBeGreaterThanOrEqual(4.5);
     expect(ratio(
       await color(error, "color"),
@@ -132,6 +153,13 @@ test("连接失败和会话归档共用提示条，窄窗换肤保留操作焦�
     )).toBeGreaterThanOrEqual(4.5);
   }
   await undo.press("Enter");
+  await expect(archive).toBeHidden();
+  await trigger.press("Enter");
+  await view.press("Enter");
+  await expect(archive).toBeHidden();
+  await expect(session.locator("html")).toHaveAttribute("data-opened-archive-settings", "true");
+  await trigger.press("Enter");
+  await dismiss.press("Enter");
   await expect(archive).toBeHidden();
   await settings.press("Enter");
   await expect(session.locator("html")).toHaveAttribute("data-opened-agent-settings", "true");

@@ -74,6 +74,13 @@ test("五种提示条在双主题三档字号下显示语义色、可展开详�
     }
     await expect(error.getByText("E_RELEASE_LOG_UNAVAILABLE")).toBeVisible();
     await expect(close).toBeFocused();
+    const title = (await error
+      .getByText("读取发布记录失败", { exact: true })
+      .boundingBox())!;
+    const icon = (await error.locator("svg").first().boundingBox())!;
+    const closeBox = (await close.boundingBox())!;
+    expect(icon.y - title.y).toBeCloseTo(2, 1);
+    expect(closeBox.y).toBeCloseTo(title.y, 1);
   }
   await close.press("Enter");
   await expect(error).toBeHidden();

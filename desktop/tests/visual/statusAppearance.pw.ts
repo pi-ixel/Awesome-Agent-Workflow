@@ -159,6 +159,9 @@ test("加载和状态点遵循减少动态效果，键盘阅读中的通知在�
     .filter({ hasText: "发布记录已复制" });
   const close = toast.getByRole("button", { name: "关闭提示" });
   await close.focus();
+  const title = toast.getByText(
+    "发布记录已复制到剪贴板，原始报告可在运行管理查看。",
+  );
   for (const [theme, px] of appearances) {
     await setAppearance(page, theme, px);
     await expect(toast).toHaveCSS("font-size", `${px - 2}px`);
@@ -167,7 +170,39 @@ test("加载和状态点遵循减少动态效果，键盘阅读中的通知在�
     expect(await toast.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(
       true,
     );
+    const box = (await title.boundingBox())!;
+    const icon = (await toast.locator("svg").first().boundingBox())!;
+    const dismiss = (await close.boundingBox())!;
+    const lineHeight = await title.evaluate((el) =>
+      parseFloat(getComputedStyle(el).lineHeight),
+    );
+    expect(box.height).toBeGreaterThan(lineHeight);
+    expect(
+      Math.abs(icon.y + icon.height / 2 - (box.y + lineHeight / 2)),
+    ).toBeLessThan(1);
+    expect(
+      Math.abs(dismiss.y + dismiss.height / 2 - (box.y + lineHeight / 2)),
+    ).toBeLessThan(1);
   }
   await close.press("Enter");
   await expect(toast).toBeHidden();
+
+  await status.getByRole("button", { name: "显示短通知" }).press("Enter");
+  const short = status
+    .getByRole("status")
+    .filter({ hasText: "已复制到剪贴板" });
+  const shortTitle = (await short
+    .getByText("已复制到剪贴板", { exact: true })
+    .boundingBox())!;
+  const shortIcon = (await short.locator("svg").first().boundingBox())!;
+  const shortClose = (await short
+    .getByRole("button", { name: "关闭提示" })
+    .boundingBox())!;
+  const centerY = shortTitle.y + shortTitle.height / 2;
+  expect(Math.abs(shortIcon.y + shortIcon.height / 2 - centerY)).toBeLessThan(
+    1,
+  );
+  expect(Math.abs(shortClose.y + shortClose.height / 2 - centerY)).toBeLessThan(
+    1,
+  );
 });

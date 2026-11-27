@@ -90,6 +90,19 @@ export function StatusFixture() {
           >
             显示通知
           </ActionButton>
+          <ActionButton
+            tone="secondary"
+            size="compact"
+            onClick={() =>
+              workbench.showToast({
+                message: "已复制到剪贴板",
+                variant: "ok",
+                durationMs: 5_000,
+              })
+            }
+          >
+            显示短通知
+          </ActionButton>
         </div>
         <UsageMeter label="已用 Credit" percent={42} />
         <UsageMeter label="已用存储" percent={86.5} tone="warn" />
