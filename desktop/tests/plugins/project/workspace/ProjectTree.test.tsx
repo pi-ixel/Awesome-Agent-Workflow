@@ -5,7 +5,8 @@ import { useSessionStore } from "../../../helpers/foreground.ts";
 import { createTestProjectIndexes } from "../../../helpers/projectIndexes.ts";
 import { createTestProjectWorkbench } from "../../../helpers/projectWorkbench.tsx";
 import { sessionPinKey } from "../../../../src/plugins/project/sessions/sessionPin.ts";
-import { pathKey } from "../../../../src/shared/panelPaths.ts";
+import { formatRemoteProjectPath, newProjectPath, pathKey } from "../../../../src/shared/panelPaths.ts";
+import { webviewStorage } from "../../../../src/plugins/host/storage/storage.ts";
 /**
  * 项目树（左栏）测试：冷启动空态（无任何已知项目时给一行添加指引）；
  * 置顶带（无分组头，hover 前导槽显钉子）与置顶菜单；会话子节点分页呈现
@@ -36,6 +37,7 @@ beforeEach(() => {
     selectedPath: null,
     activePath: null,
     recentWorkspaces: [],
+    projectFolders: {},
     pinnedPaths: [],
     pinnedSessions: [],
   });
@@ -51,6 +53,63 @@ afterEach(() => {
   bindTestLayout(undefined);
   fixture.dispose();
   indexes.dispose();
+});
+
+it("离线远程项目只保存显示名，失败可重试，清空后恢复主目录名", async () => {
+  const primary = formatRemoteProjectPath("root", "/workspace/server");
+  const path = newProjectPath(primary);
+  const related = [formatRemoteProjectPath("child", "/workspace/shared")];
+  const name = "远程分组";
+  const key = pathKey(path);
+  const current = {
+    [key]: { name, relatedPaths: related },
+    [pathKey(primary)]: { name: "另一个项目", relatedPaths: [] },
+  };
+  useWorkspaceStore.setState({
+    recentWorkspaces: [path, primary].map((path) => ({ path, lastOpenedAt: "now" })),
+    projectFolders: current,
+  });
+  const commit = vi.spyOn(webviewStorage, "setConfigurationItems")
+    .mockRejectedValueOnce(new Error("配置写入失败"));
+  try {
+    const user = userEvent.setup();
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
+    const row = screen.getByRole("button", { name });
+    const openRename = async () => {
+      fireEvent.contextMenu(row);
+      await user.click(screen.getByRole("menuitem", { name: "重命名项目" }));
+      return screen.getByRole("dialog", { name: "重命名项目" });
+    };
+    const dialog = await openRename();
+    const input = within(dialog).getByRole("textbox", { name: "项目名称" });
+    expect(input).toHaveValue(name);
+    await user.clear(input);
+    await user.type(input, "  另一个项目  ");
+    await user.keyboard("{Enter}");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("配置写入失败");
+    expect(input).toHaveValue("  另一个项目  ");
+    expect(useWorkspaceStore.getState().projectFolders).toEqual(current);
+
+    await user.click(within(dialog).getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    expect(screen.getAllByRole("button", { name: "另一个项目" })).toHaveLength(2);
+    const changes = commit.mock.calls.at(-1)?.[0];
+    expect(Object.keys(changes ?? {})).toEqual(["aaw-desktop/workspace/v1"]);
+    expect(useWorkspaceStore.getState().projectFolders?.[key])
+      .toEqual({ name: "另一个项目", relatedPaths: related });
+
+    const resetDialog = await openRename();
+    await user.clear(within(resetDialog).getByRole("textbox", { name: "项目名称" }));
+    await user.keyboard("{Enter}");
+    await screen.findByRole("button", { name: "server" });
+    act(() => useWorkspaceStore.getState().hydrateFromStorage());
+    expect(useWorkspaceStore.getState().projectFolders?.[key])
+      .toEqual({ name: "server", relatedPaths: related });
+    expect(useWorkspaceStore.getState().projectFolders?.[pathKey(primary)])
+      .toEqual(current[pathKey(primary)]);
+  } finally {
+    commit.mockRestore();
+  }
 });
 
 it("打开另一个置顶项目时保持项目块和原有行实例", () => {

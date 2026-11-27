@@ -53,6 +53,7 @@ export interface WorkspaceSnapshot {
 export interface WorkspaceStoreState extends WorkspaceSnapshot {
   registerProject: (path: string, folders?: ProjectFolders) => string;
   updateProjectFolders: (path: string, folders: ProjectFolders) => void;
+  renameProject: (path: string, name: string) => Promise<void>;
   selectWorkspace: (path: string) => void;
   clearSelection: () => void;
   openWorkspace: (path?: string) => void;
