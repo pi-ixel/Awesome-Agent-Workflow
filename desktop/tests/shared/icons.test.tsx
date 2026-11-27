@@ -4,6 +4,7 @@ import {
   ArrowUpIcon,
   ChevronRightIcon,
   FolderGlyph,
+  ProjectGlyph,
 } from "../../src/shared/ui/icons.tsx";
 import { FilesIcon } from "../../src/shared/ui/file-icons/icons.tsx";
 
@@ -29,4 +30,21 @@ it("发送箭头和开闭文件夹使用可缩放的装饰图形", () => {
   rerender(<FolderGlyph isExpanded />);
   expect(closed).toBeTruthy();
   expect(container.querySelector("path")).not.toHaveAttribute("d", closed);
+});
+
+it.each([
+  [false, false], [false, true], [true, false], [true, true],
+])("项目图标保留缩放和开合状态 remote=%s multiple=%s", (remote, multiple) => {
+  const glyph = (expanded: boolean) => <ProjectGlyph {...{ remote, multiple, expanded }} />;
+  const { container, rerender } = render(glyph(false));
+  const svg = container.querySelector("svg")!;
+  expect(svg).toHaveClass("ui-icon-16");
+  expect(svg).not.toHaveAttribute("width");
+  expect(svg.querySelector("rect") !== null).toBe(remote);
+  expect(svg.querySelector(":scope > path") !== null).toBe(multiple);
+  const indicator = svg.querySelector("g > path:last-child");
+  expect(indicator).toHaveAttribute("opacity", "0");
+  rerender(glyph(true));
+  expect(indicator).toHaveAttribute("opacity", "1");
+  expect(indicator).toHaveClass("motion-reduce:transition-none");
 });

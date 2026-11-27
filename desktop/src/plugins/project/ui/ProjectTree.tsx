@@ -91,6 +91,7 @@ import {
   ClockIcon,
   CornerDownRightIcon,
   FolderGlyph,
+  ProjectGlyph,
   ListFilterIcon,
   PlusIcon,
   PinIcon,
@@ -470,7 +471,11 @@ function ProjectNodeRow({
               isPinned ? "group-hover/project-row:hidden" : "inline-flex"
             }
           >
-            <FolderGlyph isExpanded={isExpanded} className="ui-icon-16 shrink-0 text-ink-subtle" />
+            <ProjectGlyph
+              remote={isRemoteProjectPath(path)}
+              multiple={(config?.relatedPaths.length ?? 0) > 0}
+              expanded={isExpanded}
+            />
           </span>
           {isPinned ? (
             <PinIcon className="hidden ui-icon-16 text-ink-subtle group-hover/project-row:block" />

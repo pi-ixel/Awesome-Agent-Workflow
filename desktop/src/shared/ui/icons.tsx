@@ -346,6 +346,9 @@ export function ShieldCheckIcon(props: IconProps) {
 }
 
 /** 文件夹图标：与项目树一致的双态 Lucide 线性图形（收起合口 / 展开开口）。 */
+const folderOpenPath = "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2";
+const folderClosedPath = "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z";
+
 export function FolderGlyph({
   isExpanded = true,
   className = "ui-icon-14 shrink-0 text-ink-mute",
@@ -356,10 +359,42 @@ export function FolderGlyph({
   return (
     <Svg strokeWidth={2} className={className}>
       {isExpanded ? (
-        <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />
+        <path d={folderOpenPath} />
       ) : (
-        <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+        <path d={folderClosedPath} />
       )}
+    </Svg>
+  );
+}
+
+/** 侧栏项目图标。前层表示开合，后层表示项目含有关联目录。 */
+export function ProjectGlyph({ remote, multiple, expanded }: {
+  readonly remote: boolean;
+  readonly multiple: boolean;
+  readonly expanded: boolean;
+}) {
+  const fade = "transition-opacity duration-200 ease-out motion-reduce:transition-none";
+  return (
+    <Svg strokeWidth={2} className="ui-icon-16 shrink-0 text-ink-subtle">
+      {multiple && (
+        <path d={remote
+          ? "M7 5V3.8A1.8 1.8 0 0 1 8.8 2H20a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2"
+          : "M7 6V4a1.5 1.5 0 0 1 1.5-1.5H12l2 2h6a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2"} />
+      )}
+      <g transform={multiple ? "translate(0 4) scale(.84)" : undefined}>
+        {remote ? (
+          <>
+            <rect x="2" y="3" width="20" height="14" rx="2" />
+            <path d="M8 21h8M12 17v4" />
+            <path d="m6 7 3 3-3 3m6 0h4" className={fade} opacity={expanded ? 1 : 0} />
+          </>
+        ) : (
+          <>
+            <path d={folderClosedPath} className={fade} opacity={expanded ? 0 : 1} />
+            <path d={folderOpenPath} className={fade} opacity={expanded ? 1 : 0} />
+          </>
+        )}
+      </g>
     </Svg>
   );
 }
