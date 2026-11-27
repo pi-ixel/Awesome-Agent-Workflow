@@ -139,11 +139,22 @@ export function PanelWorkspace({
   useEffect(() => {
     const element = ref.current;
     if (!element || typeof ResizeObserver === "undefined") return;
+    const apply = (width: number, height: number) => {
+      if (!document.hidden && width > 0 && height > 0) setAvailable(width);
+    };
+    const restore = () => {
+      const { width, height } = element.getBoundingClientRect();
+      apply(width, height);
+    };
     const observer = new ResizeObserver(([entry]) => {
-      if (entry) setAvailable(entry.contentRect.width);
+      if (entry) apply(entry.contentRect.width, entry.contentRect.height);
     });
     observer.observe(element);
-    return () => observer.disconnect();
+    document.addEventListener("visibilitychange", restore);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("visibilitychange", restore);
+    };
   }, []);
   useEffect(() => {
     if (!open || !project) return;

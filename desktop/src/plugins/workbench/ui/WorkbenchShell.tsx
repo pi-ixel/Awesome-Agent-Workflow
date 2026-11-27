@@ -91,9 +91,17 @@ export function WorkbenchShell({ children }: { readonly children: ReactNode }) {
   const saveWidth = useContext(WorkbenchContext)?.saveSidebarWidth;
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   useEffect(() => {
-    const resize = () => setViewportWidth(window.innerWidth);
+    const resize = () => {
+      // 最小化时的中间尺寸不应压缩已经展开的侧栏。
+      if (!document.hidden && window.innerWidth > 0 && window.innerHeight > 0)
+        setViewportWidth(window.innerWidth);
+    };
     window.addEventListener("resize", resize);
-    return () => window.removeEventListener("resize", resize);
+    document.addEventListener("visibilitychange", resize);
+    return () => {
+      window.removeEventListener("resize", resize);
+      document.removeEventListener("visibilitychange", resize);
+    };
   }, []);
   const sidebarMaximum = Math.max(LEFT_MIN_PX, viewportWidth * 0.5);
   const sidebarCollapsed = useWorkbenchUiValue(
