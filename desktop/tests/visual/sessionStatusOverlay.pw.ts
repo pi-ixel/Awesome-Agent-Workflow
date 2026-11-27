@@ -291,11 +291,25 @@ test("提问轨道支持键盘跨越虚拟窗口，换肤时保留当前提问�
     await expect(previous).toBeFocused();
     await expect(previous).not.toHaveCSS("box-shadow", "none");
     await expect(session.locator('[data-query-id="user-88"]')).toBeInViewport();
+    const idleTick = last.locator("span");
+    await expect(idleTick).toHaveCSS(
+      "background-color",
+      theme === "暖白" ? "rgb(199, 199, 199)" : "rgb(108, 108, 108)",
+    );
+    await expect(idleTick).toHaveCSS("opacity", "1");
+    await expect(previous.locator("span")).not.toHaveCSS(
+      "background-color",
+      theme === "暖白" ? "rgb(199, 199, 199)" : "rgb(108, 108, 108)",
+    );
     const label = previous.locator("span");
     const marker = await label.boundingBox();
     const row = await previous.boundingBox();
     expect(marker!.x + marker!.width).toBeLessThanOrEqual(row!.x + row!.width + 1);
   }
+  await last.hover();
+  await expect(last.locator("span")).toHaveCSS("background-color", "rgb(38, 38, 38)");
+  await expect.poll(async () => (await last.locator("span").boundingBox())?.width ?? 0)
+    .toBeGreaterThan(12);
   await session.locator("[data-session-messages]").hover();
   await session.mouse.wheel(0, -1000);
   await expect(rail.locator('[aria-current="location"]')).not.toHaveAttribute("data-query-row", "88");

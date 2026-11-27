@@ -90,3 +90,26 @@ describe("dark theme contrast boundary", () => {
     );
   });
 });
+
+it("uses one shared muted line color across Desktop", () => {
+  const warm = source.slice(dark.length);
+  expect(token("line-muted")).toBe("#6c6c6c");
+  expect(warm).toContain("--color-line-muted: #c7c7c7;");
+  const navigator = readFileSync(
+    "src/plugins/project/conversation/ui/ConversationNavigator.tsx",
+    "utf8",
+  );
+  const violations: string[] = [];
+  for (const file of readdirSync("src", { recursive: true, encoding: "utf8" })) {
+    if (!/\.(?:css|tsx?|svg)$/.test(file)) continue;
+    const path = file.replaceAll("\\", "/");
+    const text = readFileSync(join("src", file), "utf8");
+    const oldGray = /#a0a0a0(?:[0-9a-f]{2})?\b|rgba?\(\s*160[,\s]+160[,\s]+160\b/i;
+    const rawReplacement = /#c7c7c7(?:[0-9a-f]{2})?\b|rgba?\(\s*199[,\s]+199[,\s]+199\b/i;
+    if (oldGray.test(text) || (path !== "shared/styles/index.css" && rawReplacement.test(text))) {
+      violations.push(path);
+    }
+  }
+  expect(violations).toEqual([]);
+  expect(navigator).toMatch(/const tickColor = idle\s*\? "bg-line-muted"/);
+}, 30000);
