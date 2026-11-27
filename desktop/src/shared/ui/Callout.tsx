@@ -101,8 +101,9 @@ export function Callout({
   const hasDetails =
     details !== undefined && details !== null && details !== false;
   const compact = !hasBody && !hasDetails;
+  // 操作文字使用标题行高，额外留出描边按钮的上下边框。
   const rowHeight = actions
-    ? "[--callout-row:max(1lh,1.75rem)]"
+    ? "[--callout-row:max(calc(1lh+2px),1.75rem)]"
     : onDismiss
       ? "[--callout-row:max(1lh,24px)]"
       : "[--callout-row:max(1lh,calc(var(--ui-icon-unit)*16))]";
@@ -139,7 +140,7 @@ export function Callout({
         </div>
         {actions && (
           <div
-            className={`flex shrink-0 flex-wrap items-center gap-1.5 ${compact ? "ml-auto min-h-(--callout-row) max-w-full" : "self-center"}`}
+            className={`flex shrink-0 flex-wrap items-center gap-1.5 ${compact ? "ml-auto min-h-(--callout-row) max-w-full [&>button]:min-h-(--callout-row) [&>button]:py-0 [&>button]:leading-[inherit]" : "self-center"}`}
           >
             {actions}
           </div>

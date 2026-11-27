@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 import { blend, color, ratio } from "./contrast.ts";
 
 test("运行中模型可刷新，滚动列表时操作固定，换肤与字号保留焦点", async ({
@@ -116,9 +116,16 @@ test("窄窗归档提示居中或整组换行，换肤时保留操作焦点", as
   const undo = archive.getByRole("button", { name: "撤销" });
   const view = archive.getByRole("button", { name: "查看" });
   const dismiss = archive.getByRole("button", { name: "关闭归档提示" });
+  const heading = archive.getByText("已归档的聊天", { exact: true });
   await undo.focus();
   const font = page.getByRole("spinbutton", { name: "界面字号" });
   const centerY = ({ y, height }: { y: number; height: number }) => y + height / 2;
+  const textTop = (locator: Locator) =>
+    locator.evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      return range.getBoundingClientRect().top;
+    });
   for (const [theme, px] of [["暖白", 12], ["暗夜", 20], ["暖白", 14]] as const) {
     await page.getByRole("button", { name: theme, exact: true }).click();
     await font.fill(String(px));
@@ -129,7 +136,6 @@ test("窄窗归档提示居中或整组换行，换肤时保留操作焦点", as
     for (const notice of [archive, error]) {
       expect(await notice.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
     }
-    const heading = archive.getByText("已归档的聊天", { exact: true });
     const title = (await heading.boundingBox())!;
     const lineHeight = await heading.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
     const icon = (await archive.locator("svg").first().boundingBox())!;
@@ -139,13 +145,20 @@ test("窄窗归档提示居中或整组换行，换肤时保留操作焦点", as
     expect(title.height).toBeCloseTo(lineHeight, 1);
     expect(Math.abs(centerY(icon) - centerY(title))).toBeLessThan(1);
     expect(Math.abs(centerY(close) - centerY(title))).toBeLessThan(1);
+    expect(undoBox.height).toBeCloseTo(viewBox.height, 1);
     expect(Math.abs(centerY(undoBox) - centerY(viewBox))).toBeLessThan(1);
     expect(undoBox.x).toBeGreaterThan(viewBox.x + viewBox.width);
+    expect(Math.abs((await textTop(view)) - (await textTop(undo)))).toBeLessThan(0.25);
     if (px === 20) {
       expect(viewBox.y).toBeGreaterThan(title.y + title.height);
+      await session.setViewportSize({ width: 720, height: 660 });
     } else {
       expect(Math.abs(centerY(viewBox) - centerY(title))).toBeLessThan(1);
     }
+    const titleTextTop = await textTop(heading);
+    expect(Math.abs((await textTop(view)) - titleTextTop)).toBeLessThan(0.25);
+    expect(Math.abs((await textTop(undo)) - titleTextTop)).toBeLessThan(0.25);
+    if (px === 20) await session.setViewportSize({ width: 320, height: 660 });
     expect(ratio(await color(archive, "color"), await color(archive, "background-color"))).toBeGreaterThanOrEqual(4.5);
     expect(ratio(
       await color(error, "color"),
