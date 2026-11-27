@@ -242,6 +242,16 @@ it("keeps plugin names and dependency relations aligned with their production ow
     }
   }
   const optional = [
+    ...(["browser", "remoteProject", "visual", "workflow"] as const).map(
+      (owner) =>
+        [
+          owner,
+          "登记内置 MCP",
+          "mcp",
+          `src/plugins/${owner}/index.ts`,
+          "scoped.mcp.registerBuiltin",
+        ] as const,
+    ),
     [
       "skills",
       "插件管理显示 MCP 页",
@@ -488,7 +498,7 @@ it("keeps plugin names and dependency relations aligned with their production ow
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => /^(?:\w+ --> \w+|\w+ -\. ".+" \.-> \w+)$/.test(line));
-  expect(new Set(edges).size).toBe(102);
+  expect(new Set(edges).size).toBe(required.length + weak.length);
   expect(edges.sort()).toEqual([...required, ...weak].sort());
 
   const runtime = createTestDesktopRuntime(
@@ -501,6 +511,20 @@ it("keeps plugin names and dependency relations aligned with their production ow
       await installDesktopWorkbench(context);
       for (const name of plugins.filter((item) => item !== "scheduledTasks"))
         expect(context.get(name), name).toBeDefined();
+      expect(
+        context.mcp.builtins
+          .getState()
+          .map(({ id }) => id)
+          .sort(),
+      ).toEqual(
+        [
+          "aaw-remote-project",
+          "aaw-workflow-authoring",
+          "aaw-workflow-result",
+          ...(context.host.browser.isAvailable() ? ["aaw-browser"] : []),
+          ...(context.host.visualGuide ? ["aaw-visual"] : []),
+        ].sort(),
+      );
     },
   );
   try {
@@ -598,6 +622,25 @@ it("exposes only service and event modules for runtime calls from outside the ow
     }
   }
   expect(violations).toEqual([]);
+});
+
+it("MCP 目录通过服务注册接收内置条目，页面无需导入所属插件", () => {
+  const dependencies = new Set([
+    "mcp",
+    "host",
+    "agents",
+    "project",
+    "diagnostics",
+    "acpRuntime",
+  ]);
+  for (const { path, targets } of productionImports("src/plugins/mcp")) {
+    const imports = targets.filter(
+      (target) =>
+        target.startsWith("src/plugins/") &&
+        !dependencies.has(target.split("/")[2]!),
+    );
+    expect(imports, path).toEqual([]);
+  }
 });
 
 it("rejects config, internal modules and runtime types while preserving the assembly entry", () => {

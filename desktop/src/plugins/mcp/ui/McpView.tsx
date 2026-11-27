@@ -30,8 +30,8 @@ import {
   PageFilterSearch,
 } from "../../../shared/ui/PageFilterControls.tsx";
 import { PlugIcon, PlusIcon, TrashIcon } from "../../../shared/ui/icons.tsx";
-import type { HostService } from "../../host/service.ts";
-import { useBrowserAgentControl } from "../../browser/service.ts";
+import type { BuiltinMcp } from "../service.ts";
+import { useBuiltinControls } from "./builtinControls.ts";
 import {
   duplicateNameMessage,
   type McpManagement,
@@ -59,10 +59,14 @@ type EntryAction =
   | { kind: "toggle"; name: string; enabled: boolean }
   | { kind: "remove"; name: string };
 
-const browserName = "AAW 内置浏览器";
+const noBuiltins: readonly BuiltinMcp[] = [];
 
-function isBrowserServer(name: string) {
-  return /^aaw-browser-[0-9a-f]{24}$/i.test(name);
+function builtinKey(entry: BuiltinMcp) {
+  return `${entry.id}:1`;
+}
+
+function matchesBuiltin(entry: BuiltinMcp, name: string) {
+  return entry.id === name || entry.matchesServer?.(name) === true;
 }
 
 function errorMessage(error: unknown) {
@@ -258,7 +262,7 @@ export function McpView({
   service,
   agentId,
   activeProfile,
-  browser,
+  builtins = noBuiltins,
   canManageNative,
   nativeTransports = [],
   canManageInjected,
@@ -272,7 +276,7 @@ export function McpView({
   service: McpManagement | null;
   agentId: string;
   activeProfile: string | null;
-  browser: HostService["browser"];
+  builtins?: readonly BuiltinMcp[];
   canManageNative: boolean;
   nativeTransports?: readonly NativeMcpDraft["transport"][];
   canManageInjected: boolean;
@@ -329,9 +333,9 @@ export function McpView({
     new Map<string, { head: string; observed: Set<string> }>(),
   );
   const [failure, setFailure] = useState<string | null>(null);
-  const browserControl = useBrowserAgentControl(browser);
+  const { states: builtinControls, change: changeBuiltin } =
+    useBuiltinControls(builtins);
   const inspector = service?.host.inspection;
-  const browserKey = "aaw-browser:1";
   const native = useLoad(
     () =>
       service && canManageNative
@@ -358,26 +362,42 @@ export function McpView({
         : Promise.resolve(null),
     [service, agentId, canManageInjected, refresh],
   );
-  const browserTools = useLoad(
-    () =>
-      inspector && browserControl.available
-        ? inspector.browserTools()
-        : Promise.resolve(null),
-    [inspector, browserControl.available, refresh],
+  const builtinTools = useLoad(
+    async () =>
+      new Map(
+        await Promise.all(
+          builtins.map(
+            async (entry) =>
+              [
+                entry,
+                await Promise.resolve()
+                  .then(() => entry.tools?.read())
+                  .catch(() => undefined),
+              ] as const,
+          ),
+        ),
+      ),
+    [builtins, refresh],
   );
-  const browserRegistration = useLoad(
-    () =>
-      sessionId && browserControl.available && browserControl.enabled
-        ? browser.mcpRegistration(sessionId)
-        : Promise.resolve(null),
-    [
-      browser,
-      browserControl.available,
-      browserControl.enabled,
-      sessionId,
-      runtime,
-      refresh,
-    ],
+  const builtinRegistrations = useLoad(
+    async () =>
+      new Map(
+        await Promise.all(
+          builtins.map(
+            async (entry) =>
+              [
+                entry,
+                sessionId &&
+                (!entry.enabled || builtinControls.get(entry)?.enabled === true)
+                  ? await Promise.resolve()
+                      .then(() => entry.registration?.(sessionId))
+                      .catch(() => null)
+                  : undefined,
+              ] as const,
+          ),
+        ),
+      ),
+    [builtins, builtinControls, sessionId, runtime, refresh],
   );
   const targets = useMemo(() => {
     const list: Existing[] = [];
@@ -443,13 +463,19 @@ export function McpView({
         },
       ];
     });
-    if (browserControl.available && browserControl.enabled !== null)
-      available.unshift({
-        key: browserKey,
-        enabled: browserControl.enabled,
-        manualOnly: false,
-        run: () => inspector.probeBrowser(),
-      });
+    for (const entry of builtins) {
+      const policy = entry.tools;
+      const enabled = entry.enabled
+        ? builtinControls.get(entry)?.enabled
+        : true;
+      if (policy && typeof enabled === "boolean")
+        available.push({
+          key: builtinKey(entry),
+          enabled,
+          manualOnly: false,
+          run: () => policy.probe(),
+        });
+    }
     return available;
   }, [
     service,
@@ -460,8 +486,8 @@ export function McpView({
     nativeWorkspace,
     agentId,
     inspectionProfile,
-    browserControl.available,
-    browserControl.enabled,
+    builtins,
+    builtinControls,
   ]);
 
   const runCheck = useCallback(
@@ -527,7 +553,8 @@ export function McpView({
     };
   }, [inspector, jobs, runCheck, canManageNative, native.isLoading]);
   const names = new Map<string, number>();
-  if (browserControl.available) names.set(browserName, 1);
+  for (const entry of builtins)
+    names.set(entry.name, (names.get(entry.name) ?? 0) + 1);
   for (const {
     entry: { name },
   } of targets)
@@ -550,13 +577,47 @@ export function McpView({
     if (health[key]) return health[key].ok ? "检测成功" : "连接异常";
     return "未检测";
   }
-  const browserRuntimeName = browserRegistration.data?.endpointName ?? "";
-  const browserStatus = summary(
-    browserRuntimeName,
-    browserKey,
-    browserControl.enabled,
-    browserRegistration.data?.handshakeComplete === true,
-  );
+  function builtinStatus(entry: BuiltinMcp) {
+    const registration = builtinRegistrations.data?.get(entry);
+    const enabled = entry.enabled
+      ? (builtinControls.get(entry)?.enabled ?? null)
+      : true;
+    const failed = Array.from(failures).find((name) =>
+      entry.registration
+        ? name === registration?.name
+        : matchesBuiltin(entry, name),
+    );
+    const status = summary(
+      failed ?? "",
+      builtinKey(entry),
+      enabled,
+      entry.registration
+        ? registration?.connected === true
+        : Array.from(runtimeServers).some((name) =>
+            matchesBuiltin(entry, name),
+          ),
+    );
+    return status === "未检测" ? "未确认" : status;
+  }
+
+  function builtinToolList(entry: BuiltinMcp) {
+    const tools = builtinTools.data?.get(entry)?.tools;
+    if (tools) return tools;
+    const reported = Object.entries(runtime?.mcpToolsByServer ?? {}).filter(
+      ([name]) => matchesBuiltin(entry, name),
+    );
+    if (reported.length === 0) return undefined;
+    return [
+      ...new Set(
+        reported.flatMap(([name, items]) =>
+          items.map((item) => {
+            const prefix = `mcp__${name}__`;
+            return item.startsWith(prefix) ? item.slice(prefix.length) : item;
+          }),
+        ),
+      ),
+    ].map((name) => ({ name }));
+  }
   function statusOf(target: Existing) {
     const name = target.entry.name;
     const usesNative =
@@ -612,28 +673,36 @@ export function McpView({
       );
     })
     .sort((left, right) => left.entry.name.localeCompare(right.entry.name));
-  const showBrowser =
-    browserControl.available &&
+  const visibleBuiltins = builtins.filter((entry) =>
     shows(
       [
-        browserName,
-        ...(browserTools.data?.tools.map(({ name }) => name) ?? []),
+        entry.id,
+        entry.name,
+        entry.description,
+        entry.scope,
+        ...(builtinToolList(entry)?.map(({ name }) => name) ?? []),
       ].join(" "),
-      browserControl.enabled,
+      builtinControls.get(entry)?.enabled ?? null,
       "builtin",
-      browserStatus,
-    );
-  const count = targets.length + Number(browserControl.available);
+      builtinStatus(entry),
+    ),
+  );
+  const count = targets.length + builtins.length;
   const enabledCount =
     targets.filter(({ entry }) => entry.enabled).length +
-    Number(browserControl.enabled === true);
+    builtins.filter((entry) => builtinControls.get(entry)?.enabled === true)
+      .length;
   const errorCount =
     targets.filter((target) => statusOf(target) === "连接异常").length +
-    Number(browserStatus === "连接异常");
+    builtins.filter((entry) => builtinStatus(entry) === "连接异常").length;
   const activeToolCount = runtime?.mcpToolsByServer
     ? Object.entries(runtime.mcpToolsByServer).reduce((sum, [name, tools]) => {
         if (failures.has(name)) return sum;
-        const builtIn = name === browserRuntimeName || isBrowserServer(name);
+        const builtIn = builtins.find(
+          (entry) =>
+            matchesBuiltin(entry, name) ||
+            builtinRegistrations.data?.get(entry)?.name === name,
+        );
         const managedEntry = targets.find(
           (target) => target.source === "managed" && target.entry.name === name,
         );
@@ -641,12 +710,12 @@ export function McpView({
           (target) => target.source === "native" && target.entry.name === name,
         );
         if (
-          (builtIn && browserControl.enabled === false) ||
+          (builtIn && builtinControls.get(builtIn)?.enabled === false) ||
           (!builtIn && !hasNative && managedEntry?.entry.enabled === false)
         )
           return sum;
         const disabled = builtIn
-          ? browserTools.data?.disabledTools
+          ? builtinTools.data?.get(builtIn)?.disabledTools
           : !hasNative && managedEntry?.source === "managed"
             ? managedEntry.entry.disabledTools
             : undefined;
@@ -666,8 +735,13 @@ export function McpView({
   const current = selection
     ? targets.find((target) => targetKey(target) === selection)
     : undefined;
-  const hasBrowserDetail = selection === browserKey && browserControl.available;
-  const isDetailVisible = Boolean(hasBrowserDetail || current);
+  const currentBuiltin = builtins.find(
+    (entry) => builtinKey(entry) === selection,
+  );
+  const builtinError = builtins
+    .map((entry) => builtinControls.get(entry)?.error)
+    .find(Boolean);
+  const isDetailVisible = Boolean(currentBuiltin || current);
   const isDetailOpen = isDetailVisible && !isDetailClosing;
   function closeDetail(restoreFocus = true) {
     if (restoreFocus) detailTrigger.current?.focus({ preventScroll: true });
@@ -693,23 +767,25 @@ export function McpView({
     mutate(target, { kind: "toggle", name: target.entry.name, enabled });
   }
 
-  function browserToggle() {
+  function builtinToggle(entry: BuiltinMcp) {
+    if (!entry.enabled) return undefined;
+    const control = builtinControls.get(entry);
     return (
       <ToggleSwitch
-        label={browserName + " 启用"}
-        checked={browserControl.enabled === true}
-        pending={browserControl.pending}
-        disabled={browserControl.enabled === null}
-        onChange={browserControl.change}
+        label={entry.name + " 启用"}
+        checked={control?.enabled === true}
+        pending={control?.pending}
+        disabled={typeof control?.enabled !== "boolean"}
+        onChange={(enabled) => changeBuiltin(entry, enabled)}
       />
     );
   }
 
-  function testButton(key: string) {
+  function testButton(key: string, requiresEnabled = false) {
     const job = jobs.find((candidate) => candidate.key === key);
     return (
       job &&
-      (key !== browserKey || job.enabled) && (
+      (!requiresEnabled || job.enabled) && (
         <ActionButton
           tone="secondary"
           size="compact"
@@ -765,27 +841,38 @@ export function McpView({
     };
   }
 
+  function setBuiltinTools(
+    entry: BuiltinMcp,
+    names: readonly string[],
+    enabled: boolean,
+  ) {
+    const policy = entry.tools;
+    if (!policy) return;
+    const key = builtinKey(entry);
+    queueWrite(
+      names.map((name) => toolKey(key, name)),
+      async () => {
+        const disabledTools = await policy.setEnabled(names, enabled);
+        builtinTools.patch((data) => {
+          const current = data.get(entry);
+          return current
+            ? new Map(data).set(entry, { ...current, disabledTools })
+            : data;
+        });
+      },
+    );
+  }
+
   function setTools(
-    target: ManagedExisting | null,
+    target: ManagedExisting,
     tools: readonly string[],
     enabled: boolean,
   ) {
     if (!inspector) return;
-    const key = target ? targetKey(target) : browserKey;
+    const key = targetKey(target);
     queueWrite(
       tools.map((name) => toolKey(key, name)),
       async () => {
-        if (!target) {
-          const receipt = await inspector.setBrowserTools(tools, enabled);
-          browserTools.patch(
-            (data) =>
-              data && {
-                ...data,
-                disabledTools: receipt,
-              },
-          );
-          return;
-        }
         const { expected, accept } = revisionFor(target);
         const revision = accept(
           await inspector.setManagedTools(
@@ -901,7 +988,7 @@ export function McpView({
   ) {
     if (
       change.draft.name !== change.previousName &&
-      change.draft.name === browserName
+      builtins.some((entry) => entry.name === change.draft.name)
     )
       throw new Error(duplicateNameMessage);
   }
@@ -1089,7 +1176,7 @@ export function McpView({
                 onChange={setTransportFilter}
                 options={[
                   { value: "all", label: "全部方式" },
-                  ...(browserControl.available
+                  ...(builtins.length
                     ? [{ value: "builtin", label: "内置工具" }]
                     : []),
                   ...availableTransports.map((value) => ({
@@ -1137,26 +1224,29 @@ export function McpView({
                 当前 Agent 的 MCP 配置管理暂未接入。
               </p>
             )}
-            {showBrowser && (
-              <h2 className="text-ui-caption text-ink-mute">内置工具 (1)</h2>
+            {visibleBuiltins.length > 0 && (
+              <h2 className="text-ui-caption text-ink-mute">
+                AAW 内置 ({visibleBuiltins.length})
+              </h2>
             )}
             <ul aria-label="MCP 服务" className="space-y-2">
-              {showBrowser && (
+              {visibleBuiltins.map((entry) => (
                 <McpServiceRow
-                  name={browserName}
-                  detail="内置浏览器工具"
+                  key={builtinKey(entry)}
+                  name={entry.name}
+                  detail={entry.scope}
                   transport="AAW 内置"
-                  status={browserStatus}
-                  selected={isDetailOpen && hasBrowserDetail}
+                  status={builtinStatus(entry)}
+                  selected={isDetailOpen && currentBuiltin === entry}
                   detailsId={detailsId}
                   onSelect={(event) =>
-                    selectDetail(browserKey, event.currentTarget)
+                    selectDetail(builtinKey(entry), event.currentTarget)
                   }
-                  toggle={browserToggle()}
+                  toggle={builtinToggle(entry)}
                 />
-              )}
+              ))}
               {visible.length > 0 && (
-                <li className={showBrowser ? "pt-3" : undefined}>
+                <li className={visibleBuiltins.length > 0 ? "pt-3" : undefined}>
                   <h2 className="text-ui-caption text-ink-mute">
                     外部与自定义服务 ({visible.length})
                   </h2>
@@ -1216,7 +1306,7 @@ export function McpView({
                 正在读取本地 MCP 配置…
               </p>
             )}
-            {!isLoading && !visible.length && !showBrowser && (
+            {!isLoading && !visible.length && !visibleBuiltins.length && (
               <p className="text-ui-sm text-ink-mute">
                 {search || filter !== "all" || transportFilter !== "all"
                   ? "没有匹配的 MCP 服务"
@@ -1232,44 +1322,48 @@ export function McpView({
             sliding
             drawerRef={detailDrawer}
             aria-label={
-              hasBrowserDetail
-                ? browserName + " 详情"
+              currentBuiltin
+                ? currentBuiltin.name + " 详情"
                 : current && current.entry.name + " 详情"
             }
             className="z-10 w-[min(100%,28rem)] min-w-0 flex-col overflow-auto border-l border-line bg-base @min-[48rem]:w-(--mcp-drawer-width)"
           >
-            {hasBrowserDetail ? (
+            {currentBuiltin ? (
               <McpServiceDetails
-                key={browserKey}
-                name={browserName}
+                key={builtinKey(currentBuiltin)}
+                name={currentBuiltin.name}
                 transport="AAW 内置"
-                description="内置浏览器工具，提供导航、页面读取和交互等能力。"
-                summary={browserStatus}
+                description={currentBuiltin.description}
+                summary={builtinStatus(currentBuiltin)}
                 connection={[
-                  ["控制范围", "Desktop 全局"],
-                  ["当前状态", browserStatus],
+                  ["适用场景", currentBuiltin.scope],
+                  ["当前状态", builtinStatus(currentBuiltin)],
                 ]}
-                health={health[browserKey]}
+                health={health[builtinKey(currentBuiltin)]}
                 config={{
-                  name: browserName,
-                  enabled: browserControl.enabled,
+                  id: currentBuiltin.id,
+                  name: currentBuiltin.name,
+                  enabled: builtinControls.get(currentBuiltin)?.enabled,
                   transport: "builtin",
-                  disabledTools: browserTools.data?.disabledTools,
+                  disabledTools:
+                    builtinTools.data?.get(currentBuiltin)?.disabledTools,
                 }}
-                tools={browserTools.data?.tools}
-                disabledTools={browserTools.data?.disabledTools ?? []}
-                toggle={browserToggle()}
-                actions={testButton(browserKey)}
+                tools={builtinToolList(currentBuiltin)}
+                disabledTools={
+                  builtinTools.data?.get(currentBuiltin)?.disabledTools ?? []
+                }
+                toggle={builtinToggle(currentBuiltin)}
+                actions={testButton(builtinKey(currentBuiltin), true)}
                 onToggleTools={
-                  inspector
+                  currentBuiltin.tools
                     ? (tools, enabled) => {
-                        void setTools(null, tools, enabled);
+                        setBuiltinTools(currentBuiltin, tools, enabled);
                       }
                     : undefined
                 }
                 onClose={closeDetail}
                 isToolPending={(name) =>
-                  pendingWrites.has(toolKey(browserKey, name))
+                  pendingWrites.has(toolKey(builtinKey(currentBuiltin), name))
                 }
               />
             ) : (
@@ -1385,12 +1479,12 @@ export function McpView({
             )}
           </EdgeDrawer>
         </div>
-        {((failure && !confirmation) || browserControl.error) && (
+        {((failure && !confirmation) || builtinError) && (
           <div
             role="alert"
             className="flex items-center gap-2 px-6 pb-4 text-ui-sm text-danger-ink"
           >
-            <span>{failure ?? browserControl.error}</span>
+            <span>{failure ?? builtinError}</span>
             {hasWriteConflict && (
               <ActionButton tone="secondary" size="compact" onClick={retryRead}>
                 重新读取配置

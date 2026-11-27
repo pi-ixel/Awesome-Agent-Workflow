@@ -1,4 +1,5 @@
 import type { Context } from "cordis";
+import type {} from "../mcp/service.ts";
 import type { GitDiff, GitSnapshot } from "../host/types.ts";
 import type { RemoteProjectService } from "./service.ts";
 import type {
@@ -198,6 +199,15 @@ export function apply(ctx: Context): void {
   };
 
   ctx.provide(name, service);
+  ctx.inject(["mcp"], (scoped) => {
+    scoped.effect(() => scoped.mcp.registerBuiltin({
+      id: "aaw-remote-project",
+      name: "远程项目工具",
+      description: "提供当前远程项目及关联目录的操作。",
+      scope: "SSH 项目会话",
+      matchesServer: (name) => /^aaw-remote-project(?:-\d+)?$/.test(name),
+    }), "remoteProject:mcp-catalog");
+  });
 
   const unregisterFiles = ctx.host.registerRemoteDocumentFiles(
     createRemoteDocumentFileProvider(service),

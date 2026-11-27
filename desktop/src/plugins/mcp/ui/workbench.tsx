@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useSyncExternalStore } from "react";
 import { useStore } from "zustand";
 import type { AgentsService } from "../../agents/service.ts";
 import type { ProjectService } from "../../project/service.ts";
-import type { HostService } from "../../host/service.ts";
+import type { McpService } from "../service.ts";
 import type { McpManagement } from "../runtime/management.ts";
 import { activeMcpProfile } from "../runtime/profile.ts";
 
@@ -14,17 +14,18 @@ export function McpWorkbench({
   agents,
   project,
   service,
-  browser,
+  builtins,
 }: {
   agents: AgentsService;
   project: ProjectService;
   service: McpManagement | null;
-  browser: HostService["browser"];
+  builtins: McpService["builtins"];
 }) {
   const agentId = useStore(
     agents.configuration,
     (state) => state.activeAgentId,
   );
+  const builtinEntries = useStore(builtins);
   const subscribe = useCallback(
     (notify: () => void) => {
       const stop = [
@@ -75,7 +76,7 @@ export function McpWorkbench({
         service={service}
         agentId={agentId}
         activeProfile={profile}
-        browser={browser}
+        builtins={builtinEntries}
         canManageNative={!!capabilities?.native}
         nativeTransports={capabilities?.native?.editableTransports}
         canManageInjected={!!capabilities?.injection}

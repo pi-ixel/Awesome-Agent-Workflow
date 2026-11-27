@@ -1,6 +1,7 @@
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
+import { Context } from "cordis";
 import type {
   McpManagementHost,
   ManagedMcpSnapshot,
@@ -18,6 +19,8 @@ import { McpView } from "../../../src/plugins/mcp/ui/McpView.tsx";
 import { parseMcpImport } from "../../../src/plugins/mcp/runtime/importConfig.ts";
 import { McpWorkbench } from "../../../src/plugins/mcp/ui/workbench.tsx";
 import { BrowserAgentControlSettings } from "../../../src/plugins/browser/service.ts";
+import { browserMcpContribution } from "../../../src/plugins/browser/domain/mcpContribution.ts";
+import { createBuiltinMcpRegistry } from "../../../src/plugins/mcp/runtime/builtinRegistry.ts";
 import { codeAgentAdapter } from "../../../src/plugins/agents/enhancements/codeagent/adapter.ts";
 import type { ProjectService } from "../../../src/plugins/project/service.ts";
 import { createTestBrowserHost } from "../../helpers/browserHost.ts";
@@ -47,7 +50,6 @@ it("服务开关逐项更新，连续写入使用新版本，筛选结果同步�
       service={service}
       agentId="chrys"
       activeProfile={null}
-      browser={createTestBrowserHost()}
       canManageNative
       canManageInjected
       canTest
@@ -103,7 +105,6 @@ it("表单和 JSON 导入共用弹窗，切换保留草稿，预览后才写入"
       service={service}
       agentId="chrys"
       activeProfile={null}
-      browser={createTestBrowserHost()}
       canManageNative
       canManageInjected
       canTest
@@ -216,7 +217,7 @@ it("复用已保存的检测结果，展示工具权限并按服务版本提交"
       service={service}
       agentId="chrys"
       activeProfile={null}
-      browser={browser}
+      builtins={[browserMcpContribution(browser, service.host.inspection)]}
       canManageNative
       canManageInjected
       canTest
@@ -594,7 +595,6 @@ it("CodeAgent 工作区条目仅手动检测，列表和批量检测不会启动
       service={service}
       agentId="codeagent"
       activeProfile={null}
-      browser={createTestBrowserHost()}
       canManageNative
       canManageInjected
       canTest={false}
@@ -712,7 +712,6 @@ it("tests the unsaved HTTP draft from the unified card editor and confirms delet
       service={service}
       agentId="chrys"
       activeProfile={null}
-      browser={createTestBrowserHost()}
       canManageNative
       nativeTransports={["stdio", "http"]}
       canManageInjected
@@ -832,7 +831,6 @@ it("opens details on demand, switches cards in place, and dismisses from outside
       service={service}
       agentId="chrys"
       activeProfile={null}
-      browser={createTestBrowserHost()}
       canManageNative
       canManageInjected
       canTest
@@ -881,7 +879,6 @@ it("mixes native and Desktop cards, filters by configured state, and checks exac
       service={service}
       agentId="chrys"
       activeProfile={null}
-      browser={createTestBrowserHost()}
       canManageNative
       nativeTransports={["stdio", "http"]}
       canManageInjected
@@ -952,7 +949,6 @@ it("reloads an externally changed revision in the existing editor and keeps type
       service={service}
       agentId="chrys"
       activeProfile={null}
-      browser={createTestBrowserHost()}
       canManageNative
       canManageInjected
       canTest
@@ -991,10 +987,34 @@ it("reloads an externally changed revision in the existing editor and keeps type
   });
 });
 
-it("shows the built-in browser as a switch-only card with CodeAgent and mirrors the Settings switch", async () => {
+it("内置浏览器卡片与设置开关同步，详情保留工具权限和握手状态", async () => {
   const user = userEvent.setup();
   const browser = createTestBrowserHost();
   const { host } = fixture();
+  vi.spyOn(browser, "mcpRegistration").mockResolvedValue({
+    endpointName: "aaw-browser-0123456789abcdef01234567",
+    handshakeComplete: true,
+  });
+  const setBrowserTools = vi.fn().mockResolvedValue(["browser_open"]);
+  Object.assign(host, {
+    inspection: {
+      read: () => Promise.resolve({}),
+      save: () => Promise.resolve(),
+      browserTools: () =>
+        Promise.resolve({
+          tools: [{ name: "browser_open" }],
+          disabledTools: [],
+        }),
+      probeBrowser: () =>
+        Promise.resolve({
+          ok: true,
+          message: "检测成功",
+          checkedAt: 0,
+          durationMs: 0,
+        }),
+      setBrowserTools,
+    },
+  });
   const recoverSession = vi.fn(() => Promise.resolve());
   const agents = {
     configuration: createStore(() => ({ activeAgentId: "codeagent" })),
@@ -1002,6 +1022,10 @@ it("shows the built-in browser as a switch-only card with CodeAgent and mirrors 
     selectionKey: () => "agent-key",
   } as unknown as AgentsService;
   const service = createMcpManagement(host, agents, () => ({}));
+  const catalog = createBuiltinMcpRegistry();
+  catalog.registerBuiltin(
+    browserMcpContribution(browser, service.host.inspection),
+  );
   const project = {
     projects: {
       workspace: createStore(() => ({ activePath: workspace, toolPaths: {} })),
@@ -1028,7 +1052,7 @@ it("shows the built-in browser as a switch-only card with CodeAgent and mirrors 
         agents={agents}
         project={project}
         service={service}
-        browser={browser}
+        builtins={catalog.builtins}
       />
     </>,
   );
@@ -1048,5 +1072,104 @@ it("shows the built-in browser as a switch-only card with CodeAgent and mirrors 
   expect(recoverSession).not.toHaveBeenCalled();
   expect(
     screen.queryByRole("button", { name: /重连|更多操作/ }),
+  ).not.toBeInTheDocument();
+  const row = within(list).getByRole("article", { name: "AAW 内置浏览器" });
+  await within(row).findByText("已连接");
+  await user.click(within(row).getByRole("button", { name: "AAW 内置浏览器" }));
+  const details = screen.getByRole("complementary", {
+    name: "AAW 内置浏览器 详情",
+  });
+  const tool = await within(details).findByRole("switch", {
+    name: "browser_open 启用",
+  });
+  await user.click(tool);
+  await vi.waitFor(() => expect(tool).not.toBeChecked());
+  expect(setBrowserTools).toHaveBeenCalledExactlyOnceWith(
+    ["browser_open"],
+    false,
+  );
+});
+
+it("独立插件登记后出现，切换会话只更新状态，卸载后移除目录项", async () => {
+  const ctx = new Context();
+  const catalog = createBuiltinMcpRegistry();
+  ctx.provide("mcp", {
+    ...catalog,
+    View: () => null,
+    previewInstall: () => Promise.reject(new Error("测试未接入安装")),
+    commitInstall: () => Promise.reject(new Error("测试未接入安装")),
+  });
+  const agents = {
+    configuration: createStore(() => ({ activeAgentId: "codeagent" })),
+    resolve: () => codeAgentAdapter,
+    selectionKey: () => "agent-key",
+  } as unknown as AgentsService;
+  const session = createStore(() => ({
+    isBound: true,
+    agentKey: "agent-key",
+    activeSessionId: "first",
+  }));
+  const runtime = createStore(() => ({
+    lastSessionId: "first",
+    runtime: {
+      mcpServers: [{ name: "test-runtime", toolCount: 1 }],
+      mcpFailures: [],
+      mcpToolsByServer: { "test-runtime": ["mcp__test-runtime__test_tool"] },
+    },
+  }));
+  const project = {
+    projects: {
+      workspace: createStore(() => ({ activePath: workspace, toolPaths: {} })),
+    },
+    conversation: { foreground: { session, runtime } },
+  } as unknown as ProjectService;
+  render(
+    <McpWorkbench
+      agents={agents}
+      project={project}
+      service={null}
+      builtins={catalog.builtins}
+    />,
+  );
+  const plugin = {
+    name: "test-mcp-catalog",
+    inject: ["mcp"],
+    apply(owner: Context) {
+      owner.effect(
+        () =>
+          owner.mcp.registerBuiltin({
+            id: "test-entry",
+            name: "扩展工具",
+            description: "测试插件注册的工具。",
+            scope: "示例会话",
+            matchesServer: (name) => name === "test-runtime",
+          }),
+        "test:mcp",
+      );
+    },
+  };
+  expect(
+    screen.queryByRole("article", { name: "扩展工具" }),
+  ).not.toBeInTheDocument();
+  await act(async () => {
+    await ctx.plugin(plugin);
+  });
+  const row = await screen.findByRole("article", { name: "扩展工具" });
+  expect(within(row).getByText("已连接")).toBeVisible();
+  expect(within(row).queryByRole("switch")).not.toBeInTheDocument();
+  await userEvent.click(within(row).getByRole("button", { name: "扩展工具" }));
+  expect(screen.getByText("test_tool")).toBeVisible();
+  act(() => session.setState({ activeSessionId: "second" }));
+  expect(screen.getByRole("article", { name: "扩展工具" })).toBe(row);
+  expect(within(row).getByText("未确认")).toBeVisible();
+  expect(screen.queryByText("test_tool")).not.toBeInTheDocument();
+  const [fiber] = ctx.registry.get(plugin)?.fibers ?? [];
+  expect(fiber).toBeDefined();
+  await act(async () => {
+    await fiber!.dispose();
+  });
+  expect(row).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("complementary", { name: "扩展工具 详情" }),
   ).not.toBeInTheDocument();
 });

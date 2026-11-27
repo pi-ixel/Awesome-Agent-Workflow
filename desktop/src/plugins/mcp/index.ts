@@ -4,12 +4,14 @@ import { createMcpManagement } from "./runtime/management.ts";
 import { McpWorkbench } from "./ui/workbench.tsx";
 import type { McpService } from "./service.ts";
 import { activeMcpProfile } from "./runtime/profile.ts";
+import { createBuiltinMcpRegistry } from "./runtime/builtinRegistry.ts";
 
 export const name = "mcp";
 export const inject = ["host", "agents", "project", "diagnostics"];
 
 export function apply(ctx: Context): void {
   const { host, agents, project } = ctx;
+  const catalog = createBuiltinMcpRegistry();
   const management = host.mcp
     ? createMcpManagement(
         host.mcp,
@@ -25,12 +27,13 @@ export function apply(ctx: Context): void {
     return () => unregister?.();
   }, "mcp:resources");
   ctx.provide(name, {
+    ...catalog,
     View: () =>
       createElement(McpWorkbench, {
         agents,
         project,
         service: management,
-        browser: host.browser,
+        builtins: catalog.builtins,
       }),
     previewInstall: (agentId, definitions) =>
       management
