@@ -67,8 +67,16 @@ const TerminalFixture = terminalParams.has("terminal-dock")
 const BrowserFixture = terminalParams.has("browser-appearance")
   ? (await import("./browserAppearanceFixture.tsx")).BrowserAppearanceFixture
   : null;
-const UpdateButtonFixture = terminalParams.has("update-button")
-  ? (await import("./updateButtonFixture.tsx")).UpdateButtonFixture
+const updateFixtures = terminalParams.has("update-button") || terminalParams.has("update-settings") || terminalParams.has("switch-settings")
+  ? await import("./updateButtonFixture.tsx")
+  : null;
+const UpdateFixture = terminalParams.has("switch-settings")
+  ? updateFixtures?.SwitchSettingsFixture
+  : terminalParams.has("update-settings")
+  ? updateFixtures?.UpdateSettingsFixture
+  : updateFixtures?.UpdateButtonFixture;
+const AdditionalSwitchFixture = terminalParams.has("additional-switches")
+  ? (await import("./additionalSwitchFixture.tsx")).AdditionalSwitchFixture
   : null;
 const AnnotationSummaryFixture = terminalParams.has("annotation-summary")
   ? (await import("./annotationSummaryFixture.tsx")).AnnotationSummaryFixture
@@ -169,7 +177,8 @@ createRoot(document.querySelector("#root")!).render(
       )}
       {TerminalFixture && <TerminalFixture />}
       {BrowserFixture && <BrowserFixture />}
-      {UpdateButtonFixture && <UpdateButtonFixture />}
+      {UpdateFixture && <UpdateFixture />}
+      {AdditionalSwitchFixture && <AdditionalSwitchFixture />}
       {AnnotationSummaryFixture && <AnnotationSummaryFixture />}
       {FeedbackFixture && <FeedbackFixture />}
       {StatusFixture && <StatusFixture />}

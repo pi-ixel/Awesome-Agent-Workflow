@@ -1,0 +1,246 @@
+<!doctype html>
+<!--
+Generated from gallery/originals/index.html by tools/build-standalone.mjs.
+
+MIT License
+
+Copyright (c) 2026 guanmo-ai
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ink Switch · UI Moments</title>
+  <link rel="icon" href="data:,">
+  <style>
+    /* Monochrome tokens. Only the Color set adds hues of its own. */
+    :root {
+      color-scheme: light;
+      --page: #fafafa;
+      --surface: #f2f2f3;
+      --raised: #fff;
+      --ink: #18181b;
+      --muted: #6b6b72;
+      --rail: rgb(24 24 27 / .11);
+      --line: rgb(24 24 27 / .09);
+      --accent: #18181b;
+      --on-accent: #fafafa;
+      --accent-soft: rgb(24 24 27 / .07);
+      --danger: var(--ink);
+      --danger-soft: rgb(24 24 27 / .1);
+      --shadow: 0 1px 2px rgb(0 0 0 / .1), 0 6px 18px rgb(0 0 0 / .07);
+      --spring: cubic-bezier(.3, 1.45, .5, 1);
+      --ease: cubic-bezier(.16, 1, .3, 1);
+      --font: Geist, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    }
+
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --page: #0b0b0c;
+      --surface: #161618;
+      --raised: #232326;
+      --ink: #fafafa;
+      --muted: #9a9aa1;
+      --rail: rgb(250 250 250 / .13);
+      --line: rgb(250 250 250 / .09);
+      --accent: #fafafa;
+      --on-accent: #0b0b0c;
+      --accent-soft: rgb(250 250 250 / .09);
+      --danger-soft: rgb(250 250 250 / .12);
+      --shadow: 0 1px 2px rgb(0 0 0 / .5), 0 8px 24px rgb(0 0 0 / .35);
+    }
+
+    .sample { min-width: 0; }
+    .stage {
+      position: relative;
+      display: grid;
+      grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+      place-items: center;
+      height: 220px;
+      border-radius: 22px;
+      background: var(--surface);
+      container-type: size;
+      overflow: hidden;
+    }
+    .caption { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 11px 4px 0; }
+    .caption h2 { margin: 0; font-size: 14px; line-height: 1.4; font-weight: 650; }
+    .caption p, .credit { margin: 0; font-size: 12px; color: var(--muted); }
+
+    /* Controls scale with the card; pointer maths always uses real geometry. */
+    .widget { display: grid; place-items: center; transition: scale .3s var(--ease); }
+    @container (max-height: 160px) { .widget { scale: .82; } }
+    @container (max-width: 215px) { .widget { scale: .8; } }
+    @container (max-height: 128px) { .widget { scale: .7; } }
+    @container (max-width: 180px) { .widget { scale: .66; } }
+    @container (min-height: 300px) and (min-width: 440px) { .widget { scale: 1.35; } }
+
+    .ink {
+      position: relative;
+      width: 84px;
+      height: 46px;
+      padding: 0;
+      border: 0;
+      border-radius: 23px;
+      background: var(--rail);
+      overflow: hidden;
+      isolation: isolate;
+    }
+    .ink-fill { position: absolute; inset: 0; background: var(--accent); clip-path: circle(0 at 23px 50%); }
+    .ink[aria-checked="true"] .ink-fill { clip-path: circle(80px at 61px 50%); }
+    .ink-knob {
+      position: absolute;
+      top: 5px;
+      left: 5px;
+      width: 36px;
+      height: 36px;
+      border-radius: 18px;
+      background: var(--raised);
+      box-shadow: var(--shadow);
+      transition: translate .52s var(--spring);
+    }
+    .ink-knob::after {
+      position: absolute;
+      inset: 12px;
+      content: '';
+      border-radius: 50% 50% 50% 50% / 58% 58% 42% 42%;
+      background: var(--accent);
+      transition: scale .42s var(--spring) .26s;
+    }
+    .ink[aria-checked="true"] .ink-knob { translate: 38px 0; }
+    .ink[aria-checked="true"] .ink-knob::after { scale: 0; transition-delay: 0s; transition-duration: .22s; }
+    .ink-splash i { position: absolute; top: 50%; left: 23px; width: 5px; height: 5px; margin: -2.5px; border-radius: 50%; background: var(--accent); opacity: 0; pointer-events: none; }
+    .ink:hover .ink-knob { box-shadow: var(--shadow), 0 0 0 4px var(--accent-soft); }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition-duration: 0s !important; transition-delay: 0s !important; }
+    }
+    .stage,.caption{-webkit-user-select:none;user-select:none}.stage :is(textarea,[contenteditable]:not([contenteditable=false]),input:not([type=range],[type=radio],[type=checkbox],[type=button],[type=file])){-webkit-user-select:text;user-select:text}.stage{--press-ease: cubic-bezier(.2,.8,.2,1);--return-ease: cubic-bezier(.2,.9,.34,1.16);--press-duration: 45ms}.stage :where(button,label[for]){cursor:pointer}.stage :where(button,label[for],[role=slider],[tabindex="0"]):focus-visible{outline:2px solid var(--accent);outline-offset:3px}@media(hover:hover)and (pointer:fine){.stage :where(button:not(:disabled,[aria-disabled=true]),label[for]):hover{opacity:.91}}.stage :where(button:not(:disabled,[aria-disabled=true]),label[for]):active{opacity:.78;transition:opacity var(--press-duration) var(--press-ease)}.stage [data-pointer-active]{cursor:var(--active-cursor, grabbing)}@media(prefers-reduced-motion:reduce){.stage{--press-duration: 0s}}
+
+    *, *::before, *::after { box-sizing: border-box; }
+    body { min-height: 100vh; min-height: 100svh; display: grid; place-items: center; margin: 0; background: var(--page); color: var(--ink); font: 400 14px/1.6 system-ui, sans-serif; }
+    main { width: min(100%, 450px); padding: 20px; }
+    button, output { font: inherit; color: inherit; }
+    button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+    .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; font-size: 12px; }
+    .theme { min-height: 40px; padding: 4px 12px; border: 1px solid var(--line); border-radius: 10px; background: none; }
+    .theme[aria-pressed="true"] { background: var(--surface); }
+    footer { margin-top: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="toolbar">
+      <span>UI Moments</span>
+      <button type="button" class="theme" id="theme" aria-pressed="false">Dark theme</button>
+    </header>
+    <section class="sample" id="ink-switch" aria-labelledby="ink-title">
+      <div class="stage">
+        <div class="widget">
+          <button class="ink" type="button" role="switch" aria-checked="false" aria-label="Ink Switch">
+            <span class="ink-fill" aria-hidden="true"></span>
+            <span class="ink-splash" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="ink-knob" aria-hidden="true"></span>
+          </button>
+        </div>
+      </div>
+      <div class="caption"><h2 id="ink-title">Ink Switch</h2><p>Tap to toggle</p></div>
+    </section>
+    <footer><small class="credit">guanmo-ai · MIT</small></footer>
+  </main>
+  <script>
+    (() => {
+
+      const root = document.documentElement;
+      const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+      const motionEnabled = () => !reducedMotion.matches && root.dataset.galleryActive !== 'false';
+      const $ = (selector, scope = document) => scope.querySelector(selector);
+      const $$ = (selector, scope = document) => Array.from(scope.querySelectorAll(selector));
+      const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+      {
+        const ink = $('.ink');
+        const fill = $('.ink-fill', ink);
+        const knob = $('.ink-knob', ink);
+        const splash = $$('.ink-splash i', ink);
+        let motions = [];
+
+        function cancelMotions() {
+          motions.forEach(motion => motion.cancel());
+          motions = [];
+        }
+        reducedMotion.addEventListener('change', cancelMotions);
+
+        ink.addEventListener('click', () => {
+          const on = ink.getAttribute('aria-checked') !== 'true';
+          ink.setAttribute('aria-checked', String(on));
+          ink.dispatchEvent(new Event('change', { bubbles: true }));
+          cancelMotions();
+          if (!motionEnabled()) return;
+          const easing = 'cubic-bezier(.2,.75,.25,1)';
+          motions.push(knob.animate([
+            { scale: '1 1' },
+            { scale: '1.3 .84', offset: .32 },
+            { scale: '.94 1.06', offset: .68 },
+            { scale: '1 1' },
+          ], { duration: 520, easing: 'cubic-bezier(.3,.7,.4,1)' }));
+          if (on) {
+            motions.push(fill.animate([
+              { clipPath: 'circle(0px at 23px 50%)' },
+              { clipPath: 'circle(14px at 23px 50%)', offset: .18 },
+              { clipPath: 'circle(80px at 23px 50%)' },
+            ], { duration: 640, easing }));
+            splash.forEach((drop, index) => {
+              const angle = (-60 + index * 60) * Math.PI / 180;
+              const x = Math.cos(angle) * (22 + index * 4), y = Math.sin(angle) * 14;
+              motions.push(drop.animate([
+                { opacity: 1, transform: 'translate(0, 0) scale(1)' },
+                { opacity: 1, transform: `translate(${x}px, ${y}px) scale(.9)`, offset: .55 },
+                { opacity: 0, transform: `translate(${x * 1.25}px, ${y * 1.25}px) scale(0)` },
+              ], { duration: 460, delay: 40 + index * 30, easing: 'cubic-bezier(.2,.8,.3,1)' }));
+            });
+          } else {
+            motions.push(fill.animate([
+              { clipPath: 'circle(80px at 61px 50%)' },
+              { clipPath: 'circle(18px at 61px 50%)', offset: .7 },
+              { clipPath: 'circle(0px at 61px 50%)' },
+            ], { duration: 460, easing: 'cubic-bezier(.5,0,.3,1)' }));
+          }
+        });
+      }
+
+      const theme = $('#theme');
+      const systemTheme = matchMedia('(prefers-color-scheme: dark)');
+      function setTheme(dark) {
+        root.dataset.theme = dark ? 'dark' : 'light';
+        theme.setAttribute('aria-pressed', String(dark));
+      }
+      function followSystemTheme() { setTheme(systemTheme.matches); }
+      followSystemTheme();
+      systemTheme.addEventListener('change', followSystemTheme);
+      theme.addEventListener('click', () => {
+        systemTheme.removeEventListener('change', followSystemTheme);
+        setTheme(root.dataset.theme !== 'dark');
+      });
+    })();
+  </script>
+</body>
+</html>

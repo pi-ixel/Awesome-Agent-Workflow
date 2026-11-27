@@ -24,6 +24,111 @@
   }
 }
 
+/* Compact ToggleSwitch motion inspired by UI Moments (guanmo-ai, MIT). */
+.ink-switch-track {
+  position: relative;
+  display: block;
+  flex-shrink: 0;
+  inline-size: calc(32 * var(--ui-icon-unit));
+  --ink-switch-height: calc(18 * var(--ui-icon-unit));
+  --ink-switch-gap: calc(2 * var(--ui-icon-unit));
+  --ink-switch-knob-size: calc(var(--ink-switch-height) - 2 * var(--ink-switch-gap));
+  --ink-switch-knob-shadow: 0 0 2px color-mix(in oklab, var(--color-overlay-shade) 12%, transparent);
+  block-size: var(--ink-switch-height);
+  @supports (block-size: round(nearest, 1px, 1px)) {
+    /* 先取整上下留白，再从轨道高度推导圆钮尺寸。 */
+    --ink-switch-height: round(nearest, calc(18 * var(--ui-icon-unit)), var(--ink-switch-pixel, 1px));
+    --ink-switch-gap: round(nearest, calc(2 * var(--ui-icon-unit)), var(--ink-switch-pixel, 1px));
+  }
+  inline-size: round(nearest, calc(32 * var(--ui-icon-unit)), var(--ink-switch-pixel, 1px));
+  --ink-switch-off: color-mix(in oklab, var(--color-ink) 30%, transparent);
+  --ink-switch-on: var(--color-ink);
+  background: var(--ink-switch-off);
+  isolation: isolate;
+  overflow: hidden;
+}
+.ink-switch-fill {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--color-ink);
+  clip-path: circle(0 at 27.38% 50%);
+}
+.ink-switch-knob {
+  position: absolute;
+  inset-block-start: var(--ink-switch-gap);
+  inset-inline-start: var(--ui-icon-unit);
+  inline-size: var(--ink-switch-knob-size);
+  block-size: var(--ink-switch-knob-size);
+  background: var(--color-base);
+  box-shadow: var(--ink-switch-knob-shadow);
+  transition: inset-inline-start 520ms cubic-bezier(.3, 1.45, .5, 1);
+}
+.ink-switch-track[data-checked="true"] {
+  background: var(--ink-switch-on);
+}
+.ink-switch-track[data-checked="true"] .ink-switch-knob {
+  inset-inline-start: calc(100% - var(--ink-switch-knob-size) - var(--ui-icon-unit));
+}
+.ink-switch-dot {
+  position: absolute;
+  inset: 33.333%;
+  background: var(--color-ink);
+  transition: scale 420ms cubic-bezier(.3, 1.45, .5, 1) 260ms;
+}
+.ink-switch-track[data-checked="true"] .ink-switch-dot {
+  scale: 0;
+  transition-delay: 0ms;
+  transition-duration: 220ms;
+}
+.ink-switch-drop {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 27.38%;
+  inline-size: calc(2 * var(--ui-icon-unit));
+  block-size: calc(2 * var(--ui-icon-unit));
+  transform: translate(-50%, -50%);
+  background: var(--color-ink);
+  opacity: 0;
+}
+@media (hover: hover) and (pointer: fine) {
+  label:has(input:not(:disabled, [aria-busy="true"])):hover > .ink-switch-track .ink-switch-knob {
+    box-shadow: var(--ink-switch-knob-shadow), 0 0 0 calc(1.5 * var(--ui-icon-unit)) color-mix(in oklab, var(--color-ink) 14%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ink-switch-dot,
+  .ink-switch-knob {
+    transition: none;
+  }
+}
+@media (forced-colors: active) {
+  .ink-switch-track {
+    --ink-switch-on: Highlight;
+    forced-color-adjust: none;
+    outline: 1px solid ButtonText;
+    outline-offset: -1px;
+  }
+  .ink-switch-fill,
+  .ink-switch-dot,
+  .ink-switch-drop,
+  .ink-switch-knob {
+    forced-color-adjust: none;
+  }
+  .ink-switch-fill {
+    background: Highlight;
+  }
+  .ink-switch-knob {
+    background: ButtonText;
+  }
+  .ink-switch-dot {
+    background: ButtonFace;
+  }
+  .ink-switch-track[data-checked="true"] .ink-switch-knob {
+    background: HighlightText;
+  }
+}
+
 [data-icon-hover-button][data-icon-button-size] {
   --icon-button-box: 28px;
   --icon-button-glyph: 16;

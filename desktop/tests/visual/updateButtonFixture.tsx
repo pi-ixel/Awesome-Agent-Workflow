@@ -1,6 +1,10 @@
 import { createStore } from "zustand";
+import type { ComponentType } from "react";
+import { BrowserAgentControlSettings } from "../../src/plugins/browser/service.ts";
+import { apply as applyScheduledTasks } from "../../src/plugins/scheduledTasks/index.ts";
 import type { UpdateState } from "../../src/plugins/updates/types.ts";
-import { UpdateButton } from "../../src/plugins/updates/ui/DesktopUpdate.tsx";
+import { UpdateButton, UpdateSettings } from "../../src/plugins/updates/ui/DesktopUpdate.tsx";
+import { createTestBrowserHost } from "../helpers/browserHost.ts";
 
 const state = createStore<UpdateState>(() => ({
   snapshot: {
@@ -37,7 +41,7 @@ const state = createStore<UpdateState>(() => ({
       autoDownload: true,
       server: "",
       acceleration: true,
-      contribute: false,
+      contribute: true,
     },
   },
   initialization: { phase: "ready" },
@@ -67,3 +71,50 @@ export function UpdateButtonFixture() {
     </section>
   );
 }
+
+export function UpdateSettingsFixture() {
+  const noop = () => Promise.resolve();
+  return <UpdateSettings updates={{
+    ...updates,
+    reloadStatus: noop,
+    check: noop,
+    download: noop,
+    savePreferences: (patch) => {
+      const snapshot = state.getState().snapshot;
+      if (snapshot) state.setState({ snapshot: { ...snapshot, preferences: { ...snapshot.preferences, ...patch } } });
+      return Promise.resolve();
+    },
+    install: () => Promise.reject(new Error("The visual fixture does not install updates")),
+    openFolder: noop,
+  }} />;
+}
+
+export function SwitchSettingsFixture() {
+  return <>
+    <UpdateSettingsFixture />
+    {TraySettings && <TraySettings />}
+    <BrowserAgentControlSettings host={browser} />
+  </>;
+}
+
+let TraySettings: ComponentType | undefined;
+if (new URLSearchParams(window.location.search).has("switch-settings")) {
+  await applyScheduledTasks({
+    host: {
+      isNative: () => false,
+      storage: { getItem: () => null },
+      window: { setCloseToTray: async () => {} },
+    },
+    provide() {},
+    effect(register: () => void, label?: string) {
+      if (label !== "scheduledTasks:resources") register();
+    },
+    workbench: {
+      register(slot: string, spec: { View: ComponentType }) {
+        if (slot === "settings") TraySettings = spec.View;
+      },
+    },
+  } as unknown as Parameters<typeof applyScheduledTasks>[0]);
+}
+
+const browser = createTestBrowserHost();
