@@ -307,8 +307,11 @@ test("提问轨道支持键盘跨越虚拟窗口，换肤时保留当前提问�
     expect(marker!.x + marker!.width).toBeLessThanOrEqual(row!.x + row!.width + 1);
   }
   await session.bringToFront();
+  // 先结束虚拟列表滚动，避免滚动事件关闭新打开的悬停预览。
+  await last.scrollIntoViewIfNeeded();
+  await expect(last).toBeInViewport({ ratio: 1 });
   await session.mouse.move(0, 0);
-  await last.hover();
+  await last.hover({ position: { x: 8, y: 5 } });
   await expect(last.locator("span")).toHaveCSS("background-color", "rgb(38, 38, 38)");
   await expect.poll(async () => (await last.locator("span").boundingBox())?.width ?? 0)
     .toBeGreaterThan(12);
