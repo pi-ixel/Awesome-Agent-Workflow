@@ -367,7 +367,7 @@
 .workflow-draft-knowledge-list { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
 .workflow-draft-knowledge-chip { display:inline-flex; align-items:center; border:1px solid var(--color-line); border-radius:var(--radius-control); background:var(--color-surface); overflow:hidden; transition:border-color .15s ease; }
 .workflow-draft-knowledge-chip:hover { border-color:var(--color-line-strong); }
-.workflow-draft-knowledge-open { display:inline-flex; align-items:center; gap:4px; border-radius:var(--radius-flat); padding-inline:8px; font-size:var(--text-ui-xs); }
+.workflow-draft-knowledge-open { border-radius:var(--radius-flat); }
 .workflow-draft-knowledge-remove { border-left:1px solid var(--color-line); border-radius:var(--radius-flat); }
 .workflow-draft-knowledge-existing { display:grid; gap:6px; padding:10px 12px; border:1px solid var(--color-line); border-radius:var(--radius-control); background:var(--color-surface); }
 .workflow-draft-knowledge-area { min-height:280px; max-height:52vh; line-height:1.65; resize:vertical; }

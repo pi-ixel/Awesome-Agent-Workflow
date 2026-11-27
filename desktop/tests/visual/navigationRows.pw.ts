@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { blend, color, ratio } from "./contrast.ts";
+import { expectCenteredAction } from "./actionButtonGeometry.ts";
 
 for (const theme of ["暖白", "暗夜"]) {
   test(`${theme} 下的五种导航行在三档字号下保留点击区、悬停和键盘焦点`, async ({
@@ -260,6 +261,7 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
       "font-size",
       size + "px",
     );
+    await expectCenteredAction(skillAction);
     await expect(task).toHaveAttribute("aria-current", "true");
     await expect(skills).toHaveAttribute("aria-current", "page");
     const glyphs = await nav.locator("button > svg").evaluateAll((icons) =>
@@ -359,6 +361,7 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
     }),
   ).toEqual(skillHeaderStyle);
   const mcpAction = mcpHeader.getByRole("button", { name: "新增 MCP" });
+  await expectCenteredAction(mcpAction);
   await expect(
     collections.getByRole("searchbox", { name: "搜索 MCP" }),
   ).toHaveCSS("font-size", skillFilterFont);

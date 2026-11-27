@@ -127,7 +127,9 @@ export function Callout({
           <div
             className={`min-w-0 flex-1 [overflow-wrap:anywhere] ${compact ? "min-h-(--callout-row) pt-[calc((var(--callout-row)-1lh)/2)]" : ""}`}
           >
-            <div className="font-medium">{title}</div>
+            <div className={compact && actions ? "ui-control-label font-medium" : "font-medium"}>
+              {title}
+            </div>
             {hasBody && <div className="mt-0.5 text-ink-soft">{children}</div>}
             {hasDetails && (
               <Disclosure summary="详情" className="mt-1 text-ink-mute">

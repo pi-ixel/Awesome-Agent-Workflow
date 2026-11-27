@@ -205,7 +205,7 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
         onChange={(values) => updateFilters({ statuses: values })}
       />
       {/* 显示已归档：和两个下拉同高的图标开关，数字是归档了几条；窄屏时不单独占一行。 */}
-      <ActionButton tone="secondary" aria-label="显示已归档" aria-pressed={showArchived}
+      <ActionButton contentLayout="custom" tone="secondary" aria-label="显示已归档" aria-pressed={showArchived}
         {...hintTooltipProps(showArchived ? "隐藏已归档" : "显示已归档")}
         className={`min-h-8 min-w-8 shrink-0 gap-1 px-2 tabular-nums ${showArchived ? "border-ink-faint bg-raised" : "text-ink-soft"}`}
         onClick={() => updateFilters({ showArchived: !showArchived })}>

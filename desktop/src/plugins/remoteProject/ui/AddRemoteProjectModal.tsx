@@ -353,10 +353,10 @@ export function CreateProjectFormBody({
                 aria-label={`切换设备，当前：${deviceLabel}`}
                 onClick={handleToggleMenu}
                 className="inline-flex items-center gap-1.5 rounded-control px-2.5 py-1 text-ui-sm font-medium text-ink"
+                leadingIcon={deviceIcon}
+                trailingIcon={<ChevronDownIcon className="ui-icon-14 shrink-0 text-ink-mute" />}
               >
-                {deviceIcon}
                 {deviceLabel}
-                <ChevronDownIcon className="ui-icon-14 shrink-0 text-ink-mute" />
               </ActionButton>
             )
           }

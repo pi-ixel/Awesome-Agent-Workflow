@@ -123,9 +123,10 @@ export function ProjectFolderFields({
               tone="ghost"
               disabled={disabled}
               onClick={onPick}
-              className={`flex w-full items-center justify-start gap-2 rounded-flat px-3 py-2 text-ui-sm text-ink-mute ${folders.length ? "border-t border-line" : ""}`}
+              className={`w-full gap-2 rounded-flat px-3 py-2 text-ui-sm text-ink-mute ${folders.length ? "border-t border-line" : ""}`}
+              leadingIcon={<PlusIcon className="ui-icon-14 shrink-0" />}
+              align="start"
             >
-              <PlusIcon className="ui-icon-14 shrink-0" />
               添加文件夹
             </ActionButton>
           )}

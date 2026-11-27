@@ -101,11 +101,10 @@ export function RefreshButton({
           {...buttonProps}
           className={`min-w-0 max-w-full whitespace-normal! ${buttonClass}`}
           onClick={handleClick}
+          leadingIcon={glyph}
+          labelOverflow="wrap"
         >
-          {glyph}
-          <span className="min-w-0 text-left [overflow-wrap:anywhere]">
-            {feedback}
-          </span>
+          {feedback}
         </ActionButton>
       ) : (
         <IconButton

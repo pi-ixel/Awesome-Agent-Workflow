@@ -279,7 +279,6 @@
 .aaw-tools .tool-actions > button {
   padding: 6px 7px;
   font-size: var(--text-xs);
-  line-height: 18px;
   border-radius: var(--radius-control);
 }
 .aaw-tools textarea {

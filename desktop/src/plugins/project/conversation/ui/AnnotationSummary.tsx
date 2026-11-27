@@ -131,10 +131,10 @@ export function AnnotationSummary({
           aria-expanded={position !== null}
           aria-controls={position ? panelId : undefined}
           aria-haspopup="dialog"
-          className="inline-flex items-center gap-1.5 rounded-pill! py-1 pl-3 pr-1.5"
+          className="gap-1.5 rounded-pill! px-2.5 py-1"
           onClick={() => open(true)}
+          leadingIcon={<MessageCircleIcon className="ui-icon-14 text-ink-mute" />}
         >
-          <MessageCircleIcon className="ui-icon-14 text-ink-mute" />
           {count} 条评论
         </ActionButton>
         {onClear && (

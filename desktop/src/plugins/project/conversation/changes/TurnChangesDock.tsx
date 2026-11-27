@@ -278,11 +278,11 @@ export function TurnChangesReview({
           size="compact"
           aria-expanded={isExpanded}
           onClick={() => setExpanded((value) => !value)}
+          trailingIcon={<ChevronRightIcon
+            className={`ui-icon-14 ${isExpanded ? "-rotate-90" : "rotate-90"}`}
+          />}
         >
           {isExpanded ? "收起" : "查看 Diff"}
-          <ChevronRightIcon
-            className={`ui-icon-14 ${isExpanded ? "-rotate-90" : "rotate-90"}`}
-          />
         </ActionButton>
       )}
       <IconButton
@@ -480,8 +480,8 @@ export function TurnChangesReview({
                 aria-pressed={hasWrap}
                 className={hasWrap ? "bg-raised text-ink" : ""}
                 onClick={() => setWrap((value) => !value)}
+                leadingIcon={<WrapTextIcon className="ui-icon-14" />}
               >
-                <WrapTextIcon className="ui-icon-14" />
                 换行
               </ActionButton>
               <SegmentedControl

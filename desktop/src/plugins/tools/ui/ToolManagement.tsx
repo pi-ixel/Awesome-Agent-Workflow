@@ -1,12 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import {
-  DangerButton,
-  btnGhost,
-  btnPrimary,
-  btnSecondary,
-  Listbox,
-  ToggleSwitch,
-} from "../../../shared/ui/controls.tsx";
+import { ActionButton, DangerButton, Listbox, ToggleSwitch } from "../../../shared/ui/controls.tsx";
 import { CopyButton } from "../../../shared/ui/CopyButton.tsx";
 import { SquareTerminalIcon } from "../../../shared/ui/icons.tsx";
 // 外观仍由 tools.css 决定（那份规则特异性更高），这里挂共享常量是为了让
@@ -192,15 +185,15 @@ export function ToolManagement({
       className="aaw-tools tool-management flex h-full min-h-0 flex-col bg-base"
     >
       <header className="management-nav">
-        <button
+        <ActionButton
+          tone="ghost"
           type="button"
-          className={btnGhost}
           onClick={() =>
             requestAction("返回工具中心", onBack, "放弃修改并返回")
           }
         >
           ← 返回工具中心
-        </button>
+        </ActionButton>
         <span>插件管理</span>
       </header>
       <div className="management-scroll">
@@ -219,14 +212,14 @@ export function ToolManagement({
                 {tool.author ? ` · ${tool.author}` : ""}
               </p>
             </div>
-            <button
+            <ActionButton
+              tone="primary"
               type="button"
-              className={btnPrimary}
               onClick={onOpen}
               disabled={busy}
             >
               打开插件 ↗
-            </button>
+            </ActionButton>
           </div>
           {feedback && (
             <p
@@ -240,14 +233,14 @@ export function ToolManagement({
             <div className="management-feedback" role="alert">
               <p>还有未保存的设置，继续{pending.label}将放弃这些修改。</p>
               <div className="mg-actions">
-                <button
+                <ActionButton
+                  tone="secondary"
                   ref={continueEditing}
                   type="button"
-                  className={btnSecondary}
                   onClick={() => setPending(undefined)}
                 >
                   继续编辑
-                </button>
+                </ActionButton>
                 <DangerButton
                   onClick={() => {
                     setPending(undefined);
@@ -357,20 +350,20 @@ export function ToolManagement({
                         {dirty ? "有未保存的修改" : "保存后，重新打开插件生效"}
                       </span>
                       <div className="mg-actions">
-                        <button
+                        <ActionButton
+                          tone="ghost"
                           type="button"
-                          className={btnGhost}
                           onClick={() => setValues(resolveToolSettings(tool))}
                         >
                           恢复默认
-                        </button>
-                        <button
+                        </ActionButton>
+                        <ActionButton
+                          tone="primary"
                           type="submit"
-                          className={btnPrimary}
                           disabled={!dirty}
                         >
                           保存设置
-                        </button>
+                        </ActionButton>
                       </div>
                     </div>
                   </form>
@@ -402,26 +395,26 @@ export function ToolManagement({
                   )}
                 </div>
                 <div className="mg-actions">
-                  <button
+                  <ActionButton
+                    tone="secondary"
                     type="button"
-                    className={btnSecondary}
                     onClick={onExport}
                     disabled={busy}
                   >
                     导出源码 ZIP
-                  </button>
-                  <button
+                  </ActionButton>
+                  <ActionButton
+                    tone="ghost"
                     type="button"
-                    className={btnGhost}
                     onClick={() => picker.current?.click()}
                     disabled={busy}
                   >
                     更新源码
-                  </button>
+                  </ActionButton>
                   {entry.previousVersion && onRollback && (
-                    <button
+                    <ActionButton
+                      tone="ghost"
                       type="button"
-                      className={btnGhost}
                       disabled={busy}
                       onClick={() => {
                         // 退版会让设置表单按上一版的 schema 重挂载：没保存的草稿会没。
@@ -431,7 +424,7 @@ export function ToolManagement({
                       }}
                     >
                       退回上一版 v{entry.previousVersion}
-                    </button>
+                    </ActionButton>
                   )}
                 </div>
                 <p className="mg-note">
@@ -596,26 +589,27 @@ export function ToolManagement({
               <div className="mg-content mg-remove">
                 {confirmRemove ? (
                   <div className="mg-actions">
-                    <button
+                    <ActionButton
+                      tone="ghost"
                       type="button"
-                      className={btnGhost}
                       onClick={() => setConfirmRemove(false)}
                     >
                       取消
-                    </button>
+                    </ActionButton>
                     <DangerButton disabled={busy} onClick={onRemove}>
                       确认卸载
                     </DangerButton>
                   </div>
                 ) : (
-                  <button
+                  <ActionButton
+                    tone="ghost"
                     type="button"
-                    className={`${btnGhost} remove-button`}
+                    className="remove-button"
                     disabled={busy}
                     onClick={() => setConfirmRemove(true)}
                   >
                     卸载
-                  </button>
+                  </ActionButton>
                 )}
               </div>
             </Section>

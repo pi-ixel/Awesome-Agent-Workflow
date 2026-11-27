@@ -63,6 +63,50 @@
 }
 
 @layer components {
+  [data-action-button] {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    text-align: center;
+  }
+
+  [data-action-button][data-action-align="start"] {
+    justify-content: flex-start;
+    text-align: start;
+  }
+
+  [data-action-button="compact"] {
+    border-width: 1px;
+    border-color: transparent;
+  }
+
+  [data-action-button] > svg {
+    flex-shrink: 0;
+  }
+
+  .ui-control-label {
+    /* 中文回退字体的笔画像素略高于行盒中心。 */
+    position: relative;
+    inset-block-start: 0.5px;
+  }
+
+  .action-button-label {
+    min-width: 0;
+  }
+
+  .action-button-label[data-overflow="truncate"] {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .action-button-label[data-overflow="wrap"] {
+    overflow-wrap: anywhere;
+    text-align: start;
+    white-space: normal;
+  }
+
   [data-icon-hover-button] {
     display: inline-grid;
     place-items: center;

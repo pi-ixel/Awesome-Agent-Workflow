@@ -117,7 +117,8 @@ export function GitReviewDiff({
         <ActionButton
           tone="ghost"
           key={`context-${start}`}
-          className="block w-full px-3 py-1 text-left text-ink-mute transition-colors hover:bg-hover"
+          align="start"
+          className="w-full px-3 py-1 text-ink-mute transition-colors hover:bg-hover"
           onClick={() =>
             setExpanded((old) => {
               const next = new Set(old);

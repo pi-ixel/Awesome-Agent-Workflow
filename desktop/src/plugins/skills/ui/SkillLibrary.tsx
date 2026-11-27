@@ -441,8 +441,8 @@ function LibraryPage(
               size="compact"
               disabled={busy || !library}
               onClick={rescan}
+              leadingIcon={<RefreshIcon className="ui-icon-14" />}
             >
-              <RefreshIcon className="ui-icon-14" />
               刷新
             </ActionButton>
 
@@ -451,8 +451,8 @@ function LibraryPage(
               size="compact"
               disabled={busy || !destinations.length}
               onClick={importSkills}
+              leadingIcon={<PlusIcon className="ui-icon-14" />}
             >
-              <PlusIcon className="ui-icon-14" />
               导入技能
             </ActionButton>
           </>

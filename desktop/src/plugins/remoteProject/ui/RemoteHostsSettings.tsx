@@ -8,7 +8,7 @@ import {
 import { SettingCard } from "../../../shared/ui/SettingsPageParts.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import {
-  GlobeIcon,
+  MonitorIcon,
   PencilIcon,
   PlusIcon,
   RefreshIcon,
@@ -156,9 +156,9 @@ export function RemoteHostsSettings({ service }: RemoteHostsSettingsProps) {
               size="compact"
               type="button"
               onClick={() => setModalTarget({ kind: "create" })}
+              leadingIcon={<PlusIcon className="ui-icon-14 shrink-0" />}
             >
-              <PlusIcon className="ui-icon-14 shrink-0" />
-              <span>添加远程主机</span>
+              添加远程主机
             </ActionButton>
           </div>
         </div>
@@ -197,7 +197,7 @@ export function RemoteHostsSettings({ service }: RemoteHostsSettingsProps) {
           </div>
         ) : connections.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-popover border border-dashed border-line-strong bg-raised/30 px-6 py-10 text-center">
-            <GlobeIcon className="ui-icon-20 text-ink-ghost" />
+            <MonitorIcon className="ui-icon-20 text-ink-ghost" />
             <div className={`mt-2.5 ${settingsLabelClass}`}>
               暂未配置远程主机
             </div>
@@ -211,9 +211,9 @@ export function RemoteHostsSettings({ service }: RemoteHostsSettingsProps) {
               type="button"
               onClick={() => setModalTarget({ kind: "create" })}
               className="mt-4"
+              leadingIcon={<PlusIcon className="ui-icon-14 shrink-0" />}
             >
-              <PlusIcon className="ui-icon-14 shrink-0" />
-              <span>添加第一台远程主机</span>
+              添加第一台远程主机
             </ActionButton>
           </div>
         ) : (
@@ -263,12 +263,10 @@ export function RemoteHostsSettings({ service }: RemoteHostsSettingsProps) {
                         type="button"
                         disabled={isTesting}
                         onClick={() => void handleTest(conn)}
+                        aria-busy={isTesting}
+                        leadingIcon={isTesting ? <Spinner className="ui-icon-12" /> : undefined}
                       >
-                        {isTesting ? (
-                          <Spinner className="ui-icon-12" />
-                        ) : (
-                          "测试"
-                        )}
+                        测试
                       </ActionButton>
                       <IconButton
                         aria-label={`编辑 ${conn.name}`}
