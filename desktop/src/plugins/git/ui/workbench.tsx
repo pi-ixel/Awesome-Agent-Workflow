@@ -2,13 +2,24 @@ import type { Context } from "cordis";
 import { createStore } from "zustand";
 import type { PanelTab, WorkbenchContributions } from "../../workbench/types.ts";
 import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
-import type { ProjectWorkspace } from "../../project/service.ts";
+import type {
+  ProjectAnnotationEditor,
+  ProjectWorkspace,
+} from "../../project/service.ts";
 import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
 import type { GitService } from "../service.ts";
 import { GitDiffView } from "./GitDiffView.tsx";
 import { GitPanel } from "./GitPanel.tsx";
-import { createGitRevealCursor } from "../review/review.ts";
-import { pathKey, pathName } from "../../../shared/panelPaths.ts";
+import {
+  changeKey,
+  createGitRevealCursor,
+  reviewModel,
+} from "../review/review.ts";
+import {
+  pathKey,
+  pathName,
+  projectFolderPath,
+} from "../../../shared/panelPaths.ts";
 import { FileDiffIcon } from "../../../shared/ui/icons.tsx";
 import { FileDisplayIcon } from "../../../shared/ui/file-icons/fileDisplay.tsx";
 import { resolveIconName } from "../../../shared/ui/file-icons/fileDisplayHelpers.ts";
@@ -22,6 +33,10 @@ import {
   useToolProject,
   type ToolProjectSource,
 } from "../../../shared/ui/ToolProjectSelector.tsx";
+import { GitReviewDiff } from "./GitReviewDiff.tsx";
+import { gitAnnotationRevision } from "../review/annotationRevision.ts";
+import type { GitReviewNavigation } from "../types.ts";
+import { includesDiffLine } from "../../../shared/annotations/diffSelection.ts";
 
 /** Diff tabs from existing layouts remain readable after review moved into its own panel. */
 function readDiffTab(tab: PanelTab | undefined) {
@@ -33,6 +48,7 @@ export function gitPanels(
   activity?: ReadonlySnapshot<{
     readonly watch?: ProjectWorkspace["subscribeWorkspaceActivity"];
     readonly scope?: ToolProjectSource;
+    readonly annotationEditor?: ProjectAnnotationEditor;
   }>,
   requests?: ReadonlySnapshot<Readonly<Record<string, GitReviewReveal>>>,
 ): readonly WorkbenchContributions["panels"][] {
@@ -55,6 +71,10 @@ export function gitPanels(
           (state) => state?.watch,
         );
         const scope = useRegisteredSnapshot(activity, (state) => state?.scope);
+        const editor = useRegisteredSnapshot(
+          activity,
+          (state) => state?.annotationEditor,
+        );
         const selection = useToolProject(project, scope);
         const target = selection.project ?? project;
         const request = useRegisteredSnapshot(
@@ -67,7 +87,11 @@ export function gitPanels(
             git={git}
             reveal={reveal}
             revealRequest={request}
-            watchActivity={watchActivity && ((_, listener) => watchActivity(project, listener))}
+            annotations={editor ? { project, editor } : undefined}
+            watchActivity={
+              watchActivity &&
+              ((_, listener) => watchActivity(project, listener))
+            }
             projectSelector={
               selection.projects.length > 1 ? (
                 <ToolProjectSelector
@@ -124,12 +148,72 @@ export const inject = ["git", "workbench"];
 export function apply(ctx: Context): void {
   const { git, workbench } = ctx;
   const review = createGitReviewNavigation(workbench);
-  ctx.provide("gitUi", review.navigation);
   ctx.effect(() => () => review.dispose(), "git:review-navigation");
   const activity = createStore<{
     watch?: ProjectWorkspace["subscribeWorkspaceActivity"];
     scope?: ToolProjectSource;
+    annotationEditor?: ProjectAnnotationEditor;
   }>(() => ({}));
+  const annotationView: NonNullable<
+    GitReviewNavigation["annotationView"]
+  > = async (annotation) => {
+    const anchor = annotation.diff;
+    if (anchor?.kind !== "git") return null;
+    const { scope, annotationEditor } = activity.getState();
+    if (!scope) return null;
+    const related =
+      scope.getState().projectFolders?.[pathKey(annotation.project)]
+        ?.relatedPaths ?? [];
+    if (
+      ![projectFolderPath(annotation.project), ...related].some(
+        (root) => pathKey(root) === pathKey(anchor.target),
+      )
+    )
+      return null;
+    const snapshot = await git.status(anchor.target);
+    if (
+      !snapshot.repoRoot ||
+      pathKey(snapshot.repoRoot) !== pathKey(anchor.root)
+    )
+      return null;
+    const change = snapshot.changes.find(
+      (item) => item.path === anchor.file && changeKey(item) === anchor.change,
+    );
+    if (!change) return null;
+    const diff = await git.diff(anchor.target, change);
+    if ((await gitAnnotationRevision(change, diff)) !== annotation.revision ||
+      scope !== activity.getState().scope)
+      return null;
+    const model = reviewModel(diff);
+    if (
+      !model.rows.some((row) =>
+        includesDiffLine(
+          anchor,
+          anchor.side,
+          anchor.side === "old" ? row.old : row.next,
+        ),
+      )
+    )
+      return null;
+    return (
+      <GitReviewDiff
+        model={model}
+        location={anchor}
+        annotations={
+          annotationEditor
+            ? {
+                editor: annotationEditor,
+                project: annotation.project,
+                origin: anchor,
+                oldPath: change.oldPath ?? undefined,
+                revision: () => Promise.resolve(annotation.revision),
+              }
+            : undefined
+        }
+      />
+    );
+  };
+  ctx.provide("gitUi", { ...review.navigation, annotationView });
   ctx.effect(() => {
     const binding = ctx.inject(["project"], function gitWorkspaceActivity(scoped) {
       const { subscribeWorkspaceActivity } = scoped.project.projects;
@@ -137,6 +221,7 @@ export function apply(ctx: Context): void {
         activity.setState({
           watch: subscribeWorkspaceActivity,
           scope: scoped.project.projects.workspace,
+          annotationEditor: scoped.project.drafts.annotationEditor,
         });
         return () => activity.setState({}, true);
       });

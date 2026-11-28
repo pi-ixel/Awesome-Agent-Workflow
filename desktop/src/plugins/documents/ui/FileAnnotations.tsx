@@ -1,13 +1,12 @@
-import { ActionButton } from "../../../shared/ui/controls.tsx";
-import { HintSurface } from "../../../shared/ui/controls/HintSurface.tsx";
-import { settingsTextareaClass } from "../../../shared/ui/SettingsPageParts.tsx";
+import {
+  AnnotationPopover,
+  annotationSelectionAnchor,
+} from "../../../shared/ui/AnnotationPopover.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
-import { DangerButton } from "../../../shared/ui/controls.tsx";
 import type { MarkdownEditorApi } from "./MarkdownSourceEditor.tsx";
-import { createPortal } from "react-dom";
 import { useContext, useEffect, useMemo, useState, useSyncExternalStore, type RefObject } from "react";
 import { documentRevision, locateAnnotation } from "../annotations/anchors.ts";
-import { QUOTE_LIMIT, COMMENT_LIMIT } from "../config.ts";
+import { QUOTE_LIMIT } from "../config.ts";
 import type { DocumentAnnotation } from "../types.ts";
 import { useStore } from "zustand";
 import type { DocumentsService } from "../service.ts";
@@ -29,30 +28,6 @@ interface Editor {
 const noSubscription = () => () => {};
 const emptyAnnotations: readonly DocumentAnnotation[] = [];
 
-/** Keep both the selection action and its editor inside the visible document. */
-function overlayPosition(
-  root: HTMLElement | null,
-  x: number,
-  y: number,
-  open: boolean,
-) {
-  const bounds = root?.getBoundingClientRect();
-  const left = Math.max(8, (bounds?.left ?? 0) + 8);
-  const right = Math.min(
-    window.innerWidth - 8,
-    (bounds?.right ?? window.innerWidth) - 8,
-  );
-  const top = Math.max(8, (bounds?.top ?? 0) + 8);
-  const bottom = Math.min(
-    window.innerHeight - 8,
-    (bounds?.bottom ?? window.innerHeight) - 8,
-  );
-  const width = Math.min(open ? 304 : 64, Math.max(64, right - left));
-  return {
-    x: Math.max(left, Math.min(x, right - width)),
-    y: Math.max(top, Math.min(y, bottom - (open ? 260 : 30))),
-  };
-}
 export function FileAnnotations({
   documents,
   root,
@@ -90,7 +65,8 @@ export function FileAnnotations({
   const items = useMemo(
     () =>
       annotations.filter(
-        (a) => pathKey(a.path) === pathKey(path) && a.source === source,
+        (a) =>
+          !a.diff && pathKey(a.path) === pathKey(path) && a.source === source,
       ),
     [annotations, path, source],
   );
@@ -101,6 +77,7 @@ export function FileAnnotations({
     request.target === currentTarget &&
     (!request.draft ||
       annotations.some((a) => a.id === request.annotation.id)) &&
+    !request.annotation.diff &&
     pathKey(request.annotation.project) === pathKey(project) &&
     pathKey(request.annotation.path) === pathKey(path) &&
     request.annotation.source === source
@@ -175,10 +152,6 @@ export function FileAnnotations({
         setNotice("选区最多 10000 字，请缩小范围");
         return;
       }
-      const rect =
-        Array.from(selected.getClientRects())
-          .filter((r) => r.width > 0)
-          .at(-1) ?? selected.getBoundingClientRect();
       const row = (node: Node) =>
         (node instanceof Element ? node : node.parentElement)?.closest(
           "[data-file-line]",
@@ -206,12 +179,7 @@ export function FileAnnotations({
       setEditor({
         owner: annotationEditor,
         target: currentTarget,
-        ...overlayPosition(
-          element,
-          element.getBoundingClientRect().left + 8,
-          rect.bottom + 6,
-          false,
-        ),
+        ...annotationSelectionAnchor(selection, "clientX" in event ? event : undefined),
         open: false,
         annotation: {
           id: crypto.randomUUID(),
@@ -290,19 +258,6 @@ export function FileAnnotations({
   }, [documents, requestAnnotation, request?.nonce]);
 
   useEffect(() => {
-    if (!editor) return;
-    const key = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        setEditor(null);
-      }
-    };
-    window.addEventListener("keydown", key, true);
-    return () => window.removeEventListener("keydown", key, true);
-  }, [editor]);
-
-  useEffect(() => {
     const element = root.current;
     if (!element) return;
     if (source && requestAnnotation?.endLine) reveal(requestAnnotation.endLine);
@@ -378,7 +333,8 @@ export function FileAnnotations({
         owner: annotationEditor,
         annotation: hit.annotation,
         target: currentTarget,
-        ...overlayPosition(element, event.clientX, event.clientY + 8, true),
+        x: event.clientX,
+        y: event.clientY,
         open: true,
       });
     };
@@ -451,103 +407,29 @@ export function FileAnnotations({
           </IconButton>
         </div>
       )}
-      {editor &&
-        createPortal(
-          <HintSurface
-            open
-            role={editor.open ? "dialog" : "group"}
-            aria-label={editor.open ? "文档批注" : "选区操作"}
-            data-file-find-ignore
-            data-annotation-overlay
-            className={`fixed z-[100] max-w-[calc(100vw-16px)] ${editor.open ? "p-2.5 text-ui-base" : "annotation-rainbow-border p-0.5 text-ui-caption"}`}
-            style={{
-              left: editor.x,
-              top: editor.y,
-              width: editor.open ? 304 : undefined,
-            }}
-          >
-            {editor.open ? (
-              <>
-                <p className="mb-2 truncate text-ui-caption text-ink-mute">
-                  {editor.annotation.path.split(/[\\/]/).at(-1)}
-                  <span className="ml-2">
-                    {editor.annotation.startLine
-                      ? `第 ${editor.annotation.startLine}${editor.annotation.endLine && editor.annotation.endLine !== editor.annotation.startLine ? `–${editor.annotation.endLine}` : ""} 行`
-                      : "渲染选区"}
-                  </span>
-                </p>
-                <blockquote className="mb-2 max-h-16 overflow-auto whitespace-pre-wrap border-l-2 border-info-line pl-2 text-ui-caption text-ink-mute">
-                  {editor.annotation.quote}
-                </blockquote>
-                <textarea
-                  autoFocus
-                  aria-label="批注意见"
-                  placeholder="写下意见，或留空仅引用原文"
-                  maxLength={COMMENT_LIMIT}
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (
-                      (e.ctrlKey || e.metaKey) &&
-                      e.key === "Enter" &&
-                      !e.nativeEvent.isComposing
-                    ) {
-                      e.preventDefault();
-                      save();
-                    }
-                  }}
-                  className={`${settingsTextareaClass} min-h-20`}
-                />
-                <div className="mt-2 flex justify-end gap-2">
-                  {annotations.some((a) => a.id === editor.annotation.id) && (
-                    <DangerButton
-                      type="button"
-                      className="mr-auto px-2 py-1"
-                      onClick={() => {
-                        if (editor.owner.remove(editor.target, editor.annotation.id)) setEditor(null);
-                      }}
-                    >
-                      删除
-                    </DangerButton>
-                  )}
-                  <ActionButton
-                    tone="ghost"
-                    size="compact"
-                    type="button"
-                    onClick={() => setEditor(null)}
-                  >
-                    取消
-                  </ActionButton>
-                  <ActionButton
-                    tone="primary"
-                    size="compact"
-                    type="button"
-                    onClick={save}
-                  >
-                    添加到会话
-                  </ActionButton>
-                </div>
-              </>
-            ) : (
-              <ActionButton
-                tone="ghost"
-                size="compact"
-                type="button"
-                onPointerDown={(e) => e.preventDefault()}
-                onClick={() =>
-                  setEditor({
-                    ...editor,
-                    ...overlayPosition(root.current, editor.x, editor.y, true),
-                    open: true,
-                  })
-                }
-              >
-                批注
-              </ActionButton>
-            )}
-          </HintSurface>,
-          document.body,
-        )}
+      {editor && (
+        <AnnotationPopover
+          root={root}
+          x={editor.x}
+          y={editor.y}
+          file={editor.annotation.path.split(/[\\/]/).at(-1) ?? editor.annotation.path}
+          location={editor.annotation.startLine
+            ? `第 ${editor.annotation.startLine}${editor.annotation.endLine && editor.annotation.endLine !== editor.annotation.startLine ? `–${editor.annotation.endLine}` : ""} 行`
+            : "渲染选区"}
+          quote={editor.annotation.quote}
+          comment={comment}
+          onComment={setComment}
+          onClose={() => setEditor(null)}
+          onSave={save}
+          onRemove={annotations.some((a) => a.id === editor.annotation.id)
+            ? () => { if (editor.owner.remove(editor.target, editor.annotation.id)) setEditor(null); }
+            : undefined}
+          onOpen={!editor.open ? () => setEditor({
+            ...editor,
+            open: true,
+          }) : undefined}
+        />
+      )}
     </>
   );
 }

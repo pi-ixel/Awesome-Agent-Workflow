@@ -1,6 +1,18 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ReviewMatch, ReviewModel } from "../review/review.ts";
 import { ActionButton } from "../../../shared/ui/controls.tsx";
+import type { DiffLineRange } from "../../../shared/annotations/types.ts";
+import type { AnnotationDraftTarget } from "../../project/types.ts";
+import {
+  diffLineProps,
+  includesDiffLine,
+} from "../../../shared/annotations/diffSelection.ts";
+import {
+  DiffAnnotationActions,
+  DiffLineNumber,
+  useDiffAnnotation,
+  type DiffAnnotationBinding,
+} from "../../../shared/ui/DiffAnnotations.tsx";
 import {
   diffAppearance,
   diffSurfaceClass,
@@ -12,16 +24,31 @@ export function GitReviewDiff({
   match,
   navigation = 0,
   onLocate,
+  annotations,
+  location,
 }: {
   model: ReviewModel;
   query?: string;
   match?: ReviewMatch;
   navigation?: number;
   onLocate?: (element: HTMLElement) => void;
+  annotations?: DiffAnnotationBinding<AnnotationDraftTarget>;
+  location?: DiffLineRange;
 }) {
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useState(() => {
+    if (!location) return 0;
+    const row = model.rows.findIndex((row) =>
+      includesDiffLine(
+        location,
+        location.side,
+        location.side === "old" ? row.old : row.next,
+      ),
+    );
+    return Math.floor(Math.max(0, row) / 1000) * 1000;
+  });
   const ref = useRef<HTMLDivElement>(null);
+  const annotation = useDiffAnnotation(ref, annotations);
   const sides = useRef<(HTMLDivElement | null)[]>([null, null]);
   const contents = useRef<(HTMLDivElement | null)[]>([null, null]);
   const appliedOffsets = useRef([0, 0]);
@@ -95,6 +122,12 @@ export function GitReviewDiff({
       else target.scrollIntoView?.({ block: "center", inline: "nearest" });
     }
   }, [match, navigation, pageStart, onLocate]);
+  useEffect(() => {
+    if (!location) return;
+    ref.current
+      ?.querySelector('[data-diff-annotation-location="true"]')
+      ?.scrollIntoView?.({ block: "center", inline: "nearest" });
+  }, [location]);
   const rows = model.rows;
   const displayed: [ReactNode[], ReactNode[]] = [[], []];
   const pushPair = (old: ReactNode, next: ReactNode) => {
@@ -104,7 +137,7 @@ export function GitReviewDiff({
   for (let i = pageStart; i < Math.min(rows.length, pageStart + 1000); i++) {
     const row = rows[i];
     if (!row) continue;
-    if (row.hidden && !needle && !expanded.has(i)) {
+    if (row.hidden && !needle && !location && !expanded.has(i)) {
       const start = i;
       while (
         i + 1 < Math.min(rows.length, pageStart + 1000) &&
@@ -138,6 +171,9 @@ export function GitReviewDiff({
       const present =
         item && (side === "old" ? item.old !== null : item.next !== null);
       const text = present ? item.text.slice(1) : " ";
+      const line = present ? (side === "old" ? item.old : item.next) : null;
+      const annotationSide = side === "old" ? "old" : "new";
+      const isLocated = includesDiffLine(location, annotationSide, line);
       const appearance = diffAppearance[present ? item.kind : "missing"];
       const parts = [];
       let from = 0;
@@ -177,13 +213,27 @@ export function GitReviewDiff({
           className={`flex min-w-0 ${appearance.row}`}
         >
           {/* 固定行号覆盖行首，因此也绘制增删状态条。 */}
-          <span
-            className={`sticky left-0 z-[1] w-[max(48px,6ch)] shrink-0 select-none border-r border-line px-2 text-right tabular-nums ${appearance.stickyGutter}`}
+          <DiffLineNumber
+            className={`sticky left-0 z-[1] ${annotations ? "w-[max(56px,8ch)]" : "w-[max(48px,6ch)]"} shrink-0 select-none border-r border-line px-2 text-right tabular-nums ${appearance.stickyGutter}`}
+            line={line}
+            side={annotationSide}
+            text={text}
+            onAdd={annotation.add}
+          />
+          <code
+            className="block min-w-0 flex-1 px-3 whitespace-pre"
+            data-diff-annotation-location={isLocated || undefined}
           >
-            {present ? (side === "old" ? item.old : item.next) : ""}
-          </span>
-          <code className="block min-w-0 flex-1 px-3 whitespace-pre">
-            {parts}
+            <span
+              {...(annotations &&
+                diffLineProps(
+                  side === "old" ? line : null,
+                  side === "next" ? line : null,
+                ))}
+              className={isLocated ? "bg-find-highlight text-ink" : undefined}
+            >
+              {parts}
+            </span>
           </code>
         </div>
       );
@@ -223,6 +273,7 @@ export function GitReviewDiff({
        surface 提亮 */
     <div
       ref={ref}
+      {...annotation.handlers}
       aria-label="Git 左右差异"
       className={`overflow-x-auto text-ui-sm ${diffSurfaceClass}`}
     >
@@ -241,6 +292,7 @@ export function GitReviewDiff({
           <div
             key={side}
             aria-label={side === 0 ? "修改前" : "修改后"}
+            data-annotation-column
             ref={(element) => {
               sides.current[side] = element;
             }}
@@ -268,6 +320,7 @@ export function GitReviewDiff({
           下一段（共 {rows.length} 行）
         </ActionButton>
       )}
+      <DiffAnnotationActions state={annotation} />
     </div>
   );
 }

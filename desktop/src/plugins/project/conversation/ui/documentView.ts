@@ -8,7 +8,10 @@ export type FileCandidates = Pick<DocumentsService, "listWorkspaceFiles" | "isAc
 
 export interface ConversationDocumentView {
   readonly assetUrl: DocumentsService["assetUrl"];
-  readonly openAnnotation: (annotation: DocumentAnnotation, draft: boolean) => void;
+  readonly openAnnotation: (
+    annotation: DocumentAnnotation,
+    draft: boolean,
+  ) => void | Promise<boolean>;
   readonly ownsFindShortcut: (event: KeyboardEvent) => boolean;
   readonly fileCandidates: FileCandidates;
 }

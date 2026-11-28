@@ -7,6 +7,7 @@ import { useContext, useState } from "react";
 import { ConversationDocumentContext } from "./documentView.ts";
 import { COMMENT_LIMIT } from "../../../documents/service.ts";
 import type { DocumentAnnotation } from "../../../documents/types.ts";
+import { diffRangeLabel } from "../../../../shared/annotations/diffSelection.ts";
 export function AnnotationCards({
   annotations,
   onChange,
@@ -19,6 +20,9 @@ export function AnnotationCards({
   const openAnnotation = useContext(ConversationDocumentContext)?.openAnnotation;
   const [editing, setEditing] = useState<string | null>(null);
   const [comment, setComment] = useState("");
+  const [unavailable, setUnavailable] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
   if (!annotations.length) return null;
   return (
     <div
@@ -37,12 +41,25 @@ export function AnnotationCards({
               data-hint={a.path}
               disabled={!openAnnotation}
               className="flex-1 truncate font-medium"
-              onClick={() => openAnnotation?.(a, !!onRemove)}
+              onClick={() => {
+                const result = openAnnotation?.(a, !!onRemove);
+                if (result)
+                  void result.then((opened) =>
+                    setUnavailable((current) => {
+                      const next = new Set(current);
+                      if (opened) next.delete(a.id);
+                      else next.add(a.id);
+                      return next;
+                    }),
+                  );
+              }}
             >
               {a.path.split(/[\\/]/).at(-1)}
-              {a.startLine
-                ? ` · ${a.startLine}${a.endLine !== a.startLine ? `–${a.endLine}` : ""} 行`
-                : ""}
+              {a.diff
+                ? ` · ${a.diff.kind === "turn" ? "轮次 Diff" : "Git Changes"} · ${diffRangeLabel(a.diff)}`
+                : a.startLine
+                  ? ` · ${a.startLine}${a.endLine !== a.startLine ? `–${a.endLine}` : ""} 行`
+                  : ""}
             </TextLink>
             {onChange && (
               <IconButton iconSize="compact"
@@ -70,6 +87,11 @@ export function AnnotationCards({
               </IconButton>
             )}
           </div>
+          {unavailable.has(a.id) && (
+            <p role="status" className="mt-1 text-ink-mute">
+              原差异版本不可用，以下是批注保存时的内容。
+            </p>
+          )}
           <blockquote className="mt-1 max-h-20 overflow-auto whitespace-pre-wrap border-l-2 border-info-line pl-2 leading-[1.35] text-ink-mute">
             {a.quote.split(/\r?\n/).map((line, i) => (
               <span

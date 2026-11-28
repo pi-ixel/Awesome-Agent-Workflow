@@ -309,9 +309,7 @@ for (const mode of ["partial-large", "legacy-large"]) {
   });
 }
 
-test("纯聊天和执行中的新轮保留只读旧卡，新轮结束有变更才移动展示位", async ({
-  page,
-}) => {
+test("纯聊天、执行中的新轮及完成后的新轮都保留只读旧卡", async ({ page }) => {
   for (const mode of ["chat-running", "chat-zero"]) {
     await page.getByRole("combobox").selectOption(mode);
     const old = page.locator(
@@ -332,7 +330,7 @@ test("纯聊天和执行中的新轮保留只读旧卡，新轮结束有变更�
   await page.getByRole("combobox").selectOption("next-diff");
   await expect(
     page.locator("[data-preview-turn=preview-user] [data-turn-changes]"),
-  ).toHaveCount(0);
+  ).toHaveCount(1);
   const current = page.locator(
     "[data-preview-turn=next-user] [data-turn-changes]",
   );
@@ -343,6 +341,220 @@ test("纯聊天和执行中的新轮保留只读旧卡，新轮结束有变更�
   await expect(
     page.getByRole("combobox", { name: "选择变更记录" }),
   ).toHaveCount(0);
+});
+
+test("删除行和片段批注保存到会话草稿，回跳准确区分修改前与片段", async ({
+  page,
+}) => {
+  await page.goto("/tests/visual/turnChanges.html?annotations");
+  const dock = page.locator("[data-turn-changes]");
+  await dock.getByRole("button", { name: /tools\.legacy\.json/ }).click();
+  const oldLine = dock.getByRole("button", { name: "批注修改前 · 第 2 行" });
+  await oldLine.hover();
+  await expect(oldLine).toHaveCSS("opacity", "1");
+  await oldLine.click();
+  const editor = page.getByRole("dialog", { name: "文档批注" });
+  await expect(editor.getByText('"systemBrowserFallback": true')).toBeVisible();
+  await editor
+    .getByRole("textbox", { name: "批注意见" })
+    .fill("确认删除系统浏览器回退。");
+  await editor.getByRole("button", { name: "添加到会话" }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(
+    dock.getByRole("button", { name: "收起", exact: true }),
+  ).toBeVisible();
+  const card = page.getByRole("button", {
+    name: /tools\.legacy\.json.*修改前.*第 2 行/,
+  });
+  await card.click();
+  const review = page.getByRole("dialog", { name: "批注原 Diff" });
+  await expect(
+    review.locator('[data-side="before"] [data-diff-annotation-location]'),
+  ).toContainText("systemBrowserFallback");
+  await expect(
+    review.locator('[data-side="after"] [data-diff-annotation-location]'),
+  ).toHaveCount(0);
+  await review.getByRole("button", { name: "关闭差异" }).click();
+  await page.reload();
+  await expect(card).toBeVisible();
+
+  await page.goto(
+    "/tests/visual/turnChanges.html?annotations&journal-fragments",
+  );
+  await card.click();
+  await expect(
+    page.getByText("原差异版本不可用，以下是批注保存时的内容。"),
+  ).toBeVisible();
+  await expect(page.getByText("确认删除系统浏览器回退。")).toBeVisible();
+  const fragment = page.getByRole("button", {
+    name: "批注修改后 · 片段 2，第 1 行",
+  });
+  await fragment.focus();
+  await fragment.press("Enter");
+  await expect(editor.getByText("second-new")).toBeVisible();
+  await editor.getByRole("textbox", { name: "批注意见" }).fill("第二处调整");
+  await editor.getByRole("button", { name: "添加到会话" }).click();
+  await page
+    .getByRole("button", { name: /systemFallback.ts.*片段 2，第 1 行/ })
+    .click();
+  await expect(review.locator("[data-diff-annotation-location]")).toContainText(
+    "second-new",
+  );
+});
+
+test("锁定的历史 Diff 可批注，跨栏选区无批注入口", async ({ page }) => {
+  await page.goto("/tests/visual/turnChanges.html?annotations");
+  await page.getByRole("combobox").selectOption("next-diff");
+  const history = page.locator(
+    "[data-preview-turn=preview-user] [data-turn-changes]",
+  );
+  await expect(history.getByRole("button", { name: "全部撤销" })).toHaveCount(
+    0,
+  );
+  if (await history.getByRole("button", { name: "查看 Diff" }).count())
+    await history.getByRole("button", { name: "查看 Diff" }).click();
+  await history.getByRole("button", { name: "双栏对比" }).click();
+  const pick = (old: boolean) =>
+    page.evaluate((crossColumn) => {
+      const root = document.querySelector("[data-preview-turn=preview-user]")!;
+      const first = root.querySelector(
+        "[data-annotation-old='1']",
+      )!.firstChild!;
+      const last = root.querySelector(
+        crossColumn ? "[data-annotation-new='3']" : "[data-annotation-old='2']",
+      )!.firstChild!;
+      const range = document.createRange();
+      range.setStart(first, 0);
+      range.setEnd(last, last.textContent!.length);
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(range);
+      last.parentElement!.dispatchEvent(
+        new PointerEvent("pointerup", { bubbles: true }),
+      );
+    }, old);
+  await pick(true);
+  await expect(
+    page.getByRole("button", { name: "批注", exact: true }),
+  ).toHaveCount(0);
+  await pick(false);
+  await page.getByRole("button", { name: "批注", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "文档批注" });
+  await expect(editor.getByText(/修改前 · 第 1–2 行/)).toBeVisible();
+  await editor
+    .getByRole("textbox", { name: "批注意见" })
+    .fill("保留旧实现的校验。");
+  await editor.getByRole("button", { name: "添加到会话" }).click();
+  await page
+    .getByRole("button", { name: /systemFallback.ts.*修改前.*第 1–2 行/ })
+    .click();
+  const review = page.getByRole("dialog", { name: "批注原 Diff" });
+  await expect(review.locator("[data-diff-annotation-location]")).toHaveCount(
+    2,
+  );
+});
+
+test("放大审阅复用同一浮层，支持仅引用及原地编辑和删除", async ({ page }) => {
+  await page.goto("/tests/visual/turnChanges.html?annotations");
+  await page.getByRole("button", { name: "放大审阅", exact: true }).click();
+  const review = page.getByRole("dialog", { name: "本轮工作区变更审阅" });
+  const add = review.getByRole("button", {
+    name: "批注修改前 · 第 2 行",
+    exact: true,
+  });
+  await add.click();
+  const editor = review.getByRole("dialog", { name: "文档批注" });
+  const input = editor.getByRole("textbox", { name: "批注意见" });
+  await expect(editor).toHaveAttribute("data-hint-open", "true");
+  await expect(input).toBeFocused();
+  await expect(input).toHaveAttribute(
+    "placeholder",
+    "写下意见，或留空仅引用原文",
+  );
+  await page.keyboard.press("Escape");
+  await expect(editor).toHaveCount(0);
+  await expect(review).toBeVisible();
+
+  await add.click();
+  await input.press("Control+Enter");
+  await expect(editor).toHaveCount(0);
+  await expect(review).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Array.from(CSS.highlights.keys()).some((key) =>
+          key.startsWith("diff-annotation-"),
+        ),
+      ),
+    )
+    .toBe(true);
+  const code = review.locator("[data-annotation-old='2']");
+  await code.click({ position: { x: 20, y: 5 } });
+  await expect(
+    editor.getByRole("button", { name: "删除", exact: true }),
+  ).toBeVisible();
+  await expect(input).toHaveValue("");
+  await input.fill("在原审阅中补充意见");
+  await editor.getByRole("button", { name: "添加到会话" }).click();
+  await expect(editor).toHaveCount(0);
+  await code.click({ position: { x: 20, y: 5 } });
+  await expect(input).toHaveValue("在原审阅中补充意见");
+  await editor.getByRole("button", { name: "删除", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(review).toBeVisible();
+  await review.getByRole("button", { name: "关闭放大审阅" }).click();
+  await expect(page.getByLabel("文档批注")).toHaveCount(0);
+});
+
+test("批注操作跟随鼠标松开点，反向拖选和窗口边缘都能继续操作", async ({
+  page,
+}) => {
+  await page.goto("/tests/visual/turnChanges.html?annotations");
+  const code = page.locator("[data-annotation-new='1']");
+  await expect(code).toBeVisible();
+  const bounds = (await code.boundingBox())!;
+  const { x, y: top, width, height } = bounds;
+  const left = Math.round(x + 12);
+  const right = Math.round(x + Math.min(160, width - 8));
+  const y = Math.round(top + height / 2);
+  const actions = page.getByRole("group", { name: "选区操作" });
+  for (const [start, end] of [
+    [left, right],
+    [right, left],
+  ] as const) {
+    await page.mouse.move(start, y);
+    await page.mouse.down();
+    await page.mouse.move(end, y, { steps: 8 });
+    await page.mouse.up();
+    await expect(actions).toHaveCSS("left", `${end}px`);
+    await expect(actions).toHaveCSS("top", `${y + 6}px`);
+    await actions.getByRole("button", { name: "批注", exact: true }).click();
+    const editor = page.getByRole("dialog", { name: "文档批注" });
+    await expect(editor).toHaveCSS("left", `${end}px`);
+    await expect(editor).toHaveCSS("top", `${y + 6}px`);
+    await page.keyboard.press("Escape");
+    await expect(editor).toHaveCount(0);
+  }
+
+  await code.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    element.dispatchEvent(
+      new PointerEvent("pointerup", {
+        bubbles: true,
+        clientX: window.innerWidth - 10,
+        clientY: window.innerHeight - 20,
+      }),
+    );
+  });
+  await actions.getByRole("button", { name: "批注", exact: true }).click();
+  const edge = (await page
+    .getByRole("dialog", { name: "文档批注" })
+    .boundingBox())!;
+  expect(edge.x + edge.width).toBeLessThanOrEqual(992);
+  expect(edge.y + edge.height).toBeLessThanOrEqual(774);
 });
 
 test("全部撤销后收起并保留恢复，恢复后仍能查看相同历史 Diff", async ({

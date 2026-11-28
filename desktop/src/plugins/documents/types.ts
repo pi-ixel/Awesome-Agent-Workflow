@@ -1,20 +1,7 @@
 import type { ReadonlySnapshot } from "../../shared/state/readonlySnapshot.ts";
 
-/** A quote and the context needed to relocate it after a file edit. */
-export interface DocumentAnnotation {
-  readonly id: string;
-  readonly project: string;
-  readonly path: string;
-  readonly source: boolean;
-  readonly quote: string;
-  readonly prefix: string;
-  readonly suffix: string;
-  readonly offset: number;
-  readonly revision: string;
-  readonly startLine?: number;
-  readonly endLine?: number;
-  readonly comment: string;
-}
+import type { DocumentAnnotation } from "../../shared/annotations/types.ts";
+export type { DocumentAnnotation } from "../../shared/annotations/types.ts";
 
 export interface MarkdownDocument {
   readonly path: string;

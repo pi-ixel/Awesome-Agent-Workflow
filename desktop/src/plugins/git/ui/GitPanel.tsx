@@ -1,7 +1,10 @@
 import { TreeBranch, treeChevronClass } from "../../../shared/ui/TreeMotion.tsx";
 import type { GitChange, GitSnapshot } from "../../host/types.ts";
 import { useProjectGit } from "./useProjectGit.ts";
-import type { ProjectWorkspace } from "../../project/service.ts";
+import type {
+  ProjectAnnotationEditor,
+  ProjectWorkspace,
+} from "../../project/service.ts";
 import type { GitReviewReveal } from "./reviewNavigation.ts";
 import type { GitService } from "../service.ts";
 import {
@@ -30,6 +33,7 @@ import { reviewRailWidths } from "../config.ts";
 import { GitReviewDiff } from "./GitReviewDiff.tsx";
 import { RefreshButton } from "../../../shared/ui/controls/RefreshButton.tsx";
 import { GitLineStats } from "./GitLineStats.tsx";
+import { gitAnnotationRevision } from "../review/annotationRevision.ts";
 export { GitDiffView } from "./GitDiffView.tsx";
 
 export function GitPanel({
@@ -39,6 +43,7 @@ export function GitPanel({
   watchActivity,
   revealRequest,
   projectSelector,
+  annotations,
 }: {
   project: string;
   git: GitService;
@@ -46,6 +51,7 @@ export function GitPanel({
   watchActivity?: ProjectWorkspace["subscribeWorkspaceActivity"];
   revealRequest?: GitReviewReveal;
   projectSelector?: ReactNode;
+  annotations?: { project: string; editor: ProjectAnnotationEditor };
 }) {
   const [localReveal] = useState(() => createGitRevealCursor());
   const result = useProjectGit(project, git.query, watchActivity);
@@ -78,6 +84,7 @@ export function GitPanel({
           reveal={revealRequest}
           data={result.data}
           onRefresh={result.refresh}
+          annotations={annotations}
         />
       ) : (
         <div className="p-3">
@@ -98,6 +105,7 @@ function GitReview({
   revealCursor,
   reveal,
   onRefresh,
+  annotations,
 }: {
   project: string;
   data: GitSnapshot;
@@ -105,6 +113,7 @@ function GitReview({
   revealCursor: GitRevealCursor;
   reveal?: GitReviewReveal;
   onRefresh: () => Promise<void>;
+  annotations?: { project: string; editor: ProjectAnnotationEditor };
 }) {
   const [seenReveal, setSeenReveal] = useState(reveal);
   const [groups, setGroups] = useState({
@@ -286,7 +295,29 @@ function GitReview({
             {entry?.data?.notice && (
               <p className="p-3 text-warn-ink">{entry.data.notice}</p>
             )}
-            {entry?.model && <GitReviewDiff key={key} model={entry.model} />}
+            {entry?.model && (
+              <GitReviewDiff
+                key={key}
+                model={entry.model}
+                annotations={
+                  annotations && data.repoRoot && entry.data
+                    ? {
+                        ...annotations,
+                        origin: {
+                          kind: "git",
+                          root: data.repoRoot,
+                          file: change.path,
+                          change: key,
+                          target: project,
+                        },
+                        oldPath: change.oldPath ?? undefined,
+                        revision: () =>
+                          gitAnnotationRevision(change, entry.data!),
+                      }
+                    : undefined
+                }
+              />
+            )}
           </div>
         )}
       </div>

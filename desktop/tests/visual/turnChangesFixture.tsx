@@ -1,5 +1,10 @@
 import { createRoot } from "react-dom/client";
-import { useLayoutEffect, useMemo, useState } from "react";
+import {
+  useLayoutEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { createStore } from "zustand/vanilla";
 import { ConversationTurnView } from "../../src/plugins/project/conversation/ui/ConversationTurnView.tsx";
 import { createProjectForeground } from "../../src/plugins/project/conversation/foreground.ts";
@@ -14,6 +19,13 @@ import type {
 } from "../../src/plugins/project/conversation/changes/service.ts";
 import type { TurnChangesRecord } from "../../src/contracts/turnChanges/types.ts";
 import { HintTooltip } from "../../src/shared/ui/controls/HintTooltip.tsx";
+import { AnnotationCards } from "../../src/plugins/project/conversation/ui/AnnotationCards.tsx";
+import { ConversationDocumentContext } from "../../src/plugins/project/conversation/ui/documentView.ts";
+import { useDiffAnnotationReview } from "../../src/plugins/project/conversation/changes/DiffAnnotationReview.tsx";
+import { createAnnotationDraftStore } from "../../src/plugins/project/composer/annotationDraftStore.ts";
+import { createAnnotationEditing } from "../../src/plugins/project/composer/annotationEditing.ts";
+import { draftScopeKey } from "../../src/plugins/project/composer/scope.ts";
+import { emptyAnnotationDraft } from "../../src/plugins/project/composer/annotationTypes.ts";
 import "../../src/shared/styles/index.css";
 
 const base: TurnChangesRecord = {
@@ -89,20 +101,56 @@ const largeDiff: TurnChangesRecord = {
     ...base.files.slice(1),
   ],
 };
-const foreground = createProjectForeground();
+const drafts = createAnnotationDraftStore(localStorage);
+const foreground = createProjectForeground(drafts.service);
+const projectPath = "D:/preview";
+const sessionId = "preview-session";
+const agentKey = "preview-agent";
+const workspace = createStore(() => ({
+  ...emptyWorkspace,
+  activePath: projectPath,
+}));
+const editor = createAnnotationEditing(
+  drafts.service,
+  workspace,
+  foreground.snapshot.session,
+  {
+    showConversation: () => {
+      throw new Error("差异内部保存不应切换会话");
+    },
+    startNewSession: () => {
+      throw new Error("差异内部保存不应开始会话");
+    },
+  },
+).editor;
+const scope = draftScopeKey(projectPath, sessionId, agentKey);
+drafts.service.ensure(scope);
 const binding = {
   project: {
-    projects: {
-      workspace: createStore(() => ({
-        ...emptyWorkspace,
-        activePath: "D:/preview",
-      })),
-    },
+    projects: { workspace },
+    drafts: { annotationEditor: editor },
     sessions: { activity: createStore(() => ({ entries: {} })) },
     conversation: { foreground: foreground.snapshot },
+    isActive: () => true,
   },
   isActive: () => true,
 } as unknown as ProjectViewBinding;
+
+function DraftReview() {
+  const diff = useDiffAnnotationReview(undefined);
+  const annotations = useSyncExternalStore(
+    drafts.service.subscribe,
+    () =>
+      drafts.service.getState().drafts[scope]?.annotations ??
+      emptyAnnotationDraft.annotations,
+  );
+  return (
+    <ConversationDocumentContext.Provider value={{ openAnnotation: diff.open }}>
+      <AnnotationCards annotations={annotations} />
+      {diff.review}
+    </ConversationDocumentContext.Provider>
+  );
+}
 function Preview() {
   const [mode, setMode] = useState("complete");
   const [warm, setWarm] = useState(false);
@@ -238,7 +286,12 @@ function Preview() {
     [state, mode],
   );
   useLayoutEffect(() => {
-    foreground.view.session.setState({ turnChanges: changes });
+    foreground.view.session.setState({
+      turnChanges: changes,
+      ...(demo.has("annotations")
+        ? { activeSessionId: sessionId, agentKey, isBound: true }
+        : {}),
+    });
   }, [changes]);
   const reset = (next: string) => {
     setMode(next);
@@ -381,7 +434,7 @@ function Preview() {
                 ["missing-baseline", "缺少开始内容"],
                 ["chat-running", "新消息执行中，旧卡只读"],
                 ["chat-zero", "新轮纯聊天，保留旧卡"],
-                ["next-diff", "新轮有变更，替换旧卡"],
+                ["next-diff", "新轮有变更，保留历史卡"],
                 ["legacy-empty", "旧会话无快照"],
                 ["preparing", "准备基线，不显示卡片"],
                 ["partial-large", "大仓库只新增 hello.ts"],
@@ -403,6 +456,7 @@ function Preview() {
             {warm ? "切换暗夜" : "切换暖白"}
           </button>
         </div>
+        {demo.has("annotations") && <DraftReview />}
         <div
           className="min-h-0 flex-1 overflow-auto px-4 py-5"
           data-message-list

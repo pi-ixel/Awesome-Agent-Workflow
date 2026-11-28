@@ -36,6 +36,7 @@ export function apply(ctx: Context): void {
   const gitReview = createStore<{
     query?: GitService["query"];
     open?: GitReviewNavigation["open"];
+    annotationView?: GitReviewNavigation["annotationView"];
   }>(() => ({}));
   const skills = createStore<{
     readonly candidates?: SkillsService["candidates"];
@@ -113,9 +114,9 @@ export function apply(ctx: Context): void {
   ctx.effect(() => {
     const binding = ctx.inject(["git", "gitUi"], function projectGitReview(scoped) {
       const { query } = scoped.git;
-      const { open } = scoped.gitUi;
+      const { open, annotationView } = scoped.gitUi;
       scoped.effect(() => {
-        gitReview.setState({ query, open });
+        gitReview.setState({ query, open, annotationView });
         return () => gitReview.setState({}, true);
       });
     });

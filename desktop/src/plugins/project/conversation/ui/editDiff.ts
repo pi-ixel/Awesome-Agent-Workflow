@@ -12,6 +12,7 @@
 export type { EditPayload } from "../../../acpRuntime/types.ts";
 /** diff 呈现行：context=未变，del=删，add=增，gap=被折叠的未变区间。 */
 export interface DiffRow {
+  readonly fragment?: number;
   readonly type: "context" | "del" | "add" | "gap";
   /** 旧文件行号（context/del 行有值）。 */
   readonly oldNo: number | null;

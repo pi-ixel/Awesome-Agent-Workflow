@@ -257,7 +257,7 @@ it("keeps a mounted file annotation editor on the original draft, follows promot
       openPath: vi.fn(),
     })).unmount;
     const paragraph = await screen.findByText(quote);
-    const edit = (comment: string) => {
+    const selectQuote = () => {
       const text = paragraph.firstChild!;
       const range = document.createRange();
       range.setStart(text, 0);
@@ -265,12 +265,20 @@ it("keeps a mounted file annotation editor on the original draft, follows promot
       const selection = window.getSelection()!;
       selection.removeAllRanges();
       selection.addRange(range);
+    };
+    const edit = (comment: string) => {
+      selectQuote();
       fireEvent.keyUp(paragraph, { key: "Shift" });
       fireEvent.click(screen.getByRole("button", { name: "批注" }));
       expect(screen.getByRole("dialog", { name: "文档批注" })).toHaveAttribute("data-hint-open", "true");
       fireEvent.change(screen.getByRole("textbox", { name: "批注意见" }), { target: { value: comment } });
     };
     const save = () => fireEvent.click(screen.getByRole("button", { name: "添加到会话" }));
+
+    selectQuote();
+    fireEvent.pointerUp(paragraph, { clientX: 300, clientY: 120 });
+    expect(screen.getByRole("group", { name: "选区操作" })).toHaveStyle({ left: "300px", top: "126px" });
+    fireEvent.keyDown(window, { key: "Escape" });
 
     edit("原会话的批注");
     act(() => session.setState({ agentKey: "agent-b" }));

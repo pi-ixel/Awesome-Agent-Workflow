@@ -376,13 +376,20 @@
       "import → ./McpView.tsx"
     ]
   },
+  "plugins/project/conversation/changes/DiffAnnotationReview.tsx": {
+    "definitions": {
+      "提示与确认": ["DiffAnnotationReview"]
+    },
+    "targets": []
+  },
   "plugins/project/conversation/changes/DiffContent.tsx": {
     "definitions": {
       "内容与专用绘制": [
         "DiffContent",
         "DiffViewport",
         "DiffViewport/renderRows",
-        "DiffViewport/row"
+        "DiffViewport/row",
+        "DiffViewport/row/gutter"
       ]
     },
     "targets": []
@@ -1642,6 +1649,19 @@
   "shared/ui/CopyButton.tsx": {
     "definitions": {
       "命令按钮": ["CopyButton"]
+    },
+    "targets": []
+  },
+  "shared/ui/AnnotationPopover.tsx": {
+    "definitions": {
+      "提示与确认": ["AnnotationPopover"]
+    },
+    "targets": []
+  },
+  "shared/ui/DiffAnnotations.tsx": {
+    "definitions": {
+      "提示与确认": ["DiffAnnotationActions", "DiffAnnotationForm"],
+      "内容与专用绘制": ["DiffLineNumber"]
     },
     "targets": []
   },
