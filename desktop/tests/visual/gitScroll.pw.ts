@@ -10,9 +10,10 @@ test("Git 分屏与统一差异共用颜色，换肤后保留查找命中和行�
   const comparison = await context.newPage();
   await comparison.setViewportSize({ width: 420, height: 720 });
   await comparison.goto("/tests/visual/gitScrollFixture.html?appearance");
+  const split = comparison.getByLabel("Git 左右差异").first();
+  await split.getByRole("button", { name: "换行", exact: true }).click();
   const find = comparison.getByRole("button", { name: "查找末尾" });
   await find.press("Enter");
-  const split = comparison.getByLabel("Git 左右差异").first();
   const older = split.getByLabel("修改前");
   const newer = split.getByLabel("修改后");
   const offset = () => older.evaluate((el) => el.scrollLeft);
@@ -87,6 +88,10 @@ test("both diff columns follow equal pixel positions despite uneven content and 
 }) => {
   await page.goto("/tests/visual/gitScrollFixture.html");
   const views = page.getByLabel("Git 左右差异");
+  await views
+    .first()
+    .getByRole("button", { name: "换行", exact: true })
+    .click();
   const left = views.nth(0).getByLabel("修改前"),
     right = views.nth(0).getByLabel("修改后");
   await expect
@@ -125,4 +130,44 @@ test("both diff columns follow equal pixel positions despite uneven content and 
   await expect
     .poll(() => right.evaluate((e) => e.scrollLeft))
     .toBe(await left.evaluate((e) => e.scrollLeft));
+});
+
+test("Git Changes 默认折叠超长行的显示宽度并保持双栏逐行对齐", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 540, height: 1000 });
+  await page.goto("/tests/visual/gitScrollFixture.html");
+  const split = page.getByLabel("Git 左右差异").first();
+  await expect(
+    split.getByRole("button", { name: "换行", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  const before = split.getByLabel("修改前");
+  const after = split.getByLabel("修改后");
+  const rows = async () => {
+    const positions = (side: typeof before) =>
+      side.locator("code").evaluateAll((cells) =>
+        cells.map((cell) => ({
+          top: cell.parentElement!.getBoundingClientRect().top,
+          height: cell.parentElement!.getBoundingClientRect().height,
+        })),
+      );
+    return [await positions(before), await positions(after)];
+  };
+  for (const width of [540, 430]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await expect(before.locator("code").first()).toHaveCSS(
+      "white-space",
+      "pre-wrap",
+    );
+    const [left, right] = await rows();
+    expect(left).toEqual(right);
+    expect(left?.[0]?.height).toBeGreaterThan((left?.[1]?.height ?? 0) * 2);
+    for (const side of [before, after]) {
+      expect(
+        await side.evaluate(
+          (element) => element.scrollWidth - element.clientWidth,
+        ),
+      ).toBe(0);
+    }
+  }
 });

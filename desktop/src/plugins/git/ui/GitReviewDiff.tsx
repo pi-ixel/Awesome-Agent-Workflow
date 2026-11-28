@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ReviewMatch, ReviewModel } from "../review/review.ts";
 import { ActionButton } from "../../../shared/ui/controls.tsx";
+import { WrapTextIcon } from "../../../shared/ui/icons.tsx";
 import type { DiffLineRange } from "../../../shared/annotations/types.ts";
 import type { AnnotationDraftTarget } from "../../project/types.ts";
 import {
@@ -35,6 +36,7 @@ export function GitReviewDiff({
   annotations?: DiffAnnotationBinding<AnnotationDraftTarget>;
   location?: DiffLineRange;
 }) {
+  const [hasWrap, setWrap] = useState(true);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
   const [page, setPage] = useState(() => {
     if (!location) return 0;
@@ -54,7 +56,7 @@ export function GitReviewDiff({
   const appliedOffsets = useRef([0, 0]);
   useEffect(() => {
     const container = ref.current;
-    if (!container) return;
+    if (!container || hasWrap) return;
     let frame = 0;
     const measure = () => {
       cancelAnimationFrame(frame);
@@ -95,7 +97,7 @@ export function GitReviewDiff({
       observer?.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [model, query, match, navigation, page, expanded]);
+  }, [model, query, match, navigation, page, expanded, hasWrap]);
   const synchronize = (side: number) => {
     const source = sides.current[side];
     const opposite = 1 - side;
@@ -121,7 +123,7 @@ export function GitReviewDiff({
       if (onLocate) onLocate(target);
       else target.scrollIntoView?.({ block: "center", inline: "nearest" });
     }
-  }, [match, navigation, pageStart, onLocate]);
+  }, [match, navigation, pageStart, onLocate, hasWrap]);
   useEffect(() => {
     if (!location) return;
     ref.current
@@ -221,7 +223,7 @@ export function GitReviewDiff({
             onAdd={annotation.add}
           />
           <code
-            className="block min-w-0 flex-1 px-3 whitespace-pre"
+            className={`block min-w-0 flex-1 px-3 ${hasWrap ? "whitespace-pre-wrap wrap-anywhere" : "whitespace-pre"}`}
             data-diff-annotation-location={isLocated || undefined}
           >
             <span
@@ -258,7 +260,7 @@ export function GitReviewDiff({
       }
     } else if (row.kind === "meta") {
       const meta = (
-        <div key={i} className="px-3 text-ink-soft">
+        <div key={i} className="min-w-0 wrap-anywhere px-3 text-ink-soft">
           {row.text}
         </div>
       );
@@ -277,6 +279,18 @@ export function GitReviewDiff({
       aria-label="Git 左右差异"
       className={`overflow-x-auto text-ui-sm ${diffSurfaceClass}`}
     >
+      <div className="flex justify-end border-b border-line px-2 py-1">
+        <ActionButton
+          tone="ghost"
+          size="compact"
+          aria-pressed={hasWrap}
+          className={hasWrap ? "bg-raised text-ink" : ""}
+          leadingIcon={<WrapTextIcon className="ui-icon-14" />}
+          onClick={() => setWrap(!hasWrap)}
+        >
+          换行
+        </ActionButton>
+      </div>
       {pageStart > 0 && !match && (
         <ActionButton
           tone="ghost"
@@ -296,14 +310,26 @@ export function GitReviewDiff({
             ref={(element) => {
               sides.current[side] = element;
             }}
-            onScroll={() => synchronize(side)}
-            className="min-w-0 overflow-x-auto"
+            onScroll={hasWrap ? undefined : () => synchronize(side)}
+            className={
+              hasWrap
+                ? "grid min-w-0 grid-rows-subgrid"
+                : "min-w-0 overflow-x-auto"
+            }
+            style={
+              hasWrap
+                ? {
+                    gridColumn: side + 1,
+                    gridRow: `1 / span ${Math.max(1, column.length)}`,
+                  }
+                : undefined
+            }
           >
             <div
               ref={(element) => {
                 contents.current[side] = element;
               }}
-              className="w-max min-w-full"
+              className={hasWrap ? "contents" : "w-max min-w-full"}
             >
               {column}
             </div>

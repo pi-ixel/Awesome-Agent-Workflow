@@ -10,6 +10,7 @@ const model = {
   rows: [
     { kind: "del" as const, text: `-${long}`, old: 1, next: null },
     { kind: "add" as const, text: "+short", old: null, next: 1 },
+    { kind: "context" as const, text: " next row", old: 2, next: 2 },
   ],
   full: false,
 };

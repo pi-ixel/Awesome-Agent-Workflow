@@ -1,6 +1,5 @@
 import {
   AnnotationPopover,
-  annotationSelectionAnchor,
   type AnnotationAnchor,
 } from "../../../shared/ui/AnnotationPopover.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
@@ -179,7 +178,7 @@ export function FileAnnotations({
       setEditor({
         owner: annotationEditor,
         target: currentTarget,
-        anchor: annotationSelectionAnchor(selected),
+        anchor: { range: selected },
         open: false,
         annotation: {
           id: crypto.randomUUID(),

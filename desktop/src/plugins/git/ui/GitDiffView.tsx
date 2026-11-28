@@ -8,6 +8,7 @@ import { useProjectGit } from "./useProjectGit.ts";
 import type { ProjectWorkspace } from "../../project/service.ts";
 import { RefreshButton } from "../../../shared/ui/controls/RefreshButton.tsx";
 import { ActionButton } from "../../../shared/ui/controls.tsx";
+import { WrapTextIcon } from "../../../shared/ui/icons.tsx";
 import {
   diffAppearance,
   diffSurfaceClass,
@@ -30,6 +31,7 @@ export function GitDiffView({
   const [result, setResult] = useState<{ data?: GitDiff; error?: string }>({});
   const manualRead = useRef<() => Promise<void>>(() => Promise.resolve());
   const [visible, setVisible] = useState(1000);
+  const [hasWrap, setWrap] = useState(true);
   const git = useProjectGit(project, gitService.query, watchActivity);
   const key = JSON.stringify(change);
   const readDiff = useMemo(
@@ -64,6 +66,16 @@ export function GitDiffView({
           {change.status} · {change.path}
         </span>
         <ActionButton
+          tone="ghost"
+          size="compact"
+          aria-pressed={hasWrap}
+          className={hasWrap ? "bg-raised text-ink" : ""}
+          leadingIcon={<WrapTextIcon className="ui-icon-14" />}
+          onClick={() => setWrap(!hasWrap)}
+        >
+          换行
+        </ActionButton>
+        <ActionButton
           tone="secondary"
           size="compact"
           type="submit"
@@ -97,7 +109,9 @@ export function GitDiffView({
         className="min-h-0 flex-1 overflow-auto bg-base"
         aria-label="Git 统一差异"
       >
-        <div className={`w-max min-w-full text-ui-sm ${diffSurfaceClass}`}>
+        <div
+          className={`${hasWrap ? "" : "w-max min-w-full"} text-ui-sm ${diffSurfaceClass}`}
+        >
           {rows.slice(0, visible).map((row, index) => {
             const { row: rowClass, ink } = diffAppearance[row.kind];
             return (
@@ -112,7 +126,11 @@ export function GitDiffView({
                 >
                   {row.next}
                 </span>
-                <code className="px-3 whitespace-pre">{row.text || " "}</code>
+                <code
+                  className={`px-3 ${hasWrap ? "min-w-0 flex-1 whitespace-pre-wrap wrap-anywhere" : "whitespace-pre"}`}
+                >
+                  {row.text || " "}
+                </code>
               </div>
             );
           })}

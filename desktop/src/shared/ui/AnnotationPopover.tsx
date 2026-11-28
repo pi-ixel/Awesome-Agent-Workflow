@@ -1,30 +1,18 @@
 import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { COMMENT_LIMIT } from "../annotations/types.ts";
+import { visibleSelectionAnchor } from "../annotations/selectionGeometry.ts";
 import { ActionButton, DangerButton } from "./controls.tsx";
 import { HintSurface } from "./controls/HintSurface.tsx";
 import { settingsTextareaClass } from "./inputStyles.ts";
 
-export interface AnnotationAnchor {
-  readonly x: number;
-  readonly top?: number;
-  readonly bottom: number;
-}
-
-export function annotationSelectionAnchor(range: Range): AnnotationAnchor {
-  const rects = Array.from(range.getClientRects()).filter(
-    (rect) => rect.width > 0 && rect.height > 0,
-  );
-  const first = rects[0] ?? range.getBoundingClientRect();
-  let { left, right, bottom } = first;
-  for (const rect of rects) {
-    if (Math.abs(rect.top - first.top) > 1) break;
-    left = Math.min(left, rect.left);
-    right = Math.max(right, rect.right);
-    bottom = Math.max(bottom, rect.bottom);
-  }
-  return { x: (left + right) / 2, top: first.top, bottom };
-}
+export type AnnotationAnchor =
+  | { readonly range: Range }
+  | {
+      readonly x: number;
+      readonly bottom: number;
+      readonly top?: undefined;
+    };
 
 export function AnnotationPopover({
   root,
@@ -69,11 +57,19 @@ export function AnnotationPopover({
   }, [onClose]);
   // 放大审阅中的编辑器要留在父弹窗的焦点范围内。
   const container = root.current?.closest(".modal-panel") ?? document.body;
-  const { x, top: anchorTop, bottom: anchorBottom } = anchor;
   useLayoutEffect(() => {
     const element = surface.current;
     if (!element) return;
+    let frame = 0;
     const position = () => {
+      const resolved =
+        "range" in anchor ? visibleSelectionAnchor(anchor.range) : anchor;
+      if (!resolved) {
+        if (!isOpen) element.style.visibility = "hidden";
+        return;
+      }
+      element.style.visibility = "";
+      const { x, top: anchorTop, bottom: anchorBottom } = resolved;
       const bounds =
         container === document.body ? null : container.getBoundingClientRect();
       const left = Math.max(0, bounds?.left ?? 0) + 8;
@@ -92,18 +88,26 @@ export function AnnotationPopover({
       element.style.left = `${Math.max(left, Math.min(alignedLeft, right - element.offsetWidth))}px`;
       element.style.top = `${Math.max(top, Math.min(placeAbove ? above : below, bottom - element.offsetHeight))}px`;
     };
+    const schedule = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(position);
+    };
     position();
-    window.addEventListener("resize", position);
+    window.addEventListener("resize", schedule);
+    if ("range" in anchor) document.addEventListener("scroll", schedule, true);
     const observer =
       typeof ResizeObserver !== "undefined"
-        ? new ResizeObserver(position)
+        ? new ResizeObserver(schedule)
         : undefined;
     observer?.observe(element);
+    if (root.current) observer?.observe(root.current);
     return () => {
+      cancelAnimationFrame(frame);
       observer?.disconnect();
-      window.removeEventListener("resize", position);
+      window.removeEventListener("resize", schedule);
+      document.removeEventListener("scroll", schedule, true);
     };
-  }, [anchorBottom, anchorTop, container, isOpen, x]);
+  }, [anchor, container, isOpen, root]);
   return createPortal(
     <HintSurface
       ref={surface}

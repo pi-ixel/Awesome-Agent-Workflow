@@ -21,7 +21,6 @@ import {
 import { pathKey, pathName, resolveFileReference } from "../panelPaths.ts";
 import {
   AnnotationPopover,
-  annotationSelectionAnchor,
   type AnnotationAnchor,
 } from "./AnnotationPopover.tsx";
 import { IconButton } from "./IconButton.tsx";
@@ -66,7 +65,7 @@ export function DiffLineNumber({
   readonly className: string;
 }) {
   return (
-    <span className={`group/diff-gutter ${className}`}>
+    <span data-annotation-gutter className={`group/diff-gutter ${className}`}>
       {line}
       {line != null && onAdd && (
         <IconButton
@@ -282,7 +281,7 @@ export function useDiffAnnotation<T extends object>(
       setDraft((current) => (current?.isOpen ? current : undefined));
       return;
     }
-    openDraft(quote, annotationSelectionAnchor(selection.getRangeAt(0)), false);
+    openDraft(quote, { range: selection.getRangeAt(0) }, false);
   }
   return {
     add:

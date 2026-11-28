@@ -255,6 +255,9 @@ function PreviewBody({
     [documents, root, base],
   );
   const showModeToggle = markdown || svg;
+  const codeClassName = wrap
+    ? "min-w-0 flex-1 whitespace-pre-wrap wrap-anywhere px-3"
+    : "whitespace-pre px-3";
   const body = (
     <div className="flex min-h-0 flex-1 flex-col overflow-auto">
       {markdown && sourceMounted ? (
@@ -327,18 +330,19 @@ function PreviewBody({
             >
               <span
                 data-annotation-line={index + 1}
+                data-annotation-gutter
                 className="sticky left-0 w-12 shrink-0 select-none border-r border-line bg-base pr-2 text-right text-ink-faint"
               >
                 {index + 1}
               </span>
               {lines?.[index] !== undefined ? (
                 <code
-                  className={`${wrap ? "whitespace-pre-wrap break-words" : "whitespace-pre"} px-3`}
+                  className={codeClassName}
                   dangerouslySetInnerHTML={{ __html: lines[index] }}
                 />
               ) : (
                 <code
-                  className={`${wrap ? "whitespace-pre-wrap break-words" : "whitespace-pre"} px-3`}
+                  className={codeClassName}
                 >
                   {text || " "}
                 </code>
@@ -444,10 +448,7 @@ export function FilePreview({
     (state) => state.documents[pathKey(path)],
   );
   const dirty = document ? markdownDirty(document) : false;
-  // Markdown is prose-first even in source mode. Other source files retain
-  // their horizontal layout until the user explicitly enables wrapping.
-  const [wrapOverride, setWrapOverride] = useState<boolean | null>(null);
-  const wrap = wrapOverride ?? /\.(md|markdown)$/i.test(path);
+  const [wrap, setWrap] = useState(true);
   const { menu, open: openMenu, dismiss: dismissMenu } = useMenuController();
 
   useEffect(() => {
@@ -616,7 +617,7 @@ export function FilePreview({
         icon: <WrapTextIcon className="ui-icon-16" />,
         radio: true,
         selected: wrap,
-        onSelect: () => setWrapOverride(!wrap),
+        onSelect: () => setWrap(!wrap),
       });
     }
     if (entries.length > 0) entries.push({ type: "separator" });

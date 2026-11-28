@@ -258,6 +258,7 @@ export function MarkdownSourceEditor({
       }),
     });
     viewRef.current = view;
+    view.scrollDOM.querySelector(".cm-gutters")?.setAttribute("data-annotation-gutter", "");
     const disconnectHints = connectEditorHints(view.dom);
     onReady({
       find: view.plugin(markdownFindView)!,

@@ -16,6 +16,7 @@ it("synchronizes both directions without affecting other diff instances", () => 
     </>,
   );
   const [first, second] = screen.getAllByLabelText("Git 左右差异");
+  fireEvent.click(within(first!).getByRole("button", { name: "换行" }));
   const a = within(first!).getByLabelText("修改前"),
     b = within(first!).getByLabelText("修改后");
   const other = within(second!).getByLabelText("修改前");

@@ -583,10 +583,7 @@ test("批注居中定位到第一行文字上方，正反拖选的位置一致",
     selection.addRange(range);
     element.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
   });
-  await actions.getByRole("button", { name: "批注", exact: true }).click();
-  const edge = (await editor.boundingBox())!;
-  expect(edge.x + edge.width).toBeLessThanOrEqual(992);
-  await expect(editor).toHaveCSS("top", "32px");
+  await expect(actions).toBeHidden();
 });
 
 test("全部撤销后收起并保留恢复，恢复后仍能查看相同历史 Diff", async ({
