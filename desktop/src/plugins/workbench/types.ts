@@ -112,12 +112,6 @@ export interface WorkspaceGateProps {
   }>;
 }
 
-export interface StartupWait {
-  readonly timeoutMs: number;
-  readonly isReady: () => boolean;
-  readonly subscribe: (listener: () => void) => () => void;
-}
-
 export interface SidebarFooterProps {
   readonly badge?: {
     readonly tooltip: string;
@@ -198,7 +192,7 @@ export interface WorkbenchContributions {
     id: string;
     View: ComponentType<{ Footer: ComponentType<SidebarFooterProps> }>;
   };
-  startup: { id: string; capture(): StartupWait | undefined };
+  startup: { id: string; shouldPlay(): boolean };
   about: { id: string; label: string; Value: ComponentType };
   panels: {
     id: string;

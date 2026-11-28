@@ -1,9 +1,113 @@
 import { expect, it, vi } from "vitest";
+import { desktopManagedStorage, webviewStorage } from "../../../../src/plugins/host/storage/storage.ts";
+import { createProjectSessionIndexes } from "../../../../src/plugins/project/sessions/sessionIndexes.ts";
+import { bindNativeSessionTitles } from "../../../../src/plugins/project/sessions/sessionTitles.ts";
+import { newProjectPath, pathKey } from "../../../../src/shared/panelPaths.ts";
 import {
   createSessionCatalog,
   emptyCatalog,
   sessionListEntries,
 } from "../../../../src/plugins/project/sessions/catalog.ts";
+
+it("重启时用已保存的标题和活动时间排序，手动标题覆盖自动标题", async () => {
+  const project = "d:/project";
+  const agentKey = JSON.stringify(["alpha", "startup"]);
+  const base = { agentId: "alpha", project, title: null, metadata: { archive: null, unread: false, cwd: null } };
+  const newest = { sessionId: "new", title: "自动标题", updatedAt: "2026-11-28T11:00:00.000Z" };
+  const older = { sessionId: "old", title: "另一个标题", updatedAt: "2026-11-28T10:00:00.000Z" };
+  const saved = [older, newest];
+  const request = vi.spyOn(desktopManagedStorage, "request").mockResolvedValue(saved);
+  const initial = { records: [{ ...base, sessionId: "new", title: "我的标题" }], conflicts: [] };
+  const indexes = createProjectSessionIndexes(webviewStorage, undefined, initial);
+  try {
+    await indexes.saveListings(project, agentKey, saved);
+    expect(request).toHaveBeenCalledExactlyOnceWith("session_metadata_save_listings", {
+      project: { agentId: "alpha", project },
+      sessions: saved,
+    });
+    expect(indexes.ownerOf(project, agentKey, "old")).toBe(project);
+    const reopened = createProjectSessionIndexes(webviewStorage, undefined, {
+      records: saved.map(({ sessionId, ...listing }) => ({
+        ...base, sessionId, title: sessionId === "new" ? "我的标题" : null,
+        metadata: { ...base.metadata, listing },
+      })),
+      conflicts: [],
+    });
+    try {
+      reopened.catalog.selectCatalog(agentKey, () => {});
+      expect(reopened.catalog.store.getState().sessionsByPath[project]).toEqual([
+        { id: "new", title: "我的标题", nativeTitle: newest.title, updatedAt: newest.updatedAt },
+        { id: "old", title: older.title, nativeTitle: older.title, updatedAt: older.updatedAt },
+      ]);
+      expect(reopened.catalog.store.getState().statusByPath).toEqual({});
+    } finally {
+      reopened.dispose();
+    }
+  } finally {
+    indexes.dispose();
+    bindNativeSessionTitles(undefined);
+    request.mockRestore();
+  }
+});
+
+it("在 ACP 返回前读取本机索引，按 Agent 和项目隔离，并沿用隐藏与合并规则", () => {
+  const workspacePath = newProjectPath("D:/project");
+  const otherProject = newProjectPath("D:/project");
+  const agentKey = JSON.stringify(["alpha", "launch-config"]);
+  const owner = { workspacePath, agentKey };
+  const row = (agentId: string, project: string, sessionId: string, title: string | null) => ({
+    agentId,
+    project,
+    sessionId,
+    title,
+    metadata: { archive: null, unread: false, cwd: null },
+  });
+  const indexes = createProjectSessionIndexes(webviewStorage, undefined, {
+    records: [
+      row("alpha", workspacePath, "manual", "手动标题"),
+      row("alpha", workspacePath, "native", null),
+      row("alpha", workspacePath, "scheduled", null),
+      row("alpha", otherProject, "other", "同目录的另一个项目"),
+      row("beta", workspacePath, "manual", "另一个 Agent"),
+    ],
+    conflicts: [],
+  });
+  const { catalog } = indexes;
+  const getRows = (path: string) => catalog.store.getState().sessionsByPath[pathKey(path)];
+  try {
+    catalog.excludeSessions([{ workspacePath, agentKey: "alpha", sessionId: "scheduled" }]);
+    catalog.selectCatalog(agentKey, () => {});
+    expect(getRows(workspacePath)).toMatchObject([
+      { id: "manual", title: "手动标题", nativeTitle: "会话" },
+      { id: "native", title: "会话", updatedAt: null },
+    ]);
+    expect(getRows(otherProject)).toMatchObject([{ id: "other" }]);
+    expect(catalog.store.getState().statusByPath).toEqual({});
+
+    catalog.writeCatalogStatus(agentKey, workspacePath, agentKey, { state: "error", message: "ACP 离线" });
+    expect(getRows(workspacePath)?.map(({ id }) => id)).toEqual(["manual", "native"]);
+
+    const updatedAt = "2026-11-28T02:00:00Z";
+    const listed = [
+      { sessionId: "native", cwd: workspacePath, title: "Agent 标题", updatedAt },
+      { sessionId: "remote-only", cwd: workspacePath, title: "补入的会话" },
+    ];
+    const entries = sessionListEntries({ sessionsByPath: {}, items: [] }, listed, null, owner, [], catalog.store.getState());
+    catalog.updateCatalog(agentKey, owner, entries);
+    expect(getRows(workspacePath)).toMatchObject([
+      { id: "native", title: "Agent 标题", updatedAt },
+      { id: "manual", title: "手动标题", nativeTitle: "会话" },
+      { id: "remote-only", title: "补入的会话" },
+    ]);
+
+    catalog.selectCatalog("beta", () => {});
+    expect(getRows(workspacePath)).toMatchObject([{ id: "manual", title: "另一个 Agent" }]);
+    expect(getRows(otherProject)).toBeUndefined();
+  } finally {
+    indexes.dispose();
+    bindNativeSessionTitles(undefined);
+  }
+});
 
 it("rejects a stale catalog write after Agent switching and restores the original owner's directory", () => {
   const {

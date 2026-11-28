@@ -12,7 +12,7 @@ import { createSessionActivityStore, sessionActivityKey } from "./sessionActivit
 import type { DeleteSessionTarget } from "./sessionDeletion.ts";
 import { createSessionArchiveStore } from "./sessionArchiveStore.ts";
 import type { Logger } from "../../../shared/logging/logger.ts";
-import { createSessionMetadata, type SessionRecords } from "./sessionMetadata.ts";
+import { createSessionMetadata, type SessionRecords, type StoredListing } from "./sessionMetadata.ts";
 import { bindNativeSessionTitles } from "./sessionTitles.ts";
 
 function readOwnerKey(key: string): [string, string, string] | undefined {
@@ -113,6 +113,7 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
         deletions.blocked(target) || isModelProbe(target);
     },
     retainedSessions,
+    metadata?.list,
   );
   let writes = Promise.resolve();
   function claimSessionProject(project: string, agentKey: string, sessionId: string, cwd?: string): Promise<void> {
@@ -168,6 +169,16 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
   }));
   return {
     catalog,
+    async saveListings(project: string, agentKey: string, sessions: readonly StoredListing[]) {
+      if (!metadata || !sessions.length) return;
+      const saved = await metadata.saveListings(project, agentKey, sessions);
+      if (scope.signal.aborted || !saved.length) return;
+      owners = {
+        ...owners,
+        ...Object.fromEntries(saved.map(({ sessionId }) => [ownerKey(project, agentKey, sessionId), project])),
+      };
+      catalog.refreshVisibility();
+    },
     retainedSessions,
     ownerOf,
     isOwnershipUncertain,

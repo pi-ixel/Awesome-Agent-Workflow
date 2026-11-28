@@ -15,6 +15,23 @@ pub(crate) struct SessionMetadata {
     #[serde(default)]
     pub unread: bool,
     pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listing: Option<Listing>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Listing {
+    title: Option<String>,
+    updated_at: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ListedSession {
+    session_id: String,
+    #[serde(flatten)]
+    listing: Listing,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -293,6 +310,76 @@ pub async fn session_metadata_update(
     let owner = SessionIdentity::new(&owner.agent_id, &owner.project, owner.session_id.as_deref())
         .ok_or("会话身份无效")?;
     tauri::async_runtime::spawn_blocking(move || update(&data, owner, change))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn save_listings(
+    data: &Path,
+    project: SessionIdentity,
+    sessions: Vec<ListedSession>,
+) -> Result<Vec<ListedSession>, String> {
+    let _lock = source_lock(data, &project)?;
+    let root = root_key(&project);
+    let unassigned: Unassigned = read_record(&unassigned_path(data))?;
+    let foreign: BTreeSet<_> = memberships(data, Some(&project.agent_id))?
+        .into_iter()
+        .filter(|owner| owner.project != project.project && root_key(owner) == root)
+        .filter_map(|owner| owner.session_id)
+        .collect();
+    let mut saved = Vec::new();
+    for session in sessions {
+        let Some(owner) = SessionIdentity::new(
+            &project.agent_id, &project.project, Some(&session.session_id),
+        ) else { continue };
+        if foreign.contains(&session.session_id)
+            || unassigned.owners.contains(&source(&owner))
+            || deleted(data, &owner)?
+        {
+            continue;
+        }
+        let result = (|| {
+            let target = owner.directory(data).join("metadata.json");
+            let mut metadata: SessionMetadata = read_record(&target)?;
+            let mut listing = metadata.listing.clone().unwrap_or_default();
+            let timestamp = |value: &Option<String>| {
+                value.as_deref().and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            };
+            let incoming_time = timestamp(&session.listing.updated_at);
+            let current_time = timestamp(&listing.updated_at);
+            if incoming_time.is_none() || incoming_time >= current_time {
+                if session.listing.title.is_some() {
+                    listing.title = session.listing.title;
+                }
+                if incoming_time.is_some() {
+                    listing.updated_at = session.listing.updated_at;
+                }
+            }
+            if metadata.listing.as_ref() != Some(&listing) {
+                owner.ensure(data).map_err(|error| error.to_string())?;
+                metadata.listing = Some(listing.clone());
+                write_record(&target, &metadata)?;
+            }
+            Ok::<_, String>(ListedSession { session_id: session.session_id, listing })
+        })();
+        match result {
+            Ok(session) => saved.push(session),
+            Err(error) => eprintln!("无法保存会话列表元数据: {error}"),
+        }
+    }
+    Ok(saved)
+}
+
+#[tauri::command]
+pub async fn session_metadata_save_listings(
+    app: tauri::AppHandle,
+    project: SessionIdentity,
+    sessions: Vec<ListedSession>,
+) -> Result<Vec<ListedSession>, String> {
+    let data = crate::storage_location::data_dir(&app)?;
+    let project = SessionIdentity::new(&project.agent_id, &project.project, None)
+        .ok_or("项目身份无效")?;
+    tauri::async_runtime::spawn_blocking(move || save_listings(&data, project, sessions))
         .await
         .map_err(|error| error.to_string())?
 }
@@ -671,6 +758,57 @@ mod tests {
 
     fn owner(project: &str, id: &str) -> SessionIdentity {
         SessionIdentity::new("agent", project, Some(id)).unwrap()
+    }
+
+    #[test]
+    fn list_metadata_survives_reopen_without_overwriting_manual_or_newer_fields() {
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path();
+        let project = SessionIdentity::new("agent", "D:/AAW", None).unwrap();
+        let target = owner("D:/AAW", "session");
+        let dir = target.ensure(data).unwrap();
+        write_record(&dir.join("metadata.json"), &json!({ "unread": true })).unwrap();
+        update(data, target.clone(), Some(SessionChange::Title(Some("手动".into())))).unwrap();
+        let newer = "2026-11-28T11:00:00.000Z";
+        let listing = |title: Option<&str>, updated_at: Option<&str>| ListedSession {
+            session_id: "session".into(),
+            listing: Listing {
+                title: title.map(str::to_owned),
+                updated_at: updated_at.map(str::to_owned),
+            },
+        };
+        save_listings(data, project.clone(), vec![listing(Some("自动"), Some(newer))]).unwrap();
+        save_listings(data, project.clone(), vec![listing(Some("旧标题"), Some("2026-11-28T10:00:00Z"))]).unwrap();
+        save_listings(data, project, vec![listing(None, Some("2026-11-28T12:00:00.000Z"))]).unwrap();
+        let reopened = record(data, target).unwrap();
+        assert_eq!(reopened.title.as_deref(), Some("手动"));
+        assert!(reopened.metadata.unread);
+        let cached = reopened.metadata.listing.unwrap();
+        assert_eq!(cached.title.as_deref(), Some("自动"));
+        assert_eq!(cached.updated_at.as_deref(), Some("2026-11-28T12:00:00.000Z"));
+    }
+
+    #[test]
+    fn lists_register_new_sessions_without_recreating_deleted_or_foreign_sessions() {
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path();
+        let project = SessionIdentity::new("agent", "D:/AAW", None).unwrap();
+        let foreign = owner(
+            "//aaw-project/11111111-2222-3333-4444-555555555555/D%3A%2FAAW",
+            "foreign",
+        );
+        foreign.ensure(data).unwrap();
+        mark_source_deleted(data, &owner("D:/AAW", "deleted")).unwrap();
+        let sessions = ["new", "deleted", "foreign"].into_iter().map(|id| ListedSession {
+            session_id: id.into(),
+            listing: Listing { title: Some("自动".into()), updated_at: None },
+        }).collect();
+        let saved = save_listings(data, project, sessions).unwrap();
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].session_id, "new");
+        assert!(!owner("D:/AAW", "deleted").directory(data).exists());
+        assert!(!owner("D:/AAW", "foreign").directory(data).exists());
+        assert_eq!(memberships(data, Some("agent")).unwrap().len(), 2);
     }
 
     #[test]

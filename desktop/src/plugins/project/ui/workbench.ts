@@ -18,7 +18,7 @@ import { NewSessionHeaderAction, projectHeaders } from "./projectHeaders.tsx";
 import { createProjectSettings } from "./settings.tsx";
 import { createUsageSettingsEntry } from "../usage/settingsEntry.ts";
 import { createLegacyAgentDataView } from "./LegacyAgentDataSection.tsx";
-import { captureProjectStartup } from "./startup.ts";
+import { knownWorkspacePaths } from "../workspace/knownPaths.ts";
 import { registerProjectExit } from "../lifecycle/lifecycle.ts";
 import { withProjectView } from "./bindings/projectView.tsx";
 import { createProjectViewNavigation } from "./bindings/workbenchNavigation.ts";
@@ -93,11 +93,7 @@ export function apply(ctx: Context): void {
   ctx.effect(() =>
     workbench.register("startup", {
       id: "project-preloading",
-      capture: () => captureProjectStartup({
-        workspace: project.projects.workspace,
-        catalog: project.sessions.catalog,
-        selection: agents.configuration,
-      }),
+      shouldPlay: () => knownWorkspacePaths(project.projects.workspace.getState()).length > 0,
     }),
   );
   ctx.effect(() => {

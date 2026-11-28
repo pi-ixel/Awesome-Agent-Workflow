@@ -1,5 +1,5 @@
 import {
-  sameSessionAgent,
+  sessionAgentId,
   type DeleteSessionTarget,
 } from "./sessionDeletion.ts";
 import { createStore } from "zustand";
@@ -16,6 +16,7 @@ import {
 } from "../conversation/sessionStore.ts";
 import type { SessionInfo } from "../../../contracts/acp/protocol.ts";
 import type { SessionTarget } from "./types.ts";
+import type { SessionRecords } from "./sessionMetadata.ts";
 
 export interface CatalogOwner {
   readonly workspacePath: string;
@@ -55,7 +56,8 @@ export function sessionListEntries(
   }
   const cachedTitle = (id: string): string | undefined => {
     const entry = previousEntries.get(id);
-    return agentSessionTitle(entry?.nativeTitle ?? entry?.title);
+    const title = agentSessionTitle(entry?.nativeTitle ?? entry?.title);
+    return title === "会话" ? undefined : title;
   };
   const entries: SessionSummary[] = [];
   if (activeSessionId !== null) {
@@ -67,7 +69,7 @@ export function sessionListEntries(
       id: activeSessionId,
       title:
         agentSessionTitle(listedSelf?.title) ??
-        (cached && cached !== "会话" ? cached : sessionTitleOf(store.items)),
+        cached ?? sessionTitleOf(store.items),
       // 排序语义对齐 ZCode：updatedAt = 会话最后活动时间（chrys 权威
       // 优先，本地缓存次之）。打开/切换会话**不**盖当前时刻——否则每次
       // 载入历史会话它都会跳到列表顶部。全新会话（无任何时间来源，首条
@@ -154,12 +156,13 @@ export function createSessionCatalog(
   signal: AbortSignal,
   hidden: (target: DeleteSessionTarget) => boolean = () => false,
   retainedSessions: (agent: string) => { project: string; sessionId: string }[] = () => [],
+  localRecords: () => Iterable<SessionRecords["records"][number]> = () => [],
 ) {
   const store = createStore<SessionCatalogState>()(() => emptyCatalog);
   const catalogCache = new Map<string, SessionCatalogState>();
   const externalSessions = new Set<string>();
   const externalKey = (agent: string, path: string, id: string) =>
-    JSON.stringify([agent, pathKey(path), id]);
+    JSON.stringify([sessionAgentId(agent) ?? agent, pathKey(path), id]);
   const visibleEntries = (
     agent: string,
     path: string,
@@ -217,9 +220,33 @@ export function createSessionCatalog(
     if (current.agentKey !== agentKey) {
       if (current.agentKey) catalogCache.set(current.agentKey, current);
       invalidatePreviousPreparation();
-      const byPath = { ...catalogCache.get(agentKey)?.sessionsByPath };
-      for (const path of new Set(retainedSessions(agentKey).map((owner) => owner.project))) {
-        byPath[path] = visibleEntries(agentKey, path, byPath[path] ?? []);
+      const cached = catalogCache.get(agentKey);
+      const byPath = { ...cached?.sessionsByPath };
+      if (!cached) {
+        const agentId = sessionAgentId(agentKey) ?? agentKey;
+        const localByPath = new Map<string, SessionSummary[]>();
+        for (const record of localRecords()) {
+          if (record.agentId !== agentId) continue;
+          const path = pathKey(record.project);
+          const entries = localByPath.get(path) ?? [];
+          const updatedAt = record.metadata.listing?.updatedAt ?? record.metadata.archive?.updatedAt ?? null;
+          const nativeTitle = agentSessionTitle(record.metadata.listing?.title)
+            ?? agentSessionTitle(record.metadata.archive?.title)
+            ?? sessionListTitleOf(updatedAt);
+          entries.push({ id: record.sessionId, title: record.title ?? nativeTitle, nativeTitle, updatedAt });
+          localByPath.set(path, entries);
+        }
+        for (const [path, entries] of localByPath) {
+          byPath[path] = entries.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
+        }
+      }
+      const paths = new Set(Object.keys(byPath).map(pathKey));
+      for (const { project } of retainedSessions(agentKey)) {
+        const path = pathKey(project);
+        if (!paths.has(path)) byPath[path] = [];
+      }
+      for (const [path, entries] of Object.entries(byPath)) {
+        byPath[path] = visibleEntries(agentKey, path, entries);
       }
       store.setState({
         agentKey,
@@ -323,13 +350,6 @@ export function createSessionCatalog(
     excludeSessions,
     refreshVisibility,
     isExternal: (target: DeleteSessionTarget) =>
-      [...externalSessions].some((key) => {
-        const [agent, path, id] = JSON.parse(key) as [string, string, string];
-        return (
-          path === pathKey(target.workspacePath) &&
-          id === target.sessionId &&
-          sameSessionAgent(agent, target.agentKey)
-        );
-      }),
+      externalSessions.has(externalKey(target.agentKey, target.workspacePath, target.sessionId)),
   };
 }

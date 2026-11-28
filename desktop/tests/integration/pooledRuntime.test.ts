@@ -290,6 +290,35 @@ describe("main runtime with the ACP pool", () => {
       create.mockRestore();
     }
   });
+
+  it("writes the background ACP listing with a normalized timestamp and skips external sessions", async () => {
+    const path = "/catalog-persistence";
+    const agentKey = agentService.selectionKey(useWorkspaceStore.getState().toolPaths);
+    const owner = { agentKey, workspacePath: path };
+    const save = vi.spyOn(projectIndexes, "saveListings");
+    projectIndexes.catalog.excludeSessions([{ ...owner, sessionId: "scheduled" }]);
+    vi.mocked(createAgentTransport).mockImplementation(() => {
+      const peer = standardAcpPeer();
+      peer.handlers.set("session/list", () => ({
+        sessions: [
+          { sessionId: "history", cwd: path, title: "ACP 标题", updatedAt: "2026-11-28T19:00:00+08:00" },
+          { sessionId: "scheduled", cwd: path, title: "定时任务" },
+          { sessionId: "empty", cwd: path },
+        ],
+      }));
+      peers.push(peer);
+      return Promise.resolve(peer.client);
+    });
+    try {
+      await preloadSessionList(path);
+      expect(save).toHaveBeenCalledExactlyOnceWith(path, agentKey, [
+        { sessionId: "history", title: "ACP 标题", updatedAt: "2026-11-28T11:00:00.000Z" },
+      ]);
+    } finally {
+      save.mockRestore();
+    }
+  });
+
   it("still releases other sessions and all connections after one cleanup fails", async () => {
     await openRealWorkspace("/a", { forceNew: true });
     await openRealWorkspace("/b", { forceNew: true });

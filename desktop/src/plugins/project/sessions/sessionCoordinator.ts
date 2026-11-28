@@ -43,7 +43,7 @@ import {
 } from "../conversation/SessionRuntime.ts";
 import { ProjectFactory } from "../workspace/ProjectFactory.ts";
 import { SessionFactory } from "../conversation/SessionFactory.ts";
-import { displayTitleOf } from "./sessionTitles.ts";
+import { agentSessionTitle, displayTitleOf } from "./sessionTitles.ts";
 import { sessionListEntries, type CatalogOwner } from "./catalog.ts";
 import type { createElicitationQueue } from "../interactions/elicitationStore.ts";
 import { knownWorkspacePaths } from "../workspace/knownPaths.ts";
@@ -1074,6 +1074,11 @@ export function createSessionCoordinator({
         if (activeRuntime === runtime)
           foreground.activity.publish(runtime.workspacePath, event);
         const sessionId = runtime.session.sessionId;
+        if (event.type === "session_info_update" && event.sessionId === sessionId &&
+            !runtime.pluginOpened && !runtime.scheduled &&
+            indexes.ownerOf(runtime.workspacePath, runtime.agentKey, sessionId)) {
+          saveAgentListings(runtime, [event]);
+        }
         const watchers = sessionId
           ? eventWatchers.get(
               sessionActivityKey(
@@ -2189,6 +2194,28 @@ export function createSessionCoordinator({
       foregroundSession.setState({ sessionsByPath: catalog.sessionsByPath });
   }
 
+  function saveAgentListings(
+    { workspacePath, agentKey }: { workspacePath: string; agentKey: string },
+    listed: readonly (Pick<SessionInfo, "sessionId" | "updatedAt"> & { title?: string | null })[],
+  ): void {
+    const root = pathKey(projectFolderPath(workspacePath));
+    const isSharedRoot = knownWorkspacePaths(workspaceStore.getState()).some(
+      (path) => pathKey(path) !== pathKey(workspacePath) && pathKey(projectFolderPath(path)) === root,
+    );
+    const summaries = listed.flatMap(({ sessionId, title, updatedAt }) => {
+      const target = { workspacePath, agentKey, sessionId };
+      if (directory.isExternal(target) || indexes.deletions.blocked(target) ||
+          (isSharedRoot && !indexes.ownerOf(workspacePath, agentKey, sessionId))) return [];
+      const nativeTitle = agentSessionTitle(title);
+      const timestamp = updatedAt ? Date.parse(updatedAt) : NaN;
+      const activityTime = Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : undefined;
+      return nativeTitle || activityTime ? [{ sessionId, title: nativeTitle, updatedAt: activityTime }] : [];
+    });
+    void indexes.saveListings(workspacePath, agentKey, summaries).catch((error: unknown) =>
+      logger.warn("保存会话列表元数据失败", { reason: String(error) }),
+    );
+  }
+
   async function queryProjectCatalog(
     workspacePath: string,
     agentKey: string,
@@ -2250,13 +2277,17 @@ export function createSessionCoordinator({
               pathKey(runtime.workspacePath) === pathKey(workspacePath),
           ),
           catalogStore.getState(),
-        ).filter(({ id }) => matches(id)).map((entry) => ({
-          ...entry,
-          nativeTitle: entry.title,
-          title: displayTitleOf(entry.id, entry.title, agentKey, workspacePath),
-        }));
+        ).filter(({ id }) => matches(id)).map((entry) => {
+          const nativeTitle = entry.nativeTitle ?? entry.title;
+          return {
+            ...entry,
+            nativeTitle,
+            title: displayTitleOf(entry.id, nativeTitle, agentKey, workspacePath),
+          };
+        });
         publishCatalog({ workspacePath, agentKey }, entries);
         setListStatus(workspacePath, agentKey, { state: "ready" });
+        saveAgentListings({ workspacePath, agentKey }, scopedHistory);
         return scopedHistory;
       } catch (error) {
         if (!valid()) return null;

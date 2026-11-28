@@ -290,7 +290,8 @@ describe("App 主布局", () => {
         statusByPath: { "d:/dev/demo-project": { state: "ready" } },
       });
     });
-    await userEvent.click(within(screen.getByLabelText("项目树")).getByRole("button", { name: "工作流" }));
+    const tree = await screen.findByLabelText("项目树", undefined, { timeout: 3_000 });
+    await userEvent.click(within(tree).getByRole("button", { name: "工作流" }));
     // 总览的顶栏：项目名 + 返回按钮（全应用唯一顶栏，无 crumb 重影）
     expect(
       screen.getByRole("heading", { name: "demo-project" }),
