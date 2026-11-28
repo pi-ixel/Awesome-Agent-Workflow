@@ -13,38 +13,9 @@ import type {
   StorageResponse,
 } from "../../../src/plugins/diagnostics/capture/storageRegistry.ts";
 import { createStorageSettings } from "../../../src/plugins/diagnostics/ui/StorageSettings.tsx";
-import { ToolsStorageSetting } from "../../../src/plugins/diagnostics/ui/ToolsStorageSetting.tsx";
 import { StorageView } from "../../../src/plugins/diagnostics/ui/StorageView.tsx";
 import { desktopManagedStorage } from "../../../src/plugins/host/service.ts";
 import { HintTooltip } from "../../../src/shared/ui/controls/HintTooltip.tsx";
-
-it("选择工具存储位置后显示待重启计划，并允许取消", async () => {
-  const home = "C:/AAW/tools";
-  const legacy = { home, homeCustom: false, legacyLocations: true, pendingPath: null, migrationError: null };
-  const target = "D:/AAW/aaw-tools";
-  const available = vi.spyOn(desktopManagedStorage, "available").mockReturnValue(true);
-  const request = vi.spyOn(desktopManagedStorage, "request").mockImplementation((command, args) =>
-    Promise.resolve(command === "tools_location_schedule" && args?.target
-      ? { ...legacy, pendingPath: target }
-      : legacy),
-  );
-  try {
-    render(<ToolsStorageSetting pickDirectory={() => Promise.resolve("D:/AAW")} />);
-    const path = screen.getByLabelText<HTMLInputElement>("工具整体当前存储位置");
-    await waitFor(() => expect(path.value).toBe(home));
-    fireEvent.click(screen.getByRole("button", { name: "选择文件夹" }));
-    await screen.findByText(`退出并重新打开 AAW 后迁移到 ${target}`);
-    expect(path.value).toBe(home);
-    expect(request).toHaveBeenCalledWith("tools_location_schedule", { target: "D:/AAW" });
-    fireEvent.click(screen.getByRole("button", { name: "取消迁移" }));
-    await screen.findByRole("button", { name: "归并到默认位置" });
-    expect(request).toHaveBeenCalledWith("tools_location_schedule", { cancel: true });
-    expect(path.value).toBe(home);
-  } finally {
-    request.mockRestore();
-    available.mockRestore();
-  }
-});
 
 it("shows usage statistics occupation without cleanup controls", async () => {
   const request = vi.fn().mockResolvedValue([{
@@ -392,8 +363,7 @@ it("shows the current storage path and schedules a folder picked by the user", a
       pick,
     );
     render(<Settings />);
-    // 工具存储卡（ToolsStorageSetting）也有「选择文件夹 / 保存」按钮，
-    // 这里的查询必须限定在「存储位置」卡内。
+    // 查询限定在「存储位置」卡内，避免与下方存储明细里的同名控件混淆。
     const card = within(screen.getByLabelText("存储位置"));
     const path = card.getByLabelText<HTMLInputElement>("数据存储路径");
     await waitFor(() => expect(path.value).toBe(currentPath));

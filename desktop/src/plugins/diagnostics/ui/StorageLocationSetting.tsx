@@ -74,7 +74,7 @@ export function StorageLocationSetting({
       <SettingRow
         label="数据存储路径"
         htmlFor="storage-location-path"
-        desc="选择一个父目录。应用会在重启时创建 com.aaw.desktop 数据文件夹，迁移配置、会话数据、更新缓存和诊断日志。"
+        desc="选择一个父目录。应用会在重启时创建 com.aaw.desktop 数据文件夹，迁移配置、会话数据、工具和工具数据、更新缓存和诊断日志。工具跟着这个目录走，不需要单独设置。"
         footerAlign="start"
         footer={
           error || location?.migrationError || location?.pendingPath ? (

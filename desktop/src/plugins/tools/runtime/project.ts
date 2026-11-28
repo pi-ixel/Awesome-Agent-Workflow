@@ -290,9 +290,10 @@ export function toolProjectIdFromBrief(brief: string): string {
 }
 
 /**
- * 落点由 Rust 的 `tools_root_dir` 按当前账号解析好：自定义「工具整体」目录
- * 下不带账号层（账号私有家），默认位置带账号层（多账号共享的家）。前端
- * 不再自己拼账号段——两条路同一套解析，迁移后立即生效。
+ * 落点由 Rust 的 `tools_root_dir` 按当前账号解析好：旧版按账号指针指向的是
+ * 该账号独占的家根（不带账号层），其余情况都在数据根的工具库下按
+ * `projects/<账号>` 分层。前端不再自己拼账号段——两条路同一套解析，
+ * 数据根搬家后立即生效。
  */
 export async function defaultToolProjectsDir(
   io: ToolProjectIO,
@@ -816,7 +817,7 @@ export async function migrateLegacyTools(
     options.parent ?? (await defaultToolProjectsDir(io, options.owner));
   // 设了自定义根时，默认根里已有的项目不算"没有"：项目列表同时扫两个根，
   // 默认根里已有的工具不该在自定义根再克隆一份——否则同一个 id 两份源码，
-  // 改哪份、装哪份全是歧义（2026-11-22 真机：自定义根指到工具整体的家根，
+  // 改哪份、装哪份全是歧义（2026-11-22 真机：自定义根正好指到工具库的家根，
   // 面板每次重挂载都在家根下重生一份脚手架）。
   const fallbackRoot = options.parent
     ? await defaultToolProjectsDir(io, options.owner)

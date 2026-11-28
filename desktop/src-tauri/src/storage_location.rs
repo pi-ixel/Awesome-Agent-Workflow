@@ -30,7 +30,6 @@ struct StorageLocation {
     control: PathBuf,
     state: Mutex<Location>,
     error: Mutex<Option<String>>,
-    tool_migration_error: Mutex<Option<String>>,
     _lock: File,
 }
 
@@ -88,7 +87,6 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {
         .open(default.join("runtime/locks/storage-location.lock"))
         .map_err(|e| e.to_string())?;
     let mut error = None;
-    let mut tool_error = None;
     if lock.try_lock().is_ok() {
         let mut state: Location = read_record(&control)?;
         let finish_tool_paths = |state: &mut Location| -> Result<(), String> {
@@ -122,8 +120,12 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {
         })();
         if let Err(cause) = result {
             error = Some(format!("存储目录迁移失败：{cause}"));
-        } else if let Err(cause) = crate::tools::location::apply_pending(state.active.as_deref().unwrap_or(&default)) {
-            tool_error = Some(cause);
+        } else if let Err(cause) = crate::tools::location::absorb_legacy_home(
+            state.active.as_deref().unwrap_or(&default),
+        ) {
+            // 旧版独立工具库并入数据目录。搬不动就不搬：指针还在，工具继续从原位置
+            // 可用，下次启动重试。这里只留痕，因为设置页已经不再展示工具位置。
+            eprintln!("旧工具库未能并入数据目录，已继续使用原位置：{cause}");
         }
         lock.unlock().map_err(|e| e.to_string())?;
     }
@@ -137,23 +139,9 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {
         control,
         state: Mutex::new(state),
         error: Mutex::new(error),
-        tool_migration_error: Mutex::new(tool_error),
         _lock: lock,
     });
     Ok(())
-}
-
-pub(crate) fn tool_migration_error(app: &AppHandle) -> Option<String> {
-    app.try_state::<StorageLocation>()
-        .and_then(|location| location.tool_migration_error.lock().ok()?.clone())
-}
-
-pub(crate) fn clear_tool_migration_error(app: &AppHandle) {
-    if let Some(location) = app.try_state::<StorageLocation>() {
-        if let Ok(mut error) = location.tool_migration_error.lock() {
-            *error = None;
-        }
-    }
 }
 
 fn active_dir(app: &AppHandle) -> Option<PathBuf> {

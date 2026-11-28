@@ -18,7 +18,6 @@ import {
 } from "../capture/storageThresholds.ts";
 import { StorageView } from "./StorageView.tsx";
 import { StorageLocationSetting } from "./StorageLocationSetting.tsx";
-import { ToolsStorageSetting } from "./ToolsStorageSetting.tsx";
 import {
   flushNativeConfiguration,
   loadNativeConfiguration,
@@ -159,7 +158,6 @@ export function createStorageSettings(
         {desktopManagedStorage.available() && (
           <StorageLocationSetting pickDirectory={pickStorageDirectory} />
         )}
-        <ToolsStorageSetting pickDirectory={pickStorageDirectory} />
         {state.readError && (
           <p role="alert" className="text-ui-caption text-danger-ink">
             读取存储状态失败。{state.readError}{" "}

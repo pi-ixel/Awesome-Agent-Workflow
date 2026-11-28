@@ -379,8 +379,5 @@
   ],
   "shared/ui/markdown/deferredCodePlugin.ts": [
     "专用渲染依赖 · @streamdown/code"
-  ],
-  "plugins/diagnostics/ui/ToolsStorageSetting.tsx": [
-    "ToolsStorageSetting · <input>"
   ]
 }
