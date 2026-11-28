@@ -225,7 +225,7 @@ export function SessionStatusOverlay({
             aria-label="会话状态悬浮卡"
             className="pointer-events-none absolute right-4 top-2 z-20"
           >
-              <ActionButton
+              <ActionButton contentLayout="custom"
                 ref={capsule}
                 tone="secondary"
                 inert={mode === "panel"}

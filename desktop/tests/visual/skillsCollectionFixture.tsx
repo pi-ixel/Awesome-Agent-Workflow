@@ -187,7 +187,11 @@ export async function createSkillsCollection(isPreview = false) {
   } as unknown as Context["host"]);
   const browser = createTestBrowserHost();
   const builtinCatalog = createBuiltinMcpRegistry();
-  builtinCatalog.registerBuiltin(browserMcpContribution(browser, undefined));
+  const browserTools = {
+    browserTools: () => Promise.resolve({ tools: [{ name: "browser_open" }], disabledTools: [] }),
+    setBrowserTools: () => Promise.resolve([]),
+  } as unknown as NonNullable<Parameters<typeof browserMcpContribution>[1]>;
+  builtinCatalog.registerBuiltin(browserMcpContribution(browser, browserTools));
   const mcp = {
     host: {
       managedRead: () =>

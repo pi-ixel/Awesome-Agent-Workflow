@@ -55,7 +55,7 @@ export function TurnUsageBadge({ usage }: { readonly usage: TurnUsageDetails | n
       : "未知";
   return (
     <div className="w-fit text-ui-sm text-ink-mute">
-      <ActionButton
+      <ActionButton contentLayout="custom"
         tone="ghost"
         ref={anchor}
         type="button"

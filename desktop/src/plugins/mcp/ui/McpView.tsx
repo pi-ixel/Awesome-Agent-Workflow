@@ -1148,8 +1148,9 @@ export function McpView({
                   size="compact"
                   disabled={!managed.data}
                   onClick={() => startEditor("form")}
+                  leadingIcon={<PlusIcon className="ui-icon-14" />}
                 >
-                  <PlusIcon className="ui-icon-14" /> 新增 MCP
+                  新增 MCP
                 </ActionButton>
               )}
             </>

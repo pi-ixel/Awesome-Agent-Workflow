@@ -52,9 +52,9 @@ export function StatusChipMenu({
         className={`flex min-h-7 items-center gap-1 rounded-control px-1.5 py-1 text-ui-base font-normal ${
           warning ? "text-warn-ink! hover:text-warn-ink!" : "text-ink"
         }`}
+        trailingIcon={<ChevronDownIcon className="ui-icon-14 shrink-0 opacity-70" />}
       >
         {label}
-        <ChevronDownIcon className="ui-icon-14 shrink-0 opacity-70" />
       </ActionButton>
       {menu && (
         <ContextMenu

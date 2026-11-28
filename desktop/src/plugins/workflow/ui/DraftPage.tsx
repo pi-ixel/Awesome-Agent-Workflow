@@ -753,7 +753,6 @@ export function DraftPage({
                         type="button"
                         tone="secondary"
                         size="compact"
-                        className="inline-flex items-center gap-1"
                         onClick={() => {
                           if (!hasSession) {
                             setRequest(
@@ -762,12 +761,12 @@ export function DraftPage({
                           }
                           setDrawer("ai");
                         }}
-                      >
-                        <SparklesIcon
+                        leadingIcon={<SparklesIcon
                           className="ui-icon-12"
                           aria-hidden={true}
-                        />
-                        <span>用 AI 调整流向</span>
+                        />}
+                      >
+                        用 AI 调整流向
                       </ActionButton>
                     </div>
                   )}
@@ -788,9 +787,9 @@ export function DraftPage({
                         className="workflow-draft-knowledge-open"
                         data-hint="点击查看或编辑知识文档"
                         onClick={() => openKnowledgeEditor(k)}
+                        leadingIcon={<FileIcon className="ui-icon-12" aria-hidden={true} />}
                       >
-                        <FileIcon className="ui-icon-12" aria-hidden={true} />
-                        <span>{k}</span>
+                        {k}
                       </ActionButton>
                       {canPatch && (
                         <IconButton
@@ -811,12 +810,11 @@ export function DraftPage({
                       type="button"
                       tone="secondary"
                       size="compact"
-                      className="inline-flex items-center gap-1"
                       disabled={savingPatch}
                       onClick={openAddKnowledge}
+                      leadingIcon={<PlusIcon className="ui-icon-12" aria-hidden={true} />}
                     >
-                      <PlusIcon className="ui-icon-12" aria-hidden={true} />
-                      <span>添加知识</span>
+                      添加知识
                     </ActionButton>
                   )}
                 </div>
@@ -949,14 +947,14 @@ export function DraftPage({
               type="button"
               tone="secondary"
               size="compact"
-              className={`inline-flex items-center gap-1.5${drawer === "ai" ? " is-active-toggle" : ""}`}
+              className={drawer === "ai" ? "is-active-toggle" : undefined}
               aria-pressed={drawer === "ai"}
               onClick={() =>
                 setDrawer((current) => (current === "ai" ? "none" : "ai"))
               }
+              leadingIcon={<SparklesIcon className="ui-icon-14" aria-hidden={true} />}
             >
-              <SparklesIcon className="ui-icon-14" aria-hidden={true} />
-              <span>用 AI 修改</span>
+              用 AI 修改
             </ActionButton>
           )}
           <ActionButton
@@ -1169,15 +1167,14 @@ export function DraftPage({
                           type="button"
                           tone="secondary"
                           size="compact"
-                          className="inline-flex items-center gap-1"
                           disabled={savingPatch}
                           onClick={() => attachKnowledgeToNode(fileName)}
-                        >
-                          <PlusIcon
+                          leadingIcon={<PlusIcon
                             className="ui-icon-12"
                             aria-hidden={true}
-                          />
-                          <span>{fileName}</span>
+                          />}
+                        >
+                          {fileName}
                         </ActionButton>
                       ))}
                     </div>
@@ -1247,7 +1244,6 @@ export function DraftPage({
                         type="button"
                         tone="danger"
                         size="compact"
-                        className="inline-flex items-center gap-1"
                         disabled={savingPatch || otherRefs > 0}
                         data-hint={
                           otherRefs > 0
@@ -1255,9 +1251,9 @@ export function DraftPage({
                             : "删除此知识文件并从当前节点移除"
                         }
                         onClick={() => deleteKnowledgeFile(knowledgeModal.name)}
+                        leadingIcon={<TrashIcon className="ui-icon-12" aria-hidden={true} />}
                       >
-                        <TrashIcon className="ui-icon-12" aria-hidden={true} />
-                        <span>删除知识文件</span>
+                        删除知识文件
                       </ActionButton>
                     )}
                   </div>

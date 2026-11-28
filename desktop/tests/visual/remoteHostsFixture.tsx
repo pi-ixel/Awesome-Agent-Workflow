@@ -23,7 +23,10 @@ const connection: RemoteConnectionDTO = {
 };
 const service = {
   projects: createStore(() => ({ records: [], recentDirsByConnection: {} })),
-  listConnections: () => Promise.resolve([connection]),
+  listConnections: () =>
+    Promise.resolve(
+      new URLSearchParams(location.search).has("empty") ? [] : [connection],
+    ),
   listProjectsForConnection: () => [],
   testConnection: () =>
     Promise.resolve({ ok: false, message: "连接超时，请检查地址" }),

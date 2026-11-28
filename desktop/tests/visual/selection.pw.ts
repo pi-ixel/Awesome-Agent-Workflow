@@ -296,14 +296,15 @@ for (const theme of ["暖白", "暗夜"]) {
           await toggle.press("Space");
           await expect(toggle).not.toBeChecked();
           const track = toggle.locator("+ span");
-          const knob = track.locator("span");
+          const knob = track.locator(".ink-switch-knob");
+          await expect.poll(() => knob.evaluate(el => el.getAnimations().length)).toBe(0);
           const off = await knob.boundingBox();
           const trackBounds = (await track.boundingBox())!;
-          await toggle.press("Space");
+          await toggle.press("Enter");
           await expect(toggle).toBeChecked();
-          expect(trackBounds.width).toBeCloseTo((32 * px) / 14, 1);
-          expect(trackBounds.height).toBeCloseTo((18 * px) / 14, 1);
-          expect(off!.width).toBeCloseTo(px, 1);
+          expect(trackBounds.width).toBe(Math.round((32 * px) / 14));
+          expect(trackBounds.height).toBe(Math.round((18 * px) / 14));
+          expect(off!.width).toBe(Math.round((18 * px) / 14) - 2 * Math.round((2 * px) / 14));
           await expect
             .poll(async () => {
               const on = (await knob.boundingBox())!;
@@ -318,7 +319,7 @@ for (const theme of ["暖白", "暗夜"]) {
             .toBeLessThan(0.15);
           await expect(track).not.toHaveCSS("box-shadow", "none");
           await expect
-            .poll(() => color(track, "background-color"))
+            .poll(() => color(track.locator(".ink-switch-fill"), "background-color"))
             .toEqual(await color(track, "--color-ink"));
           await expect(
             section.getByRole("switch", { name: kind + " 禁用开关" }),
@@ -378,3 +379,153 @@ for (const theme of ["暖白", "暗夜"]) {
     },
   );
 }
+
+for (const ratio of [1, 1.25]) {
+  test(`墨滴开关两态的圆钮在 ${ratio * 100}% 缩放下上下居中`, async ({ browser }) => {
+    const context = await browser.newContext({ deviceScaleFactor: ratio, reducedMotion: "reduce" });
+    try {
+      const page = await context.newPage();
+      await page.goto("/tests/visual/uiScaleFixture.html?selection");
+      await page.getByRole("button", { name: "暖白", exact: true }).click();
+      const toggle = page.getByRole("switch", { name: "neutral 开关", exact: true });
+      const track = toggle.locator("+ span");
+      const knob = track.locator(".ink-switch-knob");
+      await track.scrollIntoViewIfNeeded();
+      for (const size of [14, 15]) {
+        await page.evaluate(px => document.documentElement.style.setProperty("--ui-font-size", `${px}px`), size);
+        for (const checked of [false, true]) {
+          if ((await toggle.isChecked()) !== checked) {
+            await toggle.press("Space");
+            await toggle.evaluate(el => el.blur());
+          }
+          if (checked) await expect(toggle).toBeChecked();
+          else await expect(toggle).not.toBeChecked();
+          await expect(track).toHaveCSS("--ink-switch-pixel", `${1 / ratio}px`);
+          await expect.poll(async () => {
+            const y = (await track.boundingBox())!.y * ratio;
+            return Math.abs(y - Math.round(y));
+          }).toBeLessThan(0.025);
+          const rect = await knob.evaluate(el => {
+            const rail = el.parentElement!.getBoundingClientRect();
+            const thumb = el.getBoundingClientRect();
+            return {
+              thumbX: thumb.x + thumb.width / 2,
+              railX: rail.x + rail.width / 2,
+              y: rail.y,
+              height: rail.height,
+              top: thumb.top - rail.top,
+              bottom: rail.bottom - thumb.bottom,
+            };
+          });
+          const gap = Math.round(rect.top * ratio);
+          expect(gap).toBeGreaterThan(0);
+          expect(Math.abs(gap - (2 * size * ratio) / 14)).toBeLessThanOrEqual(0.5);
+          expect(rect.top * ratio).toBeCloseTo(gap, 1);
+          expect(rect.bottom * ratio).toBeCloseTo(gap, 1);
+          await expect(knob).toHaveCSS("box-shadow", /0px 0px 2px 0px/);
+
+          const screenshot = await page.screenshot();
+          const paintedGaps = await page.evaluate(async ({ data, rect, ratio }) => {
+            const image = new Image();
+            image.src = "data:image/png;base64," + data;
+            await image.decode();
+            const canvas = document.createElement("canvas");
+            canvas.width = 1;
+            canvas.height = Math.round(rect.height * ratio) + 4;
+            const context = canvas.getContext("2d")!;
+            function sample(x: number) {
+              context.drawImage(image, -Math.floor(x * ratio), 2 - Math.round(rect.y * ratio));
+              const pixels = context.getImageData(0, 0, 1, canvas.height).data;
+              return Array.from({ length: canvas.height }, (_, y) => pixels[y * 4]!);
+            }
+            const rail = sample(rect.railX);
+            const thumb = sample(rect.thumbX);
+            const railThreshold = (rail[0]! + Math.min(...rail)) / 2;
+            const thumbThreshold = Math.max(...thumb) - 24;
+            const railRows = rail.flatMap((value, y) => value < railThreshold ? [y] : []);
+            const railTop = railRows[0]!;
+            const railBottom = railRows.at(-1)!;
+            const thumbRows = thumb.flatMap((value, y) =>
+              y >= railTop && y <= railBottom && value > thumbThreshold ? [y] : []);
+            return {
+              top: thumbRows[0]! - railTop,
+              bottom: railBottom - thumbRows.at(-1)!,
+            };
+          }, { data: screenshot.toString("base64"), rect, ratio });
+          expect(Math.min(paintedGaps.top, paintedGaps.bottom)).toBeGreaterThan(0);
+          // 缩放后的抗锯齿可能让一个边缘多算一像素，绘制中心仍须落在半像素内。
+          expect(Math.abs(paintedGaps.top - paintedGaps.bottom) / 2).toBeLessThanOrEqual(0.5);
+        }
+      }
+    } finally {
+      await context.close();
+    }
+  });
+}
+
+test("共享墨滴开关支持键盘、触摸和减少动画", async ({ page, browser }) => {
+  await page.goto("/tests/visual/uiScaleFixture.html?selection");
+  const toggle = page.getByRole("switch", { name: "neutral 开关", exact: true });
+  const track = toggle.locator("+ span");
+  const fill = track.locator(".ink-switch-fill");
+  const knob = track.locator(".ink-switch-knob");
+
+  const dot = track.locator(".ink-switch-dot");
+  const drops = track.locator(".ink-switch-drop");
+  await expect(drops).toHaveCount(3);
+  await expect(knob).not.toHaveCSS("box-shadow", "none");
+  await expect(dot).not.toHaveCSS("scale", "0");
+  await fill.evaluate((el) => {
+    const animate = el.animate.bind(el);
+    el.animate = (frames, options) => {
+      const motion = animate(frames, options);
+      const keyframes = (motion.effect as KeyframeEffect).getKeyframes();
+      el.setAttribute("data-fill-origin", String(keyframes[0]?.clipPath));
+      el.setAttribute("data-fill-duration", String(motion.effect?.getTiming().duration));
+      return motion;
+    };
+  });
+  await knob.evaluate((el) => {
+    const animate = el.animate.bind(el);
+    el.animate = (frames, options) => {
+      const motion = animate(frames, options);
+      if ((motion.effect as KeyframeEffect).getKeyframes().some(frame => frame.scale === "1.3 0.84")) {
+        el.setAttribute("data-squash-observed", "");
+      }
+      return motion;
+    };
+  });
+  await toggle.press("Enter");
+  await expect(toggle).toBeChecked();
+  await expect(toggle).toBeFocused();
+  await expect(track).not.toHaveCSS("box-shadow", "none");
+  await expect(knob).toHaveAttribute("data-squash-observed", "");
+  await expect(fill).toHaveAttribute("data-fill-origin", /at 27.38%/);
+  await expect(fill).toHaveAttribute("data-fill-duration", "640");
+  await expect(dot).toHaveCSS("scale", "0");
+  const ink = await fill.evaluate(element => getComputedStyle(element).backgroundColor);
+  await expect(fill).toHaveCSS("clip-path", "circle(0px at 27.38% 50%)");
+  await expect(track).toHaveCSS("background-color", ink);
+  await toggle.press("Space");
+  await expect(toggle).not.toBeChecked();
+  await expect(fill).toHaveAttribute("data-fill-origin", /at 72.62%/);
+  await expect(fill).toHaveAttribute("data-fill-duration", "460");
+  await expect(fill).toHaveCSS("clip-path", "circle(0px at 27.38% 50%)");
+  await expect(dot).toHaveCSS("scale", "none");
+
+  const mobile = await browser.newContext({
+    hasTouch: true, viewport: { width: 320, height: 640 }, reducedMotion: "reduce",
+  });
+  try {
+    const touchPage = await mobile.newPage();
+    await touchPage.goto("/tests/visual/uiScaleFixture.html?selection");
+    const touchToggle = touchPage.getByRole("switch", { name: "neutral 开关", exact: true });
+    const touchTrack = touchToggle.locator("+ span");
+    await touchTrack.tap();
+    await expect(touchToggle).toBeChecked();
+    await expect(touchTrack.locator(".ink-switch-fill")).toHaveCSS("transition-duration", "0s");
+    expect(await touchTrack.evaluate((el) => el.getAnimations({ subtree: true }).length)).toBe(0);
+  } finally {
+    await mobile.close();
+  }
+});

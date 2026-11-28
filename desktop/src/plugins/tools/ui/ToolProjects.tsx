@@ -1,12 +1,7 @@
 import { useState } from "react";
 import { useStore } from "zustand";
 import { pathKey } from "../../../shared/panelPaths.ts";
-import {
-  DangerButton,
-  btnGhost,
-  btnPrimary,
-  btnSecondary,
-} from "../../../shared/ui/controls.tsx";
+import { ActionButton, DangerButton } from "../../../shared/ui/controls.tsx";
 import { ToolboxIcon } from "../../../shared/ui/icons.tsx";
 // 外观由 tools.css 的 .build-rename input 决定，挂共享常量是为了让编辑框守卫识别。
 import { settingsInputClass } from "../../../shared/ui/inputStyles.ts";
@@ -188,22 +183,22 @@ export function ToolProjectList({
               {/* 收起时只有这一行的两个动作：最常做的，其余都在展开之后。 */}
               {!expanded && (
                 <div className="build-project-actions">
-                  <button
+                  <ActionButton
+                    tone="primary"
                     type="button"
-                    className={btnPrimary}
                     disabled={busy || !!project.broken}
                     onClick={() => void workshop.resume(project.dir)}
                   >
                     继续开发
-                  </button>
-                  <button
+                  </ActionButton>
+                  <ActionButton
+                    tone="secondary"
                     type="button"
-                    className={btnSecondary}
                     disabled={!selectable}
                     onClick={() => onPreview(project.dir)}
                   >
                     预览
-                  </button>
+                  </ActionButton>
                 </div>
               )}
               {expanded && (
@@ -251,22 +246,22 @@ export function ToolProjectList({
                         />
                       </label>
                       <div className="build-project-actions">
-                        <button
+                        <ActionButton
+                          tone="ghost"
                           type="button"
-                          className={btnGhost}
                           onClick={() => setRenaming(undefined)}
                         >
                           取消
-                        </button>
-                        <button
+                        </ActionButton>
+                        <ActionButton
+                          tone="primary"
                           type="submit"
-                          className={btnPrimary}
                           disabled={
                             !renaming.name.trim() || !renaming.id.trim()
                           }
                         >
                           保存
-                        </button>
+                        </ActionButton>
                       </div>
                       {renaming.note && (
                         <span className="build-hint is-error">
@@ -279,9 +274,9 @@ export function ToolProjectList({
                       <span className="build-hint">
                         删除会移除项目目录与工具数据，不可恢复。
                       </span>
-                      <button
+                      <ActionButton
+                        tone="ghost"
                         type="button"
-                        className={btnGhost}
                         disabled={
                           removal !== undefined && removal.note === undefined
                         }
@@ -291,7 +286,7 @@ export function ToolProjectList({
                         }}
                       >
                         取消
-                      </button>
+                      </ActionButton>
                       <DangerButton
                         disabled={
                           removal !== undefined && removal.note === undefined
@@ -309,9 +304,9 @@ export function ToolProjectList({
                   ) : (
                     // 改名与删除是低频 + 破坏性动作，放在展开后的页脚，不占收起的行。
                     <div className="build-project-footer">
-                      <button
+                      <ActionButton
+                        tone="ghost"
                         type="button"
-                        className={btnGhost}
                         onClick={() =>
                           setRenaming({
                             dir: project.dir,
@@ -321,14 +316,14 @@ export function ToolProjectList({
                         }
                       >
                         改名
-                      </button>
-                      <button
+                      </ActionButton>
+                      <ActionButton
+                        tone="ghost"
                         type="button"
-                        className={btnGhost}
                         onClick={() => setConfirming(project.dir)}
                       >
                         删除
-                      </button>
+                      </ActionButton>
                     </div>
                   )}
                 </>

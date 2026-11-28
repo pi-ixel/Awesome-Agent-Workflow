@@ -2,13 +2,7 @@ import { useDeferredValue, useEffect, useRef, useState } from "react";
 import type { ChangeEvent, MouseEvent as ReactMouseEvent } from "react";
 import { useStore } from "zustand";
 import { pathKey } from "../../../shared/panelPaths.ts";
-import {
-  Checkbox,
-  DangerButton,
-  btnGhost,
-  btnPrimary,
-  btnSecondary,
-} from "../../../shared/ui/controls.tsx";
+import { ActionButton, Checkbox, DangerButton, btnGhost, btnSecondary } from "../../../shared/ui/controls.tsx";
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
 import type { ContextMenuEntry } from "../../../shared/ui/ContextMenu.tsx";
 import { SquareTerminalIcon, ToolboxIcon } from "../../../shared/ui/icons.tsx";
@@ -102,20 +96,23 @@ function EmptyLibrary({
         </li>
       </ol>
       <div className="tools-empty-actions">
-        <button
+        <ActionButton
+          tone="primary"
           type="button"
-          className={`${btnPrimary} tools-empty-primary`}
+          className="tools-empty-primary"
           onClick={onCreate}
+          trailingIcon={<span aria-hidden="true">→</span>}
         >
-          开始做工具 <span aria-hidden="true">→</span>
-        </button>
-        <button
+          开始做工具
+        </ActionButton>
+        <ActionButton
+          tone="secondary"
           type="button"
-          className={`${btnSecondary} tools-empty-import`}
+          className="tools-empty-import"
           onClick={onImport}
         >
           导入工具…
-        </button>
+        </ActionButton>
       </div>
     </section>
   );
@@ -638,24 +635,24 @@ export function ToolsPanel({
             </p>
           </div>
           {host.isNative() && (
-            <button
+            <ActionButton
+              tone="secondary"
               type="button"
-              className={btnSecondary}
               onClick={() => void openTool()}
             >
               打开启动器 ↗
-            </button>
+            </ActionButton>
           )}
-          <button
+          <ActionButton
+            tone="secondary"
             type="button"
-            className={btnSecondary}
             aria-haspopup="menu"
             aria-expanded={cardMenu.menu?.id === ":import"}
             disabled={busy}
             onClick={openImportMenu}
           >
             导入工具
-          </button>
+          </ActionButton>
         </div>
         <div className="tools-tabs mt-4 flex flex-wrap items-center gap-2">
           <button
@@ -680,14 +677,15 @@ export function ToolsPanel({
             开发工具 · {projectCount}
           </button>
           {/* 开发指导独立成窗口：内容是全平台通用的规范，不该混在"做某个工具"的流程里。 */}
-          <button
+          <ActionButton
+            tone="ghost"
             type="button"
-            className={`${btnGhost} tools-guide`}
+            className="tools-guide"
             onClick={() => void openGuide()}
             disabled={busy}
           >
             开发指导 ↗
-          </button>
+          </ActionButton>
         </div>
         <input
           ref={picker}
@@ -799,13 +797,13 @@ export function ToolsPanel({
                   {removing?.id === tool.id ? (
                     <div className="tool-remove is-row">
                       <div className="tool-remove-actions">
-                        <button
+                        <ActionButton
+                          tone="ghost"
                           type="button"
-                          className={btnGhost}
                           onClick={() => setRemoving(undefined)}
                         >
                           取消
-                        </button>
+                        </ActionButton>
                         {/* 危险动作给危险配色，取消退回中性：之前两者权重是反的。 */}
                         <DangerButton
                           onClick={() =>
@@ -826,7 +824,8 @@ export function ToolsPanel({
                     </div>
                   ) : (
                     <div className="tool-row-actions">
-                      <button
+                      <ActionButton
+                        tone="ghost"
                         type="button"
                         className="tool-row-open"
                         aria-label={`打开 ${tool.name}`}
@@ -839,7 +838,7 @@ export function ToolsPanel({
                         onClick={() => void openTool(tool.id)}
                       >
                         打开
-                      </button>
+                      </ActionButton>
                       <button
                         type="button"
                         className="tool-row-more"
@@ -866,13 +865,13 @@ export function ToolsPanel({
                     」。换个关键词，或者看看是不是还没导入。
                   </p>
                 </div>
-                <button
+                <ActionButton
+                  tone="ghost"
                   type="button"
-                  className={btnGhost}
                   onClick={() => setSearch("")}
                 >
                   清空搜索
-                </button>
+                </ActionButton>
               </div>
             )}
           </>

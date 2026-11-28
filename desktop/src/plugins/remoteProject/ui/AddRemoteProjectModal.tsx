@@ -272,8 +272,6 @@ export function CreateProjectFormBody({
       try {
         const picked = await onPickLocalDirectory();
         if (picked) addFolder(picked);
-        else if (folders.length === 0)
-          setError("目录选择已取消或当前环境不可用，可点击重试。");
       } catch (error) {
         setError(describeUnknownError(error));
       } finally {
@@ -355,10 +353,10 @@ export function CreateProjectFormBody({
                 aria-label={`切换设备，当前：${deviceLabel}`}
                 onClick={handleToggleMenu}
                 className="inline-flex items-center gap-1.5 rounded-control px-2.5 py-1 text-ui-sm font-medium text-ink"
+                leadingIcon={deviceIcon}
+                trailingIcon={<ChevronDownIcon className="ui-icon-14 shrink-0 text-ink-mute" />}
               >
-                {deviceIcon}
                 {deviceLabel}
-                <ChevronDownIcon className="ui-icon-14 shrink-0 text-ink-mute" />
               </ActionButton>
             )
           }

@@ -31,6 +31,7 @@
 import { UiIcon } from "./UiIcon.tsx";
 import { forwardRef, useEffect, useId, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from "react";
 
+import { useDevicePixelAlignment } from "./controls/useDevicePixelAlignment.ts";
 import { useAnchoredPopover } from "./controls/useAnchoredPopover.ts";
 import { CheckIcon, ChevronDownIcon } from "./icons.tsx";
 
@@ -67,16 +68,48 @@ const actionTones = {
   "danger-solid": `${btnBase} bg-danger-solid text-danger-solid-ink enabled:hover:bg-danger-solid-hover focus-visible:[--keyboard-focus-color:var(--color-danger-solid-ink)]`,
   media: `${btnBase} border border-media-ink/30 text-media-ink enabled:hover:bg-media-ink/10`,
 };
-export const ActionButton = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<"button"> & {
+type ActionButtonProps = Omit<ComponentPropsWithoutRef<"button">, "dangerouslySetInnerHTML"> & {
   readonly tone: keyof typeof actionTones;
   readonly size?: "compact";
-}>(function ActionButton({ tone, size, className = "", type = "button", ...props }, ref) {
-  return <button {...props} ref={ref} type={type} className={`${actionTones[tone]} ${size === "compact" ? btnSize : ""} ${className}`} />;
+  readonly leadingIcon?: ReactNode;
+  readonly trailingIcon?: ReactNode;
+  readonly labelOverflow?: "truncate" | "wrap";
+  readonly align?: "start";
+  readonly contentLayout?: "custom";
+};
+
+export const ActionButton = forwardRef<HTMLButtonElement, ActionButtonProps>(function ActionButton(
+  { tone, size, className = "", type = "button", children, leadingIcon, trailingIcon, labelOverflow, align, contentLayout, ...props },
+  ref,
+) {
+  const standard = contentLayout !== "custom";
+  return (
+    <button
+      {...props}
+      ref={ref}
+      type={type}
+      className={`${actionTones[tone]} ${size === "compact" ? btnSize : ""} ${className}`}
+      data-action-button={standard ? size ?? "regular" : undefined}
+      data-action-align={align}
+    >
+      {standard ? (
+        <>
+          {leadingIcon}
+          {children != null && children !== false && (
+            <span className="ui-control-label action-button-label" data-overflow={labelOverflow}>
+              {children}
+            </span>
+          )}
+          {trailingIcon}
+        </>
+      ) : children}
+    </button>
+  );
 });
 
-export const DangerButton = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<"button">>(
-  function DangerButton({ className = "", type = "button", ...props }, ref) {
-    return <ActionButton {...props} ref={ref} type={type} tone="danger" className={className} />;
+export const DangerButton = forwardRef<HTMLButtonElement, Omit<ActionButtonProps, "tone">>(
+  function DangerButton(props, ref) {
+    return <ActionButton {...props} ref={ref} tone="danger" />;
   },
 );
 
@@ -259,6 +292,63 @@ export function ToggleSwitch({
   onChange,
   label,
 }: ToggleSwitchProps) {
+  const track = useRef<HTMLSpanElement>(null);
+  useDevicePixelAlignment(track);
+  const previous = useRef(checked);
+
+  useEffect(() => {
+    if (previous.current === checked) return;
+    previous.current = checked;
+    const surface = track.current;
+    const knob = surface?.querySelector(".ink-switch-knob");
+    const fill = surface?.querySelector(".ink-switch-fill");
+    if (!surface || !fill || typeof knob?.animate !== "function") return;
+    const preference = matchMedia("(prefers-reduced-motion: reduce)");
+    if (preference.matches) return;
+
+    // Motion adapted from UI Moments Ink Switch, © 2026 guanmo-ai (MIT).
+    // The complete copyright and license notice is in docs/demos/ink-switch.html.
+    const circle = (radius: number, center: number) =>
+      ({ clipPath: `circle(${radius}% at ${center}% 50%)` });
+    const motions = [
+      knob.animate([
+        { scale: "1 1" },
+        { scale: "1.3 0.84", offset: 0.32 },
+        { scale: "0.94 1.06", offset: 0.68 },
+        { scale: "1 1" },
+      ], { duration: 520, easing: "cubic-bezier(.3,.7,.4,1)" }),
+      fill.animate(checked
+        ? [circle(0, 27.38), { ...circle(21, 27.38), offset: 0.18 }, circle(123, 27.38)]
+        : [circle(123, 72.62), { ...circle(28, 72.62), offset: 0.7 }, circle(0, 72.62)],
+      { duration: checked ? 640 : 460, easing: checked ? "cubic-bezier(.2,.75,.25,1)" : "cubic-bezier(.5,0,.3,1)" }),
+    ];
+    if (checked) {
+      // The animated fill owns the ink during motion. The track paints
+      // the settled shape in a single pass to avoid double edge blending.
+      motions.push(surface.animate(
+        [{ backgroundColor: "var(--ink-switch-off)" }, { backgroundColor: "var(--ink-switch-off)" }],
+        { duration: 640 },
+      ));
+      surface.querySelectorAll(".ink-switch-drop").forEach((drop, index) => {
+        const angle = (index - 1) * Math.PI / 3;
+        const x = Math.cos(angle) * (22 + index * 4) * 32 / 84;
+        const y = Math.sin(angle) * 14 * 32 / 84;
+        const travel = (distance: number) => `calc(${distance} * var(--ui-icon-unit))`;
+        motions.push(drop.animate([
+          { opacity: 1, translate: "0 0", scale: 1 },
+          { opacity: 1, translate: `${travel(x)} ${travel(y)}`, scale: 0.9, offset: 0.55 },
+          { opacity: 0, translate: `${travel(x * 1.25)} ${travel(y * 1.25)}`, scale: 0 },
+        ], { duration: 460, delay: 40 + index * 30, easing: "cubic-bezier(.2,.8,.3,1)" }));
+      });
+    }
+    const cancel = () => motions.forEach((motion) => motion.cancel());
+    preference.addEventListener("change", cancel);
+    return () => {
+      preference.removeEventListener("change", cancel);
+      cancel();
+    };
+  }, [checked]);
+
   return (
     <label
       className={`relative inline-flex min-h-6 shrink-0 items-center justify-center ${pending ? "cursor-wait opacity-70" : disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
@@ -275,15 +365,26 @@ export function ToggleSwitch({
         onChange={(event) => {
           if (!pending) onChange(event.target.checked);
         }}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          if (!pending && !event.repeat) event.currentTarget.click();
+        }}
         className="peer sr-only"
       />
       <span
         aria-hidden={true}
-        className={`relative h-[calc(18*var(--ui-icon-unit))] w-[calc(32*var(--ui-icon-unit))] shrink-0 rounded-pill border transition-colors peer-focus-visible:keyboard-focus-marker ${checked ? "border-ink bg-ink [--keyboard-focus-color:var(--color-foreground-inverse)]" : "border-transparent bg-ink/30"}`}
+        ref={track}
+        data-checked={checked}
+        className={`ink-switch-track rounded-pill peer-focus-visible:keyboard-focus-marker ${checked ? "[--keyboard-focus-color:var(--color-foreground-inverse)]" : ""}`}
       >
-        <span
-          className={`ui-icon-14 absolute top-1/2 -translate-y-1/2 rounded-pill bg-base transition-[left] motion-reduce:transition-none ${checked ? "left-[calc(100%_-_15*var(--ui-icon-unit))]" : "left-[var(--ui-icon-unit)]"}`}
-        />
+        <span className="ink-switch-fill" />
+        <span className="ink-switch-drop rounded-pill" />
+        <span className="ink-switch-drop rounded-pill" />
+        <span className="ink-switch-drop rounded-pill" />
+        <span className="ink-switch-knob rounded-pill">
+          <span className="ink-switch-dot rounded-pill" />
+        </span>
       </span>
     </label>
   );

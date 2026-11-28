@@ -243,20 +243,21 @@ it("页面通过共享表面声明弹窗语义", () => {
   ).toEqual(Array.from({ length: 3 }, () => "Page" + rawRole));
 });
 
-it("按钮语义由登记的共享控件渲染", () => {
-  // 工具面板（plugins/tools）自带一套 btnPrimary / btnSecondary / btnGhost 与
-  // tools.css 版式，不套共享 ActionButton——那会把 actionTones 的底色叠到工具
-  // 面板自己的配色上。它的按钮单列在下一条，这里只守共享控件的独占性。
-  const owners = Object.entries(productionAppearance)
-    .filter(([file]) => !file.startsWith("plugins/tools/"))
-    .flatMap(([file, uses]) =>
-      uses
-        .filter((use) =>
-          / · (?:<button>|createElement\(button\)|role=button)$/.test(use),
-        )
-        .map((use) => file + "#" + use),
-    );
-  expect(owners).toEqual([
+function nativeButtonOwners(inventory: Record<string, string[]>) {
+  return Object.entries(inventory).flatMap(([file, uses]) =>
+    uses
+      .filter((use) => / · (?:<button>|createElement\(button\)|role=button)$/.test(use))
+      .map((use) => file + "#" + use),
+  );
+}
+
+it("原生按钮仅由共享控件和既有专用入口渲染", () => {
+  expect(nativeButtonOwners(productionAppearance)).toEqual([
+    "plugins/tools/ui/ToolManagement.tsx#Section · <button>",
+    "plugins/tools/ui/ToolProjects.tsx#ToolProjectList · <button>",
+    "plugins/tools/ui/ToolsPanel.tsx#ToolsPanel · <button>",
+    "plugins/tools/ui/ToolsPanel.tsx#ToolsPanel · <button>",
+    "plugins/tools/ui/ToolsPanel.tsx#ToolsPanel · <button>",
     "shared/ui/Breadcrumb.tsx#Breadcrumb · <button>",
     "shared/ui/ContextMenu.tsx#ContextMenu/renderedEntries · <button>",
     "shared/ui/IconButton.tsx#IconButton · <button>",
@@ -272,27 +273,21 @@ it("按钮语义由登记的共享控件渲染", () => {
   ]);
 });
 
-it("工具面板的行内按钮各归其主，新增时不会悄悄混进共享控件之外", () => {
-  const owners = Object.entries(productionAppearance)
-    .filter(([file]) => file.startsWith("plugins/tools/"))
-    .flatMap(([file, uses]) =>
-      uses
-        .filter((use) => / · <button>$/.test(use))
-        .map((use) => file + "#" + use),
-    );
-  // 数量与归属分开断言：条数说明面板里有多少个按钮，唯一归属说明它们都还在
-  // 工具面板自己那几个视图函数里。挪到别处、或新开一个文件写按钮，都会红。
-  expect(owners.length).toBe(46);
-  expect([...new Set(owners.map((owner) => owner.replace(" · <button>", "")))].sort()).toEqual([
-    "plugins/tools/ui/ToolBuilder.tsx#NewToolForm",
-    "plugins/tools/ui/ToolBuilder.tsx#ProjectDetail",
-    "plugins/tools/ui/ToolManagement.tsx#Section",
-    "plugins/tools/ui/ToolManagement.tsx#ToolManagement",
-    "plugins/tools/ui/ToolPreview.tsx#ToolPreview",
-    "plugins/tools/ui/ToolPreviewTab.tsx#ToolPreviewTab",
-    "plugins/tools/ui/ToolProjects.tsx#ToolProjectList",
-    "plugins/tools/ui/ToolsPanel.tsx#EmptyLibrary",
-    "plugins/tools/ui/ToolsPanel.tsx#ToolsPanel",
+it("新页面和已有工具页面新增原生、伪按钮或工厂创建的按钮都进入排查", () => {
+  const file = "plugins/tools/ui/ToolsPanel.tsx";
+  const records = inventoryAppearance(file, `
+    import { createElement as make } from "react";
+    function ToolsPanel() { return <>
+      <button>新增</button>
+      <div role={"button"}>新增</div>
+      {make("button", {}, "新增")}
+      <ActionButton tone="primary">新增</ActionButton>
+    </>; }
+  `);
+  expect(nativeButtonOwners({ [file]: records })).toEqual([
+    file + "#ToolsPanel · <button>",
+    file + "#ToolsPanel · createElement(button)",
+    file + "#ToolsPanel · role=button",
   ]);
 });
 

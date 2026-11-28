@@ -1,9 +1,5 @@
 import { useStore } from "zustand";
-import {
-  btnGhost,
-  btnPrimary,
-  btnSecondary,
-} from "../../../shared/ui/controls.tsx";
+import { ActionButton } from "../../../shared/ui/controls.tsx";
 import { CopyButton } from "../../../shared/ui/CopyButton.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 // 工具面板的输入框外观由 tools.css 提供（那份规则特异性更高），这里挂上共享
@@ -94,32 +90,32 @@ export function NewToolForm({
             {root ? <ToolPath path={root} compact /> : <code>默认位置</code>}
           </span>
           {available && (
-            <button
+            <ActionButton
+              tone="ghost"
               type="button"
-              className={btnGhost}
               disabled={busy}
               onClick={() => void workshop.chooseProjectsRoot()}
             >
               更改目录
-            </button>
+            </ActionButton>
           )}
           {available && customRoot && (
-            <button
+            <ActionButton
+              tone="ghost"
               type="button"
-              className={btnGhost}
               disabled={busy}
               onClick={() => workshop.resetProjectsRoot()}
             >
               恢复默认
-            </button>
+            </ActionButton>
           )}
-          <button
+          <ActionButton
+            tone="primary"
             type="submit"
-            className={btnPrimary}
             disabled={!available || busy || !brief.trim()}
           >
             {busy ? "正在建项目…" : "开始做"}
-          </button>
+          </ActionButton>
         </div>
         {!available && (
           <p className="build-hint">需要桌面版并登录后才能建项目。</p>
@@ -214,20 +210,20 @@ export function ProjectDetail({
             </p>
           </div>
           <div className="build-stalled-actions">
-            <button
+            <ActionButton
+              tone="secondary"
               type="button"
-              className={btnSecondary}
               onClick={() => void workshop.refreshProjects()}
             >
               刷新列表
-            </button>
-            <button
+            </ActionButton>
+            <ActionButton
+              tone="ghost"
               type="button"
-              className={btnGhost}
               onClick={() => workshop.dismiss()}
             >
               从工作台移除
-            </button>
+            </ActionButton>
           </div>
         </div>
       ) : (
@@ -243,13 +239,13 @@ export function ProjectDetail({
                 <ToolPath path={project.dir} label="源码目录" />
               </div>
               <div className="build-stalled-actions">
-                <button
+                <ActionButton
+                  tone="primary"
                   type="button"
-                  className={btnPrimary}
                   onClick={() => void workshop.verify()}
                 >
                   我改完了，重新校验
-                </button>
+                </ActionButton>
               </div>
             </div>
           )}
@@ -281,33 +277,33 @@ export function ProjectDetail({
             打包出货才是主操作；「继续开发」是回到会话里的次级入口。
             disabled 不再挂 `check`：清单读不出来的时候，正是要回去让 AI 修
             的时候——按钮灰掉等于把唯一出口也关上了。 */}
-            <button
+            <ActionButton
+              tone="secondary"
               type="button"
-              className={btnSecondary}
               disabled={snapshot.busy}
               onClick={onResume}
             >
               继续开发
-            </button>
-            <button
+            </ActionButton>
+            <ActionButton
+              tone="secondary"
               type="button"
-              className={btnSecondary}
               onClick={onPreview}
               disabled={snapshot.busy}
             >
               预览
-            </button>
+            </ActionButton>
             {/* 交接块里已经有「我改完了，重新校验」，这里就不再重复一个同名动作。
             没有校验结论（还在读 / 读失败）时也要有这一条：否则整块只剩灰按钮。 */}
             {!snapshot.stalled && (problems.length > 0 || !check) && (
-              <button
+              <ActionButton
+                tone="secondary"
                 type="button"
-                className={btnSecondary}
                 onClick={() => void workshop.verify()}
                 disabled={snapshot.busy}
               >
                 重新校验
-              </button>
+              </ActionButton>
             )}
             {/* 文案一直说"把问题复制给 AI"，却只有一段不能一键复制的列表——这里补上按钮。 */}
             {problems.length > 0 && (
@@ -324,14 +320,14 @@ export function ProjectDetail({
             {snapshot.installed && !snapshot.drift ? (
               <span className="build-hint">已安装到工具中心</span>
             ) : (
-              <button
+              <ActionButton
+                tone="primary"
                 type="button"
-                className={btnPrimary}
                 onClick={() => void workshop.install()}
                 disabled={!check?.ready}
               >
                 {snapshot.drift ? "更新到这一版" : "确认安装"}
-              </button>
+              </ActionButton>
             )}
           </div>
         </>

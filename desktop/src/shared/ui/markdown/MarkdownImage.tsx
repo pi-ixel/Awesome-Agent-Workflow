@@ -881,7 +881,7 @@ export function MarkdownImage({
       {effectiveImageStatus === "loading" ? (
         <style>{markdownImageLoadingShimmerCss}</style>
       ) : null}
-      <ActionButton
+      <ActionButton contentLayout="custom"
         tone="ghost"
         type="button"
         aria-label="打开图片预览"

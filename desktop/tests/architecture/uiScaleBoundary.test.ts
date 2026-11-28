@@ -253,5 +253,5 @@ it("shares project form fields across new, edit and repair flows", () => {
   const fields = readFileSync("src/plugins/remoteProject/ui/ProjectFolderFields.tsx", "utf8");
   expect(form).toContain("<ProjectFolderFields");
   expect(fields).toMatch(/aria-label="项目名称"[\s\S]*?className=\{[^\n]*text-ui-sm/);
-  expect(fields).toMatch(/className=\{[^\n]*items-center[^\n]*text-ui-sm[^\n]*\n[^\n]*\n[^\n]*PlusIcon[^\n]*\n\s*添加文件夹/);
+  expect(fields).toMatch(/className=\{[^\n]*text-ui-sm[^\n]*\n\s*leadingIcon=\{<PlusIcon[^\n]*\n\s*align="start"\s*>\s*添加文件夹/);
 });

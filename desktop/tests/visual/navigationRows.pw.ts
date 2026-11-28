@@ -1,5 +1,7 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { blend, color, ratio } from "./contrast.ts";
+import { expectCenteredAction } from "./actionButtonGeometry.ts";
+import { switchCoverage } from "./switchCoverage.ts";
 
 for (const theme of ["暖白", "暗夜"]) {
   test(`${theme} 下的五种导航行在三档字号下保留点击区、悬停和键盘焦点`, async ({
@@ -260,6 +262,7 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
       "font-size",
       size + "px",
     );
+    await expectCenteredAction(skillAction);
     await expect(task).toHaveAttribute("aria-current", "true");
     await expect(skills).toHaveAttribute("aria-current", "page");
     const glyphs = await nav.locator("button > svg").evaluateAll((icons) =>
@@ -344,7 +347,7 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
   await expect(mcp).toHaveAttribute("aria-current", "page");
   const mcpCard = collections.getByRole("article", { name: "发布服务" });
   const browser = collections.getByRole("article", { name: "AAW 内置浏览器" });
-  await expect(browser.getByRole("switch")).toBeEnabled();
+  await expect(browser.getByRole("switch")).toBeChecked();
   const mcpHeader = collections
     .getByRole("heading", { name: "MCP", exact: true })
     .locator("xpath=ancestor::header");
@@ -359,6 +362,7 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
     }),
   ).toEqual(skillHeaderStyle);
   const mcpAction = mcpHeader.getByRole("button", { name: "新增 MCP" });
+  await expectCenteredAction(mcpAction);
   await expect(
     collections.getByRole("searchbox", { name: "搜索 MCP" }),
   ).toHaveCSS("font-size", skillFilterFont);
@@ -369,15 +373,15 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
     skillActionHeight,
     1,
   );
-  expect(
-    await browser
+  await expect
+    .poll(() => browser
       .getByRole("switch")
       .locator("+ span")
       .evaluate((track) => {
         const style = getComputedStyle(track);
         return [style.width, style.height, style.backgroundColor];
-      }),
-  ).toEqual(skillSwitchStyle);
+      }))
+    .toEqual(skillSwitchStyle);
   await expect(
     browser.getByRole("button", { name: "AAW 内置浏览器", exact: true }),
   ).toBeVisible();
@@ -744,3 +748,146 @@ test("存储数据行、用量记录和 Markdown 表格在大字号下保持可�
     .poll(() => table.evaluate((el) => el.scrollLeft))
     .toBeGreaterThan(90);
 });
+
+test("更新页和 MCP 同状态开关使用完全一致的墨滴样式", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const readStyle = (toggle: Locator) =>
+    toggle.locator("+ span").evaluate((track) => {
+      const style = getComputedStyle(track);
+      const knob = getComputedStyle(track.querySelector(".ink-switch-knob")!);
+      const dot = getComputedStyle(track.querySelector(".ink-switch-dot")!);
+      const fill = getComputedStyle(track.querySelector(".ink-switch-fill")!);
+      return {
+        width: style.width, height: style.height, track: style.backgroundColor,
+        thumb: knob.backgroundColor, shadow: knob.boxShadow,
+        dot: dot.backgroundColor, scale: dot.scale, fill: fill.backgroundColor,
+        clip: fill.clipPath,
+      };
+    });
+  await page.goto("/tests/visual/uiScaleFixture.html?update-settings");
+  const autoCheck = page.getByRole("switch", { name: "自动检查更新", exact: true });
+  const autoDownload = page.getByRole("switch", { name: "自动下载更新", exact: true });
+  await expect(autoCheck).toBeChecked();
+  await expect(autoDownload).toBeChecked();
+  const checked = await readStyle(autoCheck);
+  expect(await readStyle(autoDownload)).toEqual(checked);
+  await autoCheck.press("Space");
+  await expect(autoCheck).not.toBeChecked();
+  const unchecked = await readStyle(autoCheck);
+
+  await page.goto("/tests/visual/sidebarTypographyFixture.html?collections");
+  await page.getByRole("button", { name: "MCP", exact: true }).click();
+  const mcp = page.getByRole("article", { name: "AAW 内置浏览器" }).getByRole("switch");
+  await expect(mcp).toBeChecked();
+  await expect.poll(() => readStyle(mcp)).toEqual(checked);
+  await mcp.press("Space");
+  await expect(mcp).not.toBeChecked();
+  await expect.poll(() => readStyle(mcp)).toEqual(unchecked);
+});
+
+for (const deviceScaleFactor of [1, 1.25]) {
+  test(`Desktop 各页面的开关在 ${deviceScaleFactor * 100}% 缩放下按物理像素对齐`, async ({ browser }) => {
+    const context = await browser.newContext({
+      deviceScaleFactor, viewport: { width: 1000, height: 1800 }, reducedMotion: "reduce",
+    });
+    try {
+      const page = await context.newPage();
+      const applyAppearance = async () => {
+        await page.locator('input[role="switch"]').first().waitFor({ state: "attached" });
+        await page.evaluate(() => {
+          document.documentElement.classList.add("theme-warm");
+          document.documentElement.style.setProperty("--ui-font-size", "15px");
+        });
+      };
+      const pixels = async (target: Locator) => {
+        await expect(target).toBeChecked();
+        const track = target.locator("+ span");
+        await track.scrollIntoViewIfNeeded();
+        await expect.poll(async () => {
+          const rect = (await track.boundingBox())!;
+          const errors = [rect.x, rect.y].map(value =>
+            Math.abs(value * deviceScaleFactor - Math.round(value * deviceScaleFactor)),
+          );
+          return Math.max(...errors);
+        }).toBeLessThan(0.025);
+        const box = (await track.boundingBox())!;
+        expect(box.width * deviceScaleFactor).toBeCloseTo(Math.round(32 * 15 / 14 * deviceScaleFactor), 1);
+        const screenshot = await page.screenshot();
+        return page.evaluate(async ({ data, rect, ratio }) => {
+          const image = new Image();
+          image.src = "data:image/png;base64," + data;
+          await image.decode();
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.round(rect.width * ratio / 2);
+          canvas.height = Math.round(rect.height * ratio);
+          const ctx = canvas.getContext("2d")!;
+          ctx.drawImage(image, -Math.round(rect.x * ratio), -Math.round(rect.y * ratio));
+          // Measure the ink silhouette on the half without the checked-state knob.
+          const rgba = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+          return Array.from({ length: canvas.height }, (_, y) => {
+            let ink = 0;
+            for (let x = 0; x < canvas.width; x++) {
+              if (rgba[(y * canvas.width + x) * 4]! < 128) ink++;
+            }
+            return ink;
+          });
+        }, { data: screenshot.toString("base64"), rect: box, ratio: deviceScaleFactor });
+      };
+      await page.goto("/tests/visual/uiScaleFixture.html?switch-settings");
+      await applyAppearance();
+      const inspect = page.getByRole("switch", { name: "自动检查更新", exact: true });
+      const expected = await pixels(inspect);
+      expect(Math.max(...expected)).toBeGreaterThan(14 * deviceScaleFactor);
+      const verified = ["自动检查更新"];
+      const center = (widths: number[]) => widths.reduce((sum, width, y) => sum + y * width, 0) /
+        widths.reduce((sum, width) => sum + width, 0);
+      const expectSameInk = async (name: string, target = page.getByRole("switch", { name, exact: true })) => {
+        const actual = await pixels(target);
+        expect(actual).toHaveLength(expected.length);
+        expect(Math.max(...actual)).toBe(Math.max(...expected));
+        // Edge antialiasing varies by surface. A full device-pixel shift still fails.
+        expect(Math.abs(center(actual) - center(expected)), name).toBeLessThan(0.6);
+        expect(actual.slice(1, -1).reduce((difference, width, y) => difference + Math.abs(width - expected[y + 1]!), 0), name)
+          .toBeLessThanOrEqual(8);
+        verified.push(name);
+      };
+      for (const name of [
+        ...switchCoverage["plugins/updates/ui/DesktopUpdate.tsx"].slice(1).flat(),
+        ...switchCoverage["plugins/scheduledTasks/index.ts"].flat(),
+        ...switchCoverage["plugins/browser/ui/settings.tsx"].flat(),
+      ]) {
+        await expectSameInk(name);
+      }
+
+      await page.goto("/tests/visual/uiScaleFixture.html?additional-switches");
+      await applyAppearance();
+      for (const name of switchCoverage["plugins/project/ui/settings.tsx"].flat()) await expectSameInk(name);
+      await page.getByText("高级配置", { exact: true }).click();
+      const customAnswers = page.getByRole("switch", { name: "支持自定义回答", exact: true });
+      await customAnswers.press("Space");
+      await page.mouse.move(0, 0);
+      await customAnswers.evaluate(element => element.blur());
+      await expectSameInk("支持自定义回答", customAnswers);
+      await expectSameInk("排序键名");
+
+      await page.goto("/tests/visual/sidebarTypographyFixture.html?collections");
+      await applyAppearance();
+      const skill = page.getByRole("article", { name: "发布准备和回滚预案的完整审查" }).getByRole("switch");
+      await expectSameInk("发布准备和回滚预案的完整审查", skill);
+      await page.getByRole("button", { name: "MCP", exact: true }).click();
+      await page.mouse.move(0, 0);
+      await expectSameInk("AAW 内置浏览器 启用");
+      await expectSameInk("发布服务 启用");
+      await page.getByRole("button", { name: "发布服务", exact: true }).click();
+      const details = page.getByRole("complementary", { name: "发布服务 详情" });
+      await expectSameInk("发布服务 详情开关", details.getByRole("switch", { name: "发布服务 启用", exact: true }));
+      await details.getByRole("button", { name: "收起详情" }).click();
+      await page.getByRole("button", { name: "AAW 内置浏览器", exact: true }).click();
+      await expectSameInk("browser_open 启用");
+
+      expect(verified.sort()).toEqual(Object.values(switchCoverage).flat(2).sort());
+    } finally {
+      await context.close();
+    }
+  });
+}

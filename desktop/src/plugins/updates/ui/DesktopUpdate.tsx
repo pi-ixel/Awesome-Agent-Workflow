@@ -27,7 +27,7 @@ export function UpdateButton({
   if (!ready) return null;
   return (
     <UpdateReleaseNotes key={ready.version} release={ready} openExternal={updates.openExternal}>
-      <ActionButton
+      <ActionButton contentLayout="custom"
         tone="ghost"
         type="button"
         aria-label="更新 Desktop"
