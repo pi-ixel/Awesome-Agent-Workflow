@@ -103,31 +103,44 @@ export function attachSessionViews(
   // false，状态机的收尾不依赖正常返回路径）
   let wasRunning = sessionStore.getState().isAgentRunning;
   let lastUsage: TurnUsage | undefined;
+  let lastUsageAsOf: number | null = null;
   let previousItems:
     ReturnType<typeof sessionStore.getState>["items"] | undefined;
-  const syncUsage = (state: ReturnType<typeof sessionStore.getState>) => {
+  const syncUsage = (
+    state: ReturnType<typeof sessionStore.getState>,
+    runningChanged = false,
+  ) => {
     if (promptUsageBasis !== "prompt-total") return;
-    if (state.items === previousItems) return;
+    if (state.items === previousItems && !runningChanged) return;
     previousItems = state.items;
     let latest: TurnUsage | undefined;
-    for (let i = state.items.length - 1; i >= 0; i--) {
-      const item = state.items[i];
-      if (item?.kind === "user" && item.turnUsage) {
+    let latestTurn = 0;
+    let turnCount = 0;
+    for (const item of state.items) {
+      if (item.kind !== "user") continue;
+      turnCount += 1;
+      if (item.turnUsage) {
         latest = item.turnUsage;
-        break;
+        latestTurn = turnCount;
       }
     }
-    if (latest !== lastUsage) {
+    // 轮次进行中，末尾的用户消息还没有用量，不算缺报。
+    const usageAsOf =
+      latest !== undefined && latestTurn < turnCount && !state.isAgentRunning
+        ? latestTurn
+        : null;
+    if (latest !== lastUsage || usageAsOf !== lastUsageAsOf) {
       lastUsage = latest;
-      statusStore.getState().setTurnUsage(latest ?? null);
+      lastUsageAsOf = usageAsOf;
+      statusStore.getState().setTurnUsage(latest ?? null, usageAsOf);
     }
   };
   syncUsage(sessionStore.getState());
-  const unsubscribeTurn = sessionStore.subscribe((state) => {
+  const unsubscribeTurn = sessionStore.subscribe((state, previous) => {
     // activeSessionId may be a session-list fallback on a prewarmed connection;
     // only an explicit open target identifies the session being restored.
     restoreCounters(state.openingSessionId);
-    syncUsage(state);
+    syncUsage(state, state.isAgentRunning !== previous.isAgentRunning);
     if (state.isAgentRunning === wasRunning) {
       return;
     }

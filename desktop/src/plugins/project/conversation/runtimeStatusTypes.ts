@@ -16,6 +16,8 @@ export interface UsageSnapshot {
   readonly totalSessionInputTokens?: number;
   readonly totalSessionOutputTokens?: number;
   readonly totalSessionCacheHitTokens?: number;
+  /** 最新轮缺少用量时，当前总量实际截至的轮次。 */
+  readonly sessionUsageAsOf?: number;
   readonly cacheHitTokens: number | null;
 }
 

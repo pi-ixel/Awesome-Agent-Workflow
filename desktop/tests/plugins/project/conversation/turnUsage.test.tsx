@@ -1,6 +1,6 @@
 import { createTestProjectWorkbench } from "../../../helpers/projectWorkbench.tsx";
 import { afterEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createSessionStore } from "../../../../src/plugins/project/conversation/sessionStore.ts";
 import { createRuntimeStatusStore } from "../../../../src/plugins/project/conversation/runtimeStatusStore.ts";
 import { restoreStoppedTurns } from "../../../../src/plugins/project/conversation/SessionFactory.ts";
@@ -431,6 +431,121 @@ it("uses a zero baseline only for a new first turn and requires adjacent snapsho
   render(<TurnUsageBadge usage={null} />);
   fireEvent.focus(screen.getByRole("button", { name: "用量 未知" }));
   expect(screen.getByRole("tooltip")).toHaveTextContent("输入未知");
+});
+
+it("marks session totals as of the latest reported turn after a usage gap", async () => {
+  let responseUsage: typeof usage | undefined = usage;
+  const acp = {
+    sessionId: "usage-gap",
+    onEvent: () => () => {},
+    prompt: () => Promise.resolve({ stopReason: "end_turn" as const, usage: responseUsage }),
+    cancel() {},
+  } as unknown as AcpSessionPort;
+  const session = createSessionStore();
+  const status = createRuntimeStatusStore();
+  const detach = attachSessionViews(
+    acp,
+    session,
+    createApprovalStore(),
+    status,
+    undefined,
+    undefined,
+    undefined,
+    "prompt-total",
+  );
+  session.getState().sendPrompt("reported");
+  await vi.waitFor(() => expect(status.getState().usage?.totalSessionTokens).toBe(361111));
+  responseUsage = undefined;
+  session.getState().sendPrompt("missing");
+  await vi.waitFor(() => expect(session.getState().isAgentRunning).toBe(false));
+  expect(status.getState().usage?.totalSessionTokens).toBe(361111);
+  status.getState().handleSessionEvent({
+    type: "usage_update",
+    sessionId: "usage-gap",
+    contextUsed: 20,
+    contextSize: 100,
+  });
+
+  selectRuntimeStatusStore(status);
+  const workbench = createTestProjectWorkbench({});
+  render(<ContextRing />, { wrapper: workbench.Wrapper });
+  fireEvent.focus(screen.getByRole("button", { name: /上下文用量/ }));
+  const card = screen.getByLabelText("上下文容量");
+  expect(card).toHaveTextContent("会话总用量361,111 tok");
+  expect(card).toHaveTextContent("截至第 1 轮");
+
+  responseUsage = {
+    ...usage,
+    inputTokens: 90539,
+    outputTokens: 4452,
+    cachedReadTokens: 300000,
+    totalTokens: 400000,
+  };
+  await act(async () => {
+    session.getState().sendPrompt("recovered");
+    await Promise.resolve();
+  });
+  await vi.waitFor(() => expect(status.getState().usage?.totalSessionTokens).toBe(400000));
+  expect(card).toHaveTextContent("会话总用量400,000 tok");
+  expect(card).not.toHaveTextContent("截至第");
+
+  cleanup();
+  workbench.dispose();
+  session.getState().clear();
+  detach();
+});
+
+it("does not report a running turn as missing usage", async () => {
+  let calls = 0;
+  let finish: ((value: { stopReason: "end_turn"; usage: undefined }) => void) | undefined;
+  const acp = {
+    sessionId: "usage-running",
+    onEvent: () => () => {},
+    prompt: () =>
+      ++calls === 1
+        ? Promise.resolve({ stopReason: "end_turn" as const, usage })
+        : new Promise<{ stopReason: "end_turn"; usage: undefined }>((resolve) => {
+            finish = resolve;
+          }),
+    cancel() {},
+  } as unknown as AcpSessionPort;
+  const session = createSessionStore();
+  const status = createRuntimeStatusStore();
+  const detach = attachSessionViews(
+    acp,
+    session,
+    createApprovalStore(),
+    status,
+    undefined,
+    undefined,
+    undefined,
+    "prompt-total",
+  );
+  session.getState().sendPrompt("reported");
+  await vi.waitFor(() => expect(session.getState().isAgentRunning).toBe(false));
+
+  // 第二轮尚未返回：agent 还没有机会上报，不是缺报。
+  session.getState().sendPrompt("still running");
+  await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+  selectRuntimeStatusStore(status);
+  const workbench = createTestProjectWorkbench({});
+  render(<ContextRing />, { wrapper: workbench.Wrapper });
+  fireEvent.focus(screen.getByRole("button", { name: /上下文用量/ }));
+  const card = screen.getByLabelText("上下文容量");
+  expect(card).toHaveTextContent("会话总用量361,111 tok");
+  expect(card).not.toHaveTextContent("截至第");
+
+  await act(async () => {
+    finish!({ stopReason: "end_turn", usage: undefined });
+    await Promise.resolve();
+  });
+  await vi.waitFor(() => expect(session.getState().isAgentRunning).toBe(false));
+  await vi.waitFor(() => expect(card).toHaveTextContent("截至第 1 轮"));
+
+  cleanup();
+  workbench.dispose();
+  session.getState().clear();
+  detach();
 });
 
 it("preserves agent-provided cumulative counters across standard, partial and child reports", () => {

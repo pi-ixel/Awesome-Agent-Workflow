@@ -68,6 +68,7 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
  *  轨道 opacity 0.25 / 进度弧 0.7，颜色随文字 currentColor）。 */
 export function ContextRing(): React.JSX.Element {
   const usage = useRuntimeValue((state) => state.usage);
+  const sessionUsageAsOf = useRuntimeValue((state) => state.usage?.sessionUsageAsOf ?? null);
   const reportedCapacity = useRuntimeValue(
     (state) => state.usage?.maxContextTokens ?? state.runtime.maxContextTokens,
   );
@@ -264,9 +265,14 @@ export function ContextRing(): React.JSX.Element {
                     </div>
                     <div className="space-y-3 border-t border-line pt-3">
                       {hasSessionUsage && (
-                        <div className="flex items-baseline justify-between gap-3 text-ui-sm">
-                          <span className="text-ink-mute">会话总用量</span>
-                          <span className="shrink-0 text-right text-ink"><HintNumber value={tokens(usage.totalSessionTokens)} /></span>
+                        <div className="space-y-1">
+                          <div className="flex items-baseline justify-between gap-3 text-ui-sm">
+                            <span className="text-ink-mute">会话总用量</span>
+                            <span className="shrink-0 text-right text-ink"><HintNumber value={tokens(usage.totalSessionTokens)} /></span>
+                          </div>
+                          {sessionUsageAsOf !== null && (
+                            <p className="text-right text-ui-caption text-ink-mute">截至第 {sessionUsageAsOf} 轮，最新轮未上报</p>
+                          )}
                         </div>
                       )}
                       <div className="flex items-baseline justify-between gap-3 text-ui-sm">
