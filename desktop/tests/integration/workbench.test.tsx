@@ -806,30 +806,32 @@ describe("会话内 AAW 面板", () => {
         items: [{
           kind: "assistant",
           id: "absolute-file-message",
-          text: "看 `D:\\outside\\demo.html:2`、`D:/other/demo.html`、`D:/outside/folder` 和 `D:/outside/missing.html`。",
+          text: "看 `D:\\outside\\demo.html:2` 和 `D:/outside/missing.html`。\n\n~~~text\nD:/other/demo.html#L7\nD:/outside/folder\n~~~",
           isStreaming: false,
           createdAt: "",
         }],
       });
       renderDesktopApp(services.workbench);
       const message = within(document.querySelector('[data-item-id="absolute-file-message"]') as HTMLElement);
-      const [firstLink, secondLink] = message.getAllByRole("button", { name: "demo.html" });
+      const firstLink = message.getByRole("button", { name: /^demo\.html$/ });
+      const secondLink = message.getByRole("button", { name: "D:/other/demo.html#L7" });
       expect(stat.mock.calls.flat()).not.toContain(first);
 
       const panel = () => useRightPanelStore.getState().projects[pathKey(PATH)];
-      await userEvent.click(firstLink!);
+      await userEvent.click(firstLink);
       await waitFor(() => expect(panel()?.active).toBe("file:" + pathKey(first)));
       expect(panel()?.open).toBe(true);
       expect(panel()?.tabs[0]?.data).toEqual({ path: first, line: 2 });
       await waitFor(() => expect(preview).toHaveBeenCalledWith(first));
 
-      await userEvent.click(secondLink!);
+      await userEvent.click(secondLink);
       await waitFor(() => expect(panel()?.active).toBe("file:" + pathKey(second)));
-      await userEvent.click(firstLink!);
+      expect(panel()?.tabs[1]?.data).toEqual({ path: second, line: 7 });
+      await userEvent.click(firstLink);
       await waitFor(() => expect(panel()?.active).toBe("file:" + pathKey(first)));
       expect(panel()?.tabs.map((tab) => tab.data?.path)).toEqual([first, second]);
 
-      await userEvent.click(message.getByRole("button", { name: "folder" }));
+      await userEvent.click(message.getByRole("button", { name: "D:/outside/folder" }));
       await waitFor(() => expect(panel()?.active).toBe("directory:" + pathKey(folder)));
       await userEvent.click(message.getByRole("button", { name: "missing.html" }));
       expect(await message.findByText("文件已不存在")).toHaveAttribute("role", "alert");

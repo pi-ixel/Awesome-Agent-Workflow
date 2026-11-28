@@ -1723,6 +1723,7 @@
         "buildMarkdownComponents/th",
         "buildMarkdownComponents/tr",
         "buildMarkdownComponents/ul",
+        "renderTextBlockReferences",
         "trimTrailingNewlinesInCodeTree"
       ]
     },
