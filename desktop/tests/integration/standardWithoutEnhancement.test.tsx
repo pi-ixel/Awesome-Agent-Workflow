@@ -10,6 +10,7 @@ import { beforeAll, expect, it, vi } from "vitest";
 // Only the composition list is replaced. All protocol/store/UI code remains real.
 vi.mock("../../src/plugins/agents/registry/builtins.ts", () => ({
   builtinAgentAdapters: [],
+  installBuiltinLifecycle: () => {},
 }));
 beforeAll(() => {
   const poison = (directory: string) => {

@@ -26,7 +26,6 @@ export interface NativeSkill {
   status: string;
   statusLabel?: string | null;
   skillFilePath?: string | null;
-  usageCount: number | null;
   disabledId?: string;
   disabledProject?: string | null;
   unavailable?: string | null;
@@ -99,13 +98,30 @@ export interface NativeSkillLibrary {
     entry: NativeSkill | null;
     stopped: RecycledSkill | null;
   }>;
-  sizes?: (
+  remove?: (
     query: SkillQuery,
-    skills: SkillDirectorySelection[],
-  ) => Promise<(number | null)[]>;
+    action: SkillRemovalAction,
+  ) => Promise<SkillRemovalResult[]>;
+  cleanupCodeAgent?: (
+    identity: string,
+    version: string | null,
+  ) => Promise<SkillRemovalResult[]>;
   files?: (
     query: SkillQuery,
     skill: SkillDirectorySelection,
     request: SkillFileRequest,
   ) => Promise<SkillFileResponse>;
 }
+
+export interface SkillRemovalResult {
+  name: string;
+  path: string | null;
+  id: string | null;
+  ok: boolean;
+  message: string;
+  stopped: RecycledSkill | null;
+}
+
+export type SkillRemovalAction =
+  | Extract<SkillAction, { type: "deletePermanent" }>
+  | { type: "purge"; ids: string[] };

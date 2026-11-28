@@ -1,4 +1,5 @@
 import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
+import type { AgentInitialized } from "../service.ts";
 import type { AcpSessionPort } from "../../acpRuntime/types.ts";
 import { AcpResponseError } from "../../acpConnection/service.ts";
 /**
@@ -42,6 +43,7 @@ const REQUEST_TIMEOUT_MS = 60_000;
 const EARLY_NOTIFICATION_SETTLE_MS = 1_200;
 
 export interface AgentProbeResources {
+  readonly afterInitialize?: AgentInitialized;
   readonly createLease: AgentProbeSessionFactory;
   readonly createTransport: (
     launch: AgentLaunch,
@@ -102,8 +104,9 @@ export async function testAgentConnection(
   try {
     onStep?.(stage);
     signal?.throwIfAborted();
+    const launch = adapter.buildLaunch({ workspacePath: null, executablePath });
     transport ??= await options.createTransport(
-      adapter.buildLaunch({ workspacePath: null, executablePath }),
+      launch,
       adapter,
     );
     if (transport === null) throw new Error("当前环境无法启动 Agent 进程");
@@ -125,6 +128,7 @@ export async function testAgentConnection(
     onStep?.(stage);
     signal?.throwIfAborted();
     const result = await session.initialize();
+    await options.afterInitialize?.(adapter, launch, result);
     signal?.throwIfAborted();
     outcome = {
       ok: true,
@@ -270,6 +274,7 @@ export async function runAgentProbe(
     session.onEvent((event) => tallyEvent(run, event));
     step("握手 initialize");
     const init = await session.initialize();
+    await options.afterInitialize?.(adapter, adapter.buildLaunch({ workspacePath: options.cwd, executablePath: options.executablePath }), init);
     protocolVersion = init.protocolVersion;
     agentName = init.agentInfo.name;
     agentVersion = init.agentInfo.version ?? null;

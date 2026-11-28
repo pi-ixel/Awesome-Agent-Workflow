@@ -276,10 +276,6 @@ export function SkillDetail({
                   <dt>来源</dt>
                   <dd>{sourceLabel}</dd>
                 </div>
-                <div>
-                  <dt>使用次数</dt>
-                  <dd>{skill.usageCount ?? "未知"}</dd>
-                </div>
                 {updatedAt != null && (
                   <div>
                     <dt>最近更新</dt>
@@ -289,14 +285,21 @@ export function SkillDetail({
                 {!["正常", "配置内定义"].includes(skill.status) && (
                   <div>
                     <dt>状态</dt>
-                    <dd className={skill.disabledId ? "text-ink-mute" : "text-danger-ink"} data-hint={skill.status}>
+                    <dd
+                      className={
+                        skill.disabledId ? "text-ink-mute" : "text-danger-ink"
+                      }
+                      data-hint={skill.status}
+                    >
                       {skill.statusLabel ?? skill.status}
                     </dd>
                   </div>
                 )}
               </dl>
               {skill.unavailable && (
-                <p className="text-ui-caption text-warn-ink">{skill.unavailable}</p>
+                <p className="text-ui-caption text-warn-ink">
+                  {skill.unavailable}
+                </p>
               )}
               {shared && !skill.disabledId && (
                 <p className="text-ui-caption text-ink-mute">

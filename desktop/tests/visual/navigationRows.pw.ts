@@ -254,7 +254,7 @@ test("业务列表的定时任务与技能保留选择、焦点和各自的打�
   await expect
     .poll(async () => (await longDescription.boundingBox())!.x)
     .toBeCloseTo(beforeHover, 1);
-  await expect(card.getByText("项目技能 · 6.8 KiB")).toBeVisible();
+  await expect(card.getByText("项目技能")).toBeVisible();
   await detail.press("Shift");
   for (const [theme, size] of appearanceSteps) {
     await selectAppearance(page, theme, size);

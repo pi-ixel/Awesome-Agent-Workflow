@@ -12,6 +12,7 @@ import type {
   SkillAction,
   SkillCatalog,
   SkillProvider,
+  SkillRemovalAction,
 } from "../../host/types.ts";
 import {
   ActionButton,
@@ -23,7 +24,7 @@ import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import { SkillPackageActions } from "./SkillPackageActions.tsx";
 import { SkillCard, SkillGroup } from "./SkillCards.tsx";
 import { SkillDetail } from "./SkillDetail.tsx";
-import { formatSize, projectGroups, skillKey } from "./skillGroups.ts";
+import { projectGroups, skillKey } from "./skillGroups.ts";
 import type { SkillPackageManager } from "../types.ts";
 
 const buttonSize =
@@ -93,10 +94,6 @@ function LibraryPage(
   const scanned = snapshot?.scan === scan ? snapshot.scanned : undefined;
   const notify = useFeedback();
   const scanError = snapshot?.scan === scan ? snapshot.error : undefined;
-  const [sizes, setSizes] = useState<{
-    scan: typeof scan;
-    bytes: ReadonlyMap<string, number>;
-  }>();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<SkillStatus>("all");
   const [detail, setDetail] = useState<NativeSkill | null>(null);
@@ -148,58 +145,6 @@ function LibraryPage(
       current = false;
     };
   }, [library, scan]);
-  useEffect(() => {
-    if (!library?.sizes || !scanned) return;
-    const readSizes = library.sizes;
-    const selected = [
-      ...scanned.entries
-        .filter((entry) => entry.kind !== "inline")
-        .map(({ source, path, realPath }) => ({
-          key: JSON.stringify([source, path]),
-          selection: { source, path, realPath },
-        })),
-      ...scanned.trash
-        .filter((entry) => entry.kind !== "inline" && !entry.unavailable)
-        .map(({ id, path, source }) => ({
-          key: id,
-          selection: {
-            source: source ?? path,
-            path,
-            realPath: path,
-            disabledId: id,
-          },
-        })),
-    ];
-    let current = true;
-    async function loadSizes() {
-      const bytes = new Map<string, number>();
-      for (let index = 0; index < selected.length && current; index += 16) {
-        const batch = selected.slice(index, index + 16);
-        const result = await readSizes(
-          scan.query,
-          batch.map(({ selection }) => selection),
-        );
-        if (!current) return;
-        batch.forEach(({ key }, offset) => {
-          if (typeof result[offset] === "number")
-            bytes.set(key, result[offset]);
-        });
-        setSizes((previous) => ({
-          scan,
-          bytes: new Map([
-            ...(previous?.scan === scan ? previous.bytes : []),
-            ...bytes,
-          ]),
-        }));
-      }
-    }
-    void loadSizes().catch(() => {
-      // 大小是补充信息，读取失败时保留已显示的卡片和结果。
-    });
-    return () => {
-      current = false;
-    };
-  }, [scanned, library, scan]);
   const manager = props.packages;
   const sources = new Map(catalog?.sources.map((entry) => [entry.path, entry]));
   const destinations = catalog?.sources.filter((s) => s.canImport) ?? [];
@@ -215,7 +160,6 @@ function LibraryPage(
     isLink: item.isLink ?? false,
     kind: item.kind,
     status: "已停用",
-    usageCount: null,
     disabledId: item.id,
     disabledProject: item.project,
     unavailable: item.unavailable,
@@ -274,15 +218,59 @@ function LibraryPage(
       }
     });
   }
+  async function removeSkill(action: SkillRemovalAction) {
+    if (!library || !catalog) return;
+    report([]);
+    await perform(async () => {
+      try {
+        if (!library.remove)
+          throw new Error("当前宿主不支持技能删除，请更新客户端");
+        const results = await library.remove(
+          { ...scan.query, profile: catalog.profile },
+          action,
+        );
+        const failed = results.filter((r) => !r.ok);
+        const succeeded = results.length - failed.length;
+        notify?.({
+          message:
+            results.length === 1
+              ? `${results[0]!.name} · ${results[0]!.message}`
+              : `已删除 ${succeeded} 项，失败 ${failed.length} 项${failed.length ? ` · ${failed[0]!.message}` : ""}`,
+          variant: failed.length ? (succeeded ? "warn" : "danger") : "ok",
+        });
+        setSnapshot((previous) => {
+          if (previous?.scan !== scan || !previous.catalog) return previous;
+          const paths = new Set(
+            results.filter((r) => r.ok || r.stopped).map((r) => r.path),
+          );
+          const ids = new Set(results.filter((r) => r.ok).map((r) => r.id));
+          return {
+            ...previous,
+            catalog: {
+              ...previous.catalog,
+              entries: previous.catalog.entries.filter(
+                (entry) => !paths.has(entry.path),
+              ),
+              trash: [
+                ...previous.catalog.trash.filter((entry) => !ids.has(entry.id)),
+                ...results.flatMap((r) => (r.stopped ? [r.stopped] : [])),
+              ],
+            },
+          };
+        });
+      } catch (error) {
+        notify?.({ message: String(error), variant: "danger" });
+      }
+    });
+  }
   async function toggleSkill(skill: NativeSkill) {
     if (!library || !catalog) return;
     const { source, path, realPath, name, revision, disabledId } = skill;
     if (!library.toggle) {
-      await change(
-        disabledId
-          ? { type: "restore", ids: [disabledId] }
-          : { type: "delete", items: [{ name, path, revision }] },
-      );
+      notify?.({
+        message: "当前宿主不支持技能启停，请更新客户端",
+        variant: "danger",
+      });
       return;
     }
     const key = skillKey(skill);
@@ -325,45 +313,6 @@ function LibraryPage(
           },
         };
       });
-      if (library.sizes && next.kind !== "inline") {
-        const target = {
-          source: next.source,
-          path: next.path,
-          realPath: next.realPath,
-          disabledId: next.disabledId,
-        };
-        const sizeKey =
-          next.disabledId ?? JSON.stringify([next.source, next.path]);
-        const oldSize =
-          sizes?.scan === scan
-            ? sizes.bytes.get(disabledId ?? JSON.stringify([source, path]))
-            : undefined;
-        if (oldSize !== undefined)
-          setSizes((previous) => ({
-            scan,
-            bytes: new Map([
-              ...(previous?.scan === scan ? previous.bytes : []),
-              [sizeKey, oldSize],
-            ]),
-          }));
-        void library
-          .sizes(query, [target])
-          .then(([bytes]) => {
-            if (typeof bytes === "number")
-              setSizes((previous) =>
-                !previous || previous.scan === scan
-                  ? {
-                      scan,
-                      bytes: new Map([
-                        ...(previous?.bytes ?? []),
-                        [sizeKey, bytes],
-                      ]),
-                    }
-                  : previous,
-              );
-          })
-          .catch(() => undefined);
-      }
     } catch (error) {
       if (notify) notify({ message: String(error), variant: "danger" });
       else report([String(error)]);
@@ -419,9 +368,12 @@ function LibraryPage(
     if (mode === "disable") {
       void toggleSkill(skill);
     } else if (disabledId) {
-      void change({ type: "purge", ids: [disabledId] });
+      void removeSkill({ type: "purge", ids: [disabledId] });
     } else {
-      void change({ type: "deletePermanent", item: { name, path, revision } });
+      void removeSkill({
+        type: "deletePermanent",
+        item: { name, path, revision },
+      });
     }
   }
   return (
@@ -546,13 +498,6 @@ function LibraryPage(
               <SkillGroup key={group.project ?? ""} {...group}>
                 {group.entries.map((skill) => {
                   const origin = sources.get(skill.source);
-                  const bytes =
-                    sizes?.scan === scan
-                      ? sizes.bytes.get(
-                          skill.disabledId ??
-                            JSON.stringify([skill.source, skill.path]),
-                        )
-                      : undefined;
                   return (
                     <SkillCard
                       key={slot(skill)}
@@ -569,7 +514,6 @@ function LibraryPage(
                             : skill.kind === "package"
                               ? "插件技能"
                               : "目录技能"),
-                        bytes === undefined ? null : formatSize(bytes),
                       ]
                         .filter(Boolean)
                         .join(" · ")}

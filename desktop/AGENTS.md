@@ -80,6 +80,7 @@ CI（`.github/workflows/desktop.yml`）对涉及 `desktop/**` 的 PR 依次执�
 | 工作流引擎             | `workflow-engine-rs/README.md`、`workflow-engine-rs/docs/workflow-format.md`                    |
 | 功能现状               | `docs/features/`                                                                                |
 | 会话整轮变更           | [轮末净 diff、撤销与恢复](docs/features/turn-changes.md)                                        |
+| 技能管理               | [技能清单、操作反馈与内置技能清理](docs/features/skills.md)                                     |
 | 发布                   | `docs/engineering/CI-CD.md`                                                                     |
 
 `docs/history/` 与 `docs/` 下的阶段性设计、验收记录是过程记录，查找现状以上表为准。

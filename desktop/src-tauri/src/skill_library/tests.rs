@@ -34,6 +34,166 @@ fn action(json: serde_json::Value) -> Action {
 }
 
 #[test]
+fn listing_does_not_read_usage_logs_or_serialize_usage_statistics() {
+    let (_tmp, loc, q) = setup(Provider::CodeAgent);
+    skill(&loc.home.join(".cac/skills/sample"), "sample");
+    fs::create_dir_all(loc.home.join(".cac/skill-usage.jsonl")).unwrap();
+    let data = catalog::list(&loc, &q).unwrap();
+    assert!(data.warnings.is_empty());
+    assert_eq!(data.entries.len(), 1);
+    assert!(data.entries[0].preview.is_empty());
+    assert!(!data.entries[0].revision.is_empty());
+    assert!(
+        serde_json::to_value(data).unwrap()["entries"][0]
+            .get("usageCount")
+            .is_none()
+    );
+}
+
+#[test]
+fn permanent_removal_only_reads_the_selected_skill_and_checks_its_revision() {
+    let (_tmp, loc, q) = setup(Provider::CodeAgent);
+    let root = loc.home.join(".cac/skills");
+    for i in 0..20 {
+        skill(&root.join(format!("skill-{i}")), &format!("skill-{i}"));
+    }
+    let data = catalog::list(&loc, &q).unwrap();
+    let entry = data.entries.iter().find(|e| e.name == "skill-0").unwrap();
+    catalog::PREVIEW_READS.with(|reads| reads.borrow_mut().clear());
+    let action = serde_json::from_value(json!({"type":"deletePermanent","item":entry})).unwrap();
+    let results = changes::remove_selected(&loc, &q, action).unwrap();
+    assert!(results[0].ok);
+    assert!(!entry.path.exists());
+    catalog::PREVIEW_READS.with(|reads| {
+        let reads = reads.borrow();
+        assert!(!reads.is_empty());
+        assert!(reads.len() <= 2);
+        assert!(reads.iter().all(|path| path == &entry.path));
+    });
+    let stale = &data.entries[1];
+    fs::write(stale.path.join("SKILL.md"), "changed").unwrap();
+    let action = serde_json::from_value(json!({"type":"deletePermanent","item":stale})).unwrap();
+    assert!(!changes::remove_selected(&loc, &q, action).unwrap()[0].ok);
+    assert!(stale.path.exists());
+    catalog::PREVIEW_READS.with(|reads| reads.borrow_mut().clear());
+    let action = serde_json::from_value(json!({"type":"deletePermanent","item":{
+        "path":root.join("../../.."), "name":"forged", "revision":"forged"
+    }}))
+    .unwrap();
+    assert!(!changes::remove_selected(&loc, &q, action).unwrap()[0].ok);
+    catalog::PREVIEW_READS.with(|reads| assert!(reads.borrow().is_empty()));
+    assert!(root.is_dir());
+}
+
+#[test]
+fn targeted_purge_reports_partial_failure_and_unknown_versions_retry() {
+    let (_tmp, loc, q) = setup(Provider::CodeAgent);
+    let root = loc.home.join(".cac/skills");
+    skill(&root.join("sample"), "sample");
+    let entry = catalog::list(&loc, &q).unwrap().entries.remove(0);
+    delete(&loc, &q, &entry);
+    let id = catalog::list(&loc, &q).unwrap().trash[0].id.clone();
+    let action = serde_json::from_value(json!({"type":"purge","ids":[id,"../forged"]})).unwrap();
+    let results = changes::remove_selected(&loc, &q, action).unwrap();
+    assert!(results[0].ok);
+    assert!(!results[1].ok);
+    for _ in 0..2 {
+        skill(&root.join("mr-review"), "mr-review");
+        assert!(cleanup::run(&loc, "codeagent", None).unwrap()[0].ok);
+    }
+}
+
+#[test]
+fn builtin_cleanup_is_exact_global_only_and_does_not_stage_or_copy() {
+    let (tmp, loc, q) = setup(Provider::CodeAgent);
+    let root = loc.home.join(".cac/skills");
+    let package = loc.home.join(".cac/plugins/cache/local/tools/1/skills");
+    for name in cleanup::NAMES {
+        skill(&root.join(name), "display-name");
+        skill(&package.join(name), name);
+    }
+    let shared = loc.home.join(".agents/skills/mr-review");
+    let claude = loc.home.join(".claude/skills/mr-review");
+    let project = q.projects[0].join(".cac/skills/mr-review");
+    let icode = loc.chrys.join("skills/mr-review");
+    for path in [
+        &shared,
+        &claude,
+        &project,
+        &icode,
+        &root.join("mr-review-copy"),
+    ] {
+        skill(path, "mr-review");
+    }
+    let outside = tmp.path().join("outside");
+    skill(&outside, "outside");
+    link_directory(&root.join("mr-review/templates"), &outside);
+    let results = cleanup::run(&loc, "codeagent", Some("1")).unwrap();
+    assert_eq!(results.len(), 42);
+    assert!(results.iter().all(|r| r.ok));
+    for path in [
+        &shared,
+        &claude,
+        &project,
+        &icode,
+        &outside,
+        &root.join("mr-review-copy"),
+    ] {
+        assert!(path.join("SKILL.md").exists());
+    }
+    assert!(!loc.trash.exists());
+}
+
+#[test]
+fn builtin_cleanup_retries_partial_failures_and_remembers_only_completed_versions() {
+    let (_tmp, loc, _q) = setup(Provider::CodeAgent);
+    let root = loc.home.join(".cac/skills");
+    skill(&root.join("auto-verify"), "auto-verify");
+    fs::write(root.join("mr-review"), "blocked").unwrap();
+    let first = cleanup::run(&loc, "codeagent", Some("1")).unwrap();
+    assert!(first.iter().any(|r| r.ok));
+    assert!(first.iter().any(|r| !r.ok));
+    fs::remove_file(root.join("mr-review")).unwrap();
+    // 失败重试也能清理缺少 SKILL.md 的残留目录。
+    fs::create_dir(root.join("mr-review")).unwrap();
+    let second = cleanup::run(&loc, "codeagent", Some("1")).unwrap();
+    assert!(second.iter().all(|r| r.ok));
+    skill(&root.join("mr-review"), "mr-review");
+    assert!(
+        cleanup::run(&loc, "codeagent", Some("1"))
+            .unwrap()
+            .is_empty()
+    );
+    assert!(root.join("mr-review").exists());
+    assert!(cleanup::run(&loc, "codeagent", Some("2")).unwrap()[0].ok);
+    skill(&root.join("mr-review"), "mr-review");
+    assert!(cleanup::run(&loc, "another-codeagent", Some("2")).unwrap()[0].ok);
+}
+
+#[test]
+fn builtin_cleanup_rejects_linked_sources_and_unlinks_only_selected_skill_links() {
+    let (tmp, loc, _q) = setup(Provider::CodeAgent);
+    let shared = tmp.path().join("shared");
+    skill(&shared.join("mr-review"), "mr-review");
+    fs::create_dir_all(loc.home.join(".cac")).unwrap();
+    let source = loc.home.join(".cac/skills");
+    link_directory(&source, &shared);
+    assert!(
+        cleanup::run(&loc, "codeagent", Some("1"))
+            .unwrap()
+            .iter()
+            .any(|r| !r.ok)
+    );
+    assert!(shared.join("mr-review/SKILL.md").exists());
+    changes::remove_tree(&source).unwrap();
+    fs::create_dir(&source).unwrap();
+    link_directory(&source.join("mr-review"), &shared.join("mr-review"));
+    assert!(cleanup::run(&loc, "codeagent", Some("1")).unwrap()[0].ok);
+    assert!(!source.join("mr-review").exists());
+    assert!(shared.join("mr-review/SKILL.md").exists());
+}
+
+#[test]
 fn toggle_returns_only_the_affected_entry_and_rejects_a_stale_revision() {
     let (_tmp, loc, query) = setup(Provider::CodeAgent);
     let source = loc.home.join(".cac/skills");
@@ -85,35 +245,6 @@ fn link_directory(link: &Path, target: &Path) {
 }
 
 #[cfg(any(windows, unix))]
-#[test]
-fn directory_sizes_resolve_skill_links_but_skip_nested_links_and_other_roots() {
-    let (tmp, loc, query) = setup(Provider::CodeAgent);
-    let target = tmp.path().join("shared-skill");
-    skill(&target, "linked");
-    let templates = target.join("templates");
-    fs::create_dir(&templates).unwrap();
-    fs::write(templates.join("test.txt"), "模板").unwrap();
-    let outside = tmp.path().join("outside");
-    fs::create_dir(&outside).unwrap();
-    fs::write(outside.join("ignored"), [0; 128]).unwrap();
-    link_directory(&templates.join("external"), &outside);
-    link_directory(&templates.join("loop"), &target);
-    let root = loc.home.join(".cac/skills");
-    fs::create_dir_all(&root).unwrap();
-    link_directory(&root.join("linked"), &target);
-    let catalog = catalog::list(&loc, &query).unwrap();
-    let valid = serde_json::to_value(&catalog.entries[0]).unwrap();
-    let mut invalid = valid.clone();
-    invalid["realPath"] = json!(outside);
-    let selected =
-        serde_json::from_value::<Vec<files::Selection>>(json!([valid, invalid])).unwrap();
-    let expected = fs::metadata(target.join("SKILL.md")).unwrap().len() + "模板".len() as u64;
-    assert_eq!(
-        files::directory_sizes(&loc, &query, &selected).unwrap(),
-        vec![Some(expected), None]
-    );
-}
-
 #[test]
 fn skill_detail_reads_selected_directory_and_exact_text() {
     use files::{Request, browse};
@@ -369,8 +500,6 @@ fn reads_disabled_files_by_record_and_permanently_deletes_only_the_selected_skil
         ..q.clone()
     };
     assert!(browse(&loc, &other, &selection, request("SKILL.md")).is_err());
-    let bytes = files::directory_sizes(&loc, &q, std::slice::from_ref(&selection)).unwrap();
-    assert!(bytes[0].is_some_and(|size| size > 0));
     assert!(
         apply(&loc, &q, action(json!({"type":"restore","ids":[id]}))).unwrap()[0]
             .contains("已恢复")
@@ -440,7 +569,7 @@ fn link_recovery_keeps_the_original_target_and_sibling_intact() {
 }
 
 #[test]
-fn usage_matches_absolute_paths_and_source_activation_is_explicit() {
+fn source_activation_is_explicit() {
     let (tmp, loc, q) = setup(Provider::ICode);
     let profile = loc.chrys.join("agents/Code.yaml");
     fs::create_dir_all(profile.parent().unwrap()).unwrap();
@@ -469,68 +598,6 @@ fn usage_matches_absolute_paths_and_source_activation_is_explicit() {
             .iter()
             .any(|s| s.path == dest && s.enabled == Some(true))
     );
-    let ca = Query {
-        provider: Provider::CodeAgent,
-        ..q
-    };
-    fs::create_dir_all(loc.home.join(".cac")).unwrap();
-    fs::write(
-        loc.home.join(".cac/skill-usage.jsonl"),
-        format!(
-            "{}\n{}\n",
-            json!({"type":"active","name":"sample"}),
-            json!({"type":"active","skillPath":from})
-        ),
-    )
-    .unwrap();
-    assert!(
-        catalog::list(&loc, &ca).unwrap().entries[0]
-            .usage_count
-            .is_none()
-    );
-    fs::write(
-        loc.home.join(".cac/skill-usage.jsonl"),
-        json!({"type":"active","skillPath":dest.join("sample/SKILL.md")}).to_string(),
-    )
-    .unwrap();
-    assert_eq!(
-        catalog::list(&loc, &ca).unwrap().entries[0].usage_count,
-        Some(1)
-    );
-}
-#[test]
-fn codeagent_usage_counts_skill_name_for_each_matching_entry() {
-    let (_tmp, loc, q) = setup(Provider::CodeAgent);
-    let global = loc.home.join(".cac/skills/review");
-    let project = q.projects[0].join(".cac/skills/project-review");
-    let unknown = q.projects[0].join(".cac/skills/unknown");
-    skill(&global, "Review");
-    skill(&project, "review");
-    skill(&unknown, "unknown");
-    let events = [
-        json!({"type":"active","skillPath":global,"skillName":"Review"}),
-        json!({"type":"active","skillPath":"an-alias","skillName":"REVIEW"}),
-        json!({"type":"active","skillName":"PROJECT-REVIEW"}),
-        json!({"type":"active","skillPath":"review"}),
-        json!({"type":"active","skillPath":loc.home.join("missing/review"),"skillName":"review"}),
-        json!({"type":"inactive","skillName":"review"}),
-        json!({"type":"active","name":"unknown"}),
-    ];
-    let log = events.map(|event| event.to_string()).join("\n");
-    fs::write(loc.home.join(".cac/skill-usage.jsonl"), log).unwrap();
-
-    let catalog = catalog::list(&loc, &q).unwrap();
-    let count = |path: &Path| {
-        catalog
-            .entries
-            .iter()
-            .find(|entry| entry.path == path)
-            .unwrap()
-            .usage_count
-    };
-    assert_eq!(count(&global), Some(2));
-    assert_eq!(count(&project), Some(2));
-    assert_eq!(count(&unknown), None);
 }
 #[test]
 fn codeagent_catalog_exposes_short_issue_labels_and_original_details() {

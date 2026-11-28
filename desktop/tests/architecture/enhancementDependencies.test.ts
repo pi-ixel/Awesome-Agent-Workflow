@@ -150,7 +150,8 @@ describe("enhancement dependency boundary", () => {
   // 扫描全部共享源码，CI 并行时接近默认 5 秒上限
   it("keeps vendor-specific fields out of shared code outside explicit protocol and host adapters", { timeout: 20_000 }, () => {
     const bad: string[] = [];
-    const creditHostBoundary = new Map<string, readonly string[]>([
+    const vendorHostBoundary = new Map<string, readonly string[]>([
+      ["filesystem/skillLibrary.ts", ["cleanupCodeAgent"]],
       ["index.ts", ["readCodeAgentCredit", "readCodeAgentTokenQuota"]],
       [
         "lifecycle/runtime.ts",
@@ -161,6 +162,8 @@ describe("enhancement dependency boundary", () => {
           "readCodeAgentTokenQuota",
           "CodeAgentTokenResult",
           "codeagent_token_quota",
+          "cleanupCodeAgent",
+          "skill_library_cleanup_codeagent",
         ],
       ],
       [
@@ -203,9 +206,9 @@ describe("enhancement dependency boundary", () => {
             ((ts.isIdentifier(node) &&
               node.text === "normalizeCodeAgentForm") ||
               (ts.isStringLiteral(node) && node.text === "codeagent"));
-          const creditHostAdapter =
+          const vendorHostAdapter =
             (ts.isIdentifier(node) || ts.isStringLiteral(node)) &&
-            creditHostBoundary
+            vendorHostBoundary
               .get(
                 relative(resolve("src/plugins/host"), path).replaceAll(
                   "\\",
@@ -215,7 +218,7 @@ describe("enhancement dependency boundary", () => {
               ?.includes(node.text);
           if (
             !runtimeFormCompatibility &&
-            !creditHostAdapter &&
+            !vendorHostAdapter &&
             (ts.isIdentifier(node) || ts.isStringLiteral(node)) &&
             /chrys|icode|codeagent/i.test(node.text)
           )

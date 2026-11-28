@@ -30,7 +30,6 @@ it("prefers the current project's description and excludes other projects", () =
     isLink: false,
     kind: "directory",
     status: "正常",
-    usageCount: null,
   }));
   const { descriptions } = slashSkillDescriptions(
     { profiles: [], profile: null, sources, entries, trash: [], warnings: [] },

@@ -9,6 +9,140 @@ pub struct Selection {
     name: String,
     revision: String,
 }
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum Removal {
+    DeletePermanent { item: Selection },
+    Purge { ids: Vec<String> },
+}
+
+#[derive(Serialize)]
+pub struct RemovalResult {
+    pub(super) name: String,
+    pub(super) path: Option<PathBuf>,
+    pub(super) id: Option<String>,
+    pub(super) ok: bool,
+    pub(super) message: String,
+    pub(super) stopped: Option<TrashItem>,
+}
+
+/// 删除只校验选中条目，避免为了删除一项读取整个技能库。
+pub(super) fn remove_selected(
+    loc: &Locations,
+    query: &Query,
+    action: Removal,
+) -> Result<Vec<RemovalResult>> {
+    let catalog = catalog::discover_sources(loc, query)?;
+    let mut results = vec![];
+    match action {
+        Removal::DeletePermanent { item } => {
+            let mut stopped = None;
+            let result = (|| {
+                let (entry, source) = selected_entry(&catalog, query.provider, &item)?;
+                let id = remove(loc, query, &entry, &catalog.sources)?;
+                stopped = Some(TrashItem {
+                    id: id.clone(),
+                    name: entry.name,
+                    description: entry.description,
+                    path: entry.path,
+                    kind: entry.kind,
+                    source: entry.source,
+                    project: source.project,
+                    preview: if entry.kind == Kind::Inline {
+                        entry.preview
+                    } else {
+                        String::new()
+                    },
+                    is_link: entry.is_link,
+                    unavailable: None,
+                });
+                let message = restore_or_purge(loc, query.provider, &catalog.sources, &id, true)?;
+                stopped = None;
+                Ok(message)
+            })();
+            let message = result
+                .as_ref()
+                .err()
+                .filter(|_| stopped.is_some())
+                .map(|e| format!("已停用，删除未完成，请在已停用列表重试 · {e}"));
+            results.push(RemovalResult {
+                name: item.name,
+                path: Some(item.path),
+                id: None,
+                ok: result.is_ok(),
+                message: message
+                    .unwrap_or_else(|| result.unwrap_or_else(|e: io::Error| e.to_string())),
+                stopped,
+            });
+        }
+        Removal::Purge { ids } => {
+            for id in ids {
+                let mut name = id.clone();
+                let result = checked_record(loc, query.provider, &id).and_then(|(_, record)| {
+                    name = record.name;
+                    restore_or_purge(loc, query.provider, &catalog.sources, &id, true)
+                });
+                results.push(RemovalResult {
+                    name,
+                    path: None,
+                    id: Some(id),
+                    ok: result.is_ok(),
+                    message: result.unwrap_or_else(|e| e.to_string()),
+                    stopped: None,
+                });
+            }
+        }
+    }
+    Ok(results)
+}
+
+fn selected_entry(
+    catalog: &Catalog,
+    provider: Provider,
+    selected: &Selection,
+) -> Result<(Entry, Source)> {
+    for source in &catalog.sources {
+        let entry = if source.kind == Kind::Inline {
+            catalog
+                .entries
+                .iter()
+                .find(|entry| {
+                    entry.path == selected.path
+                        && entry.name == selected.name
+                        && entry.revision == selected.revision
+                })
+                .cloned()
+        } else if selected.path.starts_with(&source.path) {
+            // 先校验来源与路径层级，再读取正文；重叠来源可能有不同的允许深度。
+            let valid = selected.path.canonicalize().and_then(|real_path| {
+                files::skill_root(
+                    &catalog.sources,
+                    provider,
+                    &files::Selection {
+                        source: source.path.clone(),
+                        path: selected.path.clone(),
+                        real_path,
+                        disabled_id: None,
+                    },
+                )
+            });
+            if valid.is_err() {
+                continue;
+            }
+            Some(catalog::file_entry(source, &selected.path)?)
+        } else {
+            None
+        };
+        if let Some(entry) = entry {
+            if entry.name != selected.name || entry.revision != selected.revision {
+                return Err(error("条目已变化，请刷新"));
+            }
+            return Ok((entry, source.clone()));
+        }
+    }
+    Err(error("技能来源已变化，请刷新"))
+}
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Action {
@@ -80,11 +214,8 @@ pub(super) fn toggle(loc: &Locations, query: &Query, action: Toggle) -> Result<T
                         .ok_or_else(|| error("技能来源已变化"))?;
                     catalog::file_entry(source, &record.original)?
                 };
-                if query.provider == Provider::CodeAgent {
-                    let _ = catalog::usage(
-                        &loc.home.join(".cac/skill-usage.jsonl"),
-                        std::slice::from_mut(&mut row),
-                    );
+                if row.kind != Kind::Inline {
+                    row.preview.clear();
                 }
                 Some(row)
             } else {
@@ -598,7 +729,7 @@ fn restore_or_purge(
     Ok("已恢复".into())
 }
 
-fn remove_tree(path: &Path) -> Result<()> {
+pub(super) fn remove_tree(path: &Path) -> Result<()> {
     let kind = fs::symlink_metadata(path)?.file_type();
     #[cfg(windows)]
     {
