@@ -262,6 +262,22 @@ test("信息流模型搜索与审批菜单支持键盘选择，外观往返保�
   await expect(approvalMenu).toBeHidden();
   await expect(approval).toBeFocused();
   await expect(composer).toHaveValue("整理发布记录");
+  const policyIcons = approval.locator(":scope > svg");
+  const policyLabel = approval.locator(":scope > .action-button-label");
+  for (const mode of ["每次询问", "自动放行"]) {
+    await approval.press("Enter");
+    await approvalMenu.getByRole("menuitemradio", { name: mode }).click();
+    await expect(policyLabel).toHaveText(mode);
+    await expect(policyIcons).toHaveCount(2);
+    const icon = (await policyIcons.first().boundingBox())!;
+    const label = (await policyLabel.boundingBox())!;
+    const chevron = (await policyIcons.last().boundingBox())!;
+    expect(icon.x + icon.width).toBeLessThan(label.x);
+    expect(label.x + label.width).toBeLessThan(chevron.x);
+    const labelCenter = label.y + label.height / 2;
+    expect(Math.abs(icon.y + icon.height / 2 - labelCenter)).toBeLessThanOrEqual(0.75);
+    expect(Math.abs(chevron.y + chevron.height / 2 - labelCenter)).toBeLessThanOrEqual(0.75);
+  }
 });
 
 test("提问轨道支持键盘跨越虚拟窗口，换肤时保留当前提问和焦点", async ({ page, context }) => {

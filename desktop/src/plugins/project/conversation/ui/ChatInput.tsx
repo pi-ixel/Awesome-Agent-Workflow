@@ -1596,17 +1596,13 @@ export function ChatInput({
             title={`审批默认模式：客户端对权限请求的缺省应答（当前「${policyLabelOf(approvalPolicy)}」）`}
             menuLabel="审批默认模式"
             warning={approvalPolicy === "auto-allow"}
-            label={
-              <>
-                <span aria-hidden="true">
-                  {approvalPolicy === "auto-allow" ? (
-                    <ShieldAlertIcon className="ui-icon-16" />
-                  ) : (
-                    <HandIcon className="ui-icon-16" strokeWidth={2} />
-                  )}
-                </span>
-                {policyLabelOf(approvalPolicy)}
-              </>
+            label={policyLabelOf(approvalPolicy)}
+            leadingIcon={
+              approvalPolicy === "auto-allow" ? (
+                <ShieldAlertIcon className="ui-icon-16" />
+              ) : (
+                <HandIcon className="ui-icon-16" strokeWidth={2} />
+              )
             }
             entries={approvalModeOptions.map((option) => {
               const warning = option.value === "auto-allow";

@@ -11,6 +11,7 @@ import { ChevronDownIcon } from "../../../../shared/ui/icons.tsx";
 /** 信息流的审批和模型入口。业务选择项使用共享菜单的单选语义。 */
 export function StatusChipMenu({
   label,
+  leadingIcon,
   title,
   menuLabel,
   warning = false,
@@ -19,6 +20,7 @@ export function StatusChipMenu({
   search,
 }: {
   readonly label: ReactNode;
+  readonly leadingIcon?: ReactNode;
   readonly title: string;
   readonly menuLabel: string;
   readonly warning?: boolean;
@@ -52,6 +54,7 @@ export function StatusChipMenu({
         className={`flex min-h-7 items-center gap-1 rounded-control px-1.5 py-1 text-ui-base font-normal ${
           warning ? "text-warn-ink! hover:text-warn-ink!" : "text-ink"
         }`}
+        leadingIcon={leadingIcon}
         trailingIcon={<ChevronDownIcon className="ui-icon-14 shrink-0 opacity-70" />}
       >
         {label}
