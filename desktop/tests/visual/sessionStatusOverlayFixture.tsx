@@ -19,7 +19,11 @@ import { WorkbenchShell } from "../../src/plugins/workbench/ui/WorkbenchShell.ts
 import { WorkbenchContext } from "../../src/plugins/workbench/ui/bindings/react.ts";
 import type { WorkbenchService } from "../../src/plugins/workbench/service.ts";
 import { projectHeaders } from "../../src/plugins/project/ui/projectHeaders.tsx";
-import { projectConversationPageId } from "../../src/plugins/project/workspace/pageIds.ts";
+import { createProjectPages } from "../../src/plugins/project/ui/workbenchViews.tsx";
+import {
+  projectConversationPageId,
+  projectOverviewPageId,
+} from "../../src/plugins/project/workspace/pageIds.ts";
 import { emptyWorkspace } from "../../src/plugins/project/workspace/types.ts";
 import { createProjectSessionIndexes } from "../../src/plugins/project/sessions/sessionIndexes.ts";
 import { ActionButton } from "../../src/shared/ui/controls.tsx";
@@ -218,14 +222,29 @@ const { Monitor: StorageNoticeMonitor } = createStorageSettings(
 export function RightPanelFixture() {
   const { Wrapper, workbench } = createGitWorkbench();
   const params = new URLSearchParams(location.search);
+  const OverviewPage = params.has("project-overview")
+    ? createProjectPages({
+        skills: createStore(() => ({})),
+        gitReview: createStore(() => ({})),
+        extension: createStore(() => ({})),
+        documentView: createStore(() => ({})),
+        watchActivity: () => () => {},
+        openDiagnostics: () => {},
+        openArchiveSettings: () => {},
+        workbench,
+      })[0]!.View
+    : null;
   workbench.navigation
     .getState()
-    .restoreContextView({ contextPath: path, viewId: null });
-  if (params.has("conversation-header")) {
+    .restoreContextView({
+      contextPath: path,
+      viewId: OverviewPage ? projectOverviewPageId : null,
+    });
+  if (OverviewPage || params.has("conversation-header")) {
     workbench.register("pages", {
-      id: projectConversationPageId,
+      id: OverviewPage ? projectOverviewPageId : projectConversationPageId,
       default: true,
-      View: () => conversation,
+      View: OverviewPage ?? (() => conversation),
     });
     for (const header of projectHeaders) workbench.register("headers", header);
   }
@@ -278,7 +297,7 @@ export function RightPanelFixture() {
       )}
       <div className="min-h-0 flex-1 overflow-hidden">
         <PanelWorkspace project={path} enabled>
-          {conversation}
+          {OverviewPage ? <OverviewPage project={path} /> : conversation}
         </PanelWorkspace>
       </div>
     </div>
