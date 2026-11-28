@@ -1,6 +1,7 @@
 mod catalog;
 mod changes;
 pub(crate) use changes::copy_tree;
+mod cleanup;
 mod files;
 mod profiles;
 #[cfg(test)]
@@ -91,7 +92,6 @@ pub struct Entry {
     status: String,
     status_label: Option<String>,
     skill_file_path: Option<PathBuf>,
-    usage_count: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -163,12 +163,10 @@ pub async fn skill_library_toggle(
         return Err("只有主窗口可以启停技能".into());
     }
     let locations = Locations::resolve(&app)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        changes::toggle(&locations, &query, action)
-    })
-    .await
-    .map_err(|error| error.to_string())?
-    .map_err(|error| error.to_string())
+    tauri::async_runtime::spawn_blocking(move || changes::toggle(&locations, &query, action))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
 }
 #[tauri::command]
 pub async fn skill_library_list(
@@ -176,12 +174,10 @@ pub async fn skill_library_list(
     query: Query,
 ) -> std::result::Result<Catalog, String> {
     let locations = Locations::resolve(&app)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        catalog::list(&locations, &query)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || catalog::list(&locations, &query))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 #[tauri::command]
 pub async fn skill_library_change(
@@ -190,8 +186,25 @@ pub async fn skill_library_change(
     action: changes::Action,
 ) -> std::result::Result<Vec<String>, String> {
     let locations = Locations::resolve(&app)?;
+    tauri::async_runtime::spawn_blocking(move || changes::apply(&locations, &query, action))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn skill_library_remove(
+    app: AppHandle,
+    webview: tauri::Webview,
+    query: Query,
+    action: changes::Removal,
+) -> std::result::Result<Vec<changes::RemovalResult>, String> {
+    if webview.label() != "main" {
+        return Err("只有主窗口可以删除技能".into());
+    }
+    let locations = Locations::resolve(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        changes::apply(&locations, &query, action)
+        changes::remove_selected(&locations, &query, action)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -199,21 +212,18 @@ pub async fn skill_library_change(
 }
 
 #[tauri::command]
-pub async fn skill_library_sizes(
+pub async fn skill_library_cleanup_codeagent(
     app: AppHandle,
     webview: tauri::Webview,
-    query: Query,
-    skills: Vec<files::Selection>,
-) -> std::result::Result<Vec<Option<u64>>, String> {
+    identity: String,
+    version: Option<String>,
+) -> std::result::Result<Vec<changes::RemovalResult>, String> {
     if webview.label() != "main" {
-        return Err("只有主窗口可以读取技能目录大小".into());
-    }
-    if skills.len() > files::MAX_SIZE_SELECTIONS {
-        return Err("请求的技能数量超过上限".into());
+        return Err("只有主窗口可以清理内置技能".into());
     }
     let locations = Locations::resolve(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        files::directory_sizes(&locations, &query, &skills)
+        cleanup::run(&locations, &identity, version.as_deref())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -232,10 +242,8 @@ pub async fn skill_library_files(
         return Err("只有主窗口可以查看技能文件".into());
     }
     let locations = Locations::resolve(&app)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        files::browse(&locations, &query, &skill, request)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || files::browse(&locations, &query, &skill, request))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }

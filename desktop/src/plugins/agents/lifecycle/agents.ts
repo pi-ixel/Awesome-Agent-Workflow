@@ -3,7 +3,7 @@ import type {
   ConfigurationRecord,
   ConfigurationScope,
 } from "../../configuration/types.ts";
-import type { AgentsService } from "../service.ts";
+import type { AgentsService, AgentInitialized } from "../service.ts";
 import type { AgentExtensionClient } from "../../../contracts/mcp/management.ts";
 import type { AgentProtocolCheckOptions } from "../types.ts";
 import type { AgentProbeSessionFactory } from "../probe/types.ts";
@@ -36,6 +36,18 @@ interface ProbeTransportOwner {
 const probeBusyMessage = "已有 ACP 诊断正在运行，请等待结束后重试";
 
 export class DesktopAgents implements AgentsService {
+  private readonly initialized = new Set<AgentInitialized>();
+  registerInitialized(listener: AgentInitialized): () => void {
+    this.initialized.add(listener);
+    return () => { this.initialized.delete(listener); };
+  }
+  afterInitialize: AgentInitialized = async (adapter, launch, info) => {
+    for (const listener of this.initialized) {
+      if (this.lifecycle.signal.aborted) return;
+      try { await listener(adapter, launch, info); }
+      catch (error) { this.loggerFactory("agents").warn("Agent 初始化扩展失败", { error: String(error) }); }
+    }
+  };
   readonly service: AgentsService;
   private readonly lifecycle = new AbortController();
   private readonly adapters: readonly AgentAdapter[];
@@ -88,6 +100,8 @@ export class DesktopAgents implements AgentsService {
     this.configuration = this.configurationView.snapshot;
     const readSelectedId = () => this.selectedId;
     this.service = {
+      registerInitialized: this.registerInitialized.bind(this),
+      afterInitialize: this.afterInitialize,
       configuration: this.configuration,
       probeState: this.probeState,
       get selectedId() { return readSelectedId(); },
@@ -332,6 +346,7 @@ export class DesktopAgents implements AgentsService {
       try {
         const session = lease.openSession();
         const handshake = await session.initialize();
+        await this.afterInitialize(adapter, launch, handshake);
         const request = session.requestAgentExtension?.bind(session);
         if (!request) throw new Error("当前 ACP 连接不支持扩展请求");
         return await run({
@@ -419,6 +434,7 @@ export class DesktopAgents implements AgentsService {
       this.probeReports.setState({ isBusy: true });
       return await run({
         signal,
+        afterInitialize: this.afterInitialize,
         createLease: (...args) => {
           signal.throwIfAborted();
           return (owned.session = factory.create(...args));
@@ -471,6 +487,7 @@ export class DesktopAgents implements AgentsService {
   shutdown(): Promise<void> {
     return (this.stopping ??= (async () => {
       this.lifecycle.abort();
+      this.initialized.clear();
       this.probeSessions?.lifecycle.abort();
       this.configurationView.dispose();
       this.probeView.dispose();

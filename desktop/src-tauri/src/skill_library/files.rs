@@ -1,11 +1,8 @@
 use super::*;
-use std::{collections::HashMap, io::Read, path::Component};
+use std::{io::Read, path::Component};
 
 const MAX_TEXT_BYTES: u64 = 256 * 1024;
 const MAX_DIRECTORY_ITEMS: usize = 500;
-const MAX_SIZE_ENTRIES: usize = 100_000;
-const MAX_SIZE_DEPTH: usize = 64;
-pub(super) const MAX_SIZE_SELECTIONS: usize = 16;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -107,53 +104,6 @@ pub(super) fn skill_root(
     Ok(real)
 }
 
-pub(super) fn directory_sizes(
-    loc: &Locations,
-    query: &Query,
-    selected: &[Selection],
-) -> Result<Vec<Option<u64>>> {
-    let catalog = catalog::discover_sources(loc, query)?;
-    let mut sizes = HashMap::new();
-    Ok(selected
-        .iter()
-        .map(|skill| {
-            let root = match &skill.disabled_id {
-                Some(id) => changes::disabled_root(loc, query, id),
-                None => skill_root(&catalog.sources, query.provider, skill),
-            }
-            .ok()?;
-            *sizes.entry(root).or_insert_with_key(|root| {
-                let mut remaining = MAX_SIZE_ENTRIES;
-                directory_size(root, root, MAX_SIZE_DEPTH, &mut remaining).ok()
-            })
-        })
-        .collect())
-}
-
-fn directory_size(root: &Path, path: &Path, depth: usize, remaining: &mut usize) -> Result<u64> {
-    let _guard = open_checked(path, root, true)?;
-    let mut size = 0;
-    for child in fs::read_dir(path)? {
-        *remaining = remaining
-            .checked_sub(1)
-            .ok_or_else(|| error("技能目录过大"))?;
-        let path = child?.path();
-        let info = fs::symlink_metadata(&path)?;
-        if is_link(&info) {
-            continue;
-        }
-        if info.is_file() {
-            size += info.len();
-        } else if info.is_dir() {
-            let depth = depth
-                .checked_sub(1)
-                .ok_or_else(|| error("技能目录层级过深"))?;
-            size += directory_size(root, &path, depth, remaining)?;
-        }
-    }
-    Ok(size)
-}
-
 fn is_link(meta: &fs::Metadata) -> bool {
     #[cfg(windows)]
     {
@@ -186,7 +136,7 @@ fn checked_metadata(path: &Path, directory: bool) -> Result<fs::Metadata> {
 }
 
 #[cfg(windows)]
-fn open_checked(path: &Path, root: &Path, directory: bool) -> Result<fs::File> {
+pub(super) fn open_checked(path: &Path, root: &Path, directory: bool) -> Result<fs::File> {
     use std::os::windows::{ffi::OsStringExt, fs::OpenOptionsExt, io::AsRawHandle};
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
@@ -230,7 +180,7 @@ fn open_checked(path: &Path, root: &Path, directory: bool) -> Result<fs::File> {
 }
 
 #[cfg(not(windows))]
-fn open_checked(path: &Path, root: &Path, directory: bool) -> Result<fs::File> {
+pub(super) fn open_checked(path: &Path, root: &Path, directory: bool) -> Result<fs::File> {
     use rustix::fs::{Mode, OFlags, open};
     checked_metadata(path, directory)?;
     let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK;

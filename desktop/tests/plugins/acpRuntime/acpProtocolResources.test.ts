@@ -24,9 +24,18 @@ it("owns protocol leases without the project service and clears them on Fiber re
     });
     const adapter = root.agents.resolve("native-opencode");
     if (!adapter) throw new Error("Standard test Agent is unavailable");
+    const initialized = vi.fn(() => {
+      // 扩展失败不能阻断连接，也不能向 Agent 发送上下文说明。
+      if (initialized.mock.calls.length === 1) return Promise.reject(new Error("模拟清理失败"));
+      return Promise.resolve();
+    });
+    const releaseInitialized = root.agents.registerInitialized!(initialized);
     const fiber = await root.plugin(acpRuntime);
     const protocol = root.acpRuntime.protocol;
     await protocol.prepare(adapter, "test-agent", {});
+    expect(initialized).toHaveBeenCalled();
+    expect(peers.flatMap(({ received }) => received).some(({ method }) => method === "session/new")).toBe(false);
+    releaseInitialized();
     const session = protocol.open("test-agent");
     await session.initialize();
     await session.newSession("/workspace");

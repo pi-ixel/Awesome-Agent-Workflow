@@ -46,7 +46,7 @@ export class RuntimeConnections implements AcpProtocolResources {
     private readonly base: AcpConnectionInternals,
     private readonly agents: Pick<
       AgentsService,
-      "selectedId" | "buildLaunch" | "openTransport"
+      "selectedId" | "buildLaunch" | "openTransport" | "afterInitialize"
     >,
     private readonly logger: Logger,
     private readonly supportsCustomAnswers: (agentId: string) => boolean = () =>
@@ -111,6 +111,7 @@ export class RuntimeConnections implements AcpProtocolResources {
           );
           notify({ kind: "handshake" });
           const negotiated = await handshake.initialize({ timeoutMs: 30_000 });
+          await this.agents.afterInitialize?.(adapter, launch, negotiated);
           await handshake.closeSession();
           connection.configureDiagnosticProbe(diagnosticProbeFor(negotiated));
           notify({ kind: "ready" });

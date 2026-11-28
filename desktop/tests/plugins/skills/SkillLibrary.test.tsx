@@ -22,7 +22,6 @@ const skill = {
   kind: "directory" as const,
   isLink: false,
   revision: "r1",
-  usageCount: null,
 };
 const catalog: SkillCatalog = {
   profile: null,
@@ -42,7 +41,7 @@ const catalog: SkillCatalog = {
   warnings: [],
 };
 
-it("启停只替换选中的技能，复用所在卡片和目录大小", async () => {
+it("启停只替换选中的技能，复用所在卡片且不重扫", async () => {
   const sibling = {
     ...skill,
     name: "other",
@@ -79,8 +78,6 @@ it("启停只替换选中的技能，复用所在卡片和目录大小", async (
         toggle,
         candidates: () => Promise.resolve([]),
         change: () => Promise.resolve([]),
-        sizes: (_query, selections) =>
-          Promise.resolve(selections.map(() => 1024)),
       }}
       provider="codeagent"
       storage={window.localStorage}
@@ -92,111 +89,17 @@ it("启停只替换选中的技能，复用所在卡片和目录大小", async (
   const card = await screen.findByRole("article", { name: "sample" });
   const other = screen.getByRole("article", { name: "other" });
   const control = within(card).getByRole("switch");
-  await within(other).findByText(".cac · 1.0 KiB");
+  await within(other).findByText(".cac");
   await userEvent.click(control);
   await waitFor(() => expect(control).not.toBeChecked());
   expect(await screen.findByRole("article", { name: "sample" })).toBe(card);
   expect(screen.getByRole("article", { name: "other" })).toBe(other);
-  expect(within(other).getByText(".cac · 1.0 KiB")).toBeVisible();
+  expect(within(other).getByText(".cac")).toBeVisible();
   expect(within(other).getByRole("switch")).toBeEnabled();
   await userEvent.click(control);
   await waitFor(() => expect(control).toBeChecked());
   expect(list).toHaveBeenCalledTimes(1);
   expect(toggle).toHaveBeenCalledTimes(2);
-});
-
-it("先显示技能卡片，随后补充当前列表的目录大小", async () => {
-  let resolveSize!: (bytes: (number | null)[]) => void;
-  const sizes = vi
-    .fn<NonNullable<NativeSkillLibrary["sizes"]>>()
-    .mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          resolveSize = resolve;
-        }),
-    )
-    .mockResolvedValue([3072]);
-  render(
-    <SkillLibrary
-      library={{
-        list: () => Promise.resolve(catalog),
-        candidates: () => Promise.resolve([]),
-        change: () => Promise.resolve([]),
-        sizes,
-      }}
-      provider="codeagent"
-      storage={window.localStorage}
-      knownProjects={() => []}
-      pick={() => Promise.resolve(null)}
-      reveal={() => Promise.resolve()}
-    />,
-  );
-  const card = await screen.findByRole("article", { name: "sample" });
-  expect(within(card).getByText(".cac")).toBeVisible();
-  await waitFor(() => expect(sizes).toHaveBeenCalledTimes(1));
-  await userEvent.click(screen.getByRole("button", { name: "刷新" }));
-  expect(await within(card).findByText(".cac · 3.0 KiB")).toBeVisible();
-  await act(() => {
-    resolveSize([512]);
-    return Promise.resolve();
-  });
-  expect(within(card).queryByText(/512 B/)).toBeNull();
-});
-
-it("分批读取启用和停用技能的大小，后续批次失败时保留已有结果", async () => {
-  const entries = Array.from({ length: 16 }, (_, index) => {
-    const path = `${root}/skill-${index}`;
-    return { ...skill, name: `技能 ${index}`, path, realPath: path };
-  });
-  const stopped = {
-    ...skill,
-    name: "停用技能",
-    id: "stopped",
-    path: `${root}/stopped`,
-  };
-  const unavailable = {
-    ...stopped,
-    name: "失效技能",
-    id: "unavailable",
-    unavailable: "原目录不可用",
-  };
-  const data: SkillCatalog = {
-    ...catalog,
-    entries: [...entries, { ...skill, kind: "inline", name: "配置技能" }],
-    trash: [stopped, unavailable],
-  };
-  const sizes = vi
-    .fn<NonNullable<NativeSkillLibrary["sizes"]>>()
-    .mockResolvedValueOnce(entries.map(() => 1024))
-    .mockRejectedValueOnce(new Error("读取失败"));
-  render(
-    <SkillLibrary
-      library={{
-        list: () => Promise.resolve(data),
-        candidates: () => Promise.resolve([]),
-        change: () => Promise.resolve([]),
-        sizes,
-      }}
-      provider="codeagent"
-      storage={window.localStorage}
-      knownProjects={() => []}
-      pick={() => Promise.resolve(null)}
-      reveal={() => Promise.resolve()}
-    />,
-  );
-  const first = within(await screen.findByRole("article", { name: "技能 0" }));
-  expect(await first.findByText(".cac · 1.0 KiB")).toBeVisible();
-  expect(sizes.mock.calls.map(([, batch]) => batch.length)).toEqual([16, 1]);
-  expect(sizes.mock.calls[1]?.[1]).toEqual([
-    {
-      source: root,
-      path: stopped.path,
-      realPath: stopped.path,
-      disabledId: stopped.id,
-    },
-  ]);
-  expect(screen.getByRole("article", { name: "停用技能" })).toBeVisible();
-  expect(first.getByText(".cac · 1.0 KiB")).toBeVisible();
 });
 
 it("详情浏览真实目录，在同一弹窗切换并复制完整原文", async () => {
@@ -399,6 +302,28 @@ it("旧回收记录作为停用卡片，可查看原文、恢复或删除", asyn
         list: () => Promise.resolve(data),
         candidates: () => Promise.resolve([]),
         change,
+        toggle: async (query, action) => {
+          if (action.type === "enable")
+            await change(query, { type: "restore", ids: [action.id] });
+          return {
+            message: "旧技能 · 已跳过，同名配置已存在",
+            entry: null,
+            stopped: null,
+          };
+        },
+        remove: async (query, action) => {
+          await change(query, action);
+          return [
+            {
+              name: "旧技能",
+              path: null,
+              id: "old",
+              ok: false,
+              message: "已跳过，同名配置已存在",
+              stopped: null,
+            },
+          ];
+        },
       }}
       provider="icode"
       storage={window.localStorage}
@@ -557,6 +482,21 @@ it("同名技能按来源查看和删除，路径操作在详情工作台", asyn
           list: () => Promise.resolve(data),
           candidates: () => Promise.resolve([]),
           change,
+          remove: async (query, action) => {
+            await change(query, action);
+            return action.type === "deletePermanent"
+              ? [
+                  {
+                    name: action.item.name,
+                    path: action.item.path,
+                    id: null,
+                    ok: true,
+                    message: "已永久删除",
+                    stopped: null,
+                  },
+                ]
+              : [];
+          },
         }}
         provider="icode"
         storage={window.localStorage}
@@ -706,9 +646,16 @@ it("插件包开关只停用当前技能，其他技能保持启用", async () =
       trash: [{ ...entry, id: "paused" }],
     });
   const change = vi.fn<NativeSkillLibrary["change"]>().mockResolvedValue([]);
+  const toggle = vi
+    .fn<NonNullable<NativeSkillLibrary["toggle"]>>()
+    .mockResolvedValue({
+      message: "sample · 已停用",
+      entry: null,
+      stopped: { ...entry, id: "paused" },
+    });
   render(
     <SkillLibrary
-      library={{ list, candidates: () => Promise.resolve([]), change }}
+      library={{ list, candidates: () => Promise.resolve([]), change, toggle }}
       provider="codeagent"
       storage={window.localStorage}
       knownProjects={() => []}
@@ -719,11 +666,15 @@ it("插件包开关只停用当前技能，其他技能保持启用", async () =
   const control = await screen.findByRole("switch", { name: "sample 启用" });
   expect(control).toBeChecked();
   await userEvent.click(control);
-  expect(change).toHaveBeenCalledWith(
+  expect(toggle).toHaveBeenCalledWith(
     { provider: "codeagent", profile: null, projects: [] },
     {
-      type: "delete",
-      items: [{ name: entry.name, path: entry.path, revision: entry.revision }],
+      type: "disable",
+      source,
+      name: entry.name,
+      path: entry.path,
+      realPath: entry.realPath,
+      revision: entry.revision,
     },
   );
   await waitFor(() =>
@@ -733,6 +684,8 @@ it("插件包开关只停用当前技能，其他技能保持启用", async () =
   );
   expect(screen.getByRole("switch", { name: "other 启用" })).toBeChecked();
   expect(screen.queryByRole("dialog")).toBeNull();
+  expect(list).toHaveBeenCalledTimes(1);
+  expect(change).not.toHaveBeenCalled();
 });
 it("保留已卸载插件包记录的原生重装能力", async () => {
   let items = [

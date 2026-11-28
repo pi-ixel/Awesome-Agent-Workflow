@@ -1,6 +1,7 @@
 import type { HistoryEvidence } from "../host/types.ts";
 import type { AgentExtensionClient } from "../../contracts/mcp/management.ts";
 import type { AcpTransport } from "../host/types.ts";
+import type { InitializeResult } from "../../contracts/acp/protocol.ts";
 import { findAgentAdapter } from "./registry/registry.ts";
 
 /** Reporting identity is owned by the registered Agent enhancement. */
@@ -51,6 +52,8 @@ export interface AgentSwitchGuard {
 }
 
 export interface AgentsService {
+  registerInitialized?(listener: AgentInitialized): () => void;
+  afterInitialize?: AgentInitialized;
   readonly configuration: ReadonlySnapshot<AgentConfigurationSnapshot>;
   readonly probeState: ReadonlySnapshot<AgentProbeSnapshot>;
   readonly selectedId: string;
@@ -97,3 +100,6 @@ export interface AgentsService {
   runProtocolCheck(id: string, options: AgentProtocolCheckOptions): Promise<void>;
   shutdown(): Promise<void>;
 }
+
+/** 握手完成、创建会话前的宿主扩展，不向 Agent 上下文发送说明。 */
+export type AgentInitialized = (adapter: AgentAdapter, launch: AgentLaunch, info: InitializeResult) => Promise<void>;

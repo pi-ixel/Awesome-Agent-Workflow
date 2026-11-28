@@ -1,4 +1,10 @@
 import { Context } from "cordis";
+import type {
+  SkillQuery,
+  SkillRemovalAction,
+} from "../../src/plugins/host/types.ts";
+import { Feedback } from "../../src/shared/ui/feedback.ts";
+import { ToastHost } from "../../src/plugins/workbench/ui/ToastHost.tsx";
 import { createStore } from "zustand";
 import * as skillsWorkbench from "../../src/plugins/skills/ui/workbench.tsx";
 import { McpView } from "../../src/plugins/mcp/ui/McpView.tsx";
@@ -73,7 +79,6 @@ export async function createSkillsCollection(isPreview = false) {
         kind: "directory",
         isLink: false,
         revision: "r1",
-        usageCount: null,
       },
     ],
     trash: [
@@ -178,17 +183,59 @@ export async function createSkillsCollection(isPreview = false) {
         candidates: () => Promise.resolve([]),
         change,
         files,
-        sizes: (_query: unknown, selected: readonly { path: string }[]) =>
-          Promise.resolve(
-            selected.map(({ path }) => (path === sample.path ? 6963 : 2048)),
-          ),
+        toggle: async (
+          query: SkillQuery,
+          action: Parameters<NonNullable<NativeSkillLibrary["toggle"]>>[1],
+        ) => {
+          if (action.type === "enable") {
+            await change(query, { type: "restore", ids: [action.id] });
+            return {
+              message: "已恢复",
+              entry:
+                catalog.entries.find((item) => item.path === action.id) ?? null,
+              stopped: null,
+            };
+          }
+          await change(query, {
+            type: "delete",
+            items: [
+              {
+                name: action.name,
+                path: action.path,
+                revision: action.revision,
+              },
+            ],
+          });
+          return {
+            message: "已停用",
+            entry: null,
+            stopped:
+              catalog.trash.find((item) => item.path === action.path) ?? null,
+          };
+        },
+        remove: async (query: SkillQuery, action: SkillRemovalAction) => {
+          await change(query, action);
+          return action.type === "deletePermanent"
+            ? [
+                {
+                  name: action.item.name,
+                  path: action.item.path,
+                  id: null,
+                  ok: true,
+                  message: "已永久删除",
+                  stopped: null,
+                },
+              ]
+            : [];
+        },
       },
     },
   } as unknown as Context["host"]);
   const browser = createTestBrowserHost();
   const builtinCatalog = createBuiltinMcpRegistry();
   const browserTools = {
-    browserTools: () => Promise.resolve({ tools: [{ name: "browser_open" }], disabledTools: [] }),
+    browserTools: () =>
+      Promise.resolve({ tools: [{ name: "browser_open" }], disabledTools: [] }),
     setBrowserTools: () => Promise.resolve([]),
   } as unknown as NonNullable<Parameters<typeof browserMcpContribution>[1]>;
   builtinCatalog.registerBuiltin(browserMcpContribution(browser, browserTools));
@@ -236,19 +283,22 @@ export async function createSkillsCollection(isPreview = false) {
   return function SkillsCollection() {
     return (
       <Wrapper>
-        {isPreview ? (
-          <div className="grid min-h-screen bg-base md:grid-cols-[10rem_minmax(0,1fr)]">
-            <aside className="border-line bg-sidebar md:border-r">
+        <Feedback.Provider value={workbench.showToast}>
+          {isPreview ? (
+            <div className="grid min-h-screen bg-base md:grid-cols-[10rem_minmax(0,1fr)]">
+              <aside className="border-line bg-sidebar md:border-r">
+                <View project={project} />
+              </aside>
+              <WorkArea project={project} />
+            </div>
+          ) : (
+            <>
               <View project={project} />
-            </aside>
-            <WorkArea project={project} />
-          </div>
-        ) : (
-          <>
-            <View project={project} />
-            <WorkArea project={project} />
-          </>
-        )}
+              <WorkArea project={project} />
+            </>
+          )}
+          <ToastHost />
+        </Feedback.Provider>
       </Wrapper>
     );
   };

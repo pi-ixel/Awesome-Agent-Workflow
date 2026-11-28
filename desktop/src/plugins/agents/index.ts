@@ -2,7 +2,7 @@ import type { Context } from "cordis";
 import { desktopSettingsKey } from "../configuration/service.ts";
 import { DesktopAgents } from "./lifecycle/agents.ts";
 import { agentPreferenceFields } from "./config.ts";
-import { installBuiltinWorkbench } from "./registry/builtins.ts";
+import { installBuiltinWorkbench, installBuiltinLifecycle } from "./registry/builtins.ts";
 
 export const name = "agents";
 export const inject = ["host", "configuration", "diagnostics", "acpConnection"];
@@ -30,6 +30,7 @@ export function apply(ctx: Context): void {
     ctx.diagnostics.createLogger,
   );
   ctx.provide(name, agents.service);
+  installBuiltinLifecycle(ctx);
   ctx.effect(() => ctx.diagnostics.registerStorage({
     id: "agents.settings",
     label: "Agent 配置",

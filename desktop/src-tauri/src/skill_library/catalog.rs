@@ -2,6 +2,11 @@ use super::*;
 use serde_yaml::Value;
 use std::io::Read;
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static PREVIEW_READS: std::cell::RefCell<Vec<PathBuf>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 fn source(
     path: PathBuf,
     label: impl Into<String>,
@@ -238,68 +243,15 @@ pub(super) fn list(loc: &Locations, query: &Query) -> Result<Catalog> {
                 .push(format!("{} · {e}", root.path.display()));
         }
     }
-    if query.provider == Provider::CodeAgent {
-        if let Err(e) = usage(
-            &loc.home.join(".cac/skill-usage.jsonl"),
-            &mut result.entries,
-        ) {
-            result.warnings.push(format!("使用记录读取失败 · {e}"));
-        }
-    }
     result.trash =
         changes::trash_items(loc, query.provider, &result.sources, &mut result.warnings)?;
+    // 正文仍参与校验摘要，但目录清单不携带正文；详情由文件接口按需读取。
+    for entry in &mut result.entries {
+        if entry.kind != Kind::Inline {
+            entry.preview.clear();
+        }
+    }
     Ok(result)
-}
-
-// 绝对路径事件只计入对应目录。名称事件计入每个匹配的技能条目。
-pub(super) fn usage(path: &Path, entries: &mut [Entry]) -> Result<()> {
-    use std::collections::HashMap;
-    use std::io::{BufRead, BufReader};
-    let file = match fs::File::open(path) {
-        Ok(file) => file,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e),
-    };
-    let mut path_counts: HashMap<PathBuf, u64> = HashMap::new();
-    let mut name_counts: HashMap<String, u64> = HashMap::new();
-    for line in BufReader::new(file).lines() {
-        let Ok(event) = serde_json::from_str::<serde_json::Value>(&line?) else {
-            continue;
-        };
-        if event["type"] != "active" {
-            continue;
-        }
-        let absolute_path = ["skillPath", "skillDir", "skill_path", "skill_dir"]
-            .iter()
-            .find_map(|key| event[*key].as_str())
-            .map(Path::new)
-            .filter(|path| path.is_absolute());
-        if let Some(path) = absolute_path {
-            let dir = if basename(path).eq_ignore_ascii_case("SKILL.md") {
-                path.parent().unwrap_or(path)
-            } else {
-                path
-            };
-            *path_counts.entry(dir.to_owned()).or_default() += 1;
-        } else if let Some(name) = event["skillName"]
-            .as_str()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            *name_counts.entry(name.to_lowercase()).or_default() += 1;
-        }
-    }
-    for entry in entries {
-        let name = entry.name.to_lowercase();
-        let directory = basename(&entry.path).to_lowercase();
-        let mut count = path_counts.get(&entry.path).copied().unwrap_or(0)
-            + name_counts.get(&name).copied().unwrap_or(0);
-        if directory != name {
-            count += name_counts.get(&directory).copied().unwrap_or(0);
-        }
-        entry.usage_count = (count > 0).then_some(count);
-    }
-    Ok(())
 }
 
 fn scan(
@@ -340,6 +292,8 @@ pub(super) fn metadata(text: &str) -> Result<Value> {
     Err(error("YAML 文件头未结束"))
 }
 pub(super) fn read_preview(path: &Path, bytes: &mut Vec<u8>) -> Result<usize> {
+    #[cfg(test)]
+    PREVIEW_READS.with(|reads| reads.borrow_mut().push(path.to_owned()));
     fs::File::open(path.join("SKILL.md"))?
         .take(256 * 1024)
         .read_to_end(bytes)
@@ -395,6 +349,5 @@ pub(super) fn file_entry(root: &Source, path: &Path) -> Result<Entry> {
         status,
         status_label,
         skill_file_path: path.join("SKILL.md").canonicalize().ok(),
-        usage_count: None,
     })
 }

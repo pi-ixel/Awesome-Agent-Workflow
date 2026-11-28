@@ -807,7 +807,6 @@ describe("ChatInput slash 命令面板", () => {
       revision: "r",
       isLink: false,
       status: "正常",
-      usageCount: null,
     };
     const catalog: SkillCatalog = {
       profile: null,

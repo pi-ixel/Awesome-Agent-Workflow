@@ -409,6 +409,8 @@ export type AccountHost = Pick<
 import type { NativeSkillLibrary } from "./filesystem/skillLibrary.ts";
 export type {
   NativeSkillLibrary,
+  SkillRemovalAction,
+  SkillRemovalResult,
   SkillProvider,
   SkillCatalog,
   SkillQuery,
