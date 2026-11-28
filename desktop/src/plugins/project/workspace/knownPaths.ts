@@ -1,6 +1,6 @@
 import { pathKey } from "../../../shared/panelPaths.ts";
 
-/** Shared by startup presentation and preparation so they wait for the same projects. */
+/** 启动动画和后台查询使用同一批项目路径。 */
 export function knownWorkspacePaths(workspace: {
   selectedPath: string | null;
   activePath: string | null;

@@ -113,6 +113,27 @@ it("离线远程项目只保存显示名，失败可重试，清空后恢复主�
   }
 });
 
+it("已有本机会话的项目直接显示列表，并请求后台更新", () => {
+  useWorkspaceStore.setState({
+    recentWorkspaces: [{ path: PATH, lastOpenedAt: "now" }],
+  });
+  indexes.catalog.setState({
+    sessionsByPath: { [PATH]: [{ id: "local", title: "本机会话", updatedAt: null }] },
+  });
+  const preloadSessionList = vi.fn(() => Promise.resolve());
+  const local = createTestProjectWorkbench({
+    sessions: { ...indexes, preloadSessionList },
+    projects: { workspace: useWorkspaceStore },
+  });
+  try {
+    render(<ProjectTree />, { wrapper: local.Wrapper });
+    expect(screen.getByText("本机会话")).toBeVisible();
+    expect(preloadSessionList).toHaveBeenCalledExactlyOnceWith(PATH);
+  } finally {
+    local.dispose();
+  }
+});
+
 it("打开另一个置顶项目时保持项目块和原有行实例", () => {
   const other = "D:/dev/second-prj";
   useWorkspaceStore.setState({

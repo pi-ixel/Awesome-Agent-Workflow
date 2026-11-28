@@ -57,7 +57,10 @@ export function createTestProjectWorkbench(
         ...commands,
         ...service.projects,
       },
-      sessions: { ...service.sessions },
+      sessions: {
+        preloadSessionList: () => Promise.resolve(),
+        ...service.sessions,
+      },
       conversation: {
         foreground: foregroundFixture.view,
         ...service.conversation,

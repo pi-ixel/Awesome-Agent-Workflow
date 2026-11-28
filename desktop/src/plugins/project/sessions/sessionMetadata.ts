@@ -7,6 +7,12 @@ export interface StoredArchive {
   readonly updatedAt: string | null;
 }
 
+export interface StoredListing {
+  readonly sessionId: string;
+  readonly title?: string | null;
+  readonly updatedAt?: string | null;
+}
+
 interface SessionRecord {
   readonly agentId: string;
   readonly project: string;
@@ -16,6 +22,7 @@ interface SessionRecord {
     readonly archive: StoredArchive | null;
     readonly unread: boolean;
     readonly cwd: string | null;
+    readonly listing?: Omit<StoredListing, "sessionId">;
   };
 }
 
@@ -41,11 +48,19 @@ export function createSessionMetadata(
   const key = ({ agentId, project, sessionId }: ReturnType<typeof owner>) =>
     JSON.stringify([agentId, project, sessionId]);
   const records = new Map(
-    initial.records.map((record) => [key(record), record]),
+    initial.records.map((record) => [
+      key(owner(record.project, record.agentId, record.sessionId)),
+      record,
+    ]),
   );
   const pending = new Map<string, Promise<void>>();
   const get = (project: string, agent: string, sessionId: string) =>
     records.get(key(owner(project, agent, sessionId)));
+  const getOrCreate = (identity: ReturnType<typeof owner>) => records.get(key(identity)) ?? {
+    ...identity,
+    title: null,
+    metadata: { archive: null, unread: false, cwd: null },
+  };
 
   function write(
     project: string,
@@ -64,11 +79,7 @@ export function createSessionMetadata(
           owner: identity,
           change,
         });
-        const record = current ?? {
-          ...identity,
-          title: null,
-          metadata: { archive: null, unread: false, cwd: null },
-        };
+        const record = getOrCreate(identity);
         records.set(
           recordKey,
           change?.kind === "title"
@@ -90,6 +101,26 @@ export function createSessionMetadata(
 
   return {
     get,
+    list: () => records.values(),
+    async saveListings(project: string, agent: string, sessions: readonly StoredListing[]) {
+      const { agentId, project: projectPath } = owner(project, agent, "");
+      const changed = sessions.filter(({ sessionId, title, updatedAt }) => {
+        const listing = get(projectPath, agentId, sessionId)?.metadata.listing;
+        return (title != null && title !== listing?.title) ||
+          (updatedAt != null && updatedAt !== listing?.updatedAt);
+      });
+      if (!changed.length) return [];
+      const saved = await storage.managed!.request<StoredListing[]>("session_metadata_save_listings", {
+        project: { agentId, project: projectPath },
+        sessions: changed,
+      });
+      for (const { sessionId, ...listing } of saved) {
+        const identity = owner(projectPath, agentId, sessionId);
+        const record = getOrCreate(identity);
+        records.set(key(identity), { ...record, metadata: { ...record.metadata, listing } });
+      }
+      return saved;
+    },
     write,
     forget: (project: string, agent: string, sessionId: string) =>
       records.delete(key(owner(project, agent, sessionId))),

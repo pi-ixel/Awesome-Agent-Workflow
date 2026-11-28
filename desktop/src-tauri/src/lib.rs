@@ -290,6 +290,7 @@ pub fn run() {
             storage_preferences::storage_title_write,
             session_metadata::session_metadata_list,
             session_metadata::session_metadata_update,
+            session_metadata::session_metadata_save_listings,
             storage_preferences::storage_configuration_load,
             storage_preferences::storage_configuration_write,
             session_snapshots::session_data_read,

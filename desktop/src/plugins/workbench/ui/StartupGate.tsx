@@ -4,6 +4,8 @@ import { WindowControls } from "./WindowControls.tsx";
 import { useWorkbenchEntries } from "./bindings/react.ts";
 import "./StartupGate.css";
 
+const STARTUP_ANIMATION_MS = 1_200;
+
 function StartupScreen() {
   return (
     <section className="startup-screen" aria-label="正在准备工作区">
@@ -17,34 +19,29 @@ function StartupScreen() {
 
 export function StartupGate({ children }: { readonly children: ReactNode }) {
   const source = useWorkbenchEntries("startup")[0];
-  const [batch] = useState(() => {
-    const wait = source?.capture();
-    return wait && { source, wait, deadline: Date.now() + wait.timeoutMs };
-  });
-  const [waiting, setWaiting] = useState(batch !== undefined);
+  const [initialSource] = useState(() =>
+    source?.shouldPlay() &&
+    !window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches
+      ? source
+      : undefined,
+  );
+  const [playing, setPlaying] = useState(initialSource !== undefined);
+  if (playing && source !== initialSource) setPlaying(false);
 
   useEffect(() => {
-    if (!waiting || !batch) return;
-    const finish = () => setWaiting(false);
-    if (source !== batch.source) {
-      finish();
-      return;
-    }
-    const check = () => {
-      if (batch.wait.isReady()) finish();
-    };
-    const unsubscribe = batch.wait.subscribe(check);
-    const timer = window.setTimeout(finish, Math.max(0, batch.deadline - Date.now()));
-    check();
-    return () => {
-      window.clearTimeout(timer);
-      unsubscribe();
-    };
-  }, [batch, source, waiting]);
+    if (!playing) return;
+    const timer = window.setTimeout(
+      () => setPlaying(false),
+      STARTUP_ANIMATION_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [playing]);
 
-  if (waiting && source === batch?.source) return <StartupScreen />;
+  if (playing && source === initialSource) return <StartupScreen />;
   return (
-    <div className={`flex min-h-0 flex-1 flex-col overflow-hidden${batch ? " startup-workspace-enter" : ""}`}>
+    <div
+      className={`flex min-h-0 flex-1 flex-col overflow-hidden${initialSource ? " startup-workspace-enter" : ""}`}
+    >
       {children}
     </div>
   );

@@ -17,6 +17,7 @@ import type { ProjectPage } from "../../src/plugins/project/ui/bindings/projectP
 import type { ProjectService } from "../../src/plugins/project/service.ts";
 import { sessionPinKey } from "../../src/plugins/project/sessions/sessionPin.ts";
 import { ConversationTurnView } from "../../src/plugins/project/conversation/ui/ConversationTurnView.tsx";
+import { pathKey } from "../../src/shared/panelPaths.ts";
 
 export function renderProjectTree(
   root: Root,
@@ -62,6 +63,7 @@ export function renderProjectTree(
   const indexes = createProjectSessionIndexes(storage);
   indexes.catalog.store.setState({
     agentKey,
+    statusByPath: { [pathKey(path)]: { state: "ready" } },
     sessionsByPath: {
       [path]: [
         {

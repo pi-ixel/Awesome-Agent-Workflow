@@ -1306,9 +1306,9 @@ function ProjectChildren({
   );
   const groups = useSessionGroups(path);
   useEffect(() => {
-    if (sessions === undefined && status === undefined)
+    if (status === undefined)
       void projectService?.sessions.preloadSessionList(path);
-  }, [path, projectService, sessions, status]);
+  }, [path, projectService, status]);
   const feedback =
     status?.state === "error" ? (
       <div className="ml-2 pl-2 pt-1 text-ui-sm text-ink-ghost">
@@ -1332,7 +1332,7 @@ function ProjectChildren({
       <>
         {feedback ?? (
           <p className="ml-2 pl-2 pt-1 text-ui-sm text-ink-ghost">
-            {status?.state === "loading" || sessions === undefined
+            {status?.state !== "ready"
               ? "正在获取会话…"
               : "暂无历史会话"}
           </p>
