@@ -1,4 +1,6 @@
 import type { GitSnapshot } from "../host/types.ts";
+import type { ReactNode } from "react";
+import type { DocumentAnnotation } from "../../shared/annotations/types.ts";
 
 export interface ProjectGitState {
   readonly data?: GitSnapshot;
@@ -19,4 +21,7 @@ export type ReviewSource =
 
 export interface GitReviewNavigation {
   readonly open: (project: string, source: "changes" | "untracked") => void;
+  readonly annotationView?: (
+    annotation: DocumentAnnotation,
+  ) => Promise<ReactNode | null>;
 }

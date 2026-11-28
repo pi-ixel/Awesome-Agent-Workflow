@@ -3,7 +3,7 @@ import { isAbsolutePath } from "../../shared/panelPaths.ts";
 
 export const DIRECTORY_READ_CONCURRENCY = 4;
 export const QUOTE_LIMIT = 10_000;
-export const COMMENT_LIMIT = 2_000;
+export { COMMENT_LIMIT } from "../../shared/annotations/types.ts";
 
 function validLegacyPath(fields: Readonly<Record<string, unknown>>): boolean {
   return typeof fields.path === "string" && isAbsolutePath(fields.path);

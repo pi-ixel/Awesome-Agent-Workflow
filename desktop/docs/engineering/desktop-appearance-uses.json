@@ -32,7 +32,6 @@
   ],
   "plugins/diagnostics/ui/StorageSettings.tsx": ["ThresholdInput · <input>"],
   "plugins/diagnostics/ui/perf/MemoryChart.tsx": ["MemoryChart · <svg>"],
-  "plugins/documents/ui/FileAnnotations.tsx": ["FileAnnotations · <textarea>"],
   "plugins/documents/ui/FileDocumentTools.tsx": [
     "FileDocumentTools · <input>",
     "FileDocumentTools · 内嵌图形",
@@ -338,6 +337,7 @@
     "removedGutter · 差异样式 bg-diff-removed-gutter",
     "removedInk · 差异样式 text-diff-removed-ink"
   ],
+  "shared/ui/AnnotationPopover.tsx": ["AnnotationPopover · <textarea>"],
   "shared/ui/file-icons/fileDisplay.tsx": ["FileDisplayIcon · 内嵌图形"],
   "shared/ui/markdown/DiagramPreviewDialog.tsx": [
     "CircleIcon · 内嵌图形",

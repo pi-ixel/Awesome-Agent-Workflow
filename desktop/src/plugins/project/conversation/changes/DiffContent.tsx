@@ -5,6 +5,21 @@ import type { TurnFileChange } from "../../../../contracts/turnChanges/types.ts"
 import { diffAppearance } from "../../../../shared/ui/diffStyles.ts";
 import { ActionButton } from "../../../../shared/ui/controls.tsx";
 import { buildDiffRows, type DiffRow } from "../ui/editDiff.ts";
+import type {
+  DiffLineRange,
+  DiffSide,
+} from "../../../../shared/annotations/types.ts";
+import {
+  diffLineProps,
+  includesDiffLine,
+} from "../../../../shared/annotations/diffSelection.ts";
+import {
+  DiffAnnotationActions,
+  DiffLineNumber,
+  useDiffAnnotation,
+  type DiffAnnotationBinding,
+} from "../../../../shared/ui/DiffAnnotations.tsx";
+import type { AnnotationDraftTarget } from "../../types.ts";
 
 /** 同一修改段的删除和新增左右配对，较短一侧补空行。 */
 type DisplayRow = readonly [before: DiffRow | null, after?: DiffRow | null];
@@ -48,6 +63,7 @@ function sameLine(
     !!row &&
     !!anchor &&
     row.type === anchor.type &&
+    row.fragment === anchor.fragment &&
     row.oldNo === anchor.oldNo &&
     row.newNo === anchor.newNo
   );
@@ -64,6 +80,7 @@ function anchorIndex(rows: readonly DisplayRow[], anchor: DiffRow | undefined) {
     pair.some(
       (row) =>
         row &&
+        row.fragment === anchor.fragment &&
         ((anchor.oldNo !== null &&
           row.oldNo !== null &&
           row.oldNo >= anchor.oldNo) ||
@@ -93,20 +110,32 @@ export function DiffContent({
   split,
   wrap,
   positionRef,
+  annotations,
+  location,
 }: {
   readonly file: TurnFileChange;
   readonly split: boolean;
   readonly wrap: boolean;
   readonly positionRef: RefObject<DiffPosition>;
+  readonly annotations?: DiffAnnotationBinding<AnnotationDraftTarget>;
+  readonly location?: DiffLineRange;
 }) {
-  const [hasContext, setHasContext] = useState(false);
+  const [hasContext, setHasContext] = useState(!!location);
   const rows = useMemo(() => {
     if (file.fragments?.length) {
       return file.fragments.flatMap(([before, after], index): DiffRow[] => [
-        ...(index
-          ? [{ type: "gap" as const, oldNo: null, newNo: null, text: "⋯" }]
-          : []),
-        ...buildDiffRows(before ?? "", after, hasContext ? Infinity : 3).rows,
+        {
+          type: "gap",
+          oldNo: null,
+          newNo: null,
+          text: `片段 ${index + 1}`,
+          fragment: index + 1,
+        },
+        ...buildDiffRows(
+          before ?? "",
+          after,
+          hasContext ? Infinity : 3,
+        ).rows.map((row) => ({ ...row, fragment: index + 1 })),
       ]);
     }
     const rows = buildDiffRows(
@@ -198,6 +227,8 @@ export function DiffContent({
         widths={widths}
         missingNewline={missingNewline}
         positionRef={positionRef}
+        annotations={annotations}
+        location={location}
       />
     </>
   );
@@ -210,6 +241,8 @@ function DiffViewport({
   widths,
   missingNewline,
   positionRef,
+  annotations,
+  location,
 }: {
   readonly rows: readonly DisplayRow[];
   readonly split: boolean;
@@ -217,11 +250,32 @@ function DiffViewport({
   readonly widths: readonly [number, number];
   readonly missingNewline: readonly (number | null)[];
   readonly positionRef: RefObject<DiffPosition>;
+  readonly annotations?: DiffAnnotationBinding<AnnotationDraftTarget>;
+  readonly location?: DiffLineRange;
 }) {
+  const reviewRef = useRef<HTMLDivElement>(null);
   const beforeRef = useRef<HTMLDivElement>(null);
   const afterRef = useRef<HTMLDivElement>(null);
+  const annotation = useDiffAnnotation(reviewRef, annotations);
   const [opening] = useState(() => positionRef.current);
-  const [startIndex] = useState(() => anchorIndex(rows, opening.anchor));
+  const [startIndex] = useState(() => {
+    if (location) {
+      const index = rows.findIndex((pair) =>
+        pair.some(
+          (row) =>
+            row &&
+            includesDiffLine(
+              location,
+              location.side,
+              location.side === "old" ? row.oldNo : row.newNo,
+              row.fragment,
+            ),
+        ),
+      );
+      if (index >= 0) return index;
+    }
+    return anchorIndex(rows, opening.anchor);
+  });
   const initialOffset = startIndex * estimatedRowHeight;
   const scrollTop = useRef(0);
   const correction = useRef<{
@@ -390,15 +444,37 @@ function DiffViewport({
       : diffAppearance[item.type];
     const hasMissingNewline =
       !!item &&
+      !item.fragment &&
       ((item.oldNo !== null && item.oldNo === missingNewline[0]) ||
         (item.newNo !== null && item.newNo === missingNewline[1]));
+    const old = split && side === 1 ? null : item?.oldNo;
+    const next = split && side === 0 ? null : item?.newNo;
+    const isLocated =
+      includesDiffLine(location, "old", old, item?.fragment) ||
+      includesDiffLine(location, "new", next, item?.fragment);
+    const gutter = (line: number | null | undefined, side: DiffSide) => (
+      <DiffLineNumber
+        line={line}
+        side={side}
+        text={item?.text}
+        fragment={item?.fragment}
+        onAdd={annotation.add}
+        className={`relative ${annotations ? "w-[max(56px,8ch)]" : "w-9"} shrink-0 pr-2 text-right text-ink-subtlest select-none`}
+      />
+    );
     return (
       <div
         key={index}
         data-diff-row
         data-diff-index={index}
-        data-diff-old-line={item?.oldNo ?? undefined}
-        data-diff-new-line={item?.newNo ?? undefined}
+        data-diff-old-line={
+          item?.fragment ? undefined : (item?.oldNo ?? undefined)
+        }
+        data-diff-new-line={
+          item?.fragment ? undefined : (item?.newNo ?? undefined)
+        }
+        data-diff-fragment={item?.fragment}
+        data-diff-annotation-location={isLocated || undefined}
         style={{ height: size }}
         className={appearance.row}
       >
@@ -406,20 +482,8 @@ function DiffViewport({
           data-diff-measure={index}
           className="flex min-w-full font-mono text-ui-sm leading-relaxed"
         >
-          {!split ? (
-            <>
-              <span className="w-9 shrink-0 pr-2 text-right text-ink-subtlest select-none">
-                {item?.oldNo}
-              </span>
-              <span className="w-9 shrink-0 pr-2 text-right text-ink-subtlest select-none">
-                {item?.newNo}
-              </span>
-            </>
-          ) : (
-            <span className="w-9 shrink-0 pr-2 text-right text-ink-subtlest select-none">
-              {side === 0 ? item?.oldNo : item?.newNo}
-            </span>
-          )}
+          {(!split || side === 0) && gutter(old, "old")}
+          {(!split || side === 1) && gutter(next, "new")}
           <span className={`w-4 shrink-0 select-none ${appearance.ink}`}>
             {isBlank
               ? ""
@@ -432,7 +496,12 @@ function DiffViewport({
           <code
             className={`min-w-0 flex-1 pr-3 ${wrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"}`}
           >
-            {isBlank ? " " : item.text}
+            <span
+              {...(annotations && diffLineProps(old, next, item?.fragment))}
+              className={isLocated ? "bg-find-highlight text-ink" : undefined}
+            >
+              {isBlank ? " " : item.text}
+            </span>
             {hasMissingNewline && (
               <span className="block text-ui-caption text-ink-mute">
                 \ 文件末尾无换行
@@ -453,7 +522,7 @@ function DiffViewport({
           height: totalHeight,
           width: wrap
             ? undefined
-            : `calc(${columns}ch + ${split ? 16 : 25} * var(--spacing))`,
+            : `calc(${columns}ch + ${split ? 16 : 25} * var(--spacing) + ${annotations ? (split ? 24 : 48) : 0}px)`,
         }}
       >
         <div
@@ -469,27 +538,35 @@ function DiffViewport({
   };
   return (
     <div
-      ref={split ? undefined : beforeRef}
-      className={`min-h-0 min-w-0 flex-1 bg-base ${split ? "grid grid-cols-2 overflow-hidden" : "overflow-auto [overflow-anchor:none]"}`}
-      onScroll={split ? undefined : (event) => handleScroll(event, 0)}
-      aria-label={split ? "双栏差异" : "统一差异"}
+      ref={reviewRef}
+      {...annotation.handlers}
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col"
     >
-      {split
-        ? ([0, 1] as const).map((side) => (
-            <div
-              key={side}
-              ref={side === 0 ? beforeRef : afterRef}
-              className={`min-h-0 min-w-0 overflow-auto overflow-x-scroll [overflow-anchor:none] ${side ? "border-l border-line" : ""}`}
-              aria-label={
-                side ? "修改后，独立横向滚动" : "修改前，独立横向滚动"
-              }
-              data-side={side ? "after" : "before"}
-              onScroll={(event) => handleScroll(event, side)}
-            >
-              {renderRows(side)}
-            </div>
-          ))
-        : renderRows(0)}
+      <div
+        ref={split ? undefined : beforeRef}
+        className={`min-h-0 min-w-0 flex-1 bg-base ${split ? "grid grid-cols-2 overflow-hidden" : "overflow-auto [overflow-anchor:none]"}`}
+        onScroll={split ? undefined : (event) => handleScroll(event, 0)}
+        aria-label={split ? "双栏差异" : "统一差异"}
+      >
+        {split
+          ? ([0, 1] as const).map((side) => (
+              <div
+                key={side}
+                ref={side === 0 ? beforeRef : afterRef}
+                className={`min-h-0 min-w-0 overflow-auto overflow-x-scroll [overflow-anchor:none] ${side ? "border-l border-line" : ""}`}
+                aria-label={
+                  side ? "修改后，独立横向滚动" : "修改前，独立横向滚动"
+                }
+                data-side={side ? "after" : "before"}
+                data-annotation-column
+                onScroll={(event) => handleScroll(event, side)}
+              >
+                {renderRows(side)}
+              </div>
+            ))
+          : renderRows(0)}
+      </div>
+      <DiffAnnotationActions state={annotation} />
     </div>
   );
 }

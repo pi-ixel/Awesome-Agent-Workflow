@@ -20,7 +20,11 @@ import { ConversationDocumentContext, type ConversationDocumentView } from "../c
 import { ArchiveNotice } from "./ArchiveNotice.tsx";
 import ProjectOverview from "./ProjectOverview.tsx";
 import { ProjectTree } from "./ProjectTree.tsx";
-import { projectConversationPageId, projectOverviewPageId } from "../workspace/pageIds.ts";
+import {
+  projectConversationPageId,
+  projectOverviewPageId,
+} from "../workspace/pageIds.ts";
+import { useDiffAnnotationReview } from "../conversation/changes/DiffAnnotationReview.tsx";
 
 function ProjectDialogs() {
   const pending = useApprovalValue((state) => state.pending);
@@ -52,6 +56,7 @@ export function createProjectPages({
   readonly gitReview: ReadonlySnapshot<{
     readonly query?: GitService["query"];
     readonly open?: GitReviewNavigation["open"];
+    readonly annotationView?: GitReviewNavigation["annotationView"];
   }>;
   readonly extension: ReadonlySnapshot<{ readonly view?: ProjectExtension }>;
   readonly documentView: ReadonlySnapshot<{ readonly view?: ConversationDocumentView }>;
@@ -74,14 +79,31 @@ export function createProjectPages({
     const git = useStore(gitReview);
     const projectExtension = useStore(extension, (state) => state.view);
     const documents = useStore(documentView, (state) => state.view);
-    const resolvers = useSyncExternalStore((listener) => workbench.subscribe(listener), () => workbench.getSnapshot().pathResolvers);
-    const links = useMemo(() => ({
-      assetUrl: documents?.assetUrl,
-      openAnnotation: documents?.openAnnotation,
-      openPath: workbench.openPath,
-      canOpenUrl: (path: string) => workbench.canOpen({ kind: "url", path }),
-      inspectReference: resolvers.length ? (root: string, path: string) => workbench.inspectReference(root, path) : undefined,
-    }), [documents, resolvers]);
+    const { open: openDiffAnnotation, review: diffReview } = useDiffAnnotationReview(git.annotationView);
+    const resolvers = useSyncExternalStore(
+      (listener) => workbench.subscribe(listener),
+      () => workbench.getSnapshot().pathResolvers,
+    );
+    const links = useMemo(
+      () =>
+        ({
+          assetUrl: documents?.assetUrl,
+          openAnnotation: (annotation, draft) =>
+            annotation.diff
+            ? openDiffAnnotation(annotation)
+              : documents?.openAnnotation(annotation, draft),
+          openPath: workbench.openPath,
+          canOpenUrl: (path: string) =>
+            workbench.canOpen({ kind: "url", path }),
+          inspectReference: resolvers.length
+            ? (root: string, path: string) =>
+                workbench.inspectReference(root, path)
+            : undefined,
+        }) satisfies NonNullable<
+          React.ContextType<typeof ConversationDocumentContext>
+        >,
+      [openDiffAnnotation, documents, resolvers],
+    );
     return (
       <ConversationDocumentContext.Provider value={links}>
         <SessionView
@@ -96,6 +118,7 @@ export function createProjectPages({
           openDiagnostics={openDiagnostics}
           openArchiveSettings={openArchiveSettings}
         />
+        {diffReview}
       </ConversationDocumentContext.Provider>
     );
   }

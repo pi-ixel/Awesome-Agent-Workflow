@@ -3,6 +3,7 @@ import { useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
 import { ConversationDocumentContext } from "../ui/documentView.ts";
 import {
   pathName,
+  projectFolderPath,
   resolveFileReference,
 } from "../../../../shared/panelPaths.ts";
 import type { TurnChangesSession } from "./service.ts";
@@ -28,6 +29,8 @@ import { ModalShell } from "../../../../shared/ui/ModalShell.tsx";
 import { Callout } from "../../../../shared/ui/Callout.tsx";
 import type { TurnFileChange } from "../../../../contracts/turnChanges/types.ts";
 import { DiffContent, type DiffPosition } from "./DiffContent.tsx";
+import { useProject } from "../../ui/bindings/projectView.tsx";
+import { turnAnnotationRevision } from "./annotationRevision.ts";
 
 const labels: Record<TurnFileChange["kind"], string> = {
   modified: "修改",
@@ -75,7 +78,11 @@ function TurnChangesSlot({
   );
   if (groups && groups.length > 1) {
     const completed = groups.flatMap((group) => {
-      const record = visibleTurnChanges(group.view.records);
+      const record = visibleTurnChanges(
+        userId
+          ? group.view.records.filter((record) => record.userId === userId)
+          : group.view.records,
+      );
       return record ? [{ group, record }] : [];
     });
     const last = completed.reduce<(typeof completed)[number] | undefined>(
@@ -121,7 +128,11 @@ function TurnChangesSlot({
       </section>
     );
   }
-  const record = visibleTurnChanges(view.records);
+  const record = visibleTurnChanges(
+    userId
+      ? view.records.filter((record) => record.userId === userId)
+      : view.records,
+  );
   if (record && (!userId || record.userId === userId))
     return (
       <TurnChangesReview
@@ -148,6 +159,8 @@ export function TurnChangesReview({
 }) {
   const workspace = useWorkspaceValue((value) => value.activePath);
   const workingDirectory = useSessionValue((value) => value.workingDirectory);
+  const sessionId = useSessionValue((value) => value.activeSessionId);
+  const annotationEditor = useProject()?.drafts?.annotationEditor;
   const documents = useContext(ConversationDocumentContext);
   const view = useRegisteredSnapshot(changes.state, (value) => value!);
   const record = recordId
@@ -155,12 +168,13 @@ export function TurnChangesReview({
     : visibleTurnChanges(view.records);
   // 兼容早期记录：未知采集项不能混入净变更列表或文件总数。
   const files = record?.files.filter((item) => item.kind !== "unknown") ?? [];
-  const isLocked = isReadOnly || !!record?.locked;
+  const isHistorical = record?.id !== visibleTurnChanges(view.records)?.id;
+  const isLocked = isReadOnly || !!record?.locked || isHistorical;
   const isFullyRestored =
     files.length > 0 &&
     files.every((item) => record?.restored.includes(item.path));
   const [isExpanded, setExpanded] = useState(
-    view.openRevision > 0 && !isFullyRestored,
+    view.openRevision > 0 && !isFullyRestored && !isHistorical,
   );
   const [isFull, setFull] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -187,7 +201,7 @@ export function TurnChangesReview({
   }
   if (view.openRevision !== lastOpen) {
     setLastOpen(view.openRevision);
-    if (!isFullyRestored) setExpanded(true);
+    if (!isFullyRestored && !isHistorical) setExpanded(true);
   }
   const unverified = record?.unverified ?? [];
   const activeFilter =
@@ -590,6 +604,26 @@ export function TurnChangesReview({
                     split={isSplit}
                     wrap={hasWrap}
                     positionRef={position}
+                    annotations={
+                      workspace && sessionId && annotationEditor
+                        ? {
+                            editor: annotationEditor,
+                            project: workspace,
+                            origin: {
+                              kind: "turn",
+                              root:
+                                root ??
+                                workingDirectory ??
+                                projectFolderPath(workspace),
+                              file: file.path,
+                              sessionId,
+                              recordId: record.id,
+                            },
+                            oldPath: file.oldPath,
+                            revision: () => turnAnnotationRevision(file),
+                          }
+                        : undefined
+                    }
                   />
                 </>
               )}
