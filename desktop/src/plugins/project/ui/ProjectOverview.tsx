@@ -7,7 +7,7 @@ import { useProject, useProjectNavigation } from "./bindings/projectView.tsx";
  * （连接态），以及干到哪了（AAW 工作流状态）。
  *
  * 结构（自上而下）：
- * - 项目状态行：右侧连接态与主行动按钮；
+ * - 居中引导：说明当前项目的会话入口，提供主行动按钮与连接态；
  * - 工作流：工作流插件提供的区块（进行中的运行、启动工作流的入口）；
  *   没有装配工作流插件时不显示。
  *
@@ -29,7 +29,7 @@ import type { ComponentType } from "react";
 
 import { ActionButton, Badge, Spinner } from "../../../shared/ui/controls.tsx";
 
-/** 项目状态行：连接态与连接动作。 */
+/** 项目主动作：连接态与新建会话。 */
 function ProjectStatusRow({ path }: { readonly path: string }) {
   const projectService = useProject();
   const activePath = useWorkspaceValue((state) => state.activePath);
@@ -38,9 +38,7 @@ function ProjectStatusRow({ path }: { readonly path: string }) {
   const isConnectingThis = isConnecting && activePath === path;
 
   return (
-    <div className="flex flex-wrap items-center gap-2.5">
-      <span aria-hidden={true} className="flex-1" />
-
+    <div className="flex flex-wrap items-center justify-center gap-2.5">
       {isConnectingThis ? (
         <Badge tone="info">
           <Spinner className="ui-icon-12 shrink-0" />
@@ -58,7 +56,7 @@ function ProjectStatusRow({ path }: { readonly path: string }) {
               void projectService?.sessions.startNewSession(path);
             }}
             disabled={isConnecting}
-            className="shrink-0 px-3 py-1.5 text-ui-sm"
+            className="shrink-0 px-4 py-2 text-ui-base"
           >
             新建会话
           </ActionButton>
@@ -86,7 +84,12 @@ function ProjectSetup() {
         title="从左侧选择或新建一个项目目录，开始与 agent 对话。"
         description="添加后自动检查项目环境。"
         action={
-          <ActionButton tone="primary" type="button" onClick={handleAddProject} className="px-4 py-2 text-ui-base">
+          <ActionButton
+            tone="primary"
+            type="button"
+            onClick={handleAddProject}
+            className="px-4 py-2 text-ui-base"
+          >
             添加项目
           </ActionButton>
         }
@@ -109,12 +112,17 @@ function ProjectOverview({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-5">
+    <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col gap-5">
       <section
         aria-label="项目状态"
-        className="flex flex-col gap-3 rounded-popover border border-line bg-surface p-5"
+        className="flex flex-1 flex-col items-center justify-center text-center"
       >
-        <ProjectStatusRow path={path} />
+        <EmptyState
+          title="在当前项目中开始与 agent 对话。"
+          description="从左侧选择已有会话，或新建一个会话。"
+          action={<ProjectStatusRow path={path} />}
+          className="[&>span]:max-w-none"
+        />
       </section>
       {ExtensionOverview && <ExtensionOverview project={path} />}
     </div>
