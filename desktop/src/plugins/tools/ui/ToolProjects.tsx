@@ -66,7 +66,6 @@ export function ToolProjectList({
       // 还没读过盘时不能说"没有 index.html"：新建项目的那一瞬间就是这样，
       // 红字提示会让用户以为 AI 根本没把文件写出来。
       hasHtml: snapshot.check ? !!snapshot.check.tool : true,
-      network: snapshot.check?.tool?.permissions?.network === true,
     });
   }
   if (projectsLoading && !rows.length)
@@ -172,9 +171,6 @@ export function ToolProjectList({
                     )
                   ) : (
                     <em className="build-permission">未安装</em>
-                  )}
-                  {project.network && (
-                    <em className="build-permission">可联网</em>
                   )}
                   {!project.hasHtml && (
                     <em className="build-missing">还没有 index.html</em>

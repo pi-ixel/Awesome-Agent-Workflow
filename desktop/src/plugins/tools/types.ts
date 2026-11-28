@@ -11,7 +11,7 @@ export interface ToolAction {
  * 让"尽量不约束"落在 warn 上——提醒但不阻止，用户自己决定。
  */
 export interface ToolViolation {
-  /** `FIELD` 表示清单字段问题；`R1`…`R9` 对应手册里的红线编号。 */
+  /** `FIELD` 表示清单字段问题，其他编号对应手册里的红线。 */
   readonly ruleId: string;
   readonly level: "block" | "warn";
   /** 位置，例如 `manifest.id`、`index.html`。 */
@@ -20,60 +20,6 @@ export interface ToolViolation {
   readonly message: string;
   /** 给 AI 看的修复建议——它要能照着改，而不是再猜一次。 */
   readonly hint: string;
-}
-
-/**
- * 联网声明。
- *
- * `true` 等价于"不限域名的 http(s)"，是历史写法，继续支持；写成对象可以限定
- * 域名（连接、图片和音视频共用同一白名单），`insecure` 才放行自签证书。
- */
-export interface ToolNetworkPermission {
-  /** 允许访问的域名，支持 `*.corp.example.com` 这种通配；省略表示不限。 */
-  readonly hosts?: readonly string[];
-  /** 放行自签证书。安装时会明确警告。 */
-  readonly insecure?: boolean;
-}
-
-/** 工具在运行时申请的能力；安装时会展示给用户。 */
-export interface ToolPermissions {
-  /** 联网：`false` 禁止外部请求；`true` 或省略保持允许，对象可限定域名。 */
-  readonly network?: boolean | ToolNetworkPermission;
-}
-
-/** 归一化后的联网声明，供校验器、运行时与手册共用。 */
-export interface NetworkRule {
-  /** 清单里是否真的写了 `network`。false 表示"没表态"。 */
-  readonly declared: boolean;
-  readonly enabled: boolean;
-  readonly hosts: readonly string[];
-  readonly insecure: boolean;
-}
-
-/**
- * 归一化联网声明。
- *
- * **没写 `network` 时按"允许"处理**，而不是按"禁止"。这是刻意的取舍：早期工具
- * 都没写这个字段，一律断网会让存量工具当场静默失效——那正是本轮要消灭的现象。
- * 想真正收紧的作者可以显式写 `network: false`；校验器会对"看起来在联网却没表态"
- * 的包给 warn，把声明这件事推给作者，而不是靠运行时突然翻脸。
- */
-export function readNetworkRule(
-  permissions: ToolPermissions | undefined,
-): NetworkRule {
-  const value = permissions?.network;
-  if (value === undefined)
-    return { declared: false, enabled: true, hosts: [], insecure: false };
-  if (value === false)
-    return { declared: true, enabled: false, hosts: [], insecure: false };
-  if (value === true)
-    return { declared: true, enabled: true, hosts: [], insecure: false };
-  return {
-    declared: true,
-    enabled: true,
-    hosts: Array.isArray(value.hosts) ? value.hosts : [],
-    insecure: value.insecure === true,
-  };
 }
 
 /** 工具包对宿主契约的要求。省略表示"只要清单格式兼容就能跑"。 */
@@ -119,7 +65,7 @@ export interface ToolBuild {
  *
  * 只有四条满足其一时才该用：原生模块、非 HTTP 协议、不受对话框约束的文件
  * 系统、真正无窗口的常驻进程。它不是"更强大的 L2"，而是**放弃沙箱**：
- * 一旦声明，用户账户下的文件与网络权限都归这个进程。
+ * 独立进程以当前账号权限访问系统资源。
  */
 export interface ToolRuntime {
   readonly kind: "process";
@@ -147,7 +93,6 @@ export interface ToolPackage {
   readonly html: string;
   readonly actions?: readonly ToolAction[];
   readonly settingsSchema?: readonly ToolSetting[];
-  readonly permissions?: ToolPermissions;
   /** 作者 / 团队名，导入别人给的包时用于判断可信度。 */
   readonly author?: string;
   /** 来源说明（仓库地址、内部文档链接等）。 */

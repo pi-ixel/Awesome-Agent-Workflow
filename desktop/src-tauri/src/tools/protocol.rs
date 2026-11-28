@@ -201,60 +201,19 @@ pub fn content_type(path: &Path) -> &'static str {
     }
 }
 
-/// 不随工具声明变化的 CSP 指令。
-///
-/// 与预览 runtime/policy.ts 保持一致，外部资源不能在基底里无条件放行。
-pub const BASE_POLICY: [&str; 7] = [
+/// 页面工具的默认策略。与工具预览逐条对齐，并允许同源宿主通道。
+pub const PAGE_POLICY: [&str; 10] = [
     "default-src 'none'",
     "script-src 'unsafe-inline' 'self'",
     "style-src 'unsafe-inline' 'self'",
+    "img-src 'self' data: blob: https: http:",
     "font-src 'self' data:",
+    "media-src 'self' data: blob: https: http:",
     "form-action 'none'",
     "base-uri 'none'",
     "object-src 'none'",
+    "connect-src 'self' https: http:",
 ];
-
-/// 按工具声明拼出完整 CSP。
-///
-/// 连接、图片和音视频共同遵守联网声明：
-/// - 没写 `network` → 宽松（`https: http:`），保住存量工具
-/// - 写 `network: false` → 只保留本地资源及宿主能力通道
-/// - 写 `hosts` → 白名单
-pub fn policy_for(network: Option<&crate::tools::manifest::NetworkRule>) -> String {
-    let mut directives: Vec<String> = BASE_POLICY.iter().map(|item| item.to_string()).collect();
-    // `'self'` 必须永远在 connect-src 里：工具调宿主能力走的是同源
-    // `fetch("/__aaw/call/...")`。少了它，声明了 `network.hosts` 白名单的工具
-    // 连 store 都写不进去——而作者只会看到"存储失败"，根本联想不到 CSP。
-    let remote = match network {
-        Some(rule) if !rule.enabled => String::new(),
-        Some(rule) if !rule.hosts.is_empty() => rule
-            .hosts
-            .iter()
-            .map(String::as_str)
-            .filter(|host| valid_host(host))
-            .collect::<Vec<_>>()
-            .join(" "),
-        _ => "https: http:".to_string(),
-    };
-    let suffix = if remote.is_empty() { String::new() } else { format!(" {remote}") };
-    for (directive, local) in [
-        ("connect-src", "'self'"),
-        ("img-src", "'self' data: blob:"),
-        ("media-src", "'self' data: blob:"),
-    ] {
-        directives.push(format!("{directive} {local}{suffix}"));
-    }
-    directives.join("; ")
-}
-
-/// 域名校验，挡住会污染 CSP 的字符（空格、分号、引号）。
-fn valid_host(host: &str) -> bool {
-    !host.is_empty()
-        && host.len() <= 260
-        && host
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '*' | ':'))
-}
 
 /// 构造一个错误响应。空 body + 状态码，别把路径信息回给页面。
 pub fn empty(status: u16) -> Response<Vec<u8>> {
@@ -265,13 +224,14 @@ pub fn empty(status: u16) -> Response<Vec<u8>> {
 }
 
 /// 构造一个成功响应。HTML 带 CSP，其它资源不带（CSP 只在文档上生效）。
-pub fn file_response(path: &Path, body: Vec<u8>, policy: Option<String>) -> Response<Vec<u8>> {
+pub fn file_response(path: &Path, body: Vec<u8>) -> Response<Vec<u8>> {
+    let mime = content_type(path);
     let mut builder = Response::builder()
         .status(StatusCode::OK)
-        .header("Content-Type", content_type(path))
+        .header("Content-Type", mime)
         .header("Cache-Control", "no-store");
-    if let Some(policy) = policy {
-        builder = builder.header("Content-Security-Policy", policy);
+    if mime.starts_with("text/html;") {
+        builder = builder.header("Content-Security-Policy", PAGE_POLICY.join("; "));
     }
     builder
         .body(body)
@@ -380,63 +340,14 @@ mod tests {
     }
 
     #[test]
-    fn network_rule_controls_connections_images_and_media() {
-        use crate::tools::manifest::NetworkRule;
-        let unrestricted = [
-            "connect-src 'self' https: http:",
-            "img-src 'self' data: blob: https: http:",
-            "media-src 'self' data: blob: https: http:",
-        ];
-        let local = [
-            "connect-src 'self'",
-            "img-src 'self' data: blob:",
-            "media-src 'self' data: blob:",
-        ];
-        let cases = [
-            (None, unrestricted),
-            (Some(NetworkRule::default()), unrestricted),
-            (Some(NetworkRule { enabled: false, ..Default::default() }), local),
-            (Some(NetworkRule {
-                hosts: vec!["*.corp.example.com".into(), "api.example.com:8443".into(), "bad host".into()],
-                ..Default::default()
-            }), [
-                "connect-src 'self' *.corp.example.com api.example.com:8443",
-                "img-src 'self' data: blob: *.corp.example.com api.example.com:8443",
-                "media-src 'self' data: blob: *.corp.example.com api.example.com:8443",
-            ]),
-            // 显式白名单全部无效时也不能放开网络。
-            (Some(NetworkRule {
-                hosts: vec!["bad host".into(), "bad; img-src *".into()],
-                ..Default::default()
-            }), local),
-        ];
-        for (rule, expected) in cases {
-            let policy = policy_for(rule.as_ref());
-            for directive in expected {
-                let name = directive.split_once(' ').unwrap().0;
-                assert_eq!(
-                    policy.split("; ").find(|item| item.starts_with(&format!("{name} "))),
-                    Some(directive),
-                    "{policy}",
-                );
-            }
-            let response = file_response(Path::new("index.html"), Vec::new(), Some(policy.clone()));
-            assert_eq!(response.headers()["Content-Security-Policy"].to_str().unwrap(), policy);
+    fn html_uses_the_default_policy_while_assets_are_served_normally() {
+        for name in ["index.html", "page.HTM"] {
+            let response = file_response(Path::new(name), Vec::new());
+            let policy = PAGE_POLICY.join("; ");
+            assert_eq!(response.headers()["content-security-policy"], policy.as_str());
         }
-    }
 
-    #[test]
-    fn self_is_always_allowed_for_the_capability_channel() {
-        use crate::tools::manifest::NetworkRule;
-        // 少了 'self'，工具连 store 都写不进去，而作者只会看到"存储失败"。
-        for rule in [
-            None,
-            Some(&NetworkRule { enabled: false, hosts: vec![], insecure: vec![] }),
-            Some(&NetworkRule { enabled: true, hosts: vec!["a.example.com".into()], insecure: vec![] }),
-        ] {
-            let policy = policy_for(rule);
-            let connect = policy.split("; ").find(|item| item.starts_with("connect-src")).unwrap();
-            assert!(connect.contains("'self'"), "{connect}");
-        }
+        let response = file_response(Path::new("app.js"), Vec::new());
+        assert!(!response.headers().contains_key("content-security-policy"));
     }
 }

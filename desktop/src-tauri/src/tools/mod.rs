@@ -13,7 +13,7 @@
 //! # 现在只有这一条链路
 //!
 //! P3 删掉了 `tools-runtime/`（Electron 载体）。所以「同一工具在两个载体里行为
-//! 一致」这个对照条件已经不存在，取而代之的是两条：**12 项能力的语义在
+//! 一致」这个对照条件已经不存在，取而代之的是两条：**11 项能力的语义在
 //! `contract.ts` 里只有一份**，以及**动作语义（20 秒 / 512 KB / 幂等）在 L1/L2/L3
 //! 三种载体上完全一样**。改任何一项能力前，先看 `caps.rs` 与 `inject.rs` 是不是
 //! 一起改了——它们是同一件事的两半（下行注入、上行命令面）。
@@ -59,13 +59,13 @@ use std::time::{Duration, Instant};
 ///
 /// 与前端 `runtime/contract.ts` 的 `toolContractVersion` 是同一个数字，两处
 /// 不一致就会出现"界面说兼容、宿主说不兼容"。第 2 代删掉了 `preload`。
-pub const CONTRACT_GENERATION: u32 = 2;
+pub const CONTRACT_GENERATION: u32 = 3;
 
-/// 契约里的十二项能力名。`initialize` 时告诉进程它能拿什么。
+/// 契约里的能力名。`initialize` 时告诉进程它能拿什么。
 pub fn caps_capability_names() -> Vec<&'static str> {
     vec![
         "settings", "store", "sharedStore", "files", "clipboard", "actions",
-        "system", "secrets", "lifecycle", "context", "bus", "network",
+        "system", "secrets", "lifecycle", "context", "bus",
     ]
 }
 
@@ -73,7 +73,6 @@ use tauri::http::{Request, Response};
 use tauri::{AppHandle, Manager};
 
 use limits::LIMITS;
-use manifest::NetworkRule;
 use store::ToolStore;
 
 /// 动作执行的超时。与 Electron 版一致（`runtime.mjs:478` 的 20 秒），
@@ -88,7 +87,6 @@ pub(crate) struct ToolSession {
     pub(crate) tool_id: String,
     pub(crate) dir: PathBuf,
     pub(crate) name: String,
-    pub(crate) network: NetworkRule,
     pub(crate) background: Option<manifest::BackgroundDecl>,
     /// 每次建窗随机生成的通道令牌。
     ///
@@ -561,25 +559,7 @@ fn serve(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
         eprintln!("[aaw-tools] 工具 {tool_id} 的 {path} 读不了或超过 8 MB");
         return protocol::empty(404);
     };
-    // CSP 只挂在 HTML 上：挂在 js/css 上不生效，还会让响应变大。
-    let is_html = matches!(
-        file.extension().and_then(|value| value.to_str()).map(str::to_ascii_lowercase).as_deref(),
-        Some("html") | Some("htm")
-    );
-    let policy = if is_html {
-        // 首次导航可能早于会话注册，这时读该版本的清单，仍按它的声明限制连接。
-        let network = host
-            .sessions
-            .lock()
-            .ok()
-            .and_then(|map| map.values().find(|item| item.tool_id == tool_id).cloned())
-            .map(|item| item.network.clone());
-        let network = network.or_else(|| manifest::read(&dir).ok().map(|manifest| manifest.network()));
-        Some(protocol::policy_for(network.as_ref()))
-    } else {
-        None
-    };
-    protocol::file_response(&file, body, policy)
+    protocol::file_response(&file, body)
 }
 
 /// 打开一个工具窗口。
@@ -814,7 +794,6 @@ pub(crate) fn open_page_window(
     }
 
     let host = app.state::<ToolsHost>();
-    let network = manifest.network();
     let token = uuid::Uuid::new_v4().to_string();
 
     // settings 要在建窗口之前算好——注入脚本是常量，不能等页面来问。
@@ -837,7 +816,6 @@ pub(crate) fn open_page_window(
         tool_id: tool_id.to_string(),
         dir: dir.to_path_buf(),
         name: manifest.name.clone(),
-        network,
         background: manifest.background.clone(),
         token,
         carrier: carrier.to_string(),
@@ -863,7 +841,7 @@ pub(crate) fn open_page_window(
         .map_err(|error| error.to_string())?
         .insert(label.clone(), session.clone());
 
-    // 关窗即清账：留着旧 label 会让重新打开的窗口继承一个过期的目录与网络规则。
+    // 关窗即清账：留着旧 label 会让重新打开的窗口继承过期的目录和会话状态。
     let app_handle = app.clone();
     let closing = label.clone();
     window.on_window_event(move |event| match event {
@@ -1197,7 +1175,6 @@ mod tests {
             tool_id: "pilot".into(),
             dir: PathBuf::from("/tmp"),
             name: "p".into(),
-            network: NetworkRule::default(),
             background: None,
             token: "t".into(),
             carrier: "page".into(),

@@ -254,7 +254,7 @@ it("导出时按实际用到的能力补写 requires（设计稿 §5.4）", () =
     toolProjectFiles(tool)["manifest.json"]!,
   );
   expect(manifest).toHaveProperty("requires", {
-    contract: 2,
+    contract: 3,
     capabilities: ["files", "store"],
   });
 
@@ -290,7 +290,7 @@ it("扫描覆盖 aawStore.scope，且跳过 node_modules 与上行能力", () =>
       "window.aawClipboard.readText()",
     ]),
   ).toEqual(["clipboard", "sharedStore", "store"]);
-  // actions 是上行能力，network 是声明式授权：都不进 requires。
+  // 自动扫描只补写下行宿主接口。
   expect(
     scanUsedCapabilities(["window.aawActions.run()", 'fetch("https://x")']),
   ).toEqual([]);
@@ -315,7 +315,7 @@ it("导出时会扫目录里的 app.js 构建产物，但跳过 node_modules", (
   );
   // app.js 里的 secrets 被扫到；node_modules 里的 lifecycle 不算数（依赖不是作者写的）。
   expect(manifest).toHaveProperty("requires", {
-    contract: 2,
+    contract: 3,
     capabilities: ["secrets"],
   });
 });

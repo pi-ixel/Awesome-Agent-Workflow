@@ -332,11 +332,8 @@ export function ToolsPanel({
           upload.files,
         );
         lines.push(describeInstall(outcome, upload.tool.name));
-        // 进程工具先说：它比"会联网"更该被看见，晚一步提示就等于没提示。
         const carrier = describeProcessCarrier(upload.tool);
         if (carrier) lines.push(carrier);
-        if (upload.tool.permissions?.network)
-          lines.push(`注意：${upload.tool.name} 会联网（作者声明的）。`);
         // 带依赖的包：说清依赖落在哪，用户以后想改/找不到时有个确切位置。
         // 只数 node_modules 下的文件——`files` 里还有 manifest.json、index.html、
         // AGENTS.md 这些作者自己的文件，把它们说成"依赖"会让用户以为装了个重包。
@@ -782,9 +779,6 @@ export function ToolsPanel({
                               <SquareTerminalIcon className="ui-icon-12" />
                               {tool.actions.length} 动作
                             </span>
-                          )}
-                          {tool.permissions?.network && (
-                            <span className="tool-row-tag">可联网</span>
                           )}
                           {/* 这个标记不是装饰：常驻工具关窗后仍在跑，用户得知道
                             "关掉了"和"真退出了"是两回事。 */}

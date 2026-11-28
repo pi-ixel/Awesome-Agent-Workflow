@@ -117,7 +117,6 @@ const jsonTable = {
   name: "接口 JSON 转表格",
   version: "1.2.0",
   hasHtml: true,
-  network: false,
 };
 const otherProjects = [
   {
@@ -127,7 +126,6 @@ const otherProjects = [
     name: "Markdown 导出",
     version: "0.3.1",
     hasHtml: true,
-    network: false,
   },
   {
     dir: "E:/AAW/tools/projects/u1/timestamp",
@@ -136,7 +134,6 @@ const otherProjects = [
     name: "时间戳转换",
     version: "",
     hasHtml: false,
-    network: false,
   },
 ];
 const workshop = fakeWorkshop(

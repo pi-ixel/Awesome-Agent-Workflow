@@ -101,7 +101,6 @@ export interface ToolProjectSummary {
   readonly name?: string;
   readonly version?: string;
   readonly hasHtml: boolean;
-  readonly network: boolean;
   /** manifest 读不出来时的原因，列表上直接展示，免得用户点进去才发现坏了。 */
   readonly broken?: string;
 }
@@ -143,8 +142,6 @@ export async function listToolProjectSummaries(
       ]);
       const manifest =
         "manifest" in manifestResult ? manifestResult.manifest : undefined;
-      const permissions = manifest?.permissions as
-        { network?: unknown } | undefined;
       return {
         dir,
         dirName: pathName(dir),
@@ -152,7 +149,6 @@ export async function listToolProjectSummaries(
         name: text(manifest?.name),
         version: text(manifest?.version),
         hasHtml,
-        network: permissions?.network === true,
         broken: "broken" in manifestResult ? manifestResult.broken : undefined,
       };
     }),
@@ -294,9 +290,10 @@ export function toolProjectIdFromBrief(brief: string): string {
 }
 
 /**
- * 落点由 Rust 的 `tools_root_dir` 按当前账号解析好：自定义「工具整体」目录
- * 下不带账号层（账号私有家），默认位置带账号层（多账号共享的家）。前端
- * 不再自己拼账号段——两条路同一套解析，迁移后立即生效。
+ * 落点由 Rust 的 `tools_root_dir` 按当前账号解析好：旧版按账号指针指向的是
+ * 该账号独占的家根（不带账号层），其余情况都在数据根的工具库下按
+ * `projects/<账号>` 分层。前端不再自己拼账号段——两条路同一套解析，
+ * 数据根搬家后立即生效。
  */
 export async function defaultToolProjectsDir(
   io: ToolProjectIO,
@@ -539,7 +536,7 @@ async function checkProcessFiles(
       ruleId: "FIELD",
       level: "warn",
       where: "manifest.runtime",
-      message: `这是 L3 进程工具：打开时会启动 ${entry}，它以你的身份运行，拥有你账户下的文件与网络权限。${inventory}平台不检查这个程序做什么，装之前请自己确认来源。`,
+      message: `这是 L3 进程工具：打开时会启动 ${entry}，并以当前账号权限访问系统资源。${inventory}请在安装前确认程序来源。`,
       hint: "只装你信得过的可执行文件；不确定来源就别装。只是做界面与数据处理的话，L1/L2 不需要进程，也不会有这道确认。",
     },
   ];
@@ -820,7 +817,7 @@ export async function migrateLegacyTools(
     options.parent ?? (await defaultToolProjectsDir(io, options.owner));
   // 设了自定义根时，默认根里已有的项目不算"没有"：项目列表同时扫两个根，
   // 默认根里已有的工具不该在自定义根再克隆一份——否则同一个 id 两份源码，
-  // 改哪份、装哪份全是歧义（2026-11-22 真机：自定义根指到工具整体的家根，
+  // 改哪份、装哪份全是歧义（2026-11-22 真机：自定义根正好指到工具库的家根，
   // 面板每次重挂载都在家根下重生一份脚手架）。
   const fallbackRoot = options.parent
     ? await defaultToolProjectsDir(io, options.owner)

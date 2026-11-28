@@ -204,7 +204,7 @@ const errorText = (error: unknown) =>
  * 工具的内容指纹：只收影响运行行为的字段。
  *
  * `author` / `source` 是描述性元数据，改了不该提示"项目与已安装的不一致"；
- * 动作、设置、权限、build / runtime 这些改了行为就变了，必须算进去。
+ * 动作、设置、build / runtime 变动会改变行为，必须算进去。
  */
 export function contentSignature(tool: ToolPackage): string {
   return JSON.stringify({
@@ -214,7 +214,6 @@ export function contentSignature(tool: ToolPackage): string {
     html: tool.html,
     actions: tool.actions ?? null,
     settingsSchema: tool.settingsSchema ?? null,
-    permissions: tool.permissions ?? null,
     requires: tool.requires ?? null,
     needsSelection: tool.needsSelection ?? null,
     background: tool.background ?? null,
@@ -273,7 +272,7 @@ export function describeProcessCarrier(
   tool: Pick<ToolPackage, "name" | "runtime">,
 ): string | undefined {
   if (tool.runtime?.kind !== "process") return undefined;
-  return `注意：${tool.name} 会启动独立进程 ${tool.runtime.entry}，它以你的身份运行——能读写你账户下的文件、能联网。平台不检查这个程序做什么，确认来源后再打开。`;
+  return `注意：${tool.name} 会启动独立进程 ${tool.runtime.entry}，并以当前账号权限访问系统资源。打开前请确认来源。`;
 }
 
 /** 校验通过时说同一句话：AI 停下后自动校验、用户手点重新校验，走的是同一个结论。 */
@@ -530,7 +529,7 @@ export function createWorkshop(deps: {
    * 校准"装进去的那一份"与"目录里的那一份"。
    *
    * 只比版本号不够——AI 经常改了内容忘了改版本号；只比 html 又漏掉清单里
-   * 动作/设置/权限的改动——用户会看到"已安装"，打开却是旧行为。所以比
+   * 动作或设置的改动——用户会看到"已安装"，打开却是旧行为。所以比
    * 一整份内容指纹：作者、来源这类描述字段除外（它们不影响跑起来的样子）。
    */
   function syncWithInstalled(tool: ToolPackage | undefined): {

@@ -11,7 +11,7 @@ import {
 } from "../../../shared/ui/inputStyles.ts";
 import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
 import type { PersonalTool, ToolSettings } from "../types.ts";
-import { readNetworkRule, readToolCarrier } from "../types.ts";
+import { readToolCarrier } from "../types.ts";
 import { resolveToolSettings } from "../runtime/settings.ts";
 import { toolProjectFiles } from "../runtime/projectArchive.ts";
 import { toolGlyph, toneOf } from "./mark.ts";
@@ -27,7 +27,7 @@ type SectionKey = "settings" | "source" | "actions" | "info" | "remove";
  * 「自定义设置」。标题上带摘要徽标（几项设置 / 几个动作 / 导出几个文件），
  * 收起时也能判断里面有没有自己要找的东西，不用逐个点开确认。
  *
- * 这里只是统一的**展示壳**：设置项、动作、权限、作者都来自工具包 manifest，
+ * 这里统一展示工具包 manifest 中的设置项、动作和作者信息，
  * 安装时间与来源目录来自宿主记录，新增插件不需要为管理页写任何专属 UI。
  * 文件清单也不再写死：直接问导出器 toolProjectFiles 要，界面说导出什么，
  * ZIP 里就真的有什么。
@@ -132,7 +132,6 @@ export function ToolManagement({
 }) {
   const tool = entry.package;
   const carrier = readToolCarrier(tool);
-  const network = readNetworkRule(tool.permissions);
   const [values, setValues] = useState<ToolSettings>(() =>
     resolveToolSettings(tool, entry.settings),
   );
@@ -506,7 +505,7 @@ export function ToolManagement({
             <Section
               id="info"
               title="插件信息"
-              description="运行能力与标识"
+              description="运行方式与标识"
               open={open.info}
               onToggle={() => toggle("info")}
             >
@@ -522,18 +521,12 @@ export function ToolManagement({
                     <dt>运行方式</dt>
                     <dd>{CARRIER_LABEL[carrier]}</dd>
                   </div>
-                  <div>
-                    <dt>运行能力</dt>
-                    <dd>
-                      {carrier === "L3"
-                        ? "本机进程以当前账号权限运行，可读写文件及联网"
-                        : !network.enabled
-                          ? "页面联网已关闭"
-                          : network.hosts.length
-                            ? `页面只可连接指定域名（${network.hosts.join("、")}）`
-                            : "页面可联网（HTTP/HTTPS）"}
-                    </dd>
-                  </div>
+                  {carrier === "L3" && (
+                    <div>
+                      <dt>进程权限</dt>
+                      <dd>本机进程以当前账号权限访问系统资源</dd>
+                    </div>
+                  )}
                   <div>
                     <dt>AI 接口</dt>
                     <dd>

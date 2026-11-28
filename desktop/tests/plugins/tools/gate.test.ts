@@ -33,13 +33,14 @@ it("没写 requires 就宽松放行：旧包一个都不用改", () => {
 });
 
 it("要求更高的契约代际时拦下，并说清当前是第几代", () => {
-  const problems = checkCompatibility(makeTool({ requires: { contract: 3 } }));
+  const current = currentHostContract().contract;
+  const problems = checkCompatibility(
+    makeTool({ requires: { contract: current + 1 } }),
+  );
   expect(problems).toHaveLength(1);
   expect(problems[0]?.ruleId).toBe("CONTRACT");
-  expect(problems[0]?.message).toContain("第 2 代");
-  expect(problems[0]?.message).toContain(
-    `第 ${currentHostContract().contract} 代`,
-  );
+  expect(problems[0]?.message).toContain(`第 ${current + 1} 代`);
+  expect(problems[0]?.message).toContain(`第 ${current} 代`);
 });
 
 it("宿主缺能力时按能力名逐个报出来", () => {
