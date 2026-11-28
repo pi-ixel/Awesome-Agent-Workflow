@@ -505,56 +505,88 @@ test("放大审阅复用同一浮层，支持仅引用及原地编辑和删除",
   await expect(page.getByLabel("文档批注")).toHaveCount(0);
 });
 
-test("批注操作跟随鼠标松开点，反向拖选和窗口边缘都能继续操作", async ({
-  page,
-}) => {
+test("批注居中定位到第一行文字上方，正反拖选的位置一致", async ({ page }) => {
   await page.goto("/tests/visual/turnChanges.html?annotations");
-  const code = page.locator("[data-annotation-new='1']");
-  await expect(code).toBeVisible();
-  const bounds = (await code.boundingBox())!;
-  const { x, y: top, width, height } = bounds;
-  const left = Math.round(x + 12);
-  const right = Math.round(x + Math.min(160, width - 8));
-  const y = Math.round(top + height / 2);
+  const first = page.locator("[data-annotation-new='1']");
+  const second = page.locator("[data-annotation-new='2']");
+  await expect(first).toBeVisible();
+  const position = async (line: typeof first, inset: number) => {
+    const box = (await line.boundingBox())!;
+    return [box.x + inset, box.y + box.height / 2] as const;
+  };
+  const start = await position(first, 34);
+  const end = await position(second, 68);
   const actions = page.getByRole("group", { name: "选区操作" });
-  for (const [start, end] of [
-    [left, right],
-    [right, left],
+  const editor = page.getByRole("dialog", { name: "文档批注" });
+  let previous: { x: number; y: number } | undefined;
+  for (const [from, to] of [
+    [start, end],
+    [end, start],
   ] as const) {
-    await page.mouse.move(start, y);
+    await page.mouse.move(...from);
     await page.mouse.down();
-    await page.mouse.move(end, y, { steps: 8 });
+    await page.mouse.move(...to, { steps: 12 });
     await page.mouse.up();
-    await expect(actions).toHaveCSS("left", `${end}px`);
-    await expect(actions).toHaveCSS("top", `${y + 6}px`);
+    await expect(actions).toBeVisible();
+    const source = await first.evaluate((line) => {
+      const selected = window.getSelection()!.getRangeAt(0);
+      const range = document.createRange();
+      range.setStart(selected.startContainer, selected.startOffset);
+      range.setEnd(line, line.childNodes.length);
+      const box = range.getBoundingClientRect();
+      return {
+        center: box.x + box.width / 2,
+        top: box.top,
+        bottom: box.bottom,
+      };
+    });
+    const action = await actions.evaluate((element) => {
+      const popover = element as HTMLElement;
+      return {
+        x: parseFloat(popover.style.left) + popover.offsetWidth / 2,
+        y: parseFloat(popover.style.top) + popover.offsetHeight,
+      };
+    });
+    expect(Math.abs(action.x - source.center)).toBeLessThan(1);
+    expect(Math.abs(action.y - (source.top - 6))).toBeLessThan(1);
+    if (previous) expect(action).toEqual(previous);
+    previous = action;
     await actions.getByRole("button", { name: "批注", exact: true }).click();
-    const editor = page.getByRole("dialog", { name: "文档批注" });
-    await expect(editor).toHaveCSS("left", `${end}px`);
-    await expect(editor).toHaveCSS("top", `${y + 6}px`);
+    await expect(editor).toBeVisible();
+    const popup = await editor.evaluate((element) => {
+      const popover = element as HTMLElement;
+      return {
+        center: parseFloat(popover.style.left) + popover.offsetWidth / 2,
+        top: parseFloat(popover.style.top),
+        height: popover.offsetHeight,
+      };
+    });
+    expect(Math.abs(popup.center - source.center)).toBeLessThan(1);
+    const expectedTop = source.top - popup.height - 6;
+    expect(
+      Math.abs(
+        popup.top - (expectedTop >= 8 ? expectedTop : source.bottom + 6),
+      ),
+    ).toBeLessThan(1);
     await page.keyboard.press("Escape");
     await expect(editor).toHaveCount(0);
   }
 
-  await code.evaluate((element) => {
+  await first.evaluate((element) => {
     const range = document.createRange();
     range.selectNodeContents(element);
+    Object.defineProperty(range, "getClientRects", {
+      value: () => [new DOMRect(window.innerWidth - 72, 10, 62, 16)],
+    });
     const selection = window.getSelection()!;
     selection.removeAllRanges();
     selection.addRange(range);
-    element.dispatchEvent(
-      new PointerEvent("pointerup", {
-        bubbles: true,
-        clientX: window.innerWidth - 10,
-        clientY: window.innerHeight - 20,
-      }),
-    );
+    element.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
   });
   await actions.getByRole("button", { name: "批注", exact: true }).click();
-  const edge = (await page
-    .getByRole("dialog", { name: "文档批注" })
-    .boundingBox())!;
+  const edge = (await editor.boundingBox())!;
   expect(edge.x + edge.width).toBeLessThanOrEqual(992);
-  expect(edge.y + edge.height).toBeLessThanOrEqual(774);
+  await expect(editor).toHaveCSS("top", "32px");
 });
 
 test("全部撤销后收起并保留恢复，恢复后仍能查看相同历史 Diff", async ({

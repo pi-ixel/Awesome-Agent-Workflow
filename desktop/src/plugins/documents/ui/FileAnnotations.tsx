@@ -1,6 +1,7 @@
 import {
   AnnotationPopover,
   annotationSelectionAnchor,
+  type AnnotationAnchor,
 } from "../../../shared/ui/AnnotationPopover.tsx";
 import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import type { MarkdownEditorApi } from "./MarkdownSourceEditor.tsx";
@@ -20,8 +21,7 @@ interface Editor {
   readonly owner: ProjectAnnotationEditor;
   readonly annotation: DocumentAnnotation;
   readonly target: AnnotationDraftTarget;
-  readonly x: number;
-  readonly y: number;
+  readonly anchor: AnnotationAnchor;
   readonly open: boolean;
 }
 
@@ -179,7 +179,7 @@ export function FileAnnotations({
       setEditor({
         owner: annotationEditor,
         target: currentTarget,
-        ...annotationSelectionAnchor(selection, "clientX" in event ? event : undefined),
+        anchor: annotationSelectionAnchor(selected),
         open: false,
         annotation: {
           id: crypto.randomUUID(),
@@ -333,8 +333,7 @@ export function FileAnnotations({
         owner: annotationEditor,
         annotation: hit.annotation,
         target: currentTarget,
-        x: event.clientX,
-        y: event.clientY,
+        anchor: { x: event.clientX, bottom: event.clientY },
         open: true,
       });
     };
@@ -410,8 +409,7 @@ export function FileAnnotations({
       {editor && (
         <AnnotationPopover
           root={root}
-          x={editor.x}
-          y={editor.y}
+          anchor={editor.anchor}
           file={editor.annotation.path.split(/[\\/]/).at(-1) ?? editor.annotation.path}
           location={editor.annotation.startLine
             ? `第 ${editor.annotation.startLine}${editor.annotation.endLine && editor.annotation.endLine !== editor.annotation.startLine ? `–${editor.annotation.endLine}` : ""} 行`

@@ -262,6 +262,13 @@ it("keeps a mounted file annotation editor on the original draft, follows promot
       const range = document.createRange();
       range.setStart(text, 0);
       range.setEnd(text, quote.length);
+      Object.defineProperty(range, "getClientRects", {
+        value: () => [
+          new DOMRect(200, 120, 44, 16),
+          new DOMRect(244, 120, 66, 16),
+          new DOMRect(220, 140, 140, 16),
+        ],
+      });
       const selection = window.getSelection()!;
       selection.removeAllRanges();
       selection.addRange(range);
@@ -277,7 +284,10 @@ it("keeps a mounted file annotation editor on the original draft, follows promot
 
     selectQuote();
     fireEvent.pointerUp(paragraph, { clientX: 300, clientY: 120 });
-    expect(screen.getByRole("group", { name: "选区操作" })).toHaveStyle({ left: "300px", top: "126px" });
+    expect(screen.getByRole("group", { name: "选区操作" })).toHaveStyle({
+      left: "255px",
+      top: "114px",
+    });
     fireEvent.keyDown(window, { key: "Escape" });
 
     edit("原会话的批注");

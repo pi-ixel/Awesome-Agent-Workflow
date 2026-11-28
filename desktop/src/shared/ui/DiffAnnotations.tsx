@@ -22,11 +22,8 @@ import { pathKey, pathName, resolveFileReference } from "../panelPaths.ts";
 import {
   AnnotationPopover,
   annotationSelectionAnchor,
+  type AnnotationAnchor,
 } from "./AnnotationPopover.tsx";
-import type {
-  KeyboardEvent as ReactKeyboardEvent,
-  PointerEvent as ReactPointerEvent,
-} from "react";
 import { IconButton } from "./IconButton.tsx";
 import { PlusIcon } from "./icons.tsx";
 
@@ -106,8 +103,7 @@ interface Draft<T extends object> {
   readonly quote: DiffQuote;
   readonly target: T;
   readonly binding: DiffAnnotationBinding<T>;
-  readonly x: number;
-  readonly y: number;
+  readonly anchor: AnnotationAnchor;
   readonly isOpen: boolean;
   readonly annotation?: DocumentAnnotation;
 }
@@ -210,8 +206,7 @@ export function useDiffAnnotation<T extends object>(
           quote: annotation.quote,
           offset: annotation.offset,
         },
-        x: event.clientX,
-        y: event.clientY,
+        anchor: { x: event.clientX, bottom: event.clientY },
       });
     };
     void binding
@@ -261,7 +256,7 @@ export function useDiffAnnotation<T extends object>(
 
   const openDraft = (
     quote: DiffQuote,
-    anchor: Pick<Draft<T>, "x" | "y">,
+    anchor: AnnotationAnchor,
     isOpen: boolean,
   ) => {
     const target = readTarget();
@@ -272,10 +267,10 @@ export function useDiffAnnotation<T extends object>(
         target,
         binding,
         isOpen,
-        ...anchor,
+        anchor,
       });
   };
-  function capture(event: ReactPointerEvent | ReactKeyboardEvent) {
+  function capture(event: { readonly target: EventTarget | null }) {
     if (
       !(event.target instanceof Node) ||
       !root.current?.contains(event.target)
@@ -287,20 +282,13 @@ export function useDiffAnnotation<T extends object>(
       setDraft((current) => (current?.isOpen ? current : undefined));
       return;
     }
-    openDraft(
-      quote,
-      annotationSelectionAnchor(
-        selection,
-        "clientX" in event ? event : undefined,
-      ),
-      false,
-    );
+    openDraft(quote, annotationSelectionAnchor(selection.getRangeAt(0)), false);
   }
   return {
     add:
       binding &&
       ((quote: DiffQuote, anchor: DOMRect) =>
-        openDraft(quote, { x: anchor.left, y: anchor.bottom }, true)),
+        openDraft(quote, { x: anchor.left, bottom: anchor.bottom }, true)),
     handlers: binding ? { onPointerUp: capture, onKeyUp: capture } : {},
     root,
     highlightName,
@@ -391,8 +379,7 @@ function DiffAnnotationForm<T extends object>({
   return (
     <AnnotationPopover
       root={state.root}
-      x={draft.x}
-      y={draft.y}
+      anchor={draft.anchor}
       file={pathName(relativePath)}
       location={diffRangeLabel(draft.quote)}
       quote={quote}

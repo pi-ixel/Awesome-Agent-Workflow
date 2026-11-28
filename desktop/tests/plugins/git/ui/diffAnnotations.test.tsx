@@ -84,12 +84,15 @@ it("Git Changes 批注归入会话草稿，准确匹配版本，并兼容发送�
   const selection = window.getSelection()!;
   const range = document.createRange();
   range.selectNodeContents(code);
+  Object.defineProperty(range, "getClientRects", {
+    value: () => [new DOMRect(220, 150, 120, 18)],
+  });
   selection.removeAllRanges();
   selection.addRange(range);
   fireEvent.pointerUp(code, { clientX: 380, clientY: 150 });
   expect(screen.getByRole("group", { name: "选区操作" })).toHaveStyle({
-    left: "380px",
-    top: "156px",
+    left: "280px",
+    top: "144px",
   });
   fireEvent.keyDown(window, { key: "Escape" });
   selection.removeAllRanges();

@@ -5,27 +5,30 @@ import { ActionButton, DangerButton } from "./controls.tsx";
 import { HintSurface } from "./controls/HintSurface.tsx";
 import { settingsTextareaClass } from "./inputStyles.ts";
 
-export function annotationSelectionAnchor(
-  selection: Selection,
-  pointer?: { readonly clientX: number; readonly clientY: number },
-) {
-  if (pointer) return { x: pointer.clientX, y: pointer.clientY };
-  const range = selection.getRangeAt(0);
-  const focus = range.cloneRange();
-  if (selection.focusNode) {
-    focus.setStart(selection.focusNode, selection.focusOffset);
-    focus.collapse(true);
-    const caret = focus.getBoundingClientRect();
-    if (caret.height > 0) return { x: caret.left, y: caret.bottom };
+export interface AnnotationAnchor {
+  readonly x: number;
+  readonly top?: number;
+  readonly bottom: number;
+}
+
+export function annotationSelectionAnchor(range: Range): AnnotationAnchor {
+  const rects = Array.from(range.getClientRects()).filter(
+    (rect) => rect.width > 0 && rect.height > 0,
+  );
+  const first = rects[0] ?? range.getBoundingClientRect();
+  let { left, right, bottom } = first;
+  for (const rect of rects) {
+    if (Math.abs(rect.top - first.top) > 1) break;
+    left = Math.min(left, rect.left);
+    right = Math.max(right, rect.right);
+    bottom = Math.max(bottom, rect.bottom);
   }
-  const rect = range.getBoundingClientRect();
-  return { x: rect.right, y: rect.bottom };
+  return { x: (left + right) / 2, top: first.top, bottom };
 }
 
 export function AnnotationPopover({
   root,
-  x,
-  y,
+  anchor,
   file,
   location,
   quote,
@@ -39,8 +42,7 @@ export function AnnotationPopover({
   onClose,
 }: {
   readonly root: RefObject<HTMLElement | null>;
-  readonly x: number;
-  readonly y: number;
+  readonly anchor: AnnotationAnchor;
   readonly file: string;
   readonly location: string;
   readonly quote: string;
@@ -67,6 +69,7 @@ export function AnnotationPopover({
   }, [onClose]);
   // 放大审阅中的编辑器要留在父弹窗的焦点范围内。
   const container = root.current?.closest(".modal-panel") ?? document.body;
+  const { x, top: anchorTop, bottom: anchorBottom } = anchor;
   useLayoutEffect(() => {
     const element = surface.current;
     if (!element) return;
@@ -79,11 +82,15 @@ export function AnnotationPopover({
         Math.min(window.innerWidth, bounds?.right ?? window.innerWidth) - 8;
       const bottom =
         Math.min(window.innerHeight, bounds?.bottom ?? window.innerHeight) - 8;
-      const below = y + 6;
-      const above = y - 6 - element.offsetHeight;
-      const fitsBelow = below + element.offsetHeight <= bottom;
-      element.style.left = `${Math.max(left, Math.min(x, right - element.offsetWidth))}px`;
-      element.style.top = `${Math.max(top, Math.min(fitsBelow ? below : above, bottom - element.offsetHeight))}px`;
+      const below = anchorBottom + 6;
+      const above = (anchorTop ?? anchorBottom) - 6 - element.offsetHeight;
+      const prefersAbove = anchorTop !== undefined;
+      const placeAbove = prefersAbove
+        ? above >= top
+        : below + element.offsetHeight > bottom;
+      const alignedLeft = prefersAbove ? x - element.offsetWidth / 2 : x;
+      element.style.left = `${Math.max(left, Math.min(alignedLeft, right - element.offsetWidth))}px`;
+      element.style.top = `${Math.max(top, Math.min(placeAbove ? above : below, bottom - element.offsetHeight))}px`;
     };
     position();
     window.addEventListener("resize", position);
@@ -96,7 +103,7 @@ export function AnnotationPopover({
       observer?.disconnect();
       window.removeEventListener("resize", position);
     };
-  }, [container, isOpen, x, y]);
+  }, [anchorBottom, anchorTop, container, isOpen, x]);
   return createPortal(
     <HintSurface
       ref={surface}
