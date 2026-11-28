@@ -27,3 +27,41 @@ test("消息正文的文件引用与外链共用键盘焦点和悬停样式，�
     await expect(page.locator("html")).toHaveAttribute("data-opened-file", "D:/outside/sample.html");
   }
 });
+
+test("text 块保留缩进和复制原文，路径能用键盘打开到指定行", async ({
+  page,
+}) => {
+  await page.goto("/tests/visual/uiScaleFixture.html?links");
+  await page.evaluate(() => {
+    Object.defineProperty(navigator.clipboard, "writeText", {
+      value: (text: string) => {
+        document.documentElement.dataset.copiedText = text;
+        return Promise.resolve();
+      },
+    });
+  });
+  const block = page.locator('[data-language="text"]');
+  const path = block.getByRole("button", { name: "README.md:12" });
+  const original = "  README.md:12  \n说明文字";
+  expect(await block.locator("pre code").textContent()).toBe(original);
+  for (const theme of ["暖白", "暗夜"]) {
+    await page.getByRole("button", { name: theme, exact: true }).click();
+    await path.hover();
+    await expect(path).toHaveCSS("text-decoration-line", "underline");
+    await path.press("Enter");
+    await expect(path).toBeFocused();
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-opened-file",
+      "/project/README.md",
+    );
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-opened-line",
+      "12",
+    );
+  }
+  await block.getByRole("button", { name: "复制代码" }).press("Enter");
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-copied-text",
+    original + "\n",
+  );
+});

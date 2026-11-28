@@ -23,6 +23,7 @@ import {
   cloneElement,
   Component,
   createContext,
+  Fragment,
   isValidElement,
   memo,
   useContext,
@@ -65,6 +66,7 @@ import {
   type MarkdownCodeRenderer,
 } from "./markdown/codeRenderers.ts";
 import { deferredCodePlugin } from "./markdown/deferredCodePlugin.ts";
+import { shouldRenderMermaidCodeBlock } from "./markdown/mermaidLanguage.ts";
 import {
   MarkdownImage,
   MarkdownImageParagraph,
@@ -500,10 +502,11 @@ interface ReplyFiles {
 }
 const ReplyFilesContext = createContext<ReplyFiles | undefined>(undefined);
 
-function VerifiedReplyFile({ reference, children, isAbsolute = false }: {
+function VerifiedReplyFile({ reference, children, isAbsolute = false, inTextBlock = false }: {
   readonly reference: FileReference;
   readonly children: ReactNode;
   readonly isAbsolute?: boolean;
+  readonly inTextBlock?: boolean;
 }) {
   const { root, verify, open } = useContext(ReplyFilesContext) ?? {};
   const path = isAbsolute ? workspaceTargetPath(root ?? "", reference.path) : reference.path;
@@ -526,7 +529,7 @@ function VerifiedReplyFile({ reference, children, isAbsolute = false }: {
   return (
     <TextLink
       type="button"
-      className="inline-flex max-w-full items-baseline gap-1 wrap-anywhere align-baseline"
+      className={inTextBlock ? "[white-space:inherit]" : "inline-flex max-w-full items-baseline gap-1 wrap-anywhere align-baseline"}
       data-hint={path}
       onClick={() => {
         if (!open) return;
@@ -538,10 +541,14 @@ function VerifiedReplyFile({ reference, children, isAbsolute = false }: {
         });
       }}
     >
-      {deferred ? <CornerDownRightIcon className="ui-icon-16 shrink-0 self-center" /> :
-        available?.directory ? <FolderGlyph isExpanded={false} className="ui-icon-16 shrink-0 self-center" /> :
-        <FileIcon className="ui-icon-16 shrink-0 self-center" />}
-      <span className="min-w-0 self-baseline">{children}</span>
+      {inTextBlock ? children : (
+        <>
+          {deferred ? <CornerDownRightIcon className="ui-icon-16 shrink-0 self-center" /> :
+            available?.directory ? <FolderGlyph isExpanded={false} className="ui-icon-16 shrink-0 self-center" /> :
+            <FileIcon className="ui-icon-16 shrink-0 self-center" />}
+          <span className="min-w-0 self-baseline">{children}</span>
+        </>
+      )}
     </TextLink>
   );
 }
@@ -586,6 +593,53 @@ function inspectCodeChildren(children: ReactNode): {
   return { language, text };
 }
 
+const nonPathCharacters = /[\p{Cc}`|<>*?]/u;
+const standaloneRelativePath =
+  /^(?:\.\.?[/\\]|[^\s:/\\]+[/\\]|[\p{L}\p{N}_.][\p{L}\p{N}_.%#:-]*$)/u;
+
+function resolveAbsoluteReplyFile(target: string): FileReference | null {
+  const isWindowsPath = windowsDriveAbsolutePathPattern.test(target);
+  if (
+    (!isWindowsPath && !/^\/(?!\/)/.test(target)) ||
+    nonPathCharacters.test(target)
+  )
+    return null;
+  const reference = resolveFileReference("", target.replaceAll("%", "%25"));
+  return reference && (!isWindowsPath || !reference.path.slice(2).includes(":"))
+    ? reference
+    : null;
+}
+
+function renderTextBlockReferences(text: string, root?: string): ReactNode {
+  return text.split("\n").map((line, index) => {
+    const newline = index === 0 ? "" : "\n";
+    const target = line.trim();
+    if (!target || nonPathCharacters.test(target) || /\s-[\w-]/.test(target))
+      return newline + line;
+    const absolute = resolveAbsoluteReplyFile(target);
+    const reference =
+      absolute ??
+      (root && standaloneRelativePath.test(target)
+        ? resolveRelativeFileReference(root, target.replaceAll("%", "%25"))
+        : null);
+    if (!reference) return newline + line;
+    return (
+      <Fragment key={index}>
+        {newline}
+        {line.slice(0, line.length - line.trimStart().length)}
+        <VerifiedReplyFile
+          reference={reference}
+          isAbsolute={absolute !== null}
+          inTextBlock
+        >
+          {target}
+        </VerifiedReplyFile>
+        {line.slice(line.trimEnd().length)}
+      </Fragment>
+    );
+  });
+}
+
 /**
  * 行内/块级 code 双态渲染:BlockCodeContext 为真(pre → CodeBlock 拦截链内)
  * 即块级,继承正文色;否则行内药丸。
@@ -601,9 +655,15 @@ function MarkdownCode({
   const isLinkLabel = useContext(LinkLabelContext);
   const files = useContext(ReplyFilesContext);
   if (isBlock) {
+    const language = (languageClassNamePattern.exec(className ?? "")?.[1] ?? "").toLowerCase();
+    const text = files?.open && (language === "" || language === "text")
+      ? inspectCodeChildren(children).text
+      : "";
     return (
       <code className={`font-mono text-ui-base text-ink ${className ?? ""}`}>
-        {children}
+        {text && !shouldRenderMermaidCodeBlock(language, text)
+          ? renderTextBlockReferences(text, files?.root)
+          : children}
       </code>
     );
   }
@@ -616,18 +676,13 @@ function MarkdownCode({
   const text = !isLinkLabel && (files?.open || files?.root)
     ? inspectCodeChildren(children).text
     : "";
-  const target = text.trim();
-  const isWindowsPath = windowsDriveAbsolutePathPattern.test(target);
-  const isAbsolute = isWindowsPath || /^\/(?!\/)/.test(target);
-  if (files?.open && isAbsolute && !/[\p{Cc}`|<>*?]/u.test(target)) {
-    const reference = resolveFileReference("", target.replaceAll("%", "%25"));
-    if (reference && (!isWindowsPath || !reference.path.slice(2).includes(":"))) {
-      return (
-        <VerifiedReplyFile key={reference.path} reference={reference} isAbsolute>
-          <code className={codeClassName}>{basenameOf(reference.path)}</code>
-        </VerifiedReplyFile>
-      );
-    }
+  const absolute = files?.open ? resolveAbsoluteReplyFile(text.trim()) : null;
+  if (absolute) {
+    return (
+      <VerifiedReplyFile key={absolute.path} reference={absolute} isAbsolute>
+        <code className={codeClassName}>{basenameOf(absolute.path)}</code>
+      </VerifiedReplyFile>
+    );
   }
   const inlinePath = text.length > 0 && !/[\n\r`|<>*?]/.test(text) &&
     (/^(?:\.\.?[/\\]|[^\s/\\]+[/\\])/.test(text) ||

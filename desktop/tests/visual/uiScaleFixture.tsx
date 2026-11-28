@@ -96,8 +96,9 @@ const MarkdownView = (linkSample || new URLSearchParams(location.search).has("ma
   ? (await import("../../src/shared/ui/MarkdownView.tsx")).MarkdownView
   : null;
 
-function reportSampleFile(path: string) {
+function reportSampleFile(path: string, line?: number) {
   document.documentElement.dataset.openedFile = path;
+  document.documentElement.dataset.openedLine = String(line ?? "");
 }
 function reportSampleLink(url: string) {
   document.documentElement.dataset.openedUrl = url;
@@ -134,7 +135,7 @@ function MarkdownSample() {
             verify: (_root, path) => Promise.resolve(path === "/project/README.md" ? { path, kind: "file" } : null),
             open: reportSampleFile,
           }}
-          text={"[项目说明](./README.md) 与 [外部文档](https://example.org/guide)，或打开 `D:\\outside\\sample.html`。"} />
+          text={"[项目说明](./README.md) 与 [外部文档](https://example.org/guide)，或打开 `D:\\outside\\sample.html`。\n\n~~~text\n  README.md:12  \n说明文字\n~~~"} />
       ) : <MarkdownView text={"~~~mermaid\nflowchart LR\n Draft[草稿] --> Done[完成]\n~~~"} />}
     </MarkdownAppearance>
   );

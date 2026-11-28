@@ -62,7 +62,6 @@ it("makes inline absolute paths clickable without looking up files on render", (
         "或 `D:/reports/100%/demo.md#L5`",
         "以及 `/home/user/note.md`。",
         "原样保留 D:\\outside\\plain.md 和 `start demo.html`。",
-        "\n\n~~~text\nD:\\outside\\snippet.md\n~~~",
       ].join(" ")}
       replyFiles={{ root: "D:/repo", verify, open: openAbsolute }}
     />,
@@ -81,9 +80,87 @@ it("makes inline absolute paths clickable without looking up files on render", (
   ]);
   expect(
     screen.queryByRole("button", {
-      name: /plain\.md|snippet\.md|start demo\.html/,
+      name: /plain\.md|start demo\.html/,
     }),
   ).toBeNull();
+});
+
+it("opens only standalone text block paths, preserving their text and line numbers", async () => {
+  const root = "D:/repo";
+  const open = vi.fn();
+  const verify = vi.fn((_root: string, path: string) =>
+    Promise.resolve(
+      path === root + "/src/main.ts"
+        ? { path, kind: "file" as const }
+        : path === root + "/docs"
+          ? { path, kind: "directory" as const }
+          : null,
+    ),
+  );
+  const body = [
+    "  src/main.ts:42:3  ",
+    "D:\\outside\\Project Files",
+    "/home/user/note.md#L5",
+    "https://example.test/readme",
+    "cat ./src/main.ts",
+    "/home/user/note.md --help",
+    "看看 src/main.ts",
+    "../outside.md",
+    "src/missing.ts",
+  ].join("\n");
+  const { container } = render(
+    <MarkdownView
+      text={`~~~text\n${body}\n~~~\n\n~~~\n./docs/\n~~~\n\n~~~ts\nD:/outside/source.ts\n~~~`}
+      replyFiles={{ root, verify, open }}
+    />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "src/main.ts:42:3" }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "D:\\outside\\Project Files" }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "/home/user/note.md#L5" }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "./docs/" }));
+  expect(open.mock.calls).toEqual([
+    [root + "/src/main.ts", 42],
+    ["D:/outside/Project Files", undefined],
+    ["/home/user/note.md", 5],
+    [root + "/docs", undefined],
+  ]);
+  expect(verify.mock.calls.map(([, path]) => path)).toEqual([
+    root + "/src/main.ts",
+    root + "/src/missing.ts",
+    root + "/docs",
+  ]);
+  expect(container.querySelector("pre code")?.textContent).toBe(body);
+  expect(
+    screen.queryByRole("button", {
+      name: /missing|example|outside.md|--help|source.ts/,
+    }),
+  ).not.toBeInTheDocument();
+});
+
+it("waits until the reply finishes to check paths in a text block", async () => {
+  const root = "D:/repo";
+  const path = root + "/src/main.ts";
+  const open = vi.fn();
+  const verify = vi.fn(() => Promise.resolve({ path, kind: "file" as const }));
+  const replyFiles = { root, verify, open };
+  const text = "~~~text\nsrc/main.ts:7\n~~~";
+  const { rerender } = render(
+    <MarkdownView text={text} replyFiles={replyFiles} streaming />,
+  );
+  expect(screen.getByText("src/main.ts:7")).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "src/main.ts:7" }),
+  ).not.toBeInTheDocument();
+  expect(verify).not.toHaveBeenCalled();
+  rerender(<MarkdownView text={text} replyFiles={replyFiles} />);
+  fireEvent.click(await screen.findByRole("button", { name: "src/main.ts:7" }));
+  expect(open).toHaveBeenCalledWith(path, 7);
 });
 
 it("leaves an existing reference as text if the file disappears before the click", async () => {
